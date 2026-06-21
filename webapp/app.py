@@ -48,9 +48,12 @@ def _check_token(token: str | None) -> None:
 
 @app.post("/admin/upload-db")
 async def upload_db(token: str | None = None, file: UploadFile = File(...)):
-    """Restore library.db from an uploaded file. Protected by LINKLIB_SAVE_TOKEN."""
+    """Restore library.db from an uploaded file (plain or gzip). Protected by LINKLIB_SAVE_TOKEN."""
+    import gzip as _gzip
     _check_token(token)
     data = await file.read()
+    if data[:2] == b'\x1f\x8b':
+        data = _gzip.decompress(data)
     with open(DB_PATH, "wb") as f:
         f.write(data)
     return JSONResponse({"ok": True, "bytes": len(data)})
