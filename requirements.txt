@@ -3,7 +3,7 @@ requests>=2.31
 beautifulsoup4>=4.12
 fastapi>=0.110
 uvicorn[standard]>=0.29
+anthropic>=0.25
 
-# Optional — install if you want the extras:
-#   pip install anthropic        # Claude summaries + auto-tags (enrichment)
-#   pip install trafilatura      # higher-quality full-text extraction
+# Optional — higher-quality full-text extraction
+# pip install trafilatura
