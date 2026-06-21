@@ -1,5 +1,4 @@
 [deploy]
-startCommand = "uvicorn webapp.app:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/api/search"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
