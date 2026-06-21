@@ -29,19 +29,23 @@ def ingest_url(
     New saves get auto-tagged against your existing board vocabulary, so a
     read-later queue stays organized in your own taxonomy.
     """
-    from .extract import fetch_fulltext as _fetch
+    from .extract import fetch_page
 
-    content = _fetch(url) if fetch_fulltext else ""
+    page_title = ""
+    content = ""
+    if fetch_fulltext:
+        page = fetch_page(url)
+        page_title = page.title
+        content = page.content
+
     art = Article(
         url=url,
-        title="",                      # filled by enrichment or left as URL
+        title=page_title or url,
         content=content,
         notes=notes or "",
         tags=tags or [],
         saved_at=datetime.now(timezone.utc).isoformat(),
     )
-    if not art.title:
-        art.title = url
     article_id = lib.upsert(art)
 
     if do_enrich:
@@ -62,7 +66,7 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
     itself gets indexed for search. Dead/paywalled links fall back to the title.
     Tags are biased toward your existing vocabulary.
     """
-    from .extract import fetch_fulltext
+    from .extract import fetch_page
 
     vocab = lib.known_tags()
     rows = lib.unenriched(limit=limit)
@@ -70,12 +74,25 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
     for row in rows:
         text = row["content"] or row["summary"] or ""
         if fetch and not text:
-            text = fetch_fulltext(row["url"])
-            if text:
-                lib.update_content(row["id"], text)
-        result = enrich_mod.enrich(row["title"], text or row["title"], known_tags=vocab)
+            page = fetch_page(row["url"])
+            if page.content:
+                lib.update_content(row["id"], page.content)
+                text = page.content
+            if page.title and not row["title"]:
+                # fill in missing title while we have the page
+                lib.conn.execute(
+                    "UPDATE articles SET title=?, updated_at=? WHERE id=?",
+                    (page.title, _now(), row["id"]),
+                )
+                lib.conn.commit()
+        result = enrich_mod.enrich(row["title"] or row["url"], text or row["title"], known_tags=vocab)
         if result:
             lib.apply_enrichment(row["id"], result.summary, result.tags)
             done += 1
         progress(done, len(rows), row["title"])
     return done
+
+
+def _now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()

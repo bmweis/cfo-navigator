@@ -29,8 +29,8 @@ _SYSTEM = """You are an FP&A and startup-finance research assistant. Answer the 
 question for a finance leader—concise, concrete, practical.
 
 You have TWO source types:
-1. SAVED LIBRARY sources (below): articles the user has already saved. Ground your \
-answer in these first.
+1. SAVED LIBRARY sources (provided in the user message): articles the user has already \
+saved. Ground your answer in these first.
 2. WEB SEARCH (restricted to the user's trusted sites): use it to pull in NEW, recent \
 articles the user may not have saved yet, so the answer reflects current thinking, not \
 just the backlog.
@@ -95,9 +95,10 @@ def answer_question(lib: Library, question: str, model: str = DEFAULT_MODEL,
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return Answer(text="(Set ANTHROPIC_API_KEY to enable answers.)", sources=hits)
 
-    prompt = f"{_SYSTEM}\n\nSAVED LIBRARY SOURCES:\n{_format_sources(hits)}\n\nQUESTION: {question}"
+    prompt = f"SAVED LIBRARY SOURCES:\n{_format_sources(hits)}\n\nQUESTION: {question}"
 
     kwargs = {"model": model, "max_tokens": 1500,
+              "system": _SYSTEM,
               "messages": [{"role": "user", "content": prompt}]}
     if use_web:
         from .sources import preferred_domains

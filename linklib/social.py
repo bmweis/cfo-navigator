@@ -16,10 +16,10 @@ from .db import Library
 from .agent import retrieve
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
+AUTHOR_TITLE = os.environ.get("LINKLIB_AUTHOR_TITLE", "CFO")
 
 # Distilled from the write-like-brian skill (voice + hard rules + LinkedIn mode).
-BRIAN_VOICE = """You draft in Brian Weisberg's voice — VP of BizOps and Strategic Finance
-at Mux, a known voice in the CFO/finance community. Lead with the point, support it with
+BRIAN_VOICE = f"""You draft in Brian Weisberg's voice — {AUTHOR_TITLE}, a known voice in the CFO/finance community. Lead with the point, support it with
 ONE concrete detail, and stop. Direct, low-ceremony, with matter-of-fact warmth. It earns
 trust by being specific and honest, not polished.
 
@@ -74,9 +74,11 @@ def draft_post(lib: Library, article_id: int | None = None, url: str | None = No
     """Draft a LinkedIn post from a saved article (by id/url) or a topic."""
     source_rows: list[dict] = []
     if article_id is not None:
-        source_rows = [r for r in lib.search("", limit=100000) if r["id"] == article_id][:1]
+        row = lib.conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
+        source_rows = [lib._row_to_dict(row)] if row else []
     elif url:
-        source_rows = [r for r in lib.search("", limit=100000) if r["url"] == url][:1]
+        row = lib.conn.execute("SELECT * FROM articles WHERE url = ?", (url,)).fetchone()
+        source_rows = [lib._row_to_dict(row)] if row else []
     elif topic:
         source_rows = retrieve(lib, topic, max_sources=4)
 

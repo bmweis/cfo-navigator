@@ -98,9 +98,10 @@ async def save(request: Request, token: str | None = None):
 
 @app.get("/bookmarklet", response_class=PlainTextResponse)
 def bookmarklet():
+    token_param = f"?token={SAVE_TOKEN}" if SAVE_TOKEN else ""
     js = (
         "javascript:(function(){var u=encodeURIComponent(location.href);"
-        f"fetch('{PUBLIC_BASE}/save',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
+        f"fetch('{PUBLIC_BASE}/save{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
         "body:JSON.stringify({url:decodeURIComponent(u)})}).then(function(){alert('Saved to library');});})();"
     )
     return js
