@@ -312,6 +312,16 @@ class Library:
         row = self.conn.execute("SELECT * FROM tools WHERE id=?", (tool_id,)).fetchone()
         return self._tool_to_dict(row) if row else None
 
+    def update_tool(self, tool_id: int, name: str, description: str,
+                    url: str, categories: list[str]) -> None:
+        self.conn.execute(
+            """UPDATE tools SET name=?, description=?, url=?, categories_json=?
+               WHERE id=?""",
+            (name.strip(), description.strip(), url.strip(),
+             json.dumps(categories), tool_id),
+        )
+        self.conn.commit()
+
     def approve_tool(self, tool_id: int) -> None:
         self.conn.execute("UPDATE tools SET approved=1 WHERE id=?", (tool_id,))
         self.conn.commit()

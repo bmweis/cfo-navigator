@@ -751,6 +751,7 @@ def tools_directory(request: Request):
     import json as _json
     tools_json = _json.dumps([
         {
+            "id": t["id"],
             "name": t["name"],
             "description": t["description"],
             "url": t["url"],
@@ -804,10 +805,15 @@ def tools_directory(request: Request):
 .tool-desc{{font-size:14px;color:#3a352e;margin:0 0 12px;line-height:1.5;}}
 .tool-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .tool-cat{{font-size:11px;color:var(--accent);background:var(--accent-light);border-radius:6px;padding:2px 8px;}}
+.tool-admin{{display:flex;gap:6px;flex-shrink:0;}}
+.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
+.tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
+.tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 </style>
 
 <script>
 var ALL_TOOLS = {tools_json};
+var AUTHED = {'true' if authed else 'false'};
 var activeCat = '';
 
 function renderTools(tools) {{
@@ -826,8 +832,20 @@ function renderTools(tools) {{
     var cats = (t.categories || []).map(function(c) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
     }}).join('');
+    var adminControls = AUTHED
+      ? '<div class="tool-admin">'
+          + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Edit</a>'
+          + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:inline;"'
+          + ' onsubmit="return confirm(\'Delete \' + ' + JSON.stringify(t.name) + ' + \'?\');">'
+          + '<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button>'
+          + '</form>'
+          + '</div>'
+      : '';
     return '<article class="tool-card">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">'
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
+      + adminControls
+      + '</div>'
       + '<p class="tool-desc">' + esc(t.description) + '</p>'
       + '<div class="tool-cats">' + cats + '</div>'
       + '</article>';
@@ -1114,6 +1132,81 @@ def admin_tools_reject(request: Request, tool_id: int):
     finally:
         lib.close()
     return RedirectResponse("/admin/tools", status_code=303)
+
+
+@app.get("/admin/tools/{tool_id}/edit", response_class=HTMLResponse)
+def admin_tools_edit(request: Request, tool_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+    finally:
+        lib.close()
+    if not tool:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    body = f"""<div class="page" style="max-width:560px;">
+<h1>Edit tool</h1>
+<form method="post" action="/admin/tools/{tool_id}/edit" style="display:grid;gap:20px;">
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Tool name *</label>
+    <input name="name" required maxlength="200" value="{_esc(tool['name'])}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">URL *</label>
+    <input name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Short description *</label>
+    <textarea name="description" required maxlength="400" rows="3"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(tool['description'])}</textarea>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      {_tool_category_checkboxes(tool['categories'])}
+    </div>
+  </div>
+  <div>
+    <button type="submit" class="btn">Save changes</button>
+    <a href="/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page(f"Edit {_esc(tool['name'])} — CFO Toolbox", "", body, authed=True))
+
+
+@app.post("/admin/tools/{tool_id}/edit")
+async def admin_tools_edit_submit(request: Request, tool_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    url = (form.get("url") or "").strip()
+    description = (form.get("description") or "").strip()
+    categories = [v.strip() for v in form.getlist("categories") if v.strip()]
+    if not (name and url and description and categories):
+        raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
+    lib = _lib()
+    try:
+        lib.update_tool(tool_id, name, description, url, categories)
+    finally:
+        lib.close()
+    return RedirectResponse("/tools", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/delete")
+def admin_tools_delete(request: Request, tool_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_tool(tool_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/tools", status_code=303)
 
 
 # ---------------------------------------------------------------------------
