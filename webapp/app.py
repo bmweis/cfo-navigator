@@ -181,6 +181,8 @@ def thought_leadership():
     ])
 
     body += section("Authored", [
+        ("The Growth Engine Ratio: Accounting for the Missing Half of Your Efficiency Equation · The F Suite · Dec 2025",
+         "/growth-engine-ratio", "2025-12"),
         ("The F Suite — Exit Readiness for CFOs · The F Suite · Mar 2026",
          "https://www.fsuite.co/blog/exit-readiness-cfos", "2026-03"),
         ("OnlyCFO — Building Dashboards That Matter · OnlyCFO · Apr 2024",
@@ -202,6 +204,300 @@ def thought_leadership():
 
     body += "</div>"
     return HTMLResponse(_page("Thought Leadership — Brian Weisberg", "Thought Leadership", body))
+
+
+@app.get("/growth-engine-ratio", response_class=HTMLResponse)
+def growth_engine_ratio():
+    body = """<div class="page" style="max-width:820px;">
+
+<p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Framework</p>
+<h1 style="margin:0 0 8px;">The Growth Engine Ratio</h1>
+<p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
+  By Brian Weisberg &middot; Published with <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a> &middot; December 2025
+</p>
+
+<div style="background:var(--accent-light);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:18px 22px;margin:0 0 36px;">
+  <p style="margin:0;font-size:15px;">
+    The full guide — including benchmark data from 200+ public and private SaaS companies via OPEXEngine —
+    is available as a downloadable whitepaper on The F Suite.
+    <strong><a href="https://www.fsuite.co" target="_blank" rel="noopener">Read the full article and download the guide &rarr;</a></strong>
+    <em style="display:block;margin-top:6px;font-size:13px;color:var(--muted);">(Link will be live when The F Suite publishes — coming soon.)</em>
+  </p>
+</div>
+
+<h2 style="margin-top:0;">Why I Built This</h2>
+<p>Most SaaS efficiency metrics measure one engine at a time. CAC payback tells you how quickly GTM
+investment pays back on new logos. Magic Number tells you how much ARR you're getting per dollar of
+sales and marketing spend. Both are useful — I use them all the time — but they share a blind spot:
+they leave R&D entirely out of the efficiency equation.</p>
+
+<p>That bothers me. At most companies, R&D is 20–30% of revenue. It's a meaningful investment, and
+it directly influences how easy — or hard — it is for GTM to do its job. A great product shortens
+sales cycles, reduces churn, and drives expansion. A product that's hard to understand or hasn't
+kept pace with customer needs makes every dollar of GTM spend work harder just to stay in place.</p>
+
+<p>When product and GTM are evaluated in separate silos, it's almost impossible to answer the
+question that actually matters: are these two engines working together efficiently?
+I came up with the Growth Engine Ratio to answer that question.</p>
+
+<h2>The Core Idea</h2>
+<p>The framework is built on a simple observation: revenue recognized today is the result of
+investments made over the past several quarters, not just last quarter. Features ship before
+they're sold. Pipeline built in Q1 converts in Q3. A single period's P&amp;L doesn't capture that.</p>
+
+<p>So instead of comparing today's revenue growth to today's spending, the Growth Engine Ratio
+distributes investment across the quarters that actually contributed to a given period's growth.
+I call this the <strong>time-distributed contribution model</strong>.</p>
+
+<p>The formula:</p>
+<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:0 0 24px;font-family:ui-monospace,monospace;font-size:14px;line-height:1.8;">
+  <strong>Growth Engine Ratio = Annualized Revenue Growth &divide; (GTM Investment + R&amp;D Investment)</strong><br><br>
+  Annualized Growth = (Revenue Q<sub>n</sub> &minus; Revenue Q<sub>n-1</sub>) &times; 4<br>
+  GTM Investment = 0.25 &times; (GTM<sub>n-4</sub> + GTM<sub>n-3</sub> + GTM<sub>n-2</sub> + GTM<sub>n-1</sub>)<br>
+  R&amp;D Investment = 0.25 &times; (R&amp;D<sub>n-5</sub> + R&amp;D<sub>n-4</sub>)
+</div>
+
+<p>GTM uses a 4-quarter lookback because enterprise sales cycles run 6–9 months — pipeline built
+in Q<sub>n-4</sub> converts across subsequent quarters until it lands in Q<sub>n</sub>.
+R&amp;D uses a 2-quarter lookback starting one quarter earlier (n-5, n-4) because features are
+built before they're sold. The build-then-sell sequence matters.</p>
+
+<h2>What the Number Tells You</h2>
+<p>A ratio of <strong>$1.00</strong> means you're generating exactly $1 of annualized revenue growth for
+every $1 of combined R&amp;D + GTM investment. That's the threshold that separates companies
+that are profitable on acquisition from those that aren't.</p>
+
+<p>In my analysis of 11 public SaaS companies across 188 company-quarters, only 2 exceeded $1.00
+in steady state. The other 9 need to retain customers for 1.2 to 2.8 years just to break even
+on acquisition costs. That changes how you think about churn — permanently.</p>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:0 0 32px;">
+  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <thead><tr style="background:var(--accent-light);">
+      <th style="padding:10px 14px;text-align:left;font-weight:600;">Tier</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;">Ratio</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;">Years to Break Even</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;">What It Means</th>
+    </tr></thead>
+    <tbody>
+      <tr style="border-top:1px solid var(--line);">
+        <td style="padding:10px 14px;">&#127942; Elite</td>
+        <td style="padding:10px 14px;">&gt; $1.20</td>
+        <td style="padding:10px 14px;">&lt; 0.8 years</td>
+        <td style="padding:10px 14px;">Profitable on acquisition — invest aggressively</td>
+      </tr>
+      <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
+        <td style="padding:10px 14px;">&#11088; Strong</td>
+        <td style="padding:10px 14px;">$0.70 – $1.20</td>
+        <td style="padding:10px 14px;">0.8 – 1.4 years</td>
+        <td style="padding:10px 14px;">Above median — maintain efficiency as you scale</td>
+      </tr>
+      <tr style="border-top:1px solid var(--line);">
+        <td style="padding:10px 14px;">&#10003; Typical</td>
+        <td style="padding:10px 14px;">$0.50 – $0.70</td>
+        <td style="padding:10px 14px;">1.4 – 2.0 years</td>
+        <td style="padding:10px 14px;">In the pack — retention must be a top priority</td>
+      </tr>
+      <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
+        <td style="padding:10px 14px;">&#9888;&#65039; Below target</td>
+        <td style="padding:10px 14px;">&lt; $0.50</td>
+        <td style="padding:10px 14px;">&gt; 2.0 years</td>
+        <td style="padding:10px 14px;">Urgent review — fix retention before scaling acquisition</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2>Calculate Your Ratio</h2>
+<p style="color:var(--muted);font-size:15px;margin:-6px 0 24px;">Enter your last 6 quarters of data. All figures in the same currency (millions, thousands — just be consistent).</p>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px 32px;margin:0 0 40px;">
+  <div style="display:grid;gap:20px;">
+
+    <div>
+      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">Revenue</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Current quarter (Q<sub>n</sub>)</label>
+          <input id="rev_n" type="number" min="0" step="any" placeholder="e.g. 100"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Prior quarter (Q<sub>n-1</sub>)</label>
+          <input id="rev_n1" type="number" min="0" step="any" placeholder="e.g. 90"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">GTM Spend (Sales &amp; Marketing) — last 4 quarters</p>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-4</sub></label>
+          <input id="gtm4" type="number" min="0" step="any" placeholder="e.g. 20"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-3</sub></label>
+          <input id="gtm3" type="number" min="0" step="any" placeholder="e.g. 22"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-2</sub></label>
+          <input id="gtm2" type="number" min="0" step="any" placeholder="e.g. 24"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-1</sub></label>
+          <input id="gtm1" type="number" min="0" step="any" placeholder="e.g. 26"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">R&amp;D Spend — 2 quarters (the build window)</p>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-width:320px;">
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-5</sub></label>
+          <input id="rnd5" type="number" min="0" step="any" placeholder="e.g. 16"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-4</sub></label>
+          <input id="rnd4" type="number" min="0" step="any" placeholder="e.g. 18"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <button onclick="calcGER()" class="btn" style="padding:12px 28px;font-size:16px;">Calculate my ratio</button>
+      <button onclick="loadExample()" class="btn btn-ghost" style="margin-left:12px;">Load worked example</button>
+    </div>
+  </div>
+
+  <div id="ger-result" style="display:none;margin-top:28px;padding-top:24px;border-top:1px solid var(--line);">
+    <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap;">
+      <div style="flex:0 0 auto;">
+        <p style="font-size:13px;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.06em;">Your Growth Engine Ratio</p>
+        <p id="ger-value" style="font-size:48px;font-weight:700;letter-spacing:-0.03em;margin:0;color:var(--accent);"></p>
+      </div>
+      <div style="flex:1;min-width:200px;">
+        <p id="ger-tier" style="font-size:18px;font-weight:600;margin:0 0 6px;"></p>
+        <p id="ger-breakeven" style="font-size:14px;color:var(--muted);margin:0 0 10px;"></p>
+        <p id="ger-interp" style="font-size:15px;margin:0;"></p>
+      </div>
+    </div>
+    <div id="ger-detail" style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.8;"></div>
+  </div>
+</div>
+
+<p style="font-size:13px;color:var(--muted);margin:-20px 0 40px;">
+  <strong>Methodology note:</strong> GTM = Sales &amp; Marketing expense (GAAP including SBC).
+  R&D = Research &amp; Development expense. Use either GAAP or non-GAAP consistently —
+  don't mix. Benchmarks in the full guide use GAAP. Requires at least 6 quarters of history
+  for the n-5 R&amp;D lookback.
+</p>
+
+<h2>A Note on Retention</h2>
+<p>One of the more useful outputs of this framework is a simple break-even calculation:
+<strong>Years to Break Even = 1 ÷ Efficiency Ratio</strong>. If your ratio is $0.60, you
+need to retain each customer for 1.7 years just to recover acquisition costs — and that
+assumes flat renewal with no expansion. Strong NRR (above 110%) compresses that timeline;
+contraction can make it indefinitely long.</p>
+
+<p>Companies below $1.00 — which is most of them — need both high gross retention and strong
+net expansion for the economics to work. One without the other isn't sufficient. The ratio
+makes that constraint explicit in a way that's hard to argue with in a board room.</p>
+
+<h2>Get the Full Guide</h2>
+<p>The whitepaper includes the complete methodology, a worked example using Datadog's public
+financials, benchmark data across 200+ companies via OPEXEngine, and a performance tier guide
+with specific actions to take based on where your ratio lands. It's published in partnership
+with The F Suite.</p>
+
+<a href="https://www.fsuite.co" target="_blank" rel="noopener" class="btn" style="font-size:15px;padding:12px 24px;">
+  Download the full guide &rarr;
+</a>
+<p style="font-size:13px;color:var(--muted);margin-top:8px;">(Full link coming soon — check back or <a href="/contact">reach out</a> and I'll send it directly.)</p>
+
+</div>
+
+<script>
+function v(id) { return parseFloat(document.getElementById(id).value) || 0; }
+
+function loadExample() {
+  document.getElementById('rev_n').value = 100;
+  document.getElementById('rev_n1').value = 90;
+  document.getElementById('gtm4').value = 20;
+  document.getElementById('gtm3').value = 22;
+  document.getElementById('gtm2').value = 24;
+  document.getElementById('gtm1').value = 26;
+  document.getElementById('rnd5').value = 16;
+  document.getElementById('rnd4').value = 18;
+  calcGER();
+}
+
+function calcGER() {
+  var rev_n = v('rev_n'), rev_n1 = v('rev_n1');
+  var gtm4 = v('gtm4'), gtm3 = v('gtm3'), gtm2 = v('gtm2'), gtm1 = v('gtm1');
+  var rnd5 = v('rnd5'), rnd4 = v('rnd4');
+
+  var annGrowth = (rev_n - rev_n1) * 4;
+  var gtmInv = 0.25 * (gtm4 + gtm3 + gtm2 + gtm1);
+  var rndInv = 0.25 * (rnd5 + rnd4);
+  var totalInv = gtmInv + rndInv;
+
+  if (totalInv <= 0 || rev_n <= 0) {
+    alert('Please fill in all fields with values greater than zero.');
+    return;
+  }
+
+  var ratio = annGrowth / totalInv;
+  var breakeven = ratio > 0 ? (1 / ratio).toFixed(1) : '∞';
+
+  var tier, tierColor, interp;
+  if (ratio >= 1.20) {
+    tier = '&#127942; Elite (top 10%)';
+    tierColor = '#1a4d3c';
+    interp = "You've earned the right to invest aggressively. Every new customer is profitable on acquisition — consider TAM expansion, adjacent markets, or accelerating hiring.";
+  } else if (ratio >= 0.70) {
+    tier = '&#11088; Strong (above median)';
+    tierColor = '#2d6a4f';
+    interp = "Solid performance. Focus on maintaining efficiency as you scale. You're close to the $1.00 break-even — small improvements in NRR or cost discipline can get you there.";
+  } else if (ratio >= 0.50) {
+    tier = '&#10003; Typical (near median)';
+    tierColor = '#b45309';
+    interp = "You're in the pack. Diagnose: is growth too slow, or investment too high? Pick one to improve first. Retention is critical — you need " + breakeven + " years just to break even on acquisition.";
+  } else if (ratio > 0) {
+    tier = '&#9888;&#65039; Below target (bottom 25%)';
+    tierColor = '#b91c1c';
+    interp = "Urgent strategic review needed. Growth likely decelerated while spending stayed elevated. Fix retention and expansion economics before scaling acquisition further.";
+  } else {
+    tier = '&#8212; Negative growth';
+    tierColor = '#b91c1c';
+    interp = "Revenue declined quarter-over-quarter. Focus on stabilizing the base before evaluating efficiency.";
+  }
+
+  document.getElementById('ger-value').textContent = ratio >= 0 ? '$' + ratio.toFixed(2) : '-$' + Math.abs(ratio).toFixed(2);
+  document.getElementById('ger-value').style.color = tierColor;
+  document.getElementById('ger-tier').innerHTML = tier;
+  document.getElementById('ger-tier').style.color = tierColor;
+  document.getElementById('ger-breakeven').textContent = ratio > 0 ? 'Break-even: ' + breakeven + ' years at flat renewal' : '';
+  document.getElementById('ger-interp').textContent = interp;
+  document.getElementById('ger-detail').innerHTML =
+    'Annualized growth: <strong>' + annGrowth.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
+    'GTM investment (time-weighted): <strong>' + gtmInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
+    'R&amp;D investment (time-weighted): <strong>' + rndInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
+    'Total investment: <strong>' + totalInv.toFixed(1) + '</strong>';
+
+  document.getElementById('ger-result').style.display = 'block';
+  document.getElementById('ger-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+</script>"""
+    return HTMLResponse(_page("The Growth Engine Ratio — Brian Weisberg", "Thought Leadership", body))
 
 
 @app.get("/contact", response_class=HTMLResponse)
