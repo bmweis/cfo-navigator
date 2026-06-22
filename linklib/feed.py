@@ -23,6 +23,13 @@ CACHE_TTL = 1800   # 30 minutes
 MAX_ITEMS_PER_FEED = 20
 _UA = "Mozilla/5.0 (compatible; CFONavigator/1.0; +https://bmweis.com)"
 
+# Domains known to be fully or substantially paywalled.
+# Items whose URL contains one of these get paywalled=True.
+PAYWALLED_DOMAINS = {
+    "stratechery.com",       # members-only daily + weekly
+    "blog.publiccomps.com",  # subscription newsletter
+}
+
 _cache: dict[str, tuple[float, list[dict]]] = {}
 _cache_lock = threading.Lock()
 
@@ -211,13 +218,16 @@ def get_feed_items(
         for fut in as_completed(futures):
             all_items.extend(fut.result())
 
+    # Tag paywalled items
+    for item in all_items:
+        item["paywalled"] = any(d in item["url"] for d in PAYWALLED_DOMAINS)
+
     # Sort: items with dates newest-first, undated items last
     dated = [i for i in all_items if i["pub_dt"]]
     undated = [i for i in all_items if not i["pub_dt"]]
     dated.sort(key=lambda i: i["pub_dt"], reverse=True)
 
     result = (dated + undated)[:max_total]
-    # Strip the non-serialisable datetime before returning
     for item in result:
         item.pop("pub_dt", None)
 

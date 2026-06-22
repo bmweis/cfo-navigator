@@ -628,12 +628,15 @@ def feed_reader(cat: str = "", token: str | None = None):
     cards = ""
     for item in items:
         save_url = _esc(item["url"])
+        paywalled = item.get("paywalled", False)
+        paywall_badge = ' <span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:600;vertical-align:middle;">&#128274; Paywalled</span>' if paywalled else ''
+        read_btn = '' if paywalled else f'<a href="/read?url={save_url}&token={_esc(SAVE_TOKEN)}" class="faction">&#9654; Read</a>'
         cards += f"""<article class="fcard">
-  <div class="fcard-meta">{_esc(item['source'])}{ ' &middot; ' + _fmt_date(item['published_at']) if item['published_at'] else ''}</div>
+  <div class="fcard-meta">{_esc(item['source'])}{ ' &middot; ' + _fmt_date(item['published_at']) if item['published_at'] else ''}{paywall_badge}</div>
   <a class="fcard-title" href="{save_url}" target="_blank" rel="noopener">{_esc(item['title'])}</a>
   { f'<p class="fcard-summary">{_esc(item["summary"])}</p>' if item.get('summary') else '' }
   <div class="fcard-actions">
-    <a href="/read?url={save_url}&token={_esc(SAVE_TOKEN)}" class="faction">&#9654; Read</a>
+    {read_btn}
     <button class="faction" onclick="saveItem(this,'{save_url}')">+ Save to Library</button>
   </div>
 </article>"""
