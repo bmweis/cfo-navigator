@@ -739,7 +739,8 @@ async def contact_submit(request: Request):
 
 
 @app.get("/tools", response_class=HTMLResponse)
-def tools_directory():
+def tools_directory(request: Request):
+    authed = _is_authed(request)
     lib = _lib()
     try:
         tools = lib.list_tools(approved_only=True)
@@ -764,8 +765,11 @@ def tools_directory():
     )
 
     body = f"""<div class="page" style="max-width:860px;">
-<h1>CFO Toolbox</h1>
-<p style="color:var(--muted);margin:4px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
+<div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+  <h1 style="margin:0;">CFO Toolbox</h1>
+  {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
+</div>
+<p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
 <a href="/tools/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Submit a tool</a></p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
@@ -855,7 +859,7 @@ function filterCat(btn) {{
 
 renderTools(ALL_TOOLS);
 </script>"""
-    return HTMLResponse(_page("CFO Toolbox — Brian Weisberg", "CFO Toolbox", body))
+    return HTMLResponse(_page("CFO Toolbox — Brian Weisberg", "CFO Toolbox", body, authed=authed))
 
 
 def _tool_category_checkboxes(selected: list[str] | None = None) -> str:
