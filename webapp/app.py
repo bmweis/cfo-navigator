@@ -151,7 +151,8 @@ def thought_leadership():
         '<p style="color:var(--muted);margin:4px 0 32px;">Podcasts, writing, interviews, and appearances.</p>'
 
     body += section("Podcast — Host", [
-        ("OnlyCFO Podcast", "https://www.onlycfo.io/podcast"),
+        ("The Cash Flow Show — Conversations about how tech companies make money",
+         "https://www.onlycfo.io/podcast"),
     ])
 
     body += section("Podcasts — Guest", [
@@ -159,8 +160,10 @@ def thought_leadership():
          "https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn"),
         ("OpexEngine — SaaS Conversations: Dynamic Planning for SaaS Finance Leaders",
          "https://www.opexengine.com/webinar/opexengine-saas-conversations-dynamic-planning-for-saas-finance-leaders"),
-        ("YouTube appearance", "https://www.youtube.com/watch?v=mqVvcVVTSrk"),
-        ("YouTube appearance", "https://www.youtube.com/watch?v=GPdRstJ_sKw"),
+        ("Role Forward Podcast — The Heuristics of Forecasting",
+         "https://www.youtube.com/watch?v=mqVvcVVTSrk"),
+        ("Role Forward Podcast — Collaborative Budgeting",
+         "https://www.youtube.com/watch?v=GPdRstJ_sKw"),
     ])
 
     body += section("Webinar — Host", [
