@@ -9,6 +9,7 @@ Public routes (no auth):
 
 Private routes (library tools):
     GET  /library              Search + browse saved articles
+    GET  /read                 Article reader (Instapaper-style clean view)
     POST /ask                  FP&A Q&A
     POST /save                 Capture a link
     POST /post                 Draft a LinkedIn post
@@ -126,9 +127,13 @@ engineering, sales, and marketing. Those relationships are how you earn trust, a
 secrets, and develop a genuine pulse on how a business actually operates. That's the foundation
 for financial leadership that's actually useful to a leadership team.</p>
 
-<p>I host the <a href="https://www.onlycfo.io/podcast" target="_blank" rel="noopener">OnlyCFO Podcast</a>,
-write on startup finance, and advise finance leaders navigating the early-to-growth journey.
-Based in Boston, MA.</p>
+<p>In 2025, at the invitation of my friend <a href="https://www.onlycfo.io" target="_blank" rel="noopener">OnlyCFO</a>,
+I tried my hand at hosting a podcast. It turned out to be one of the more fun things I've done professionally—
+bringing friends and fellow finance leaders onto
+<a href="https://www.onlycfo.io/podcast" target="_blank" rel="noopener">The Cash Flow Show</a> to dig into
+the topics I care most about: how tech companies make money, how finance teams earn their seat at the table,
+and what it actually looks like to scale a business with discipline. I write on startup finance and advise
+finance leaders navigating the early-to-growth journey. Based in Boston, MA.</p>
 
 <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap;">
   <a href="/thought-leadership" class="btn">Thought Leadership</a>
@@ -181,8 +186,8 @@ def thought_leadership():
     ])
 
     body += section("Authored", [
-        ("The Growth Engine Ratio: Accounting for the Missing Half of Your Efficiency Equation · The F Suite · Dec 2025",
-         "/growth-engine-ratio", "2025-12"),
+        ("The Growth Engine Ratio: Accounting for the Missing Half of Your Efficiency Equation · The F Suite · Jun 2026",
+         "/growth-engine-ratio", "2026-06"),
         ("The F Suite — Exit Readiness for CFOs · The F Suite · Mar 2026",
          "https://www.fsuite.co/blog/exit-readiness-cfos", "2026-03"),
         ("OnlyCFO — Building Dashboards That Matter · OnlyCFO · Apr 2024",
@@ -213,7 +218,7 @@ def growth_engine_ratio():
 <p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Framework</p>
 <h1 style="margin:0 0 8px;">The Growth Engine Ratio</h1>
 <p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
-  By Brian Weisberg &middot; Published with <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a> &middot; December 2025
+  By Brian Weisberg &middot; Published with <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a> &middot; June 2026
 </p>
 
 <div style="background:var(--accent-light);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:18px 22px;margin:0 0 36px;">
@@ -586,6 +591,173 @@ def admin_contacts(token: str | None = None):
 # Private library tools
 # ---------------------------------------------------------------------------
 
+_READER_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500&display=swap');
+:root{--ink:#1a1714;--muted:#7a7068;--line:#e8e2d8;--bg:#f9f6f0;--surface:#ffffff;--accent:#1a4d3c;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--ink);font:18px/1.75 'Lora',Georgia,serif;}
+a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
+a:hover{opacity:.8;}
+
+.reader-bar{position:sticky;top:0;z-index:10;background:var(--surface);border-bottom:1px solid var(--line);
+  padding:0 24px;height:48px;display:flex;align-items:center;justify-content:space-between;
+  font-family:'Inter',sans-serif;font-size:13px;color:var(--muted);}
+.reader-bar .back{color:var(--accent);text-decoration:none;font-weight:500;display:flex;align-items:center;gap:6px;}
+.reader-bar .back:hover{opacity:.8;}
+.reader-controls{display:flex;align-items:center;gap:16px;}
+.reader-controls button{background:none;border:none;cursor:pointer;font:inherit;color:var(--muted);
+  padding:4px 8px;border-radius:6px;font-size:13px;}
+.reader-controls button:hover{background:var(--line);}
+
+.reader-wrap{max-width:680px;margin:0 auto;padding:56px 24px 100px;}
+
+.reader-meta{margin-bottom:40px;padding-bottom:32px;border-bottom:1px solid var(--line);}
+.reader-meta h1{font-size:clamp(22px,4vw,32px);font-weight:600;line-height:1.25;letter-spacing:-.02em;
+  margin-bottom:16px;}
+.reader-meta .byline{font-family:'Inter',sans-serif;font-size:14px;color:var(--muted);line-height:1.5;}
+.reader-meta .source-link{color:var(--accent);}
+
+.reader-body{font-size:var(--fs,18px);line-height:1.78;}
+.reader-body p{margin-bottom:1.4em;}
+.reader-body h1,.reader-body h2,.reader-body h3,.reader-body h4{
+  font-weight:600;line-height:1.3;letter-spacing:-.01em;margin:2em 0 .6em;}
+.reader-body h1{font-size:1.5em;}
+.reader-body h2{font-size:1.25em;}
+.reader-body h3{font-size:1.1em;}
+.reader-body ul,.reader-body ol{padding-left:1.5em;margin-bottom:1.4em;}
+.reader-body li{margin-bottom:.4em;}
+.reader-body blockquote{border-left:3px solid var(--line);padding-left:1.2em;color:var(--muted);
+  font-style:italic;margin:1.5em 0;}
+.reader-body img{max-width:100%;height:auto;border-radius:8px;margin:1.5em 0;}
+.reader-body figure{margin:1.5em 0;}
+.reader-body figcaption{font-size:.85em;color:var(--muted);font-family:'Inter',sans-serif;margin-top:.4em;}
+.reader-body table{width:100%;border-collapse:collapse;font-size:.9em;margin:1.5em 0;}
+.reader-body th,.reader-body td{padding:8px 12px;border:1px solid var(--line);text-align:left;}
+.reader-body th{background:#f4f0e8;font-family:'Inter',sans-serif;}
+.reader-body pre,.reader-body code{font-family:ui-monospace,monospace;font-size:.85em;
+  background:#f0ece4;border-radius:4px;padding:2px 5px;}
+.reader-body pre{padding:16px;overflow-x:auto;border-radius:8px;margin:1.5em 0;}
+.reader-body pre code{background:none;padding:0;}
+.reader-body hr{border:none;border-top:1px solid var(--line);margin:2.5em 0;}
+
+.reader-empty{text-align:center;padding:60px 20px;color:var(--muted);font-family:'Inter',sans-serif;}
+.reader-empty h2{font-size:18px;margin-bottom:12px;color:var(--ink);}
+"""
+
+_READER_TMPL = """<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<style>{css}</style>
+</head><body>
+<div class="reader-bar">
+  <a class="back" href="{back_url}">&#8592; {back_label}</a>
+  <div class="reader-controls">
+    <button onclick="adj(-2)">A&minus;</button>
+    <button onclick="adj(2)">A+</button>
+    <a href="{orig_url}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:13px;">Original &rarr;</a>
+  </div>
+</div>
+<div class="reader-wrap">
+  <div class="reader-meta">
+    <h1>{title}</h1>
+    <div class="byline">{byline}</div>
+  </div>
+  <div class="reader-body">{body}</div>
+</div>
+<script>
+var fs = parseInt(localStorage.getItem('reader-fs') || '18');
+document.documentElement.style.setProperty('--fs', fs + 'px');
+function adj(d) {{
+  fs = Math.max(14, Math.min(28, fs + d));
+  document.documentElement.style.setProperty('--fs', fs + 'px');
+  localStorage.setItem('reader-fs', fs);
+}}
+</script>
+</body></html>"""
+
+
+@app.get("/read", response_class=HTMLResponse)
+def reader(url: str = "", id: int = 0, token: str | None = None):
+    _check_token(token)
+    from linklib.extract import fetch_page
+    import html as html_mod
+
+    back_url = "/library"
+    back_label = "Library"
+
+    # Try to load from DB first (may have cached content)
+    article = None
+    if id:
+        lib = _lib()
+        try:
+            row = lib.conn.execute("SELECT * FROM articles WHERE id=?", (id,)).fetchone()
+            if row:
+                article = dict(row)
+                import json as _json
+                article["tags"] = _json.loads(article.get("tags_json") or "[]")
+        finally:
+            lib.close()
+        if article:
+            url = article["url"]
+
+    if not url:
+        body_html = '<div class="reader-empty"><h2>No URL provided</h2><p>Add ?url=https://... to the address bar.</p></div>'
+        return HTMLResponse(_READER_TMPL.format(
+            title="Reader", css=_READER_CSS, back_url=back_url, back_label=back_label,
+            orig_url="#", byline="", body=body_html,
+        ))
+
+    # Fetch content — use cached DB content if available and non-empty
+    cached_content = (article or {}).get("content", "")
+    cached_title = (article or {}).get("title", "")
+
+    if cached_content and len(cached_content) > 200:
+        title = cached_title or url
+        content = cached_content
+    else:
+        try:
+            page = fetch_page(url)
+            title = page.title or cached_title or url
+            content = page.content or ""
+        except Exception:
+            title = cached_title or url
+            content = ""
+
+    # Build byline from article metadata if available
+    byline_parts = []
+    if article:
+        if article.get("author"):
+            byline_parts.append(_esc(article["author"]))
+        if article.get("source"):
+            byline_parts.append(_esc(article["source"]))
+        if article.get("published_at"):
+            byline_parts.append(article["published_at"][:10])
+    byline_parts.append(f'<a class="source-link" href="{_esc(url)}" target="_blank" rel="noopener">{_esc(url[:60])}{"…" if len(url) > 60 else ""}</a>')
+    byline = " &middot; ".join(byline_parts)
+
+    if content:
+        # content from extract.py is plain text with newlines — convert to paragraphs
+        # but also handle if it looks like it already has HTML tags
+        if "<p>" in content or "<div" in content:
+            body_html = content
+        else:
+            paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+            body_html = "".join(f"<p>{html_mod.escape(p)}</p>" for p in paragraphs) if paragraphs else ""
+    else:
+        body_html = f"""<div class="reader-empty">
+          <h2>Content could not be extracted</h2>
+          <p>Some sites block automated access. Try reading the original.</p>
+          <p style="margin-top:16px;"><a href="{_esc(url)}" target="_blank" rel="noopener">Open original article &rarr;</a></p>
+        </div>"""
+
+    return HTMLResponse(_READER_TMPL.format(
+        title=_esc(title), css=_READER_CSS,
+        back_url=back_url, back_label=back_label,
+        orig_url=_esc(url), byline=byline,
+        body=body_html,
+    ))
+
+
 @app.get("/library", response_class=HTMLResponse)
 def library(q: str = ""):
     lib = _lib()
@@ -602,7 +774,10 @@ def library(q: str = ""):
           <div class="meta">{_esc(r.get('source',''))}{' &middot; ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
           <p class="summary">{_esc(r.get('summary',''))[:280]}</p>
           <div class="tags">{''.join(f'<span>{_esc(t)}</span>' for t in r.get('tags', []))}</div>
-          <button class="postbtn" onclick="draftPost('{_esc(r['url'])}')">Draft LinkedIn post</button>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <a href="/read?id={r['id']}&token={_esc(SAVE_TOKEN)}" class="postbtn" style="text-decoration:none;">Read</a>
+            <button class="postbtn" onclick="draftPost('{_esc(r['url'])}')">Draft LinkedIn post</button>
+          </div>
         </article>"""
         for r in results
     ) or '<p style="color:var(--muted);">No matches.</p>'
