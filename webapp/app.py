@@ -36,11 +36,12 @@ from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 from linklib.db import Library
 from linklib.pipeline import ingest_url
+from linklib import backup
 
 DB_PATH = os.environ.get("LINKLIB_DB", "library.db")
 SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
@@ -1194,7 +1195,7 @@ async def ask(request: Request):
 
 
 @app.post("/save")
-async def save(request: Request, token: str | None = None):
+async def save(request: Request, background_tasks: BackgroundTasks, token: str | None = None):
     _check_token(token or request.headers.get("X-Save-Token"))
     payload = {}
     try:
@@ -1211,6 +1212,7 @@ async def save(request: Request, token: str | None = None):
     lib = _lib()
     try:
         row = ingest_url(lib, url, tags=tags, notes=payload.get("note", ""))
+        background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True, "id": row["id"], "title": row.get("title"), "tags": row.get("tags", [])})
     finally:
         lib.close()
@@ -1302,6 +1304,41 @@ async def upload_db(request: Request, file: UploadFile = File(...), token: str |
     return HTMLResponse(_page("Upload complete", "", body, authed=True))
 
 
+@app.get("/admin/download-db")
+def download_db(request: Request):
+    """Download a consistent snapshot of the live database (manual backup)."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    from starlette.background import BackgroundTask
+
+    tmp = backup.snapshot_to_file(DB_PATH)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return FileResponse(
+        tmp,
+        media_type="application/octet-stream",
+        filename=f"library-{stamp}.db",
+        background=BackgroundTask(lambda: os.path.exists(tmp) and os.remove(tmp)),
+    )
+
+
+@app.post("/admin/backup-now", response_class=HTMLResponse)
+def backup_now_route(request: Request, token: str | None = None):
+    _require_api(request, token)
+    if not backup.is_configured():
+        body = """<div class="page"><h1>Backup not configured</h1>
+  <p class="muted">Set <code>DROPBOX_APP_KEY</code>, <code>DROPBOX_APP_SECRET</code>,
+  and <code>DROPBOX_REFRESH_TOKEN</code> to enable Dropbox backups.</p></div>"""
+        return HTMLResponse(_page("Backup", "", body, authed=True))
+    try:
+        result = backup.backup_now(DB_PATH)
+        msg = f"Uploaded <strong>{result['name']}</strong> ({result['bytes']:,} bytes) to Dropbox."
+    except Exception as e:
+        msg = f"Backup failed: {e}"
+    body = f"""<div class="page"><h1>Backup</h1><p>{msg}</p>
+  <p style="margin-top:1rem;"><a href="/library">Back to the library →</a></p></div>"""
+    return HTMLResponse(_page("Backup", "", body, authed=True))
+
+
 @app.get("/bookmarklet", response_class=PlainTextResponse)
 def bookmarklet(request: Request):
     if not _is_authed(request):
@@ -1330,7 +1367,7 @@ async def post_draft(request: Request):
 
 
 @app.post("/feed/save")
-async def feed_save(request: Request):
+async def feed_save(request: Request, background_tasks: BackgroundTasks):
     """Server-side save proxy — authed via login cookie, no token in client HTML."""
     _require_api(request)
     form = await request.form()
@@ -1340,6 +1377,7 @@ async def feed_save(request: Request):
     lib = _lib()
     try:
         ingest_url(lib, url)
+        background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
