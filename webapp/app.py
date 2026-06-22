@@ -229,12 +229,20 @@ def logout():
 
 @app.get("/", response_class=HTMLResponse)
 def homepage():
-    body = """<div class="page">
+    # Show the photo if it's present; otherwise a clean monogram. This way the
+    # headshot displays automatically the moment headshot.jpg lands in static/.
+    if os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg")):
+        avatar = ('<img src="/static/headshot.jpg" alt="Brian Weisberg" '
+                  'style="width:140px;height:140px;border-radius:50%;object-fit:cover;'
+                  'object-position:center top;flex-shrink:0;border:3px solid var(--line);">')
+    else:
+        avatar = ('<div aria-label="Brian Weisberg" '
+                  'style="width:140px;height:140px;border-radius:50%;flex-shrink:0;border:3px solid var(--line);'
+                  'background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;'
+                  'font-size:46px;font-weight:700;letter-spacing:-0.02em;">BW</div>')
+    body = f"""<div class="page">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
-  <div aria-label="Brian Weisberg"
-       style="width:140px;height:140px;border-radius:50%;flex-shrink:0;border:3px solid var(--line);
-              background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;
-              font-size:46px;font-weight:700;letter-spacing:-0.02em;">BW</div>
+  {avatar}
   <div>
     <h1 style="margin:0 0 4px;">Brian Weisberg</h1>
     <p style="color:var(--muted);font-size:15px;margin:0;">CFO &middot; Boston, MA</p>
