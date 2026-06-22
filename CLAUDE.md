@@ -28,6 +28,7 @@ linklib/           # core library (the only thing that matters long-term)
   agent.py         # FP&A Q&A: library retrieval + web search, cited answer
   social.py        # LinkedIn post generator in Brian's voice (self-contained)
   sources.py       # parses preferred_sites.opml → domain allowlist for web search
+  feed.py          # RSS/Atom reader over the OPML list: concurrent fetch, 30-min cache
 
 scripts/           # CLI entry points
   import_archive.py   # one-time Feedly archive import
@@ -37,9 +38,12 @@ scripts/           # CLI entry points
   post.py             # draft a LinkedIn post from the terminal
 
 webapp/
-  app.py           # FastAPI: search UI, Ask box, Draft-post, /save, /api/search, /bookmarklet
+  app.py           # FastAPI: public site (/, /thought-leadership, /growth-engine-ratio,
+                   #   /contact) + private tools (/library, /feed, /read, /ask, /post,
+                   #   /save, /api/search, /bookmarklet) + auth (/login, /logout)
+  static/          # served assets (e.g. headshot.jpg) via GET /static/{filename}
 
-preferred_sites.opml  # Feedly subscriptions — used as allowed_domains for web search
+preferred_sites.opml  # subscription list: web-search allowlist AND the /feed reader source
 library.db            # NOT in git (personal data, large). Lives beside the code locally.
 ```
 
@@ -55,8 +59,52 @@ library.db            # NOT in git (personal data, large). Lives beside the code
 - **Web search is domain-restricted.** `agent.py` passes `preferred_sites.opml` domains
   as `allowed_domains` to the `web_search_20250305` tool, so the chatbot only cites
   sources Brian already trusts.
-- **The `/save` endpoint is token-gated** via `LINKLIB_SAVE_TOKEN`. Leave it unset for
-  local-only use; set it when the app is public-facing.
+- **`preferred_sites.opml` is dual-purpose.** It's both the web-search allowlist and the
+  `/feed` reader's subscription list. Use direct RSS/Atom URLs — Feedly proxy URLs
+  (`feedly.com/web/...`) are skipped because they require auth. Paywalled sources are
+  tagged in `feed.py` (`PAYWALLED_DOMAINS`) and shown with a badge; the in-app reader is
+  disabled for them.
+- **The `/feed` reader caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
+  item dicts are shallow-copied before mutation — never mutate a cached entry in place.
+  Editing the OPML won't show up live until the cache expires or the app restarts.
+
+See the **Authentication & security** section below for the full access-control model —
+it supersedes the old "`/save` is token-gated" note.
+
+## Authentication & security
+
+The site is one app with a **public face** and a **private back office**. Auth is a
+single shared secret with a session-cookie login on top — no user accounts, no DB
+tables, no third-party dependency.
+
+- **One secret, two front doors.** `LINKLIB_PASSWORD` is the login password; if unset it
+  **falls back to `LINKLIB_SAVE_TOKEN`**, so by default the same string unlocks both the
+  login screen and the token API. If *neither* is set, the private routes are open
+  (local-dev convenience).
+- **Login = signed session cookie.** `POST /login` checks the password and sets an
+  HMAC-signed, HttpOnly, SameSite=Lax cookie (`cfo_session`, 30-day TTL). Signing uses
+  `LINKLIB_SECRET_KEY`, falling back to the password. Implemented with the stdlib
+  (`hmac`/`hashlib`) — deliberately no `itsdangerous`/SessionMiddleware dependency.
+  **If `LINKLIB_SECRET_KEY` is unset, an app restart invalidates all sessions** (you just
+  log in again — harmless). Set it on the host to keep sessions sticky across deploys.
+- **Route protection:**
+  - Public (no auth): `/`, `/thought-leadership`, `/growth-engine-ratio`, `/contact`,
+    `/login`, `/logout`, `/static/*`, `/health`.
+  - Private HTML pages → **redirect to `/login`** when signed out: `/library`, `/feed`,
+    `/read`, `/admin/contacts`.
+  - Private API → **401** when unauthenticated, but also accept a valid token (cookie OR
+    `X-Save-Token`/`?token=`): `/ask`, `/post`, `/feed/save`, `/api/search`.
+  - `/save` is **token-only** (`X-Save-Token` header or `?token=`) because the bookmarklet
+    calls it cross-origin, where the login cookie can't be sent.
+- **No secret in rendered HTML.** Internal links no longer carry `?token=`; the cookie
+  authorizes navigation. Token comparison is constant-time (`hmac.compare_digest`).
+- **⚠️ Bookmarklet caveat (by design).** The `/bookmarklet` snippet embeds
+  `LINKLIB_SAVE_TOKEN` in plaintext JS — it must, because it runs on third-party pages
+  cross-origin where the cookie is unavailable. The `/bookmarklet` *page* is login-gated
+  so only Brian can retrieve it, **but the snippet itself is a secret.** Don't paste it
+  publicly, and **if you rotate `LINKLIB_SAVE_TOKEN`, re-grab the bookmarklet** (the old
+  one stops working).
+- `/static/{filename}` resolves through `os.path.basename` to block path traversal.
 
 ## `library.db` is intentionally not in the repo
 
@@ -70,11 +118,13 @@ list below.
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `LINKLIB_DB` | `library.db` | Path to the SQLite database |
-| `LINKLIB_SAVE_TOKEN` | (none) | Auth token for `POST /save` (set when hosted) |
+| `LINKLIB_SAVE_TOKEN` | (none) | Token for `POST /save` + bookmarklet; also the default login password. Set when hosted. |
+| `LINKLIB_PASSWORD` | = `LINKLIB_SAVE_TOKEN` | Login password for the private section. Set to decouple the login password from the save token. |
+| `LINKLIB_SECRET_KEY` | = password | HMAC key for signing session cookies. Set on the host so logins survive restarts/deploys. |
 | `LINKLIB_ENRICH_MODEL` | `claude-haiku-4-5-20251001` | Claude model for enrichment |
 | `LINKLIB_CHAT_MODEL` | `claude-sonnet-4-6` | Claude model for Q&A and post drafting |
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
-| `LINKLIB_SITES_OPML` | `preferred_sites.opml` | Path to OPML for web-search domain list |
+| `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/feed` source list |
 
 ## Running locally
 
@@ -103,14 +153,32 @@ uvicorn webapp.app:app --reload    # http://localhost:8000
 - FP&A Q&A (library + web search)
 - LinkedIn post drafting
 - Bookmarklet
+- Public site: bio homepage (`/`), thought leadership (`/thought-leadership`),
+  Growth Engine Ratio page + calculator (`/growth-engine-ratio`), contact (`/contact`)
+- Password login for the private section (`/login` + signed session cookie)
+- CFO Feed RSS reader (`/feed`) with category tabs, per-source filter, save-to-library
+- Article reader, Instapaper-style (`/read`)
+- Hosting/deployment on Railway (see Deployment below)
 
 **Not yet built (from the migration plan):**
-- Public site: bio homepage, thought leadership page, contact
-- Authentication/login for the private section when hosted
-- CFO Feed (RSS reader pulling Feedly feeds + Substacks, with "save to library" action)
 - iOS Share Sheet shortcut
-- Hosting/deployment (Vercel, Railway, or similar)
 - MCP server wrapper over `/api/search` for Claude chat access
+  (note: `/api/search` already accepts a `token` for programmatic auth)
+- bmweis.com custom domain pointed at Railway
+
+## Deployment
+
+- **Host:** Railway, building from the `Dockerfile` (`python:3.11-slim`, runs
+  `uvicorn webapp.app:app`). `Procfile` and `railway.toml` are also present;
+  `railway.toml` sets the healthcheck to `/health`.
+- **Deploy flow:** Railway auto-deploys from the **`main`** branch. Feature work happens on
+  a branch, then merges to `main` to ship. **If it isn't on `main`, it isn't live** — a
+  common gotcha (e.g. a change that looks done but "doesn't show up" is usually still on a
+  feature branch).
+- Set `LINKLIB_SAVE_TOKEN` (and ideally `LINKLIB_SECRET_KEY`) in Railway's env so the
+  private section is protected and logins persist across deploys. `library.db` is not in
+  the repo, so a hosted instance starts empty unless the DB is provisioned/persisted
+  separately.
 
 ## Models in use
 
