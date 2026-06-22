@@ -22,14 +22,10 @@
     <outline type="rss" text="Jason Calacanis" title="Jason Calacanis" xmlUrl="http://calacanis.com/feed/" htmlUrl="https://calacanis.com"/>
     <outline type="rss" text="Stories by Bryce Roberts on Medium" title="Stories by Bryce Roberts on Medium" xmlUrl="https://medium.com/feed/@bryce" htmlUrl="https://medium.com/@bryce"/>
     <outline type="rss" text="Above the Crowd" title="Above the Crowd" xmlUrl="http://abovethecrowd.com/feed/" htmlUrl="https://abovethecrowd.com/"/>
-  </outline>
-  <outline text="Additional Blogs" title="Additional Blogs">
     <outline type="rss" text="SaaStr" title="SaaStr" xmlUrl="https://www.saastr.com/feed/" htmlUrl="https://www.saastr.com/"/>
     <outline type="rss" text="Christoph Janz" title="Christoph Janz" xmlUrl="https://christophjanz.blogspot.com/feeds/posts/default" htmlUrl="https://christophjanz.blogspot.com/"/>
     <outline type="rss" text="OpexEngine" title="OpexEngine" xmlUrl="https://www.opexengine.com/articles/feed" htmlUrl="https://www.opexengine.com/articles"/>
     <outline type="rss" text="25iq" title="25iq" xmlUrl="https://25iq.com/feed/" htmlUrl="https://25iq.com/"/>
-    <outline type="rss" text="Mostly Metrics" title="Mostly Metrics" xmlUrl="https://www.mostlymetrics.com/feed" htmlUrl="https://www.mostlymetrics.com/archive"/>
-    <outline type="rss" text="New Age Accounting" title="New Age Accounting" xmlUrl="https://www.newageaccounting.ai/feed" htmlUrl="https://www.newageaccounting.ai/"/>
   </outline>
   <outline text="Substacks" title="Substacks">
     <outline type="rss" text="OnlyCFO" title="OnlyCFO" xmlUrl="https://www.onlycfo.io/feed" htmlUrl="https://www.onlycfo.io/"/>
@@ -37,5 +33,6 @@
     <outline type="rss" text="Growth Unhinged (Kyle Poyar)" title="Growth Unhinged (Kyle Poyar)" xmlUrl="https://kylepoyar.substack.com/feed" htmlUrl="https://kylepoyar.substack.com/"/>
     <outline type="rss" text="Looking for Leverage" title="Looking for Leverage" xmlUrl="https://lookingforleverage.substack.com/feed" htmlUrl="https://lookingforleverage.substack.com/"/>
     <outline type="rss" text="Mostly Metrics (CJ Gustafson)" title="Mostly Metrics (CJ Gustafson)" xmlUrl="https://cjgustafson.substack.com/feed" htmlUrl="https://cjgustafson.substack.com/"/>
+    <outline type="rss" text="New Age Accounting" title="New Age Accounting" xmlUrl="https://www.newageaccounting.ai/feed" htmlUrl="https://www.newageaccounting.ai/"/>
   </outline>
 </body></opml>
