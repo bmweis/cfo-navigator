@@ -366,6 +366,11 @@ async function draftPost(url){{
 # API endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
 @app.get("/api/search")
 def api_search(q: str = "", limit: int = 50):
     lib = _lib()
