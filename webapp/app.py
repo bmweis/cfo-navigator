@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Going-forward capture + search web app.
+"""bmweis.com — public site + private CFO Navigator tools.
 
-Run locally now:
-    pip install fastapi "uvicorn[standard]"
-    uvicorn webapp.app:app --reload
+Public routes (no auth):
+    GET  /                     Bio homepage
+    GET  /thought-leadership   Podcasts, writing, interviews
+    GET  /contact              Contact form
+    POST /contact              Submit contact form
 
-This same app is what you later deploy so the iOS/iPadOS Share Sheet
-shortcut and the desktop bookmarklet can POST to it from anywhere.
-
-Endpoints:
-    GET  /                     search + browse UI
-    POST /save                 capture a link  {url, tags?, note?}  -> JSON
-    GET  /api/search?q=...      JSON search (this is what Claude/MCP hits)
-    GET  /bookmarklet           a drag-to-bookmarks-bar one-click saver
-
-Security: set LINKLIB_SAVE_TOKEN and pass it as ?token= (or X-Save-Token
-header) on /save so a hosted instance isn't open to the world.
+Private routes (library tools):
+    GET  /library              Search + browse saved articles
+    GET  /read                 Article reader (Instapaper-style clean view)
+    POST /ask                  FP&A Q&A
+    POST /save                 Capture a link
+    POST /post                 Draft a LinkedIn post
+    GET  /api/search           JSON search API
+    GET  /bookmarklet          One-click saver script
+    GET  /admin/contacts       View contact form submissions (token-gated)
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, FileResponse
 
 from linklib.db import Library
 from linklib.pipeline import ingest_url
@@ -34,7 +34,20 @@ DB_PATH = os.environ.get("LINKLIB_DB", "library.db")
 SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
 PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
 
-app = FastAPI(title="CFO Navigator")
+app = FastAPI(title="bmweis.com")
+
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+
+@app.get("/static/{filename}")
+def static_file(filename: str):
+    path = os.path.join(_STATIC_DIR, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    ext = filename.rsplit(".", 1)[-1].lower()
+    media = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+             "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media)
 
 
 def _lib() -> Library:
@@ -44,6 +57,999 @@ def _lib() -> Library:
 def _check_token(token: str | None) -> None:
     if SAVE_TOKEN and token != SAVE_TOKEN:
         raise HTTPException(status_code=401, detail="bad or missing save token")
+
+
+def _esc(s) -> str:
+    return (str(s) or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+# ---------------------------------------------------------------------------
+# Shared layout helpers
+# ---------------------------------------------------------------------------
+
+_CSS = """
+:root{--ink:#16130f;--muted:#6b6258;--line:#e6e0d6;--bg:#faf7f2;--accent:#1a4d3c;--accent-light:#eef3f0;}
+*{box-sizing:border-box;}
+body{margin:0;font:16px/1.6 ui-sans-serif,-apple-system,Segoe UI,Inter,sans-serif;color:var(--ink);background:var(--bg);}
+a{color:var(--accent);text-decoration:none;}
+a:hover{text-decoration:underline;}
+.site-header{border-bottom:1px solid var(--line);padding:18px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
+.site-header .logo{font-size:17px;font-weight:700;letter-spacing:-0.02em;color:var(--ink);}
+.site-nav{display:flex;gap:24px;font-size:14px;}
+.site-nav a{color:var(--muted);}
+.site-nav a:hover{color:var(--ink);text-decoration:none;}
+.site-nav a.active{color:var(--ink);font-weight:600;}
+.page{max-width:780px;margin:0 auto;padding:48px 24px 80px;}
+h1{font-size:28px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;}
+h2{font-size:20px;font-weight:600;letter-spacing:-0.01em;margin:40px 0 14px;}
+h3{font-size:15px;font-weight:600;margin:0 0 4px;}
+p{margin:0 0 16px;color:#3a352e;}
+.btn{display:inline-block;padding:10px 20px;background:var(--accent);color:#fff;border-radius:10px;font-size:15px;font-weight:500;border:0;cursor:pointer;}
+.btn:hover{opacity:.9;text-decoration:none;}
+.btn-ghost{background:transparent;color:var(--accent);border:1px solid var(--line);padding:9px 18px;}
+.btn-ghost:hover{background:var(--accent-light);opacity:1;}
+"""
+
+def _page(title: str, active: str, body: str) -> str:
+    nav_items = [
+        ("/", "About"),
+        ("/thought-leadership", "Thought Leadership"),
+        ("/contact", "Contact"),
+        ("/library", "Library"),
+        ("/feed", "Feed"),
+    ]
+    nav = "".join(
+        f'<a href="{href}" class="{"active" if active == label else ""}">{label}</a>'
+        for href, label in nav_items
+    )
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_esc(title)}</title>
+<style>{_CSS}</style></head><body>
+<header class="site-header">
+  <a class="logo" href="/">Brian Weisberg</a>
+  <nav class="site-nav">{nav}</nav>
+</header>
+{body}
+</body></html>"""
+
+
+# ---------------------------------------------------------------------------
+# Public pages
+# ---------------------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+def homepage():
+    body = """<div class="page">
+<div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:32px;">
+  <img src="/static/headshot.jpg" alt="Brian Weisberg"
+       style="width:140px;height:140px;border-radius:50%;object-fit:cover;object-position:center top;flex-shrink:0;border:3px solid var(--line);">
+  <div>
+    <h1 style="margin:0 0 4px;">Brian Weisberg</h1>
+    <p style="color:var(--muted);font-size:15px;margin:0;">CFO &middot; Boston, MA</p>
+  </div>
+</div>
+
+<p>I'm a CFO with 15+ years leading finance, accounting, and business operations for B2B SaaS
+and IT infrastructure companies. I'm currently CFO at The Suite, Inc. and GM of
+<a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>—an invite-only
+network of 1,000+ growth and late-stage CFOs. Before that, I spent seven years as CFO of
+<a href="https://tidelift.com" target="_blank" rel="noopener">Tidelift</a>, growing the company
+from fewer than a dozen employees through $73.5M in funding and an eventual acquisition by Sonar.</p>
+
+<p>Scaling early-stage startups has become my passion. While not a traditional entrepreneur myself,
+I'm inspired by the energy and conviction founders bring to disrupting the status quo—and I've
+built my career helping them do it with a clear financial picture and sound operational backbone.</p>
+
+<p>What sets me apart is a cross-functional approach to financial leadership. I get out from
+behind my desk to mentor, learn from, and build real relationships with peers in product,
+engineering, sales, and marketing. Those relationships are how you earn trust, acquire earned
+secrets, and develop a genuine pulse on how a business actually operates. That's the foundation
+for financial leadership that's actually useful to a leadership team.</p>
+
+<p>In 2025, at the invitation of my friend <a href="https://www.onlycfo.io" target="_blank" rel="noopener">OnlyCFO</a>,
+I tried my hand at hosting a podcast. It turned out to be one of the more fun things I've done professionally—
+bringing friends and fellow finance leaders onto
+<a href="https://www.onlycfo.io/podcast" target="_blank" rel="noopener">The Cash Flow Show</a> to dig into
+the topics I care most about: how tech companies make money, how finance teams earn their seat at the table,
+and what it actually looks like to scale a business with discipline. I write on startup finance and advise
+finance leaders navigating the early-to-growth journey. Based in Boston, MA.</p>
+
+<div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap;">
+  <a href="/thought-leadership" class="btn">Thought Leadership</a>
+  <a href="/contact" class="btn btn-ghost">Get in Touch</a>
+</div>
+</div>"""
+    return HTMLResponse(_page("Brian Weisberg — CFO", "About", body))
+
+
+@app.get("/thought-leadership", response_class=HTMLResponse)
+def thought_leadership():
+    def section(title: str, items: list[tuple[str, str, str]]) -> str:
+        # items: (label, url, sort_key) — sort_key is "YYYY-MM" or "" to pin to top
+        sorted_items = sorted(items, key=lambda x: x[2], reverse=True)
+        links = "".join(
+            f'<li style="margin:0 0 10px;"><a href="{url}" target="_blank" rel="noopener">{_esc(label)}</a></li>'
+            for label, url, _ in sorted_items
+        )
+        return f'<h2>{title}</h2><ul style="padding-left:20px;margin:0 0 8px;">{links}</ul>'
+
+    body = '<div class="page"><h1>Thought Leadership</h1>' + \
+        '<p style="color:var(--muted);margin:4px 0 28px;">Podcasts, writing, interviews, and appearances.</p>' + \
+        """<a href="/growth-engine-ratio" style="display:block;text-decoration:none;background:var(--accent);color:#fff;border-radius:14px;padding:22px 26px;margin-bottom:36px;">
+  <div style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.75;margin-bottom:6px;">Featured &mdash; New Framework</div>
+  <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;">The Growth Engine Ratio</div>
+  <div style="font-size:14px;opacity:.85;line-height:1.5;">A new metric for measuring how R&amp;D and GTM investments work together to drive growth &mdash; with an interactive calculator to see how you stack up. Published with The F Suite &rarr;</div>
+</a>"""
+
+    body += section("Podcast — Host", [
+        ("The Cash Flow Show — Conversations about how tech companies make money",
+         "https://www.onlycfo.io/podcast", ""),
+    ])
+
+    body += section("Podcasts — Guest", [
+        ("Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks · Monetizely · Sep 2023",
+         "https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn",
+         "2023-09"),
+        ("OpexEngine — SaaS Conversations: Dynamic Planning for SaaS Finance Leaders · OpexEngine · May 2023",
+         "https://www.opexengine.com/webinar/opexengine-saas-conversations-dynamic-planning-for-saas-finance-leaders",
+         "2023-05"),
+        ("Role Forward Podcast — The Heuristics of Forecasting · Mosaic Tech · Dec 2022",
+         "https://www.youtube.com/watch?v=mqVvcVVTSrk", "2022-12"),
+        ("Role Forward Podcast — Collaborative Budgeting · Mosaic Tech · Apr 2022",
+         "https://www.youtube.com/watch?v=GPdRstJ_sKw", "2022-04"),
+    ])
+
+    body += section("Webinar — Host", [
+        ("Numeric — Lean Accounting Team · Numeric · Mar 2024",
+         "https://numeric.lpages.co/lean-accounting-team-webinar/", "2024-03"),
+    ])
+
+    body += section("Interview", [
+        ("Sequence — From $1M to $100M: 6 Finance Lessons from the Frontline · Sequence · Jul 2025",
+         "https://www.sequencehq.com/blog/from-1m-to-100m-6-finance-lessons-from-the-frontline", "2025-07"),
+    ])
+
+    body += section("Authored", [
+        ("The Growth Engine Ratio: Accounting for the Missing Half of Your Efficiency Equation · The F Suite · Jun 2026",
+         "/growth-engine-ratio", "2026-06"),
+        ("The F Suite — Exit Readiness for CFOs · The F Suite · Mar 2026",
+         "https://www.fsuite.co/blog/exit-readiness-cfos", "2026-03"),
+        ("OnlyCFO — Building Dashboards That Matter · OnlyCFO · Apr 2024",
+         "https://www.onlycfo.io/p/building-dashboards-that-matter", "2024-04"),
+    ])
+
+    body += section("Cited & Quoted", [
+        ("LegalDive — GC/CFO Collaboration · LegalDive · Mar 2023",
+         "https://www.legaldive.com/news/gc-cfo-collaboration-svb-techgc-the-f-suite-silicon-valley-bank/646561/",
+         "2023-03"),
+        ("Numeric — When and How to Scale Your Accounting Department · Numeric · Nov 2023",
+         "https://www.numeric.io/blog/when-and-how-to-scale-your-accounting-department", "2023-11"),
+        ("Numeric — Startup CFO Primer · Numeric · Jun 2024",
+         "https://www.numeric.io/blog/startup-cfo-primer", "2024-06"),
+        ("CFO Drive — Innovative Cost-Saving Measures Q&A · CFO Drive · Jul 2024",
+         "https://cfodrive.com/qa/what-innovative-cost-saving-measures-can-significantly-impact-a-companys-bottom-line/",
+         "2024-07"),
+    ])
+
+    body += "</div>"
+    return HTMLResponse(_page("Thought Leadership — Brian Weisberg", "Thought Leadership", body))
+
+
+@app.get("/growth-engine-ratio", response_class=HTMLResponse)
+def growth_engine_ratio():
+    body = """<div class="page" style="max-width:820px;">
+
+<p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Framework</p>
+<h1 style="margin:0 0 8px;">The Growth Engine Ratio</h1>
+<p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
+  By Brian Weisberg &middot; Published with <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a> &middot; June 2026
+</p>
+
+<div style="background:var(--accent-light);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:18px 22px;margin:0 0 36px;">
+  <p style="margin:0;font-size:15px;">
+    The full guide — including benchmark data from 200+ public and private SaaS companies via OPEXEngine —
+    is available as a downloadable whitepaper on The F Suite.
+    <strong><a href="https://www.fsuite.co" target="_blank" rel="noopener">Read the full article and download the guide &rarr;</a></strong>
+    <em style="display:block;margin-top:6px;font-size:13px;color:var(--muted);">(Link will be live when The F Suite publishes — coming soon.)</em>
+  </p>
+</div>
+
+<h2 style="margin-top:0;">Why I Built This</h2>
+<p>Most SaaS efficiency metrics measure one engine at a time. CAC payback tells you how quickly GTM
+investment pays back on new logos. Magic Number tells you how much ARR you're getting per dollar of
+sales and marketing spend. Both are useful — I use them all the time — but they share a blind spot:
+they leave R&D entirely out of the efficiency equation.</p>
+
+<p>That bothers me. At most companies, R&D is 20–30% of revenue. It's a meaningful investment, and
+it directly influences how easy — or hard — it is for GTM to do its job. A great product shortens
+sales cycles, reduces churn, and drives expansion. A product that's hard to understand or hasn't
+kept pace with customer needs makes every dollar of GTM spend work harder just to stay in place.</p>
+
+<p>When product and GTM are evaluated in separate silos, it's almost impossible to answer the
+question that actually matters: are these two engines working together efficiently?
+I came up with the Growth Engine Ratio to answer that question.</p>
+
+<h2>The Core Idea</h2>
+<p>The framework is built on a simple observation: revenue recognized today is the result of
+investments made over the past several quarters, not just last quarter. Features ship before
+they're sold. Pipeline built in Q1 converts in Q3. A single period's P&amp;L doesn't capture that.</p>
+
+<p>So instead of comparing today's revenue growth to today's spending, the Growth Engine Ratio
+distributes investment across the quarters that actually contributed to a given period's growth.
+I call this the <strong>time-distributed contribution model</strong>.</p>
+
+<p>The formula:</p>
+<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:0 0 24px;font-family:ui-monospace,monospace;font-size:14px;line-height:1.8;">
+  <strong>Growth Engine Ratio = Annualized Revenue Growth &divide; (GTM Investment + R&amp;D Investment)</strong><br><br>
+  Annualized Growth = (Revenue Q<sub>n</sub> &minus; Revenue Q<sub>n-1</sub>) &times; 4<br>
+  GTM Investment = 0.25 &times; (GTM<sub>n-4</sub> + GTM<sub>n-3</sub> + GTM<sub>n-2</sub> + GTM<sub>n-1</sub>)<br>
+  R&amp;D Investment = 0.25 &times; (R&amp;D<sub>n-5</sub> + R&amp;D<sub>n-4</sub>)
+</div>
+
+<p>GTM uses a 4-quarter lookback because enterprise sales cycles run 6–9 months — pipeline built
+in Q<sub>n-4</sub> converts across subsequent quarters until it lands in Q<sub>n</sub>.
+R&amp;D uses a 2-quarter lookback starting one quarter earlier (n-5, n-4) because features are
+built before they're sold. The build-then-sell sequence matters.</p>
+
+<h2>What the Number Tells You</h2>
+<p>A ratio of <strong>$1.00</strong> means you're generating exactly $1 of annualized revenue growth for
+every $1 of combined R&amp;D + GTM investment. That's the threshold that separates companies
+that are profitable on acquisition from those that aren't.</p>
+
+<p>In my analysis of 11 public SaaS companies across 188 company-quarters, only 2 exceeded $1.00
+in steady state. The other 9 need to retain customers for 1.2 to 2.8 years just to break even
+on acquisition costs. That changes how you think about churn — permanently.</p>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:0 0 32px;">
+  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <thead><tr style="background:var(--accent-light);">
+      <th style="padding:10px 14px;text-align:left;font-weight:600;">Tier</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;">Ratio</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;">Years to Break Even</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;">What It Means</th>
+    </tr></thead>
+    <tbody>
+      <tr style="border-top:1px solid var(--line);">
+        <td style="padding:10px 14px;">&#127942; Elite</td>
+        <td style="padding:10px 14px;">&gt; $1.20</td>
+        <td style="padding:10px 14px;">&lt; 0.8 years</td>
+        <td style="padding:10px 14px;">Profitable on acquisition — invest aggressively</td>
+      </tr>
+      <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
+        <td style="padding:10px 14px;">&#11088; Strong</td>
+        <td style="padding:10px 14px;">$0.70 – $1.20</td>
+        <td style="padding:10px 14px;">0.8 – 1.4 years</td>
+        <td style="padding:10px 14px;">Above median — maintain efficiency as you scale</td>
+      </tr>
+      <tr style="border-top:1px solid var(--line);">
+        <td style="padding:10px 14px;">&#10003; Typical</td>
+        <td style="padding:10px 14px;">$0.50 – $0.70</td>
+        <td style="padding:10px 14px;">1.4 – 2.0 years</td>
+        <td style="padding:10px 14px;">In the pack — retention must be a top priority</td>
+      </tr>
+      <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
+        <td style="padding:10px 14px;">&#9888;&#65039; Below target</td>
+        <td style="padding:10px 14px;">&lt; $0.50</td>
+        <td style="padding:10px 14px;">&gt; 2.0 years</td>
+        <td style="padding:10px 14px;">Urgent review — fix retention before scaling acquisition</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2>Calculate Your Ratio</h2>
+<p style="color:var(--muted);font-size:15px;margin:-6px 0 24px;">Enter your last 6 quarters of data. All figures in the same currency (millions, thousands — just be consistent).</p>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px 32px;margin:0 0 40px;">
+  <div style="display:grid;gap:20px;">
+
+    <div>
+      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">Revenue</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Current quarter (Q<sub>n</sub>)</label>
+          <input id="rev_n" type="number" min="0" step="any" placeholder="e.g. 100"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Prior quarter (Q<sub>n-1</sub>)</label>
+          <input id="rev_n1" type="number" min="0" step="any" placeholder="e.g. 90"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">GTM Spend (Sales &amp; Marketing) — last 4 quarters</p>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-4</sub></label>
+          <input id="gtm4" type="number" min="0" step="any" placeholder="e.g. 20"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-3</sub></label>
+          <input id="gtm3" type="number" min="0" step="any" placeholder="e.g. 22"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-2</sub></label>
+          <input id="gtm2" type="number" min="0" step="any" placeholder="e.g. 24"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-1</sub></label>
+          <input id="gtm1" type="number" min="0" step="any" placeholder="e.g. 26"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">R&amp;D Spend — 2 quarters (the build window)</p>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-width:320px;">
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-5</sub></label>
+          <input id="rnd5" type="number" min="0" step="any" placeholder="e.g. 16"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-4</sub></label>
+          <input id="rnd4" type="number" min="0" step="any" placeholder="e.g. 18"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);">
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <button onclick="calcGER()" class="btn" style="padding:12px 28px;font-size:16px;">Calculate my ratio</button>
+      <button onclick="loadExample()" class="btn btn-ghost" style="margin-left:12px;">Load worked example</button>
+    </div>
+  </div>
+
+  <div id="ger-result" style="display:none;margin-top:28px;padding-top:24px;border-top:1px solid var(--line);">
+    <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap;">
+      <div style="flex:0 0 auto;">
+        <p style="font-size:13px;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.06em;">Your Growth Engine Ratio</p>
+        <p id="ger-value" style="font-size:48px;font-weight:700;letter-spacing:-0.03em;margin:0;color:var(--accent);"></p>
+      </div>
+      <div style="flex:1;min-width:200px;">
+        <p id="ger-tier" style="font-size:18px;font-weight:600;margin:0 0 6px;"></p>
+        <p id="ger-breakeven" style="font-size:14px;color:var(--muted);margin:0 0 10px;"></p>
+        <p id="ger-interp" style="font-size:15px;margin:0;"></p>
+      </div>
+    </div>
+    <div id="ger-detail" style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.8;"></div>
+  </div>
+</div>
+
+<p style="font-size:13px;color:var(--muted);margin:-20px 0 40px;">
+  <strong>Methodology note:</strong> GTM = Sales &amp; Marketing expense (GAAP including SBC).
+  R&D = Research &amp; Development expense. Use either GAAP or non-GAAP consistently —
+  don't mix. Benchmarks in the full guide use GAAP. Requires at least 6 quarters of history
+  for the n-5 R&amp;D lookback.
+</p>
+
+<h2>A Note on Retention</h2>
+<p>One of the more useful outputs of this framework is a simple break-even calculation:
+<strong>Years to Break Even = 1 ÷ Efficiency Ratio</strong>. If your ratio is $0.60, you
+need to retain each customer for 1.7 years just to recover acquisition costs — and that
+assumes flat renewal with no expansion. Strong NRR (above 110%) compresses that timeline;
+contraction can make it indefinitely long.</p>
+
+<p>Companies below $1.00 — which is most of them — need both high gross retention and strong
+net expansion for the economics to work. One without the other isn't sufficient. The ratio
+makes that constraint explicit in a way that's hard to argue with in a board room.</p>
+
+<h2>Get the Full Guide</h2>
+<p>The whitepaper includes the complete methodology, a worked example using Datadog's public
+financials, benchmark data across 200+ companies via OPEXEngine, and a performance tier guide
+with specific actions to take based on where your ratio lands. It's published in partnership
+with The F Suite.</p>
+
+<a href="https://www.fsuite.co" target="_blank" rel="noopener" class="btn" style="font-size:15px;padding:12px 24px;">
+  Download the full guide &rarr;
+</a>
+<p style="font-size:13px;color:var(--muted);margin-top:8px;">(Full link coming soon — check back or <a href="/contact">reach out</a> and I'll send it directly.)</p>
+
+</div>
+
+<script>
+function v(id) { return parseFloat(document.getElementById(id).value) || 0; }
+
+function loadExample() {
+  document.getElementById('rev_n').value = 100;
+  document.getElementById('rev_n1').value = 90;
+  document.getElementById('gtm4').value = 20;
+  document.getElementById('gtm3').value = 22;
+  document.getElementById('gtm2').value = 24;
+  document.getElementById('gtm1').value = 26;
+  document.getElementById('rnd5').value = 16;
+  document.getElementById('rnd4').value = 18;
+  calcGER();
+}
+
+function calcGER() {
+  var rev_n = v('rev_n'), rev_n1 = v('rev_n1');
+  var gtm4 = v('gtm4'), gtm3 = v('gtm3'), gtm2 = v('gtm2'), gtm1 = v('gtm1');
+  var rnd5 = v('rnd5'), rnd4 = v('rnd4');
+
+  var annGrowth = (rev_n - rev_n1) * 4;
+  var gtmInv = 0.25 * (gtm4 + gtm3 + gtm2 + gtm1);
+  var rndInv = 0.25 * (rnd5 + rnd4);
+  var totalInv = gtmInv + rndInv;
+
+  if (totalInv <= 0 || rev_n <= 0) {
+    alert('Please fill in all fields with values greater than zero.');
+    return;
+  }
+
+  var ratio = annGrowth / totalInv;
+  var breakeven = ratio > 0 ? (1 / ratio).toFixed(1) : '∞';
+
+  var tier, tierColor, interp;
+  if (ratio >= 1.20) {
+    tier = '&#127942; Elite (top 10%)';
+    tierColor = '#1a4d3c';
+    interp = "You've earned the right to invest aggressively. Every new customer is profitable on acquisition — consider TAM expansion, adjacent markets, or accelerating hiring.";
+  } else if (ratio >= 0.70) {
+    tier = '&#11088; Strong (above median)';
+    tierColor = '#2d6a4f';
+    interp = "Solid performance. Focus on maintaining efficiency as you scale. You're close to the $1.00 break-even — small improvements in NRR or cost discipline can get you there.";
+  } else if (ratio >= 0.50) {
+    tier = '&#10003; Typical (near median)';
+    tierColor = '#b45309';
+    interp = "You're in the pack. Diagnose: is growth too slow, or investment too high? Pick one to improve first. Retention is critical — you need " + breakeven + " years just to break even on acquisition.";
+  } else if (ratio > 0) {
+    tier = '&#9888;&#65039; Below target (bottom 25%)';
+    tierColor = '#b91c1c';
+    interp = "Urgent strategic review needed. Growth likely decelerated while spending stayed elevated. Fix retention and expansion economics before scaling acquisition further.";
+  } else {
+    tier = '&#8212; Negative growth';
+    tierColor = '#b91c1c';
+    interp = "Revenue declined quarter-over-quarter. Focus on stabilizing the base before evaluating efficiency.";
+  }
+
+  document.getElementById('ger-value').textContent = ratio >= 0 ? '$' + ratio.toFixed(2) : '-$' + Math.abs(ratio).toFixed(2);
+  document.getElementById('ger-value').style.color = tierColor;
+  document.getElementById('ger-tier').innerHTML = tier;
+  document.getElementById('ger-tier').style.color = tierColor;
+  document.getElementById('ger-breakeven').textContent = ratio > 0 ? 'Break-even: ' + breakeven + ' years at flat renewal' : '';
+  document.getElementById('ger-interp').textContent = interp;
+  document.getElementById('ger-detail').innerHTML =
+    'Annualized growth: <strong>' + annGrowth.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
+    'GTM investment (time-weighted): <strong>' + gtmInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
+    'R&amp;D investment (time-weighted): <strong>' + rndInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
+    'Total investment: <strong>' + totalInv.toFixed(1) + '</strong>';
+
+  document.getElementById('ger-result').style.display = 'block';
+  document.getElementById('ger-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+</script>"""
+    return HTMLResponse(_page("The Growth Engine Ratio — Brian Weisberg", "Thought Leadership", body))
+
+
+@app.get("/contact", response_class=HTMLResponse)
+def contact_page(submitted: str = ""):
+    if submitted == "1":
+        body = """<div class="page" style="max-width:560px;">
+<h1>Thanks for reaching out.</h1>
+<p>I'll get back to you shortly.</p>
+<a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
+</div>"""
+        return HTMLResponse(_page("Contact — Brian Weisberg", "Contact", body))
+
+    body = """<div class="page" style="max-width:560px;">
+<h1>Get in Touch</h1>
+<p style="color:var(--muted);margin:4px 0 32px;">I'm always happy to connect with finance leaders, founders, and operators.</p>
+<form method="post" action="/contact" style="display:grid;gap:16px;">
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Name</label>
+    <input name="name" required style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;" placeholder="Your name">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Email</label>
+    <input name="email" type="email" required style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;" placeholder="you@example.com">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Message</label>
+    <textarea name="message" required rows="5" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;" placeholder="What's on your mind?"></textarea>
+  </div>
+  <div>
+    <button type="submit" class="btn">Send message</button>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Contact — Brian Weisberg", "Contact", body))
+
+
+@app.post("/contact")
+async def contact_submit(request: Request):
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    email = (form.get("email") or "").strip()
+    message = (form.get("message") or "").strip()
+    if not (name and email and message):
+        raise HTTPException(status_code=400, detail="All fields required")
+    lib = _lib()
+    try:
+        lib.save_contact(name, email, message)
+    finally:
+        lib.close()
+    return RedirectResponse("/contact?submitted=1", status_code=303)
+
+
+@app.get("/admin/contacts", response_class=HTMLResponse)
+def admin_contacts(token: str | None = None):
+    _check_token(token)
+    lib = _lib()
+    try:
+        contacts = lib.list_contacts()
+    finally:
+        lib.close()
+    rows = "".join(
+        f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(c['created_at'][:10])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{_esc(c['name'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{_esc(c['email'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:pre-wrap;">{_esc(c['message'])}</td>
+        </tr>"""
+        for c in contacts
+    ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No submissions yet.</td></tr>'
+    body = f"""<div class="page" style="max-width:960px;">
+<h1>Contact submissions</h1>
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:24px;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Message</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>"""
+    return HTMLResponse(_page("Contacts — Admin", "", body))
+
+
+# ---------------------------------------------------------------------------
+# Private library tools
+# ---------------------------------------------------------------------------
+
+_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferred_sites.opml"))
+
+
+@app.get("/feed", response_class=HTMLResponse)
+def feed_reader(cat: str = "", token: str | None = None):
+    _check_token(token)
+    from linklib.feed import get_feed_items
+
+    try:
+        items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
+    except Exception as e:
+        return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed",
+            f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>'))
+
+
+    # Category tab bar
+    tabs = '<a href="/feed?token={t}" class="ftab{active}">All</a>'.format(
+        t=_esc(SAVE_TOKEN), active=' ftab-on' if not cat else '',
+    )
+    for c in categories:
+        active = ' ftab-on' if c == cat else ''
+        tabs += f'<a href="/feed?cat={_esc(c)}&token={_esc(SAVE_TOKEN)}" class="ftab{active}">{_esc(c)}</a>'
+
+    def _fmt_date(iso: str) -> str:
+        if not iso:
+            return ""
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            return dt.strftime("%-d %b %Y")
+        except Exception:
+            return iso[:10]
+
+    # Collect unique sources in the order they first appear
+    sources = list(dict.fromkeys(item["source"] for item in items))
+
+    cards = ""
+    for item in items:
+        save_url = _esc(item["url"])
+        paywalled = item.get("paywalled", False)
+        paywall_badge = ' <span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:600;vertical-align:middle;">&#128274; Paywalled</span>' if paywalled else ''
+        read_btn = '' if paywalled else f'<a href="/read?url={save_url}&token={_esc(SAVE_TOKEN)}" class="faction">&#9654; Read</a>'
+        src_attr = _esc(item["source"])
+        cards += f"""<article class="fcard" data-source="{src_attr}">
+  <div class="fcard-meta">{_esc(item['source'])}{ ' &middot; ' + _fmt_date(item['published_at']) if item['published_at'] else ''}{paywall_badge}</div>
+  <a class="fcard-title" href="{save_url}" target="_blank" rel="noopener">{_esc(item['title'])}</a>
+  { f'<p class="fcard-summary">{_esc(item["summary"])}</p>' if item.get('summary') else '' }
+  <div class="fcard-actions">
+    {read_btn}
+    <button class="faction" onclick="saveItem(this,'{save_url}')">+ Save to Library</button>
+  </div>
+</article>"""
+
+    if not cards:
+        cards = '<p style="color:var(--muted);padding:32px 0;">No items loaded — feeds may be warming up. Try refreshing in a moment.</p>'
+
+    # Source filter checkboxes
+    source_checks = "".join(
+        f'<label class="fsrc-label"><input type="checkbox" class="fsrc-cb" value="{_esc(s)}" checked onchange="applyFilter()"><span>{_esc(s)}</span></label>'
+        for s in sources
+    )
+    filter_panel = f"""<div id="filter-panel" style="display:none;border-bottom:1px solid var(--line);background:#fff;padding:14px 24px;">
+  <div style="max-width:860px;margin:0 auto;">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:10px;">
+      <span style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">Filter by source</span>
+      <button onclick="setAll(true)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Select all</button>
+      <button onclick="setAll(false)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Clear all</button>
+      <span id="filter-count" style="font-size:12px;color:var(--muted);margin-left:auto;"></span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">{source_checks}</div>
+  </div>
+</div>"""
+
+    body = f"""<div style="border-bottom:1px solid var(--line);padding:12px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
+  <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1;">{tabs}</div>
+    <button onclick="toggleFilter()" id="filter-btn" style="font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);border-radius:20px;padding:6px 14px;cursor:pointer;white-space:nowrap;">&#9776; Sources</button>
+  </div>
+</div>
+{filter_panel}
+<main id="feed-main" style="max-width:860px;margin:0 auto;padding:24px 24px 80px;display:grid;gap:12px;">
+{cards}
+</main>
+<style>
+.ftab{{display:inline-block;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;
+  color:var(--muted);text-decoration:none;border:1px solid transparent;}}
+.ftab:hover{{color:var(--ink);text-decoration:none;background:var(--accent-light);}}
+.ftab-on{{background:var(--accent);color:#fff !important;}}
+.fcard{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 20px;}}
+.fcard-meta{{font-size:12px;color:var(--muted);margin-bottom:5px;}}
+.fcard-title{{font-size:16px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;line-height:1.35;}}
+.fcard-title:hover{{color:var(--accent);text-decoration:none;}}
+.fcard-summary{{font-size:14px;color:#5a5248;margin:0 0 10px;line-height:1.5;}}
+.fcard-actions{{display:flex;gap:10px;margin-top:8px;}}
+.faction{{font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);
+  border-radius:8px;padding:5px 12px;cursor:pointer;text-decoration:none;}}
+.faction:hover{{background:var(--accent-light);text-decoration:none;}}
+.faction.saved{{color:var(--muted);pointer-events:none;}}
+.fsrc-label{{display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;
+  background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:4px 10px;
+  user-select:none;transition:background .1s;}}
+.fsrc-label:hover{{background:var(--accent-light);}}
+.fsrc-label input{{accent-color:var(--accent);cursor:pointer;}}
+</style>
+<script>
+function toggleFilter() {{
+  var p = document.getElementById('filter-panel');
+  var btn = document.getElementById('filter-btn');
+  var open = p.style.display === 'none';
+  p.style.display = open ? 'block' : 'none';
+  btn.style.background = open ? 'var(--accent-light)' : 'none';
+  if (open) updateCount();
+}}
+function setAll(checked) {{
+  document.querySelectorAll('.fsrc-cb').forEach(function(cb) {{ cb.checked = checked; }});
+  applyFilter();
+}}
+function applyFilter() {{
+  var selected = new Set();
+  document.querySelectorAll('.fsrc-cb:checked').forEach(function(cb) {{ selected.add(cb.value); }});
+  var visible = 0;
+  document.querySelectorAll('.fcard').forEach(function(card) {{
+    var show = selected.has(card.dataset.source);
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  }});
+  updateCount(visible);
+}}
+function updateCount(n) {{
+  var total = document.querySelectorAll('.fcard').length;
+  if (n === undefined) n = total;
+  document.getElementById('filter-count').textContent = n + ' of ' + total + ' shown';
+}}
+function saveItem(btn, url) {{
+  btn.textContent = 'Saving…';
+  btn.classList.add('saved');
+  fetch('/feed/save', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'url=' + encodeURIComponent(url)
+  }})
+  .then(r => {{ btn.textContent = r.ok ? '✓ Saved' : '✗ Error'; }})
+  .catch(() => {{ btn.textContent = '✗ Error'; btn.classList.remove('saved'); }});
+}}
+</script>"""
+
+    return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed", body))
+
+
+@app.post("/feed/save")
+async def feed_save(request: Request):
+    """Server-side save proxy — token never appears in client HTML."""
+    _check_token(SAVE_TOKEN)  # always uses the server-side token
+    form = await request.form()
+    url = (form.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    lib = _lib()
+    try:
+        from linklib.pipeline import ingest_url
+        ingest_url(lib, url)
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        lib.close()
+
+
+_READER_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500&display=swap');
+:root{--ink:#1a1714;--muted:#7a7068;--line:#e8e2d8;--bg:#f9f6f0;--surface:#ffffff;--accent:#1a4d3c;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--ink);font:18px/1.75 'Lora',Georgia,serif;}
+a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
+a:hover{opacity:.8;}
+
+.reader-bar{position:sticky;top:0;z-index:10;background:var(--surface);border-bottom:1px solid var(--line);
+  padding:0 24px;height:48px;display:flex;align-items:center;justify-content:space-between;
+  font-family:'Inter',sans-serif;font-size:13px;color:var(--muted);}
+.reader-bar .back{color:var(--accent);text-decoration:none;font-weight:500;display:flex;align-items:center;gap:6px;}
+.reader-bar .back:hover{opacity:.8;}
+.reader-controls{display:flex;align-items:center;gap:16px;}
+.reader-controls button{background:none;border:none;cursor:pointer;font:inherit;color:var(--muted);
+  padding:4px 8px;border-radius:6px;font-size:13px;}
+.reader-controls button:hover{background:var(--line);}
+
+.reader-wrap{max-width:680px;margin:0 auto;padding:56px 24px 100px;}
+
+.reader-meta{margin-bottom:40px;padding-bottom:32px;border-bottom:1px solid var(--line);}
+.reader-meta h1{font-size:clamp(22px,4vw,32px);font-weight:600;line-height:1.25;letter-spacing:-.02em;
+  margin-bottom:16px;}
+.reader-meta .byline{font-family:'Inter',sans-serif;font-size:14px;color:var(--muted);line-height:1.5;}
+.reader-meta .source-link{color:var(--accent);}
+
+.reader-body{font-size:var(--fs,18px);line-height:1.78;}
+.reader-body p{margin-bottom:1.4em;}
+.reader-body h1,.reader-body h2,.reader-body h3,.reader-body h4{
+  font-weight:600;line-height:1.3;letter-spacing:-.01em;margin:2em 0 .6em;}
+.reader-body h1{font-size:1.5em;}
+.reader-body h2{font-size:1.25em;}
+.reader-body h3{font-size:1.1em;}
+.reader-body ul,.reader-body ol{padding-left:1.5em;margin-bottom:1.4em;}
+.reader-body li{margin-bottom:.4em;}
+.reader-body blockquote{border-left:3px solid var(--line);padding-left:1.2em;color:var(--muted);
+  font-style:italic;margin:1.5em 0;}
+.reader-body img{max-width:100%;height:auto;border-radius:8px;margin:1.5em 0;}
+.reader-body figure{margin:1.5em 0;}
+.reader-body figcaption{font-size:.85em;color:var(--muted);font-family:'Inter',sans-serif;margin-top:.4em;}
+.reader-body table{width:100%;border-collapse:collapse;font-size:.9em;margin:1.5em 0;}
+.reader-body th,.reader-body td{padding:8px 12px;border:1px solid var(--line);text-align:left;}
+.reader-body th{background:#f4f0e8;font-family:'Inter',sans-serif;}
+.reader-body pre,.reader-body code{font-family:ui-monospace,monospace;font-size:.85em;
+  background:#f0ece4;border-radius:4px;padding:2px 5px;}
+.reader-body pre{padding:16px;overflow-x:auto;border-radius:8px;margin:1.5em 0;}
+.reader-body pre code{background:none;padding:0;}
+.reader-body hr{border:none;border-top:1px solid var(--line);margin:2.5em 0;}
+
+.reader-empty{text-align:center;padding:60px 20px;color:var(--muted);font-family:'Inter',sans-serif;}
+.reader-empty h2{font-size:18px;margin-bottom:12px;color:var(--ink);}
+"""
+
+_READER_TMPL = """<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<style>{css}</style>
+</head><body>
+<div class="reader-bar">
+  <a class="back" href="{back_url}">&#8592; {back_label}</a>
+  <div class="reader-controls">
+    <button onclick="adj(-2)">A&minus;</button>
+    <button onclick="adj(2)">A+</button>
+    <a href="{orig_url}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:13px;">Original &rarr;</a>
+  </div>
+</div>
+<div class="reader-wrap">
+  <div class="reader-meta">
+    <h1>{title}</h1>
+    <div class="byline">{byline}</div>
+  </div>
+  <div class="reader-body">{body}</div>
+</div>
+<script>
+var fs = parseInt(localStorage.getItem('reader-fs') || '18');
+document.documentElement.style.setProperty('--fs', fs + 'px');
+function adj(d) {{
+  fs = Math.max(14, Math.min(28, fs + d));
+  document.documentElement.style.setProperty('--fs', fs + 'px');
+  localStorage.setItem('reader-fs', fs);
+}}
+</script>
+</body></html>"""
+
+
+@app.get("/read", response_class=HTMLResponse)
+def reader(url: str = "", id: int = 0, token: str | None = None):
+    _check_token(token)
+    from linklib.extract import fetch_page
+    import html as html_mod
+
+    back_url = "/library"
+    back_label = "Library"
+
+    # Try to load from DB first (may have cached content)
+    article = None
+    if id:
+        lib = _lib()
+        try:
+            row = lib.conn.execute("SELECT * FROM articles WHERE id=?", (id,)).fetchone()
+            if row:
+                article = dict(row)
+                import json as _json
+                article["tags"] = _json.loads(article.get("tags_json") or "[]")
+        finally:
+            lib.close()
+        if article:
+            url = article["url"]
+
+    if not url:
+        body_html = '<div class="reader-empty"><h2>No URL provided</h2><p>Add ?url=https://... to the address bar.</p></div>'
+        return HTMLResponse(_READER_TMPL.format(
+            title="Reader", css=_READER_CSS, back_url=back_url, back_label=back_label,
+            orig_url="#", byline="", body=body_html,
+        ))
+
+    # Fetch content — use cached DB content if available and non-empty
+    cached_content = (article or {}).get("content", "")
+    cached_title = (article or {}).get("title", "")
+
+    if cached_content and len(cached_content) > 200:
+        title = cached_title or url
+        content = cached_content
+    else:
+        try:
+            page = fetch_page(url)
+            title = page.title or cached_title or url
+            content = page.content or ""
+        except Exception:
+            title = cached_title or url
+            content = ""
+
+    # Build byline from article metadata if available
+    byline_parts = []
+    if article:
+        if article.get("author"):
+            byline_parts.append(_esc(article["author"]))
+        if article.get("source"):
+            byline_parts.append(_esc(article["source"]))
+        if article.get("published_at"):
+            byline_parts.append(article["published_at"][:10])
+    byline_parts.append(f'<a class="source-link" href="{_esc(url)}" target="_blank" rel="noopener">{_esc(url[:60])}{"…" if len(url) > 60 else ""}</a>')
+    byline = " &middot; ".join(byline_parts)
+
+    if content:
+        # content from extract.py is plain text with newlines — convert to paragraphs
+        # but also handle if it looks like it already has HTML tags
+        if "<p>" in content or "<div" in content:
+            body_html = content
+        else:
+            paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+            body_html = "".join(f"<p>{html_mod.escape(p)}</p>" for p in paragraphs) if paragraphs else ""
+    else:
+        body_html = f"""<div class="reader-empty">
+          <h2>Content could not be extracted</h2>
+          <p>Some sites block automated access. Try reading the original.</p>
+          <p style="margin-top:16px;"><a href="{_esc(url)}" target="_blank" rel="noopener">Open original article &rarr;</a></p>
+        </div>"""
+
+    return HTMLResponse(_READER_TMPL.format(
+        title=_esc(title), css=_READER_CSS,
+        back_url=back_url, back_label=back_label,
+        orig_url=_esc(url), byline=byline,
+        body=body_html,
+    ))
+
+
+@app.get("/library", response_class=HTMLResponse)
+def library(q: str = ""):
+    lib = _lib()
+    try:
+        results = lib.search(q, limit=100)
+        total = lib.count()
+        tags = lib.all_tags()[:25]
+    finally:
+        lib.close()
+
+    cards = "".join(
+        f"""<article class="card">
+          <a class="card-title" href="{r['url']}" target="_blank" rel="noopener">{_esc(r['title'])}</a>
+          <div class="meta">{_esc(r.get('source',''))}{' &middot; ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
+          <p class="summary">{_esc(r.get('summary',''))[:280]}</p>
+          <div class="tags">{''.join(f'<span>{_esc(t)}</span>' for t in r.get('tags', []))}</div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <a href="/read?id={r['id']}&token={_esc(SAVE_TOKEN)}" class="postbtn" style="text-decoration:none;">Read</a>
+            <button class="postbtn" onclick="draftPost('{_esc(r['url'])}')">Draft LinkedIn post</button>
+          </div>
+        </article>"""
+        for r in results
+    ) or '<p style="color:var(--muted);">No matches.</p>'
+
+    tagbar = "".join(
+        f'<a href="/library?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
+    )
+
+    page_body = f"""<div style="border-bottom:1px solid var(--line);padding:20px 24px;">
+  <div style="max-width:780px;margin:0 auto;">
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:16px;">
+      <span>{total} saved</span>
+      <a href="/read?token={_esc(SAVE_TOKEN)}" style="color:var(--accent);font-weight:500;">&#9654; Article Reader</a>
+    </div>
+    <form method="get" action="/library" style="display:flex;gap:8px;max-width:680px;">
+      <input type="search" name="q" value="{_esc(q)}" placeholder="Search titles, summaries, notes, tags…"
+             style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font-size:15px;background:#fff;" autofocus>
+      <button type="submit" class="btn">Search</button>
+    </form>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;">{tagbar}</div>
+    <div style="display:flex;gap:8px;margin-top:14px;max-width:680px;">
+      <textarea id="askq" rows="2" placeholder="Ask your library an FP&amp;A question…"
+        style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"></textarea>
+      <button class="btn" onclick="ask()">Ask</button>
+    </div>
+    <div id="answer" style="display:none;margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;font-size:15px;max-width:680px;"></div>
+  </div>
+</div>
+<main style="max-width:780px;margin:0 auto;padding:20px 24px;display:grid;gap:14px;">
+{cards}
+</main>
+<style>
+.card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;}}
+.card-title{{font-size:16px;font-weight:600;color:var(--ink);}}
+.card-title:hover{{color:var(--accent);}}
+.meta{{color:var(--muted);font-size:13px;margin:3px 0 8px;}}
+.summary{{margin:0 0 10px;color:#3a352e;font-size:14px;}}
+.tags{{display:flex;flex-wrap:wrap;gap:6px;}}
+.tags span{{font-size:11px;color:var(--accent);background:var(--accent-light);border-radius:6px;padding:2px 8px;}}
+.postbtn{{margin-top:12px;padding:6px 12px;font-size:12px;background:transparent;color:var(--accent);border:1px solid var(--line);border-radius:8px;cursor:pointer;}}
+.postbtn:hover{{background:var(--accent-light);}}
+nav.site-nav a[href="/library"]{{color:var(--ink);font-weight:600;}}
+</style>
+<script>
+async function ask(){{
+  var q=document.getElementById('askq').value.trim();
+  if(!q)return;
+  var box=document.getElementById('answer');
+  box.style.display='block';box.innerHTML='<em>Thinking…</em>';
+  try{{
+    var r=await fetch('/ask',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{question:q}})}});
+    var d=await r.json();
+    var lib=(d.sources||[]).map(function(s,i){{return '<li><a href="'+s.url+'" target="_blank">['+(i+1)+'] '+s.title+'</a></li>';}}).join('');
+    var web=(d.web_sources||[]).map(function(s){{return '<li><a href="'+s.url+'" target="_blank">🌐 '+s.title+'</a></li>';}}).join('');
+    box.innerHTML='<p>'+(d.answer||'').replace(/\\n/g,'<br>')+'</p>'+((lib||web)?'<ul style="padding-left:18px;font-size:13px;">'+lib+web+'</ul>':'');
+  }}catch(e){{box.innerHTML='Something went wrong.';}}
+}}
+async function draftPost(url){{
+  var box=document.getElementById('answer');
+  box.style.display='block';box.scrollIntoView({{behavior:'smooth'}});box.innerHTML='<em>Drafting in your voice…</em>';
+  try{{
+    var r=await fetch('/post',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{url:url,mode:'original'}})}});
+    var d=await r.json();
+    box.innerHTML='<div style="white-space:pre-wrap;line-height:1.6;">'+(d.post||'')+'</div><button class="btn btn-ghost" style="margin-top:10px;font-size:13px;" onclick="navigator.clipboard.writeText(this.previousElementSibling.innerText)">Copy</button>';
+  }}catch(e){{box.innerHTML='Something went wrong.';}}
+}}
+</script>"""
+
+    return HTMLResponse(_page(f"Library — Brian Weisberg", "Library", page_body))
+
+
+# ---------------------------------------------------------------------------
+# API endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 
 @app.get("/api/search")
@@ -57,7 +1063,6 @@ def api_search(q: str = "", limit: int = 50):
 
 @app.post("/ask")
 async def ask(request: Request):
-    """FP&A Q&A grounded in the library, with cited sources."""
     from linklib.agent import answer_question
     payload = await request.json()
     question = (payload.get("question") or "").strip()
@@ -109,7 +1114,6 @@ def bookmarklet():
 
 @app.post("/post")
 async def post_draft(request: Request):
-    """Draft a LinkedIn post in Brian's voice from a saved article or topic."""
     from linklib.social import draft_post
     payload = await request.json()
     lib = _lib()
@@ -119,108 +1123,3 @@ async def post_draft(request: Request):
         return {"post": d.post}
     finally:
         lib.close()
-
-
-@app.get("/", response_class=HTMLResponse)
-def home(q: str = ""):
-    lib = _lib()
-    try:
-        results = lib.search(q, limit=100)
-        total = lib.count()
-        tags = lib.all_tags()[:25]
-    finally:
-        lib.close()
-
-    cards = "".join(
-        f"""<article class="card">
-          <a class="title" href="{r['url']}" target="_blank" rel="noopener">{_esc(r['title'])}</a>
-          <div class="meta">{_esc(r.get('source',''))}{' · ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
-          <p class="summary">{_esc(r.get('summary',''))[:280]}</p>
-          <div class="tags">{''.join(f'<span>{_esc(t)}</span>' for t in r.get('tags', []))}</div>
-          <button class="postbtn" onclick="draftPost('{_esc(r['url'])}')">Draft LinkedIn post</button>
-        </article>""" for r in results
-    ) or '<p class="empty">No matches.</p>'
-
-    tagbar = "".join(f'<a href="/?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags)
-
-    return HTMLResponse(_PAGE.format(q=_esc(q), total=total, cards=cards, tagbar=tagbar))
-
-
-def _esc(s: str) -> str:
-    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-
-
-_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CFO Navigator</title>
-<style>
-  :root {{ --ink:#16130f; --muted:#6b6258; --line:#e6e0d6; --bg:#faf7f2; --accent:#1a4d3c; }}
-  * {{ box-sizing:border-box; }}
-  body {{ margin:0; font:16px/1.5 ui-sans-serif,-apple-system,Segoe UI,Inter,sans-serif; color:var(--ink); background:var(--bg); }}
-  header {{ padding:28px 20px 16px; border-bottom:1px solid var(--line); }}
-  h1 {{ margin:0 0 12px; font-size:20px; letter-spacing:-0.01em; }}
-  h1 em {{ color:var(--muted); font-style:normal; font-weight:400; font-size:14px; }}
-  form {{ display:flex; gap:8px; max-width:680px; }}
-  input[type=search] {{ flex:1; padding:11px 14px; border:1px solid var(--line); border-radius:10px; font-size:16px; background:#fff; }}
-  button {{ padding:11px 18px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:15px; cursor:pointer; }}
-  .tagbar {{ display:flex; flex-wrap:wrap; gap:6px; max-width:920px; margin:14px 0 0; }}
-  .tagbar a {{ font-size:12px; color:var(--muted); text-decoration:none; border:1px solid var(--line); border-radius:999px; padding:3px 10px; background:#fff; }}
-  .tagbar a em {{ color:#b8aE9e; font-style:normal; }}
-  .ask {{ display:flex; gap:8px; max-width:680px; margin:14px 0 0; }}
-  .ask textarea {{ flex:1; padding:10px 14px; border:1px solid var(--line); border-radius:10px; font:inherit; font-size:15px; background:#fff; resize:vertical; }}
-  .answer {{ max-width:920px; margin:14px 0 0; background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; font-size:15px; }}
-  .answer .srcs {{ margin:10px 0 0; padding-left:18px; font-size:13px; }}
-  .answer .srcs a {{ color:var(--accent); text-decoration:none; }}
-  main {{ max-width:920px; margin:0 auto; padding:20px; display:grid; gap:14px; }}
-  .card {{ background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px 18px; }}
-  .title {{ font-size:17px; font-weight:600; color:var(--ink); text-decoration:none; }}
-  .title:hover {{ color:var(--accent); }}
-  .meta {{ color:var(--muted); font-size:13px; margin:3px 0 8px; }}
-  .summary {{ margin:0 0 10px; color:#3a352e; font-size:14px; }}
-  .tags {{ display:flex; flex-wrap:wrap; gap:6px; }}
-  .tags span {{ font-size:11px; color:var(--accent); background:#eef3f0; border-radius:6px; padding:2px 8px; }}
-  .postbtn {{ margin-top:12px; padding:6px 12px; font-size:12px; background:transparent; color:var(--accent); border:1px solid var(--line); border-radius:8px; cursor:pointer; }}
-  .postbtn:hover {{ background:#eef3f0; }}
-  .answer .draft {{ white-space:normal; line-height:1.6; }}
-  .answer button {{ margin-top:10px; padding:6px 14px; font-size:13px; }}
-  .empty {{ color:var(--muted); }}
-</style></head><body>
-<header>
-  <h1>CFO Navigator <em>{total} saved &middot; find your way back to anything</em></h1>
-  <form method="get" action="/">
-    <input type="search" name="q" value="{q}" placeholder="Search titles, summaries, notes, tags…" autofocus>
-    <button type="submit">Search</button>
-  </form>
-  <nav class="tagbar">{tagbar}</nav>
-  <div class="ask">
-    <textarea id="q" rows="2" placeholder="Ask your library an FP&amp;A question… (e.g. how should I frame CAC payback for usage-based pricing?)"></textarea>
-    <button onclick="ask()">Ask</button>
-  </div>
-  <div id="answer" class="answer" hidden></div>
-</header>
-<script>
-async function ask() {{
-  var q = document.getElementById('q').value.trim();
-  if (!q) return;
-  var box = document.getElementById('answer');
-  box.hidden = false; box.innerHTML = '<em>Thinking…</em>';
-  try {{
-    var r = await fetch('/ask', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{question:q}})}});
-    var d = await r.json();
-    var lib = (d.sources||[]).map(function(s,i){{return '<li><a href="'+s.url+'" target="_blank" rel="noopener">['+(i+1)+'] '+s.title+'</a></li>';}}).join('');
-    var web = (d.web_sources||[]).map(function(s){{return '<li><a href="'+s.url+'" target="_blank" rel="noopener">🌐 '+s.title+'</a></li>';}}).join('');
-    box.innerHTML = '<p>'+(d.answer||'').replace(/\\n/g,'<br>')+'</p>'+((lib||web)?'<ul class="srcs">'+lib+web+'</ul>':'');
-  }} catch(e) {{ box.innerHTML = 'Something went wrong.'; }}
-}}
-async function draftPost(url) {{
-  var box = document.getElementById('answer');
-  box.hidden = false; box.scrollIntoView({{behavior:'smooth'}}); box.innerHTML = '<em>Drafting in your voice…</em>';
-  try {{
-    var r = await fetch('/post', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{url:url, mode:'original'}})}});
-    var d = await r.json();
-    box.innerHTML = '<div class="draft">'+(d.post||'').replace(/\\n/g,'<br>')+'</div><button onclick="navigator.clipboard.writeText(this.previousElementSibling.innerText)">Copy</button>';
-  }} catch(e) {{ box.innerHTML = 'Something went wrong.'; }}
-}}
-</script>
-<main>{cards}</main>
-</body></html>"""
