@@ -140,10 +140,12 @@ Based in Boston, MA.</p>
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
 def thought_leadership():
-    def section(title: str, items: list[tuple[str, str]]) -> str:
+    def section(title: str, items: list[tuple[str, str, str]]) -> str:
+        # items: (label, url, sort_key) — sort_key is "YYYY-MM" or "" to pin to top
+        sorted_items = sorted(items, key=lambda x: x[2], reverse=True)
         links = "".join(
             f'<li style="margin:0 0 10px;"><a href="{url}" target="_blank" rel="noopener">{_esc(label)}</a></li>'
-            for label, url in items
+            for label, url, _ in sorted_items
         )
         return f'<h2>{title}</h2><ul style="padding-left:20px;margin:0 0 8px;">{links}</ul>'
 
@@ -152,46 +154,50 @@ def thought_leadership():
 
     body += section("Podcast — Host", [
         ("The Cash Flow Show — Conversations about how tech companies make money",
-         "https://www.onlycfo.io/podcast"),
+         "https://www.onlycfo.io/podcast", ""),
     ])
 
     body += section("Podcasts — Guest", [
         ("Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks · Monetizely · Sep 2023",
-         "https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn"),
+         "https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn",
+         "2023-09"),
         ("OpexEngine — SaaS Conversations: Dynamic Planning for SaaS Finance Leaders · OpexEngine · May 2023",
-         "https://www.opexengine.com/webinar/opexengine-saas-conversations-dynamic-planning-for-saas-finance-leaders"),
+         "https://www.opexengine.com/webinar/opexengine-saas-conversations-dynamic-planning-for-saas-finance-leaders",
+         "2023-05"),
         ("Role Forward Podcast — The Heuristics of Forecasting · Mosaic Tech · Dec 2022",
-         "https://www.youtube.com/watch?v=mqVvcVVTSrk"),
+         "https://www.youtube.com/watch?v=mqVvcVVTSrk", "2022-12"),
         ("Role Forward Podcast — Collaborative Budgeting · Mosaic Tech · Apr 2022",
-         "https://www.youtube.com/watch?v=GPdRstJ_sKw"),
+         "https://www.youtube.com/watch?v=GPdRstJ_sKw", "2022-04"),
     ])
 
     body += section("Webinar — Host", [
-        ("Numeric — Lean Accounting Team · Numeric · Mar 28, 2024",
-         "https://numeric.lpages.co/lean-accounting-team-webinar/"),
+        ("Numeric — Lean Accounting Team · Numeric · Mar 2024",
+         "https://numeric.lpages.co/lean-accounting-team-webinar/", "2024-03"),
     ])
 
     body += section("Interview", [
         ("Sequence — From $1M to $100M: 6 Finance Lessons from the Frontline · Sequence · Jul 2025",
-         "https://www.sequencehq.com/blog/from-1m-to-100m-6-finance-lessons-from-the-frontline"),
+         "https://www.sequencehq.com/blog/from-1m-to-100m-6-finance-lessons-from-the-frontline", "2025-07"),
     ])
 
     body += section("Authored", [
         ("The F Suite — Exit Readiness for CFOs · The F Suite · Mar 2026",
-         "https://www.fsuite.co/blog/exit-readiness-cfos"),
+         "https://www.fsuite.co/blog/exit-readiness-cfos", "2026-03"),
         ("OnlyCFO — Building Dashboards That Matter · OnlyCFO · Apr 2024",
-         "https://www.onlycfo.io/p/building-dashboards-that-matter"),
+         "https://www.onlycfo.io/p/building-dashboards-that-matter", "2024-04"),
     ])
 
     body += section("Cited & Quoted", [
         ("LegalDive — GC/CFO Collaboration · LegalDive · Mar 2023",
-         "https://www.legaldive.com/news/gc-cfo-collaboration-svb-techgc-the-f-suite-silicon-valley-bank/646561/"),
+         "https://www.legaldive.com/news/gc-cfo-collaboration-svb-techgc-the-f-suite-silicon-valley-bank/646561/",
+         "2023-03"),
         ("Numeric — When and How to Scale Your Accounting Department · Numeric · Nov 2023",
-         "https://www.numeric.io/blog/when-and-how-to-scale-your-accounting-department"),
+         "https://www.numeric.io/blog/when-and-how-to-scale-your-accounting-department", "2023-11"),
         ("Numeric — Startup CFO Primer · Numeric · Jun 2024",
-         "https://www.numeric.io/blog/startup-cfo-primer"),
+         "https://www.numeric.io/blog/startup-cfo-primer", "2024-06"),
         ("CFO Drive — Innovative Cost-Saving Measures Q&A · CFO Drive · Jul 2024",
-         "https://cfodrive.com/qa/what-innovative-cost-saving-measures-can-significantly-impact-a-companys-bottom-line/"),
+         "https://cfodrive.com/qa/what-innovative-cost-saving-measures-can-significantly-impact-a-companys-bottom-line/",
+         "2024-07"),
     ])
 
     body += "</div>"
