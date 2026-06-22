@@ -24,7 +24,7 @@
     <outline type="rss" text="Above the Crowd" title="Above the Crowd" xmlUrl="http://abovethecrowd.com/feed/" htmlUrl="https://abovethecrowd.com/"/>
     <outline type="rss" text="SaaStr" title="SaaStr" xmlUrl="https://www.saastr.com/feed/" htmlUrl="https://www.saastr.com/"/>
     <outline type="rss" text="Christoph Janz" title="Christoph Janz" xmlUrl="https://christophjanz.blogspot.com/feeds/posts/default" htmlUrl="https://christophjanz.blogspot.com/"/>
-    <outline type="rss" text="OpexEngine" title="OpexEngine" xmlUrl="https://www.opexengine.com/feed" htmlUrl="https://www.opexengine.com/articles"/>
+    <outline type="rss" text="OpexEngine" title="OpexEngine" xmlUrl="https://www.opexengine.com/articles" htmlUrl="https://www.opexengine.com/articles"/>
     <outline type="rss" text="25iq" title="25iq" xmlUrl="https://25iq.com/feed/" htmlUrl="https://25iq.com/"/>
   </outline>
   <outline text="Substacks" title="Substacks">
