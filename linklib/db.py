@@ -76,11 +76,33 @@ CREATE TABLE IF NOT EXISTS contacts (
     message    TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tools (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL DEFAULT '',
+    slug            TEXT NOT NULL UNIQUE DEFAULT '',
+    description     TEXT NOT NULL DEFAULT '',
+    url             TEXT NOT NULL DEFAULT '',
+    categories_json TEXT NOT NULL DEFAULT '[]',
+    approved        INTEGER NOT NULL DEFAULT 0,
+    submitted_by    TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tools_approved ON tools(approved);
 """
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _slugify(name: str) -> str:
+    import re
+    slug = name.lower().strip()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    return slug[:80]
 
 
 @dataclass
@@ -253,6 +275,56 @@ class Library:
             "SELECT * FROM contacts ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- tools directory ---------------------------------------------------
+
+    def add_tool(self, name: str, description: str, url: str,
+                 categories: list[str], submitted_by: str = "",
+                 approved: int = 0) -> int:
+        base = _slugify(name)
+        slug = base
+        suffix = 2
+        while self.conn.execute("SELECT 1 FROM tools WHERE slug=?", (slug,)).fetchone():
+            slug = f"{base}-{suffix}"
+            suffix += 1
+        cur = self.conn.execute(
+            """INSERT INTO tools (name, slug, description, url, categories_json,
+               approved, submitted_by, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (name.strip(), slug, description.strip(), url.strip(),
+             json.dumps(categories), approved, submitted_by.strip(), _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_tools(self, approved_only: bool = True) -> list[dict]:
+        if approved_only:
+            rows = self.conn.execute(
+                "SELECT * FROM tools WHERE approved=1 ORDER BY name"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM tools ORDER BY approved, created_at DESC"
+            ).fetchall()
+        return [self._tool_to_dict(r) for r in rows]
+
+    def get_tool(self, tool_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM tools WHERE id=?", (tool_id,)).fetchone()
+        return self._tool_to_dict(row) if row else None
+
+    def approve_tool(self, tool_id: int) -> None:
+        self.conn.execute("UPDATE tools SET approved=1 WHERE id=?", (tool_id,))
+        self.conn.commit()
+
+    def delete_tool(self, tool_id: int) -> None:
+        self.conn.execute("DELETE FROM tools WHERE id=?", (tool_id,))
+        self.conn.commit()
+
+    @staticmethod
+    def _tool_to_dict(r: sqlite3.Row) -> dict:
+        d = dict(r)
+        d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
+        return d
 
     def close(self) -> None:
         self.conn.close()

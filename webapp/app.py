@@ -45,6 +45,19 @@ from linklib import backup
 
 DB_PATH = os.environ.get("LINKLIB_DB", "library.db")
 SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
+
+TOOL_CATEGORIES = [
+    "FP&A",
+    "Financial Planning",
+    "Cap Table Management",
+    "Headcount Planning",
+    "Spend Management",
+    "Financial Close",
+    "Billing",
+    "Commission Calculations",
+    "Contract Management",
+    "Procurement",
+]
 _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
@@ -155,6 +168,7 @@ def _page(title: str, active: str, body: str, authed: bool = False) -> str:
         ("/", "About"),
         ("/thought-leadership", "Thought Leadership"),
         ("/contact", "Contact"),
+        ("/tools", "CFO Toolbox"),
         ("/library", "Library"),
         ("/feed", "Feed"),
         ("/ask", "Ask"),
@@ -710,6 +724,206 @@ async def contact_submit(request: Request):
     return RedirectResponse("/contact?submitted=1", status_code=303)
 
 
+@app.get("/tools", response_class=HTMLResponse)
+def tools_directory():
+    lib = _lib()
+    try:
+        tools = lib.list_tools(approved_only=True)
+    finally:
+        lib.close()
+
+    # Serialize to JSON for client-side filtering
+    import json as _json
+    tools_json = _json.dumps([
+        {
+            "name": t["name"],
+            "description": t["description"],
+            "url": t["url"],
+            "categories": t["categories"],
+        }
+        for t in tools
+    ])
+
+    cat_buttons = "".join(
+        f'<button class="tcat-btn" data-cat="{_esc(c)}" onclick="filterCat(this)">{_esc(c)}</button>'
+        for c in TOOL_CATEGORIES
+    )
+
+    body = f"""<div class="page" style="max-width:860px;">
+<h1>CFO Toolbox</h1>
+<p style="color:var(--muted);margin:4px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
+<a href="/tools/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Submit a tool</a></p>
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
+  <input id="tool-search" type="search" placeholder="Search tools…"
+    oninput="filterTools()"
+    style="flex:1;min-width:200px;max-width:400px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <button class="tcat-btn tcat-all tcat-active" data-cat="" onclick="filterCat(this)">All</button>
+  {cat_buttons}
+</div>
+
+<div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
+
+<div id="tool-grid" style="display:grid;gap:14px;">
+</div>
+
+<p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
+
+<div style="margin-top:48px;padding-top:32px;border-top:1px solid var(--line);">
+  <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
+    <a href="/tools/submit" style="font-weight:500;">Submit it for review →</a></p>
+</div>
+</div>
+
+<style>
+.tcat-btn{{font-size:13px;font-weight:500;padding:6px 14px;border-radius:20px;border:1px solid var(--line);
+  background:none;color:var(--muted);cursor:pointer;white-space:nowrap;}}
+.tcat-btn:hover{{background:var(--accent-light);color:var(--ink);}}
+.tcat-active{{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;}}
+.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
+.tool-name{{font-size:16px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;}}
+.tool-name:hover{{color:var(--accent);}}
+.tool-desc{{font-size:14px;color:#3a352e;margin:0 0 12px;line-height:1.5;}}
+.tool-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
+.tool-cat{{font-size:11px;color:var(--accent);background:var(--accent-light);border-radius:6px;padding:2px 8px;}}
+</style>
+
+<script>
+var ALL_TOOLS = {tools_json};
+var activeCat = '';
+
+function renderTools(tools) {{
+  var grid = document.getElementById('tool-grid');
+  var empty = document.getElementById('tool-empty');
+  var count = document.getElementById('tool-count');
+  if (tools.length === 0) {{
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+    count.textContent = '';
+    return;
+  }}
+  empty.style.display = 'none';
+  count.textContent = tools.length + ' tool' + (tools.length === 1 ? '' : 's');
+  grid.innerHTML = tools.map(function(t) {{
+    var cats = (t.categories || []).map(function(c) {{
+      return '<span class="tool-cat">' + esc(c) + '</span>';
+    }}).join('');
+    return '<article class="tool-card">'
+      + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
+      + '<p class="tool-desc">' + esc(t.description) + '</p>'
+      + '<div class="tool-cats">' + cats + '</div>'
+      + '</article>';
+  }}).join('');
+}}
+
+function esc(s) {{
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
+
+function filtered() {{
+  var q = (document.getElementById('tool-search').value || '').toLowerCase();
+  return ALL_TOOLS.filter(function(t) {{
+    var matchCat = !activeCat || (t.categories || []).indexOf(activeCat) !== -1;
+    if (!matchCat) return false;
+    if (!q) return true;
+    return (t.name + ' ' + t.description + ' ' + (t.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
+  }});
+}}
+
+function filterTools() {{ renderTools(filtered()); }}
+
+function filterCat(btn) {{
+  activeCat = btn.dataset.cat;
+  document.querySelectorAll('.tcat-btn').forEach(function(b) {{ b.classList.remove('tcat-active'); }});
+  btn.classList.add('tcat-active');
+  filterTools();
+}}
+
+renderTools(ALL_TOOLS);
+</script>"""
+    return HTMLResponse(_page("CFO Toolbox — Brian Weisberg", "CFO Toolbox", body))
+
+
+def _tool_category_checkboxes(selected: list[str] | None = None) -> str:
+    selected = selected or []
+    return "".join(
+        f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">'
+        f'<input type="checkbox" name="categories" value="{_esc(c)}"'
+        f'{" checked" if c in selected else ""}> {_esc(c)}</label>'
+        for c in TOOL_CATEGORIES
+    )
+
+
+@app.get("/tools/submit", response_class=HTMLResponse)
+def tools_submit_page(submitted: str = ""):
+    if submitted == "1":
+        body = """<div class="page" style="max-width:560px;">
+<h1>Thanks — submission received.</h1>
+<p>Your tool has been submitted for review. If approved, it'll appear in the CFO Toolbox shortly.</p>
+<a href="/tools" class="btn btn-ghost" style="margin-top:8px;">Back to CFO Toolbox</a>
+</div>"""
+        return HTMLResponse(_page("Submission received — CFO Toolbox", "CFO Toolbox", body))
+
+    body = f"""<div class="page" style="max-width:560px;">
+<h1>Submit a Tool</h1>
+<p style="color:var(--muted);margin:4px 0 32px;">Know a tool that belongs in the CFO Toolbox? Submit it for review.</p>
+<form method="post" action="/tools/submit" style="display:grid;gap:20px;">
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Tool name *</label>
+    <input name="name" required maxlength="200"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="e.g. Mosaic">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">URL *</label>
+    <input name="url" type="url" required maxlength="500"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Short description *</label>
+    <textarea name="description" required maxlength="400" rows="3"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="What does it do? 1–2 sentences."></textarea>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      {_tool_category_checkboxes()}
+    </div>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Your email <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+    <input name="submitted_by" type="email" maxlength="200"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="you@example.com">
+  </div>
+  <div>
+    <button type="submit" class="btn">Submit for review</button>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Submit a Tool — CFO Toolbox", "CFO Toolbox", body))
+
+
+@app.post("/tools/submit")
+async def tools_submit(request: Request):
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    url = (form.get("url") or "").strip()
+    description = (form.get("description") or "").strip()
+    categories = [v.strip() for v in form.getlist("categories") if v.strip()]
+    submitted_by = (form.get("submitted_by") or "").strip()
+    if not (name and url and description and categories):
+        raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
+    lib = _lib()
+    try:
+        lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0)
+    finally:
+        lib.close()
+    return RedirectResponse("/tools/submit?submitted=1", status_code=303)
+
+
 @app.get("/admin/contacts", response_class=HTMLResponse)
 def admin_contacts(request: Request):
     if not _is_authed(request):
@@ -742,6 +956,146 @@ def admin_contacts(request: Request):
 </table>
 </div>"""
     return HTMLResponse(_page("Contacts — Admin", "", body))
+
+
+@app.get("/admin/tools", response_class=HTMLResponse)
+def admin_tools(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        pending = [t for t in lib.list_tools(approved_only=False) if not t["approved"]]
+    finally:
+        lib.close()
+
+    def _tool_row(t: dict) -> str:
+        cats = ", ".join(t["categories"]) or "—"
+        return f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(t['created_at'][:10])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(t['name'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(t['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(t['url'][:60])}{'…' if len(t['url']) > 60 else ''}</a></td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px;">{_esc(t['description'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t['submitted_by'] or '—')}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
+            <form method="post" action="/admin/tools/{t['id']}/approve" style="display:inline;">
+              <button class="btn" style="padding:6px 14px;font-size:13px;">Approve</button>
+            </form>
+            <form method="post" action="/admin/tools/{t['id']}/reject" style="display:inline;margin-left:6px;"
+                  onsubmit="return confirm('Reject and delete this submission?');">
+              <button class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Reject</button>
+            </form>
+          </td>
+        </tr>"""
+
+    rows = "".join(_tool_row(t) for t in pending) or \
+        '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
+
+    body = f"""<div class="page" style="max-width:1100px;">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+  <h1>CFO Toolbox — Pending submissions</h1>
+  <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
+</div>
+<p style="margin:0 0 24px;"><a href="/tools" style="font-size:13px;color:var(--muted);">View public directory →</a></p>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Description</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Submitted by</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>
+</div>"""
+    return HTMLResponse(_page("Tools Admin — CFO Toolbox", "", body, authed=True))
+
+
+@app.get("/admin/tools/new", response_class=HTMLResponse)
+def admin_tools_new(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    body = f"""<div class="page" style="max-width:560px;">
+<h1>Add a tool</h1>
+<p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
+<form method="post" action="/admin/tools/new" style="display:grid;gap:20px;">
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Tool name *</label>
+    <input name="name" required maxlength="200"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">URL *</label>
+    <input name="url" type="url" required maxlength="500"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Short description *</label>
+    <textarea name="description" required maxlength="400" rows="3"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="What does it do? 1–2 sentences."></textarea>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      {_tool_category_checkboxes()}
+    </div>
+  </div>
+  <div>
+    <button type="submit" class="btn">Add to directory</button>
+    <a href="/admin/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Add Tool — CFO Toolbox", "", body, authed=True))
+
+
+@app.post("/admin/tools/new")
+async def admin_tools_new_submit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    url = (form.get("url") or "").strip()
+    description = (form.get("description") or "").strip()
+    categories = [v.strip() for v in form.getlist("categories") if v.strip()]
+    if not (name and url and description and categories):
+        raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
+    lib = _lib()
+    try:
+        lib.add_tool(name, description, url, categories, approved=1)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/approve")
+def admin_tools_approve(request: Request, tool_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.approve_tool(tool_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/reject")
+def admin_tools_reject(request: Request, tool_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_tool(tool_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools", status_code=303)
 
 
 # ---------------------------------------------------------------------------
