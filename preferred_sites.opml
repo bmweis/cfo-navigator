@@ -11,7 +11,7 @@
   <outline text="Blogs" title="Blogs">
     <outline type="rss" text="VC Adventure" title="VC Adventure" xmlUrl="https://www.sethlevine.com/feed/" htmlUrl="https://sethlevine.com/"/>
     <outline type="rss" text="Tomasz Tunguz (Redpoint)" title="Tomasz Tunguz (Redpoint)" xmlUrl="http://tomtunguz.com/index.xml" htmlUrl="https://www.tomtunguz.com/"/>
-    <outline type="rss" text="Shockwave Innovations" title="Shockwave Innovations" xmlUrl="https://shockwaveinnovations.com/blog/feed/" htmlUrl="https://shockwaveinnovations.com/blog/"/>
+    <outline type="rss" text="Shockwave Innovations" title="Shockwave Innovations" xmlUrl="https://shockwaveinnovations.com/feed/" htmlUrl="https://shockwaveinnovations.com/"/>
     <outline type="rss" text="Brad Feld (Foundry)" title="Brad Feld (Foundry)" xmlUrl="http://feeds.feedburner.com/FeldThoughts" htmlUrl="https://feld.com/"/>
     <outline type="rss" text="For Entrepreneur" title="For Entrepreneur" xmlUrl="http://feeds.feedburner.com/forentrepreneurs" htmlUrl="https://www.forentrepreneurs.com/"/>
     <outline type="rss" text="Kellblog" title="Kellblog" xmlUrl="http://kellblog.com/feed/" htmlUrl="https://www.kellblog.com/"/>
@@ -20,11 +20,11 @@
     <outline type="rss" text="Ben Thompson (Stratechery)" title="Ben Thompson (Stratechery)" xmlUrl="http://stratechery.com/feed/" htmlUrl="https://stratechery.com"/>
     <outline type="rss" text="The Business Behind jOOQ" title="The Business Behind jOOQ" xmlUrl="https://business.jooq.org/feed/" htmlUrl="https://business.jooq.org"/>
     <outline type="rss" text="Jason Calacanis" title="Jason Calacanis" xmlUrl="http://calacanis.com/feed/" htmlUrl="https://calacanis.com"/>
-    <outline type="rss" text="Stories by Bryce Roberts on Medium" title="Stories by Bryce Roberts on Medium" xmlUrl="https://medium.com/feed/@bryce" htmlUrl="https://medium.com/@bryce"/>
+
     <outline type="rss" text="Above the Crowd" title="Above the Crowd" xmlUrl="http://abovethecrowd.com/feed/" htmlUrl="https://abovethecrowd.com/"/>
     <outline type="rss" text="SaaStr" title="SaaStr" xmlUrl="https://www.saastr.com/feed/" htmlUrl="https://www.saastr.com/"/>
     <outline type="rss" text="Christoph Janz" title="Christoph Janz" xmlUrl="https://christophjanz.blogspot.com/feeds/posts/default" htmlUrl="https://christophjanz.blogspot.com/"/>
-    <outline type="rss" text="OpexEngine" title="OpexEngine" xmlUrl="https://www.opexengine.com/articles/feed" htmlUrl="https://www.opexengine.com/articles"/>
+    <outline type="rss" text="OpexEngine" title="OpexEngine" xmlUrl="https://www.opexengine.com/feed" htmlUrl="https://www.opexengine.com/articles"/>
     <outline type="rss" text="25iq" title="25iq" xmlUrl="https://25iq.com/feed/" htmlUrl="https://25iq.com/"/>
   </outline>
   <outline text="Substacks" title="Substacks">
