@@ -157,6 +157,7 @@ def _page(title: str, active: str, body: str, authed: bool = False) -> str:
         ("/contact", "Contact"),
         ("/library", "Library"),
         ("/feed", "Feed"),
+        ("/ask", "Ask"),
     ]
     nav = "".join(
         f'<a href="{href}" class="{"active" if active == label else ""}">{label}</a>'
@@ -1111,6 +1112,9 @@ def library(request: Request, q: str = ""):
         style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"></textarea>
       <button class="btn" onclick="ask()">Ask</button>
     </div>
+    <div style="margin-top:6px;max-width:680px;text-align:right;">
+      <a id="more-opts-link" href="/ask" style="font-size:12px;color:var(--muted);">More options (model, effort, sources) &rarr;</a>
+    </div>
     <div id="answer" style="display:none;margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;font-size:15px;max-width:680px;"></div>
   </div>
 </div>
@@ -1133,14 +1137,18 @@ nav.site-nav a[href="/library"]{{color:var(--ink);font-weight:600;}}
 async function ask(){{
   var q=document.getElementById('askq').value.trim();
   if(!q)return;
+  var link=document.getElementById('more-opts-link');
+  if(link) link.href='/ask?q='+encodeURIComponent(q);
   var box=document.getElementById('answer');
   box.style.display='block';box.innerHTML='<em>Thinking…</em>';
   try{{
     var r=await fetch('/ask',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{question:q}})}});
     var d=await r.json();
-    var lib=(d.sources||[]).map(function(s,i){{return '<li><a href="'+s.url+'" target="_blank">['+(i+1)+'] '+s.title+'</a></li>';}}).join('');
-    var web=(d.web_sources||[]).map(function(s){{return '<li><a href="'+s.url+'" target="_blank">🌐 '+s.title+'</a></li>';}}).join('');
-    box.innerHTML='<p>'+(d.answer||'').replace(/\\n/g,'<br>')+'</p>'+((lib||web)?'<ul style="padding-left:18px;font-size:13px;">'+lib+web+'</ul>':'');
+    var idx=1;
+    var lib=(d.sources||[]).map(function(s){{return '<li><a href="'+s.url+'" target="_blank">['+(idx++)+'] '+s.title+'</a></li>';}}).join('');
+    var feed=(d.feed_sources||[]).map(function(s){{return '<li><a href="'+s.url+'" target="_blank">['+(idx++)+'] '+s.title+'</a></li>';}}).join('');
+    var web=(d.web_sources||[]).map(function(s){{return '<li><a href="'+s.url+'" target="_blank">&#127760; '+s.title+'</a></li>';}}).join('');
+    box.innerHTML='<p>'+(d.answer||'').replace(/\\n/g,'<br>')+'</p>'+((lib||feed||web)?'<ul style="padding-left:18px;font-size:13px;">'+lib+feed+web+'</ul>':'');
   }}catch(e){{box.innerHTML='Something went wrong.';}}
 }}
 async function draftPost(url){{
@@ -1176,20 +1184,229 @@ def api_search(request: Request, q: str = "", limit: int = 50, token: str | None
         lib.close()
 
 
+@app.get("/ask", response_class=HTMLResponse)
+def ask_page(request: Request, q: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    from linklib.agent import EFFORT_SETTINGS, COST_ESTIMATES, MODEL_ALIASES
+
+    # Build model radio rows
+    models = [
+        ("claude-haiku-4-5-20251001", "Fast &middot; cost-effective"),
+        ("claude-sonnet-4-6",         "Balanced &middot; default"),
+        ("claude-opus-4-8",           "Best quality"),
+    ]
+    default_model = "claude-sonnet-4-6"
+
+    def model_row(mid, desc, checked):
+        chk = " checked" if checked else ""
+        return (
+            f'<label class="ask-radio-label">'
+            f'<input type="radio" name="model" value="{mid}" onchange="updateEstimate()"{chk}>'
+            f'<span class="ask-radio-id">{mid}</span>'
+            f'<span class="ask-radio-desc">{desc}</span>'
+            f'</label>'
+        )
+
+    model_rows = "".join(model_row(mid, desc, mid == default_model) for mid, desc in models)
+
+    effort_details = [
+        ("quick",    "Quick",    "4 library &middot; 2 web searches &middot; ~700 tokens out"),
+        ("standard", "Standard", "8 library &middot; 4 web searches &middot; ~1,500 tokens out"),
+        ("deep",     "Deep",     "16 library &middot; 6 web searches &middot; ~2,500 tokens out"),
+    ]
+
+    def effort_row(val, label, detail, checked):
+        chk = " checked" if checked else ""
+        return (
+            f'<label class="ask-radio-label">'
+            f'<input type="radio" name="effort" value="{val}" onchange="updateEstimate()"{chk}>'
+            f'<strong>{label}</strong>'
+            f'<span class="ask-radio-desc">{detail}</span>'
+            f'</label>'
+        )
+
+    effort_rows = "".join(effort_row(v, l, d, v == "standard") for v, l, d in effort_details)
+
+    # Bake cost table into JS as a JSON-like literal
+    import json as _json
+    cost_js = _json.dumps(COST_ESTIMATES)
+
+    pre_q = _esc(q)
+
+    body = f"""<div class="page" style="max-width:820px;">
+<h1 style="margin-bottom:6px;">Ask a question</h1>
+<p style="color:var(--muted);margin:0 0 28px;">Query your saved library, RSS feed, and trusted web sources. Tune cost vs. depth before each query.</p>
+
+<div class="ask-card">
+  <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
+  <textarea id="ask-q" rows="3" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?"
+    style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin:16px 0;">
+
+  <div class="ask-card">
+    <div class="ask-section-label">Sources</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <label class="ask-check-label"><input type="checkbox" id="src-library" checked onchange="updateEstimate()"> My saved library</label>
+      <label class="ask-check-label"><input type="checkbox" id="src-feed" onchange="updateEstimate()"> Current RSS feed</label>
+      <label class="ask-check-label"><input type="checkbox" id="src-web" checked onchange="updateEstimate()"> Web search (trusted sites)</label>
+    </div>
+  </div>
+
+  <div class="ask-card">
+    <div class="ask-section-label">Model</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      {model_rows}
+    </div>
+  </div>
+
+  <div class="ask-card">
+    <div class="ask-section-label">Effort</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      {effort_rows}
+    </div>
+  </div>
+
+</div>
+
+<div style="display:flex;align-items:center;gap:20px;margin-bottom:20px;">
+  <button class="btn" onclick="doAsk()" id="ask-btn" style="padding:11px 28px;font-size:15px;">Ask</button>
+  <span id="cost-est" style="font-size:13px;color:var(--muted);"></span>
+</div>
+
+<div id="ask-result" style="display:none;"></div>
+</div>
+
+<style>
+.ask-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:0;}}
+.ask-section-label{{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;}}
+.ask-check-label{{display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;}}
+.ask-check-label input{{accent-color:var(--accent);width:15px;height:15px;cursor:pointer;flex-shrink:0;}}
+.ask-radio-label{{display:flex;flex-direction:column;gap:2px;cursor:pointer;padding:6px 0;border-top:1px solid var(--line);}}
+.ask-radio-label:first-child{{border-top:none;padding-top:0;}}
+.ask-radio-label input{{accent-color:var(--accent);width:14px;height:14px;margin-bottom:3px;}}
+.ask-radio-id{{font-family:ui-monospace,monospace;font-size:12px;color:var(--ink);font-weight:500;}}
+.ask-radio-desc{{font-size:12px;color:var(--muted);}}
+.ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 24px;font-size:15px;line-height:1.7;}}
+.ask-answer p{{margin:0 0 14px;}}
+.ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-direction:column;gap:6px;}}
+.ask-src-list li{{font-size:13px;}}
+.ask-src-list a{{color:var(--accent);}}
+nav.site-nav a[href="/ask"]{{color:var(--ink);font-weight:600;}}
+</style>
+
+<script>
+var COST = {cost_js};
+
+function updateEstimate() {{
+  var model = document.querySelector('input[name="model"]:checked');
+  var effort = document.querySelector('input[name="effort"]:checked');
+  var el = document.getElementById('cost-est');
+  if (!model || !effort || !el) return;
+  var c = (COST[model.value] || {{}})[effort.value];
+  el.textContent = c != null ? '~$' + c.toFixed(3) + ' estimated per query' : '';
+}}
+
+async function doAsk() {{
+  var q = document.getElementById('ask-q').value.trim();
+  if (!q) {{ document.getElementById('ask-q').focus(); return; }}
+
+  var model = document.querySelector('input[name="model"]:checked')?.value || 'claude-sonnet-4-6';
+  var effort = document.querySelector('input[name="effort"]:checked')?.value || 'standard';
+  var sources = [];
+  if (document.getElementById('src-library').checked) sources.push('library');
+  if (document.getElementById('src-feed').checked) sources.push('feed');
+  if (document.getElementById('src-web').checked) sources.push('web');
+  if (!sources.length) {{ alert('Select at least one source.'); return; }}
+
+  var btn = document.getElementById('ask-btn');
+  var box = document.getElementById('ask-result');
+  btn.disabled = true; btn.textContent = 'Thinking…';
+  box.style.display = 'block';
+  box.innerHTML = '<div class="ask-answer"><em style="color:var(--muted);">Querying sources…</em></div>';
+
+  try {{
+    var resp = await fetch('/ask', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ question: q, model: model, effort: effort, sources: sources }})
+    }});
+    var d = await resp.json();
+    if (!resp.ok) {{ box.innerHTML = '<div class="ask-answer" style="color:#b91c1c;">' + (d.detail || 'Error') + '</div>'; return; }}
+
+    var answerHtml = '<p>' + (d.answer || '').replace(/\\n\\n/g, '</p><p>').replace(/\\n/g, '<br>') + '</p>';
+
+    var srcItems = [];
+    (d.sources || []).forEach(function(s, i) {{
+      srcItems.push('<li>&#128218; <a href="' + s.url + '" target="_blank" rel="noopener">[' + (i+1) + '] ' + s.title + '</a></li>');
+    }});
+    var feedOffset = (d.sources || []).length;
+    (d.feed_sources || []).forEach(function(s, i) {{
+      srcItems.push('<li>&#128240; <a href="' + s.url + '" target="_blank" rel="noopener">[' + (feedOffset+i+1) + '] ' + s.title + '</a></li>');
+    }});
+    (d.web_sources || []).forEach(function(s) {{
+      srcItems.push('<li>&#127760; <a href="' + s.url + '" target="_blank" rel="noopener">' + s.title + '</a></li>');
+    }});
+
+    box.innerHTML = '<div class="ask-answer">' + answerHtml +
+      (srcItems.length ? '<ul class="ask-src-list">' + srcItems.join('') + '</ul>' : '') +
+      '</div>';
+  }} catch(e) {{
+    box.innerHTML = '<div class="ask-answer" style="color:#b91c1c;">Something went wrong: ' + e + '</div>';
+  }} finally {{
+    btn.disabled = false; btn.textContent = 'Ask';
+  }}
+}}
+
+document.addEventListener('keydown', function(e) {{
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doAsk();
+}});
+
+updateEstimate();
+</script>"""
+
+    return HTMLResponse(_page("Ask — Brian Weisberg", "Ask", body, authed=True))
+
+
 @app.post("/ask")
 async def ask(request: Request):
     _require_api(request)
-    from linklib.agent import answer_question
+    from linklib.agent import answer_question, MODEL_ALIASES
     payload = await request.json()
     question = (payload.get("question") or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="question required")
+
+    model = (payload.get("model") or "")
+    effort = (payload.get("effort") or "standard")
+
+    raw_sources = payload.get("sources") or ["library", "web"]
+    if isinstance(raw_sources, str):
+        raw_sources = [s.strip() for s in raw_sources.split(",")]
+    use_library = "library" in raw_sources
+    use_feed    = "feed"    in raw_sources
+    use_web     = "web"     in raw_sources
+
     lib = _lib()
     try:
-        ans = answer_question(lib, question)
-        return {"answer": ans.text,
-                "sources": [{"title": s["title"], "url": s["url"]} for s in ans.sources],
-                "web_sources": ans.web_sources}
+        ans = answer_question(
+            lib, question,
+            model=model,
+            effort=effort,
+            use_library=use_library,
+            use_feed=use_feed,
+            use_web=use_web,
+            opml_path=OPML_PATH if (use_feed or use_web) else None,
+        )
+        return {
+            "answer": ans.text,
+            "sources":      [{"title": s["title"], "url": s["url"]} for s in ans.sources],
+            "feed_sources": [{"title": s["title"], "url": s["url"]} for s in ans.feed_sources],
+            "web_sources":  ans.web_sources,
+        }
     finally:
         lib.close()
 
