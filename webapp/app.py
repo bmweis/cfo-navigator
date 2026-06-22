@@ -36,7 +36,7 @@ from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 from linklib.db import Library
@@ -1214,6 +1214,92 @@ async def save(request: Request, token: str | None = None):
         return JSONResponse({"ok": True, "id": row["id"], "title": row.get("title"), "tags": row.get("tags", [])})
     finally:
         lib.close()
+
+
+@app.get("/admin/upload-db", response_class=HTMLResponse)
+def upload_db_page(request: Request):
+    """One-time helper to seed the hosted DB from a local library.db.
+
+    Login-gated. Drag the local file in and submit — the next page load uses
+    it (connections are opened per-request, so no restart is needed). Safe to
+    leave in place: it's protected by the same secret as the rest of the
+    private section.
+    """
+    if not _is_authed(request):
+        return _login_redirect(request)
+    try:
+        lib = _lib()
+        try:
+            current = lib.count()
+        finally:
+            lib.close()
+    except Exception:
+        current = "unknown"
+    body = f"""<div class="page">
+  <h1>Upload library database</h1>
+  <p class="muted">Current hosted database holds <strong>{current}</strong> articles.
+  Uploading replaces it with the file you select. This is meant as a one-time
+  seed from your local <code>library.db</code>.</p>
+  <form method="post" action="/admin/upload-db" enctype="multipart/form-data"
+        style="margin-top:1.5rem;display:flex;flex-direction:column;gap:1rem;max-width:480px;">
+    <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
+           style="padding:0.5rem;border:1px solid #ccc;border-radius:6px;">
+    <button type="submit"
+            style="padding:0.6rem 1rem;background:#1a1a2e;color:#fff;border:none;border-radius:6px;cursor:pointer;">
+      Upload and replace
+    </button>
+  </form>
+  <p class="muted" style="margin-top:1rem;font-size:0.85rem;">
+    Tip: quit your local app first so the file is fully written, then upload
+    <code>library.db</code> (the main file only — the <code>-wal</code>/<code>-shm</code>
+    sidecars aren't needed).</p>
+</div>"""
+    return HTMLResponse(_page("Upload database", "", body, authed=True))
+
+
+@app.post("/admin/upload-db", response_class=HTMLResponse)
+async def upload_db(request: Request, file: UploadFile = File(...), token: str | None = None):
+    _require_api(request, token)
+    import sqlite3
+    import tempfile
+
+    dest = os.path.abspath(DB_PATH)
+    dest_dir = os.path.dirname(dest) or "."
+    fd, tmp = tempfile.mkstemp(dir=dest_dir, suffix=".upload")
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = await file.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+        # Validate it's a real library DB before swapping anything in.
+        try:
+            check = sqlite3.connect(tmp)
+            n = check.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+            check.close()
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=f"That doesn't look like a library database: {e}")
+        # Atomic swap, then clear any stale WAL sidecars from the old file.
+        os.replace(tmp, dest)
+        tmp = None
+        for sidecar in ("-wal", "-shm"):
+            try:
+                os.remove(dest + sidecar)
+            except FileNotFoundError:
+                pass
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.remove(tmp)
+
+    body = f"""<div class="page">
+  <h1>Upload complete</h1>
+  <p>Imported a database with <strong>{n}</strong> articles. It's live now —
+  no restart needed.</p>
+  <p style="margin-top:1rem;"><a href="/library">Go to the library →</a></p>
+</div>"""
+    return HTMLResponse(_page("Upload complete", "", body, authed=True))
 
 
 @app.get("/bookmarklet", response_class=PlainTextResponse)
