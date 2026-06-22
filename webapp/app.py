@@ -788,7 +788,10 @@ def library(q: str = ""):
 
     page_body = f"""<div style="border-bottom:1px solid var(--line);padding:20px 24px;">
   <div style="max-width:780px;margin:0 auto;">
-    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">{total} saved</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:16px;">
+      <span>{total} saved</span>
+      <a href="/read?token={_esc(SAVE_TOKEN)}" style="color:var(--accent);font-weight:500;">&#9654; Article Reader</a>
+    </div>
     <form method="get" action="/library" style="display:flex;gap:8px;max-width:680px;">
       <input type="search" name="q" value="{_esc(q)}" placeholder="Search titles, summaries, notes, tags…"
              style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font-size:15px;background:#fff;" autofocus>
