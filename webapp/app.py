@@ -76,6 +76,19 @@ SESSION_TTL = 30 * 24 * 3600  # 30 days
 app = FastAPI(title="bmweis.com")
 
 
+@app.on_event("startup")
+def _seed_toolbox():
+    """Seed the tools directory on first boot if the table is empty."""
+    from scripts.seed_tools import TOOLS
+    lib = _lib()
+    try:
+        if lib.conn.execute("SELECT COUNT(*) FROM tools").fetchone()[0] == 0:
+            for t in TOOLS:
+                lib.add_tool(t["name"], t["description"], t["url"], t["categories"], approved=1)
+    finally:
+        lib.close()
+
+
 def _lib() -> Library:
     return Library(DB_PATH)
 
