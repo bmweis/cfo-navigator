@@ -155,7 +155,12 @@ def thought_leadership():
         return f'<h2>{title}</h2><ul style="padding-left:20px;margin:0 0 8px;">{links}</ul>'
 
     body = '<div class="page"><h1>Thought Leadership</h1>' + \
-        '<p style="color:var(--muted);margin:4px 0 32px;">Podcasts, writing, interviews, and appearances.</p>'
+        '<p style="color:var(--muted);margin:4px 0 28px;">Podcasts, writing, interviews, and appearances.</p>' + \
+        """<a href="/growth-engine-ratio" style="display:block;text-decoration:none;background:var(--accent);color:#fff;border-radius:14px;padding:22px 26px;margin-bottom:36px;">
+  <div style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.75;margin-bottom:6px;">Featured &mdash; New Framework</div>
+  <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;">The Growth Engine Ratio</div>
+  <div style="font-size:14px;opacity:.85;line-height:1.5;">A new metric for measuring how R&amp;D and GTM investments work together to drive growth &mdash; with an interactive calculator to see how you stack up. Published with The F Suite &rarr;</div>
+</a>"""
 
     body += section("Podcast — Host", [
         ("The Cash Flow Show — Conversations about how tech companies make money",
