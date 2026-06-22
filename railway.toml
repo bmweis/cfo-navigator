@@ -1,4 +1,4 @@
 [deploy]
-healthcheckPath = "/api/search"
+healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"

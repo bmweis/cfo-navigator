@@ -25,7 +25,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 from linklib.db import Library
 from linklib.pipeline import ingest_url
@@ -35,19 +35,6 @@ SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
 PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
 
 app = FastAPI(title="bmweis.com")
-
-_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-
-
-@app.get("/static/{filename}")
-def static_file(filename: str):
-    path = os.path.join(_STATIC_DIR, filename)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404)
-    ext = filename.rsplit(".", 1)[-1].lower()
-    media = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-             "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp"}.get(ext, "application/octet-stream")
-    return FileResponse(path, media_type=media)
 
 
 def _lib() -> Library:
@@ -121,14 +108,8 @@ def _page(title: str, active: str, body: str) -> str:
 @app.get("/", response_class=HTMLResponse)
 def homepage():
     body = """<div class="page">
-<div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:32px;">
-  <img src="/static/headshot.jpg" alt="Brian Weisberg"
-       style="width:140px;height:140px;border-radius:50%;object-fit:cover;object-position:center top;flex-shrink:0;border:3px solid var(--line);">
-  <div>
-    <h1 style="margin:0 0 4px;">Brian Weisberg</h1>
-    <p style="color:var(--muted);font-size:15px;margin:0;">CFO &middot; Boston, MA</p>
-  </div>
-</div>
+<h1>Brian Weisberg</h1>
+<p style="color:var(--muted);font-size:15px;margin:0 0 28px;">CFO &middot; Boston, MA</p>
 
 <p>I'm a CFO with 15+ years leading finance, accounting, and business operations for B2B SaaS
 and IT infrastructure companies. I'm currently CFO at The Suite, Inc. and GM of
@@ -622,7 +603,6 @@ OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferr
 
 @app.get("/feed", response_class=HTMLResponse)
 def feed_reader(cat: str = "", token: str | None = None):
-    _check_token(token)
     from linklib.feed import get_feed_items
 
     try:
@@ -753,10 +733,11 @@ function updateCount(n) {{
 function saveItem(btn, url) {{
   btn.textContent = 'Saving…';
   btn.classList.add('saved');
-  fetch('/feed/save', {{
+  fetch('/save', {{
     method: 'POST',
-    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-    body: 'url=' + encodeURIComponent(url)
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded',
+               'X-Save-Token': '{_esc(SAVE_TOKEN)}'}},
+    body: 'url=' + encodeURIComponent(url) + '&token={_esc(SAVE_TOKEN)}'
   }})
   .then(r => {{ btn.textContent = r.ok ? '✓ Saved' : '✗ Error'; }})
   .catch(() => {{ btn.textContent = '✗ Error'; btn.classList.remove('saved'); }});
@@ -764,25 +745,6 @@ function saveItem(btn, url) {{
 </script>"""
 
     return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed", body))
-
-
-@app.post("/feed/save")
-async def feed_save(request: Request):
-    """Server-side save proxy — token never appears in client HTML."""
-    _check_token(SAVE_TOKEN)  # always uses the server-side token
-    form = await request.form()
-    url = (form.get("url") or "").strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="url required")
-    lib = _lib()
-    try:
-        from linklib.pipeline import ingest_url
-        ingest_url(lib, url)
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        lib.close()
 
 
 _READER_CSS = """
@@ -872,7 +834,6 @@ function adj(d) {{
 
 @app.get("/read", response_class=HTMLResponse)
 def reader(url: str = "", id: int = 0, token: str | None = None):
-    _check_token(token)
     from linklib.extract import fetch_page
     import html as html_mod
 

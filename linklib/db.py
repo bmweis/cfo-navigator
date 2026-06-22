@@ -68,6 +68,14 @@ CREATE TRIGGER IF NOT EXISTS articles_au AFTER UPDATE ON articles BEGIN
     INSERT INTO articles_fts(rowid, title, author, source, summary, content, notes, tags_text)
     VALUES (new.id, new.title, new.author, new.source, new.summary, new.content, new.notes, new.tags_text);
 END;
+
+CREATE TABLE IF NOT EXISTS contacts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL DEFAULT '',
+    email      TEXT NOT NULL DEFAULT '',
+    message    TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -231,6 +239,20 @@ class Library:
         d["tags"] = json.loads(d.pop("tags_json", "[]") or "[]")
         d.pop("tags_text", None)
         return d
+
+    def save_contact(self, name: str, email: str, message: str) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO contacts (name, email, message, created_at) VALUES (?,?,?,?)",
+            (name.strip(), email.strip(), message.strip(), _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_contacts(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM contacts ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def close(self) -> None:
         self.conn.close()
