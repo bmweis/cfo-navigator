@@ -221,17 +221,17 @@ def get_feed_items(
             except Exception:
                 pass
 
-    # Tag paywalled items
-    for item in all_items:
-        item["paywalled"] = any(d in item["url"] for d in PAYWALLED_DOMAINS)
-
     # Sort: items with dates newest-first, undated items last
-    dated = [i for i in all_items if i["pub_dt"]]
-    undated = [i for i in all_items if not i["pub_dt"]]
-    dated.sort(key=lambda i: i["pub_dt"], reverse=True)
+    # Use .get() — cached dicts may have had pub_dt popped on a prior call
+    dated = [i for i in all_items if i.get("pub_dt")]
+    undated = [i for i in all_items if not i.get("pub_dt")]
+    dated.sort(key=lambda i: i.get("pub_dt"), reverse=True)
 
-    result = (dated + undated)[:max_total]
-    for item in result:
-        item.pop("pub_dt", None)
+    result = []
+    for item in (dated + undated)[:max_total]:
+        d = dict(item)  # shallow copy so we don't mutate the cached dict
+        d["paywalled"] = any(dom in d["url"] for dom in PAYWALLED_DOMAINS)
+        d.pop("pub_dt", None)
+        result.append(d)
 
     return result, categories
