@@ -597,14 +597,20 @@ def admin_contacts(token: str | None = None):
 # Private library tools
 # ---------------------------------------------------------------------------
 
-OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", "preferred_sites.opml")
+_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferred_sites.opml"))
 
 
 @app.get("/feed", response_class=HTMLResponse)
 def feed_reader(cat: str = "", token: str | None = None):
     from linklib.feed import get_feed_items
 
-    items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
+    try:
+        items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
+    except Exception as e:
+        return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed",
+            f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>'))
+
 
     # Category tab bar
     tabs = '<a href="/feed?token={t}" class="ftab{active}">All</a>'.format(

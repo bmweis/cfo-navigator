@@ -216,7 +216,10 @@ def get_feed_items(
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {pool.submit(_cached_fetch, f): f for f in feeds}
         for fut in as_completed(futures):
-            all_items.extend(fut.result())
+            try:
+                all_items.extend(fut.result())
+            except Exception:
+                pass
 
     # Tag paywalled items
     for item in all_items:
