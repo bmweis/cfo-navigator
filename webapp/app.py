@@ -54,6 +54,7 @@ TOOL_CATEGORIES = [
     "Spend Management",
     "Financial Close",
     "Billing",
+    "Sales Tax",
     "Commission Calculations",
     "Contract Management",
     "Procurement",

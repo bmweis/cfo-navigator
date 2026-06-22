@@ -20,13 +20,13 @@ TOOLS = [
         "name": "Sequence",
         "url": "https://www.sequencehq.com",
         "description": "All-in-one CPQ, billing, usage metering, and revenue recognition for B2B SaaS. Automates the full quote-to-cash workflow — from contract to invoice to recognized revenue.",
-        "categories": ["Billing", "Contract Management"],
+        "categories": ["Billing"],
     },
     {
         "name": "Tabs",
         "url": "https://www.tabs.com",
         "description": "AI-powered billing and accounts receivable automation for B2B companies. Ingests contracts, automates invoicing, manages collections, and handles GAAP revenue recognition.",
-        "categories": ["Billing", "Financial Close"],
+        "categories": ["Billing"],
     },
     {
         "name": "Numeric",
@@ -86,13 +86,13 @@ TOOLS = [
         "name": "Anrok",
         "url": "https://www.anrok.com",
         "description": "Global sales tax and VAT compliance platform built for SaaS. Monitors nexus in real time, calculates tax on invoices, and automates filing across 100+ countries.",
-        "categories": ["Billing"],
+        "categories": ["Sales Tax"],
     },
     {
         "name": "Kintsugi",
         "url": "https://trykintsugi.com",
         "description": "AI-powered sales tax, VAT, and GST automation. Monitors nexus, calculates tax in real time, and handles filing and remittance automatically across the US and internationally.",
-        "categories": ["Billing"],
+        "categories": ["Sales Tax"],
     },
     {
         "name": "Maxio",
