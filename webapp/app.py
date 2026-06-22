@@ -83,6 +83,7 @@ def _page(title: str, active: str, body: str) -> str:
         ("/thought-leadership", "Thought Leadership"),
         ("/contact", "Contact"),
         ("/library", "Library"),
+        ("/feed", "Feed"),
     ]
     nav = "".join(
         f'<a href="{href}" class="{"active" if active == label else ""}">{label}</a>'
@@ -595,6 +596,92 @@ def admin_contacts(token: str | None = None):
 # ---------------------------------------------------------------------------
 # Private library tools
 # ---------------------------------------------------------------------------
+
+OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", "preferred_sites.opml")
+
+
+@app.get("/feed", response_class=HTMLResponse)
+def feed_reader(cat: str = "", token: str | None = None):
+    _check_token(token)
+    from linklib.feed import get_feed_items
+
+    items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
+
+    # Category tab bar
+    tabs = '<a href="/feed?token={t}" class="ftab{active}">All</a>'.format(
+        t=_esc(SAVE_TOKEN), active=' ftab-on' if not cat else '',
+    )
+    for c in categories:
+        active = ' ftab-on' if c == cat else ''
+        tabs += f'<a href="/feed?cat={_esc(c)}&token={_esc(SAVE_TOKEN)}" class="ftab{active}">{_esc(c)}</a>'
+
+    def _fmt_date(iso: str) -> str:
+        if not iso:
+            return ""
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            return dt.strftime("%-d %b %Y")
+        except Exception:
+            return iso[:10]
+
+    cards = ""
+    for item in items:
+        save_url = _esc(item["url"])
+        cards += f"""<article class="fcard">
+  <div class="fcard-meta">{_esc(item['source'])}{ ' &middot; ' + _fmt_date(item['published_at']) if item['published_at'] else ''}</div>
+  <a class="fcard-title" href="{save_url}" target="_blank" rel="noopener">{_esc(item['title'])}</a>
+  { f'<p class="fcard-summary">{_esc(item["summary"])}</p>' if item.get('summary') else '' }
+  <div class="fcard-actions">
+    <a href="/read?url={save_url}&token={_esc(SAVE_TOKEN)}" class="faction">&#9654; Read</a>
+    <button class="faction" onclick="saveItem(this,'{save_url}')">+ Save to Library</button>
+  </div>
+</article>"""
+
+    if not cards:
+        cards = '<p style="color:var(--muted);padding:32px 0;">No items loaded — feeds may be warming up. Try refreshing in a moment.</p>'
+
+    body = f"""<div style="border-bottom:1px solid var(--line);padding:16px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
+  <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    {tabs}
+  </div>
+</div>
+<main style="max-width:860px;margin:0 auto;padding:24px 24px 80px;display:grid;gap:12px;">
+{cards}
+</main>
+<style>
+.ftab{{display:inline-block;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;
+  color:var(--muted);text-decoration:none;border:1px solid transparent;}}
+.ftab:hover{{color:var(--ink);text-decoration:none;background:var(--accent-light);}}
+.ftab-on{{background:var(--accent);color:#fff !important;}}
+.fcard{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 20px;}}
+.fcard-meta{{font-size:12px;color:var(--muted);margin-bottom:5px;}}
+.fcard-title{{font-size:16px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;line-height:1.35;}}
+.fcard-title:hover{{color:var(--accent);text-decoration:none;}}
+.fcard-summary{{font-size:14px;color:#5a5248;margin:0 0 10px;line-height:1.5;}}
+.fcard-actions{{display:flex;gap:10px;margin-top:8px;}}
+.faction{{font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);
+  border-radius:8px;padding:5px 12px;cursor:pointer;text-decoration:none;}}
+.faction:hover{{background:var(--accent-light);text-decoration:none;}}
+.faction.saved{{color:var(--muted);pointer-events:none;}}
+</style>
+<script>
+function saveItem(btn, url) {{
+  btn.textContent = 'Saving…';
+  btn.classList.add('saved');
+  fetch('/save', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded',
+               'X-Save-Token': '{_esc(SAVE_TOKEN)}'}},
+    body: 'url=' + encodeURIComponent(url) + '&token={_esc(SAVE_TOKEN)}'
+  }})
+  .then(r => {{ btn.textContent = r.ok ? '✓ Saved' : '✗ Error'; }})
+  .catch(() => {{ btn.textContent = '✗ Error'; btn.classList.remove('saved'); }});
+}}
+</script>"""
+
+    return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed", body))
+
 
 _READER_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500&display=swap');
