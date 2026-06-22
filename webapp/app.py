@@ -4,23 +4,35 @@
 Public routes (no auth):
     GET  /                     Bio homepage
     GET  /thought-leadership   Podcasts, writing, interviews
+    GET  /growth-engine-ratio  GER framework + calculator
     GET  /contact              Contact form
     POST /contact              Submit contact form
+    GET  /login / POST /login  Password sign-in (sets a signed session cookie)
+    GET  /logout               Clear the session
+    GET  /static/{file}        Static assets (e.g. headshot)
+    GET  /health               Health check
 
-Private routes (library tools):
+Private routes (require login cookie; API routes also accept a token):
     GET  /library              Search + browse saved articles
+    GET  /feed                 RSS reader over the OPML subscription list
     GET  /read                 Article reader (Instapaper-style clean view)
     POST /ask                  FP&A Q&A
-    POST /save                 Capture a link
     POST /post                 Draft a LinkedIn post
+    POST /feed/save            Save a feed item to the library
+    POST /save                 Capture a link (token auth — used by bookmarklet)
     GET  /api/search           JSON search API
     GET  /bookmarklet          One-click saver script
-    GET  /admin/contacts       View contact form submissions (token-gated)
+    GET  /admin/contacts       View contact form submissions
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import sys
+import time
+from datetime import datetime
+from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -36,6 +48,16 @@ _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
 
+# --- Auth -------------------------------------------------------------------
+# A single shared secret protects the private tools. LINKLIB_PASSWORD is the
+# login password; it falls back to LINKLIB_SAVE_TOKEN so one secret works for
+# both the login screen and the bookmarklet/token API. If neither is set, the
+# private routes are open (convenient for local-only use).
+AUTH_PASSWORD = os.environ.get("LINKLIB_PASSWORD") or SAVE_TOKEN
+SECRET_KEY = os.environ.get("LINKLIB_SECRET_KEY") or AUTH_PASSWORD or "dev-insecure-key"
+COOKIE_NAME = "cfo_session"
+SESSION_TTL = 30 * 24 * 3600  # 30 days
+
 app = FastAPI(title="bmweis.com")
 
 
@@ -43,9 +65,57 @@ def _lib() -> Library:
     return Library(DB_PATH)
 
 
+# --- Session cookie helpers (stdlib HMAC — no extra dependency) --------------
+
+def _sign(value: str) -> str:
+    sig = hmac.new(SECRET_KEY.encode(), value.encode(), hashlib.sha256).hexdigest()
+    return f"{value}.{sig}"
+
+
+def _make_session() -> str:
+    """A signed cookie value that expires SESSION_TTL seconds from now."""
+    return _sign(str(int(time.time()) + SESSION_TTL))
+
+
+def _valid_session(cookie: str | None) -> bool:
+    if not cookie or "." not in cookie:
+        return False
+    value, _, sig = cookie.rpartition(".")
+    expected = hmac.new(SECRET_KEY.encode(), value.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return False
+    try:
+        return int(value) > int(time.time())
+    except ValueError:
+        return False
+
+
+def _is_authed(request: Request) -> bool:
+    """True if the request carries a valid login session (or no password set)."""
+    if not AUTH_PASSWORD:
+        return True
+    return _valid_session(request.cookies.get(COOKIE_NAME))
+
+
+def _login_redirect(request: Request) -> RedirectResponse:
+    nxt = request.url.path + (("?" + request.url.query) if request.url.query else "")
+    return RedirectResponse(f"/login?next={quote(nxt, safe='')}", status_code=303)
+
+
 def _check_token(token: str | None) -> None:
-    if SAVE_TOKEN and token != SAVE_TOKEN:
+    """Constant-time token check for the bookmarklet / programmatic save."""
+    if SAVE_TOKEN and not (token and hmac.compare_digest(token, SAVE_TOKEN)):
         raise HTTPException(status_code=401, detail="bad or missing save token")
+
+
+def _require_api(request: Request, token: str | None = None) -> None:
+    """Allow API access via a valid login cookie OR a valid token header/param."""
+    if _is_authed(request):
+        return
+    tok = token or request.headers.get("X-Save-Token")
+    if SAVE_TOKEN and tok and hmac.compare_digest(tok, SAVE_TOKEN):
+        return
+    raise HTTPException(status_code=401, detail="unauthorized")
 
 
 def _esc(s) -> str:
@@ -79,7 +149,7 @@ p{margin:0 0 16px;color:#3a352e;}
 .btn-ghost:hover{background:var(--accent-light);opacity:1;}
 """
 
-def _page(title: str, active: str, body: str) -> str:
+def _page(title: str, active: str, body: str, authed: bool = False) -> str:
     nav_items = [
         ("/", "About"),
         ("/thought-leadership", "Thought Leadership"),
@@ -91,6 +161,8 @@ def _page(title: str, active: str, body: str) -> str:
         f'<a href="{href}" class="{"active" if active == label else ""}">{label}</a>'
         for href, label in nav_items
     )
+    if authed:
+        nav += '<a href="/logout">Log out</a>'
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(title)}</title>
@@ -101,6 +173,54 @@ def _page(title: str, active: str, body: str) -> str:
 </header>
 {body}
 </body></html>"""
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/library", error: str = ""):
+    if _is_authed(request):
+        return RedirectResponse(next or "/library", status_code=303)
+    err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">Incorrect password — try again.</p>'
+           if error else "")
+    body = f"""<div class="page" style="max-width:420px;">
+<h1>Sign in</h1>
+<p style="color:var(--muted);margin:4px 0 28px;">This area is private. Enter the password to continue.</p>
+{err}
+<form method="post" action="/login" style="display:grid;gap:16px;">
+  <input type="hidden" name="next" value="{_esc(next or '/library')}">
+  <input name="password" type="password" required autofocus placeholder="Password"
+         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <button type="submit" class="btn">Sign in</button>
+</form>
+</div>"""
+    return HTMLResponse(_page("Sign in — Brian Weisberg", "", body))
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    form = await request.form()
+    password = form.get("password") or ""
+    nxt = form.get("next") or "/library"
+    if not nxt.startswith("/"):  # never redirect off-site
+        nxt = "/library"
+    if AUTH_PASSWORD and hmac.compare_digest(password, AUTH_PASSWORD):
+        resp = RedirectResponse(nxt, status_code=303)
+        secure = (request.url.scheme == "https"
+                  or request.headers.get("x-forwarded-proto") == "https")
+        resp.set_cookie(COOKIE_NAME, _make_session(), max_age=SESSION_TTL,
+                        httponly=True, samesite="lax", secure=secure, path="/")
+        return resp
+    return RedirectResponse(f"/login?error=1&next={quote(nxt, safe='')}", status_code=303)
+
+
+@app.get("/logout")
+def logout():
+    resp = RedirectResponse("/", status_code=303)
+    resp.delete_cookie(COOKIE_NAME, path="/")
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -119,10 +239,18 @@ def homepage():
   </div>
 </div>
 
-<p>I'm a CFO with 15+ years leading finance, accounting, and business operations for B2B SaaS
-and IT infrastructure companies. I'm currently CFO at The Suite, Inc. and GM of
-<a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>—an invite-only
-network of 1,000+ growth and late-stage CFOs. Before that, I spent seven years as CFO of
+<p>I'm a finance and operations leader with 15+ years guiding finance, accounting, and business
+operations for B2B SaaS and IT infrastructure companies. Today I'm VP of Business Operations and
+Strategic Finance at <a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>, where I
+get to do what I enjoy most—operating shoulder-to-shoulder with the business rather than watching
+it from the sidelines.</p>
+
+<p>Before Mux, I stepped in as interim CFO of The Suite, Inc. and GM of
+<a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>—the invite-only
+network of 1,000+ growth- and late-stage CFOs. I'd been a founding member of that community, so
+when they needed someone to run both the parent company and the network, I raised my hand. It was
+always meant to be an interim chapter; when the right operating role came along at Mux, we parted
+ways on the best of terms. Before that, I spent seven years as CFO of
 <a href="https://tidelift.com" target="_blank" rel="noopener">Tidelift</a>, growing the company
 from fewer than a dozen employees through $73.5M in funding and an eventual acquisition by Sonar.</p>
 
@@ -570,8 +698,9 @@ async def contact_submit(request: Request):
 
 
 @app.get("/admin/contacts", response_class=HTMLResponse)
-def admin_contacts(token: str | None = None):
-    _check_token(token)
+def admin_contacts(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
     lib = _lib()
     try:
         contacts = lib.list_contacts()
@@ -588,6 +717,7 @@ def admin_contacts(token: str | None = None):
     ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No submissions yet.</td></tr>'
     body = f"""<div class="page" style="max-width:960px;">
 <h1>Contact submissions</h1>
+<p style="margin:-2px 0 0;"><a href="/logout" style="font-size:13px;color:var(--muted);">Log out</a></p>
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:24px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
@@ -609,30 +739,30 @@ OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferr
 
 
 @app.get("/feed", response_class=HTMLResponse)
-def feed_reader(cat: str = "", token: str | None = None):
-    _check_token(token)
+def feed_reader(request: Request, cat: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
     from linklib.feed import get_feed_items
 
     try:
         items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
     except Exception as e:
         return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed",
-            f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>'))
-
+            f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
+            authed=True))
 
     # Category tab bar
-    tabs = '<a href="/feed?token={t}" class="ftab{active}">All</a>'.format(
-        t=_esc(SAVE_TOKEN), active=' ftab-on' if not cat else '',
+    tabs = '<a href="/feed" class="ftab{active}">All</a>'.format(
+        active=' ftab-on' if not cat else '',
     )
     for c in categories:
         active = ' ftab-on' if c == cat else ''
-        tabs += f'<a href="/feed?cat={_esc(c)}&token={_esc(SAVE_TOKEN)}" class="ftab{active}">{_esc(c)}</a>'
+        tabs += f'<a href="/feed?cat={quote(c)}" class="ftab{active}">{_esc(c)}</a>'
 
     def _fmt_date(iso: str) -> str:
         if not iso:
             return ""
         try:
-            from datetime import datetime
             dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
             return dt.strftime("%-d %b %Y")
         except Exception:
@@ -646,7 +776,7 @@ def feed_reader(cat: str = "", token: str | None = None):
         save_url = _esc(item["url"])
         paywalled = item.get("paywalled", False)
         paywall_badge = ' <span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:600;vertical-align:middle;">&#128274; Paywalled</span>' if paywalled else ''
-        read_btn = '' if paywalled else f'<a href="/read?url={save_url}&token={_esc(SAVE_TOKEN)}" class="faction">&#9654; Read</a>'
+        read_btn = '' if paywalled else f'<a href="/read?url={quote(item["url"], safe="")}" class="faction">&#9654; Read</a>'
         src_attr = _esc(item["source"])
         cards += f"""<article class="fcard" data-source="{src_attr}">
   <div class="fcard-meta">{_esc(item['source'])}{ ' &middot; ' + _fmt_date(item['published_at']) if item['published_at'] else ''}{paywall_badge}</div>
@@ -751,7 +881,7 @@ function saveItem(btn, url) {{
 }}
 </script>"""
 
-    return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed", body))
+    return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed", body, authed=True))
 
 
 _READER_CSS = """
@@ -840,8 +970,9 @@ function adj(d) {{
 
 
 @app.get("/read", response_class=HTMLResponse)
-def reader(url: str = "", id: int = 0, token: str | None = None):
-    _check_token(token)
+def reader(request: Request, url: str = "", id: int = 0):
+    if not _is_authed(request):
+        return _login_redirect(request)
     from linklib.extract import fetch_page
     import html as html_mod
 
@@ -922,7 +1053,9 @@ def reader(url: str = "", id: int = 0, token: str | None = None):
 
 
 @app.get("/library", response_class=HTMLResponse)
-def library(q: str = ""):
+def library(request: Request, q: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
     lib = _lib()
     try:
         results = lib.search(q, limit=100)
@@ -938,7 +1071,7 @@ def library(q: str = ""):
           <p class="summary">{_esc(r.get('summary',''))[:280]}</p>
           <div class="tags">{''.join(f'<span>{_esc(t)}</span>' for t in r.get('tags', []))}</div>
           <div style="display:flex;gap:8px;margin-top:8px;">
-            <a href="/read?id={r['id']}&token={_esc(SAVE_TOKEN)}" class="postbtn" style="text-decoration:none;">Read</a>
+            <a href="/read?id={r['id']}" class="postbtn" style="text-decoration:none;">Read</a>
             <button class="postbtn" onclick="draftPost('{_esc(r['url'])}')">Draft LinkedIn post</button>
           </div>
         </article>"""
@@ -953,7 +1086,7 @@ def library(q: str = ""):
   <div style="max-width:780px;margin:0 auto;">
     <div style="font-size:13px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:16px;">
       <span>{total} saved</span>
-      <a href="/read?token={_esc(SAVE_TOKEN)}" style="color:var(--accent);font-weight:500;">&#9654; Article Reader</a>
+      <a href="/read" style="color:var(--accent);font-weight:500;">&#9654; Article Reader</a>
     </div>
     <form method="get" action="/library" style="display:flex;gap:8px;max-width:680px;">
       <input type="search" name="q" value="{_esc(q)}" placeholder="Search titles, summaries, notes, tags…"
@@ -1009,7 +1142,7 @@ async function draftPost(url){{
 }}
 </script>"""
 
-    return HTMLResponse(_page(f"Library — Brian Weisberg", "Library", page_body))
+    return HTMLResponse(_page("Library — Brian Weisberg", "Library", page_body, authed=True))
 
 
 # ---------------------------------------------------------------------------
@@ -1022,7 +1155,8 @@ def health():
 
 
 @app.get("/api/search")
-def api_search(q: str = "", limit: int = 50):
+def api_search(request: Request, q: str = "", limit: int = 50, token: str | None = None):
+    _require_api(request, token)
     lib = _lib()
     try:
         return {"query": q, "results": lib.search(q, limit=limit)}
@@ -1032,6 +1166,7 @@ def api_search(q: str = "", limit: int = 50):
 
 @app.post("/ask")
 async def ask(request: Request):
+    _require_api(request)
     from linklib.agent import answer_question
     payload = await request.json()
     question = (payload.get("question") or "").strip()
@@ -1071,7 +1206,9 @@ async def save(request: Request, token: str | None = None):
 
 
 @app.get("/bookmarklet", response_class=PlainTextResponse)
-def bookmarklet():
+def bookmarklet(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
     token_param = f"?token={SAVE_TOKEN}" if SAVE_TOKEN else ""
     js = (
         "javascript:(function(){var u=encodeURIComponent(location.href);"
@@ -1083,6 +1220,7 @@ def bookmarklet():
 
 @app.post("/post")
 async def post_draft(request: Request):
+    _require_api(request)
     from linklib.social import draft_post
     payload = await request.json()
     lib = _lib()
@@ -1096,9 +1234,8 @@ async def post_draft(request: Request):
 
 @app.post("/feed/save")
 async def feed_save(request: Request):
-    """Server-side save proxy — token never appears in client HTML."""
-    if not SAVE_TOKEN:
-        raise HTTPException(status_code=403, detail="save not configured")
+    """Server-side save proxy — authed via login cookie, no token in client HTML."""
+    _require_api(request)
     form = await request.form()
     url = (form.get("url") or "").strip()
     if not url:
@@ -1115,7 +1252,9 @@ async def feed_save(request: Request):
 
 @app.get("/static/{filename}")
 def static_file(filename: str):
-    path = os.path.join(_STATIC_DIR, filename)
+    # basename strips any path components so "../" can't escape the static dir
+    safe = os.path.basename(filename)
+    path = os.path.join(_STATIC_DIR, safe)
     if not os.path.isfile(path):
         raise HTTPException(status_code=404)
     ext = filename.rsplit(".", 1)[-1].lower()
