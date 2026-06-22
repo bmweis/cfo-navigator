@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS tools (
     categories_json TEXT NOT NULL DEFAULT '[]',
     approved        INTEGER NOT NULL DEFAULT 0,
     submitted_by    TEXT NOT NULL DEFAULT '',
-    created_at      TEXT NOT NULL
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_tools_approved ON tools(approved);
@@ -134,6 +135,12 @@ class Library:
         self.conn.execute("PRAGMA foreign_keys=ON;")
         self.conn.executescript(_SCHEMA)
         self.conn.commit()
+        # Migrate: add updated_at to tools if it was created before this column existed
+        try:
+            self.conn.execute("ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
     # -- writes -------------------------------------------------------------
 
@@ -287,12 +294,13 @@ class Library:
         while self.conn.execute("SELECT 1 FROM tools WHERE slug=?", (slug,)).fetchone():
             slug = f"{base}-{suffix}"
             suffix += 1
+        now = _now()
         cur = self.conn.execute(
             """INSERT INTO tools (name, slug, description, url, categories_json,
-               approved, submitted_by, created_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
+               approved, submitted_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, description.strip(), url.strip(),
-             json.dumps(categories), approved, submitted_by.strip(), _now()),
+             json.dumps(categories), approved, submitted_by.strip(), now, now),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -315,10 +323,10 @@ class Library:
     def update_tool(self, tool_id: int, name: str, description: str,
                     url: str, categories: list[str]) -> None:
         self.conn.execute(
-            """UPDATE tools SET name=?, description=?, url=?, categories_json=?
-               WHERE id=?""",
+            """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
+               updated_at=? WHERE id=?""",
             (name.strip(), description.strip(), url.strip(),
-             json.dumps(categories), tool_id),
+             json.dumps(categories), _now(), tool_id),
         )
         self.conn.commit()
 

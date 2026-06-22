@@ -756,6 +756,9 @@ def tools_directory(request: Request):
             "description": t["description"],
             "url": t["url"],
             "categories": t["categories"],
+            "submitted_by": t.get("submitted_by") or "",
+            "created_at": (t.get("created_at") or "")[:10],
+            "updated_at": (t.get("updated_at") or "")[:10],
         }
         for t in tools
     ])
@@ -809,6 +812,7 @@ def tools_directory(request: Request):
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
+.tool-meta{{font-size:12px;color:var(--muted);margin-top:10px;}}
 </style>
 
 <script>
@@ -841,6 +845,15 @@ function renderTools(tools) {{
           + '</form>'
           + '</div>'
       : '';
+    var metaParts = [];
+    if (AUTHED) {{
+      if (t.submitted_by) metaParts.push('Submitted by ' + esc(t.submitted_by));
+      if (t.created_at) metaParts.push('Added ' + t.created_at);
+      if (t.updated_at && t.updated_at !== t.created_at) metaParts.push('Edited ' + t.updated_at);
+    }}
+    var adminMeta = metaParts.length
+      ? '<div class="tool-meta">' + metaParts.join(' &middot; ') + '</div>'
+      : '';
     return '<article class="tool-card">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">'
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
@@ -848,6 +861,7 @@ function renderTools(tools) {{
       + '</div>'
       + '<p class="tool-desc">' + esc(t.description) + '</p>'
       + '<div class="tool-cats">' + cats + '</div>'
+      + adminMeta
       + '</article>';
   }}).join('');
 }}
@@ -1107,7 +1121,7 @@ async def admin_tools_new_submit(request: Request):
         lib.add_tool(name, description, url, categories, approved=1)
     finally:
         lib.close()
-    return RedirectResponse("/admin/tools", status_code=303)
+    return RedirectResponse("/tools", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/approve")
@@ -1145,8 +1159,18 @@ def admin_tools_edit(request: Request, tool_id: int):
         lib.close()
     if not tool:
         raise HTTPException(status_code=404, detail="Tool not found")
+    meta_parts = []
+    if tool.get("submitted_by"):
+        meta_parts.append(f"Submitted by {_esc(tool['submitted_by'])}")
+    if tool.get("created_at"):
+        meta_parts.append(f"Added {tool['created_at'][:10]}")
+    if tool.get("updated_at") and tool["updated_at"] != tool["created_at"]:
+        meta_parts.append(f"Last edited {tool['updated_at'][:10]}")
+    meta_line = (" &middot; ".join(meta_parts)) if meta_parts else ""
+
     body = f"""<div class="page" style="max-width:560px;">
 <h1>Edit tool</h1>
+{f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form method="post" action="/admin/tools/{tool_id}/edit" style="display:grid;gap:20px;">
   <div>
     <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Tool name *</label>
