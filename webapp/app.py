@@ -602,7 +602,6 @@ OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", "preferred_sites.opml")
 
 @app.get("/feed", response_class=HTMLResponse)
 def feed_reader(cat: str = "", token: str | None = None):
-    _check_token(token)
     from linklib.feed import get_feed_items
 
     items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
@@ -773,7 +772,6 @@ function adj(d) {{
 
 @app.get("/read", response_class=HTMLResponse)
 def reader(url: str = "", id: int = 0, token: str | None = None):
-    _check_token(token)
     from linklib.extract import fetch_page
     import html as html_mod
 
