@@ -231,46 +231,49 @@ def logout():
 def homepage():
     body = """<div class="page">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
-  <img src="/static/headshot.jpg" alt="Brian Weisberg"
-       style="width:140px;height:140px;border-radius:50%;object-fit:cover;object-position:center top;flex-shrink:0;border:3px solid var(--line);">
+  <div aria-label="Brian Weisberg"
+       style="width:140px;height:140px;border-radius:50%;flex-shrink:0;border:3px solid var(--line);
+              background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;
+              font-size:46px;font-weight:700;letter-spacing:-0.02em;">BW</div>
   <div>
     <h1 style="margin:0 0 4px;">Brian Weisberg</h1>
     <p style="color:var(--muted);font-size:15px;margin:0;">CFO &middot; Boston, MA</p>
   </div>
 </div>
 
-<p>I'm a finance and operations leader with 15+ years guiding finance, accounting, and business
-operations for B2B SaaS and IT infrastructure companies. Today I'm VP of Business Operations and
-Strategic Finance at <a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>, where I
-get to do what I enjoy most—operating shoulder-to-shoulder with the business rather than watching
-it from the sidelines.</p>
+<p>I'm a tech CFO. That's not my title today—I'm VP of Business Operations and Strategic Finance at
+<a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>—but it's how I think, how I
+operate, and the lens I bring to every business I help build. Fifteen-plus years in finance,
+accounting, and operations for B2B SaaS and IT infrastructure companies will do that to you. At Mux
+I get to do the part I love most: working in the thick of the business, where finance and strategy
+actually meet the day-to-day work.</p>
 
 <p>Before Mux, I stepped in as interim CFO of The Suite, Inc. and GM of
 <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>—the invite-only
-network of 1,000+ growth- and late-stage CFOs. I'd been a founding member of that community, so
-when they needed someone to run both the parent company and the network, I raised my hand. It was
-always meant to be an interim chapter; when the right operating role came along at Mux, we parted
-ways on the best of terms. Before that, I spent seven years as CFO of
-<a href="https://tidelift.com" target="_blank" rel="noopener">Tidelift</a>, growing the company
-from fewer than a dozen employees through $73.5M in funding and an eventual acquisition by Sonar.</p>
+network of 1,000+ growth- and late-stage CFOs. I'd been a founding member of that community, so when
+they needed someone to run both the parent company and the network, I raised my hand. It was always
+meant to be a chapter, not a destination; when the right operating role came along at Mux, we parted
+ways as friends. Before all of that, I spent seven years as CFO of
+<a href="https://tidelift.com" target="_blank" rel="noopener">Tidelift</a>, helping grow the company
+from a handful of people through $73.5M in funding to an acquisition by Sonar.</p>
 
-<p>Scaling early-stage startups has become my passion. While not a traditional entrepreneur myself,
-I'm inspired by the energy and conviction founders bring to disrupting the status quo—and I've
-built my career helping them do it with a clear financial picture and sound operational backbone.</p>
+<p>Scaling startups is the work I care about most. I'm not a founder myself, but I've built my career
+in the founder's corner—turning their conviction and momentum into something a business can actually
+stand on: a clear financial picture, a sound operational backbone, and decisions that hold up when
+the numbers get hard.</p>
 
-<p>What sets me apart is a cross-functional approach to financial leadership. I get out from
-behind my desk to mentor, learn from, and build real relationships with peers in product,
-engineering, sales, and marketing. Those relationships are how you earn trust, acquire earned
-secrets, and develop a genuine pulse on how a business actually operates. That's the foundation
-for financial leadership that's actually useful to a leadership team.</p>
+<p>I'm also not a behind-the-desk CFO. The best part of the job is getting out into the business—
+mentoring and learning from peers in product, engineering, sales, and marketing. That's where trust
+gets built, where you pick up the earned secrets of how a company really works, and where finance
+stops being a scorecard and becomes something a leadership team genuinely leans on.</p>
 
 <p>In 2025, at the invitation of my friend <a href="https://www.onlycfo.io" target="_blank" rel="noopener">OnlyCFO</a>,
-I tried my hand at hosting a podcast. It turned out to be one of the more fun things I've done professionally—
-bringing friends and fellow finance leaders onto
-<a href="https://www.onlycfo.io/podcast" target="_blank" rel="noopener">The Cash Flow Show</a> to dig into
-the topics I care most about: how tech companies make money, how finance teams earn their seat at the table,
-and what it actually looks like to scale a business with discipline. I write on startup finance and advise
-finance leaders navigating the early-to-growth journey. Based in Boston, MA.</p>
+I tried my hand at hosting a podcast—and it turned out to be one of the more fun things I've done
+professionally. On <a href="https://www.onlycfo.io/podcast" target="_blank" rel="noopener">The Cash Flow Show</a>
+I bring friends and fellow finance leaders on to dig into the topics I care about most: how tech
+companies make money, how finance teams earn their seat at the table, and what it really takes to
+scale a business with discipline. I also write on startup finance and advise finance leaders making
+the early-to-growth leap. Based in Boston.</p>
 
 <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap;">
   <a href="/thought-leadership" class="btn">Thought Leadership</a>
