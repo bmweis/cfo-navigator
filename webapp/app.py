@@ -24,7 +24,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from linklib.db import Library
@@ -45,18 +45,6 @@ def _check_token(token: str | None) -> None:
     if SAVE_TOKEN and token != SAVE_TOKEN:
         raise HTTPException(status_code=401, detail="bad or missing save token")
 
-
-@app.post("/admin/upload-db")
-async def upload_db(token: str | None = None, file: UploadFile = File(...)):
-    """Restore library.db from an uploaded file (plain or gzip). Protected by LINKLIB_SAVE_TOKEN."""
-    import gzip as _gzip
-    _check_token(token)
-    data = await file.read()
-    if data[:2] == b'\x1f\x8b':
-        data = _gzip.decompress(data)
-    with open(DB_PATH, "wb") as f:
-        f.write(data)
-    return JSONResponse({"ok": True, "bytes": len(data)})
 
 
 @app.get("/api/search")
