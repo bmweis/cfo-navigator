@@ -630,13 +630,17 @@ def feed_reader(cat: str = "", token: str | None = None):
         except Exception:
             return iso[:10]
 
+    # Collect unique sources in the order they first appear
+    sources = list(dict.fromkeys(item["source"] for item in items))
+
     cards = ""
     for item in items:
         save_url = _esc(item["url"])
         paywalled = item.get("paywalled", False)
         paywall_badge = ' <span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:600;vertical-align:middle;">&#128274; Paywalled</span>' if paywalled else ''
         read_btn = '' if paywalled else f'<a href="/read?url={save_url}&token={_esc(SAVE_TOKEN)}" class="faction">&#9654; Read</a>'
-        cards += f"""<article class="fcard">
+        src_attr = _esc(item["source"])
+        cards += f"""<article class="fcard" data-source="{src_attr}">
   <div class="fcard-meta">{_esc(item['source'])}{ ' &middot; ' + _fmt_date(item['published_at']) if item['published_at'] else ''}{paywall_badge}</div>
   <a class="fcard-title" href="{save_url}" target="_blank" rel="noopener">{_esc(item['title'])}</a>
   { f'<p class="fcard-summary">{_esc(item["summary"])}</p>' if item.get('summary') else '' }
@@ -649,12 +653,31 @@ def feed_reader(cat: str = "", token: str | None = None):
     if not cards:
         cards = '<p style="color:var(--muted);padding:32px 0;">No items loaded — feeds may be warming up. Try refreshing in a moment.</p>'
 
-    body = f"""<div style="border-bottom:1px solid var(--line);padding:16px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
-  <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-    {tabs}
+    # Source filter checkboxes
+    source_checks = "".join(
+        f'<label class="fsrc-label"><input type="checkbox" class="fsrc-cb" value="{_esc(s)}" checked onchange="applyFilter()"><span>{_esc(s)}</span></label>'
+        for s in sources
+    )
+    filter_panel = f"""<div id="filter-panel" style="display:none;border-bottom:1px solid var(--line);background:#fff;padding:14px 24px;">
+  <div style="max-width:860px;margin:0 auto;">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:10px;">
+      <span style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">Filter by source</span>
+      <button onclick="setAll(true)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Select all</button>
+      <button onclick="setAll(false)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Clear all</button>
+      <span id="filter-count" style="font-size:12px;color:var(--muted);margin-left:auto;"></span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">{source_checks}</div>
+  </div>
+</div>"""
+
+    body = f"""<div style="border-bottom:1px solid var(--line);padding:12px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
+  <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1;">{tabs}</div>
+    <button onclick="toggleFilter()" id="filter-btn" style="font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);border-radius:20px;padding:6px 14px;cursor:pointer;white-space:nowrap;">&#9776; Sources</button>
   </div>
 </div>
-<main style="max-width:860px;margin:0 auto;padding:24px 24px 80px;display:grid;gap:12px;">
+{filter_panel}
+<main id="feed-main" style="max-width:860px;margin:0 auto;padding:24px 24px 80px;display:grid;gap:12px;">
 {cards}
 </main>
 <style>
@@ -672,8 +695,41 @@ def feed_reader(cat: str = "", token: str | None = None):
   border-radius:8px;padding:5px 12px;cursor:pointer;text-decoration:none;}}
 .faction:hover{{background:var(--accent-light);text-decoration:none;}}
 .faction.saved{{color:var(--muted);pointer-events:none;}}
+.fsrc-label{{display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;
+  background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:4px 10px;
+  user-select:none;transition:background .1s;}}
+.fsrc-label:hover{{background:var(--accent-light);}}
+.fsrc-label input{{accent-color:var(--accent);cursor:pointer;}}
 </style>
 <script>
+function toggleFilter() {{
+  var p = document.getElementById('filter-panel');
+  var btn = document.getElementById('filter-btn');
+  var open = p.style.display === 'none';
+  p.style.display = open ? 'block' : 'none';
+  btn.style.background = open ? 'var(--accent-light)' : 'none';
+  if (open) updateCount();
+}}
+function setAll(checked) {{
+  document.querySelectorAll('.fsrc-cb').forEach(function(cb) {{ cb.checked = checked; }});
+  applyFilter();
+}}
+function applyFilter() {{
+  var selected = new Set();
+  document.querySelectorAll('.fsrc-cb:checked').forEach(function(cb) {{ selected.add(cb.value); }});
+  var visible = 0;
+  document.querySelectorAll('.fcard').forEach(function(card) {{
+    var show = selected.has(card.dataset.source);
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  }});
+  updateCount(visible);
+}}
+function updateCount(n) {{
+  var total = document.querySelectorAll('.fcard').length;
+  if (n === undefined) n = total;
+  document.getElementById('filter-count').textContent = n + ' of ' + total + ' shown';
+}}
 function saveItem(btn, url) {{
   btn.textContent = 'Saving…';
   btn.classList.add('saved');
