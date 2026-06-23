@@ -401,6 +401,30 @@ def thought_leadership():
 @app.get("/growth-engine-ratio", response_class=HTMLResponse)
 def growth_engine_ratio():
     body = """<div class="page" style="max-width:820px;">
+<style>
+  .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  input[type=range]{accent-color:var(--accent);height:4px;}
+  .ger-slider-row{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:6px;}
+  .spread-row{display:flex;align-items:center;gap:14px;padding:30px 0 26px;}
+  .spread-name{flex:0 0 108px;font-size:13px;font-weight:500;color:var(--ink);}
+  .spread-track{position:relative;flex:1;height:6px;background:var(--accent-light);border-radius:6px;}
+  .spread-bar{position:absolute;height:6px;background:var(--accent);border-radius:6px;opacity:.35;}
+  .spread-base{position:absolute;width:2px;height:18px;top:-6px;background:var(--ink);border-radius:2px;}
+  .spread-dot{position:absolute;width:11px;height:11px;border-radius:50%;top:-2.5px;border:2px solid #fff;transform:translateX(-50%);box-shadow:0 0 0 1px var(--line);}
+  .spread-cap{position:absolute;top:-26px;font-size:12px;font-weight:600;transform:translateX(-50%);white-space:nowrap;}
+  .spread-sub{position:absolute;top:13px;font-size:10px;color:var(--muted);transform:translateX(-50%);white-space:nowrap;}
+  @media (max-width:640px){
+    .ger-grid-4{grid-template-columns:repeat(2,1fr);}
+    .ger-grid-2{grid-template-columns:1fr;}
+    .ger-card{padding:22px 18px !important;}
+    .ger-table th,.ger-table td{padding:8px 10px !important;font-size:13px !important;}
+    .ger-value-big{font-size:38px !important;}
+    .spread-name{flex:0 0 76px;font-size:12px;}
+    .spread-cap{font-size:11px;}
+  }
+</style>
 
 <p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Framework</p>
 <h1 style="margin:0 0 8px;">The Growth Engine Ratio</h1>
@@ -452,7 +476,9 @@ I call this the <strong>time-distributed contribution model</strong>.</p>
 <p>GTM uses a 4-quarter lookback because enterprise sales cycles run 6–9 months — pipeline built
 in Q<sub>n-4</sub> converts across subsequent quarters until it lands in Q<sub>n</sub>.
 R&amp;D uses a 2-quarter lookback starting one quarter earlier (n-5, n-4) because features are
-built before they're sold. The build-then-sell sequence matters.</p>
+built before they're sold. The build-then-sell sequence matters. Each contributing quarter is
+weighted at 25%, so GTM enters at a full quarterly run-rate (four quarters &times; 25%) while the
+shorter R&amp;D build window enters at half (two quarters &times; 25%).</p>
 
 <h2>What the Number Tells You</h2>
 <p>A ratio of <strong>$1.00</strong> means you're generating exactly $1 of annualized revenue growth for
@@ -463,8 +489,8 @@ that are profitable on acquisition from those that aren't.</p>
 in steady state. The other 9 need to retain customers for 1.2 to 2.8 years just to break even
 on acquisition costs. That changes how you think about churn — permanently.</p>
 
-<div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:0 0 32px;">
-  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+<div class="ger-table-wrap" style="background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 32px;">
+  <table class="ger-table" style="width:100%;border-collapse:collapse;font-size:14px;min-width:520px;">
     <thead><tr style="background:var(--accent-light);">
       <th style="padding:10px 14px;text-align:left;font-weight:600;">Tier</th>
       <th style="padding:10px 14px;text-align:left;font-weight:600;">Ratio</th>
@@ -503,12 +529,12 @@ on acquisition costs. That changes how you think about churn — permanently.</p
 <h2>Calculate Your Ratio</h2>
 <p style="color:var(--muted);font-size:15px;margin:-6px 0 24px;">Enter your last 6 quarters of data. All figures in the same currency (millions, thousands — just be consistent).</p>
 
-<div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px 32px;margin:0 0 40px;">
+<div class="ger-card" style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px 32px;margin:0 0 40px;">
   <div style="display:grid;gap:20px;">
 
     <div>
       <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">Revenue</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="ger-grid-2">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Current quarter (Q<sub>n</sub>)</label>
           <input id="rev_n" type="number" min="0" step="any" placeholder="e.g. 100"
@@ -524,7 +550,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
 
     <div>
       <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">GTM Spend (Sales &amp; Marketing) — last 4 quarters</p>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+      <div class="ger-grid-4">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-4</sub></label>
           <input id="gtm4" type="number" min="0" step="any" placeholder="e.g. 20"
@@ -550,7 +576,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
 
     <div>
       <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">R&amp;D Spend — 2 quarters (the build window)</p>
-      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-width:320px;">
+      <div class="ger-grid-2" style="max-width:320px;">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-5</sub></label>
           <input id="rnd5" type="number" min="0" step="any" placeholder="e.g. 16"
@@ -574,7 +600,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
     <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap;">
       <div style="flex:0 0 auto;">
         <p style="font-size:13px;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.06em;">Your Growth Engine Ratio</p>
-        <p id="ger-value" style="font-size:48px;font-weight:700;letter-spacing:-0.03em;margin:0;color:var(--accent);"></p>
+        <p id="ger-value" class="ger-value-big" style="font-size:48px;font-weight:700;letter-spacing:-0.03em;margin:0;color:var(--accent);"></p>
       </div>
       <div style="flex:1;min-width:200px;">
         <p id="ger-tier" style="font-size:18px;font-weight:600;margin:0 0 6px;"></p>
@@ -583,6 +609,50 @@ on acquisition costs. That changes how you think about churn — permanently.</p
       </div>
     </div>
     <div id="ger-detail" style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.8;"></div>
+
+    <div id="ger-sens" style="margin-top:26px;padding-top:22px;border-top:1px dashed var(--line);">
+      <p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">Sensitivity at a glance</p>
+      <p style="font-size:13px;color:var(--muted);margin:4px 0 6px;">How a &plusmn;10% change in any single assumption would move your ratio — everything else held constant. Wider bar = bigger lever.</p>
+
+      <div id="ger-spread" style="margin:8px 0 4px;"></div>
+      <p style="font-size:12px;color:var(--muted);margin:0;line-height:1.7;">
+        <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent);opacity:.5;vertical-align:middle;margin-right:4px;"></span>each end is a &plusmn;10% move &nbsp;&middot;&nbsp;
+        <span style="display:inline-block;width:2px;height:12px;background:var(--ink);vertical-align:middle;margin:0 5px -2px 2px;"></span>your current ratio &nbsp;&middot;&nbsp;
+        endpoint colour = tier at that point
+      </p>
+
+      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-top:30px;">
+        <p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">Flex it yourself</p>
+        <button onclick="resetSens()" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Reset to baseline</button>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin:4px 0 20px;">Drag any lever to test a custom change of up to &plusmn;20%.</p>
+
+      <div style="display:grid;gap:18px;">
+        <div>
+          <div class="ger-slider-row"><label for="s_gtm" style="color:var(--ink);font-weight:500;">GTM spend</label><span id="s_gtm_val" style="color:var(--accent);font-weight:600;">0%</span></div>
+          <input id="s_gtm" type="range" min="-20" max="20" step="1" value="0" oninput="updateSens()" style="width:100%;">
+        </div>
+        <div>
+          <div class="ger-slider-row"><label for="s_rnd" style="color:var(--ink);font-weight:500;">R&amp;D spend</label><span id="s_rnd_val" style="color:var(--accent);font-weight:600;">0%</span></div>
+          <input id="s_rnd" type="range" min="-20" max="20" step="1" value="0" oninput="updateSens()" style="width:100%;">
+        </div>
+        <div>
+          <div class="ger-slider-row"><label for="s_rev" style="color:var(--ink);font-weight:500;">Revenue growth (Q<sub>n</sub> &minus; Q<sub>n-1</sub>)</label><span id="s_rev_val" style="color:var(--accent);font-weight:600;">0%</span></div>
+          <input id="s_rev" type="range" min="-20" max="20" step="1" value="0" oninput="updateSens()" style="width:100%;">
+        </div>
+      </div>
+
+      <div style="margin-top:22px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;">
+        <div>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 2px;text-transform:uppercase;letter-spacing:.06em;">Adjusted ratio</p>
+          <p id="ger-sens-value" style="font-size:34px;font-weight:700;letter-spacing:-0.02em;margin:0;color:var(--accent);"></p>
+        </div>
+        <div style="flex:1;min-width:180px;">
+          <p id="ger-sens-tier" style="font-size:15px;font-weight:600;margin:0 0 2px;"></p>
+          <p id="ger-sens-delta" style="font-size:13px;color:var(--muted);margin:0;"></p>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -619,6 +689,21 @@ with The F Suite.</p>
 
 <script>
 function v(id) { return parseFloat(document.getElementById(id).value) || 0; }
+function fmtRatio(r) { return r >= 0 ? '$' + r.toFixed(2) : '-$' + Math.abs(r).toFixed(2); }
+
+// Shared tier lookup so the headline result and the sensitivity panel stay in sync.
+function gerTier(ratio) {
+  if (ratio >= 1.20) return {tier:'&#127942; Elite (top 10%)', color:'#1a4d3c',
+    interp:"You've earned the right to invest aggressively. Every new customer is profitable on acquisition — consider TAM expansion, adjacent markets, or accelerating hiring."};
+  if (ratio >= 0.70) return {tier:'&#11088; Strong (above median)', color:'#2d6a4f',
+    interp:"Solid performance. Focus on maintaining efficiency as you scale. You're close to the $1.00 break-even — small improvements in NRR or cost discipline can get you there."};
+  if (ratio >= 0.50) return {tier:'&#10003; Typical (near median)', color:'#b45309',
+    interp:"You're in the pack. Diagnose: is growth too slow, or investment too high? Pick one to improve first. Retention is critical."};
+  if (ratio > 0) return {tier:'&#9888;&#65039; Below target (bottom 25%)', color:'#b91c1c',
+    interp:"Urgent strategic review needed. Growth likely decelerated while spending stayed elevated. Fix retention and expansion economics before scaling acquisition further."};
+  return {tier:'&#8212; Negative growth', color:'#b91c1c',
+    interp:"Revenue declined quarter-over-quarter. Focus on stabilizing the base before evaluating efficiency."};
+}
 
 function loadExample() {
   document.getElementById('rev_n').value = 100;
@@ -649,44 +734,119 @@ function calcGER() {
 
   var ratio = annGrowth / totalInv;
   var breakeven = ratio > 0 ? (1 / ratio).toFixed(1) : '∞';
+  var t = gerTier(ratio);
 
-  var tier, tierColor, interp;
-  if (ratio >= 1.20) {
-    tier = '&#127942; Elite (top 10%)';
-    tierColor = '#1a4d3c';
-    interp = "You've earned the right to invest aggressively. Every new customer is profitable on acquisition — consider TAM expansion, adjacent markets, or accelerating hiring.";
-  } else if (ratio >= 0.70) {
-    tier = '&#11088; Strong (above median)';
-    tierColor = '#2d6a4f';
-    interp = "Solid performance. Focus on maintaining efficiency as you scale. You're close to the $1.00 break-even — small improvements in NRR or cost discipline can get you there.";
-  } else if (ratio >= 0.50) {
-    tier = '&#10003; Typical (near median)';
-    tierColor = '#b45309';
-    interp = "You're in the pack. Diagnose: is growth too slow, or investment too high? Pick one to improve first. Retention is critical — you need " + breakeven + " years just to break even on acquisition.";
-  } else if (ratio > 0) {
-    tier = '&#9888;&#65039; Below target (bottom 25%)';
-    tierColor = '#b91c1c';
-    interp = "Urgent strategic review needed. Growth likely decelerated while spending stayed elevated. Fix retention and expansion economics before scaling acquisition further.";
-  } else {
-    tier = '&#8212; Negative growth';
-    tierColor = '#b91c1c';
-    interp = "Revenue declined quarter-over-quarter. Focus on stabilizing the base before evaluating efficiency.";
-  }
-
-  document.getElementById('ger-value').textContent = ratio >= 0 ? '$' + ratio.toFixed(2) : '-$' + Math.abs(ratio).toFixed(2);
-  document.getElementById('ger-value').style.color = tierColor;
-  document.getElementById('ger-tier').innerHTML = tier;
-  document.getElementById('ger-tier').style.color = tierColor;
+  document.getElementById('ger-value').textContent = fmtRatio(ratio);
+  document.getElementById('ger-value').style.color = t.color;
+  document.getElementById('ger-tier').innerHTML = t.tier;
+  document.getElementById('ger-tier').style.color = t.color;
   document.getElementById('ger-breakeven').textContent = ratio > 0 ? 'Break-even: ' + breakeven + ' years at flat renewal' : '';
-  document.getElementById('ger-interp').textContent = interp;
+  document.getElementById('ger-interp').textContent = t.interp;
   document.getElementById('ger-detail').innerHTML =
     'Annualized growth: <strong>' + annGrowth.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
     'GTM investment (time-weighted): <strong>' + gtmInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
     'R&amp;D investment (time-weighted): <strong>' + rndInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
     'Total investment: <strong>' + totalInv.toFixed(1) + '</strong>';
 
+  // Stash the baseline for the sensitivity panel, draw the spread, reset sliders.
+  window.gerBase = {annGrowth: annGrowth, gtmInv: gtmInv, rndInv: rndInv, ratio: ratio};
+  renderSpread();
+  resetSens();
+
   document.getElementById('ger-result').style.display = 'block';
   document.getElementById('ger-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+// Draw the fixed ±10% spread chart: one range bar per lever on a shared axis.
+function renderSpread() {
+  var b = window.gerBase;
+  if (!b) return;
+  var d = 0.10;
+  var levers = [
+    {name: 'GTM spend',      minus: b.annGrowth / (b.gtmInv * (1 - d) + b.rndInv),
+                             plus:  b.annGrowth / (b.gtmInv * (1 + d) + b.rndInv)},
+    {name: 'R&amp;D spend',  minus: b.annGrowth / (b.gtmInv + b.rndInv * (1 - d)),
+                             plus:  b.annGrowth / (b.gtmInv + b.rndInv * (1 + d))},
+    {name: 'Revenue growth', minus: (b.annGrowth * (1 - d)) / (b.gtmInv + b.rndInv),
+                             plus:  (b.annGrowth * (1 + d)) / (b.gtmInv + b.rndInv)}
+  ];
+
+  var vals = [b.ratio];
+  levers.forEach(function(L) { vals.push(L.minus, L.plus); });
+  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  var pad = (hi - lo) * 0.18;
+  if (pad < 0.05) pad = 0.05;
+  lo -= pad; hi += pad;
+  function pos(x) { return ((x - lo) / (hi - lo)) * 100; }
+
+  var html = '';
+  levers.forEach(function(L) {
+    var loR = Math.min(L.minus, L.plus), hiR = Math.max(L.minus, L.plus);
+    var pl = pos(loR), pr = pos(hiR), pb = pos(b.ratio);
+    var loIsMinus = (L.minus <= L.plus);  // does the −10% move land on the low end?
+    html +=
+      '<div class="spread-row">' +
+        '<div class="spread-name">' + L.name + '</div>' +
+        '<div class="spread-track">' +
+          '<div class="spread-bar" style="left:' + pl + '%;width:' + (pr - pl) + '%;"></div>' +
+          '<div class="spread-base" style="left:' + pb + '%;"></div>' +
+          '<div class="spread-dot" style="left:' + pl + '%;background:' + gerTier(loR).color + ';"></div>' +
+          '<div class="spread-dot" style="left:' + pr + '%;background:' + gerTier(hiR).color + ';"></div>' +
+          '<div class="spread-cap" style="left:' + pl + '%;color:' + gerTier(loR).color + ';">' + fmtRatio(loR) + '</div>' +
+          '<div class="spread-cap" style="left:' + pr + '%;color:' + gerTier(hiR).color + ';">' + fmtRatio(hiR) + '</div>' +
+          '<div class="spread-sub" style="left:' + pl + '%;">' + (loIsMinus ? '-10%' : '+10%') + '</div>' +
+          '<div class="spread-sub" style="left:' + pr + '%;">' + (loIsMinus ? '+10%' : '-10%') + '</div>' +
+        '</div>' +
+      '</div>';
+  });
+  document.getElementById('ger-spread').innerHTML = html;
+}
+
+function setSliderLabel(id, pct) {
+  document.getElementById(id).textContent = (pct > 0 ? '+' : '') + pct + '%';
+}
+
+function updateSens() {
+  var b = window.gerBase;
+  if (!b) return;
+  var gtmPct = parseInt(document.getElementById('s_gtm').value, 10);
+  var rndPct = parseInt(document.getElementById('s_rnd').value, 10);
+  var revPct = parseInt(document.getElementById('s_rev').value, 10);
+  setSliderLabel('s_gtm_val', gtmPct);
+  setSliderLabel('s_rnd_val', rndPct);
+  setSliderLabel('s_rev_val', revPct);
+
+  var adjGrowth = b.annGrowth * (1 + revPct / 100);
+  var adjTotal = b.gtmInv * (1 + gtmPct / 100) + b.rndInv * (1 + rndPct / 100);
+  var adjRatio = adjTotal > 0 ? adjGrowth / adjTotal : 0;
+  var t = gerTier(adjRatio);
+  var baseT = gerTier(b.ratio);
+
+  document.getElementById('ger-sens-value').textContent = fmtRatio(adjRatio);
+  document.getElementById('ger-sens-value').style.color = t.color;
+  document.getElementById('ger-sens-tier').innerHTML = t.tier;
+  document.getElementById('ger-sens-tier').style.color = t.color;
+
+  var diff = adjRatio - b.ratio;
+  var deltaEl = document.getElementById('ger-sens-delta');
+  if (Math.abs(diff) < 0.005 && t.tier === baseT.tier) {
+    deltaEl.innerHTML = 'Same as your baseline of ' + fmtRatio(b.ratio) + '.';
+  } else {
+    var arrow = diff >= 0 ? '&#9650;' : '&#9660;';
+    var sign = diff >= 0 ? '+' : '-';
+    var msg = arrow + ' ' + sign + '$' + Math.abs(diff).toFixed(2) + ' vs. baseline of ' + fmtRatio(b.ratio);
+    if (t.tier !== baseT.tier) {
+      msg += ' &mdash; <strong style="color:' + t.color + ';">crosses tier</strong>';
+    }
+    deltaEl.innerHTML = msg;
+  }
+}
+
+function resetSens() {
+  document.getElementById('s_gtm').value = 0;
+  document.getElementById('s_rnd').value = 0;
+  document.getElementById('s_rev').value = 0;
+  updateSens();
 }
 </script>"""
     return HTMLResponse(_page("The Growth Engine Ratio — Brian Weisberg", "Thought Leadership", body))
