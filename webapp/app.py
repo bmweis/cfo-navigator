@@ -830,6 +830,10 @@ function esc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }}
 
+function confirmDelete(form) {{
+  return confirm('Delete ' + form.dataset.toolname + '?');
+}}
+
 function renderTools(tools) {{
   var grid = document.getElementById('tool-grid');
   var empty = document.getElementById('tool-empty');
@@ -852,7 +856,7 @@ function renderTools(tools) {{
         + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Edit</a>'
         + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:inline;"'
         + ' data-toolname="' + esc(t.name) + '"'
-        + ' onsubmit="return confirm(\'Delete \'+this.dataset.toolname+\'?\')">'
+        + ' onsubmit="return confirmDelete(this)">'
         + '<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button>'
         + '</form></div>';
     }}
