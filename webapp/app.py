@@ -78,12 +78,15 @@ app = FastAPI(title="bmweis.com")
 
 @app.on_event("startup")
 def _seed_toolbox():
-    """Seed the tools directory on first boot if the table is empty."""
+    """Seed any tools from the seed list that aren't yet in the DB (checked by URL)."""
     from scripts.seed_tools import TOOLS
     lib = _lib()
     try:
-        if lib.conn.execute("SELECT COUNT(*) FROM tools").fetchone()[0] == 0:
-            for t in TOOLS:
+        for t in TOOLS:
+            exists = lib.conn.execute(
+                "SELECT 1 FROM tools WHERE url = ?", (t["url"],)
+            ).fetchone()
+            if not exists:
                 lib.add_tool(t["name"], t["description"], t["url"], t["categories"], approved=1)
     finally:
         lib.close()
