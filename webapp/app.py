@@ -793,7 +793,7 @@ function contributionSVG(strip, cur, labels) {
   var rndInv = 0.25 * (r[0] + r[1]);
   var tot = gtmInv + rndInv, ratio = tot > 0 ? ann / tot : 0;
 
-  var W = 760, H = 600, x0 = 118, x1 = 612, n = 6;
+  var W = 760, H = 622, x0 = 118, x1 = 612, n = 6;
   var step = (x1 - x0) / n, bw = Math.min(58, step * 0.6);
   function cx(c) { return x0 + step * (c + 0.5); }
   function fmtM(x) { var a = Math.round(x * 10) / 10; return '$' + (a % 1 === 0 ? a.toFixed(0) : a.toFixed(1)) + 'M'; }
@@ -809,16 +809,16 @@ function contributionSVG(strip, cur, labels) {
   s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#2c3e50">How ' + labels[cur] + ' is built &#8212; Time-Distributed Contribution</text>';
   s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Efficiency Ratio = $' + ratio.toFixed(2) + '</text>';
 
-  s += '<text x="20" y="176" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
-  s += '<text x="20" y="304" font-size="13" font-weight="700" fill="' + GREEN + '">Revenue</text>';
-  s += '<text x="20" y="462" font-size="13" font-weight="700" fill="' + RED + '">R&amp;D</text>';
+  s += '<text x="20" y="186" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
+  s += '<text x="20" y="320" font-size="13" font-weight="700" fill="' + GREEN + '">Revenue</text>';
+  s += '<text x="20" y="498" font-size="13" font-weight="700" fill="' + RED + '">R&amp;D</text>';
 
-  // Spend bars are scaled by $ on a shared GTM+R&D scale so heights are comparable;
+  // One shared scale across spend AND revenue so every box is comparable by $;
   // each is bottom-aligned on its lane baseline with a 25% "pull" cap on top.
-  var smax = Math.max(g[0], g[1], g[2], g[3], r[0], r[1], 1), spendMaxH = 62;
-  function spendH(val) { return Math.max(val / smax * spendMaxH, 6); }
+  var allMax = Math.max(g[0], g[1], g[2], g[3], r[0], r[1], revC, revP, 1), BARMAX = 142;
+  function barH(val) { return Math.max(val / allMax * BARMAX, 3); }
   function spendBar(c, baseY, val, col, grad) {
-    var h = spendH(val), x = cx(c) - bw / 2, y = baseY - h, capH = h * 0.25;
+    var h = barH(val), x = cx(c) - bw / 2, y = baseY - h, capH = h * 0.25;
     var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="6" fill="url(#' + grad + ')" stroke="' + col + '" stroke-opacity="0.45"/>';
     o += '<path d="M' + x.toFixed(1) + ' ' + (y + capH).toFixed(1) + ' L' + x.toFixed(1) + ' ' + (y + 6).toFixed(1) + ' Q' + x.toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + 6).toFixed(1) + ' ' + y.toFixed(1) + ' L' + (x + bw - 6).toFixed(1) + ' ' + y.toFixed(1) + ' Q' + (x + bw).toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + bw).toFixed(1) + ' ' + (y + 6).toFixed(1) + ' L' + (x + bw).toFixed(1) + ' ' + (y + capH).toFixed(1) + ' Z" fill="' + col + '"/>';
     if (h >= 22) o += '<text x="' + cx(c).toFixed(1) + '" y="' + (y + capH - 3).toFixed(1) + '" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">25%</text>';
@@ -834,15 +834,15 @@ function contributionSVG(strip, cur, labels) {
     return o;
   }
 
-  // GTM lane (contributing quarters are window columns 1..4), bottom-aligned at gB
-  var gB = 180;
-  s += bracket(1, 4, gB - spendMaxH - 14, BLUE, 'GTM Investment = ' + fmtM(gtmInv));
+  // GTM lane bottom-aligned at gB
+  var gB = 174, gTop = gB - barH(Math.max(g[0], g[1], g[2], g[3]));
+  s += bracket(1, 4, gTop - 12, BLUE, 'GTM Investment = ' + fmtM(gtmInv));
   for (var c = 1; c <= 4; c++) s += spendBar(c, gB, g[c - 1], BLUE, 'cgB');
 
-  // Revenue lane (prior at col 4, current at col 5)
-  var maxr = Math.max(revC, revP, 1), baseY = 334, maxh = 104;
+  // Revenue lane bottom-aligned at rB (same scale as spend)
+  var rB = 388;
   function revBar(c, val, isCur) {
-    var h = Math.max(val / maxr * maxh, 2), x = cx(c) - bw / 2, y = baseY - h;
+    var h = barH(val), x = cx(c) - bw / 2, y = rB - h;
     var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="7" fill="' + (isCur ? 'url(#cgG)' : '#d7f0e3') + '" stroke="' + GREEN + '" stroke-opacity="' + (isCur ? '0.55' : '0.3') + '"/>';
     o += '<text x="' + cx(c).toFixed(1) + '" y="' + (isCur ? (y + 19) : (y - 7)).toFixed(1) + '" text-anchor="middle" font-size="' + (isCur ? '12' : '10.5') + '" font-weight="' + (isCur ? '700' : '500') + '" fill="' + (isCur ? '#fff' : MUT) + '">' + fmtM(val) + '</text>';
     return o;
@@ -851,20 +851,20 @@ function contributionSVG(strip, cur, labels) {
   s += revBar(5, revC, true);
 
   // annualized-growth callout beside the current revenue bar (tracks its top)
-  var curTop = baseY - Math.max(revC / maxr * maxh, 2);
-  var gx = cx(5) + bw / 2 + 16, gy = Math.max(curTop, 150), cw = 110;
+  var curTop = rB - barH(revC);
+  var gx = cx(5) + bw / 2 + 16, gy = Math.max(curTop, 140), cw = 110;
   s += '<line x1="' + (cx(5) + bw / 2).toFixed(1) + '" y1="' + (gy + 19) + '" x2="' + gx.toFixed(1) + '" y2="' + (gy + 19) + '" stroke="' + GREEN + '" stroke-width="1.4" stroke-dasharray="3 2"/>';
   s += '<rect x="' + gx.toFixed(1) + '" y="' + gy.toFixed(1) + '" width="' + cw + '" height="38" rx="9" fill="#eafaf0" stroke="' + GREEN + '" stroke-width="1.6"/>';
   s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 18).toFixed(1) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + GREEN + '">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</text>';
   s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 32).toFixed(1) + '" text-anchor="middle" font-size="9.5" fill="' + GREEN + '">Annualized Growth</text>';
 
-  // R&D lane (contributing quarters are window columns 0..1), bottom-aligned at dB
-  var dB = 468;
-  s += bracket(0, 1, dB - spendMaxH - 14, RED, 'R&amp;D Investment = ' + fmtM(rndInv));
+  // R&D lane bottom-aligned at dB (same scale)
+  var dB = 494, dTop = dB - barH(Math.max(r[0], r[1]));
+  s += bracket(0, 1, dTop - 12, RED, 'R&amp;D Investment = ' + fmtM(rndInv));
   for (var c = 0; c <= 1; c++) s += spendBar(c, dB, r[c], RED, 'cgR');
 
   // timeline axis
-  var ty = 502;
+  var ty = 530;
   s += '<line x1="' + (x0 - 8) + '" y1="' + ty + '" x2="' + (x1 + 8) + '" y2="' + ty + '" stroke="#cfc8bc" stroke-width="2"/>';
   for (var c = 0; c < n; c++) {
     var isCur = (c === 5);
@@ -874,7 +874,7 @@ function contributionSVG(strip, cur, labels) {
 
   // formula pill
   var label2 = (ann >= 0 ? '+' : '') + fmtM(ann) + ' / ( ' + fmtM(gtmInv) + ' + ' + fmtM(rndInv) + ' ) = $' + ratio.toFixed(2);
-  var fw = label2.length * 7.3 + 40, fx = W / 2 - fw / 2, fy = 556;
+  var fw = label2.length * 7.3 + 40, fx = W / 2 - fw / 2, fy = 580;
   var pill = '<tspan fill="' + GREEN + '" font-weight="700">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</tspan> &#247; ( ' +
     '<tspan fill="' + BLUE + '" font-weight="700">' + fmtM(gtmInv) + '</tspan> + ' +
     '<tspan fill="' + RED + '" font-weight="700">' + fmtM(rndInv) + '</tspan> ) = ' +
@@ -962,19 +962,8 @@ function calcTimeline() {
     return;
   }
 
-  var series = [];
-  if (TL.fwd > 0) {
-    var up = strip.map(function(q, idx) { return idx > cur ? {rev: q.rev * 1.1, gtm: q.gtm * 0.9, rnd: q.rnd * 0.9} : q; });
-    var dn = strip.map(function(q, idx) { return idx > cur ? {rev: q.rev * 0.9, gtm: q.gtm * 1.1, rnd: q.rnd * 1.1} : q; });
-    var upP = [], dnP = [];
-    for (var i = cur; i < n; i++) {
-      var ru = gerStripAt(up, i); if (ru !== null) upP.push({i: i, y: ru});
-      var rd = gerStripAt(dn, i); if (rd !== null) dnP.push({i: i, y: rd});
-    }
-    series.push({pts: upP, color: '#8a9a93', dash: true, role: 'up'});
-    series.push({pts: dnP, color: '#8a9a93', dash: true, role: 'dn'});
-  }
-  series.push({pts: base, color: '#1a4d3c', dotsTier: true, splitAt: cur, role: 'base'});
+  // One solid line for the whole window — just show how performance stacks up vs the benchmark.
+  var series = [{pts: base, color: '#1a4d3c', dotsTier: true, role: 'base'}];
 
   var first = base[0], last = base[base.length - 1];
   var curY = gerStripAt(strip, cur); if (curY === null) curY = last.y;
@@ -988,7 +977,7 @@ function calcTimeline() {
       '<p style="font-weight:600;margin:0 0 2px;color:' + ct.color + ';">' + ct.tier + '</p>' +
       '<p style="font-size:14px;color:var(--muted);margin:0;">Across ' + base.length + ' measured quarter' + (base.length > 1 ? 's' : '') +
       ' the ratio is <strong>' + dir + '</strong> (' + fmtRatio(first.y) + ' &rarr; ' + fmtRatio(last.y) + '). ' +
-      (TL.fwd > 0 ? 'Dashed = projected path; the grey band is best/worst case if projected revenue and spend each land 10% better or worse than plan. ' : '') +
+      (TL.fwd > 0 ? 'Quarters past n are your projections. ' : '') +
       'Shaded bands are the benchmark tiers; the dashed grey line is $1.00 break-even.</p></div></div>';
 
   window.tlStrip = strip; window.tlLabels = labels;
