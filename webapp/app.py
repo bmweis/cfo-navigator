@@ -2670,16 +2670,16 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
 
     pre_url = _esc(url)
 
-    voice_badge = (
-        '<span style="font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;'
-        'border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>'
-        if is_customized else
-        '<span style="font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;">Built-in default</span>'
-    )
+    if is_customized:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
+                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
+    else:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;color:var(--muted);'
+                       'margin-left:10px;vertical-align:middle;">Built-in default</span>')
     reset_btn = (
         '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
-        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;">Reset to default</button>'
-        if is_customized else ""
+        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
+        f'{"" if is_customized else "display:none;"}">Reset to default</button>'
     )
 
     body = f"""<div class="page" style="max-width:820px;">
@@ -2805,17 +2805,16 @@ async function saveVoice() {{
     status.textContent = 'Saved.';
     status.style.color = '#065f46';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
+    var badge = document.getElementById('voice-badge');
     var resetBtn = document.getElementById('reset-btn');
-    if (d.custom && !resetBtn) {{
-      var saveBtn = document.getElementById('voice-save-btn');
-      var rb = document.createElement('button');
-      rb.id = 'reset-btn'; rb.className = 'btn btn-ghost';
-      rb.style.cssText = 'font-size:13px;color:#b91c1c;border-color:#fca5a5;';
-      rb.textContent = 'Reset to default';
-      rb.onclick = resetVoice;
-      saveBtn.parentNode.insertBefore(rb, saveBtn.nextSibling);
-    }} else if (!d.custom && resetBtn) {{
-      resetBtn.remove();
+    if (d.custom) {{
+      badge.textContent = 'Customized';
+      badge.style.cssText = 'font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;';
+      resetBtn.style.display = '';
+    }} else {{
+      badge.textContent = 'Built-in default';
+      badge.style.cssText = 'font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;';
+      resetBtn.style.display = 'none';
     }}
   }} catch(e) {{
     status.textContent = 'Save failed — try again.';
@@ -2827,8 +2826,17 @@ async function saveVoice() {{
 
 async function resetVoice() {{
   if (!confirm('Reset to the built-in default voice prompt? Your edits will be lost.')) return;
-  document.getElementById('voice-prompt').value = {repr(BRIAN_VOICE)};
-  await saveVoice();
+  try {{
+    var r = await fetch('/admin/voice', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{voice_prompt: ''}})
+    }});
+    if (!r.ok) throw new Error();
+    window.location.reload();
+  }} catch(e) {{
+    alert('Reset failed — try again.');
+  }}
 }}
 
 document.addEventListener('keydown', function(e) {{
@@ -2989,7 +2997,7 @@ def bookmarklet(request: Request):
 @app.post("/post")
 async def post_draft(request: Request):
     _require_api(request)
-    from linklib.social import draft_post, DEFAULT_MODEL, BRIAN_VOICE
+    from linklib.social import draft_post, DEFAULT_MODEL
     payload = await request.json()
     model = (payload.get("model") or "").strip() or DEFAULT_MODEL
     lib = _lib()
