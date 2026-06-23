@@ -106,6 +106,48 @@ TOOLS = [
         "description": "AI-native billing and revenue recognition automation for complex pricing models. Handles usage-based billing, ASC 606-compliant RevRec, and integrates with CRMs, ERPs, and payment systems.",
         "categories": ["Billing"],
     },
+    {
+        "name": "RightRev",
+        "url": "https://www.rightrev.com",
+        "description": "ASC 606 and IFRS 15 revenue recognition automation for SaaS and usage-based businesses. Processes complex contracts at scale with full audit readiness and native Salesforce integration.",
+        "categories": ["Financial Close"],
+    },
+    {
+        "name": "HubiFi",
+        "url": "https://www.hubifi.com",
+        "description": "Automated revenue recognition and reconciliation platform for high-volume businesses. Handles ASC 606 compliance, continuous close, and real-time revenue reporting across complex billing models.",
+        "categories": ["Financial Close"],
+    },
+    {
+        "name": "Runway",
+        "url": "https://runway.com",
+        "description": "FP&A platform built for high-growth teams. Connects 750+ data sources for financial modeling, forecasting, and reporting with human-readable formulas and real-time actuals sync.",
+        "categories": ["FP&A", "Financial Planning"],
+    },
+    {
+        "name": "Lumera",
+        "url": "https://www.lumerahq.com",
+        "description": "Governed AI infrastructure for finance teams. Lets controllers and FP&A teams build automations, agents, and scripts for close workflows — reconciliations, flux, journal entries — with full audit trails.",
+        "categories": ["Financial Close", "FP&A"],
+    },
+    {
+        "name": "Planful",
+        "url": "https://planful.com",
+        "description": "End-to-end financial performance management platform covering planning, budgeting, forecasting, close, consolidation, and reporting. Built for the Office of the CFO at mid-market to enterprise scale.",
+        "categories": ["FP&A", "Financial Planning", "Financial Close"],
+    },
+    {
+        "name": "Aleph",
+        "url": "https://www.getaleph.com",
+        "description": "AI-native FP&A platform that works alongside your existing spreadsheets. Connects 150+ data sources for financial modeling, budget planning, reporting, and close — with a familiar spreadsheet interface.",
+        "categories": ["FP&A", "Financial Planning"],
+    },
+    {
+        "name": "Pigment",
+        "url": "https://www.pigment.com",
+        "description": "Enterprise AI business planning platform for finance, sales, and HR. Covers FP&A, headcount planning, and sales performance management in a single connected model with real-time scenario analysis.",
+        "categories": ["FP&A", "Financial Planning", "Headcount Planning"],
+    },
 ]
 
 
