@@ -148,6 +148,12 @@ TOOLS = [
         "description": "Enterprise AI business planning platform for finance, sales, and HR. Covers FP&A, headcount planning, and sales performance management in a single connected model with real-time scenario analysis.",
         "categories": ["FP&A", "Financial Planning", "Headcount Planning"],
     },
+    {
+        "name": "Glidely",
+        "url": "https://glidely.ai",
+        "description": "AI agents for procurement renewals and new purchasing. Automates RFx generation, vendor scoring, and negotiation prep — built for teams without a dedicated procurement function.",
+        "categories": ["Procurement"],
+    },
 ]
 
 
