@@ -2861,48 +2861,6 @@ async def admin_voice_save(request: Request):
         lib.close()
     return JSONResponse({"ok": True, "custom": bool(prompt)})
 
-
-@app.get("/admin/upload-db", response_class=HTMLResponse)
-def upload_db_page(request: Request):
-    """One-time helper to seed the hosted DB from a local library.db.
-
-    Login-gated. Drag the local file in and submit — the next page load uses
-    it (connections are opened per-request, so no restart is needed). Safe to
-    leave in place: it's protected by the same secret as the rest of the
-    private section.
-    """
-    if not _is_authed(request):
-        return _login_redirect(request)
-    try:
-        lib = _lib()
-        try:
-            current = lib.count()
-        finally:
-            lib.close()
-    except Exception:
-        current = "unknown"
-    body = f"""<div class="page">
-  <h1>Upload library database</h1>
-  <p class="muted">Current hosted database holds <strong>{current}</strong> articles.
-  Uploading replaces it with the file you select. This is meant as a one-time
-  seed from your local <code>library.db</code>.</p>
-  <form method="post" action="/admin/upload-db" enctype="multipart/form-data"
-        style="margin-top:1.5rem;display:flex;flex-direction:column;gap:1rem;max-width:480px;">
-    <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
-           style="padding:0.5rem;border:1px solid #ccc;border-radius:6px;">
-    <button type="submit"
-            style="padding:0.6rem 1rem;background:#1a1a2e;color:#fff;border:none;border-radius:6px;cursor:pointer;">
-      Upload and replace
-    </button>
-  </form>
-  <p class="muted" style="margin-top:1rem;font-size:0.85rem;">
-    Tip: quit your local app first so the file is fully written, then upload
-    <code>library.db</code> (the main file only — the <code>-wal</code>/<code>-shm</code>
-    sidecars aren't needed).</p>
-</div>"""
-    return HTMLResponse(_page("Upload database", "", body, authed=True))
-
-
 @app.post("/admin/upload-db", response_class=HTMLResponse)
 async def upload_db(request: Request, file: UploadFile = File(...), token: str | None = None):
     _require_api(request, token)
