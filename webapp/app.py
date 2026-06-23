@@ -267,6 +267,7 @@ def _page(title: str, active: str, body: str, authed: bool = False) -> str:
         for href, label in nav_items
     )
     if authed:
+        nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin</a>'
         nav += '<a href="/logout">Log out</a>'
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2235,10 +2236,6 @@ def library(request: Request, q: str = ""):
     def _card(r):
         tags_csv = _esc(",".join(r.get("tags", [])))
         tag_spans = "".join(f'<span>{_esc(t)}</span>' for t in r.get("tags", []))
-        draft_btn = (
-            '<button class="postbtn" onclick="draftPost(\'' + _esc(r["url"]) + '\')">Draft LinkedIn post</button>'
-            if authed else ""
-        )
         return f"""<article class="card" id="card-{r['id']}">
           <a class="card-title" href="{r['url']}" target="_blank" rel="noopener">{_esc(r['title'])}</a>
           <div class="meta">{_esc(r.get('source',''))}{' &middot; ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
@@ -2255,7 +2252,6 @@ def library(request: Request, q: str = ""):
           </div>
           <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
             <a href="/read?id={r['id']}" class="postbtn" style="text-decoration:none;">Read</a>
-            {draft_btn}
             <button class="postbtn" onclick="openTagEditor({r['id']})">Edit tags</button>
             <form method="post" action="/library/{r['id']}/delete" style="display:inline;"
                   onsubmit="return confirm('Permanently delete this article?');">
@@ -2269,17 +2265,6 @@ def library(request: Request, q: str = ""):
     tagbar = "".join(
         f'<a href="/library?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
     )
-
-    _draft_post_js = """
-async function draftPost(url){
-  var box=document.getElementById('answer');
-  box.style.display='block';box.scrollIntoView({behavior:'smooth'});box.innerHTML='<em>Drafting in your voice…</em>';
-  try{
-    var r=await fetch('/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url,mode:'original'})});
-    var d=await r.json();
-    box.innerHTML='<div style="white-space:pre-wrap;line-height:1.6;">'+(d.post||'')+'</div><button class="btn btn-ghost" style="margin-top:10px;font-size:13px;" onclick="navigator.clipboard.writeText(this.previousElementSibling.innerText)">Copy</button>';
-  }catch(e){box.innerHTML='Something went wrong.';}
-}""" if authed else ""
 
     page_body = f"""<div style="border-bottom:1px solid var(--line);padding:20px 24px;">
   <div style="max-width:780px;margin:0 auto;">
@@ -2364,7 +2349,6 @@ async function ask(){{
     box.innerHTML='<p>'+(d.answer||'').replace(/\\n/g,'<br>')+'</p>'+((lib||feed||web)?'<ul style="padding-left:18px;font-size:13px;">'+lib+feed+web+'</ul>':'');
   }}catch(e){{box.innerHTML='Something went wrong.';}}
 }}
-{_draft_post_js}
 </script>"""
 
     return HTMLResponse(_page("Library—Brian Weisberg", "Library", page_body, authed=authed))
@@ -2640,6 +2624,158 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         lib.close()
 
 
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, url: str = "", uploaded: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        count = lib.count()
+    finally:
+        lib.close()
+
+    from linklib.social import DEFAULT_MODEL
+    models = [
+        ("claude-haiku-4-5-20251001", "Haiku", "Fast &amp; cheap"),
+        ("claude-sonnet-4-6",         "Sonnet", "Balanced &mdash; default"),
+        ("claude-opus-4-8",           "Opus",   "Best quality"),
+    ]
+    modes = [
+        ("original",      "Original POV",  "Your take sparked by the article — not a summary"),
+        ("amplification", "Amplify",       "Signal genuine resonance, build past the original"),
+        ("self_promo",    "Self-promote",  "Promote your own work: lean, single-analogy"),
+    ]
+
+    def _radio(name, value, label, detail, checked):
+        chk = " checked" if checked else ""
+        return (
+            f'<label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;padding:6px 0;border-top:1px solid var(--line);">'
+            f'<input type="radio" name="{name}" value="{value}"{chk} style="margin-top:3px;accent-color:var(--accent);flex-shrink:0;">'
+            f'<span><strong>{label}</strong><span style="display:block;font-size:12px;color:var(--muted);">{detail}</span></span>'
+            f'</label>'
+        )
+
+    model_radios = "".join(
+        _radio("model", mid, label, detail, mid == DEFAULT_MODEL)
+        for mid, label, detail in models
+    )
+    mode_radios = "".join(
+        _radio("post-mode", val, label, detail, val == "original")
+        for val, label, detail in modes
+    )
+
+    pre_url = _esc(url)
+
+    body = f"""<div class="page" style="max-width:820px;">
+<h1>Admin</h1>
+
+<h2 style="margin-top:0;">LinkedIn post generator</h2>
+<p style="color:var(--muted);margin:-6px 0 20px;">Draft a post in your voice from any URL or topic.</p>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:16px;">
+  <div style="display:grid;gap:16px;">
+
+    <div>
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Article URL</label>
+      <input id="post-url" type="url" value="{pre_url}" placeholder="https://…"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
+    </div>
+
+    <div>
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">Or topic <span style="font-weight:400;text-transform:none;letter-spacing:0;">(used when URL is blank; pulls from your library)</span></label>
+      <input id="post-topic" type="text" placeholder="e.g. headcount planning in uncertain environments"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:0;">Mode</div>
+        <div style="display:flex;flex-direction:column;">{mode_radios}</div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:0;">Model</div>
+        <div style="display:flex;flex-direction:column;">{model_radios}</div>
+      </div>
+    </div>
+
+    <div>
+      <button id="draft-btn" onclick="doDraft()" class="btn" style="padding:11px 28px;font-size:15px;">Draft post</button>
+      <span style="font-size:13px;color:var(--muted);margin-left:14px;">&#8984;&#9166; to draft</span>
+    </div>
+  </div>
+</div>
+
+<div id="draft-result" style="display:none;background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:40px;">
+  <div id="draft-output" style="white-space:pre-wrap;line-height:1.75;font-size:15px;color:var(--ink);"></div>
+  <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:10px;">
+    <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(document.getElementById('draft-output').innerText)" style="font-size:13px;">Copy</button>
+    <button class="btn btn-ghost" onclick="doDraft()" style="font-size:13px;">Redraft</button>
+  </div>
+</div>
+
+<h2>Library database</h2>
+{'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;font-size:14px;margin:-6px 0 16px;">Database replaced — ' + _esc(uploaded) + ' articles now live.</p>' if uploaded else ''}
+<p style="color:var(--muted);margin:-6px 0 20px;">Currently <strong>{count:,}</strong> articles. Use this if the hosted database crashes or gets corrupted.</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+  <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;">
+    <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately — no restart needed.</p>
+    <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+      <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
+        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+      <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
+    </form>
+  </div>
+  <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;">
+    <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download current database</p>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Download a consistent snapshot of the live database. Good for local backup before making changes.</p>
+    <a href="/admin/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
+  </div>
+</div>
+</div>
+
+<script>
+async function doDraft() {{
+  var url = document.getElementById('post-url').value.trim();
+  var topic = document.getElementById('post-topic').value.trim();
+  var mode = document.querySelector('input[name="post-mode"]:checked')?.value || 'original';
+  var model = document.querySelector('input[name="model"]:checked')?.value || '{_esc(DEFAULT_MODEL)}';
+  if (!url && !topic) {{
+    document.getElementById('post-url').focus();
+    return;
+  }}
+  var btn = document.getElementById('draft-btn');
+  var result = document.getElementById('draft-result');
+  var output = document.getElementById('draft-output');
+  btn.disabled = true; btn.textContent = 'Drafting…';
+  result.style.display = 'block';
+  output.textContent = 'Drafting in your voice…';
+  result.scrollIntoView({{behavior:'smooth', block:'nearest'}});
+  try {{
+    var payload = {{mode: mode, model: model}};
+    if (url) payload.url = url; else payload.topic = topic;
+    var r = await fetch('/post', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(payload)
+    }});
+    var d = await r.json();
+    output.textContent = d.post || '(no output)';
+  }} catch(e) {{
+    output.textContent = 'Something went wrong: ' + e;
+  }} finally {{
+    btn.disabled = false; btn.textContent = 'Draft post';
+  }}
+}}
+document.addEventListener('keydown', function(e) {{
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doDraft();
+}});
+</script>"""
+
+    return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+
+
 @app.get("/admin/upload-db", response_class=HTMLResponse)
 def upload_db_page(request: Request):
     """One-time helper to seed the hosted DB from a local library.db.
@@ -2717,13 +2853,7 @@ async def upload_db(request: Request, file: UploadFile = File(...), token: str |
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
 
-    body = f"""<div class="page">
-  <h1>Upload complete</h1>
-  <p>Imported a database with <strong>{n}</strong> articles. It's live now —
-  no restart needed.</p>
-  <p style="margin-top:1rem;"><a href="/library">Go to the library →</a></p>
-</div>"""
-    return HTMLResponse(_page("Upload complete", "", body, authed=True))
+    return RedirectResponse(f"/admin?uploaded={n}", status_code=303)
 
 
 @app.get("/admin/download-db")
@@ -2781,12 +2911,14 @@ def bookmarklet(request: Request):
 @app.post("/post")
 async def post_draft(request: Request):
     _require_api(request)
-    from linklib.social import draft_post
+    from linklib.social import draft_post, DEFAULT_MODEL
     payload = await request.json()
+    model = (payload.get("model") or "").strip() or DEFAULT_MODEL
     lib = _lib()
     try:
         d = draft_post(lib, article_id=payload.get("id"), url=payload.get("url"),
-                       topic=payload.get("topic"), mode=payload.get("mode", "original"))
+                       topic=payload.get("topic"), mode=payload.get("mode", "original"),
+                       model=model)
         return {"post": d.post}
     finally:
         lib.close()
