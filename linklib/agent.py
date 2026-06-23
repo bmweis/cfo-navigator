@@ -100,6 +100,20 @@ class Answer:
     web_sources: list[dict] = field(default_factory=list)   # fresh web results
 
 
+# Reuse one client across requests so its httpx connection pool stays warm —
+# sequential questions skip the TLS handshake to the API. The SDK client is
+# thread-safe, so sharing it across FastAPI's request threads is fine.
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        from anthropic import Anthropic
+        _client = Anthropic()
+    return _client
+
+
 def retrieve(lib: Library, question: str, max_sources: int = 8) -> list[dict]:
     return lib.search(_safe_fts_query(question), limit=max_sources)
 
@@ -206,9 +220,8 @@ def answer_question(
     if use_feed and opml_path:
         feed_items = retrieve_feed(question, opml_path, max_items=settings["max_feed"])
 
-    try:
-        from anthropic import Anthropic
-    except ImportError:
+    import importlib.util
+    if importlib.util.find_spec("anthropic") is None:
         return Answer(text="(Install `anthropic` to enable answers.)",
                       sources=lib_hits, feed_sources=feed_items)
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -242,8 +255,7 @@ def answer_question(
         kwargs["tools"] = [tool]
 
     try:
-        client = Anthropic()
-        resp = client.messages.create(**kwargs)
+        resp = _get_client().messages.create(**kwargs)
         text = "".join(
             b.text for b in resp.content if getattr(b, "type", None) == "text"
         ).strip()
