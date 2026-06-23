@@ -1950,12 +1950,14 @@ function updateCount(n) {{
   document.getElementById('filter-count').textContent = n + ' of ' + total + ' shown';
 }}
 function saveItem(btn, url) {{
+  var t = prompt('Tags (comma-separated, optional):');
+  if (t === null) return;
   btn.textContent = 'Saving…';
   btn.classList.add('saved');
   fetch('/feed/save', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-    body: 'url=' + encodeURIComponent(url)
+    body: 'url=' + encodeURIComponent(url) + '&tags=' + encodeURIComponent(t)
   }})
   .then(r => {{ btn.textContent = r.ok ? '✓ Saved' : '✗ Error'; }})
   .catch(() => {{ btn.textContent = '✗ Error'; btn.classList.remove('saved'); }});
@@ -2028,6 +2030,7 @@ _READER_TMPL = """<!doctype html><html lang="en"><head>
   <div class="reader-controls">
     <button onclick="adj(-2)">A&minus;</button>
     <button onclick="adj(2)">A+</button>
+    {article_controls}
     <a href="{orig_url}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:13px;">Original &rarr;</a>
   </div>
 </div>
@@ -2035,9 +2038,11 @@ _READER_TMPL = """<!doctype html><html lang="en"><head>
   <div class="reader-meta">
     <h1>{title}</h1>
     <div class="byline">{byline}</div>
+    {tags_block}
   </div>
   <div class="reader-body">{body}</div>
 </div>
+{article_script}
 <script>
 var fs = parseInt(localStorage.getItem('reader-fs') || '18');
 document.documentElement.style.setProperty('--fs', fs + 'px');
@@ -2125,11 +2130,92 @@ def reader(request: Request, url: str = "", id: int = 0):
           <p style="margin-top:16px;"><a href="{_esc(url)}" target="_blank" rel="noopener">Open original article &rarr;</a></p>
         </div>"""
 
+    # Article management controls — only shown when loaded by id from the DB
+    article_controls = ""
+    tags_block = ""
+    article_script = ""
+    if article:
+        aid = article["id"]
+        current_tags = article.get("tags", [])
+        tags_csv = _esc(",".join(current_tags))
+        tag_spans = "".join(
+            f'<span style="font-size:12px;color:var(--accent);background:#eef3f0;'
+            f'border-radius:6px;padding:2px 8px;margin-right:4px;">{_esc(t)}</span>'
+            for t in current_tags
+        )
+        tags_block = f"""<div id="reader-tags" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+  {tag_spans}
+  <button onclick="openReaderTagEditor()" style="font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer;margin-left:4px;">Edit tags</button>
+</div>
+<div id="reader-tag-editor" style="display:none;margin-top:10px;">
+  <input type="text" id="reader-tag-input" value="{tags_csv}"
+    placeholder="comma-separated tags"
+    style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:14px;background:#fff;">
+  <div style="display:flex;gap:8px;margin-top:6px;">
+    <button onclick="saveReaderTags()" style="padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;">Save</button>
+    <button onclick="closeReaderTagEditor()" style="padding:5px 14px;background:none;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:13px;color:var(--muted);">Cancel</button>
+  </div>
+</div>"""
+        article_controls = (
+            f'<button onclick="deleteArticle({aid})" '
+            f'style="font-size:13px;color:#b91c1c;background:none;border:1px solid #fca5a5;'
+            f'border-radius:6px;padding:4px 10px;cursor:pointer;">Delete</button>'
+        )
+        article_script = f"""<script>
+var _articleId = {aid};
+function openReaderTagEditor() {{
+  document.getElementById('reader-tags').style.display = 'none';
+  document.getElementById('reader-tag-editor').style.display = 'block';
+  document.getElementById('reader-tag-input').focus();
+}}
+function closeReaderTagEditor() {{
+  document.getElementById('reader-tag-editor').style.display = 'none';
+  document.getElementById('reader-tags').style.display = 'flex';
+}}
+async function saveReaderTags() {{
+  var val = document.getElementById('reader-tag-input').value;
+  var tags = val.split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
+  try {{
+    var r = await fetch('/library/' + _articleId + '/tags', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{tags: tags}})
+    }});
+    if (!r.ok) throw new Error();
+    var d = await r.json();
+    var box = document.getElementById('reader-tags');
+    var esc = function(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
+    var spans = (d.tags || []).map(function(t) {{
+      return '<span style="font-size:12px;color:var(--accent);background:#eef3f0;border-radius:6px;padding:2px 8px;margin-right:4px;">' + esc(t) + '</span>';
+    }}).join('');
+    var editBtn = '<button onclick="openReaderTagEditor()" style="font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer;margin-left:4px;">Edit tags</button>';
+    box.innerHTML = spans + editBtn;
+    closeReaderTagEditor();
+  }} catch(e) {{
+    alert('Could not save tags — please try again.');
+  }}
+}}
+async function deleteArticle(id) {{
+  if (!confirm('Permanently delete this article from your library?')) return;
+  try {{
+    var form = new FormData();
+    var r = await fetch('/library/' + id + '/delete', {{method: 'POST', body: form}});
+    if (r.redirected) {{ window.location.href = r.url; return; }}
+    window.location.href = '/library';
+  }} catch(e) {{
+    alert('Could not delete — please try again.');
+  }}
+}}
+</script>"""
+
     return HTMLResponse(_READER_TMPL.format(
         title=_esc(title), css=_READER_CSS,
         back_url=back_url, back_label=back_label,
         orig_url=_esc(url), byline=byline,
         body=body_html,
+        article_controls=article_controls,
+        tags_block=tags_block,
+        article_script=article_script,
     ))
 
 
@@ -2145,19 +2231,35 @@ def library(request: Request, q: str = ""):
     finally:
         lib.close()
 
-    cards = "".join(
-        f"""<article class="card">
+    def _card(r):
+        tags_csv = _esc(",".join(r.get("tags", [])))
+        tag_spans = "".join(f'<span>{_esc(t)}</span>' for t in r.get("tags", []))
+        return f"""<article class="card" id="card-{r['id']}">
           <a class="card-title" href="{r['url']}" target="_blank" rel="noopener">{_esc(r['title'])}</a>
           <div class="meta">{_esc(r.get('source',''))}{' &middot; ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
           <p class="summary">{_esc(r.get('summary',''))[:280]}</p>
-          <div class="tags">{''.join(f'<span>{_esc(t)}</span>' for t in r.get('tags', []))}</div>
-          <div style="display:flex;gap:8px;margin-top:8px;">
+          <div class="tags" id="tags-{r['id']}">{tag_spans}</div>
+          <div id="tag-editor-{r['id']}" style="display:none;margin-top:8px;">
+            <input type="text" id="tag-input-{r['id']}" value="{tags_csv}"
+              placeholder="comma-separated tags"
+              style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;">
+            <div style="display:flex;gap:6px;margin-top:6px;">
+              <button class="postbtn" onclick="saveTags({r['id']})">Save</button>
+              <button class="postbtn" onclick="cancelTags({r['id']})">Cancel</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
             <a href="/read?id={r['id']}" class="postbtn" style="text-decoration:none;">Read</a>
             <button class="postbtn" onclick="draftPost('{_esc(r['url'])}')">Draft LinkedIn post</button>
+            <button class="postbtn" onclick="openTagEditor({r['id']})">Edit tags</button>
+            <form method="post" action="/library/{r['id']}/delete" style="display:inline;"
+                  onsubmit="return confirm('Permanently delete this article?');">
+              <button type="submit" class="postbtn" style="color:#b91c1c;">Delete</button>
+            </form>
           </div>
         </article>"""
-        for r in results
-    ) or '<p style="color:var(--muted);">No matches.</p>'
+
+    cards = "".join(_card(r) for r in results) or '<p style="color:var(--muted);">No matches.</p>'
 
     tagbar = "".join(
         f'<a href="/library?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
@@ -2202,6 +2304,33 @@ def library(request: Request, q: str = ""):
 nav.site-nav a[href="/library"]{{color:var(--ink);font-weight:600;}}
 </style>
 <script>
+function openTagEditor(id) {{
+  document.getElementById('tag-editor-' + id).style.display = 'block';
+  document.getElementById('tag-input-' + id).focus();
+}}
+function cancelTags(id) {{
+  document.getElementById('tag-editor-' + id).style.display = 'none';
+}}
+async function saveTags(id) {{
+  var input = document.getElementById('tag-input-' + id);
+  var tags = input.value.split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
+  try {{
+    var r = await fetch('/library/' + id + '/tags', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{tags: tags}})
+    }});
+    if (!r.ok) throw new Error('failed');
+    var d = await r.json();
+    var box = document.getElementById('tags-' + id);
+    box.innerHTML = (d.tags || []).map(function(t) {{
+      return '<span>' + t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>';
+    }}).join('');
+    document.getElementById('tag-editor-' + id).style.display = 'none';
+  }} catch(e) {{
+    alert('Could not save tags — please try again.');
+  }}
+}}
 async function ask(){{
   var q=document.getElementById('askq').value.trim();
   if(!q)return;
@@ -2630,9 +2759,13 @@ def bookmarklet(request: Request):
         raise HTTPException(status_code=401, detail="unauthorized")
     token_param = f"?token={SAVE_TOKEN}" if SAVE_TOKEN else ""
     js = (
-        "javascript:(function(){var u=encodeURIComponent(location.href);"
+        "javascript:(function(){"
+        "var t=prompt('Tags (comma-separated, optional):');"
+        "if(t===null)return;"
+        "var u=location.href;"
         f"fetch('{PUBLIC_BASE}/save{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
-        "body:JSON.stringify({url:decodeURIComponent(u)})}).then(function(){alert('Saved to library');});})();"
+        "body:JSON.stringify({url:u,tags:t})}}).then(function(r){alert(r.ok?'Saved to library':'Error saving');});"
+        "})();"
     )
     return js
 
@@ -2659,15 +2792,54 @@ async def feed_save(request: Request, background_tasks: BackgroundTasks):
     url = (form.get("url") or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="url required")
+    tags_raw = form.get("tags") or ""
+    tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
     lib = _lib()
     try:
-        ingest_url(lib, url)
+        ingest_url(lib, url, tags=tags)
         background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         lib.close()
+
+
+@app.post("/library/{article_id}/tags")
+async def library_update_tags(request: Request, article_id: int):
+    """Update tags on a saved article. Accepts JSON or form body."""
+    _require_api(request)
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        payload = await request.json()
+        tags_raw = payload.get("tags", [])
+        if isinstance(tags_raw, str):
+            tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+        else:
+            tags = [str(t).strip() for t in tags_raw if str(t).strip()]
+    else:
+        form = await request.form()
+        tags_str = form.get("tags") or ""
+        tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+    lib = _lib()
+    try:
+        lib.update_tags(article_id, tags)
+        return JSONResponse({"ok": True, "tags": sorted(set(tags))})
+    finally:
+        lib.close()
+
+
+@app.post("/library/{article_id}/delete")
+def library_delete(request: Request, article_id: int):
+    """Permanently delete a saved article."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_article(article_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/library", status_code=303)
 
 
 @app.get("/static/{filename}")

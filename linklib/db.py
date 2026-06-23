@@ -203,6 +203,20 @@ class Library:
         self.conn.commit()
         return existing["id"]
 
+    def update_tags(self, article_id: int, tags: list[str]) -> None:
+        """Replace the tag list on an article (hard-replace, not union)."""
+        clean = sorted(set(t.strip() for t in tags if t.strip()))
+        self.conn.execute(
+            "UPDATE articles SET tags_json=?, tags_text=?, updated_at=? WHERE id=?",
+            (json.dumps(clean), " ".join(clean), _now(), article_id),
+        )
+        self.conn.commit()
+
+    def delete_article(self, article_id: int) -> None:
+        """Permanently remove an article. FTS is updated by the articles_ad trigger."""
+        self.conn.execute("DELETE FROM articles WHERE id=?", (article_id,))
+        self.conn.commit()
+
     def apply_enrichment(self, article_id: int, summary: str, tags: list[str]) -> None:
         row = self.conn.execute("SELECT summary, tags_json FROM articles WHERE id=?", (article_id,)).fetchone()
         if row is None:
