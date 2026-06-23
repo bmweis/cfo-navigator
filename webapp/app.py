@@ -793,7 +793,7 @@ function contributionSVG(strip, cur, labels) {
   var rndInv = 0.25 * (r[0] + r[1]);
   var tot = gtmInv + rndInv, ratio = tot > 0 ? ann / tot : 0;
 
-  var W = 760, H = 560, x0 = 118, x1 = 612, n = 6;
+  var W = 760, H = 600, x0 = 118, x1 = 612, n = 6;
   var step = (x1 - x0) / n, bw = Math.min(58, step * 0.6);
   function cx(c) { return x0 + step * (c + 0.5); }
   function fmtM(x) { var a = Math.round(x * 10) / 10; return '$' + (a % 1 === 0 ? a.toFixed(0) : a.toFixed(1)) + 'M'; }
@@ -809,16 +809,20 @@ function contributionSVG(strip, cur, labels) {
   s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#2c3e50">How ' + labels[cur] + ' is built &#8212; Time-Distributed Contribution</text>';
   s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Efficiency Ratio = $' + ratio.toFixed(2) + '</text>';
 
-  s += '<text x="20" y="146" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
-  s += '<text x="20" y="252" font-size="13" font-weight="700" fill="' + GREEN + '">Revenue</text>';
-  s += '<text x="20" y="418" font-size="13" font-weight="700" fill="' + RED + '">R&amp;D</text>';
+  s += '<text x="20" y="176" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
+  s += '<text x="20" y="304" font-size="13" font-weight="700" fill="' + GREEN + '">Revenue</text>';
+  s += '<text x="20" y="462" font-size="13" font-weight="700" fill="' + RED + '">R&amp;D</text>';
 
-  function spendBar(c, cy, h, col, grad, val) {
-    var x = cx(c) - bw / 2, y = cy - h / 2, capH = h * 0.25;
-    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h + '" rx="7" fill="url(#' + grad + ')" stroke="' + col + '" stroke-opacity="0.45"/>';
-    o += '<path d="M' + x.toFixed(1) + ' ' + (y + capH).toFixed(1) + ' L' + x.toFixed(1) + ' ' + (y + 7) + ' Q' + x.toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + 7).toFixed(1) + ' ' + y.toFixed(1) + ' L' + (x + bw - 7).toFixed(1) + ' ' + y.toFixed(1) + ' Q' + (x + bw).toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + bw).toFixed(1) + ' ' + (y + 7) + ' L' + (x + bw).toFixed(1) + ' ' + (y + capH).toFixed(1) + ' Z" fill="' + col + '"/>';
-    o += '<text x="' + cx(c).toFixed(1) + '" y="' + (y + capH - 3).toFixed(1) + '" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">25%</text>';
-    o += '<text x="' + cx(c).toFixed(1) + '" y="' + (cy + h / 2 + 15).toFixed(1) + '" text-anchor="middle" font-size="11" fill="' + MUT + '">' + fmtM(val) + '</text>';
+  // Spend bars are scaled by $ on a shared GTM+R&D scale so heights are comparable;
+  // each is bottom-aligned on its lane baseline with a 25% "pull" cap on top.
+  var smax = Math.max(g[0], g[1], g[2], g[3], r[0], r[1], 1), spendMaxH = 62;
+  function spendH(val) { return Math.max(val / smax * spendMaxH, 6); }
+  function spendBar(c, baseY, val, col, grad) {
+    var h = spendH(val), x = cx(c) - bw / 2, y = baseY - h, capH = h * 0.25;
+    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="6" fill="url(#' + grad + ')" stroke="' + col + '" stroke-opacity="0.45"/>';
+    o += '<path d="M' + x.toFixed(1) + ' ' + (y + capH).toFixed(1) + ' L' + x.toFixed(1) + ' ' + (y + 6).toFixed(1) + ' Q' + x.toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + 6).toFixed(1) + ' ' + y.toFixed(1) + ' L' + (x + bw - 6).toFixed(1) + ' ' + y.toFixed(1) + ' Q' + (x + bw).toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + bw).toFixed(1) + ' ' + (y + 6).toFixed(1) + ' L' + (x + bw).toFixed(1) + ' ' + (y + capH).toFixed(1) + ' Z" fill="' + col + '"/>';
+    if (h >= 22) o += '<text x="' + cx(c).toFixed(1) + '" y="' + (y + capH - 3).toFixed(1) + '" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">25%</text>';
+    o += '<text x="' + cx(c).toFixed(1) + '" y="' + (baseY + 15).toFixed(1) + '" text-anchor="middle" font-size="11" fill="' + MUT + '">' + fmtM(val) + '</text>';
     return o;
   }
   function bracket(cLo, cHi, y, col, label) {
@@ -830,12 +834,13 @@ function contributionSVG(strip, cur, labels) {
     return o;
   }
 
-  // GTM lane (contributing quarters are window columns 1..4)
-  s += bracket(1, 4, 100, BLUE, 'GTM Investment = ' + fmtM(gtmInv));
-  for (var c = 1; c <= 4; c++) s += spendBar(c, 148, 56, BLUE, 'cgB', g[c - 1]);
+  // GTM lane (contributing quarters are window columns 1..4), bottom-aligned at gB
+  var gB = 180;
+  s += bracket(1, 4, gB - spendMaxH - 14, BLUE, 'GTM Investment = ' + fmtM(gtmInv));
+  for (var c = 1; c <= 4; c++) s += spendBar(c, gB, g[c - 1], BLUE, 'cgB');
 
   // Revenue lane (prior at col 4, current at col 5)
-  var maxr = Math.max(revC, revP, 1), baseY = 300, maxh = 116;
+  var maxr = Math.max(revC, revP, 1), baseY = 334, maxh = 104;
   function revBar(c, val, isCur) {
     var h = Math.max(val / maxr * maxh, 2), x = cx(c) - bw / 2, y = baseY - h;
     var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="7" fill="' + (isCur ? 'url(#cgG)' : '#d7f0e3') + '" stroke="' + GREEN + '" stroke-opacity="' + (isCur ? '0.55' : '0.3') + '"/>';
@@ -845,19 +850,21 @@ function contributionSVG(strip, cur, labels) {
   s += revBar(4, revP, false);
   s += revBar(5, revC, true);
 
-  // annualized-growth callout beside the current revenue bar
-  var gx = cx(5) + bw / 2 + 16, gy = 198, cw = 110;
+  // annualized-growth callout beside the current revenue bar (tracks its top)
+  var curTop = baseY - Math.max(revC / maxr * maxh, 2);
+  var gx = cx(5) + bw / 2 + 16, gy = Math.max(curTop, 150), cw = 110;
   s += '<line x1="' + (cx(5) + bw / 2).toFixed(1) + '" y1="' + (gy + 19) + '" x2="' + gx.toFixed(1) + '" y2="' + (gy + 19) + '" stroke="' + GREEN + '" stroke-width="1.4" stroke-dasharray="3 2"/>';
-  s += '<rect x="' + gx.toFixed(1) + '" y="' + gy + '" width="' + cw + '" height="38" rx="9" fill="#eafaf0" stroke="' + GREEN + '" stroke-width="1.6"/>';
-  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 18) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + GREEN + '">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</text>';
-  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 32) + '" text-anchor="middle" font-size="9.5" fill="' + GREEN + '">Annualized Growth</text>';
+  s += '<rect x="' + gx.toFixed(1) + '" y="' + gy.toFixed(1) + '" width="' + cw + '" height="38" rx="9" fill="#eafaf0" stroke="' + GREEN + '" stroke-width="1.6"/>';
+  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 18).toFixed(1) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + GREEN + '">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</text>';
+  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 32).toFixed(1) + '" text-anchor="middle" font-size="9.5" fill="' + GREEN + '">Annualized Growth</text>';
 
-  // R&D lane (contributing quarters are window columns 0..1)
-  s += bracket(0, 1, 366, RED, 'R&amp;D Investment = ' + fmtM(rndInv));
-  for (var c = 0; c <= 1; c++) s += spendBar(c, 414, 56, RED, 'cgR', r[c]);
+  // R&D lane (contributing quarters are window columns 0..1), bottom-aligned at dB
+  var dB = 468;
+  s += bracket(0, 1, dB - spendMaxH - 14, RED, 'R&amp;D Investment = ' + fmtM(rndInv));
+  for (var c = 0; c <= 1; c++) s += spendBar(c, dB, r[c], RED, 'cgR');
 
   // timeline axis
-  var ty = 478;
+  var ty = 502;
   s += '<line x1="' + (x0 - 8) + '" y1="' + ty + '" x2="' + (x1 + 8) + '" y2="' + ty + '" stroke="#cfc8bc" stroke-width="2"/>';
   for (var c = 0; c < n; c++) {
     var isCur = (c === 5);
@@ -867,7 +874,7 @@ function contributionSVG(strip, cur, labels) {
 
   // formula pill
   var label2 = (ann >= 0 ? '+' : '') + fmtM(ann) + ' / ( ' + fmtM(gtmInv) + ' + ' + fmtM(rndInv) + ' ) = $' + ratio.toFixed(2);
-  var fw = label2.length * 7.3 + 40, fx = W / 2 - fw / 2, fy = 515;
+  var fw = label2.length * 7.3 + 40, fx = W / 2 - fw / 2, fy = 556;
   var pill = '<tspan fill="' + GREEN + '" font-weight="700">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</tspan> &#247; ( ' +
     '<tspan fill="' + BLUE + '" font-weight="700">' + fmtM(gtmInv) + '</tspan> + ' +
     '<tspan fill="' + RED + '" font-weight="700">' + fmtM(rndInv) + '</tspan> ) = ' +
