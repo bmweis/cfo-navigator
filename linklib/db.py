@@ -69,6 +69,11 @@ CREATE TRIGGER IF NOT EXISTS articles_au AFTER UPDATE ON articles BEGIN
     VALUES (new.id, new.title, new.author, new.source, new.summary, new.content, new.notes, new.tags_text);
 END;
 
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS contacts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL DEFAULT '',
@@ -287,6 +292,18 @@ class Library:
         d["tags"] = json.loads(d.pop("tags_json", "[]") or "[]")
         d.pop("tags_text", None)
         return d
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        row = self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+        self.conn.commit()
 
     def save_contact(self, name: str, email: str, message: str) -> int:
         cur = self.conn.execute(

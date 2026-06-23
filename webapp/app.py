@@ -2631,10 +2631,14 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
     lib = _lib()
     try:
         count = lib.count()
+        custom_voice = lib.get_setting("voice_prompt")
     finally:
         lib.close()
 
-    from linklib.social import DEFAULT_MODEL
+    from linklib.social import DEFAULT_MODEL, BRIAN_VOICE
+    current_voice = custom_voice or BRIAN_VOICE
+    is_customized = bool(custom_voice)
+
     models = [
         ("claude-haiku-4-5-20251001", "Haiku", "Fast &amp; cheap"),
         ("claude-sonnet-4-6",         "Sonnet", "Balanced &mdash; default"),
@@ -2666,6 +2670,18 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
 
     pre_url = _esc(url)
 
+    voice_badge = (
+        '<span style="font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;'
+        'border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>'
+        if is_customized else
+        '<span style="font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;">Built-in default</span>'
+    )
+    reset_btn = (
+        '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
+        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;">Reset to default</button>'
+        if is_customized else ""
+    )
+
     body = f"""<div class="page" style="max-width:820px;">
 <h1>Admin</h1>
 
@@ -2674,19 +2690,16 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
 
 <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:16px;">
   <div style="display:grid;gap:16px;">
-
     <div>
       <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Article URL</label>
       <input id="post-url" type="url" value="{pre_url}" placeholder="https://…"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
     </div>
-
     <div>
       <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">Or topic <span style="font-weight:400;text-transform:none;letter-spacing:0;">(used when URL is blank; pulls from your library)</span></label>
       <input id="post-topic" type="text" placeholder="e.g. headcount planning in uncertain environments"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
     </div>
-
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
       <div>
         <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:0;">Mode</div>
@@ -2697,7 +2710,6 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
         <div style="display:flex;flex-direction:column;">{model_radios}</div>
       </div>
     </div>
-
     <div>
       <button id="draft-btn" onclick="doDraft()" class="btn" style="padding:11px 28px;font-size:15px;">Draft post</button>
       <span style="font-size:13px;color:var(--muted);margin-left:14px;">&#8984;&#9166; to draft</span>
@@ -2713,24 +2725,39 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
   </div>
 </div>
 
+<h2>Your voice{voice_badge}</h2>
+<p style="color:var(--muted);margin:-6px 0 16px;">The system prompt sent to Claude when drafting posts. Edit it to refine your tone, add new rules, or update your bio. Changes take effect immediately on the next draft.</p>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:40px;">
+  <textarea id="voice-prompt" rows="20"
+    style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;">{_esc(current_voice)}</textarea>
+  <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+    <button id="voice-save-btn" onclick="saveVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Save voice</button>
+    {reset_btn}
+    <span id="voice-status" style="font-size:13px;color:var(--muted);"></span>
+  </div>
+</div>
+
 <h2>Library database</h2>
 {'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;font-size:14px;margin:-6px 0 16px;">Database replaced — ' + _esc(uploaded) + ' articles now live.</p>' if uploaded else ''}
-<p style="color:var(--muted);margin:-6px 0 20px;">Currently <strong>{count:,}</strong> articles. Use this if the hosted database crashes or gets corrupted.</p>
+<p style="color:var(--muted);margin:-6px 0 20px;">Currently <strong>{count:,}</strong> articles.</p>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
-  <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;">
-    <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
-    <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately — no restart needed.</p>
-    <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
-      <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
-        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-      <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
-    </form>
-  </div>
-  <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;">
-    <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download current database</p>
-    <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Download a consistent snapshot of the live database. Good for local backup before making changes.</p>
-    <a href="/admin/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
+<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:40px;">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+    <div>
+      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately — no restart needed.</p>
+      <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+        <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
+          style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
+      </form>
+    </div>
+    <div style="border-left:1px solid var(--line);padding-left:24px;">
+      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
+      <a href="/admin/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
+    </div>
   </div>
 </div>
 </div>
@@ -2741,10 +2768,7 @@ async function doDraft() {{
   var topic = document.getElementById('post-topic').value.trim();
   var mode = document.querySelector('input[name="post-mode"]:checked')?.value || 'original';
   var model = document.querySelector('input[name="model"]:checked')?.value || '{_esc(DEFAULT_MODEL)}';
-  if (!url && !topic) {{
-    document.getElementById('post-url').focus();
-    return;
-  }}
+  if (!url && !topic) {{ document.getElementById('post-url').focus(); return; }}
   var btn = document.getElementById('draft-btn');
   var result = document.getElementById('draft-result');
   var output = document.getElementById('draft-output');
@@ -2755,11 +2779,7 @@ async function doDraft() {{
   try {{
     var payload = {{mode: mode, model: model}};
     if (url) payload.url = url; else payload.topic = topic;
-    var r = await fetch('/post', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify(payload)
-    }});
+    var r = await fetch('/post', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(payload)}});
     var d = await r.json();
     output.textContent = d.post || '(no output)';
   }} catch(e) {{
@@ -2768,12 +2788,70 @@ async function doDraft() {{
     btn.disabled = false; btn.textContent = 'Draft post';
   }}
 }}
+
+async function saveVoice() {{
+  var prompt = document.getElementById('voice-prompt').value;
+  var btn = document.getElementById('voice-save-btn');
+  var status = document.getElementById('voice-status');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/voice', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{voice_prompt: prompt.trim()}})
+    }});
+    if (!r.ok) throw new Error();
+    var d = await r.json();
+    status.textContent = 'Saved.';
+    status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+    var resetBtn = document.getElementById('reset-btn');
+    if (d.custom && !resetBtn) {{
+      var saveBtn = document.getElementById('voice-save-btn');
+      var rb = document.createElement('button');
+      rb.id = 'reset-btn'; rb.className = 'btn btn-ghost';
+      rb.style.cssText = 'font-size:13px;color:#b91c1c;border-color:#fca5a5;';
+      rb.textContent = 'Reset to default';
+      rb.onclick = resetVoice;
+      saveBtn.parentNode.insertBefore(rb, saveBtn.nextSibling);
+    }} else if (!d.custom && resetBtn) {{
+      resetBtn.remove();
+    }}
+  }} catch(e) {{
+    status.textContent = 'Save failed — try again.';
+    status.style.color = '#b91c1c';
+  }} finally {{
+    btn.disabled = false; btn.textContent = 'Save voice';
+  }}
+}}
+
+async function resetVoice() {{
+  if (!confirm('Reset to the built-in default voice prompt? Your edits will be lost.')) return;
+  document.getElementById('voice-prompt').value = {repr(BRIAN_VOICE)};
+  await saveVoice();
+}}
+
 document.addEventListener('keydown', function(e) {{
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doDraft();
 }});
 </script>"""
 
     return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+
+
+@app.post("/admin/voice")
+async def admin_voice_save(request: Request):
+    """Save (or reset) the custom voice prompt."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    prompt = (payload.get("voice_prompt") or "").strip()
+    lib = _lib()
+    try:
+        lib.set_setting("voice_prompt", prompt)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "custom": bool(prompt)})
 
 
 @app.get("/admin/upload-db", response_class=HTMLResponse)
@@ -2911,14 +2989,16 @@ def bookmarklet(request: Request):
 @app.post("/post")
 async def post_draft(request: Request):
     _require_api(request)
-    from linklib.social import draft_post, DEFAULT_MODEL
+    from linklib.social import draft_post, DEFAULT_MODEL, BRIAN_VOICE
     payload = await request.json()
     model = (payload.get("model") or "").strip() or DEFAULT_MODEL
     lib = _lib()
     try:
+        custom_voice = lib.get_setting("voice_prompt")
         d = draft_post(lib, article_id=payload.get("id"), url=payload.get("url"),
                        topic=payload.get("topic"), mode=payload.get("mode", "original"),
-                       model=model)
+                       model=model,
+                       system_prompt=custom_voice or None)
         return {"post": d.post}
     finally:
         lib.close()
