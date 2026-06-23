@@ -154,6 +154,102 @@ TOOLS = [
         "description": "AI agents for procurement renewals and new purchasing. Automates RFx generation, vendor scoring, and negotiation prep — built for teams without a dedicated procurement function.",
         "categories": ["Procurement"],
     },
+    {
+        "name": "TaxJar",
+        "url": "https://www.taxjar.com",
+        "description": "Sales tax automation platform for e-commerce and SaaS. Handles real-time calculations, nexus tracking, and returns filing across all US states and select international jurisdictions.",
+        "categories": ["Sales Tax"],
+    },
+    {
+        "name": "Orb",
+        "url": "https://www.withorb.com",
+        "description": "Usage-based billing infrastructure for modern SaaS. Ingests raw events, models complex pricing plans, generates invoices, and integrates with your CRM, data warehouse, and payment processor.",
+        "categories": ["Billing"],
+    },
+    {
+        "name": "FinQuery",
+        "url": "https://www.finquery.com",
+        "description": "Lease and contract accounting software for ASC 842, IFRS 16, and GASB 87 compliance. Automates journal entries, disclosures, and audit-ready reporting for lease portfolios.",
+        "categories": ["Financial Close", "Contract Management"],
+    },
+    {
+        "name": "Ironclad",
+        "url": "https://ironcladapp.com",
+        "description": "Enterprise contract lifecycle management platform. Automates contract creation, negotiation, approvals, and analytics — giving legal and finance teams a single system of record.",
+        "categories": ["Contract Management"],
+    },
+    {
+        "name": "LinkSquares",
+        "url": "https://www.linksquares.com",
+        "description": "AI-powered contract management and analytics platform. Extracts key terms from executed contracts, tracks obligations and renewals, and provides a searchable legal data repository.",
+        "categories": ["Contract Management"],
+    },
+    {
+        "name": "Coupa",
+        "url": "https://www.coupa.com",
+        "description": "Enterprise business spend management platform covering procurement, invoicing, expense management, and supply chain. Provides end-to-end spend visibility and compliance for mid-market to enterprise.",
+        "categories": ["Spend Management", "Procurement"],
+    },
+    {
+        "name": "Tropic",
+        "url": "https://www.tropicapp.io",
+        "description": "Software spend management and procurement automation. Tracks SaaS contracts, benchmarks pricing, and manages renewals and purchasing workflows to reduce software costs.",
+        "categories": ["Spend Management", "Procurement"],
+    },
+    {
+        "name": "Glean",
+        "url": "https://www.glean.ai",
+        "description": "SaaS spend management platform that analyzes software invoices and contracts to surface savings opportunities, flag duplicates, and benchmark pricing against market rates.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "Vendr",
+        "url": "https://www.vendr.com",
+        "description": "SaaS purchasing platform combining procurement software with expert negotiation services. Manages vendor discovery, renewal workflows, and price benchmarking to reduce software spend.",
+        "categories": ["Procurement", "Spend Management"],
+    },
+    {
+        "name": "Tipalti",
+        "url": "https://www.tipalti.com",
+        "description": "Global payables automation platform. Handles supplier onboarding, invoice processing, multi-currency payments, tax compliance (W-9/W-8/1099), and AP reconciliation at scale.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "Expensify",
+        "url": "https://www.expensify.com",
+        "description": "Expense management and corporate card platform. Automates receipt capture, approvals, reimbursements, and accounting sync — covering both employee expenses and corporate card spend.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "Teampay",
+        "url": "https://www.teampay.com",
+        "description": "Distributed spend management platform with conversational intake. Employees request purchases via chat, approvals route automatically, and spend hits corporate cards with built-in controls.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "Metronome",
+        "url": "https://www.metronome.com",
+        "description": "Usage-based billing and revenue infrastructure for cloud and AI companies. Ingests product usage events, models flexible pricing plans, and generates accurate invoices at any scale.",
+        "categories": ["Billing"],
+    },
+    {
+        "name": "BILL",
+        "url": "https://www.bill.com",
+        "description": "AP and AR automation platform for SMBs. Digitizes invoice processing, automates approval workflows, handles domestic and international payments, and syncs with major accounting software.",
+        "categories": ["Financial Close"],
+    },
+    {
+        "name": "Airbase",
+        "url": "https://www.airbase.com",
+        "description": "Spend management platform combining corporate cards, AP automation, and expense reimbursement. Provides pre-approval workflows, real-time spend controls, and ERP integrations in one system.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "Datarails",
+        "url": "https://www.datarails.com",
+        "description": "FP&A platform that works within Excel. Consolidates data from ERPs and other sources into a governed model, enabling automated reporting, budgeting, and forecasting without leaving spreadsheets.",
+        "categories": ["FP&A", "Financial Planning"],
+    },
 ]
 
 
