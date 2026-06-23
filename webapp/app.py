@@ -2221,7 +2221,8 @@ async function deleteArticle(id) {{
 
 @app.get("/library", response_class=HTMLResponse)
 def library(request: Request, q: str = ""):
-    if not _is_authed(request):
+    authed = _is_authed(request)
+    if not authed:
         return _login_redirect(request)
     lib = _lib()
     try:
@@ -2234,6 +2235,10 @@ def library(request: Request, q: str = ""):
     def _card(r):
         tags_csv = _esc(",".join(r.get("tags", [])))
         tag_spans = "".join(f'<span>{_esc(t)}</span>' for t in r.get("tags", []))
+        draft_btn = (
+            '<button class="postbtn" onclick="draftPost(\'' + _esc(r["url"]) + '\')">Draft LinkedIn post</button>'
+            if authed else ""
+        )
         return f"""<article class="card" id="card-{r['id']}">
           <a class="card-title" href="{r['url']}" target="_blank" rel="noopener">{_esc(r['title'])}</a>
           <div class="meta">{_esc(r.get('source',''))}{' &middot; ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
@@ -2250,7 +2255,7 @@ def library(request: Request, q: str = ""):
           </div>
           <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
             <a href="/read?id={r['id']}" class="postbtn" style="text-decoration:none;">Read</a>
-            <button class="postbtn" onclick="draftPost('{_esc(r['url'])}')">Draft LinkedIn post</button>
+            {draft_btn}
             <button class="postbtn" onclick="openTagEditor({r['id']})">Edit tags</button>
             <form method="post" action="/library/{r['id']}/delete" style="display:inline;"
                   onsubmit="return confirm('Permanently delete this article?');">
@@ -2264,6 +2269,17 @@ def library(request: Request, q: str = ""):
     tagbar = "".join(
         f'<a href="/library?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
     )
+
+    _draft_post_js = """
+async function draftPost(url){
+  var box=document.getElementById('answer');
+  box.style.display='block';box.scrollIntoView({behavior:'smooth'});box.innerHTML='<em>Drafting in your voice…</em>';
+  try{
+    var r=await fetch('/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url,mode:'original'})});
+    var d=await r.json();
+    box.innerHTML='<div style="white-space:pre-wrap;line-height:1.6;">'+(d.post||'')+'</div><button class="btn btn-ghost" style="margin-top:10px;font-size:13px;" onclick="navigator.clipboard.writeText(this.previousElementSibling.innerText)">Copy</button>';
+  }catch(e){box.innerHTML='Something went wrong.';}
+}""" if authed else ""
 
     page_body = f"""<div style="border-bottom:1px solid var(--line);padding:20px 24px;">
   <div style="max-width:780px;margin:0 auto;">
@@ -2348,18 +2364,10 @@ async function ask(){{
     box.innerHTML='<p>'+(d.answer||'').replace(/\\n/g,'<br>')+'</p>'+((lib||feed||web)?'<ul style="padding-left:18px;font-size:13px;">'+lib+feed+web+'</ul>':'');
   }}catch(e){{box.innerHTML='Something went wrong.';}}
 }}
-async function draftPost(url){{
-  var box=document.getElementById('answer');
-  box.style.display='block';box.scrollIntoView({{behavior:'smooth'}});box.innerHTML='<em>Drafting in your voice…</em>';
-  try{{
-    var r=await fetch('/post',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{url:url,mode:'original'}})}});
-    var d=await r.json();
-    box.innerHTML='<div style="white-space:pre-wrap;line-height:1.6;">'+(d.post||'')+'</div><button class="btn btn-ghost" style="margin-top:10px;font-size:13px;" onclick="navigator.clipboard.writeText(this.previousElementSibling.innerText)">Copy</button>';
-  }}catch(e){{box.innerHTML='Something went wrong.';}}
-}}
+{_draft_post_js}
 </script>"""
 
-    return HTMLResponse(_page("Library—Brian Weisberg", "Library", page_body, authed=True))
+    return HTMLResponse(_page("Library—Brian Weisberg", "Library", page_body, authed=authed))
 
 
 # ---------------------------------------------------------------------------
