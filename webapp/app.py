@@ -943,8 +943,8 @@ def tools_submit_page(submitted: str = ""):
     </div>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Your email <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
-    <input name="submitted_by" type="email" maxlength="200"
+    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Your email *</label>
+    <input name="submitted_by" type="email" required maxlength="200"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="you@example.com">
   </div>
@@ -964,8 +964,8 @@ async def tools_submit(request: Request):
     description = (form.get("description") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
     submitted_by = (form.get("submitted_by") or "").strip()
-    if not (name and url and description and categories):
-        raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
+    if not (name and url and description and categories and submitted_by):
+        raise HTTPException(status_code=400, detail="All fields including email are required.")
     lib = _lib()
     try:
         lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0)
