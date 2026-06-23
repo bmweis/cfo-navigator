@@ -316,6 +316,7 @@ the early-to-growth leap. Based in Boston.</p>
 <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap;">
   <a href="/thought-leadership" class="btn">Thought Leadership</a>
   <a href="/contact" class="btn btn-ghost">Get in Touch</a>
+  <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
 </div>
 </div>"""
     return HTMLResponse(_page("Brian Weisberg — CFO", "About", body))
