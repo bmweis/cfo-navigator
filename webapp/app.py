@@ -407,12 +407,22 @@ def growth_engine_ratio():
   .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
   input[type=range]{accent-color:var(--accent);height:4px;}
   .ger-slider-row{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:6px;}
+  .spread-row{display:flex;align-items:center;gap:14px;padding:30px 0 26px;}
+  .spread-name{flex:0 0 108px;font-size:13px;font-weight:500;color:var(--ink);}
+  .spread-track{position:relative;flex:1;height:6px;background:var(--accent-light);border-radius:6px;}
+  .spread-bar{position:absolute;height:6px;background:var(--accent);border-radius:6px;opacity:.35;}
+  .spread-base{position:absolute;width:2px;height:18px;top:-6px;background:var(--ink);border-radius:2px;}
+  .spread-dot{position:absolute;width:11px;height:11px;border-radius:50%;top:-2.5px;border:2px solid #fff;transform:translateX(-50%);box-shadow:0 0 0 1px var(--line);}
+  .spread-cap{position:absolute;top:-26px;font-size:12px;font-weight:600;transform:translateX(-50%);white-space:nowrap;}
+  .spread-sub{position:absolute;top:13px;font-size:10px;color:var(--muted);transform:translateX(-50%);white-space:nowrap;}
   @media (max-width:640px){
     .ger-grid-4{grid-template-columns:repeat(2,1fr);}
     .ger-grid-2{grid-template-columns:1fr;}
     .ger-card{padding:22px 18px !important;}
     .ger-table th,.ger-table td{padding:8px 10px !important;font-size:13px !important;}
     .ger-value-big{font-size:38px !important;}
+    .spread-name{flex:0 0 76px;font-size:12px;}
+    .spread-cap{font-size:11px;}
   }
 </style>
 
@@ -601,11 +611,21 @@ on acquisition costs. That changes how you think about churn — permanently.</p
     <div id="ger-detail" style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.8;"></div>
 
     <div id="ger-sens" style="margin-top:26px;padding-top:22px;border-top:1px dashed var(--line);">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;">
-        <p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">Sensitivity — flex your assumptions</p>
+      <p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">Sensitivity at a glance</p>
+      <p style="font-size:13px;color:var(--muted);margin:4px 0 6px;">How a &plusmn;10% change in any single assumption would move your ratio — everything else held constant. Wider bar = bigger lever.</p>
+
+      <div id="ger-spread" style="margin:8px 0 4px;"></div>
+      <p style="font-size:12px;color:var(--muted);margin:0;line-height:1.7;">
+        <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent);opacity:.5;vertical-align:middle;margin-right:4px;"></span>each end is a &plusmn;10% move &nbsp;&middot;&nbsp;
+        <span style="display:inline-block;width:2px;height:12px;background:var(--ink);vertical-align:middle;margin:0 5px -2px 2px;"></span>your current ratio &nbsp;&middot;&nbsp;
+        endpoint colour = tier at that point
+      </p>
+
+      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-top:30px;">
+        <p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">Flex it yourself</p>
         <button onclick="resetSens()" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Reset to baseline</button>
       </div>
-      <p style="font-size:13px;color:var(--muted);margin:4px 0 20px;">Drag a lever to see how a change in that driver moves your ratio. Everything else holds constant.</p>
+      <p style="font-size:13px;color:var(--muted);margin:4px 0 20px;">Drag any lever to test a custom change of up to &plusmn;20%.</p>
 
       <div style="display:grid;gap:18px;">
         <div>
@@ -728,12 +748,58 @@ function calcGER() {
     'R&amp;D investment (time-weighted): <strong>' + rndInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
     'Total investment: <strong>' + totalInv.toFixed(1) + '</strong>';
 
-  // Stash the baseline for the sensitivity panel, then reset its sliders.
+  // Stash the baseline for the sensitivity panel, draw the spread, reset sliders.
   window.gerBase = {annGrowth: annGrowth, gtmInv: gtmInv, rndInv: rndInv, ratio: ratio};
+  renderSpread();
   resetSens();
 
   document.getElementById('ger-result').style.display = 'block';
   document.getElementById('ger-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+// Draw the fixed ±10% spread chart: one range bar per lever on a shared axis.
+function renderSpread() {
+  var b = window.gerBase;
+  if (!b) return;
+  var d = 0.10;
+  var levers = [
+    {name: 'GTM spend',      minus: b.annGrowth / (b.gtmInv * (1 - d) + b.rndInv),
+                             plus:  b.annGrowth / (b.gtmInv * (1 + d) + b.rndInv)},
+    {name: 'R&amp;D spend',  minus: b.annGrowth / (b.gtmInv + b.rndInv * (1 - d)),
+                             plus:  b.annGrowth / (b.gtmInv + b.rndInv * (1 + d))},
+    {name: 'Revenue growth', minus: (b.annGrowth * (1 - d)) / (b.gtmInv + b.rndInv),
+                             plus:  (b.annGrowth * (1 + d)) / (b.gtmInv + b.rndInv)}
+  ];
+
+  var vals = [b.ratio];
+  levers.forEach(function(L) { vals.push(L.minus, L.plus); });
+  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  var pad = (hi - lo) * 0.18;
+  if (pad < 0.05) pad = 0.05;
+  lo -= pad; hi += pad;
+  function pos(x) { return ((x - lo) / (hi - lo)) * 100; }
+
+  var html = '';
+  levers.forEach(function(L) {
+    var loR = Math.min(L.minus, L.plus), hiR = Math.max(L.minus, L.plus);
+    var pl = pos(loR), pr = pos(hiR), pb = pos(b.ratio);
+    var loIsMinus = (L.minus <= L.plus);  // does the −10% move land on the low end?
+    html +=
+      '<div class="spread-row">' +
+        '<div class="spread-name">' + L.name + '</div>' +
+        '<div class="spread-track">' +
+          '<div class="spread-bar" style="left:' + pl + '%;width:' + (pr - pl) + '%;"></div>' +
+          '<div class="spread-base" style="left:' + pb + '%;"></div>' +
+          '<div class="spread-dot" style="left:' + pl + '%;background:' + gerTier(loR).color + ';"></div>' +
+          '<div class="spread-dot" style="left:' + pr + '%;background:' + gerTier(hiR).color + ';"></div>' +
+          '<div class="spread-cap" style="left:' + pl + '%;color:' + gerTier(loR).color + ';">' + fmtRatio(loR) + '</div>' +
+          '<div class="spread-cap" style="left:' + pr + '%;color:' + gerTier(hiR).color + ';">' + fmtRatio(hiR) + '</div>' +
+          '<div class="spread-sub" style="left:' + pl + '%;">' + (loIsMinus ? '-10%' : '+10%') + '</div>' +
+          '<div class="spread-sub" style="left:' + pr + '%;">' + (loIsMinus ? '+10%' : '-10%') + '</div>' +
+        '</div>' +
+      '</div>';
+  });
+  document.getElementById('ger-spread').innerHTML = html;
 }
 
 function setSliderLabel(id, pct) {
