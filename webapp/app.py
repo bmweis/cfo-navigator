@@ -750,19 +750,21 @@ def tools_directory(request: Request):
 
     # Serialize to JSON for client-side filtering
     import json as _json
-    tools_json = _json.dumps([
-        {
+    def _tool_entry(t: dict) -> dict:
+        entry = {
             "id": t["id"],
             "name": t["name"],
             "description": t["description"],
             "url": t["url"],
             "categories": t["categories"],
-            "submitted_by": t.get("submitted_by") or "",
-            "created_at": (t.get("created_at") or "")[:10],
-            "updated_at": (t.get("updated_at") or "")[:10],
         }
-        for t in tools
-    ])
+        if authed:
+            entry["submitted_by"] = t.get("submitted_by") or ""
+            entry["created_at"] = (t.get("created_at") or "")[:10]
+            entry["updated_at"] = (t.get("updated_at") or "")[:10]
+        return entry
+
+    tools_json = _json.dumps([_tool_entry(t) for t in tools])
 
     cat_buttons = "".join(
         f'<button class="tcat-btn" data-cat="{_esc(c)}" onclick="filterCat(this)">{_esc(c)}</button>'
