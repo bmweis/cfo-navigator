@@ -228,16 +228,10 @@ def answer_question(
     }
 
     if use_web:
-        _opml = opml_path
-        if _opml:
-            from .sources import preferred_domains as _preferred_domains
-            domains = list(_preferred_domains(_opml))
-        else:
-            try:
-                from .sources import preferred_domains as _preferred_domains
-                domains = list(_preferred_domains())
-            except Exception:
-                domains = []
+        # preferred_domains() defaults to the configured OPML and returns ()
+        # on any parse error, so no extra guarding is needed here.
+        from .sources import preferred_domains
+        domains = list(preferred_domains(opml_path) if opml_path else preferred_domains())
         tool: dict = {
             "type": "web_search_20250305",
             "name": "web_search",
