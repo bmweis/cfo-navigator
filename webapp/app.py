@@ -415,6 +415,13 @@ def growth_engine_ratio():
   .qhead{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
   .qrow-proj .ger-in{background:#fbfaf6;border-style:dashed;}
   .ger-chart{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;background:#fff;}
+  .ger-contrib-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .ger-contrib{width:100%;height:auto;display:block;}
+  .tl-step{display:flex;flex-direction:column;gap:6px;}
+  .tl-ctrl{display:inline-flex;align-items:center;gap:16px;border:1px solid var(--line);border-radius:10px;padding:6px 12px;background:#fff;width:max-content;}
+  .tl-ctrl button{font:inherit;font-size:18px;line-height:1;width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--accent);cursor:pointer;}
+  .tl-ctrl button:hover{background:var(--accent-light);}
+  .tl-ctrl span{font-size:16px;font-weight:700;min-width:16px;text-align:center;color:var(--ink);}
   @media (max-width:640px){
     .ger-grid-4{grid-template-columns:repeat(2,1fr);}
     .ger-grid-2{grid-template-columns:1fr;}
@@ -535,8 +542,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
 
 <div class="ger-modes" role="tablist" style="margin:0 0 18px;">
   <button class="ger-mode ger-mode-on" id="tab-point" onclick="setMode('point')">Point in time</button>
-  <button class="ger-mode" id="tab-hist" onclick="setMode('hist')">Historical trend</button>
-  <button class="ger-mode" id="tab-proj" onclick="setMode('proj')">Projection</button>
+  <button class="ger-mode" id="tab-timeline" onclick="setMode('timeline')">Timeline</button>
 </div>
 
 <div class="ger-card" style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px 32px;margin:0 0 40px;">
@@ -621,58 +627,46 @@ on acquisition costs. That changes how you think about churn — permanently.</p
     </div>
     <div id="ger-detail" style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.8;"></div>
 
+    <div style="margin-top:22px;padding-top:18px;border-top:1px dashed var(--line);">
+      <p style="font-weight:600;font-size:15px;margin:0 0 4px;color:var(--ink);">How this quarter is built</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Each contributing quarter feeds 25% of its spend into the window — R&amp;D first (build), then GTM (sell), aligned to the revenue it produced.</p>
+      <div class="ger-contrib-wrap"><div id="point-contrib" style="min-width:560px;"></div></div>
+    </div>
+
   </div><!-- /ger-result -->
   </div><!-- /panel-point -->
 
-  <div id="panel-hist" style="display:none;">
+  <div id="panel-timeline" style="display:none;">
     <p style="font-size:14px;color:var(--muted);margin:0 0 16px;">
-      Enter your actual quarterly figures, oldest &rarr; newest. The ratio for any quarter uses that
-      quarter plus the prior five (sales-cycle + build window), so your trend line begins at the
-      6th quarter and each quarter you add extends it by one point.
+      Plot your ratio over time. Choose how many quarters to look <strong>back</strong> (actuals) and
+      <strong>forward</strong> (projected) — up to 2 each, for up to 5 measured quarters. Forward quarters
+      are shaded and drawn dashed, with a best/worst band (revenue &amp; spend 10% better or worse than
+      plan). The first five rows are lookback context for the earliest measured quarter.
     </p>
+    <div style="display:flex;gap:28px;flex-wrap:wrap;margin:0 0 20px;">
+      <div class="tl-step"><span class="qhead">Periods back</span>
+        <div class="tl-ctrl"><button onclick="stepTL('back',-1)">&minus;</button><span id="tl-back">2</span><button onclick="stepTL('back',1)">+</button></div></div>
+      <div class="tl-step"><span class="qhead">Periods forward</span>
+        <div class="tl-ctrl"><button onclick="stepTL('fwd',-1)">&minus;</button><span id="tl-fwd">2</span><button onclick="stepTL('fwd',1)">+</button></div></div>
+    </div>
     <div class="ger-grid-3" style="margin-bottom:8px;">
       <span class="qhead">Quarter</span><span class="qhead">Revenue</span><span class="qhead">GTM spend</span><span class="qhead">R&amp;D spend</span>
     </div>
-    <div id="hist-rows" style="display:grid;gap:10px;"></div>
-    <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
-      <button onclick="addRow('hist')" class="btn btn-ghost" style="font-size:13px;padding:7px 14px;">+ Add quarter</button>
-      <button onclick="removeRow('hist')" class="btn btn-ghost" style="font-size:13px;padding:7px 14px;">&minus; Remove quarter</button>
-    </div>
+    <div id="tl-rows" style="display:grid;gap:8px;"></div>
     <div style="margin-top:22px;">
-      <button onclick="calcTrend('hist')" class="btn" style="padding:12px 28px;font-size:16px;">Plot my trend</button>
-      <button onclick="loadTrendExample('hist')" class="btn btn-ghost" style="margin-left:12px;">Load example</button>
+      <button onclick="calcTimeline()" class="btn" style="padding:12px 28px;font-size:16px;">Plot timeline</button>
+      <button onclick="loadTimelineExample()" class="btn btn-ghost" style="margin-left:12px;">Load example</button>
     </div>
-    <div id="hist-result" style="display:none;margin-top:26px;padding-top:24px;border-top:1px solid var(--line);"></div>
-  </div>
-
-  <div id="panel-proj" style="display:none;">
-    <p style="font-size:14px;color:var(--muted);margin:0 0 16px;">
-      Enter recent <strong>actuals</strong> for lookback, then your <strong>projected</strong> quarters
-      (shaded, dashed). We plot the projected ratio path plus an upper/lower band showing where it lands
-      if your projected revenue and spend each come in 10% better or worse than plan.
-    </p>
-    <div class="ger-grid-3" style="margin-bottom:8px;">
-      <span class="qhead">Quarter</span><span class="qhead">Revenue</span><span class="qhead">GTM spend</span><span class="qhead">R&amp;D spend</span>
-    </div>
-    <div id="proj-rows" style="display:grid;gap:10px;"></div>
-    <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
-      <button onclick="addRow('proj')" class="btn btn-ghost" style="font-size:13px;padding:7px 14px;">+ Add projected quarter</button>
-      <button onclick="removeRow('proj')" class="btn btn-ghost" style="font-size:13px;padding:7px 14px;">&minus; Remove projected quarter</button>
-    </div>
-    <div style="margin-top:22px;">
-      <button onclick="calcTrend('proj')" class="btn" style="padding:12px 28px;font-size:16px;">Plot projection</button>
-      <button onclick="loadTrendExample('proj')" class="btn btn-ghost" style="margin-left:12px;">Load example</button>
-    </div>
-    <div id="proj-result" style="display:none;margin-top:26px;padding-top:24px;border-top:1px solid var(--line);"></div>
+    <div id="tl-result" style="display:none;margin-top:26px;padding-top:24px;border-top:1px solid var(--line);"></div>
   </div>
 </div><!-- /ger-card -->
 
 <p style="font-size:13px;color:var(--muted);margin:-20px 0 40px;">
   <strong>Methodology note:</strong> GTM = Sales &amp; Marketing expense (GAAP including SBC).
   R&D = Research &amp; Development expense. Use either GAAP or non-GAAP consistently —
-  don't mix. Benchmarks in the full guide use GAAP. Every ratio — point-in-time, historical, or
-  projected — needs at least 6 consecutive quarters for the n-5 R&amp;D lookback; the trend and
-  projection modes add one plotted point for each quarter beyond the first six.
+  don't mix. Benchmarks in the full guide use GAAP. Every ratio needs 6 consecutive quarters for the
+  n-5 R&amp;D lookback, so the timeline carries five quarters of lookback before its first measured
+  point and adds one measured quarter for each period you look back or forward.
 </p>
 
 <h2>A Note on Retention</h2>
@@ -719,7 +713,7 @@ function gerTier(ratio) {
 
 /* ---- mode switching ---- */
 function setMode(m) {
-  ['point', 'hist', 'proj'].forEach(function(x) {
+  ['point', 'timeline'].forEach(function(x) {
     document.getElementById('panel-' + x).style.display = (x === m) ? 'block' : 'none';
     document.getElementById('tab-' + x).className = 'ger-mode' + (x === m ? ' ger-mode-on' : '');
   });
@@ -759,6 +753,19 @@ function calcGER() {
     'GTM investment (time-weighted): <strong>' + gtmInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
     'R&amp;D investment (time-weighted): <strong>' + rndInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
     'Total investment: <strong>' + totalInv.toFixed(1) + '</strong>';
+
+  // Build the contribution diagram from the eight inputs (window n-5 .. n).
+  window.pointStrip = [
+    {rev: 0,      gtm: 0,         rnd: v('rnd5')},
+    {rev: 0,      gtm: v('gtm4'), rnd: v('rnd4')},
+    {rev: 0,      gtm: v('gtm3'), rnd: 0},
+    {rev: 0,      gtm: v('gtm2'), rnd: 0},
+    {rev: rev_n1, gtm: v('gtm1'), rnd: 0},
+    {rev: rev_n,  gtm: 0,         rnd: 0}
+  ];
+  window.pointLabels = ['n-5', 'n-4', 'n-3', 'n-2', 'n-1', 'n'];
+  renderContrib('point', 5);
+
   document.getElementById('ger-result').style.display = 'block';
 }
 
@@ -774,112 +781,227 @@ function gerStripAt(strip, i) {
   return ((rev_n - rev_p) * 4) / tot;
 }
 
-/* ---- dynamic quarter rows for the trend modes ---- */
-var PROJ_ACTUALS = 8;                       // actual quarters before the projection starts
-var counts = {hist: 9, proj: PROJ_ACTUALS + 4};
+/* ---- modern time-distributed contribution diagram ---- */
+// Renders the 6-quarter window (cur-5 .. cur) that produces the ratio at `cur`,
+// showing the 25%-per-quarter pull from GTM and R&D aligned to the revenue it drove.
+function contributionSVG(strip, cur, labels) {
+  var g = [strip[cur - 4].gtm, strip[cur - 3].gtm, strip[cur - 2].gtm, strip[cur - 1].gtm];
+  var r = [strip[cur - 5].rnd, strip[cur - 4].rnd];
+  var revC = strip[cur].rev, revP = strip[cur - 1].rev;
+  var ann = (revC - revP) * 4;
+  var gtmInv = 0.25 * (g[0] + g[1] + g[2] + g[3]);
+  var rndInv = 0.25 * (r[0] + r[1]);
+  var tot = gtmInv + rndInv, ratio = tot > 0 ? ann / tot : 0;
 
-function rowLabel(mode, i) {
-  if (mode === 'hist') return 'Q' + (i + 1);
-  return (i < PROJ_ACTUALS) ? 'A' + (i + 1) : 'P' + (i - PROJ_ACTUALS + 1);
-}
+  var W = 760, H = 560, x0 = 118, x1 = 612, n = 6;
+  var step = (x1 - x0) / n, bw = Math.min(58, step * 0.6);
+  function cx(c) { return x0 + step * (c + 0.5); }
+  function fmtM(x) { var a = Math.round(x * 10) / 10; return '$' + (a % 1 === 0 ? a.toFixed(0) : a.toFixed(1)) + 'M'; }
+  var BLUE = '#3b82f6', GREEN = '#10b981', RED = '#f4683b', INK = '#1f2937', MUT = '#8a8178';
 
-function renderRows(mode) {
-  var n = counts[mode], html = '';
-  for (var i = 0; i < n; i++) {
-    var proj = (mode === 'proj' && i >= PROJ_ACTUALS);
-    var div = (mode === 'proj' && i === PROJ_ACTUALS) ? ' style="border-top:1px dashed var(--line);padding-top:10px;"' : '';
-    html +=
-      '<div class="ger-grid-3 ' + (proj ? 'qrow-proj' : '') + '"' + div + '>' +
-        '<span class="qlabel">' + rowLabel(mode, i) + (proj ? ' <span style="color:var(--muted);font-size:11px;">proj</span>' : '') + '</span>' +
-        '<input class="ger-in" id="' + mode + '_rev_' + i + '" type="number" min="0" step="any" placeholder="Rev">' +
-        '<input class="ger-in" id="' + mode + '_gtm_' + i + '" type="number" min="0" step="any" placeholder="GTM">' +
-        '<input class="ger-in" id="' + mode + '_rnd_' + i + '" type="number" min="0" step="any" placeholder="R&amp;D">' +
-      '</div>';
+  var s = '<svg class="ger-contrib" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,-apple-system,Segoe UI,Inter,sans-serif">';
+  s += '<defs>' +
+    '<linearGradient id="cgB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + BLUE + '" stop-opacity="0.30"/><stop offset="1" stop-color="' + BLUE + '" stop-opacity="0.08"/></linearGradient>' +
+    '<linearGradient id="cgG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + GREEN + '"/><stop offset="1" stop-color="' + GREEN + '" stop-opacity="0.6"/></linearGradient>' +
+    '<linearGradient id="cgR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + RED + '" stop-opacity="0.30"/><stop offset="1" stop-color="' + RED + '" stop-opacity="0.08"/></linearGradient>' +
+    '</defs>';
+
+  s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#2c3e50">How ' + labels[cur] + ' is built &#8212; Time-Distributed Contribution</text>';
+  s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Efficiency Ratio = $' + ratio.toFixed(2) + '</text>';
+
+  s += '<text x="20" y="146" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
+  s += '<text x="20" y="252" font-size="13" font-weight="700" fill="' + GREEN + '">Revenue</text>';
+  s += '<text x="20" y="418" font-size="13" font-weight="700" fill="' + RED + '">R&amp;D</text>';
+
+  function spendBar(c, cy, h, col, grad, val) {
+    var x = cx(c) - bw / 2, y = cy - h / 2, capH = h * 0.25;
+    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h + '" rx="7" fill="url(#' + grad + ')" stroke="' + col + '" stroke-opacity="0.45"/>';
+    o += '<path d="M' + x.toFixed(1) + ' ' + (y + capH).toFixed(1) + ' L' + x.toFixed(1) + ' ' + (y + 7) + ' Q' + x.toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + 7).toFixed(1) + ' ' + y.toFixed(1) + ' L' + (x + bw - 7).toFixed(1) + ' ' + y.toFixed(1) + ' Q' + (x + bw).toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + bw).toFixed(1) + ' ' + (y + 7) + ' L' + (x + bw).toFixed(1) + ' ' + (y + capH).toFixed(1) + ' Z" fill="' + col + '"/>';
+    o += '<text x="' + cx(c).toFixed(1) + '" y="' + (y + capH - 3).toFixed(1) + '" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">25%</text>';
+    o += '<text x="' + cx(c).toFixed(1) + '" y="' + (cy + h / 2 + 15).toFixed(1) + '" text-anchor="middle" font-size="11" fill="' + MUT + '">' + fmtM(val) + '</text>';
+    return o;
   }
-  document.getElementById(mode + '-rows').innerHTML = html;
-}
-
-function gatherVals(mode) {
-  var n = counts[mode], s = [];
-  for (var i = 0; i < n; i++) {
-    s.push([
-      (document.getElementById(mode + '_rev_' + i) || {}).value || '',
-      (document.getElementById(mode + '_gtm_' + i) || {}).value || '',
-      (document.getElementById(mode + '_rnd_' + i) || {}).value || ''
-    ]);
+  function bracket(cLo, cHi, y, col, label) {
+    var xa = cx(cLo) - bw / 2 - 3, xb = cx(cHi) + bw / 2 + 3;
+    var o = '<path d="M' + xa.toFixed(1) + ' ' + (y + 8) + ' L' + xa.toFixed(1) + ' ' + (y + 4) + ' Q' + xa.toFixed(1) + ' ' + y + ' ' + (xa + 4).toFixed(1) + ' ' + y + ' L' + (xb - 4).toFixed(1) + ' ' + y + ' Q' + xb.toFixed(1) + ' ' + y + ' ' + xb.toFixed(1) + ' ' + (y + 4) + ' L' + xb.toFixed(1) + ' ' + (y + 8) + '" fill="none" stroke="' + col + '" stroke-width="1.6"/>';
+    var mid = (xa + xb) / 2, tw = label.length * 6.7 + 24;
+    o += '<rect x="' + (mid - tw / 2).toFixed(1) + '" y="' + (y - 25) + '" width="' + tw.toFixed(1) + '" height="22" rx="11" fill="' + col + '"/>';
+    o += '<text x="' + mid.toFixed(1) + '" y="' + (y - 10) + '" text-anchor="middle" font-size="11.5" font-weight="600" fill="#fff">' + label + '</text>';
+    return o;
   }
+
+  // GTM lane (contributing quarters are window columns 1..4)
+  s += bracket(1, 4, 100, BLUE, 'GTM Investment = ' + fmtM(gtmInv));
+  for (var c = 1; c <= 4; c++) s += spendBar(c, 148, 56, BLUE, 'cgB', g[c - 1]);
+
+  // Revenue lane (prior at col 4, current at col 5)
+  var maxr = Math.max(revC, revP, 1), baseY = 300, maxh = 116;
+  function revBar(c, val, isCur) {
+    var h = Math.max(val / maxr * maxh, 2), x = cx(c) - bw / 2, y = baseY - h;
+    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="7" fill="' + (isCur ? 'url(#cgG)' : '#d7f0e3') + '" stroke="' + GREEN + '" stroke-opacity="' + (isCur ? '0.55' : '0.3') + '"/>';
+    o += '<text x="' + cx(c).toFixed(1) + '" y="' + (isCur ? (y + 19) : (y - 7)).toFixed(1) + '" text-anchor="middle" font-size="' + (isCur ? '12' : '10.5') + '" font-weight="' + (isCur ? '700' : '500') + '" fill="' + (isCur ? '#fff' : MUT) + '">' + fmtM(val) + '</text>';
+    return o;
+  }
+  s += revBar(4, revP, false);
+  s += revBar(5, revC, true);
+
+  // annualized-growth callout beside the current revenue bar
+  var gx = cx(5) + bw / 2 + 16, gy = 198, cw = 110;
+  s += '<line x1="' + (cx(5) + bw / 2).toFixed(1) + '" y1="' + (gy + 19) + '" x2="' + gx.toFixed(1) + '" y2="' + (gy + 19) + '" stroke="' + GREEN + '" stroke-width="1.4" stroke-dasharray="3 2"/>';
+  s += '<rect x="' + gx.toFixed(1) + '" y="' + gy + '" width="' + cw + '" height="38" rx="9" fill="#eafaf0" stroke="' + GREEN + '" stroke-width="1.6"/>';
+  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 18) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + GREEN + '">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</text>';
+  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 32) + '" text-anchor="middle" font-size="9.5" fill="' + GREEN + '">Annualized Growth</text>';
+
+  // R&D lane (contributing quarters are window columns 0..1)
+  s += bracket(0, 1, 366, RED, 'R&amp;D Investment = ' + fmtM(rndInv));
+  for (var c = 0; c <= 1; c++) s += spendBar(c, 414, 56, RED, 'cgR', r[c]);
+
+  // timeline axis
+  var ty = 478;
+  s += '<line x1="' + (x0 - 8) + '" y1="' + ty + '" x2="' + (x1 + 8) + '" y2="' + ty + '" stroke="#cfc8bc" stroke-width="2"/>';
+  for (var c = 0; c < n; c++) {
+    var isCur = (c === 5);
+    s += '<line x1="' + cx(c).toFixed(1) + '" y1="' + (ty - 4) + '" x2="' + cx(c).toFixed(1) + '" y2="' + (ty + 4) + '" stroke="#cfc8bc" stroke-width="1.5"/>';
+    s += '<text x="' + cx(c).toFixed(1) + '" y="' + (ty + 20) + '" text-anchor="middle" font-size="11.5" font-weight="' + (isCur ? '700' : '400') + '" fill="' + (isCur ? '#2c3e50' : MUT) + '">' + labels[cur - 5 + c] + '</text>';
+  }
+
+  // formula pill
+  var label2 = (ann >= 0 ? '+' : '') + fmtM(ann) + ' / ( ' + fmtM(gtmInv) + ' + ' + fmtM(rndInv) + ' ) = $' + ratio.toFixed(2);
+  var fw = label2.length * 7.3 + 40, fx = W / 2 - fw / 2, fy = 515;
+  var pill = '<tspan fill="' + GREEN + '" font-weight="700">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</tspan> &#247; ( ' +
+    '<tspan fill="' + BLUE + '" font-weight="700">' + fmtM(gtmInv) + '</tspan> + ' +
+    '<tspan fill="' + RED + '" font-weight="700">' + fmtM(rndInv) + '</tspan> ) = ' +
+    '<tspan fill="' + INK + '" font-weight="700">$' + ratio.toFixed(2) + '</tspan>';
+  s += '<rect x="' + fx.toFixed(1) + '" y="' + fy + '" width="' + fw.toFixed(1) + '" height="34" rx="10" fill="#ffffff" stroke="#d9d2c6" stroke-width="1.6"/>';
+  s += '<text x="' + (W / 2).toFixed(1) + '" y="' + (fy + 22) + '" text-anchor="middle" font-size="14.5">' + pill + '</text>';
+
+  s += '</svg>';
   return s;
 }
-function setVals(mode, vals) {
-  for (var i = 0; i < vals.length; i++) {
-    var r = document.getElementById(mode + '_rev_' + i); if (r) r.value = vals[i][0];
-    var g = document.getElementById(mode + '_gtm_' + i); if (g) g.value = vals[i][1];
-    var d = document.getElementById(mode + '_rnd_' + i); if (d) d.value = vals[i][2];
-  }
-}
-function addRow(mode) {
-  var max = (mode === 'hist') ? 12 : PROJ_ACTUALS + 4;
-  if (counts[mode] >= max) return;
-  var keep = gatherVals(mode); counts[mode]++; renderRows(mode); setVals(mode, keep);
-}
-function removeRow(mode) {
-  var min = (mode === 'hist') ? 6 : PROJ_ACTUALS + 1;
-  if (counts[mode] <= min) return;
-  var keep = gatherVals(mode); counts[mode]--; renderRows(mode); setVals(mode, keep);
+
+function renderContrib(prefix, idx) {
+  var strip = window[prefix + 'Strip'], labels = window[prefix + 'Labels'];
+  if (!strip || idx < 5) return;
+  document.getElementById(prefix + '-contrib').innerHTML = contributionSVG(strip, idx, labels);
 }
 
-/* ---- compute + render a trend / projection ---- */
-function calcTrend(mode) {
-  var n = counts[mode], strip = [], labels = [];
+/* ---- Timeline mode: bounded -2 .. +2 measured periods ---- */
+var TL = {back: 2, fwd: 2};
+function tlCurIndex() { return 5 + TL.back; }      // index of the current quarter
+function tlRows() { return TL.back + TL.fwd + 6; } // 5 lookback + measured periods
+function tlLabel(i) {
+  var d = i - tlCurIndex();
+  return d === 0 ? 'n' : 'n' + (d < 0 ? ('-' + (-d)) : ('+' + d));
+}
+
+function renderTL() {
+  var n = tlRows(), cur = tlCurIndex(), html = '';
   for (var i = 0; i < n; i++) {
-    strip.push({rev: v(mode + '_rev_' + i), gtm: v(mode + '_gtm_' + i), rnd: v(mode + '_rnd_' + i)});
-    labels.push(rowLabel(mode, i));
+    var proj = i > cur, lookback = i < 5;
+    var tag = (i === cur) ? ' <span style="color:var(--accent);font-size:11px;font-weight:600;">current</span>'
+            : (proj ? ' <span style="color:var(--muted);font-size:11px;">proj</span>'
+            : (lookback ? ' <span style="color:var(--muted);font-size:11px;">lookback</span>' : ''));
+    var div = (i === cur + 1) ? ' style="border-top:1px dashed var(--line);padding-top:8px;"' : '';
+    html +=
+      '<div class="ger-grid-3 ' + (proj ? 'qrow-proj' : '') + '"' + div + '>' +
+        '<span class="qlabel">' + tlLabel(i) + tag + '</span>' +
+        '<input class="ger-in" id="tl_rev_' + i + '" type="number" min="0" step="any" placeholder="Rev">' +
+        '<input class="ger-in" id="tl_gtm_' + i + '" type="number" min="0" step="any" placeholder="GTM">' +
+        '<input class="ger-in" id="tl_rnd_' + i + '" type="number" min="0" step="any" placeholder="R&amp;D">' +
+      '</div>';
+  }
+  document.getElementById('tl-rows').innerHTML = html;
+}
+
+function tlGather() {
+  var n = tlRows(), cur = tlCurIndex(), m = {};
+  for (var i = 0; i < n; i++) {
+    m[i - cur] = [
+      (document.getElementById('tl_rev_' + i) || {}).value || '',
+      (document.getElementById('tl_gtm_' + i) || {}).value || '',
+      (document.getElementById('tl_rnd_' + i) || {}).value || ''
+    ];
+  }
+  return m;
+}
+function tlRestore(m) {
+  var n = tlRows(), cur = tlCurIndex();
+  for (var i = 0; i < n; i++) {
+    var k = m[i - cur]; if (!k) continue;
+    document.getElementById('tl_rev_' + i).value = k[0];
+    document.getElementById('tl_gtm_' + i).value = k[1];
+    document.getElementById('tl_rnd_' + i).value = k[2];
+  }
+}
+function stepTL(which, delta) {
+  var keep = tlGather();
+  if (which === 'back') TL.back = Math.max(0, Math.min(2, TL.back + delta));
+  else TL.fwd = Math.max(0, Math.min(2, TL.fwd + delta));
+  document.getElementById('tl-back').textContent = TL.back;
+  document.getElementById('tl-fwd').textContent = TL.fwd;
+  renderTL(); tlRestore(keep);
+}
+
+function calcTimeline() {
+  var n = tlRows(), cur = tlCurIndex(), strip = [], labels = [];
+  for (var i = 0; i < n; i++) {
+    strip.push({rev: v('tl_rev_' + i), gtm: v('tl_gtm_' + i), rnd: v('tl_rnd_' + i)});
+    labels.push(tlLabel(i));
   }
   var base = [];
   for (var i = 0; i < n; i++) { var r = gerStripAt(strip, i); if (r !== null) base.push({i: i, y: r}); }
   if (base.length === 0) {
-    alert('Enter at least 6 consecutive quarters of Revenue, GTM and R&D (each greater than zero) to plot a point.');
+    alert('Fill in the quarters (Revenue, GTM and R&D, each greater than zero) so the earliest measured quarter has its six-quarter lookback.');
     return;
   }
 
-  var series, extraNote = '';
-  if (mode === 'proj') {
-    // Upper = best case (projected revenue +10%, projected spend -10%); lower = worst case.
-    var up = strip.map(function(q, idx) { return idx >= PROJ_ACTUALS ? {rev: q.rev * 1.1, gtm: q.gtm * 0.9, rnd: q.rnd * 0.9} : q; });
-    var dn = strip.map(function(q, idx) { return idx >= PROJ_ACTUALS ? {rev: q.rev * 0.9, gtm: q.gtm * 1.1, rnd: q.rnd * 1.1} : q; });
+  var series = [];
+  if (TL.fwd > 0) {
+    var up = strip.map(function(q, idx) { return idx > cur ? {rev: q.rev * 1.1, gtm: q.gtm * 0.9, rnd: q.rnd * 0.9} : q; });
+    var dn = strip.map(function(q, idx) { return idx > cur ? {rev: q.rev * 0.9, gtm: q.gtm * 1.1, rnd: q.rnd * 1.1} : q; });
     var upP = [], dnP = [];
-    for (var i = 0; i < n; i++) {
+    for (var i = cur; i < n; i++) {
       var ru = gerStripAt(up, i); if (ru !== null) upP.push({i: i, y: ru});
       var rd = gerStripAt(dn, i); if (rd !== null) dnP.push({i: i, y: rd});
     }
-    series = [
-      {pts: upP, color: '#8a9a93', dash: true, role: 'up'},
-      {pts: dnP, color: '#8a9a93', dash: true, role: 'dn'},
-      {pts: base, color: '#1a4d3c', dotsTier: true, splitAt: PROJ_ACTUALS - 1, role: 'base'}
-    ];
-    extraNote = 'Dashed line = projected path. The grey band is your best / worst case if projected ' +
-      'revenue and spend each land 10% better or worse than plan — it widens further out as more of ' +
-      'the ratio depends on projected numbers.';
-  } else {
-    series = [{pts: base, color: '#1a4d3c', dotsTier: true, role: 'base'}];
+    series.push({pts: upP, color: '#8a9a93', dash: true, role: 'up'});
+    series.push({pts: dnP, color: '#8a9a93', dash: true, role: 'dn'});
   }
+  series.push({pts: base, color: '#1a4d3c', dotsTier: true, splitAt: cur, role: 'base'});
 
-  var first = base[0], last = base[base.length - 1], lt = gerTier(last.y);
+  var first = base[0], last = base[base.length - 1];
+  var curY = gerStripAt(strip, cur); if (curY === null) curY = last.y;
+  var ct = gerTier(curY);
   var dir = last.y > first.y + 0.02 ? 'improving' : (last.y < first.y - 0.02 ? 'declining' : 'holding steady');
   var summary =
     '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:baseline;margin-top:18px;">' +
-      '<div><p class="qhead" style="margin:0 0 2px;">Latest ratio (' + labels[last.i] + ')</p>' +
-      '<p style="font-size:32px;font-weight:700;letter-spacing:-0.02em;margin:0;color:' + lt.color + ';">' + fmtRatio(last.y) + '</p></div>' +
+      '<div><p class="qhead" style="margin:0 0 2px;">Current quarter (n)</p>' +
+      '<p style="font-size:32px;font-weight:700;letter-spacing:-0.02em;margin:0;color:' + ct.color + ';">' + fmtRatio(curY) + '</p></div>' +
       '<div style="flex:1;min-width:220px;">' +
-      '<p style="font-weight:600;margin:0 0 2px;color:' + lt.color + ';">' + lt.tier + '</p>' +
-      '<p style="font-size:14px;color:var(--muted);margin:0;">Across ' + base.length + ' quarter' + (base.length > 1 ? 's' : '') +
-      ' your ratio is <strong>' + dir + '</strong> (' + fmtRatio(first.y) + ' &rarr; ' + fmtRatio(last.y) +
-      '). Shaded bands are the benchmark tiers; the dashed grey line is $1.00 break-even.</p></div></div>';
-  if (extraNote) summary += '<p style="font-size:13px;color:var(--muted);margin:12px 0 0;">' + extraNote + '</p>';
+      '<p style="font-weight:600;margin:0 0 2px;color:' + ct.color + ';">' + ct.tier + '</p>' +
+      '<p style="font-size:14px;color:var(--muted);margin:0;">Across ' + base.length + ' measured quarter' + (base.length > 1 ? 's' : '') +
+      ' the ratio is <strong>' + dir + '</strong> (' + fmtRatio(first.y) + ' &rarr; ' + fmtRatio(last.y) + '). ' +
+      (TL.fwd > 0 ? 'Dashed = projected path; the grey band is best/worst case if projected revenue and spend each land 10% better or worse than plan. ' : '') +
+      'Shaded bands are the benchmark tiers; the dashed grey line is $1.00 break-even.</p></div></div>';
 
-  var box = document.getElementById(mode + '-result');
-  box.innerHTML = buildChart(labels, series, n) + summary;
+  window.tlStrip = strip; window.tlLabels = labels;
+  var pick = '<label class="qhead" style="margin-right:8px;">Explain quarter</label>' +
+    '<select id="tl-pick" class="ger-in" style="width:auto;display:inline-block;padding:7px 10px;">';
+  base.forEach(function(p) { pick += '<option value="' + p.i + '"' + (p.i === cur ? ' selected' : '') + '>' + labels[p.i] + '</option>'; });
+  pick += '</select>';
+
+  var box = document.getElementById('tl-result');
+  box.innerHTML = buildChart(labels, series, n) + summary +
+    '<div style="margin-top:24px;padding-top:18px;border-top:1px dashed var(--line);">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">' +
+        '<p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">How a quarter is built</p>' + pick +
+      '</div>' +
+      '<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Pick any measured quarter to see the 25%-per-quarter pull behind that point.</p>' +
+      '<div class="ger-contrib-wrap"><div id="tl-contrib" style="min-width:560px;"></div></div>' +
+    '</div>';
   box.style.display = 'block';
+  document.getElementById('tl-pick').addEventListener('change', function() { renderContrib('tl', parseInt(this.value, 10)); });
+  renderContrib('tl', cur);
 }
 
 /* ---- inline SVG line chart with benchmark tier bands ---- */
@@ -964,23 +1086,25 @@ function buildChart(labels, series, n) {
   return s;
 }
 
-function loadTrendExample(mode) {
-  if (mode === 'hist') {
-    counts.hist = 9; renderRows('hist');
-    var rev = [50,55,61,68,75,83,92,102,113], gtm = [12,13,14,15,16,17,18,19,20], rnd = [9,9,10,10,11,11,12,12,13];
-    for (var i = 0; i < 9; i++) { document.getElementById('hist_rev_' + i).value = rev[i]; document.getElementById('hist_gtm_' + i).value = gtm[i]; document.getElementById('hist_rnd_' + i).value = rnd[i]; }
-    calcTrend('hist');
-  } else {
-    counts.proj = PROJ_ACTUALS + 4; renderRows('proj');
-    var rev = [80,86,92,99,106,114,122,131,141,151,162,174], gtm = [18,19,20,21,22,23,24,25,26,28,29,31], rnd = [13,13,14,14,15,15,16,16,17,17,18,18];
-    for (var i = 0; i < counts.proj; i++) { document.getElementById('proj_rev_' + i).value = rev[i]; document.getElementById('proj_gtm_' + i).value = gtm[i]; document.getElementById('proj_rnd_' + i).value = rnd[i]; }
-    calcTrend('proj');
+function loadTimelineExample() {
+  TL.back = 2; TL.fwd = 2;
+  document.getElementById('tl-back').textContent = TL.back;
+  document.getElementById('tl-fwd').textContent = TL.fwd;
+  renderTL();
+  // n-7 .. n+2: revenue compounding ~7%/qtr, spend disciplined; last two quarters projected.
+  var rev = [560, 602, 648, 690, 726, 762, 800, 840, 885, 932];
+  var gtm = [120, 128, 135, 141, 148, 156, 165, 172, 180, 188];
+  var rnd = [150, 150, 162, 168, 176, 184, 196, 205, 214, 224];
+  for (var i = 0; i < tlRows(); i++) {
+    document.getElementById('tl_rev_' + i).value = rev[i];
+    document.getElementById('tl_gtm_' + i).value = gtm[i];
+    document.getElementById('tl_rnd_' + i).value = rnd[i];
   }
+  calcTimeline();
 }
 
-// Build the trend tables up front so the rows exist before the user switches tabs.
-renderRows('hist');
-renderRows('proj');
+// Build the timeline table up front so its rows exist before the user switches tabs.
+renderTL();
 </script>"""
     return HTMLResponse(_page("The Growth Engine Ratio — Brian Weisberg", "Thought Leadership", body))
 
