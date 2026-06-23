@@ -824,7 +824,11 @@ def tools_directory(request: Request):
 <script>
 var ALL_TOOLS = {tools_json};
 var AUTHED = {'true' if authed else 'false'};
-var activeCat = '';
+var activeCats = new Set();
+
+function esc(s) {{
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
 
 function renderTools(tools) {{
   var grid = document.getElementById('tool-grid');
@@ -842,58 +846,68 @@ function renderTools(tools) {{
     var cats = (t.categories || []).map(function(c) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
     }}).join('');
-    var adminControls = AUTHED
-      ? '<div class="tool-admin">'
-          + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Edit</a>'
-          + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:inline;"'
-          + ' onsubmit="return confirm(\'Delete \' + ' + JSON.stringify(t.name) + ' + \'?\');">'
-          + '<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button>'
-          + '</form>'
-          + '</div>'
-      : '';
+    var adminControls = '';
+    if (AUTHED) {{
+      adminControls = '<div class="tool-admin">'
+        + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Edit</a>'
+        + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:inline;"'
+        + ' data-toolname="' + esc(t.name) + '"'
+        + ' onsubmit="return confirm(\'Delete \'+this.dataset.toolname+\'?\')">'
+        + '<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button>'
+        + '</form></div>';
+    }}
     var metaParts = [];
     if (AUTHED) {{
       if (t.submitted_by) metaParts.push('Submitted by ' + esc(t.submitted_by));
       if (t.created_at) metaParts.push('Added ' + t.created_at);
       if (t.updated_at && t.updated_at !== t.created_at) metaParts.push('Edited ' + t.updated_at);
     }}
-    var adminMeta = metaParts.length
-      ? '<div class="tool-meta">' + metaParts.join(' &middot; ') + '</div>'
-      : '';
+    var adminMeta = metaParts.length ? '<div class="tool-meta">' + metaParts.join(' &middot; ') + '</div>' : '';
     return '<article class="tool-card">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">'
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
-      + adminControls
-      + '</div>'
+      + adminControls + '</div>'
       + '<p class="tool-desc">' + esc(t.description) + '</p>'
       + '<div class="tool-cats">' + cats + '</div>'
-      + adminMeta
-      + '</article>';
+      + adminMeta + '</article>';
   }}).join('');
-}}
-
-function esc(s) {{
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }}
 
 function filtered() {{
   var q = (document.getElementById('tool-search').value || '').toLowerCase();
   return ALL_TOOLS.filter(function(t) {{
-    var matchCat = !activeCat || (t.categories || []).indexOf(activeCat) !== -1;
-    if (!matchCat) return false;
+    if (activeCats.size > 0) {{
+      var cats = t.categories || [];
+      var hit = false;
+      for (var i = 0; i < cats.length; i++) {{ if (activeCats.has(cats[i])) {{ hit = true; break; }} }}
+      if (!hit) return false;
+    }}
     if (!q) return true;
     return (t.name + ' ' + t.description + ' ' + (t.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
   }});
 }}
 
-function filterTools() {{ renderTools(filtered()); }}
+function syncButtons() {{
+  document.querySelectorAll('.tcat-btn').forEach(function(b) {{
+    var c = b.dataset.cat;
+    b.classList.toggle('tcat-active', c === '' ? activeCats.size === 0 : activeCats.has(c));
+  }});
+}}
 
 function filterCat(btn) {{
-  activeCat = btn.dataset.cat;
-  document.querySelectorAll('.tcat-btn').forEach(function(b) {{ b.classList.remove('tcat-active'); }});
-  btn.classList.add('tcat-active');
-  filterTools();
+  var cat = btn.dataset.cat;
+  if (cat === '') {{
+    activeCats.clear();
+  }} else if (activeCats.has(cat)) {{
+    activeCats.delete(cat);
+  }} else {{
+    activeCats.add(cat);
+  }}
+  syncButtons();
+  renderTools(filtered());
 }}
+
+function filterTools() {{ renderTools(filtered()); }}
 
 renderTools(ALL_TOOLS);
 </script>"""
