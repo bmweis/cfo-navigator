@@ -258,6 +258,13 @@ TOOLS = [
         "categories": ["Financial Close"],
         "advisor": True,
     },
+    {
+        "name": "Lumos",
+        "url": "https://www.lumos.ai",
+        "description": "AI-native accounts receivable and collections platform. Automates dunning workflows, payment follow-ups, and dispute resolution to accelerate cash collection and reduce DSO.",
+        "categories": ["Collections"],
+        "advisor": True,
+    },
 ]
 
 

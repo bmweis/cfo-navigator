@@ -54,6 +54,7 @@ TOOL_CATEGORIES = [
     "Spend Management",
     "Financial Close",
     "Billing",
+    "Collections",
     "Sales Tax",
     "Commission Calculations",
     "Contract Management",
@@ -964,7 +965,7 @@ def tools_directory(request: Request):
 <p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
 
 <div style="margin-top:48px;padding-top:32px;border-top:1px solid var(--line);">
-  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Brian Weisberg serves as a formal advisor to these companies.</p>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these companies.</p>
   <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
     <a href="/tools/submit" style="font-weight:500;">Submit it for review →</a></p>
 </div>
