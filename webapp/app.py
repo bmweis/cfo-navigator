@@ -62,6 +62,52 @@ TOOL_CATEGORIES = [
     "Contract Management",
     "Procurement",
 ]
+
+# coverage: "Private" | "Public" | "Both"
+BENCHMARKS = [
+    {
+        "name": "ICONIQ Growth",
+        "url": "https://iconiqcapital.com/growth/insights/",
+        "description": "Annual SaaS benchmarking reports covering ARR growth, efficiency, GTM, and unit economics for private growth-stage companies.",
+        "coverage": "Private",
+    },
+    {
+        "name": "HighAlpha (formerly OpenView)",
+        "url": "https://highalpha.com/",
+        "description": "Continuing OpenView's annual SaaS Benchmarks report — NRR, GRR, CAC payback, and other key metrics for private SaaS companies.",
+        "coverage": "Private",
+    },
+    {
+        "name": "OpexEngine",
+        "url": "https://www.opexengine.com",
+        "description": "SaaS and subscription benchmarking platform covering Rule of 40, unit economics, and operational metrics across private and public companies.",
+        "coverage": "Both",
+    },
+    {
+        "name": "Bessemer Venture Partners",
+        "url": "https://www.bvp.com/atlas",
+        "description": "State of the Cloud reports and the Good-Better-Best SaaS metrics framework — widely cited benchmarks for both private and public cloud companies.",
+        "coverage": "Both",
+    },
+    {
+        "name": "KeyBanc Capital Markets",
+        "url": "https://www.key.com/businesses-institutions/industry-expertise/technology/saas-survey.jsp",
+        "description": "Annual private SaaS company survey covering growth rates, retention, sales efficiency, and compensation benchmarks across hundreds of companies.",
+        "coverage": "Private",
+    },
+    {
+        "name": "Meritech Capital",
+        "url": "https://www.meritechcapital.com/benchmarking",
+        "description": "Comprehensive benchmarking database for public SaaS companies — growth, efficiency, valuation multiples, and operating metrics updated in real time.",
+        "coverage": "Public",
+    },
+    {
+        "name": "PublicComps",
+        "url": "https://www.publiccomps.com",
+        "description": "Financial comps, revenue multiples, and operating metrics for public SaaS and software companies, with filters by category and scale.",
+        "coverage": "Public",
+    },
+]
 _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
@@ -1204,6 +1250,24 @@ def tools_directory(request: Request):
         for c in TOOL_CATEGORIES
     )
 
+    def _bench_badge_style(cov: str) -> str:
+        return {
+            "Private": "background:#dbeafe;color:#1d4ed8",
+            "Public":  "background:#dcfce7;color:#16a34a",
+            "Both":    "background:#ede9fe;color:#7c3aed",
+        }.get(cov, "background:var(--accent-light);color:var(--accent)")
+
+    bench_cards = "".join(
+        f'<a class="bench-card" href="{_esc(b["url"])}" target="_blank" rel="noopener">'
+        f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px;">'
+        f'<span class="bench-name">{_esc(b["name"])}</span>'
+        f'<span class="bench-badge" style="{_bench_badge_style(b["coverage"])}">{_esc(b["coverage"])}</span>'
+        f'</div>'
+        f'<p class="bench-desc">{_esc(b["description"])}</p>'
+        f'</a>'
+        for b in BENCHMARKS
+    )
+
     body = f"""<div class="page" style="max-width:860px;">
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
   <h1 style="margin:0;">CFO Toolbox</h1>
@@ -1228,7 +1292,15 @@ def tools_directory(request: Request):
 
 <p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
 
-<div style="margin-top:48px;padding-top:32px;border-top:1px solid var(--line);">
+<div style="margin-top:56px;padding-top:40px;border-top:1px solid var(--line);">
+  <h2 style="font-size:20px;font-weight:700;margin:0 0 6px;">Benchmarking Resources</h2>
+  <p style="color:var(--muted);font-size:14px;margin:0 0 24px;">Key reports and datasets for SaaS financial benchmarks.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
+    {bench_cards}
+  </div>
+</div>
+
+<div style="margin-top:40px;padding-top:28px;border-top:1px solid var(--line);">
   <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these companies.</p>
   <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
     <a href="/tools/submit" style="font-weight:500;">Submit it for review →</a></p>
@@ -1252,6 +1324,12 @@ def tools_directory(request: Request):
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 .tool-meta{{font-size:12px;color:var(--muted);margin-top:10px;}}
+.bench-card{{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;transition:border-color .15s;}}
+.bench-card:hover{{border-color:var(--accent);text-decoration:none;}}
+.bench-name{{font-size:15px;font-weight:600;color:var(--ink);}}
+.bench-card:hover .bench-name{{color:var(--accent);}}
+.bench-badge{{font-size:11px;font-weight:500;border-radius:6px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}}
+.bench-desc{{font-size:13px;color:#3a352e;margin:0;line-height:1.5;}}
 </style>
 
 <script>
