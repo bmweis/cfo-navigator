@@ -267,6 +267,7 @@ def _page(title: str, active: str, body: str, authed: bool = False) -> str:
         for href, label in nav_items
     )
     if authed:
+        nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin</a>'
         nav += '<a href="/logout">Log out</a>'
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1820,25 +1821,49 @@ OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferr
 
 
 @app.get("/feed", response_class=HTMLResponse)
-def feed_reader(request: Request, cat: str = ""):
+def feed_reader(request: Request, cat: str = "", rl: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
-    from linklib.feed import get_feed_items
 
+    import json as _json
+    lib = _lib()
     try:
-        items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
-    except Exception as e:
-        return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Feed",
-            f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
-            authed=True))
+        lib_tags = [t for t, _ in lib.all_tags()[:20]]
+        custom_filters = _json.loads(lib.get_setting("feed_filter_tags") or "[]")
+        rl_urls = lib.read_later_urls()
+        rl_items_raw = lib.list_read_later() if rl else []
+    finally:
+        lib.close()
 
-    # Category tab bar
-    tabs = '<a href="/feed" class="ftab{active}">All</a>'.format(
-        active=' ftab-on' if not cat else '',
-    )
-    for c in categories:
-        active = ' ftab-on' if c == cat else ''
-        tabs += f'<a href="/feed?cat={quote(c)}" class="ftab{active}">{_esc(c)}</a>'
+    PINNED_TOPICS = ["S-1"]
+
+    if rl:
+        items = [
+            {"url": r["url"], "title": r["title"] or "(no title)", "source": r["source"] or "",
+             "summary": r["summary"] or "", "published_at": r["published_at"],
+             "paywalled": False, "_rl_mode": True}
+            for r in rl_items_raw
+        ]
+        categories = []
+    else:
+        from linklib.feed import get_feed_items
+        try:
+            items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
+        except Exception as e:
+            return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed",
+                f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
+                authed=True))
+
+    # Tab bar
+    if rl:
+        tabs = '<a href="/feed" class="ftab" style="margin-right:4px;">&larr; Back</a>'
+    else:
+        tabs = '<a href="/feed" class="ftab{active}">All</a>'.format(
+            active=' ftab-on' if not cat else '',
+        )
+        for c in categories:
+            active = ' ftab-on' if c == cat else ''
+            tabs += f'<a href="/feed?cat={quote(c)}" class="ftab{active}">{_esc(c)}</a>'
 
     def _fmt_date(iso: str) -> str:
         if not iso:
@@ -1849,78 +1874,151 @@ def feed_reader(request: Request, cat: str = ""):
         except Exception:
             return iso[:10]
 
-    # Collect unique sources in the order they first appear
-    sources = list(dict.fromkeys(item["source"] for item in items))
+    sources = list(dict.fromkeys(item.get("source", "") for item in items if item.get("source")))
 
+    # Build cards
     cards = ""
     for item in items:
-        save_url = _esc(item["url"])
+        url = item["url"]
         paywalled = item.get("paywalled", False)
-        paywall_badge = ' <span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:600;vertical-align:middle;">&#128274; Paywalled</span>' if paywalled else ''
-        read_btn = '' if paywalled else f'<a href="/read?url={quote(item["url"], safe="")}" class="faction">&#9654; Read</a>'
-        src_attr = _esc(item["source"])
-        cards += f"""<article class="fcard" data-source="{src_attr}">
-  <div class="fcard-meta">{_esc(item['source'])}{ ' &middot; ' + _fmt_date(item['published_at']) if item['published_at'] else ''}{paywall_badge}</div>
-  <a class="fcard-title" href="{save_url}" target="_blank" rel="noopener">{_esc(item['title'])}</a>
-  { f'<p class="fcard-summary">{_esc(item["summary"])}</p>' if item.get('summary') else '' }
-  <div class="fcard-actions">
-    {read_btn}
-    <button class="faction" onclick="saveItem(this,'{save_url}')">+ Save to Library</button>
-  </div>
-</article>"""
+        paywall_badge = (' <span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:600;vertical-align:middle;">&#128274; Paywalled</span>'
+                         if paywalled else '')
+        read_btn = ('' if paywalled
+                    else f'<a href="/read?url={quote(url, safe="")}" class="faction">&#9654; Read</a>')
+        is_rl_mode = item.get("_rl_mode", False)
+        is_rl = is_rl_mode or (url in rl_urls)
+        if is_rl_mode:
+            rl_btn = '<button class="faction rl-active" onclick="removeReadLater(this)">&#10003; Read later</button>'
+            save_btn = ''
+        else:
+            rl_cls = ' rl-active' if is_rl else ''
+            rl_lbl = '&#10003; Read later' if is_rl else '&#128204; Read later'
+            rl_btn = f'<button class="faction{rl_cls}" onclick="toggleReadLater(this)">{rl_lbl}</button>'
+            save_btn = '<button class="faction" onclick="saveItem(this)">+ Save</button>'
+
+        summary_html = f'  <p class="fcard-summary">{_esc(item["summary"])}</p>\n' if item.get("summary") else ''
+        actions = read_btn + (' ' + save_btn if save_btn else '') + ' ' + rl_btn
+        cards += (
+            f'<article class="fcard"'
+            f' data-source="{_esc(item.get("source", ""))}"'
+            f' data-text="{_esc((item["title"] + " " + (item.get("summary") or "")).lower())}"'
+            f' data-rl="{1 if is_rl else 0}"'
+            f' data-url="{_esc(url)}"'
+            f' data-title="{_esc(item.get("title", ""))}"'
+            f' data-fsrc="{_esc(item.get("source", ""))}"'
+            f' data-summary="{_esc((item.get("summary") or "")[:300])}"'
+            f' data-pub="{_esc(item.get("published_at") or "")}">\n'
+            f'  <div class="fcard-meta">{_esc(item.get("source", ""))}'
+            f'{ " &middot; " + _fmt_date(item["published_at"]) if item.get("published_at") else ""}'
+            f'{paywall_badge}</div>\n'
+            f'  <a class="fcard-title" href="{_esc(url)}" target="_blank" rel="noopener">{_esc(item["title"])}</a>\n'
+            f'{summary_html}'
+            f'  <div class="fcard-actions">{actions}</div>\n'
+            f'</article>'
+        )
 
     if not cards:
-        cards = '<p style="color:var(--muted);padding:32px 0;">No items loaded—feeds may be warming up. Try refreshing in a moment.</p>'
+        msg = ('No items saved to Read Later yet.' if rl
+               else 'No items loaded—feeds may be warming up. Try refreshing in a moment.')
+        cards = f'<p style="color:var(--muted);padding:32px 0;">{msg}</p>'
 
     # Source filter checkboxes
     source_checks = "".join(
         f'<label class="fsrc-label"><input type="checkbox" class="fsrc-cb" value="{_esc(s)}" checked onchange="applyFilter()"><span>{_esc(s)}</span></label>'
         for s in sources
     )
+
+    # Topic chips: pinned + library tags + custom (deduplicated, order preserved)
+    seen_t: set[str] = set()
+    all_topics: list[str] = []
+    for t in PINNED_TOPICS + lib_tags + custom_filters:
+        if t not in seen_t:
+            seen_t.add(t)
+            all_topics.append(t)
+
+    topic_chips = ""
+    for t in all_topics:
+        is_custom = t not in PINNED_TOPICS and t not in lib_tags
+        x_part = (f' <button class="chip-x" data-keyword="{_esc(t)}"'
+                  f' onclick="event.stopPropagation();removeCustomFilter(this)">&#xd7;</button>'
+                  if is_custom else '')
+        topic_chips += (f'<span class="topic-chip" data-keyword="{_esc(t)}"'
+                        f' onclick="toggleTopic(this)">{_esc(t)}{x_part}</span>')
+
+    custom_filters_js = _json.dumps(custom_filters)
+
+    # Sources section (hidden in rl mode since items come from DB)
+    if not rl:
+        src_section = f"""<div style="margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+        <span style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">Sources</span>
+        <button onclick="setAll(true)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Select all</button>
+        <button onclick="setAll(false)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Clear all</button>
+        <span id="filter-count" style="font-size:12px;color:var(--muted);margin-left:auto;"></span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">{source_checks}</div>
+    </div>"""
+    else:
+        src_section = ""
+
     filter_panel = f"""<div id="filter-panel" style="display:none;border-bottom:1px solid var(--line);background:#fff;padding:14px 24px;">
   <div style="max-width:860px;margin:0 auto;">
-    <div style="display:flex;align-items:center;gap:16px;margin-bottom:10px;">
-      <span style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">Filter by source</span>
-      <button onclick="setAll(true)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Select all</button>
-      <button onclick="setAll(false)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Clear all</button>
-      <span id="filter-count" style="font-size:12px;color:var(--muted);margin-left:auto;"></span>
+    {src_section}
+    <div>
+      <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Topics</div>
+      <div id="topic-chips" style="display:flex;flex-wrap:wrap;gap:8px;">{topic_chips}</div>
+      <div style="margin-top:8px;display:flex;gap:6px;align-items:center;">
+        <input id="custom-topic-input" placeholder="Add keyword&#x2026;"
+          style="padding:4px 10px;border:1px solid var(--line);border-radius:20px;font-size:12px;background:#fff;width:130px;"
+          onkeydown="if(event.key==='Enter')addCustomFilter();">
+        <button onclick="addCustomFilter()"
+          style="font-size:12px;color:var(--accent);background:none;border:1px solid var(--line);border-radius:20px;padding:4px 10px;cursor:pointer;">+ Add</button>
+      </div>
     </div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;">{source_checks}</div>
   </div>
 </div>"""
 
-    body = f"""<div style="border-bottom:1px solid var(--line);padding:12px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
-  <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1;">{tabs}</div>
-    <button onclick="toggleFilter()" id="filter-btn" style="font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);border-radius:20px;padding:6px 14px;cursor:pointer;white-space:nowrap;">&#9776; Sources</button>
-  </div>
-</div>
-{filter_panel}
-<main id="feed-main" style="max-width:860px;margin:0 auto;padding:24px 24px 80px;display:grid;gap:12px;">
-{cards}
-</main>
-<style>
-.ftab{{display:inline-block;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;
-  color:var(--muted);text-decoration:none;border:1px solid transparent;}}
-.ftab:hover{{color:var(--ink);text-decoration:none;background:var(--accent-light);}}
-.ftab-on{{background:var(--accent);color:#fff !important;}}
-.fcard{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 20px;}}
-.fcard-meta{{font-size:12px;color:var(--muted);margin-bottom:5px;}}
-.fcard-title{{font-size:16px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;line-height:1.35;}}
-.fcard-title:hover{{color:var(--accent);text-decoration:none;}}
-.fcard-summary{{font-size:14px;color:#5a5248;margin:0 0 10px;line-height:1.5;}}
-.fcard-actions{{display:flex;gap:10px;margin-top:8px;}}
-.faction{{font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);
-  border-radius:8px;padding:5px 12px;cursor:pointer;text-decoration:none;}}
-.faction:hover{{background:var(--accent-light);text-decoration:none;}}
-.faction.saved{{color:var(--muted);pointer-events:none;}}
-.fsrc-label{{display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;
+    rl_count = f' ({len(rl_items_raw)})' if rl_items_raw else ''
+    rl_link = '/feed' if rl else '/feed?rl=1'
+    rl_extra = ' style="background:var(--accent);color:#fff;border-color:var(--accent);"' if rl else ''
+
+    feed_css = """<style>
+.ftab{display:inline-block;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;
+  color:var(--muted);text-decoration:none;border:1px solid transparent;}
+.ftab:hover{color:var(--ink);text-decoration:none;background:var(--accent-light);}
+.ftab-on{background:var(--accent);color:#fff !important;}
+.fcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 20px;}
+.fcard-meta{font-size:12px;color:var(--muted);margin-bottom:5px;}
+.fcard-title{font-size:16px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;line-height:1.35;}
+.fcard-title:hover{color:var(--accent);text-decoration:none;}
+.fcard-summary{font-size:14px;color:#5a5248;margin:0 0 10px;line-height:1.5;}
+.fcard-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
+.faction{font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);
+  border-radius:8px;padding:5px 12px;cursor:pointer;text-decoration:none;}
+.faction:hover{background:var(--accent-light);text-decoration:none;}
+.faction.saved{color:var(--muted);pointer-events:none;}
+.faction.rl-active{background:var(--accent-light);border-color:var(--accent);}
+.fsrc-label{display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;
   background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:4px 10px;
-  user-select:none;transition:background .1s;}}
-.fsrc-label:hover{{background:var(--accent-light);}}
-.fsrc-label input{{accent-color:var(--accent);cursor:pointer;}}
-</style>
-<script>
+  user-select:none;transition:background .1s;}
+.fsrc-label:hover{background:var(--accent-light);}
+.fsrc-label input{accent-color:var(--accent);cursor:pointer;}
+.filter-btn{font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);
+  border-radius:20px;padding:6px 14px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-block;}
+.filter-btn:hover{background:var(--accent-light);text-decoration:none;}
+.topic-chip{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:20px;
+  font-size:12px;cursor:pointer;background:var(--accent-light);color:var(--accent);
+  border:1px solid transparent;user-select:none;transition:background .1s;}
+.topic-chip:hover{border-color:var(--accent);}
+.topic-chip.chip-on{background:var(--accent);color:#fff;}
+.chip-x{background:none;border:none;cursor:pointer;color:inherit;font-size:11px;
+  padding:0;margin-left:1px;opacity:.7;line-height:1;}
+.chip-x:hover{opacity:1;}
+</style>"""
+
+    feed_js = f"""<script>
+var customFilters = {custom_filters_js};
+var activeTopics = new Set();
 function toggleFilter() {{
   var p = document.getElementById('filter-panel');
   var btn = document.getElementById('filter-btn');
@@ -1933,34 +2031,144 @@ function setAll(checked) {{
   document.querySelectorAll('.fsrc-cb').forEach(function(cb) {{ cb.checked = checked; }});
   applyFilter();
 }}
+function toggleTopic(chip) {{
+  var kw = chip.dataset.keyword;
+  if (activeTopics.has(kw)) {{ activeTopics.delete(kw); chip.classList.remove('chip-on'); }}
+  else {{ activeTopics.add(kw); chip.classList.add('chip-on'); }}
+  applyFilter();
+}}
 function applyFilter() {{
+  var hasCbs = document.querySelectorAll('.fsrc-cb').length > 0;
   var selected = new Set();
   document.querySelectorAll('.fsrc-cb:checked').forEach(function(cb) {{ selected.add(cb.value); }});
   var visible = 0;
   document.querySelectorAll('.fcard').forEach(function(card) {{
-    var show = selected.has(card.dataset.source);
+    var showSrc = !hasCbs || selected.has(card.dataset.source);
+    var showTopic = activeTopics.size === 0;
+    if (!showTopic) {{
+      var txt = card.dataset.text || '';
+      activeTopics.forEach(function(kw) {{ if (txt.indexOf(kw.toLowerCase()) !== -1) showTopic = true; }});
+    }}
+    var show = showSrc && showTopic;
     card.style.display = show ? '' : 'none';
     if (show) visible++;
   }});
   updateCount(visible);
 }}
 function updateCount(n) {{
+  var el = document.getElementById('filter-count');
+  if (!el) return;
   var total = document.querySelectorAll('.fcard').length;
   if (n === undefined) n = total;
-  document.getElementById('filter-count').textContent = n + ' of ' + total + ' shown';
+  el.textContent = n + ' of ' + total + ' shown';
 }}
-function saveItem(btn, url) {{
+function saveItem(btn) {{
+  var card = btn.closest('.fcard');
+  var url = card.dataset.url;
+  var t = prompt('Tags (comma-separated, optional):');
+  if (t === null) return;
   btn.textContent = 'Saving…';
   btn.classList.add('saved');
   fetch('/feed/save', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-    body: 'url=' + encodeURIComponent(url)
+    body: 'url=' + encodeURIComponent(url) + '&tags=' + encodeURIComponent(t)
   }})
-  .then(r => {{ btn.textContent = r.ok ? '✓ Saved' : '✗ Error'; }})
-  .catch(() => {{ btn.textContent = '✗ Error'; btn.classList.remove('saved'); }});
+  .then(function(r) {{ btn.textContent = r.ok ? '✓ Saved' : '✗ Error'; }})
+  .catch(function() {{ btn.textContent = '✗ Error'; btn.classList.remove('saved'); }});
+}}
+async function toggleReadLater(btn) {{
+  var card = btn.closest('.fcard');
+  var isRl = card.dataset.rl === '1';
+  var params = new URLSearchParams({{
+    url: card.dataset.url, action: isRl ? 'remove' : 'add',
+    title: card.dataset.title || '', source: card.dataset.fsrc || '',
+    summary: card.dataset.summary || '', published_at: card.dataset.pub || ''
+  }});
+  btn.disabled = true;
+  try {{
+    var r = await fetch('/feed/read-later', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+      body: params
+    }});
+    if (r.ok) {{
+      var newRl = isRl ? '0' : '1';
+      card.dataset.rl = newRl;
+      btn.innerHTML = newRl === '1' ? '&#10003; Read later' : '&#128204; Read later';
+      btn.classList.toggle('rl-active', newRl === '1');
+    }}
+  }} finally {{ btn.disabled = false; }}
+}}
+async function removeReadLater(btn) {{
+  var card = btn.closest('.fcard');
+  var params = new URLSearchParams({{url: card.dataset.url, action: 'remove'}});
+  btn.disabled = true;
+  try {{
+    var r = await fetch('/feed/read-later', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+      body: params
+    }});
+    if (r.ok) {{
+      card.style.transition = 'opacity .25s';
+      card.style.opacity = '0';
+      setTimeout(function() {{ card.remove(); }}, 260);
+    }}
+  }} finally {{ btn.disabled = false; }}
+}}
+function addCustomFilter() {{
+  var input = document.getElementById('custom-topic-input');
+  var kw = input.value.trim();
+  if (!kw || customFilters.indexOf(kw) !== -1) {{ input.value = ''; return; }}
+  customFilters.push(kw);
+  input.value = '';
+  document.getElementById('topic-chips').appendChild(makeTopicChip(kw));
+  saveCustomFilters();
+}}
+function removeCustomFilter(btn) {{
+  var kw = btn.dataset.keyword;
+  customFilters = customFilters.filter(function(k) {{ return k !== kw; }});
+  if (activeTopics.has(kw)) {{ activeTopics.delete(kw); applyFilter(); }}
+  btn.closest('.topic-chip').remove();
+  saveCustomFilters();
+}}
+function makeTopicChip(kw) {{
+  var span = document.createElement('span');
+  span.className = 'topic-chip';
+  span.dataset.keyword = kw;
+  span.onclick = function() {{ toggleTopic(span); }};
+  span.appendChild(document.createTextNode(kw + ' '));
+  var x = document.createElement('button');
+  x.className = 'chip-x';
+  x.dataset.keyword = kw;
+  x.innerHTML = '&times;';
+  x.onclick = function(e) {{ e.stopPropagation(); removeCustomFilter(x); }};
+  span.appendChild(x);
+  return span;
+}}
+function saveCustomFilters() {{
+  fetch('/feed/filters', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{filters: customFilters}})
+  }});
 }}
 </script>"""
+
+    body = f"""<div style="border-bottom:1px solid var(--line);padding:12px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
+  <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1;">{tabs}</div>
+    <a href="{rl_link}" class="filter-btn"{rl_extra}>&#128204; Read Later{rl_count}</a>
+    <button onclick="toggleFilter()" id="filter-btn" class="filter-btn">&#9776; Sources &amp; Topics</button>
+  </div>
+</div>
+{filter_panel}
+<main id="feed-main" style="max-width:860px;margin:0 auto;padding:24px 24px 80px;display:grid;gap:12px;">
+{cards}
+</main>
+{feed_css}
+{feed_js}"""
 
     return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Feed", body, authed=True))
 
@@ -2028,6 +2236,7 @@ _READER_TMPL = """<!doctype html><html lang="en"><head>
   <div class="reader-controls">
     <button onclick="adj(-2)">A&minus;</button>
     <button onclick="adj(2)">A+</button>
+    {article_controls}
     <a href="{orig_url}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:13px;">Original &rarr;</a>
   </div>
 </div>
@@ -2035,9 +2244,11 @@ _READER_TMPL = """<!doctype html><html lang="en"><head>
   <div class="reader-meta">
     <h1>{title}</h1>
     <div class="byline">{byline}</div>
+    {tags_block}
   </div>
   <div class="reader-body">{body}</div>
 </div>
+{article_script}
 <script>
 var fs = parseInt(localStorage.getItem('reader-fs') || '18');
 document.documentElement.style.setProperty('--fs', fs + 'px');
@@ -2076,7 +2287,21 @@ def reader(request: Request, url: str = "", id: int = 0):
             url = article["url"]
 
     if not url:
-        body_html = '<div class="reader-empty"><h2>No URL provided</h2><p>Add ?url=https://... to the address bar.</p></div>'
+        body_html = """<div class="reader-empty">
+  <h2>Read any article</h2>
+  <p style="margin-bottom:1.5rem;">Paste a URL below, or open an article from your
+    <a href="/library">Library</a> or <a href="/feed">Feed</a>.</p>
+  <form method="get" action="/read"
+        style="display:flex;gap:8px;max-width:500px;margin:0 auto;">
+    <input type="url" name="url" placeholder="https://…" autofocus required
+      style="flex:1;padding:10px 14px;border:1px solid #d0cac0;border-radius:10px;
+             font-size:16px;background:#fff;font-family:inherit;">
+    <button type="submit"
+      style="padding:10px 20px;background:#1a4d3c;color:#fff;border:none;
+             border-radius:10px;font-size:16px;font-family:inherit;cursor:pointer;
+             white-space:nowrap;">Read</button>
+  </form>
+</div>"""
         return HTMLResponse(_READER_TMPL.format(
             title="Reader", css=_READER_CSS, back_url=back_url, back_label=back_label,
             orig_url="#", byline="", body=body_html,
@@ -2125,17 +2350,99 @@ def reader(request: Request, url: str = "", id: int = 0):
           <p style="margin-top:16px;"><a href="{_esc(url)}" target="_blank" rel="noopener">Open original article &rarr;</a></p>
         </div>"""
 
+    # Article management controls — only shown when loaded by id from the DB
+    article_controls = ""
+    tags_block = ""
+    article_script = ""
+    if article:
+        aid = article["id"]
+        current_tags = article.get("tags", [])
+        tags_csv = _esc(",".join(current_tags))
+        tag_spans = "".join(
+            f'<span style="font-size:12px;color:var(--accent);background:#eef3f0;'
+            f'border-radius:6px;padding:2px 8px;margin-right:4px;">{_esc(t)}</span>'
+            for t in current_tags
+        )
+        tags_block = f"""<div id="reader-tags" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+  {tag_spans}
+  <button onclick="openReaderTagEditor()" style="font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer;margin-left:4px;">Edit tags</button>
+</div>
+<div id="reader-tag-editor" style="display:none;margin-top:10px;">
+  <input type="text" id="reader-tag-input" value="{tags_csv}"
+    placeholder="comma-separated tags"
+    style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:14px;background:#fff;">
+  <div style="display:flex;gap:8px;margin-top:6px;">
+    <button onclick="saveReaderTags()" style="padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;">Save</button>
+    <button onclick="closeReaderTagEditor()" style="padding:5px 14px;background:none;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:13px;color:var(--muted);">Cancel</button>
+  </div>
+</div>"""
+        article_controls = (
+            f'<button onclick="deleteArticle({aid})" '
+            f'style="font-size:13px;color:#b91c1c;background:none;border:1px solid #fca5a5;'
+            f'border-radius:6px;padding:4px 10px;cursor:pointer;">Delete</button>'
+        )
+        article_script = f"""<script>
+var _articleId = {aid};
+function openReaderTagEditor() {{
+  document.getElementById('reader-tags').style.display = 'none';
+  document.getElementById('reader-tag-editor').style.display = 'block';
+  document.getElementById('reader-tag-input').focus();
+}}
+function closeReaderTagEditor() {{
+  document.getElementById('reader-tag-editor').style.display = 'none';
+  document.getElementById('reader-tags').style.display = 'flex';
+}}
+async function saveReaderTags() {{
+  var val = document.getElementById('reader-tag-input').value;
+  var tags = val.split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
+  try {{
+    var r = await fetch('/library/' + _articleId + '/tags', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{tags: tags}})
+    }});
+    if (!r.ok) throw new Error();
+    var d = await r.json();
+    var box = document.getElementById('reader-tags');
+    var esc = function(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
+    var spans = (d.tags || []).map(function(t) {{
+      return '<span style="font-size:12px;color:var(--accent);background:#eef3f0;border-radius:6px;padding:2px 8px;margin-right:4px;">' + esc(t) + '</span>';
+    }}).join('');
+    var editBtn = '<button onclick="openReaderTagEditor()" style="font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer;margin-left:4px;">Edit tags</button>';
+    box.innerHTML = spans + editBtn;
+    closeReaderTagEditor();
+  }} catch(e) {{
+    alert('Could not save tags — please try again.');
+  }}
+}}
+async function deleteArticle(id) {{
+  if (!confirm('Permanently delete this article from your library?')) return;
+  try {{
+    var form = new FormData();
+    var r = await fetch('/library/' + id + '/delete', {{method: 'POST', body: form}});
+    if (r.redirected) {{ window.location.href = r.url; return; }}
+    window.location.href = '/library';
+  }} catch(e) {{
+    alert('Could not delete — please try again.');
+  }}
+}}
+</script>"""
+
     return HTMLResponse(_READER_TMPL.format(
         title=_esc(title), css=_READER_CSS,
         back_url=back_url, back_label=back_label,
         orig_url=_esc(url), byline=byline,
         body=body_html,
+        article_controls=article_controls,
+        tags_block=tags_block,
+        article_script=article_script,
     ))
 
 
 @app.get("/library", response_class=HTMLResponse)
 def library(request: Request, q: str = ""):
-    if not _is_authed(request):
+    authed = _is_authed(request)
+    if not authed:
         return _login_redirect(request)
     lib = _lib()
     try:
@@ -2145,19 +2452,39 @@ def library(request: Request, q: str = ""):
     finally:
         lib.close()
 
-    cards = "".join(
-        f"""<article class="card">
+    def _card(r):
+        tags_csv = _esc(",".join(r.get("tags", [])))
+        tag_spans = "".join(
+            f'<span class="tag-chip" data-tag="{_esc(t)}">{_esc(t)}'
+            f' <button class="tag-x-btn" data-article-id="{r["id"]}" data-tag="{_esc(t)}"'
+            f' onclick="quickRemoveTagBtn(this)">&times;</button></span>'
+            for t in r.get("tags", [])
+        )
+        return f"""<article class="card" id="card-{r['id']}">
           <a class="card-title" href="{r['url']}" target="_blank" rel="noopener">{_esc(r['title'])}</a>
           <div class="meta">{_esc(r.get('source',''))}{' &middot; ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
           <p class="summary">{_esc(r.get('summary',''))[:280]}</p>
-          <div class="tags">{''.join(f'<span>{_esc(t)}</span>' for t in r.get('tags', []))}</div>
-          <div style="display:flex;gap:8px;margin-top:8px;">
+          <div class="tags" id="tags-{r['id']}" data-tags="{tags_csv}">{tag_spans}</div>
+          <div id="tag-editor-{r['id']}" style="display:none;margin-top:8px;">
+            <input type="text" id="tag-input-{r['id']}" value="{tags_csv}"
+              placeholder="comma-separated tags"
+              style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;">
+            <div style="display:flex;gap:6px;margin-top:6px;">
+              <button class="postbtn" onclick="saveTags({r['id']})">Save</button>
+              <button class="postbtn" onclick="cancelTags({r['id']})">Cancel</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
             <a href="/read?id={r['id']}" class="postbtn" style="text-decoration:none;">Read</a>
-            <button class="postbtn" onclick="draftPost('{_esc(r['url'])}')">Draft LinkedIn post</button>
+            <button class="postbtn" onclick="openTagEditor({r['id']})">Edit tags</button>
+            <form method="post" action="/library/{r['id']}/delete" style="display:inline;"
+                  onsubmit="return confirm('Permanently delete this article?');">
+              <button type="submit" class="postbtn" style="color:#b91c1c;">Delete</button>
+            </form>
           </div>
         </article>"""
-        for r in results
-    ) or '<p style="color:var(--muted);">No matches.</p>'
+
+    cards = "".join(_card(r) for r in results) or '<p style="color:var(--muted);">No matches.</p>'
 
     tagbar = "".join(
         f'<a href="/library?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
@@ -2196,12 +2523,55 @@ def library(request: Request, q: str = ""):
 .meta{{color:var(--muted);font-size:13px;margin:3px 0 8px;}}
 .summary{{margin:0 0 10px;color:#3a352e;font-size:14px;}}
 .tags{{display:flex;flex-wrap:wrap;gap:6px;}}
-.tags span{{font-size:11px;color:var(--accent);background:var(--accent-light);border-radius:6px;padding:2px 8px;}}
+.tags span{{font-size:11px;color:var(--accent);background:var(--accent-light);border-radius:6px;padding:2px 8px;display:inline-flex;align-items:center;gap:2px;}}
+.tag-x-btn{{background:none;border:none;cursor:pointer;color:var(--muted);font-size:10px;padding:0;line-height:1;opacity:.7;}}
+.tag-x-btn:hover{{color:#b91c1c;opacity:1;}}
 .postbtn{{margin-top:12px;padding:6px 12px;font-size:12px;background:transparent;color:var(--accent);border:1px solid var(--line);border-radius:8px;cursor:pointer;}}
 .postbtn:hover{{background:var(--accent-light);}}
 nav.site-nav a[href="/library"]{{color:var(--ink);font-weight:600;}}
 </style>
 <script>
+function openTagEditor(id) {{
+  document.getElementById('tag-editor-' + id).style.display = 'block';
+  document.getElementById('tag-input-' + id).focus();
+}}
+function cancelTags(id) {{
+  document.getElementById('tag-editor-' + id).style.display = 'none';
+}}
+async function _doSaveTags(id, tags) {{
+  var r = await fetch('/library/' + id + '/tags', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{tags: tags}})
+  }});
+  if (!r.ok) throw new Error('failed');
+  var d = await r.json();
+  var box = document.getElementById('tags-' + id);
+  var esc = function(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
+  box.innerHTML = (d.tags || []).map(function(t) {{
+    var et = esc(t);
+    var btn = '<button class="tag-x-btn" data-article-id="' + id + '" data-tag="' + et + '" onclick="quickRemoveTagBtn(this)">&times;</button>';
+    return '<span class="tag-chip" data-tag="' + et + '">' + et + ' ' + btn + '</span>';
+  }}).join('');
+  box.dataset.tags = (d.tags || []).join(',');
+  var input = document.getElementById('tag-input-' + id);
+  if (input) input.value = (d.tags || []).join(', ');
+  document.getElementById('tag-editor-' + id).style.display = 'none';
+}}
+async function saveTags(id) {{
+  var input = document.getElementById('tag-input-' + id);
+  var tags = input.value.split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
+  try {{ await _doSaveTags(id, tags); }} catch(e) {{ alert('Could not save tags — please try again.'); }}
+}}
+async function quickRemoveTag(id, tag) {{
+  var box = document.getElementById('tags-' + id);
+  var current = (box.dataset.tags || '').split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
+  try {{ await _doSaveTags(id, current.filter(function(t) {{ return t !== tag; }})); }}
+  catch(e) {{ alert('Could not remove tag — please try again.'); }}
+}}
+function quickRemoveTagBtn(btn) {{
+  quickRemoveTag(parseInt(btn.dataset.articleId), btn.dataset.tag);
+}}
 async function ask(){{
   var q=document.getElementById('askq').value.trim();
   if(!q)return;
@@ -2219,18 +2589,9 @@ async function ask(){{
     box.innerHTML='<p>'+(d.answer||'').replace(/\\n/g,'<br>')+'</p>'+((lib||feed||web)?'<ul style="padding-left:18px;font-size:13px;">'+lib+feed+web+'</ul>':'');
   }}catch(e){{box.innerHTML='Something went wrong.';}}
 }}
-async function draftPost(url){{
-  var box=document.getElementById('answer');
-  box.style.display='block';box.scrollIntoView({{behavior:'smooth'}});box.innerHTML='<em>Drafting in your voice…</em>';
-  try{{
-    var r=await fetch('/post',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{url:url,mode:'original'}})}});
-    var d=await r.json();
-    box.innerHTML='<div style="white-space:pre-wrap;line-height:1.6;">'+(d.post||'')+'</div><button class="btn btn-ghost" style="margin-top:10px;font-size:13px;" onclick="navigator.clipboard.writeText(this.previousElementSibling.innerText)">Copy</button>';
-  }}catch(e){{box.innerHTML='Something went wrong.';}}
-}}
 </script>"""
 
-    return HTMLResponse(_page("Library—Brian Weisberg", "Library", page_body, authed=True))
+    return HTMLResponse(_page("Library—Brian Weisberg", "Library", page_body, authed=authed))
 
 
 # ---------------------------------------------------------------------------
@@ -2503,46 +2864,242 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         lib.close()
 
 
-@app.get("/admin/upload-db", response_class=HTMLResponse)
-def upload_db_page(request: Request):
-    """One-time helper to seed the hosted DB from a local library.db.
-
-    Login-gated. Drag the local file in and submit — the next page load uses
-    it (connections are opened per-request, so no restart is needed). Safe to
-    leave in place: it's protected by the same secret as the rest of the
-    private section.
-    """
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, url: str = "", uploaded: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
+    lib = _lib()
     try:
-        lib = _lib()
-        try:
-            current = lib.count()
-        finally:
-            lib.close()
-    except Exception:
-        current = "unknown"
-    body = f"""<div class="page">
-  <h1>Upload library database</h1>
-  <p class="muted">Current hosted database holds <strong>{current}</strong> articles.
-  Uploading replaces it with the file you select. This is meant as a one-time
-  seed from your local <code>library.db</code>.</p>
-  <form method="post" action="/admin/upload-db" enctype="multipart/form-data"
-        style="margin-top:1.5rem;display:flex;flex-direction:column;gap:1rem;max-width:480px;">
-    <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
-           style="padding:0.5rem;border:1px solid #ccc;border-radius:6px;">
-    <button type="submit"
-            style="padding:0.6rem 1rem;background:#1a1a2e;color:#fff;border:none;border-radius:6px;cursor:pointer;">
-      Upload and replace
-    </button>
-  </form>
-  <p class="muted" style="margin-top:1rem;font-size:0.85rem;">
-    Tip: quit your local app first so the file is fully written, then upload
-    <code>library.db</code> (the main file only — the <code>-wal</code>/<code>-shm</code>
-    sidecars aren't needed).</p>
-</div>"""
-    return HTMLResponse(_page("Upload database", "", body, authed=True))
+        count = lib.count()
+        custom_voice = lib.get_setting("voice_prompt")
+    finally:
+        lib.close()
 
+    from linklib.social import DEFAULT_MODEL, BRIAN_VOICE
+    current_voice = custom_voice or BRIAN_VOICE
+    is_customized = bool(custom_voice)
+
+    models = [
+        ("claude-haiku-4-5-20251001", "Haiku", "Fast &amp; cheap"),
+        ("claude-sonnet-4-6",         "Sonnet", "Balanced &mdash; default"),
+        ("claude-opus-4-8",           "Opus",   "Best quality"),
+    ]
+    modes = [
+        ("original",      "Original POV",  "Your take sparked by the article — not a summary"),
+        ("amplification", "Amplify",       "Signal genuine resonance, build past the original"),
+        ("self_promo",    "Self-promote",  "Promote your own work: lean, single-analogy"),
+    ]
+
+    def _radio(name, value, label, detail, checked):
+        chk = " checked" if checked else ""
+        return (
+            f'<label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;padding:6px 0;border-top:1px solid var(--line);">'
+            f'<input type="radio" name="{name}" value="{value}"{chk} style="margin-top:3px;accent-color:var(--accent);flex-shrink:0;">'
+            f'<span><strong>{label}</strong><span style="display:block;font-size:12px;color:var(--muted);">{detail}</span></span>'
+            f'</label>'
+        )
+
+    model_radios = "".join(
+        _radio("model", mid, label, detail, mid == DEFAULT_MODEL)
+        for mid, label, detail in models
+    )
+    mode_radios = "".join(
+        _radio("post-mode", val, label, detail, val == "original")
+        for val, label, detail in modes
+    )
+
+    pre_url = _esc(url)
+
+    if is_customized:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
+                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
+    else:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;color:var(--muted);'
+                       'margin-left:10px;vertical-align:middle;">Built-in default</span>')
+    reset_btn = (
+        '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
+        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
+        f'{"" if is_customized else "display:none;"}">Reset to default</button>'
+    )
+
+    body = f"""<div class="page" style="max-width:820px;">
+<h1>Admin</h1>
+
+<h2 style="margin-top:0;">LinkedIn post generator</h2>
+<p style="color:var(--muted);margin:-6px 0 20px;">Draft a post in your voice from any URL or topic.</p>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:16px;">
+  <div style="display:grid;gap:16px;">
+    <div>
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Article URL</label>
+      <input id="post-url" type="url" value="{pre_url}" placeholder="https://…"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
+    </div>
+    <div>
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">Or topic <span style="font-weight:400;text-transform:none;letter-spacing:0;">(used when URL is blank; pulls from your library)</span></label>
+      <input id="post-topic" type="text" placeholder="e.g. headcount planning in uncertain environments"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:0;">Mode</div>
+        <div style="display:flex;flex-direction:column;">{mode_radios}</div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:0;">Model</div>
+        <div style="display:flex;flex-direction:column;">{model_radios}</div>
+      </div>
+    </div>
+    <div>
+      <button id="draft-btn" onclick="doDraft()" class="btn" style="padding:11px 28px;font-size:15px;">Draft post</button>
+      <span style="font-size:13px;color:var(--muted);margin-left:14px;">&#8984;&#9166; to draft</span>
+    </div>
+  </div>
+</div>
+
+<div id="draft-result" style="display:none;background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:40px;">
+  <div id="draft-output" style="white-space:pre-wrap;line-height:1.75;font-size:15px;color:var(--ink);"></div>
+  <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:10px;">
+    <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(document.getElementById('draft-output').innerText)" style="font-size:13px;">Copy</button>
+    <button class="btn btn-ghost" onclick="doDraft()" style="font-size:13px;">Redraft</button>
+  </div>
+</div>
+
+<h2>Your voice{voice_badge}</h2>
+<p style="color:var(--muted);margin:-6px 0 16px;">The system prompt sent to Claude when drafting posts. Edit it to refine your tone, add new rules, or update your bio. Changes take effect immediately on the next draft.</p>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:40px;">
+  <textarea id="voice-prompt" rows="20"
+    style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;">{_esc(current_voice)}</textarea>
+  <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+    <button id="voice-save-btn" onclick="saveVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Save voice</button>
+    {reset_btn}
+    <span id="voice-status" style="font-size:13px;color:var(--muted);"></span>
+  </div>
+</div>
+
+<h2>Library database</h2>
+{'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;font-size:14px;margin:-6px 0 16px;">Database replaced — ' + _esc(uploaded) + ' articles now live.</p>' if uploaded else ''}
+<p style="color:var(--muted);margin:-6px 0 20px;">Currently <strong>{count:,}</strong> articles.</p>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:40px;">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+    <div>
+      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately — no restart needed.</p>
+      <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+        <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
+          style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
+      </form>
+    </div>
+    <div style="border-left:1px solid var(--line);padding-left:24px;">
+      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
+      <a href="/admin/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+async function doDraft() {{
+  var url = document.getElementById('post-url').value.trim();
+  var topic = document.getElementById('post-topic').value.trim();
+  var mode = document.querySelector('input[name="post-mode"]:checked')?.value || 'original';
+  var model = document.querySelector('input[name="model"]:checked')?.value || '{_esc(DEFAULT_MODEL)}';
+  if (!url && !topic) {{ document.getElementById('post-url').focus(); return; }}
+  var btn = document.getElementById('draft-btn');
+  var result = document.getElementById('draft-result');
+  var output = document.getElementById('draft-output');
+  btn.disabled = true; btn.textContent = 'Drafting…';
+  result.style.display = 'block';
+  output.textContent = 'Drafting in your voice…';
+  result.scrollIntoView({{behavior:'smooth', block:'nearest'}});
+  try {{
+    var payload = {{mode: mode, model: model}};
+    if (url) payload.url = url; else payload.topic = topic;
+    var r = await fetch('/post', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(payload)}});
+    var d = await r.json();
+    output.textContent = d.post || '(no output)';
+  }} catch(e) {{
+    output.textContent = 'Something went wrong: ' + e;
+  }} finally {{
+    btn.disabled = false; btn.textContent = 'Draft post';
+  }}
+}}
+
+async function saveVoice() {{
+  var prompt = document.getElementById('voice-prompt').value;
+  var btn = document.getElementById('voice-save-btn');
+  var status = document.getElementById('voice-status');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/voice', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{voice_prompt: prompt.trim()}})
+    }});
+    if (!r.ok) throw new Error();
+    var d = await r.json();
+    status.textContent = 'Saved.';
+    status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+    var badge = document.getElementById('voice-badge');
+    var resetBtn = document.getElementById('reset-btn');
+    if (d.custom) {{
+      badge.textContent = 'Customized';
+      badge.style.cssText = 'font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;';
+      resetBtn.style.display = '';
+    }} else {{
+      badge.textContent = 'Built-in default';
+      badge.style.cssText = 'font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;';
+      resetBtn.style.display = 'none';
+    }}
+  }} catch(e) {{
+    status.textContent = 'Save failed — try again.';
+    status.style.color = '#b91c1c';
+  }} finally {{
+    btn.disabled = false; btn.textContent = 'Save voice';
+  }}
+}}
+
+async function resetVoice() {{
+  if (!confirm('Reset to the built-in default voice prompt? Your edits will be lost.')) return;
+  try {{
+    var r = await fetch('/admin/voice', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{voice_prompt: ''}})
+    }});
+    if (!r.ok) throw new Error();
+    window.location.reload();
+  }} catch(e) {{
+    alert('Reset failed — try again.');
+  }}
+}}
+
+document.addEventListener('keydown', function(e) {{
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doDraft();
+}});
+</script>"""
+
+    return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+
+
+@app.post("/admin/voice")
+async def admin_voice_save(request: Request):
+    """Save (or reset) the custom voice prompt."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    prompt = (payload.get("voice_prompt") or "").strip()
+    lib = _lib()
+    try:
+        lib.set_setting("voice_prompt", prompt)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "custom": bool(prompt)})
 
 @app.post("/admin/upload-db", response_class=HTMLResponse)
 async def upload_db(request: Request, file: UploadFile = File(...), token: str | None = None):
@@ -2580,13 +3137,7 @@ async def upload_db(request: Request, file: UploadFile = File(...), token: str |
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
 
-    body = f"""<div class="page">
-  <h1>Upload complete</h1>
-  <p>Imported a database with <strong>{n}</strong> articles. It's live now —
-  no restart needed.</p>
-  <p style="margin-top:1rem;"><a href="/library">Go to the library →</a></p>
-</div>"""
-    return HTMLResponse(_page("Upload complete", "", body, authed=True))
+    return RedirectResponse(f"/admin?uploaded={n}", status_code=303)
 
 
 @app.get("/admin/download-db")
@@ -2630,9 +3181,13 @@ def bookmarklet(request: Request):
         raise HTTPException(status_code=401, detail="unauthorized")
     token_param = f"?token={SAVE_TOKEN}" if SAVE_TOKEN else ""
     js = (
-        "javascript:(function(){var u=encodeURIComponent(location.href);"
+        "javascript:(function(){"
+        "var t=prompt('Tags (comma-separated, optional):');"
+        "if(t===null)return;"
+        "var u=location.href;"
         f"fetch('{PUBLIC_BASE}/save{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
-        "body:JSON.stringify({url:decodeURIComponent(u)})}).then(function(){alert('Saved to library');});})();"
+        "body:JSON.stringify({url:u,tags:t})}}).then(function(r){alert(r.ok?'Saved to library':'Error saving');});"
+        "})();"
     )
     return js
 
@@ -2640,12 +3195,16 @@ def bookmarklet(request: Request):
 @app.post("/post")
 async def post_draft(request: Request):
     _require_api(request)
-    from linklib.social import draft_post
+    from linklib.social import draft_post, DEFAULT_MODEL
     payload = await request.json()
+    model = (payload.get("model") or "").strip() or DEFAULT_MODEL
     lib = _lib()
     try:
+        custom_voice = lib.get_setting("voice_prompt")
         d = draft_post(lib, article_id=payload.get("id"), url=payload.get("url"),
-                       topic=payload.get("topic"), mode=payload.get("mode", "original"))
+                       topic=payload.get("topic"), mode=payload.get("mode", "original"),
+                       model=model,
+                       system_prompt=custom_voice or None)
         return {"post": d.post}
     finally:
         lib.close()
@@ -2659,15 +3218,95 @@ async def feed_save(request: Request, background_tasks: BackgroundTasks):
     url = (form.get("url") or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="url required")
+    tags_raw = form.get("tags") or ""
+    tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
     lib = _lib()
     try:
-        ingest_url(lib, url)
+        ingest_url(lib, url, tags=tags)
         background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         lib.close()
+
+
+@app.post("/feed/read-later")
+async def feed_toggle_read_later(request: Request):
+    """Add or remove a feed item from the read-later list."""
+    _require_api(request)
+    form = await request.form()
+    url = (form.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    action = (form.get("action") or "add").strip()
+    lib = _lib()
+    try:
+        if action == "remove":
+            lib.remove_read_later(url)
+        else:
+            lib.add_read_later(
+                url=url,
+                title=(form.get("title") or "").strip(),
+                source=(form.get("source") or "").strip(),
+                summary=(form.get("summary") or "").strip(),
+                published_at=(form.get("published_at") or None),
+            )
+        return JSONResponse({"ok": True, "action": action})
+    finally:
+        lib.close()
+
+
+@app.post("/feed/filters")
+async def feed_update_filters(request: Request):
+    """Persist custom topic keyword filters (stored in settings table)."""
+    _require_api(request)
+    import json as _json
+    payload = await request.json()
+    filters = [str(f).strip() for f in payload.get("filters", []) if str(f).strip()]
+    lib = _lib()
+    try:
+        lib.set_setting("feed_filter_tags", _json.dumps(filters))
+        return JSONResponse({"ok": True, "filters": filters})
+    finally:
+        lib.close()
+
+
+@app.post("/library/{article_id}/tags")
+async def library_update_tags(request: Request, article_id: int):
+    """Update tags on a saved article. Accepts JSON or form body."""
+    _require_api(request)
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        payload = await request.json()
+        tags_raw = payload.get("tags", [])
+        if isinstance(tags_raw, str):
+            tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+        else:
+            tags = [str(t).strip() for t in tags_raw if str(t).strip()]
+    else:
+        form = await request.form()
+        tags_str = form.get("tags") or ""
+        tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+    lib = _lib()
+    try:
+        lib.update_tags(article_id, tags)
+        return JSONResponse({"ok": True, "tags": sorted(set(tags))})
+    finally:
+        lib.close()
+
+
+@app.post("/library/{article_id}/delete")
+def library_delete(request: Request, article_id: int):
+    """Permanently delete a saved article."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_article(article_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/library", status_code=303)
 
 
 @app.get("/static/{filename}")

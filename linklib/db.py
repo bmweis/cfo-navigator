@@ -69,6 +69,11 @@ CREATE TRIGGER IF NOT EXISTS articles_au AFTER UPDATE ON articles BEGIN
     VALUES (new.id, new.title, new.author, new.source, new.summary, new.content, new.notes, new.tags_text);
 END;
 
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS contacts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL DEFAULT '',
@@ -92,6 +97,16 @@ CREATE TABLE IF NOT EXISTS tools (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tools_approved ON tools(approved);
+
+CREATE TABLE IF NOT EXISTS read_later (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    url         TEXT NOT NULL UNIQUE,
+    title       TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT '',
+    summary     TEXT NOT NULL DEFAULT '',
+    published_at TEXT,
+    added_at    TEXT NOT NULL
+);
 """
 
 
@@ -203,6 +218,20 @@ class Library:
         self.conn.commit()
         return existing["id"]
 
+    def update_tags(self, article_id: int, tags: list[str]) -> None:
+        """Replace the tag list on an article (hard-replace, not union)."""
+        clean = sorted(set(t.strip() for t in tags if t.strip()))
+        self.conn.execute(
+            "UPDATE articles SET tags_json=?, tags_text=?, updated_at=? WHERE id=?",
+            (json.dumps(clean), " ".join(clean), _now(), article_id),
+        )
+        self.conn.commit()
+
+    def delete_article(self, article_id: int) -> None:
+        """Permanently remove an article. FTS is updated by the articles_ad trigger."""
+        self.conn.execute("DELETE FROM articles WHERE id=?", (article_id,))
+        self.conn.commit()
+
     def apply_enrichment(self, article_id: int, summary: str, tags: list[str]) -> None:
         row = self.conn.execute("SELECT summary, tags_json FROM articles WHERE id=?", (article_id,)).fetchone()
         if row is None:
@@ -273,6 +302,18 @@ class Library:
         d["tags"] = json.loads(d.pop("tags_json", "[]") or "[]")
         d.pop("tags_text", None)
         return d
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        row = self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+        self.conn.commit()
 
     def save_contact(self, name: str, email: str, message: str) -> int:
         cur = self.conn.execute(
@@ -348,6 +389,33 @@ class Library:
         d = dict(r)
         d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
         return d
+
+    # -- read later ------------------------------------------------------------
+
+    def add_read_later(self, url: str, title: str = "", source: str = "",
+                       summary: str = "", published_at: str | None = None) -> None:
+        self.conn.execute(
+            """INSERT INTO read_later (url, title, source, summary, published_at, added_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(url) DO UPDATE SET
+                   title=excluded.title, source=excluded.source,
+                   summary=excluded.summary, published_at=excluded.published_at""",
+            (url, title, source, summary, published_at, _now()),
+        )
+        self.conn.commit()
+
+    def remove_read_later(self, url: str) -> None:
+        self.conn.execute("DELETE FROM read_later WHERE url=?", (url,))
+        self.conn.commit()
+
+    def list_read_later(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM read_later ORDER BY added_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def read_later_urls(self) -> set[str]:
+        return {r[0] for r in self.conn.execute("SELECT url FROM read_later").fetchall()}
 
     def close(self) -> None:
         self.conn.close()

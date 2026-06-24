@@ -27,6 +27,12 @@
     <outline type="rss" text="OpexEngine" title="OpexEngine" xmlUrl="https://www.opexengine.com/articles" htmlUrl="https://www.opexengine.com/articles"/>
     <outline type="rss" text="25iq" title="25iq" xmlUrl="https://25iq.com/feed/" htmlUrl="https://25iq.com/"/>
   </outline>
+  <outline text="Tools" title="Tools">
+    <outline type="rss" text="Team Ohana" title="Team Ohana" xmlUrl="https://www.teamohana.com/blog/feed/" htmlUrl="https://www.teamohana.com/"/>
+    <outline type="rss" text="Carta" title="Carta" xmlUrl="https://carta.com/feed/" htmlUrl="https://carta.com/"/>
+    <outline type="rss" text="Pave" title="Pave" xmlUrl="https://www.pave.com/blog/feed/" htmlUrl="https://www.pave.com/"/>
+    <outline type="rss" text="Pulley" title="Pulley" xmlUrl="https://pulley.com/blog/feed/" htmlUrl="https://pulley.com/"/>
+  </outline>
   <outline text="Substacks" title="Substacks">
     <outline type="rss" text="OnlyCFO" title="OnlyCFO" xmlUrl="https://www.onlycfo.io/feed" htmlUrl="https://www.onlycfo.io/"/>
     <outline type="rss" text="Alex Wilhelm" title="Alex Wilhelm" xmlUrl="https://awilhelm.substack.com/feed" htmlUrl="https://awilhelm.substack.com/"/>

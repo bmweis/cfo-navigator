@@ -70,7 +70,8 @@ class Draft:
 
 def draft_post(lib: Library, article_id: int | None = None, url: str | None = None,
                topic: str | None = None, mode: str = "original",
-               model: str = DEFAULT_MODEL) -> Draft:
+               model: str = DEFAULT_MODEL,
+               system_prompt: str | None = None) -> Draft:
     """Draft a LinkedIn post from a saved article (by id/url) or a topic."""
     source_rows: list[dict] = []
     if article_id is not None:
@@ -103,7 +104,7 @@ def draft_post(lib: Library, article_id: int | None = None, url: str | None = No
         client = Anthropic()
         resp = client.messages.create(
             model=model, max_tokens=900,
-            system=BRIAN_VOICE,
+            system=system_prompt or BRIAN_VOICE,
             messages=[{"role": "user", "content": user}],
         )
         post = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
