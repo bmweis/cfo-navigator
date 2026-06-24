@@ -821,7 +821,7 @@ function contributionSVG(strip, cur, labels) {
     var h = barH(val), x = cx(c) - bw / 2, y = baseY - h, capH = h * 0.25;
     var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="6" fill="url(#' + grad + ')" stroke="' + col + '" stroke-opacity="0.45"/>';
     o += '<path d="M' + x.toFixed(1) + ' ' + (y + capH).toFixed(1) + ' L' + x.toFixed(1) + ' ' + (y + 6).toFixed(1) + ' Q' + x.toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + 6).toFixed(1) + ' ' + y.toFixed(1) + ' L' + (x + bw - 6).toFixed(1) + ' ' + y.toFixed(1) + ' Q' + (x + bw).toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + bw).toFixed(1) + ' ' + (y + 6).toFixed(1) + ' L' + (x + bw).toFixed(1) + ' ' + (y + capH).toFixed(1) + ' Z" fill="' + col + '"/>';
-    if (h >= 22) o += '<text x="' + cx(c).toFixed(1) + '" y="' + (y + capH - 3).toFixed(1) + '" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">25%</text>';
+    if (h >= 8) o += '<text x="' + cx(c).toFixed(1) + '" y="' + (y - 5).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="700" fill="' + col + '">25%</text>';
     o += '<text x="' + cx(c).toFixed(1) + '" y="' + (baseY + 15).toFixed(1) + '" text-anchor="middle" font-size="11" fill="' + MUT + '">' + fmtM(val) + '</text>';
     return o;
   }
@@ -836,7 +836,7 @@ function contributionSVG(strip, cur, labels) {
 
   // GTM lane bottom-aligned at gB
   var gB = 174, gTop = gB - barH(Math.max(g[0], g[1], g[2], g[3]));
-  s += bracket(1, 4, gTop - 12, BLUE, 'GTM Investment = ' + fmtM(gtmInv));
+  s += bracket(1, 4, Math.max(gTop - 22, 76), BLUE, 'GTM Investment = ' + fmtM(gtmInv));
   for (var c = 1; c <= 4; c++) s += spendBar(c, gB, g[c - 1], BLUE, 'cgB');
 
   // Revenue lane bottom-aligned at rB (same scale as spend)
@@ -860,7 +860,7 @@ function contributionSVG(strip, cur, labels) {
 
   // R&D lane bottom-aligned at dB (same scale)
   var dB = 494, dTop = dB - barH(Math.max(r[0], r[1]));
-  s += bracket(0, 1, dTop - 12, RED, 'R&amp;D Investment = ' + fmtM(rndInv));
+  s += bracket(0, 1, dTop - 22, RED, 'R&amp;D Investment = ' + fmtM(rndInv));
   for (var c = 0; c <= 1; c++) s += spendBar(c, dB, r[c], RED, 'cgR');
 
   // timeline axis
@@ -962,8 +962,10 @@ function calcTimeline() {
     return;
   }
 
-  // One solid line for the whole window — just show how performance stacks up vs the benchmark.
-  var series = [{pts: base, color: '#1a4d3c', dotsTier: true, role: 'base'}];
+  // Start the chart at the first measured quarter — skip the empty lookback columns.
+  var startIdx = base[0].i;
+  var chartLabels = labels.slice(startIdx);
+  var series = [{pts: base.map(function(p) { return {i: p.i - startIdx, y: p.y}; }), color: '#1a4d3c', dotsTier: true, role: 'base'}];
 
   var first = base[0], last = base[base.length - 1];
   var curY = gerStripAt(strip, cur); if (curY === null) curY = last.y;
@@ -987,7 +989,7 @@ function calcTimeline() {
   pick += '</select>';
 
   var box = document.getElementById('tl-result');
-  box.innerHTML = buildChart(labels, series, n) + summary +
+  box.innerHTML = buildChart(chartLabels, series, chartLabels.length) + summary +
     '<div style="margin-top:24px;padding-top:18px;border-top:1px dashed var(--line);">' +
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">' +
         '<p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">How a quarter is built</p>' + pick +
