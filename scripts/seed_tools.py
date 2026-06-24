@@ -45,7 +45,7 @@ TOOLS = [
         "name": "Campfire",
         "url": "https://campfire.ai",
         "description": "AI-native ERP built for high-growth finance teams. Combines general ledger, revenue automation, close management, and reporting so lean teams can scale without adding headcount.",
-        "categories": ["Financial Close", "FP&A"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Stripe",
@@ -111,13 +111,13 @@ TOOLS = [
         "name": "RightRev",
         "url": "https://www.rightrev.com",
         "description": "ASC 606 and IFRS 15 revenue recognition automation for SaaS and usage-based businesses. Processes complex contracts at scale with full audit readiness and native Salesforce integration.",
-        "categories": ["Financial Close"],
+        "categories": ["Revenue Recognition"],
     },
     {
         "name": "HubiFi",
         "url": "https://www.hubifi.com",
         "description": "Automated revenue recognition and reconciliation platform for high-volume businesses. Handles ASC 606 compliance, continuous close, and real-time revenue reporting across complex billing models.",
-        "categories": ["Financial Close"],
+        "categories": ["Revenue Recognition"],
     },
     {
         "name": "Runway",
@@ -129,13 +129,13 @@ TOOLS = [
         "name": "Lumera",
         "url": "https://www.lumerahq.com",
         "description": "Governed AI infrastructure for finance teams. Lets controllers and FP&A teams build automations, agents, and scripts for close workflows — reconciliations, flux, journal entries — with full audit trails.",
-        "categories": ["Financial Close", "FP&A"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Planful",
         "url": "https://planful.com",
         "description": "End-to-end financial performance management platform covering planning, budgeting, forecasting, close, consolidation, and reporting. Built for the Office of the CFO at mid-market to enterprise scale.",
-        "categories": ["FP&A", "Financial Planning", "Financial Close"],
+        "categories": ["FP&A", "Financial Planning"],
     },
     {
         "name": "Aleph",
@@ -171,7 +171,7 @@ TOOLS = [
         "name": "FinQuery",
         "url": "https://www.finquery.com",
         "description": "Lease and contract accounting software for ASC 842, IFRS 16, and GASB 87 compliance. Automates journal entries, disclosures, and audit-ready reporting for lease portfolios.",
-        "categories": ["Financial Close", "Contract Management"],
+        "categories": ["Contract Management"],
     },
     {
         "name": "Ironclad",
@@ -237,7 +237,7 @@ TOOLS = [
         "name": "BILL",
         "url": "https://www.bill.com",
         "description": "AP and AR automation platform for SMBs. Digitizes invoice processing, automates approval workflows, handles domestic and international payments, and syncs with major accounting software.",
-        "categories": ["Financial Close"],
+        "categories": ["Spend Management"],
     },
     {
         "name": "Airbase",
@@ -255,8 +255,14 @@ TOOLS = [
         "name": "Rillet",
         "url": "https://www.rillet.com",
         "description": "AI-native general ledger and financial close platform built for SaaS. Automates month-end close, revenue recognition, and reporting — purpose-built for subscription and usage-based businesses.",
-        "categories": ["Financial Close"],
+        "categories": ["Revenue Recognition"],
         "advisor": True,
+    },
+    {
+        "name": "GoClose",
+        "url": "https://www.goclose.com",
+        "description": "Financial close management platform that centralizes close checklists, reconciliations, and task assignments. Gives controllers real-time visibility into close status and bottlenecks.",
+        "categories": ["Financial Close"],
     },
     {
         "name": "Lumos",

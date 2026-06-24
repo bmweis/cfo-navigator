@@ -53,6 +53,7 @@ TOOL_CATEGORIES = [
     "Headcount Planning",
     "Spend Management",
     "Financial Close",
+    "Revenue Recognition",
     "Billing",
     "Collections",
     "Sales Tax",
@@ -79,20 +80,27 @@ app = FastAPI(title="bmweis.com")
 
 @app.on_event("startup")
 def _seed_toolbox():
-    """Seed any tools from the seed list that aren't yet in the DB (checked by URL)."""
+    """Seed tools and keep categories/advisor in sync with the seed list."""
+    import json as _j
     from scripts.seed_tools import TOOLS
     lib = _lib()
     try:
         for t in TOOLS:
             row = lib.conn.execute(
-                "SELECT id, advisor FROM tools WHERE url = ?", (t["url"],)
+                "SELECT id, advisor, categories_json FROM tools WHERE url = ?", (t["url"],)
             ).fetchone()
             if not row:
                 lib.add_tool(t["name"], t["description"], t["url"], t["categories"],
                              approved=1, advisor=int(t.get("advisor", False)))
-            elif t.get("advisor") and not row["advisor"]:
-                lib.conn.execute("UPDATE tools SET advisor=1 WHERE id=?", (row["id"],))
-                lib.conn.commit()
+            else:
+                new_cats = _j.dumps(t["categories"])
+                new_adv = int(t.get("advisor", False))
+                if row["categories_json"] != new_cats or row["advisor"] != new_adv:
+                    lib.conn.execute(
+                        "UPDATE tools SET categories_json=?, advisor=? WHERE id=?",
+                        (new_cats, new_adv, row["id"]),
+                    )
+                    lib.conn.commit()
     finally:
         lib.close()
 
