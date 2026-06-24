@@ -2287,7 +2287,21 @@ def reader(request: Request, url: str = "", id: int = 0):
             url = article["url"]
 
     if not url:
-        body_html = '<div class="reader-empty"><h2>No URL provided</h2><p>Add ?url=https://... to the address bar.</p></div>'
+        body_html = """<div class="reader-empty">
+  <h2>Read any article</h2>
+  <p style="margin-bottom:1.5rem;">Paste a URL below, or open an article from your
+    <a href="/library">Library</a> or <a href="/feed">Feed</a>.</p>
+  <form method="get" action="/read"
+        style="display:flex;gap:8px;max-width:500px;margin:0 auto;">
+    <input type="url" name="url" placeholder="https://…" autofocus required
+      style="flex:1;padding:10px 14px;border:1px solid #d0cac0;border-radius:10px;
+             font-size:16px;background:#fff;font-family:inherit;">
+    <button type="submit"
+      style="padding:10px 20px;background:#1a4d3c;color:#fff;border:none;
+             border-radius:10px;font-size:16px;font-family:inherit;cursor:pointer;
+             white-space:nowrap;">Read</button>
+  </form>
+</div>"""
         return HTMLResponse(_READER_TMPL.format(
             title="Reader", css=_READER_CSS, back_url=back_url, back_label=back_label,
             orig_url="#", byline="", body=body_html,
