@@ -97,6 +97,16 @@ CREATE TABLE IF NOT EXISTS tools (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tools_approved ON tools(approved);
+
+CREATE TABLE IF NOT EXISTS read_later (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    url         TEXT NOT NULL UNIQUE,
+    title       TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT '',
+    summary     TEXT NOT NULL DEFAULT '',
+    published_at TEXT,
+    added_at    TEXT NOT NULL
+);
 """
 
 
@@ -379,6 +389,33 @@ class Library:
         d = dict(r)
         d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
         return d
+
+    # -- read later ------------------------------------------------------------
+
+    def add_read_later(self, url: str, title: str = "", source: str = "",
+                       summary: str = "", published_at: str | None = None) -> None:
+        self.conn.execute(
+            """INSERT INTO read_later (url, title, source, summary, published_at, added_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(url) DO UPDATE SET
+                   title=excluded.title, source=excluded.source,
+                   summary=excluded.summary, published_at=excluded.published_at""",
+            (url, title, source, summary, published_at, _now()),
+        )
+        self.conn.commit()
+
+    def remove_read_later(self, url: str) -> None:
+        self.conn.execute("DELETE FROM read_later WHERE url=?", (url,))
+        self.conn.commit()
+
+    def list_read_later(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM read_later ORDER BY added_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def read_later_urls(self) -> set[str]:
+        return {r[0] for r in self.conn.execute("SELECT url FROM read_later").fetchall()}
 
     def close(self) -> None:
         self.conn.close()
