@@ -401,10 +401,14 @@ the early-to-growth leap. Based in Boston.</p>
 @app.get("/thought-leadership", response_class=HTMLResponse)
 def thought_leadership():
     def section(title: str, items: list[tuple[str, str, str]]) -> str:
-        # items: (label, url, sort_key) — sort_key is "YYYY-MM" or "" to pin to top
+        # items: (label, url, sort_key) — sort_key is "YYYY-MM" or "" to pin to top.
+        # An empty url renders as plain (unlinked) text — e.g. invite-only events
+        # with no public page.
         sorted_items = sorted(items, key=lambda x: x[2], reverse=True)
         links = "".join(
-            f'<li style="margin:0 0 10px;"><a href="{url}" target="_blank" rel="noopener">{_esc(label)}</a></li>'
+            (f'<li style="margin:0 0 10px;"><a href="{url}" target="_blank" rel="noopener">{_esc(label)}</a></li>'
+             if url else
+             f'<li style="margin:0 0 10px;">{_esc(label)}</li>')
             for label, url, _ in sorted_items
         )
         return f'<h2>{title}</h2><ul style="padding-left:20px;margin:0 0 8px;">{links}</ul>'
@@ -416,6 +420,29 @@ def thought_leadership():
   <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;">The Growth Engine Ratio</div>
   <div style="font-size:14px;opacity:.85;line-height:1.5;">A new metric for measuring how R&amp;D and GTM investments work together to drive growth&mdash;with an interactive calculator to see how you stack up. Published with The F Suite &rarr;</div>
 </a>"""
+
+    body += section("Events Hosted", [
+        ("Abacum AI Summit · Abacum · Apr 2026",
+         "https://www.abacum.ai/summit-post", "2026-04"),
+        ("Claude in Action for Finance — The F Suite Virtual Panel · The F Suite · Apr 2026",
+         "https://fsuitevirtualpanel430.splashthat.com", "2026-04"),
+        ("The F Suite Boston — Growth CFO Salon · The F Suite · Nov 2025",
+         "", "2025-11"),
+        ("The F Suite Cash Cycle Demo Day — Opening & Closing Remarks · The F Suite · Oct 2025",
+         "https://cashcycledemoday.splashthat.com/", "2025-10"),
+        ("The F Suite Boston — CFO Supper Club · The F Suite · Aug 2025",
+         "", "2025-08"),
+        ("Fidelity CFO Roundtable — M&A and Managing Uncertainty · Fidelity · Mar 2025",
+         "https://luma.com/7fwtr2n8", "2025-03"),
+        ("The F Suite Boston — Private Dinner & Guided Discussion · The F Suite · Apr 2024",
+         "", "2024-04"),
+        ("The F Suite Boston — CFO Dinner · The F Suite · Dec 2023",
+         "", "2023-12"),
+        ("The F Suite — NC Launch Dinner · The F Suite · Jun 2023",
+         "", "2023-06"),
+        ("Teampay Agile Finance Summit · Teampay · Oct 2021",
+         "https://www.accelevents.com/e/agile-finance-summit-2021", "2021-10"),
+    ])
 
     body += section("Podcast—Host", [
         ("The Cash Flow Show — Conversations about how tech companies make money",
