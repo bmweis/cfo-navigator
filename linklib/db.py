@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS tools (
     url             TEXT NOT NULL DEFAULT '',
     categories_json TEXT NOT NULL DEFAULT '[]',
     approved        INTEGER NOT NULL DEFAULT 0,
+    advisor         INTEGER NOT NULL DEFAULT 0,
     submitted_by    TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL DEFAULT ''
@@ -135,12 +136,16 @@ class Library:
         self.conn.execute("PRAGMA foreign_keys=ON;")
         self.conn.executescript(_SCHEMA)
         self.conn.commit()
-        # Migrate: add updated_at to tools if it was created before this column existed
-        try:
-            self.conn.execute("ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
-            self.conn.commit()
-        except sqlite3.OperationalError:
-            pass
+        # Migrate: add columns that were added after initial schema
+        for _col_sql in [
+            "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE tools ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
+        ]:
+            try:
+                self.conn.execute(_col_sql)
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass
 
     # -- writes -------------------------------------------------------------
 
@@ -287,7 +292,7 @@ class Library:
 
     def add_tool(self, name: str, description: str, url: str,
                  categories: list[str], submitted_by: str = "",
-                 approved: int = 0) -> int:
+                 approved: int = 0, advisor: int = 0) -> int:
         base = _slugify(name)
         slug = base
         suffix = 2
@@ -297,10 +302,10 @@ class Library:
         now = _now()
         cur = self.conn.execute(
             """INSERT INTO tools (name, slug, description, url, categories_json,
-               approved, submitted_by, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+               approved, advisor, submitted_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, description.strip(), url.strip(),
-             json.dumps(categories), approved, submitted_by.strip(), now, now),
+             json.dumps(categories), approved, advisor, submitted_by.strip(), now, now),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -321,12 +326,12 @@ class Library:
         return self._tool_to_dict(row) if row else None
 
     def update_tool(self, tool_id: int, name: str, description: str,
-                    url: str, categories: list[str]) -> None:
+                    url: str, categories: list[str], advisor: int = 0) -> None:
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
-               updated_at=? WHERE id=?""",
+               advisor=?, updated_at=? WHERE id=?""",
             (name.strip(), description.strip(), url.strip(),
-             json.dumps(categories), _now(), tool_id),
+             json.dumps(categories), advisor, _now(), tool_id),
         )
         self.conn.commit()
 

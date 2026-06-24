@@ -27,6 +27,7 @@ TOOLS = [
         "url": "https://www.tabs.com",
         "description": "AI-powered billing and accounts receivable automation for B2B companies. Ingests contracts, automates invoicing, manages collections, and handles GAAP revenue recognition.",
         "categories": ["Billing"],
+        "advisor": True,
     },
     {
         "name": "Numeric",
@@ -250,6 +251,13 @@ TOOLS = [
         "description": "FP&A platform that works within Excel. Consolidates data from ERPs and other sources into a governed model, enabling automated reporting, budgeting, and forecasting without leaving spreadsheets.",
         "categories": ["FP&A", "Financial Planning"],
     },
+    {
+        "name": "Rillet",
+        "url": "https://www.rillet.com",
+        "description": "AI-native general ledger and financial close platform built for SaaS. Automates month-end close, revenue recognition, and reporting — purpose-built for subscription and usage-based businesses.",
+        "categories": ["Financial Close"],
+        "advisor": True,
+    },
 ]
 
 
@@ -263,10 +271,15 @@ def main():
     try:
         for t in TOOLS:
             existing = lib.conn.execute(
-                "SELECT id FROM tools WHERE url = ?", (t["url"],)
+                "SELECT id, advisor FROM tools WHERE url = ?", (t["url"],)
             ).fetchone()
             if existing:
-                print(f"  SKIP  {t['name']}")
+                if t.get("advisor") and not existing["advisor"]:
+                    lib.conn.execute("UPDATE tools SET advisor=1 WHERE id=?", (existing["id"],))
+                    lib.conn.commit()
+                    print(f"  UPDATED advisor flag: {t['name']}")
+                else:
+                    print(f"  SKIP  {t['name']}")
                 skipped += 1
                 continue
             tool_id = lib.add_tool(
@@ -275,6 +288,7 @@ def main():
                 url=t["url"],
                 categories=t["categories"],
                 approved=1,
+                advisor=int(t.get("advisor", False)),
             )
             print(f"  ADDED {t['name']} (id={tool_id})")
             added += 1

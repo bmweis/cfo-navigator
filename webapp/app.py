@@ -83,11 +83,15 @@ def _seed_toolbox():
     lib = _lib()
     try:
         for t in TOOLS:
-            exists = lib.conn.execute(
-                "SELECT 1 FROM tools WHERE url = ?", (t["url"],)
+            row = lib.conn.execute(
+                "SELECT id, advisor FROM tools WHERE url = ?", (t["url"],)
             ).fetchone()
-            if not exists:
-                lib.add_tool(t["name"], t["description"], t["url"], t["categories"], approved=1)
+            if not row:
+                lib.add_tool(t["name"], t["description"], t["url"], t["categories"],
+                             approved=1, advisor=int(t.get("advisor", False)))
+            elif t.get("advisor") and not row["advisor"]:
+                lib.conn.execute("UPDATE tools SET advisor=1 WHERE id=?", (row["id"],))
+                lib.conn.commit()
     finally:
         lib.close()
 
@@ -920,6 +924,7 @@ def tools_directory(request: Request):
             "description": t["description"],
             "url": t["url"],
             "categories": t["categories"],
+            "advisor": bool(t.get("advisor")),
         }
         if authed:
             entry["submitted_by"] = t.get("submitted_by") or ""
@@ -946,6 +951,7 @@ def tools_directory(request: Request):
   <input id="tool-search" type="search" placeholder="Search tools…"
     oninput="filterTools()"
     style="flex:1;min-width:200px;max-width:400px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#9733; Advisor</button>
   <button class="tcat-btn tcat-all tcat-active" data-cat="" onclick="filterCat(this)">All</button>
   {cat_buttons}
 </div>
@@ -958,6 +964,7 @@ def tools_directory(request: Request):
 <p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
 
 <div style="margin-top:48px;padding-top:32px;border-top:1px solid var(--line);">
+  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Brian Weisberg serves as a formal advisor to these companies.</p>
   <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
     <a href="/tools/submit" style="font-weight:500;">Submit it for review →</a></p>
 </div>
@@ -974,6 +981,7 @@ def tools_directory(request: Request):
 .tool-desc{{font-size:14px;color:#3a352e;margin:0 0 12px;line-height:1.5;}}
 .tool-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .tool-cat{{font-size:11px;color:var(--accent);background:var(--accent-light);border-radius:6px;padding:2px 8px;}}
+.tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 .tool-admin{{display:flex;gap:6px;flex-shrink:0;}}
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
@@ -985,6 +993,7 @@ def tools_directory(request: Request):
 var ALL_TOOLS = {tools_json};
 var AUTHED = {'true' if authed else 'false'};
 var activeCats = new Set();
+var advisorOnly = false;
 
 function esc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1007,6 +1016,7 @@ function renderTools(tools) {{
   empty.style.display = 'none';
   count.textContent = tools.length + ' tool' + (tools.length === 1 ? '' : 's');
   grid.innerHTML = tools.map(function(t) {{
+    var star = t.advisor ? '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' : '';
     var cats = (t.categories || []).map(function(c) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
     }}).join('');
@@ -1029,7 +1039,10 @@ function renderTools(tools) {{
     var adminMeta = metaParts.length ? '<div class="tool-meta">' + metaParts.join(' &middot; ') + '</div>' : '';
     return '<article class="tool-card">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">'
+      + '<div style="display:flex;align-items:baseline;gap:0;min-width:0;">'
+      + star
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
+      + '</div>'
       + adminControls + '</div>'
       + '<p class="tool-desc">' + esc(t.description) + '</p>'
       + '<div class="tool-cats">' + cats + '</div>'
@@ -1040,6 +1053,7 @@ function renderTools(tools) {{
 function filtered() {{
   var q = (document.getElementById('tool-search').value || '').toLowerCase();
   return ALL_TOOLS.filter(function(t) {{
+    if (advisorOnly && !t.advisor) return false;
     if (activeCats.size > 0) {{
       var cats = t.categories || [];
       var hit = false;
@@ -1052,21 +1066,33 @@ function filtered() {{
 }}
 
 function syncButtons() {{
+  var noFilters = activeCats.size === 0 && !advisorOnly;
   document.querySelectorAll('.tcat-btn').forEach(function(b) {{
     var c = b.dataset.cat;
-    b.classList.toggle('tcat-active', c === '' ? activeCats.size === 0 : activeCats.has(c));
+    if (c !== undefined) {{
+      b.classList.toggle('tcat-active', c === '' ? noFilters : activeCats.has(c));
+    }}
   }});
+  var ab = document.getElementById('advisor-btn');
+  if (ab) ab.classList.toggle('tcat-active', advisorOnly);
 }}
 
 function filterCat(btn) {{
   var cat = btn.dataset.cat;
   if (cat === '') {{
     activeCats.clear();
+    advisorOnly = false;
   }} else if (activeCats.has(cat)) {{
     activeCats.delete(cat);
   }} else {{
     activeCats.add(cat);
   }}
+  syncButtons();
+  renderTools(filtered());
+}}
+
+function toggleAdvisor() {{
+  advisorOnly = !advisorOnly;
   syncButtons();
   renderTools(filtered());
 }}
@@ -1281,6 +1307,12 @@ def admin_tools_new(request: Request):
     </div>
   </div>
   <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="advisor" value="1">
+      <span>&#9733; Formal advisor — mark this tool with an advisor star</span>
+    </label>
+  </div>
+  <div>
     <button type="submit" class="btn">Add to directory</button>
     <a href="/admin/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
@@ -1298,11 +1330,12 @@ async def admin_tools_new_submit(request: Request):
     url = (form.get("url") or "").strip()
     description = (form.get("description") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
+    advisor = 1 if form.get("advisor") == "1" else 0
     if not (name and url and description and categories):
         raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
     lib = _lib()
     try:
-        lib.add_tool(name, description, url, categories, approved=1)
+        lib.add_tool(name, description, url, categories, approved=1, advisor=advisor)
     finally:
         lib.close()
     return RedirectResponse("/tools", status_code=303)
@@ -1378,6 +1411,12 @@ def admin_tools_edit(request: Request, tool_id: int):
     </div>
   </div>
   <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
+      <span>&#9733; Formal advisor — mark this tool with an advisor star</span>
+    </label>
+  </div>
+  <div>
     <button type="submit" class="btn">Save changes</button>
     <a href="/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
@@ -1395,11 +1434,12 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     url = (form.get("url") or "").strip()
     description = (form.get("description") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
+    advisor = 1 if form.get("advisor") == "1" else 0
     if not (name and url and description and categories):
         raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
     lib = _lib()
     try:
-        lib.update_tool(tool_id, name, description, url, categories)
+        lib.update_tool(tool_id, name, description, url, categories, advisor=advisor)
     finally:
         lib.close()
     return RedirectResponse("/tools", status_code=303)
