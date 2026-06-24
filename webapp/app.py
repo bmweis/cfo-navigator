@@ -49,6 +49,7 @@ SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
 TOOL_CATEGORIES = [
     "FP&A",
     "Financial Planning",
+    "ERP",
     "Cap Table Management",
     "Headcount Planning",
     "Spend Management",

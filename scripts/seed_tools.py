@@ -45,7 +45,7 @@ TOOLS = [
         "name": "Campfire",
         "url": "https://campfire.ai",
         "description": "AI-native ERP built for high-growth finance teams. Combines general ledger, revenue automation, close management, and reporting so lean teams can scale without adding headcount.",
-        "categories": ["FP&A"],
+        "categories": ["ERP"],
     },
     {
         "name": "Stripe",
@@ -237,7 +237,7 @@ TOOLS = [
         "name": "BILL",
         "url": "https://www.bill.com",
         "description": "AP and AR automation platform for SMBs. Digitizes invoice processing, automates approval workflows, handles domestic and international payments, and syncs with major accounting software.",
-        "categories": ["Spend Management"],
+        "categories": ["Spend Management", "Billing"],
     },
     {
         "name": "Airbase",
@@ -254,8 +254,8 @@ TOOLS = [
     {
         "name": "Rillet",
         "url": "https://www.rillet.com",
-        "description": "AI-native general ledger and financial close platform built for SaaS. Automates month-end close, revenue recognition, and reporting — purpose-built for subscription and usage-based businesses.",
-        "categories": ["Revenue Recognition"],
+        "description": "AI-native ERP and general ledger built for SaaS. Automates month-end close, revenue recognition, and reporting — purpose-built for subscription and usage-based businesses.",
+        "categories": ["ERP"],
         "advisor": True,
     },
     {
