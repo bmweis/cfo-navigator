@@ -428,6 +428,8 @@ def thought_leadership():
          "https://fsuitevirtualpanel430.splashthat.com", "2026-04"),
         ("The F Suite Boston — Growth CFO Salon · The F Suite · Nov 2025",
          "", "2025-11"),
+        ("The F Suite — Community Crossover Roundtable: SaaS Pricing Models & Metrics in the Age of AI · The F Suite · Oct 2025",
+         "", "2025-10"),
         ("The F Suite Cash Cycle Demo Day — Opening & Closing Remarks · The F Suite · Oct 2025",
          "https://cashcycledemoday.splashthat.com/", "2025-10"),
         ("The F Suite Boston — CFO Supper Club · The F Suite · Aug 2025",
@@ -444,9 +446,19 @@ def thought_leadership():
          "https://www.accelevents.com/e/agile-finance-summit-2021", "2021-10"),
     ])
 
-    body += section("Podcast—Host", [
-        ("The Cash Flow Show — Conversations about how tech companies make money",
+    body += section("Podcast—Host: The Cash Flow Show", [
+        ("The Cash Flow Show — Conversations about how tech companies make money (full episode feed) · OnlyCFO",
          "https://www.onlycfo.io/podcast", ""),
+        ("Adopting AI in Finance & Accounting — with Sowmya Ranganathan (former Controller, OpenAI) · The Cash Flow Show · Aug 2025",
+         "https://open.spotify.com/episode/6uXkeypUPX5g5yB8lHGq2V", "2025-08"),
+        ("State of Fundraising / Equity Market · The Cash Flow Show · Jun 2025",
+         "https://open.spotify.com/episode/0rSm42OSNRzjiG3cYye3tX", "2025-06"),
+        ("Is ARR Dead? · The Cash Flow Show · Jun 2025",
+         "https://open.spotify.com/episode/5G0GUaRrOeGXxJwFh9WsPw", "2025-06"),
+        ("Commission Plan Strategies in 2025 — with Meir Rotenberg & David Ma · The Cash Flow Show · Mar 2025",
+         "https://open.spotify.com/episode/64DsKmsDgOshd3LQdM4Cte", "2025-03"),
+        ("The M&A Playbook · The Cash Flow Show · Mar 2025",
+         "https://open.spotify.com/episode/5kMa3kkutDhsoc4SBoOBZ1", "2025-03"),
     ])
 
     body += section("Podcasts—Guest", [
