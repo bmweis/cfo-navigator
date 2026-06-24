@@ -68,7 +68,7 @@ BENCHMARKS = [
     {
         "name": "ICONIQ Growth",
         "url": "https://iconiqcapital.com/growth/",
-        "description": "ICONIQ's annual State of SaaS report. Top-tier portfolio, so keep that in mind when comparing — but the data and analysis are excellent.",
+        "description": "ICONIQ's annual State of SaaS report. Top-tier portfolio, so keep that in mind when comparing—but the data and analysis are excellent.",
         "coverage": "Private",
     },
     {
@@ -86,7 +86,7 @@ BENCHMARKS = [
     {
         "name": "Benchmarkit",
         "url": "https://benchmarkit.solutions/",
-        "description": "Ray Rike's interactive benchmarking tool. Better segmentation than most — you can control who you're comparing against, which is the whole point.",
+        "description": "Ray Rike's interactive benchmarking tool. Better segmentation than most—you can control who you're comparing against, which is the whole point.",
         "coverage": "Private",
     },
     {
@@ -98,7 +98,7 @@ BENCHMARKS = [
     {
         "name": "Bessemer Venture Partners",
         "url": "https://www.bvp.com/atlas/state-of-the-cloud",
-        "description": "State of the Cloud and the Good-Better-Best SaaS metrics framework. Widely cited — worth knowing what everyone else is measuring against.",
+        "description": "State of the Cloud and the Good-Better-Best SaaS metrics framework. Widely cited—worth knowing what everyone else is measuring against.",
         "coverage": "Both",
     },
     {
@@ -110,7 +110,7 @@ BENCHMARKS = [
     {
         "name": "Meritech Capital",
         "url": "https://www.meritechcapital.com/benchmarking",
-        "description": "Interactive public cloud benchmarks — growth, efficiency, and valuation multiples, updated in real time. Great for understanding where public comps are trading.",
+        "description": "Interactive public cloud benchmarks—growth, efficiency, and valuation multiples, updated in real time. Great for understanding where public comps are trading.",
         "coverage": "Public",
     },
     {
@@ -301,7 +301,7 @@ def login_page(request: Request, next: str = "/library", error: str = ""):
   <button type="submit" class="btn">Sign in</button>
 </form>
 </div>"""
-    return HTMLResponse(_page("Sign in — Brian Weisberg", "", body))
+    return HTMLResponse(_page("Sign in—Brian Weisberg", "", body))
 
 
 @app.post("/login")
@@ -394,7 +394,7 @@ the early-to-growth leap. Based in Boston.</p>
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
 </div>
 </div>"""
-    return HTMLResponse(_page("Brian Weisberg — CFO", "About", body))
+    return HTMLResponse(_page("Brian Weisberg—CFO", "About", body))
 
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
@@ -411,17 +411,17 @@ def thought_leadership():
     body = '<div class="page"><h1>Thought Leadership</h1>' + \
         '<p style="color:var(--muted);margin:4px 0 28px;">Podcasts, writing, interviews, and appearances.</p>' + \
         """<a href="/growth-engine-ratio" style="display:block;text-decoration:none;background:var(--accent);color:#fff;border-radius:14px;padding:22px 26px;margin-bottom:36px;">
-  <div style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.75;margin-bottom:6px;">Featured &mdash; New Framework</div>
+  <div style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.75;margin-bottom:6px;">Featured&mdash;New Framework</div>
   <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;">The Growth Engine Ratio</div>
-  <div style="font-size:14px;opacity:.85;line-height:1.5;">A new metric for measuring how R&amp;D and GTM investments work together to drive growth &mdash; with an interactive calculator to see how you stack up. Published with The F Suite &rarr;</div>
+  <div style="font-size:14px;opacity:.85;line-height:1.5;">A new metric for measuring how R&amp;D and GTM investments work together to drive growth&mdash;with an interactive calculator to see how you stack up. Published with The F Suite &rarr;</div>
 </a>"""
 
-    body += section("Podcast — Host", [
+    body += section("Podcast—Host", [
         ("The Cash Flow Show — Conversations about how tech companies make money",
          "https://www.onlycfo.io/podcast", ""),
     ])
 
-    body += section("Podcasts — Guest", [
+    body += section("Podcasts—Guest", [
         ("Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks · Monetizely · Sep 2023",
          "https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn",
          "2023-09"),
@@ -434,7 +434,7 @@ def thought_leadership():
          "https://www.youtube.com/watch?v=GPdRstJ_sKw", "2022-04"),
     ])
 
-    body += section("Webinar — Host", [
+    body += section("Webinar—Host", [
         ("Numeric — Lean Accounting Team · Numeric · Mar 2024",
          "https://numeric.lpages.co/lean-accounting-team-webinar/", "2024-03"),
     ])
@@ -467,7 +467,7 @@ def thought_leadership():
     ])
 
     body += "</div>"
-    return HTMLResponse(_page("Thought Leadership — Brian Weisberg", "Thought Leadership", body))
+    return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body))
 
 
 @app.get("/growth-engine-ratio", response_class=HTMLResponse)
@@ -513,21 +513,21 @@ def growth_engine_ratio():
 
 <div style="background:var(--accent-light);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:18px 22px;margin:0 0 36px;">
   <p style="margin:0;font-size:15px;">
-    The full guide — including benchmark data from 200+ public and private SaaS companies via OPEXEngine —
+    The full guide—including benchmark data from 200+ public and private SaaS companies via OPEXEngine—
     is available as a downloadable whitepaper on The F Suite.
     <strong><a href="https://www.fsuite.co" target="_blank" rel="noopener">Read the full article and download the guide &rarr;</a></strong>
-    <em style="display:block;margin-top:6px;font-size:13px;color:var(--muted);">(Link will be live when The F Suite publishes — coming soon.)</em>
+    <em style="display:block;margin-top:6px;font-size:13px;color:var(--muted);">(Link will be live when The F Suite publishes—coming soon.)</em>
   </p>
 </div>
 
 <h2 style="margin-top:0;">Why I Built This</h2>
 <p>Most SaaS efficiency metrics measure one engine at a time. CAC payback tells you how quickly GTM
 investment pays back on new logos. Magic Number tells you how much ARR you're getting per dollar of
-sales and marketing spend. Both are useful — I use them all the time — but they share a blind spot:
+sales and marketing spend. Both are useful—I use them all the time—but they share a blind spot:
 they leave R&D entirely out of the efficiency equation.</p>
 
 <p>That bothers me. At most companies, R&D is 20–30% of revenue. It's a meaningful investment, and
-it directly influences how easy — or hard — it is for GTM to do its job. A great product shortens
+it directly influences how easy—or hard—it is for GTM to do its job. A great product shortens
 sales cycles, reduces churn, and drives expansion. A product that's hard to understand or hasn't
 kept pace with customer needs makes every dollar of GTM spend work harder just to stay in place.</p>
 
@@ -552,7 +552,7 @@ I call this the <strong>time-distributed contribution model</strong>.</p>
   R&amp;D Investment = 0.25 &times; (R&amp;D<sub>n-5</sub> + R&amp;D<sub>n-4</sub>)
 </div>
 
-<p>GTM uses a 4-quarter lookback because enterprise sales cycles run 6–9 months — pipeline built
+<p>GTM uses a 4-quarter lookback because enterprise sales cycles run 6–9 months—pipeline built
 in Q<sub>n-4</sub> converts across subsequent quarters until it lands in Q<sub>n</sub>.
 R&amp;D uses a 2-quarter lookback starting one quarter earlier (n-5, n-4) because features are
 built before they're sold. The build-then-sell sequence matters. Each contributing quarter is
@@ -566,7 +566,7 @@ that are profitable on acquisition from those that aren't.</p>
 
 <p>In my analysis of 11 public SaaS companies across 188 company-quarters, only 2 exceeded $1.00
 in steady state. The other 9 need to retain customers for 1.2 to 2.8 years just to break even
-on acquisition costs. That changes how you think about churn — permanently.</p>
+on acquisition costs. That changes how you think about churn—permanently.</p>
 
 <div class="ger-table-wrap" style="background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 32px;">
   <table class="ger-table" style="width:100%;border-collapse:collapse;font-size:14px;min-width:520px;">
@@ -581,25 +581,25 @@ on acquisition costs. That changes how you think about churn — permanently.</p
         <td style="padding:10px 14px;">&#127942; Elite</td>
         <td style="padding:10px 14px;">&gt; $1.20</td>
         <td style="padding:10px 14px;">&lt; 0.8 years</td>
-        <td style="padding:10px 14px;">Profitable on acquisition — invest aggressively</td>
+        <td style="padding:10px 14px;">Profitable on acquisition—invest aggressively</td>
       </tr>
       <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
         <td style="padding:10px 14px;">&#11088; Strong</td>
         <td style="padding:10px 14px;">$0.70 – $1.20</td>
         <td style="padding:10px 14px;">0.8 – 1.4 years</td>
-        <td style="padding:10px 14px;">Above median — maintain efficiency as you scale</td>
+        <td style="padding:10px 14px;">Above median—maintain efficiency as you scale</td>
       </tr>
       <tr style="border-top:1px solid var(--line);">
         <td style="padding:10px 14px;">&#10003; Typical</td>
         <td style="padding:10px 14px;">$0.50 – $0.70</td>
         <td style="padding:10px 14px;">1.4 – 2.0 years</td>
-        <td style="padding:10px 14px;">In the pack — retention must be a top priority</td>
+        <td style="padding:10px 14px;">In the pack—retention must be a top priority</td>
       </tr>
       <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
         <td style="padding:10px 14px;">&#9888;&#65039; Below target</td>
         <td style="padding:10px 14px;">&lt; $0.50</td>
         <td style="padding:10px 14px;">&gt; 2.0 years</td>
-        <td style="padding:10px 14px;">Urgent review — fix retention before scaling acquisition</td>
+        <td style="padding:10px 14px;">Urgent review—fix retention before scaling acquisition</td>
       </tr>
     </tbody>
   </table>
@@ -608,7 +608,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
 <h2>Calculate Your Ratio</h2>
 <p style="color:var(--muted);font-size:15px;margin:-6px 0 18px;">
   Pick how much data you have. A single quarter returns your score against the benchmark; a run of
-  quarters shows your trend; projected quarters show where you're headed — with an upper/lower band
+  quarters shows your trend; projected quarters show where you're headed—with an upper/lower band
   if your numbers land 10% better or worse than plan. All figures in the same currency, consistently.
 </p>
 
@@ -638,7 +638,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
     </div>
 
     <div>
-      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">GTM Spend (Sales &amp; Marketing) — last 4 quarters</p>
+      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">GTM Spend (Sales &amp; Marketing)—last 4 quarters</p>
       <div class="ger-grid-4">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-4</sub></label>
@@ -664,7 +664,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
     </div>
 
     <div>
-      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">R&amp;D Spend — 2 quarters (the build window)</p>
+      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">R&amp;D Spend—2 quarters (the build window)</p>
       <div class="ger-grid-2" style="max-width:320px;">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-5</sub></label>
@@ -701,7 +701,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
 
     <div style="margin-top:22px;padding-top:18px;border-top:1px dashed var(--line);">
       <p style="font-weight:600;font-size:15px;margin:0 0 4px;color:var(--ink);">How this quarter is built</p>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Each contributing quarter feeds 25% of its spend into the window — R&amp;D first (build), then GTM (sell), aligned to the revenue it produced.</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Each contributing quarter feeds 25% of its spend into the window—R&amp;D first (build), then GTM (sell), aligned to the revenue it produced.</p>
       <div class="ger-contrib-wrap"><div id="point-contrib" style="min-width:560px;"></div></div>
     </div>
 
@@ -711,7 +711,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
   <div id="panel-timeline" style="display:none;">
     <p style="font-size:14px;color:var(--muted);margin:0 0 16px;">
       Plot your ratio over time. Choose how many quarters to look <strong>back</strong> (actuals) and
-      <strong>forward</strong> (projected) — up to 2 each, for up to 5 measured quarters. Forward quarters
+      <strong>forward</strong> (projected)—up to 2 each, for up to 5 measured quarters. Forward quarters
       are shaded and drawn dashed, with a best/worst band (revenue &amp; spend 10% better or worse than
       plan). The first five rows are lookback context for the earliest measured quarter.
     </p>
@@ -735,8 +735,7 @@ on acquisition costs. That changes how you think about churn — permanently.</p
 
 <p style="font-size:13px;color:var(--muted);margin:-20px 0 40px;">
   <strong>Methodology note:</strong> GTM = Sales &amp; Marketing expense (GAAP including SBC).
-  R&D = Research &amp; Development expense. Use either GAAP or non-GAAP consistently —
-  don't mix. Benchmarks in the full guide use GAAP. Every ratio needs 6 consecutive quarters for the
+  R&D = Research &amp; Development expense. Use either GAAP or non-GAAP consistently—don't mix. Benchmarks in the full guide use GAAP. Every ratio needs 6 consecutive quarters for the
   n-5 R&amp;D lookback, so the timeline carries five quarters of lookback before its first measured
   point and adds one measured quarter for each period you look back or forward.
 </p>
@@ -744,11 +743,11 @@ on acquisition costs. That changes how you think about churn — permanently.</p
 <h2>A Note on Retention</h2>
 <p>One of the more useful outputs of this framework is a simple break-even calculation:
 <strong>Years to Break Even = 1 ÷ Efficiency Ratio</strong>. If your ratio is $0.60, you
-need to retain each customer for 1.7 years just to recover acquisition costs — and that
+need to retain each customer for 1.7 years just to recover acquisition costs—and that
 assumes flat renewal with no expansion. Strong NRR (above 110%) compresses that timeline;
 contraction can make it indefinitely long.</p>
 
-<p>Companies below $1.00 — which is most of them — need both high gross retention and strong
+<p>Companies below $1.00—which is most of them—need both high gross retention and strong
 net expansion for the economics to work. One without the other isn't sufficient. The ratio
 makes that constraint explicit in a way that's hard to argue with in a board room.</p>
 
@@ -761,7 +760,7 @@ with The F Suite.</p>
 <a href="https://www.fsuite.co" target="_blank" rel="noopener" class="btn" style="font-size:15px;padding:12px 24px;">
   Download the full guide &rarr;
 </a>
-<p style="font-size:13px;color:var(--muted);margin-top:8px;">(Full link coming soon — check back or <a href="/contact">reach out</a> and I'll send it directly.)</p>
+<p style="font-size:13px;color:var(--muted);margin-top:8px;">(Full link coming soon—check back or <a href="/contact">reach out</a> and I'll send it directly.)</p>
 
 </div>
 
@@ -772,9 +771,9 @@ function fmtRatio(r) { return r >= 0 ? '$' + r.toFixed(2) : '-$' + Math.abs(r).t
 // Shared tier lookup so the headline result and the sensitivity panel stay in sync.
 function gerTier(ratio) {
   if (ratio >= 1.20) return {tier:'&#127942; Elite (top 10%)', color:'#1a4d3c',
-    interp:"You've earned the right to invest aggressively. Every new customer is profitable on acquisition — consider TAM expansion, adjacent markets, or accelerating hiring."};
+    interp:"You've earned the right to invest aggressively. Every new customer is profitable on acquisition—consider TAM expansion, adjacent markets, or accelerating hiring."};
   if (ratio >= 0.70) return {tier:'&#11088; Strong (above median)', color:'#2d6a4f',
-    interp:"Solid performance. Focus on maintaining efficiency as you scale. You're close to the $1.00 break-even — small improvements in NRR or cost discipline can get you there."};
+    interp:"Solid performance. Focus on maintaining efficiency as you scale. You're close to the $1.00 break-even—small improvements in NRR or cost discipline can get you there."};
   if (ratio >= 0.50) return {tier:'&#10003; Typical (near median)', color:'#b45309',
     interp:"You're in the pack. Diagnose: is growth too slow, or investment too high? Pick one to improve first. Retention is critical."};
   if (ratio > 0) return {tier:'&#9888;&#65039; Below target (bottom 25%)', color:'#b91c1c',
@@ -1176,7 +1175,7 @@ function loadTimelineExample() {
 // Build the timeline table up front so its rows exist before the user switches tabs.
 renderTL();
 </script>"""
-    return HTMLResponse(_page("The Growth Engine Ratio — Brian Weisberg", "Thought Leadership", body))
+    return HTMLResponse(_page("The Growth Engine Ratio—Brian Weisberg", "Thought Leadership", body))
 
 
 @app.get("/contact", response_class=HTMLResponse)
@@ -1187,7 +1186,7 @@ def contact_page(submitted: str = ""):
 <p>I'll get back to you shortly.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
-        return HTMLResponse(_page("Contact — Brian Weisberg", "Contact", body))
+        return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body))
 
     body = """<div class="page" style="max-width:560px;">
 <h1>Get in Touch</h1>
@@ -1210,7 +1209,7 @@ def contact_page(submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Contact — Brian Weisberg", "Contact", body))
+    return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body))
 
 
 @app.post("/contact")
@@ -1307,7 +1306,7 @@ def tools_directory(request: Request):
 <div style="margin-top:56px;padding-top:40px;border-top:1px solid var(--line);">
   <h2 style="font-size:20px;font-weight:700;margin:0 0 6px;">Benchmarking Resources</h2>
   <p style="color:var(--muted);font-size:14px;margin:0 0 12px;">The benchmarking sources I actually use.</p>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a> &mdash; it&rsquo;s not always what you think it is.</p>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a>&mdash;it&rsquo;s not always what you think it is.</p>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
     {bench_cards}
   </div>
@@ -1457,7 +1456,7 @@ function filterTools() {{ renderTools(filtered()); }}
 
 renderTools(ALL_TOOLS);
 </script>"""
-    return HTMLResponse(_page("CFO Toolbox — Brian Weisberg", "CFO Toolbox", body, authed=authed))
+    return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, authed=authed))
 
 
 def _tool_category_checkboxes(selected: list[str] | None = None) -> str:
@@ -1474,11 +1473,11 @@ def _tool_category_checkboxes(selected: list[str] | None = None) -> str:
 def tools_submit_page(submitted: str = ""):
     if submitted == "1":
         body = """<div class="page" style="max-width:560px;">
-<h1>Thanks — submission received.</h1>
+<h1>Thanks—submission received.</h1>
 <p>Your tool has been submitted for review. If approved, it'll appear in the CFO Toolbox shortly.</p>
 <a href="/tools" class="btn btn-ghost" style="margin-top:8px;">Back to CFO Toolbox</a>
 </div>"""
-        return HTMLResponse(_page("Submission received — CFO Toolbox", "CFO Toolbox", body))
+        return HTMLResponse(_page("Submission received—CFO Toolbox", "CFO Toolbox", body))
 
     body = f"""<div class="page" style="max-width:560px;">
 <h1>Submit a Tool</h1>
@@ -1519,7 +1518,7 @@ def tools_submit_page(submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Submit a Tool — CFO Toolbox", "CFO Toolbox", body))
+    return HTMLResponse(_page("Submit a Tool—CFO Toolbox", "CFO Toolbox", body))
 
 
 @app.post("/tools/submit")
@@ -1571,7 +1570,7 @@ def admin_contacts(request: Request):
 <tbody>{rows}</tbody>
 </table>
 </div>"""
-    return HTMLResponse(_page("Contacts — Admin", "", body))
+    return HTMLResponse(_page("Contacts—Admin", "", body))
 
 
 @app.get("/admin/tools", response_class=HTMLResponse)
@@ -1609,7 +1608,7 @@ def admin_tools(request: Request):
 
     body = f"""<div class="page" style="max-width:1100px;">
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>CFO Toolbox — Pending submissions</h1>
+  <h1>CFO Toolbox—Pending submissions</h1>
   <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
 </div>
 <p style="margin:0 0 24px;"><a href="/tools" style="font-size:13px;color:var(--muted);">View public directory →</a></p>
@@ -1628,7 +1627,7 @@ def admin_tools(request: Request):
 </table>
 </div>
 </div>"""
-    return HTMLResponse(_page("Tools Admin — CFO Toolbox", "", body, authed=True))
+    return HTMLResponse(_page("Tools Admin—CFO Toolbox", "", body, authed=True))
 
 
 @app.get("/admin/tools/new", response_class=HTMLResponse)
@@ -1674,7 +1673,7 @@ def admin_tools_new(request: Request):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Add Tool — CFO Toolbox", "", body, authed=True))
+    return HTMLResponse(_page("Add Tool—CFO Toolbox", "", body, authed=True))
 
 
 @app.post("/admin/tools/new")
@@ -1778,7 +1777,7 @@ def admin_tools_edit(request: Request, tool_id: int):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page(f"Edit {_esc(tool['name'])} — CFO Toolbox", "", body, authed=True))
+    return HTMLResponse(_page(f"Edit {_esc(tool['name'])}—CFO Toolbox", "", body, authed=True))
 
 
 @app.post("/admin/tools/{tool_id}/edit")
@@ -1829,7 +1828,7 @@ def feed_reader(request: Request, cat: str = ""):
     try:
         items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
     except Exception as e:
-        return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed",
+        return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Feed",
             f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
             authed=True))
 
@@ -1871,7 +1870,7 @@ def feed_reader(request: Request, cat: str = ""):
 </article>"""
 
     if not cards:
-        cards = '<p style="color:var(--muted);padding:32px 0;">No items loaded — feeds may be warming up. Try refreshing in a moment.</p>'
+        cards = '<p style="color:var(--muted);padding:32px 0;">No items loaded—feeds may be warming up. Try refreshing in a moment.</p>'
 
     # Source filter checkboxes
     source_checks = "".join(
@@ -1963,7 +1962,7 @@ function saveItem(btn, url) {{
 }}
 </script>"""
 
-    return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed", body, authed=True))
+    return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Feed", body, authed=True))
 
 
 _READER_CSS = """
@@ -2231,7 +2230,7 @@ async function draftPost(url){{
 }}
 </script>"""
 
-    return HTMLResponse(_page("Library — Brian Weisberg", "Library", page_body, authed=True))
+    return HTMLResponse(_page("Library—Brian Weisberg", "Library", page_body, authed=True))
 
 
 # ---------------------------------------------------------------------------
@@ -2437,7 +2436,7 @@ document.addEventListener('keydown', function(e) {{
 updateEstimate();
 </script>"""
 
-    return HTMLResponse(_page("Ask — Brian Weisberg", "Ask", body, authed=True))
+    return HTMLResponse(_page("Ask—Brian Weisberg", "Ask", body, authed=True))
 
 
 @app.post("/ask")

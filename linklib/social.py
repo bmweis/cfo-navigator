@@ -34,7 +34,7 @@ VOICE:
 - Confident, not boastful. No gratitude theater.
 
 HARD MECHANICAL RULES (never violate):
-- Emdashes have NO surrounding spaces, and are used sparingly — one well-placed, never peppered.
+- Emdashes have NO surrounding spaces, and are used sparingly—one well-placed, never peppered.
 - Sentence case for any heading/title; proper nouns and acronyms stay capped (Mux, NetSuite, FP&A, AI, Ramp).
 - Spell out "and"; never "&" except in terms like FP&A.
 - No performative openers or closers ("I'm excited to share", "thrilled to", "Onward!", "Excited for what's next").
