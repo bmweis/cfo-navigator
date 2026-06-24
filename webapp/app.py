@@ -1306,7 +1306,8 @@ def tools_directory(request: Request):
 
 <div style="margin-top:56px;padding-top:40px;border-top:1px solid var(--line);">
   <h2 style="font-size:20px;font-weight:700;margin:0 0 6px;">Benchmarking Resources</h2>
-  <p style="color:var(--muted);font-size:14px;margin:0 0 24px;">Key reports and datasets for SaaS financial benchmarks.</p>
+  <p style="color:var(--muted);font-size:14px;margin:0 0 12px;">Key reports and datasets for SaaS financial benchmarks.</p>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Before diving in: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a> — a good reminder that these are data points, not directives.</p>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
     {bench_cards}
   </div>
