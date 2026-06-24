@@ -68,55 +68,55 @@ BENCHMARKS = [
     {
         "name": "ICONIQ Growth",
         "url": "https://iconiqcapital.com/growth/",
-        "description": "Annual State of SaaS reports with deep data on ARR growth, efficiency, GTM metrics, and operating benchmarks for private growth-stage companies.",
+        "description": "ICONIQ's annual State of SaaS report. Top-tier portfolio, so keep that in mind when comparing — but the data and analysis are excellent.",
         "coverage": "Private",
     },
     {
         "name": "ICONIQ Compass",
         "url": "https://iconiqcapital.com/growth/compass/",
-        "description": "ICONIQ's interactive benchmarking tool — lets companies slice benchmark data by ARR range, growth rate, and other dimensions for more comparable peer group analysis.",
+        "description": "Their interactive benchmarking tool. Lets you slice the data by ARR range, growth rate, and other filters so you're actually comparing against something relevant.",
         "coverage": "Private",
     },
     {
         "name": "HighAlpha (formerly OpenView)",
         "url": "https://highalpha.com/resources/",
-        "description": "Continuing OpenView's annual SaaS Benchmarks report — NRR, GRR, CAC payback, and other key metrics for private SaaS companies.",
+        "description": "Took over OpenView's annual SaaS benchmarks report. NRR, GRR, CAC payback, and the usual suspects for private SaaS companies.",
         "coverage": "Private",
     },
     {
         "name": "Benchmarkit",
         "url": "https://benchmarkit.solutions/",
-        "description": "Interactive SaaS benchmarking platform by Ray Rike with deeper segmentation than most private company reports — peer comparisons by ARR, growth rate, vertical, and GTM motion.",
+        "description": "Ray Rike's interactive benchmarking tool. Better segmentation than most — you can control who you're comparing against, which is the whole point.",
         "coverage": "Private",
     },
     {
         "name": "OpexEngine",
         "url": "https://www.opexengine.com/saas-financial-benchmarks/",
-        "description": "SaaS and subscription benchmarking platform covering Rule of 40, unit economics, and operational metrics across both private and public companies.",
+        "description": "Private and public SaaS benchmarks across Rule of 40, unit economics, and operating metrics. One of the more comprehensive data sets out there.",
         "coverage": "Both",
     },
     {
         "name": "Bessemer Venture Partners",
         "url": "https://www.bvp.com/atlas/state-of-the-cloud",
-        "description": "State of the Cloud reports and the Good-Better-Best SaaS metrics framework — widely cited benchmarks for both private and public cloud companies.",
+        "description": "State of the Cloud and the Good-Better-Best SaaS metrics framework. Widely cited — worth knowing what everyone else is measuring against.",
         "coverage": "Both",
     },
     {
         "name": "Clouded Judgement (Jamin Ball)",
         "url": "https://cloudedjudgement.substack.com/",
-        "description": "Weekly newsletter with public SaaS company benchmarks, valuation multiples, and commentary on the markets — essential reading for tracking public cloud trends.",
+        "description": "Jamin Ball's weekly newsletter on public SaaS benchmarks and market trends. One of the best signals for tracking what's actually happening across cloud.",
         "coverage": "Public",
     },
     {
         "name": "Meritech Capital",
         "url": "https://www.meritechcapital.com/benchmarking",
-        "description": "Comprehensive interactive benchmarking database for public SaaS companies — growth, efficiency, valuation multiples, and operating metrics updated in real time.",
+        "description": "Interactive public cloud benchmarks — growth, efficiency, and valuation multiples, updated in real time. Great for understanding where public comps are trading.",
         "coverage": "Public",
     },
     {
         "name": "PublicComps",
         "url": "https://www.publiccomps.com",
-        "description": "Financial comps, revenue multiples, and operating metrics for public SaaS and software companies, with filters by category and scale.",
+        "description": "Public SaaS comps and operating metrics. Good filters by category and scale.",
         "coverage": "Public",
     },
 ]
@@ -1306,8 +1306,8 @@ def tools_directory(request: Request):
 
 <div style="margin-top:56px;padding-top:40px;border-top:1px solid var(--line);">
   <h2 style="font-size:20px;font-weight:700;margin:0 0 6px;">Benchmarking Resources</h2>
-  <p style="color:var(--muted);font-size:14px;margin:0 0 12px;">Key reports and datasets for SaaS financial benchmarks.</p>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Before diving in: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a> — a good reminder that these are data points, not directives.</p>
+  <p style="color:var(--muted);font-size:14px;margin:0 0 12px;">The benchmarking sources I actually use.</p>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a> &mdash; it&rsquo;s not always what you think it is.</p>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
     {bench_cards}
   </div>
