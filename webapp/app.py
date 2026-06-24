@@ -409,25 +409,32 @@ def growth_engine_ratio():
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .ger-grid-3{display:grid;grid-template-columns:88px 1fr 1fr 1fr;gap:10px;align-items:center;}
   .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  input[type=range]{accent-color:var(--accent);height:4px;}
-  .ger-slider-row{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:6px;}
-  .spread-row{display:flex;align-items:center;gap:14px;padding:30px 0 26px;}
-  .spread-name{flex:0 0 108px;font-size:13px;font-weight:500;color:var(--ink);}
-  .spread-track{position:relative;flex:1;height:6px;background:var(--accent-light);border-radius:6px;}
-  .spread-bar{position:absolute;height:6px;background:var(--accent);border-radius:6px;opacity:.35;}
-  .spread-base{position:absolute;width:2px;height:18px;top:-6px;background:var(--ink);border-radius:2px;}
-  .spread-dot{position:absolute;width:11px;height:11px;border-radius:50%;top:-2.5px;border:2px solid #fff;transform:translateX(-50%);box-shadow:0 0 0 1px var(--line);}
-  .spread-cap{position:absolute;top:-26px;font-size:12px;font-weight:600;transform:translateX(-50%);white-space:nowrap;}
-  .spread-sub{position:absolute;top:13px;font-size:10px;color:var(--muted);transform:translateX(-50%);white-space:nowrap;}
+  .ger-modes{display:flex;flex-wrap:wrap;gap:8px;}
+  .ger-mode{font:inherit;font-size:14px;font-weight:500;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer;}
+  .ger-mode:hover{background:var(--accent-light);color:var(--ink);}
+  .ger-mode-on{background:var(--accent) !important;color:#fff !important;border-color:var(--accent) !important;}
+  .ger-in{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);}
+  .qlabel{font-size:13px;color:var(--ink);font-weight:500;}
+  .qhead{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+  .qrow-proj .ger-in{background:#fbfaf6;border-style:dashed;}
+  .ger-chart{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;background:#fff;}
+  .ger-contrib-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .ger-contrib{width:100%;height:auto;display:block;}
+  .tl-step{display:flex;flex-direction:column;gap:6px;}
+  .tl-ctrl{display:inline-flex;align-items:center;gap:16px;border:1px solid var(--line);border-radius:10px;padding:6px 12px;background:#fff;width:max-content;}
+  .tl-ctrl button{font:inherit;font-size:18px;line-height:1;width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--accent);cursor:pointer;}
+  .tl-ctrl button:hover{background:var(--accent-light);}
+  .tl-ctrl span{font-size:16px;font-weight:700;min-width:16px;text-align:center;color:var(--ink);}
   @media (max-width:640px){
     .ger-grid-4{grid-template-columns:repeat(2,1fr);}
     .ger-grid-2{grid-template-columns:1fr;}
+    .ger-grid-3{grid-template-columns:58px 1fr 1fr 1fr;gap:6px;}
     .ger-card{padding:22px 18px !important;}
     .ger-table th,.ger-table td{padding:8px 10px !important;font-size:13px !important;}
     .ger-value-big{font-size:38px !important;}
-    .spread-name{flex:0 0 76px;font-size:12px;}
-    .spread-cap{font-size:11px;}
+    .ger-in{font-size:14px;padding:8px 9px;}
   }
 </style>
 
@@ -532,9 +539,19 @@ on acquisition costs. That changes how you think about churn — permanently.</p
 </div>
 
 <h2>Calculate Your Ratio</h2>
-<p style="color:var(--muted);font-size:15px;margin:-6px 0 24px;">Enter your last 6 quarters of data. All figures in the same currency (millions, thousands — just be consistent).</p>
+<p style="color:var(--muted);font-size:15px;margin:-6px 0 18px;">
+  Pick how much data you have. A single quarter returns your score against the benchmark; a run of
+  quarters shows your trend; projected quarters show where you're headed — with an upper/lower band
+  if your numbers land 10% better or worse than plan. All figures in the same currency, consistently.
+</p>
+
+<div class="ger-modes" role="tablist" style="margin:0 0 18px;">
+  <button class="ger-mode ger-mode-on" id="tab-point" onclick="setMode('point')">Point in time</button>
+  <button class="ger-mode" id="tab-timeline" onclick="setMode('timeline')">Timeline</button>
+</div>
 
 <div class="ger-card" style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px 32px;margin:0 0 40px;">
+  <div id="panel-point">
   <div style="display:grid;gap:20px;">
 
     <div>
@@ -615,57 +632,46 @@ on acquisition costs. That changes how you think about churn — permanently.</p
     </div>
     <div id="ger-detail" style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.8;"></div>
 
-    <div id="ger-sens" style="margin-top:26px;padding-top:22px;border-top:1px dashed var(--line);">
-      <p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">Sensitivity at a glance</p>
-      <p style="font-size:13px;color:var(--muted);margin:4px 0 6px;">How a &plusmn;10% change in any single assumption would move your ratio — everything else held constant. Wider bar = bigger lever.</p>
-
-      <div id="ger-spread" style="margin:8px 0 4px;"></div>
-      <p style="font-size:12px;color:var(--muted);margin:0;line-height:1.7;">
-        <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent);opacity:.5;vertical-align:middle;margin-right:4px;"></span>each end is a &plusmn;10% move &nbsp;&middot;&nbsp;
-        <span style="display:inline-block;width:2px;height:12px;background:var(--ink);vertical-align:middle;margin:0 5px -2px 2px;"></span>your current ratio &nbsp;&middot;&nbsp;
-        endpoint colour = tier at that point
-      </p>
-
-      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-top:30px;">
-        <p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">Flex it yourself</p>
-        <button onclick="resetSens()" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Reset to baseline</button>
-      </div>
-      <p style="font-size:13px;color:var(--muted);margin:4px 0 20px;">Drag any lever to test a custom change of up to &plusmn;20%.</p>
-
-      <div style="display:grid;gap:18px;">
-        <div>
-          <div class="ger-slider-row"><label for="s_gtm" style="color:var(--ink);font-weight:500;">GTM spend</label><span id="s_gtm_val" style="color:var(--accent);font-weight:600;">0%</span></div>
-          <input id="s_gtm" type="range" min="-20" max="20" step="1" value="0" oninput="updateSens()" style="width:100%;">
-        </div>
-        <div>
-          <div class="ger-slider-row"><label for="s_rnd" style="color:var(--ink);font-weight:500;">R&amp;D spend</label><span id="s_rnd_val" style="color:var(--accent);font-weight:600;">0%</span></div>
-          <input id="s_rnd" type="range" min="-20" max="20" step="1" value="0" oninput="updateSens()" style="width:100%;">
-        </div>
-        <div>
-          <div class="ger-slider-row"><label for="s_rev" style="color:var(--ink);font-weight:500;">Revenue growth (Q<sub>n</sub> &minus; Q<sub>n-1</sub>)</label><span id="s_rev_val" style="color:var(--accent);font-weight:600;">0%</span></div>
-          <input id="s_rev" type="range" min="-20" max="20" step="1" value="0" oninput="updateSens()" style="width:100%;">
-        </div>
-      </div>
-
-      <div style="margin-top:22px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;">
-        <div>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 2px;text-transform:uppercase;letter-spacing:.06em;">Adjusted ratio</p>
-          <p id="ger-sens-value" style="font-size:34px;font-weight:700;letter-spacing:-0.02em;margin:0;color:var(--accent);"></p>
-        </div>
-        <div style="flex:1;min-width:180px;">
-          <p id="ger-sens-tier" style="font-size:15px;font-weight:600;margin:0 0 2px;"></p>
-          <p id="ger-sens-delta" style="font-size:13px;color:var(--muted);margin:0;"></p>
-        </div>
-      </div>
+    <div style="margin-top:22px;padding-top:18px;border-top:1px dashed var(--line);">
+      <p style="font-weight:600;font-size:15px;margin:0 0 4px;color:var(--ink);">How this quarter is built</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Each contributing quarter feeds 25% of its spend into the window — R&amp;D first (build), then GTM (sell), aligned to the revenue it produced.</p>
+      <div class="ger-contrib-wrap"><div id="point-contrib" style="min-width:560px;"></div></div>
     </div>
+
+  </div><!-- /ger-result -->
+  </div><!-- /panel-point -->
+
+  <div id="panel-timeline" style="display:none;">
+    <p style="font-size:14px;color:var(--muted);margin:0 0 16px;">
+      Plot your ratio over time. Choose how many quarters to look <strong>back</strong> (actuals) and
+      <strong>forward</strong> (projected) — up to 2 each, for up to 5 measured quarters. Forward quarters
+      are shaded and drawn dashed, with a best/worst band (revenue &amp; spend 10% better or worse than
+      plan). The first five rows are lookback context for the earliest measured quarter.
+    </p>
+    <div style="display:flex;gap:28px;flex-wrap:wrap;margin:0 0 20px;">
+      <div class="tl-step"><span class="qhead">Periods back</span>
+        <div class="tl-ctrl"><button onclick="stepTL('back',-1)">&minus;</button><span id="tl-back">2</span><button onclick="stepTL('back',1)">+</button></div></div>
+      <div class="tl-step"><span class="qhead">Periods forward</span>
+        <div class="tl-ctrl"><button onclick="stepTL('fwd',-1)">&minus;</button><span id="tl-fwd">2</span><button onclick="stepTL('fwd',1)">+</button></div></div>
+    </div>
+    <div class="ger-grid-3" style="margin-bottom:8px;">
+      <span class="qhead">Quarter</span><span class="qhead">Revenue</span><span class="qhead">GTM spend</span><span class="qhead">R&amp;D spend</span>
+    </div>
+    <div id="tl-rows" style="display:grid;gap:8px;"></div>
+    <div style="margin-top:22px;">
+      <button onclick="calcTimeline()" class="btn" style="padding:12px 28px;font-size:16px;">Plot timeline</button>
+      <button onclick="loadTimelineExample()" class="btn btn-ghost" style="margin-left:12px;">Load example</button>
+    </div>
+    <div id="tl-result" style="display:none;margin-top:26px;padding-top:24px;border-top:1px solid var(--line);"></div>
   </div>
-</div>
+</div><!-- /ger-card -->
 
 <p style="font-size:13px;color:var(--muted);margin:-20px 0 40px;">
   <strong>Methodology note:</strong> GTM = Sales &amp; Marketing expense (GAAP including SBC).
   R&D = Research &amp; Development expense. Use either GAAP or non-GAAP consistently —
-  don't mix. Benchmarks in the full guide use GAAP. Requires at least 6 quarters of history
-  for the n-5 R&amp;D lookback.
+  don't mix. Benchmarks in the full guide use GAAP. Every ratio needs 6 consecutive quarters for the
+  n-5 R&amp;D lookback, so the timeline carries five quarters of lookback before its first measured
+  point and adds one measured quarter for each period you look back or forward.
 </p>
 
 <h2>A Note on Retention</h2>
@@ -710,26 +716,26 @@ function gerTier(ratio) {
     interp:"Revenue declined quarter-over-quarter. Focus on stabilizing the base before evaluating efficiency."};
 }
 
+/* ---- mode switching ---- */
+function setMode(m) {
+  ['point', 'timeline'].forEach(function(x) {
+    document.getElementById('panel-' + x).style.display = (x === m) ? 'block' : 'none';
+    document.getElementById('tab-' + x).className = 'ger-mode' + (x === m ? ' ger-mode-on' : '');
+  });
+}
+
+/* ---- point-in-time (the published single-quarter formula, unchanged) ---- */
 function loadExample() {
-  document.getElementById('rev_n').value = 100;
-  document.getElementById('rev_n1').value = 90;
-  document.getElementById('gtm4').value = 20;
-  document.getElementById('gtm3').value = 22;
-  document.getElementById('gtm2').value = 24;
-  document.getElementById('gtm1').value = 26;
-  document.getElementById('rnd5').value = 16;
-  document.getElementById('rnd4').value = 18;
+  var ex = {rev_n:100, rev_n1:90, gtm4:20, gtm3:22, gtm2:24, gtm1:26, rnd5:16, rnd4:18};
+  for (var k in ex) document.getElementById(k).value = ex[k];
   calcGER();
 }
 
 function calcGER() {
   var rev_n = v('rev_n'), rev_n1 = v('rev_n1');
-  var gtm4 = v('gtm4'), gtm3 = v('gtm3'), gtm2 = v('gtm2'), gtm1 = v('gtm1');
-  var rnd5 = v('rnd5'), rnd4 = v('rnd4');
-
   var annGrowth = (rev_n - rev_n1) * 4;
-  var gtmInv = 0.25 * (gtm4 + gtm3 + gtm2 + gtm1);
-  var rndInv = 0.25 * (rnd5 + rnd4);
+  var gtmInv = 0.25 * (v('gtm4') + v('gtm3') + v('gtm2') + v('gtm1'));
+  var rndInv = 0.25 * (v('rnd5') + v('rnd4'));
   var totalInv = gtmInv + rndInv;
 
   if (totalInv <= 0 || rev_n <= 0) {
@@ -738,8 +744,8 @@ function calcGER() {
   }
 
   var ratio = annGrowth / totalInv;
-  var breakeven = ratio > 0 ? (1 / ratio).toFixed(1) : '∞';
   var t = gerTier(ratio);
+  var breakeven = ratio > 0 ? (1 / ratio).toFixed(1) : '∞';
 
   document.getElementById('ger-value').textContent = fmtRatio(ratio);
   document.getElementById('ger-value').style.color = t.color;
@@ -753,106 +759,353 @@ function calcGER() {
     'R&amp;D investment (time-weighted): <strong>' + rndInv.toFixed(1) + '</strong> &nbsp;|&nbsp; ' +
     'Total investment: <strong>' + totalInv.toFixed(1) + '</strong>';
 
-  // Stash the baseline for the sensitivity panel, draw the spread, reset sliders.
-  window.gerBase = {annGrowth: annGrowth, gtmInv: gtmInv, rndInv: rndInv, ratio: ratio};
-  renderSpread();
-  resetSens();
+  // Build the contribution diagram from the eight inputs (window n-5 .. n).
+  window.pointStrip = [
+    {rev: 0,      gtm: 0,         rnd: v('rnd5')},
+    {rev: 0,      gtm: v('gtm4'), rnd: v('rnd4')},
+    {rev: 0,      gtm: v('gtm3'), rnd: 0},
+    {rev: 0,      gtm: v('gtm2'), rnd: 0},
+    {rev: rev_n1, gtm: v('gtm1'), rnd: 0},
+    {rev: rev_n,  gtm: 0,         rnd: 0}
+  ];
+  window.pointLabels = ['n-5', 'n-4', 'n-3', 'n-2', 'n-1', 'n'];
+  renderContrib('point', 5);
 
   document.getElementById('ger-result').style.display = 'block';
-  document.getElementById('ger-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 
-// Draw the fixed ±10% spread chart: one range bar per lever on a shared axis.
-function renderSpread() {
-  var b = window.gerBase;
-  if (!b) return;
-  var d = 0.10;
-  var levers = [
-    {name: 'GTM spend',      minus: b.annGrowth / (b.gtmInv * (1 - d) + b.rndInv),
-                             plus:  b.annGrowth / (b.gtmInv * (1 + d) + b.rndInv)},
-    {name: 'R&amp;D spend',  minus: b.annGrowth / (b.gtmInv + b.rndInv * (1 - d)),
-                             plus:  b.annGrowth / (b.gtmInv + b.rndInv * (1 + d))},
-    {name: 'Revenue growth', minus: (b.annGrowth * (1 - d)) / (b.gtmInv + b.rndInv),
-                             plus:  (b.annGrowth * (1 + d)) / (b.gtmInv + b.rndInv)}
-  ];
+/* ---- rolling ratio over a continuous quarterly strip ---- */
+// strip[i] = {rev, gtm, rnd}. Ratio at quarter i uses i plus the prior five.
+function gerStripAt(strip, i) {
+  if (i < 5) return null;
+  var rev_n = strip[i].rev, rev_p = strip[i - 1].rev;
+  var gtmInv = 0.25 * (strip[i - 1].gtm + strip[i - 2].gtm + strip[i - 3].gtm + strip[i - 4].gtm);
+  var rndInv = 0.25 * (strip[i - 5].rnd + strip[i - 4].rnd);
+  var tot = gtmInv + rndInv;
+  if (tot <= 0 || rev_n <= 0 || rev_p <= 0) return null;
+  return ((rev_n - rev_p) * 4) / tot;
+}
 
-  var vals = [b.ratio];
-  levers.forEach(function(L) { vals.push(L.minus, L.plus); });
-  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
-  var pad = (hi - lo) * 0.18;
-  if (pad < 0.05) pad = 0.05;
-  lo -= pad; hi += pad;
-  function pos(x) { return ((x - lo) / (hi - lo)) * 100; }
+/* ---- modern time-distributed contribution diagram ---- */
+// Renders the 6-quarter window (cur-5 .. cur) that produces the ratio at `cur`,
+// showing the 25%-per-quarter pull from GTM and R&D aligned to the revenue it drove.
+function contributionSVG(strip, cur, labels) {
+  var g = [strip[cur - 4].gtm, strip[cur - 3].gtm, strip[cur - 2].gtm, strip[cur - 1].gtm];
+  var r = [strip[cur - 5].rnd, strip[cur - 4].rnd];
+  var revC = strip[cur].rev, revP = strip[cur - 1].rev;
+  var ann = (revC - revP) * 4;
+  var gtmInv = 0.25 * (g[0] + g[1] + g[2] + g[3]);
+  var rndInv = 0.25 * (r[0] + r[1]);
+  var tot = gtmInv + rndInv, ratio = tot > 0 ? ann / tot : 0;
 
-  var html = '';
-  levers.forEach(function(L) {
-    var loR = Math.min(L.minus, L.plus), hiR = Math.max(L.minus, L.plus);
-    var pl = pos(loR), pr = pos(hiR), pb = pos(b.ratio);
-    var loIsMinus = (L.minus <= L.plus);  // does the −10% move land on the low end?
+  var W = 760, H = 622, x0 = 118, x1 = 612, n = 6;
+  var step = (x1 - x0) / n, bw = Math.min(58, step * 0.6);
+  function cx(c) { return x0 + step * (c + 0.5); }
+  function fmtM(x) { var a = Math.round(x * 10) / 10; return '$' + (a % 1 === 0 ? a.toFixed(0) : a.toFixed(1)) + 'M'; }
+  var BLUE = '#3b82f6', GREEN = '#10b981', RED = '#f4683b', INK = '#1f2937', MUT = '#8a8178';
+
+  var s = '<svg class="ger-contrib" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,-apple-system,Segoe UI,Inter,sans-serif">';
+  s += '<defs>' +
+    '<linearGradient id="cgB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + BLUE + '" stop-opacity="0.30"/><stop offset="1" stop-color="' + BLUE + '" stop-opacity="0.08"/></linearGradient>' +
+    '<linearGradient id="cgG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + GREEN + '"/><stop offset="1" stop-color="' + GREEN + '" stop-opacity="0.6"/></linearGradient>' +
+    '<linearGradient id="cgR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + RED + '" stop-opacity="0.30"/><stop offset="1" stop-color="' + RED + '" stop-opacity="0.08"/></linearGradient>' +
+    '</defs>';
+
+  s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#2c3e50">How ' + labels[cur] + ' is built &#8212; Time-Distributed Contribution</text>';
+  s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Efficiency Ratio = $' + ratio.toFixed(2) + '</text>';
+
+  s += '<text x="20" y="186" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
+  s += '<text x="20" y="320" font-size="13" font-weight="700" fill="' + GREEN + '">Revenue</text>';
+  s += '<text x="20" y="498" font-size="13" font-weight="700" fill="' + RED + '">R&amp;D</text>';
+
+  // One shared scale across spend AND revenue so every box is comparable by $;
+  // each is bottom-aligned on its lane baseline with a 25% "pull" cap on top.
+  var allMax = Math.max(g[0], g[1], g[2], g[3], r[0], r[1], revC, revP, 1), BARMAX = 142;
+  function barH(val) { return Math.max(val / allMax * BARMAX, 3); }
+  function spendBar(c, baseY, val, col, grad) {
+    var h = barH(val), x = cx(c) - bw / 2, y = baseY - h, capH = h * 0.25;
+    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="6" fill="url(#' + grad + ')" stroke="' + col + '" stroke-opacity="0.45"/>';
+    o += '<path d="M' + x.toFixed(1) + ' ' + (y + capH).toFixed(1) + ' L' + x.toFixed(1) + ' ' + (y + 6).toFixed(1) + ' Q' + x.toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + 6).toFixed(1) + ' ' + y.toFixed(1) + ' L' + (x + bw - 6).toFixed(1) + ' ' + y.toFixed(1) + ' Q' + (x + bw).toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + bw).toFixed(1) + ' ' + (y + 6).toFixed(1) + ' L' + (x + bw).toFixed(1) + ' ' + (y + capH).toFixed(1) + ' Z" fill="' + col + '"/>';
+    if (h >= 22) o += '<text x="' + cx(c).toFixed(1) + '" y="' + (y + capH - 3).toFixed(1) + '" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">25%</text>';
+    o += '<text x="' + cx(c).toFixed(1) + '" y="' + (baseY + 15).toFixed(1) + '" text-anchor="middle" font-size="11" fill="' + MUT + '">' + fmtM(val) + '</text>';
+    return o;
+  }
+  function bracket(cLo, cHi, y, col, label) {
+    var xa = cx(cLo) - bw / 2 - 3, xb = cx(cHi) + bw / 2 + 3;
+    var o = '<path d="M' + xa.toFixed(1) + ' ' + (y + 8) + ' L' + xa.toFixed(1) + ' ' + (y + 4) + ' Q' + xa.toFixed(1) + ' ' + y + ' ' + (xa + 4).toFixed(1) + ' ' + y + ' L' + (xb - 4).toFixed(1) + ' ' + y + ' Q' + xb.toFixed(1) + ' ' + y + ' ' + xb.toFixed(1) + ' ' + (y + 4) + ' L' + xb.toFixed(1) + ' ' + (y + 8) + '" fill="none" stroke="' + col + '" stroke-width="1.6"/>';
+    var mid = (xa + xb) / 2, tw = label.length * 6.7 + 24;
+    o += '<rect x="' + (mid - tw / 2).toFixed(1) + '" y="' + (y - 25) + '" width="' + tw.toFixed(1) + '" height="22" rx="11" fill="' + col + '"/>';
+    o += '<text x="' + mid.toFixed(1) + '" y="' + (y - 10) + '" text-anchor="middle" font-size="11.5" font-weight="600" fill="#fff">' + label + '</text>';
+    return o;
+  }
+
+  // GTM lane bottom-aligned at gB
+  var gB = 174, gTop = gB - barH(Math.max(g[0], g[1], g[2], g[3]));
+  s += bracket(1, 4, gTop - 12, BLUE, 'GTM Investment = ' + fmtM(gtmInv));
+  for (var c = 1; c <= 4; c++) s += spendBar(c, gB, g[c - 1], BLUE, 'cgB');
+
+  // Revenue lane bottom-aligned at rB (same scale as spend)
+  var rB = 388;
+  function revBar(c, val, isCur) {
+    var h = barH(val), x = cx(c) - bw / 2, y = rB - h;
+    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="7" fill="' + (isCur ? 'url(#cgG)' : '#d7f0e3') + '" stroke="' + GREEN + '" stroke-opacity="' + (isCur ? '0.55' : '0.3') + '"/>';
+    o += '<text x="' + cx(c).toFixed(1) + '" y="' + (isCur ? (y + 19) : (y - 7)).toFixed(1) + '" text-anchor="middle" font-size="' + (isCur ? '12' : '10.5') + '" font-weight="' + (isCur ? '700' : '500') + '" fill="' + (isCur ? '#fff' : MUT) + '">' + fmtM(val) + '</text>';
+    return o;
+  }
+  s += revBar(4, revP, false);
+  s += revBar(5, revC, true);
+
+  // annualized-growth callout beside the current revenue bar (tracks its top)
+  var curTop = rB - barH(revC);
+  var gx = cx(5) + bw / 2 + 16, gy = Math.max(curTop, 140), cw = 110;
+  s += '<line x1="' + (cx(5) + bw / 2).toFixed(1) + '" y1="' + (gy + 19) + '" x2="' + gx.toFixed(1) + '" y2="' + (gy + 19) + '" stroke="' + GREEN + '" stroke-width="1.4" stroke-dasharray="3 2"/>';
+  s += '<rect x="' + gx.toFixed(1) + '" y="' + gy.toFixed(1) + '" width="' + cw + '" height="38" rx="9" fill="#eafaf0" stroke="' + GREEN + '" stroke-width="1.6"/>';
+  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 18).toFixed(1) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + GREEN + '">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</text>';
+  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 32).toFixed(1) + '" text-anchor="middle" font-size="9.5" fill="' + GREEN + '">Annualized Growth</text>';
+
+  // R&D lane bottom-aligned at dB (same scale)
+  var dB = 494, dTop = dB - barH(Math.max(r[0], r[1]));
+  s += bracket(0, 1, dTop - 12, RED, 'R&amp;D Investment = ' + fmtM(rndInv));
+  for (var c = 0; c <= 1; c++) s += spendBar(c, dB, r[c], RED, 'cgR');
+
+  // timeline axis
+  var ty = 530;
+  s += '<line x1="' + (x0 - 8) + '" y1="' + ty + '" x2="' + (x1 + 8) + '" y2="' + ty + '" stroke="#cfc8bc" stroke-width="2"/>';
+  for (var c = 0; c < n; c++) {
+    var isCur = (c === 5);
+    s += '<line x1="' + cx(c).toFixed(1) + '" y1="' + (ty - 4) + '" x2="' + cx(c).toFixed(1) + '" y2="' + (ty + 4) + '" stroke="#cfc8bc" stroke-width="1.5"/>';
+    s += '<text x="' + cx(c).toFixed(1) + '" y="' + (ty + 20) + '" text-anchor="middle" font-size="11.5" font-weight="' + (isCur ? '700' : '400') + '" fill="' + (isCur ? '#2c3e50' : MUT) + '">' + labels[cur - 5 + c] + '</text>';
+  }
+
+  // formula pill
+  var label2 = (ann >= 0 ? '+' : '') + fmtM(ann) + ' / ( ' + fmtM(gtmInv) + ' + ' + fmtM(rndInv) + ' ) = $' + ratio.toFixed(2);
+  var fw = label2.length * 7.3 + 40, fx = W / 2 - fw / 2, fy = 580;
+  var pill = '<tspan fill="' + GREEN + '" font-weight="700">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</tspan> &#247; ( ' +
+    '<tspan fill="' + BLUE + '" font-weight="700">' + fmtM(gtmInv) + '</tspan> + ' +
+    '<tspan fill="' + RED + '" font-weight="700">' + fmtM(rndInv) + '</tspan> ) = ' +
+    '<tspan fill="' + INK + '" font-weight="700">$' + ratio.toFixed(2) + '</tspan>';
+  s += '<rect x="' + fx.toFixed(1) + '" y="' + fy + '" width="' + fw.toFixed(1) + '" height="34" rx="10" fill="#ffffff" stroke="#d9d2c6" stroke-width="1.6"/>';
+  s += '<text x="' + (W / 2).toFixed(1) + '" y="' + (fy + 22) + '" text-anchor="middle" font-size="14.5">' + pill + '</text>';
+
+  s += '</svg>';
+  return s;
+}
+
+function renderContrib(prefix, idx) {
+  var strip = window[prefix + 'Strip'], labels = window[prefix + 'Labels'];
+  if (!strip || idx < 5) return;
+  document.getElementById(prefix + '-contrib').innerHTML = contributionSVG(strip, idx, labels);
+}
+
+/* ---- Timeline mode: bounded -2 .. +2 measured periods ---- */
+var TL = {back: 2, fwd: 2};
+function tlCurIndex() { return 5 + TL.back; }      // index of the current quarter
+function tlRows() { return TL.back + TL.fwd + 6; } // 5 lookback + measured periods
+function tlLabel(i) {
+  var d = i - tlCurIndex();
+  return d === 0 ? 'n' : 'n' + (d < 0 ? ('-' + (-d)) : ('+' + d));
+}
+
+function renderTL() {
+  var n = tlRows(), cur = tlCurIndex(), html = '';
+  for (var i = 0; i < n; i++) {
+    var proj = i > cur, lookback = i < 5;
+    var tag = (i === cur) ? ' <span style="color:var(--accent);font-size:11px;font-weight:600;">current</span>'
+            : (proj ? ' <span style="color:var(--muted);font-size:11px;">proj</span>'
+            : (lookback ? ' <span style="color:var(--muted);font-size:11px;">lookback</span>' : ''));
+    var div = (i === cur + 1) ? ' style="border-top:1px dashed var(--line);padding-top:8px;"' : '';
     html +=
-      '<div class="spread-row">' +
-        '<div class="spread-name">' + L.name + '</div>' +
-        '<div class="spread-track">' +
-          '<div class="spread-bar" style="left:' + pl + '%;width:' + (pr - pl) + '%;"></div>' +
-          '<div class="spread-base" style="left:' + pb + '%;"></div>' +
-          '<div class="spread-dot" style="left:' + pl + '%;background:' + gerTier(loR).color + ';"></div>' +
-          '<div class="spread-dot" style="left:' + pr + '%;background:' + gerTier(hiR).color + ';"></div>' +
-          '<div class="spread-cap" style="left:' + pl + '%;color:' + gerTier(loR).color + ';">' + fmtRatio(loR) + '</div>' +
-          '<div class="spread-cap" style="left:' + pr + '%;color:' + gerTier(hiR).color + ';">' + fmtRatio(hiR) + '</div>' +
-          '<div class="spread-sub" style="left:' + pl + '%;">' + (loIsMinus ? '-10%' : '+10%') + '</div>' +
-          '<div class="spread-sub" style="left:' + pr + '%;">' + (loIsMinus ? '+10%' : '-10%') + '</div>' +
-        '</div>' +
+      '<div class="ger-grid-3 ' + (proj ? 'qrow-proj' : '') + '"' + div + '>' +
+        '<span class="qlabel">' + tlLabel(i) + tag + '</span>' +
+        '<input class="ger-in" id="tl_rev_' + i + '" type="number" min="0" step="any" placeholder="Rev">' +
+        '<input class="ger-in" id="tl_gtm_' + i + '" type="number" min="0" step="any" placeholder="GTM">' +
+        '<input class="ger-in" id="tl_rnd_' + i + '" type="number" min="0" step="any" placeholder="R&amp;D">' +
       '</div>';
-  });
-  document.getElementById('ger-spread').innerHTML = html;
+  }
+  document.getElementById('tl-rows').innerHTML = html;
 }
 
-function setSliderLabel(id, pct) {
-  document.getElementById(id).textContent = (pct > 0 ? '+' : '') + pct + '%';
+function tlGather() {
+  var n = tlRows(), cur = tlCurIndex(), m = {};
+  for (var i = 0; i < n; i++) {
+    m[i - cur] = [
+      (document.getElementById('tl_rev_' + i) || {}).value || '',
+      (document.getElementById('tl_gtm_' + i) || {}).value || '',
+      (document.getElementById('tl_rnd_' + i) || {}).value || ''
+    ];
+  }
+  return m;
 }
-
-function updateSens() {
-  var b = window.gerBase;
-  if (!b) return;
-  var gtmPct = parseInt(document.getElementById('s_gtm').value, 10);
-  var rndPct = parseInt(document.getElementById('s_rnd').value, 10);
-  var revPct = parseInt(document.getElementById('s_rev').value, 10);
-  setSliderLabel('s_gtm_val', gtmPct);
-  setSliderLabel('s_rnd_val', rndPct);
-  setSliderLabel('s_rev_val', revPct);
-
-  var adjGrowth = b.annGrowth * (1 + revPct / 100);
-  var adjTotal = b.gtmInv * (1 + gtmPct / 100) + b.rndInv * (1 + rndPct / 100);
-  var adjRatio = adjTotal > 0 ? adjGrowth / adjTotal : 0;
-  var t = gerTier(adjRatio);
-  var baseT = gerTier(b.ratio);
-
-  document.getElementById('ger-sens-value').textContent = fmtRatio(adjRatio);
-  document.getElementById('ger-sens-value').style.color = t.color;
-  document.getElementById('ger-sens-tier').innerHTML = t.tier;
-  document.getElementById('ger-sens-tier').style.color = t.color;
-
-  var diff = adjRatio - b.ratio;
-  var deltaEl = document.getElementById('ger-sens-delta');
-  if (Math.abs(diff) < 0.005 && t.tier === baseT.tier) {
-    deltaEl.innerHTML = 'Same as your baseline of ' + fmtRatio(b.ratio) + '.';
-  } else {
-    var arrow = diff >= 0 ? '&#9650;' : '&#9660;';
-    var sign = diff >= 0 ? '+' : '-';
-    var msg = arrow + ' ' + sign + '$' + Math.abs(diff).toFixed(2) + ' vs. baseline of ' + fmtRatio(b.ratio);
-    if (t.tier !== baseT.tier) {
-      msg += ' &mdash; <strong style="color:' + t.color + ';">crosses tier</strong>';
-    }
-    deltaEl.innerHTML = msg;
+function tlRestore(m) {
+  var n = tlRows(), cur = tlCurIndex();
+  for (var i = 0; i < n; i++) {
+    var k = m[i - cur]; if (!k) continue;
+    document.getElementById('tl_rev_' + i).value = k[0];
+    document.getElementById('tl_gtm_' + i).value = k[1];
+    document.getElementById('tl_rnd_' + i).value = k[2];
   }
 }
-
-function resetSens() {
-  document.getElementById('s_gtm').value = 0;
-  document.getElementById('s_rnd').value = 0;
-  document.getElementById('s_rev').value = 0;
-  updateSens();
+function stepTL(which, delta) {
+  var keep = tlGather();
+  if (which === 'back') TL.back = Math.max(0, Math.min(2, TL.back + delta));
+  else TL.fwd = Math.max(0, Math.min(2, TL.fwd + delta));
+  document.getElementById('tl-back').textContent = TL.back;
+  document.getElementById('tl-fwd').textContent = TL.fwd;
+  renderTL(); tlRestore(keep);
 }
+
+function calcTimeline() {
+  var n = tlRows(), cur = tlCurIndex(), strip = [], labels = [];
+  for (var i = 0; i < n; i++) {
+    strip.push({rev: v('tl_rev_' + i), gtm: v('tl_gtm_' + i), rnd: v('tl_rnd_' + i)});
+    labels.push(tlLabel(i));
+  }
+  var base = [];
+  for (var i = 0; i < n; i++) { var r = gerStripAt(strip, i); if (r !== null) base.push({i: i, y: r}); }
+  if (base.length === 0) {
+    alert('Fill in the quarters (Revenue, GTM and R&D, each greater than zero) so the earliest measured quarter has its six-quarter lookback.');
+    return;
+  }
+
+  // One solid line for the whole window — just show how performance stacks up vs the benchmark.
+  var series = [{pts: base, color: '#1a4d3c', dotsTier: true, role: 'base'}];
+
+  var first = base[0], last = base[base.length - 1];
+  var curY = gerStripAt(strip, cur); if (curY === null) curY = last.y;
+  var ct = gerTier(curY);
+  var dir = last.y > first.y + 0.02 ? 'improving' : (last.y < first.y - 0.02 ? 'declining' : 'holding steady');
+  var summary =
+    '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:baseline;margin-top:18px;">' +
+      '<div><p class="qhead" style="margin:0 0 2px;">Current quarter (n)</p>' +
+      '<p style="font-size:32px;font-weight:700;letter-spacing:-0.02em;margin:0;color:' + ct.color + ';">' + fmtRatio(curY) + '</p></div>' +
+      '<div style="flex:1;min-width:220px;">' +
+      '<p style="font-weight:600;margin:0 0 2px;color:' + ct.color + ';">' + ct.tier + '</p>' +
+      '<p style="font-size:14px;color:var(--muted);margin:0;">Across ' + base.length + ' measured quarter' + (base.length > 1 ? 's' : '') +
+      ' the ratio is <strong>' + dir + '</strong> (' + fmtRatio(first.y) + ' &rarr; ' + fmtRatio(last.y) + '). ' +
+      (TL.fwd > 0 ? 'Quarters past n are your projections. ' : '') +
+      'Shaded bands are the benchmark tiers; the dashed grey line is $1.00 break-even.</p></div></div>';
+
+  window.tlStrip = strip; window.tlLabels = labels;
+  var pick = '<label class="qhead" style="margin-right:8px;">Explain quarter</label>' +
+    '<select id="tl-pick" class="ger-in" style="width:auto;display:inline-block;padding:7px 10px;">';
+  base.forEach(function(p) { pick += '<option value="' + p.i + '"' + (p.i === cur ? ' selected' : '') + '>' + labels[p.i] + '</option>'; });
+  pick += '</select>';
+
+  var box = document.getElementById('tl-result');
+  box.innerHTML = buildChart(labels, series, n) + summary +
+    '<div style="margin-top:24px;padding-top:18px;border-top:1px dashed var(--line);">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">' +
+        '<p style="font-weight:600;font-size:15px;margin:0;color:var(--ink);">How a quarter is built</p>' + pick +
+      '</div>' +
+      '<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Pick any measured quarter to see the 25%-per-quarter pull behind that point.</p>' +
+      '<div class="ger-contrib-wrap"><div id="tl-contrib" style="min-width:560px;"></div></div>' +
+    '</div>';
+  box.style.display = 'block';
+  document.getElementById('tl-pick').addEventListener('change', function() { renderContrib('tl', parseInt(this.value, 10)); });
+  renderContrib('tl', cur);
+}
+
+/* ---- inline SVG line chart with benchmark tier bands ---- */
+function buildChart(labels, series, n) {
+  var W = 660, H = 330, mL = 44, mR = 64, mT = 16, mB = 42;
+  var pw = W - mL - mR, ph = H - mT - mB;
+
+  var ys = [0.5, 0.7, 1.0, 1.2];
+  series.forEach(function(s) { s.pts.forEach(function(p) { ys.push(p.y); }); });
+  var ymin = Math.min.apply(null, ys), ymax = Math.max.apply(null, ys);
+  var pad = (ymax - ymin) * 0.12 || 0.1; ymin -= pad; ymax += pad;
+
+  function X(i) { return mL + (n <= 1 ? pw / 2 : (i / (n - 1)) * pw); }
+  function Y(y) { return mT + (ymax - y) / (ymax - ymin) * ph; }
+  function band(yTop, yBot, fill) {
+    var y0 = Y(Math.min(yTop, ymax)), y1 = Y(Math.max(yBot, ymin));
+    if (y1 - y0 < 0.5) return '';
+    return '<rect x="' + mL + '" y="' + y0.toFixed(1) + '" width="' + pw + '" height="' + (y1 - y0).toFixed(1) + '" fill="' + fill + '"/>';
+  }
+  function tlab(yc, txt, col) {
+    var yy = Y(yc); if (yy < mT + 7 || yy > mT + ph - 2) return '';
+    return '<text x="' + (mL + pw + 6) + '" y="' + (yy + 3).toFixed(1) + '" font-size="10" fill="' + col + '">' + txt + '</text>';
+  }
+  function polyline(pts, color, dash) {
+    if (pts.length < 2) return '';
+    var d = pts.map(function(p) { return X(p.i).toFixed(1) + ',' + Y(p.y).toFixed(1); }).join(' ');
+    return '<polyline points="' + d + '" fill="none" stroke="' + color + '" stroke-width="2.5"' + (dash ? ' stroke-dasharray="6 4"' : '') + '/>';
+  }
+
+  var s = '<svg class="ger-chart" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,-apple-system,Segoe UI,sans-serif">';
+  s += band(ymax, 1.20, '#e7f0ec') + band(1.20, 0.70, '#eef3f0') + band(0.70, 0.50, '#fbf3e6') + band(0.50, ymin, '#fbecec');
+  s += tlab((Math.min(ymax, 1.7) + 1.20) / 2, 'Elite', '#1a4d3c');
+  s += tlab(0.95, 'Strong', '#2d6a4f');
+  s += tlab(0.60, 'Typical', '#b45309');
+  s += tlab((0.50 + Math.max(ymin, -0.5)) / 2, 'Below', '#b91c1c');
+
+  // break-even reference + axis baseline
+  var yb = Y(1.0);
+  s += '<line x1="' + mL + '" y1="' + yb.toFixed(1) + '" x2="' + (mL + pw) + '" y2="' + yb.toFixed(1) + '" stroke="#b9b2a6" stroke-width="1" stroke-dasharray="4 3"/>';
+  s += '<text x="' + (mL + 3) + '" y="' + (yb - 4).toFixed(1) + '" font-size="9" fill="#6b6258">$1.00 break-even</text>';
+  s += '<line x1="' + mL + '" y1="' + (mT + ph) + '" x2="' + (mL + pw) + '" y2="' + (mT + ph) + '" stroke="#e6e0d6"/>';
+  // y endpoints
+  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymax) + 3).toFixed(1) + '" font-size="9" fill="#6b6258" text-anchor="end">' + fmtRatio(ymax) + '</text>';
+  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymin) + 3).toFixed(1) + '" font-size="9" fill="#6b6258" text-anchor="end">' + fmtRatio(ymin) + '</text>';
+  // x labels
+  for (var i = 0; i < n; i++) {
+    s += '<text x="' + X(i).toFixed(1) + '" y="' + (mT + ph + 16) + '" font-size="10" fill="#6b6258" text-anchor="middle">' + labels[i] + '</text>';
+  }
+
+  // projection uncertainty band (between up and dn series)
+  var up = null, dn = null;
+  series.forEach(function(ser) { if (ser.role === 'up') up = ser; if (ser.role === 'dn') dn = ser; });
+  if (up && dn && up.pts.length && dn.pts.length) {
+    var poly = '';
+    up.pts.forEach(function(p) { poly += X(p.i).toFixed(1) + ',' + Y(p.y).toFixed(1) + ' '; });
+    for (var k = dn.pts.length - 1; k >= 0; k--) { poly += X(dn.pts[k].i).toFixed(1) + ',' + Y(dn.pts[k].y).toFixed(1) + ' '; }
+    s += '<polygon points="' + poly.trim() + '" fill="#cfd8d3" opacity="0.45"/>';
+  }
+
+  // lines
+  series.forEach(function(ser) {
+    if (ser.splitAt !== undefined) {
+      s += polyline(ser.pts.filter(function(p) { return p.i <= ser.splitAt; }), ser.color, false);
+      s += polyline(ser.pts.filter(function(p) { return p.i >= ser.splitAt; }), ser.color, true);
+    } else {
+      s += polyline(ser.pts, ser.color, ser.dash);
+    }
+  });
+
+  // dots
+  series.forEach(function(ser) {
+    if (ser.role === 'up' || ser.role === 'dn') {
+      ser.pts.forEach(function(p) { s += '<circle cx="' + X(p.i).toFixed(1) + '" cy="' + Y(p.y).toFixed(1) + '" r="2.5" fill="' + ser.color + '"/>'; });
+    } else {
+      ser.pts.forEach(function(p) {
+        s += '<circle cx="' + X(p.i).toFixed(1) + '" cy="' + Y(p.y).toFixed(1) + '" r="4.5" fill="' + gerTier(p.y).color + '" stroke="#fff" stroke-width="1.5"/>';
+      });
+    }
+  });
+
+  s += '</svg>';
+  return s;
+}
+
+function loadTimelineExample() {
+  TL.back = 2; TL.fwd = 2;
+  document.getElementById('tl-back').textContent = TL.back;
+  document.getElementById('tl-fwd').textContent = TL.fwd;
+  renderTL();
+  // n-7 .. n+2: revenue compounding ~7%/qtr, spend disciplined; last two quarters projected.
+  var rev = [560, 602, 648, 690, 726, 762, 800, 840, 885, 932];
+  var gtm = [120, 128, 135, 141, 148, 156, 165, 172, 180, 188];
+  var rnd = [150, 150, 162, 168, 176, 184, 196, 205, 214, 224];
+  for (var i = 0; i < tlRows(); i++) {
+    document.getElementById('tl_rev_' + i).value = rev[i];
+    document.getElementById('tl_gtm_' + i).value = gtm[i];
+    document.getElementById('tl_rnd_' + i).value = rnd[i];
+  }
+  calcTimeline();
+}
+
+// Build the timeline table up front so its rows exist before the user switches tabs.
+renderTL();
 </script>"""
     return HTMLResponse(_page("The Growth Engine Ratio — Brian Weisberg", "Thought Leadership", body))
 
