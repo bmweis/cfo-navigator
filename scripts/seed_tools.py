@@ -271,6 +271,78 @@ TOOLS = [
         "categories": ["Collections"],
         "advisor": True,
     },
+    {
+        "name": "Chargebee",
+        "url": "https://www.chargebee.com",
+        "description": "Subscription management and recurring billing platform for SaaS and subscription businesses. Handles flexible pricing models, dunning, revenue recognition, and integrates with major payment gateways and ERPs.",
+        "categories": ["Billing"],
+    },
+    {
+        "name": "Recurly",
+        "url": "https://recurly.com",
+        "description": "Subscription billing platform with flexible pricing, dunning management, and revenue recognition automation. Helps reduce churn and optimize recurring revenue for subscription businesses.",
+        "categories": ["Billing"],
+    },
+    {
+        "name": "HighRadius",
+        "url": "https://www.highradius.com",
+        "description": "Enterprise AI-powered order-to-cash automation. Covers cash application, credit risk management, collections, and deductions — purpose-built for mid-market and enterprise finance teams.",
+        "categories": ["Collections"],
+    },
+    {
+        "name": "Billtrust",
+        "url": "https://www.billtrust.com",
+        "description": "B2B accounts receivable automation platform covering invoice delivery, payment portals, cash application, and collections. Accelerates cash flow and reduces manual AR work for mid-market and enterprise businesses.",
+        "categories": ["Collections"],
+    },
+    {
+        "name": "Versapay",
+        "url": "https://www.versapay.com",
+        "description": "Collaborative accounts receivable platform that connects suppliers and buyers on a shared network for invoice resolution, payment, and cash application. Reduces DSO through buyer-seller collaboration.",
+        "categories": ["Collections"],
+    },
+    {
+        "name": "BlackLine",
+        "url": "https://www.blackline.com",
+        "description": "Financial close and accounting automation platform for mid-market to enterprise. Centralizes account reconciliations, transaction matching, journal entries, and intercompany accounting with full audit trails.",
+        "categories": ["Financial Close"],
+    },
+    {
+        "name": "Spendesk",
+        "url": "https://www.spendesk.com",
+        "description": "Spend management platform combining corporate cards, invoice processing, and expense reimbursements with real-time visibility, approval workflows, and accounting integrations.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "Sage Intacct",
+        "url": "https://www.sageintacct.com",
+        "description": "Cloud ERP and accounting platform for mid-market businesses. Provides multi-entity consolidation, project accounting, revenue recognition, and financial reporting with deep integrations across the finance stack.",
+        "categories": ["ERP"],
+    },
+    {
+        "name": "NetSuite",
+        "url": "https://www.netsuite.com",
+        "description": "Oracle's cloud ERP platform and the dominant mid-market to enterprise accounting and operations system. Covers financial management, inventory, CRM, and ecommerce in a unified suite.",
+        "categories": ["ERP"],
+    },
+    {
+        "name": "Vareto",
+        "url": "https://www.vareto.com",
+        "description": "Modern FP&A platform designed for high-growth companies. Focuses on headcount planning, business partnering, and real-time financial reporting — connecting finance to the rest of the business.",
+        "categories": ["FP&A"],
+    },
+    {
+        "name": "Brex",
+        "url": "https://www.brex.com",
+        "description": "Corporate cards, expense management, and bill pay platform for growing companies. Provides high credit limits, automated expense categorization, real-time spend controls, and integrations with major ERPs.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "Airwallex",
+        "url": "https://www.airwallex.com",
+        "description": "Global payments and financial infrastructure platform. Provides multi-currency business accounts, FX at interbank rates, international AP, and card issuing — built for companies operating across borders.",
+        "categories": ["Spend Management"],
+    },
 ]
 
 
