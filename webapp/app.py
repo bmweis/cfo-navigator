@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -400,18 +401,36 @@ the early-to-growth leap. Based in Boston.</p>
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
 def thought_leadership():
+    months = ("", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+    def fmt_date(sort_key: str) -> str:
+        # "2025-10" -> "Oct 2025"; "" (pinned/featured rows) -> "".
+        try:
+            y, m = sort_key.split("-")
+            return f"{months[int(m)]} {y}"
+        except (ValueError, IndexError):
+            return ""
+
     def section(title: str, items: list[tuple[str, str, str]]) -> str:
         # items: (label, url, sort_key) — sort_key is "YYYY-MM" or "" to pin to top.
-        # An empty url renders as plain (unlinked) text — e.g. invite-only events
-        # with no public page.
+        # The date is shown in a left-hand column derived from sort_key and stripped
+        # from the label so it isn't repeated. An empty url renders the label as
+        # plain (unlinked) text — e.g. invite-only events with no public page.
         sorted_items = sorted(items, key=lambda x: x[2], reverse=True)
-        links = "".join(
-            (f'<li style="margin:0 0 10px;"><a href="{url}" target="_blank" rel="noopener">{_esc(label)}</a></li>'
-             if url else
-             f'<li style="margin:0 0 10px;">{_esc(label)}</li>')
-            for label, url, _ in sorted_items
-        )
-        return f'<h2>{title}</h2><ul style="padding-left:20px;margin:0 0 8px;">{links}</ul>'
+        rows = []
+        for label, url, sort_key in sorted_items:
+            clean = re.sub(r"\s*·\s*[A-Za-z]+\s+20\d{2}\s*$", "", label)
+            title_html = (f'<a href="{url}" target="_blank" rel="noopener">{_esc(clean)}</a>'
+                          if url else f'<span>{_esc(clean)}</span>')
+            rows.append(
+                '<li style="display:flex;gap:16px;margin:0 0 12px;align-items:baseline;">'
+                '<span style="flex:0 0 78px;color:var(--muted);font-size:13px;'
+                f'font-variant-numeric:tabular-nums;white-space:nowrap;">{fmt_date(sort_key)}</span>'
+                f'{title_html}</li>'
+            )
+        return (f'<h2>{title}</h2>'
+                f'<ul style="list-style:none;padding-left:0;margin:0 0 8px;">{"".join(rows)}</ul>')
 
     body = '<div class="page"><h1>Thought Leadership</h1>' + \
         '<p style="color:var(--muted);margin:4px 0 28px;">Podcasts, writing, interviews, and appearances.</p>' + \
