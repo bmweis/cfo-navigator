@@ -39,7 +39,7 @@ TOOLS = [
         "name": "Abacum",
         "url": "https://www.abacum.io",
         "description": "AI-native FP&A platform for modern finance teams. Consolidates data from across the business for budgeting, forecasting, scenario modeling, and management reporting.",
-        "categories": ["FP&A", "Financial Planning"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Campfire",
@@ -75,13 +75,13 @@ TOOLS = [
         "name": "Concourse",
         "url": "https://www.concourse.co",
         "description": "AI agents for corporate finance teams. Connects to your ERP, CRM, and data warehouse to generate reports, forecasts, and variance analysis through natural language — no SQL required.",
-        "categories": ["FP&A", "Financial Planning"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Drivetrain",
         "url": "https://www.drivetrain.ai",
         "description": "AI-native FP&A and business planning platform. Supports multi-dimensional modeling, scenario analysis, and KPI reporting with 800+ integrations and a familiar spreadsheet-like interface.",
-        "categories": ["FP&A", "Financial Planning"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Anrok",
@@ -123,7 +123,7 @@ TOOLS = [
         "name": "Runway",
         "url": "https://runway.com",
         "description": "FP&A platform built for high-growth teams. Connects 750+ data sources for financial modeling, forecasting, and reporting with human-readable formulas and real-time actuals sync.",
-        "categories": ["FP&A", "Financial Planning"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Lumera",
@@ -135,19 +135,19 @@ TOOLS = [
         "name": "Planful",
         "url": "https://planful.com",
         "description": "End-to-end financial performance management platform covering planning, budgeting, forecasting, close, consolidation, and reporting. Built for the Office of the CFO at mid-market to enterprise scale.",
-        "categories": ["FP&A", "Financial Planning"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Aleph",
         "url": "https://www.getaleph.com",
         "description": "AI-native FP&A platform that works alongside your existing spreadsheets. Connects 150+ data sources for financial modeling, budget planning, reporting, and close — with a familiar spreadsheet interface.",
-        "categories": ["FP&A", "Financial Planning"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Pigment",
         "url": "https://www.pigment.com",
         "description": "Enterprise AI business planning platform for finance, sales, and HR. Covers FP&A, headcount planning, and sales performance management in a single connected model with real-time scenario analysis.",
-        "categories": ["FP&A", "Financial Planning", "Headcount Planning"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Glidely",
@@ -249,7 +249,7 @@ TOOLS = [
         "name": "Datarails",
         "url": "https://www.datarails.com",
         "description": "FP&A platform that works within Excel. Consolidates data from ERPs and other sources into a governed model, enabling automated reporting, budgeting, and forecasting without leaving spreadsheets.",
-        "categories": ["FP&A", "Financial Planning"],
+        "categories": ["FP&A"],
     },
     {
         "name": "Rillet",
