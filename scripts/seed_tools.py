@@ -524,7 +524,7 @@ TOOLS = [
         "name": "Klipfolio",
         "url": "https://www.klipfolio.com",
         "description": "KPI dashboard and business metrics platform. Connects to 100+ data sources for real-time executive dashboards. Finance teams use it for board-level reporting and operational metrics tracking.",
-        "categories": ["Financial Reporting"],
+        "categories": ["BI & Analytics"],
     },
     # Financial Close additions
     {
