@@ -418,7 +418,7 @@ TOOLS = [
     {
         "name": "Hemrock",
         "url": "https://www.hemrock.com",
-        "description": "Pre-built Excel financial planning models for companies that want a structured alternative to FP&A software. A practical middle ground between a homegrown spreadsheet and a full planning platform—purpose-built models you can buy and deploy immediately.",
+        "description": "Financial models for founders and investors, built by Taylor Davidson (fractional CFO, 25 years building models). Start from a proven structure and edit it with AI—run it as a spreadsheet, in your browser, or through your AI. A practical alternative to a full FP&A platform for teams not ready to make that jump.",
         "categories": ["FP&A"],
     },
     # Treasury / Cash Management
