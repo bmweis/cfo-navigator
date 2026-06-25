@@ -70,6 +70,30 @@ TOOL_CATEGORIES = [
     "BI & Analytics",
 ]
 
+CATEGORY_DESCRIPTIONS = {
+    "FP&A": "Business-wide financial planning, budgeting, forecasting, and management reporting.",
+    "Headcount Planning": "Standalone tools for planning and tracking headcount—open reqs, budget vs. actuals on people costs, and the finance–HR handoff.",
+    "Treasury": "Treasury management systems, FX risk, global payments infrastructure, and corporate cash investment platforms.",
+    "Cash Flow Forecasting": "Tools dedicated to predicting future cash positions and liquidity—connecting to bank feeds and ERPs to model inflows and outflows.",
+    "AI Agents": "Finance-native AI agents that operate autonomously on finance workflows, purpose-built for finance teams.",
+    "ERP": "Core accounting and enterprise resource planning—general ledger, system of record, and financial management.",
+    "Cap Table Management": "Equity management for private companies—cap table tracking, 409A valuations, and employee equity plan administration.",
+    "Spend Management": "Corporate cards, expense management, AP automation, and employee spend controls.",
+    "Financial Close": "Standalone close management platforms—checklists, reconciliations, journal entries, flux analysis, and audit readiness.",
+    "Financial Reporting": "Tools that produce and present the three core financial statements: income statement, balance sheet, and cash flow statement.",
+    "Revenue Recognition": "Standalone ASC 606 / IFRS 15 revenue recognition platforms, purchasable independently of the billing system feeding them.",
+    "Billing": "Subscription billing, usage-based billing, invoicing, and recurring payments infrastructure.",
+    "Collections": "Accounts receivable management and collections automation—dunning, cash application, and DSO reduction.",
+    "Sales Tax": "Sales tax, VAT, and GST compliance—nexus monitoring, real-time calculation, and filing.",
+    "Commission Calculations": "Incentive compensation management—commission plan design, automated calculations, and rep-facing earnings dashboards.",
+    "Compensation Data": "Compensation benchmarking surveys and data used to set and validate salary, equity, and total comp structures.",
+    "Contract Management": "Contract lifecycle management—drafting, negotiation, approvals, eSign, obligation tracking, and renewals.",
+    "Procurement": "Software and vendor procurement—purchasing workflows, price benchmarking, and renewal management.",
+    "RevOps": "Revenue operations—pipeline management, revenue forecasting, and deal intelligence for finance and sales leaders.",
+    "Cloud/IT Spend": "Cloud cost management and SaaS management—visibility into and control over cloud infrastructure spend and software license costs.",
+    "BI & Analytics": "Business intelligence, data visualization, SQL analytics, and data infrastructure CFOs own or use for reporting.",
+}
+
 # coverage: "Private" | "Public" | "Both"
 BENCHMARKS = [
     {
@@ -1265,7 +1289,8 @@ def tools_directory(request: Request):
     tools_json = _json.dumps([_tool_entry(t) for t in tools])
 
     cat_buttons = "".join(
-        f'<button class="tcat-btn" data-cat="{_esc(c)}" onclick="filterCat(this)">{_esc(c)}</button>'
+        f'<button class="tcat-btn" data-cat="{_esc(c)}" onclick="filterCat(this)"'
+        f' title="{_esc(CATEGORY_DESCRIPTIONS.get(c, ""))}">{_esc(c)}</button>'
         for c in TOOL_CATEGORIES
     )
 

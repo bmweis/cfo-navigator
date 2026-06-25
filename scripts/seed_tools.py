@@ -704,7 +704,7 @@ TOOLS = [
         "name": "Zuora",
         "url": "https://www.zuora.com",
         "description": "Subscription management and recurring billing platform. Handles flexible pricing, recurring invoicing, revenue recognition (ASC 606/IFRS 15), and SaaS metrics reporting. One of the most widely deployed billing platforms at mid-market to enterprise.",
-        "categories": ["Billing"],
+        "categories": ["Billing", "Revenue Recognition"],
     },
     {
         "name": "Paddle",
