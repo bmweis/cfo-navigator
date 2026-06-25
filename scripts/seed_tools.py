@@ -464,6 +464,36 @@ TOOLS = [
         "description": "Modern treasury management platform for mid-market companies. Provides real-time cash visibility across bank accounts and entities, liquidity forecasting, and payment operations—a lighter-weight alternative to enterprise TMS platforms.",
         "categories": ["Treasury"],
     },
+    {
+        "name": "Kyriba",
+        "url": "https://www.kyriba.com",
+        "description": "The dominant enterprise treasury management system. Covers cash visibility across hundreds of bank accounts and entities, liquidity forecasting, payments, FX risk management, and bank connectivity. The platform most large finance teams evaluate first.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "GTreasury",
+        "url": "https://www.gtreasury.com",
+        "description": "Treasury and risk management platform for mid-to-large enterprises. Handles cash positioning, debt and investment management, FX hedging, and global bank integration. Competes directly with Kyriba.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Vesto",
+        "url": "https://www.vesto.io",
+        "description": "Startup-focused treasury platform. Automates investing idle operating cash into T-bills, money market funds, and other short-duration instruments—so companies earn yield on cash reserves without manual banking operations.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Corpay",
+        "url": "https://www.corpay.com",
+        "description": "Global corporate payments and FX risk management platform (formerly part of FleetCor). Handles cross-border payments, currency hedging, and international AP automation for companies with significant foreign currency exposure.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "TreasurySpring",
+        "url": "https://www.treasuryspring.com",
+        "description": "Corporate treasury investment platform based in the UK. Gives companies direct access to short-term fixed-income instruments—T-bills, money market funds, and term deposits—to put idle cash to work at institutional-grade terms.",
+        "categories": ["Treasury"],
+    },
     # Sales Tax additions
     {
         "name": "Avalara",
