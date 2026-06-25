@@ -415,6 +415,12 @@ TOOLS = [
         "description": "Aon's compensation benchmarking surveys and data. One of the most widely used comp survey providers—covers tech, life sciences, and other sectors with deep cut of the data by role, level, and geography.",
         "categories": ["Compensation Data"],
     },
+    {
+        "name": "Hemrock",
+        "url": "https://www.hemrock.com",
+        "description": "Pre-built Excel financial planning models for companies that want a structured alternative to FP&A software. A practical middle ground between a homegrown spreadsheet and a full planning platform—purpose-built models you can buy and deploy immediately.",
+        "categories": ["FP&A"],
+    },
     # Treasury / Cash Management
     {
         "name": "Agicap",
