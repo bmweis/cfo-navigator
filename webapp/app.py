@@ -50,6 +50,7 @@ TOOL_CATEGORIES = [
     "FP&A",
     "Headcount Planning",
     "Treasury",
+    "Cash Flow Forecasting",
     "AI Agents",
     "ERP",
     "Cap Table Management",
