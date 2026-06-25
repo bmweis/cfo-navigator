@@ -441,12 +441,6 @@ TOOLS = [
         "categories": ["Treasury"],
     },
     {
-        "name": "Relay Finance",
-        "url": "https://relayfi.com",
-        "description": "Business banking and cash flow platform for SMBs. Combines multi-account banking with cash flow tracking and automated savings—built for founders and finance teams managing lean treasury operations.",
-        "categories": ["Treasury"],
-    },
-    {
         "name": "Sibill",
         "url": "https://www.sibill.com",
         "description": "European cash flow forecasting platform. Connects to bank accounts and ERPs across multiple currencies to deliver rolling cash forecasts, payment planning, and liquidity alerts.",
@@ -565,6 +559,12 @@ TOOLS = [
         "categories": ["Cloud/IT Spend"],
     },
     {
+        "name": "CloudZero",
+        "url": "https://www.cloudzero.com",
+        "description": "Cloud cost intelligence platform focused on unit economics. Maps AWS, Azure, and GCP spend to products, features, and customers so engineering and finance teams can track cost-per-customer and cost-per-feature alongside cloud bills.",
+        "categories": ["Cloud/IT Spend"],
+    },
+    {
         "name": "Torii",
         "url": "https://www.torii.io",
         "description": "SaaS management platform. Discovers all software in use across the organization, tracks spend and license utilization, and manages renewals and offboarding workflows to reduce shadow IT and wasted seats.",
@@ -587,7 +587,7 @@ TOOLS = [
         "name": "Zylo",
         "url": "https://zylo.com",
         "description": "Enterprise SaaS management platform. Discovers shadow IT, tracks license utilization and renewal dates, and benchmarks software costs against market data. The enterprise-tier option for companies managing hundreds of software contracts.",
-        "categories": ["Procurement"],
+        "categories": ["Cloud/IT Spend"],
     },
     # Contract Management additions
     {
@@ -774,7 +774,7 @@ TOOLS = [
         "name": "Phocas",
         "url": "https://www.phocassoftware.com",
         "description": "Business intelligence and FP&A platform built for distribution, manufacturing, and retail. Layers analytics on top of ERP data to give operations and finance teams industry-specific reporting without custom SQL.",
-        "categories": ["FP&A"],
+        "categories": ["BI & Analytics"],
     },
     {
         "name": "Workday Adaptive Planning",
