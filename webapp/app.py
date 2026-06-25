@@ -447,8 +447,6 @@ def thought_leadership():
          "https://fsuitevirtualpanel430.splashthat.com", "2026-04"),
         ("The F Suite Boston — Growth CFO Salon · The F Suite · Nov 2025",
          "", "2025-11"),
-        ("The F Suite — Community Crossover Roundtable: SaaS Pricing Models & Metrics in the Age of AI · The F Suite · Oct 2025",
-         "", "2025-10"),
         ("The F Suite Cash Cycle Demo Day — Opening & Closing Remarks · The F Suite · Oct 2025",
          "https://cashcycledemoday.splashthat.com/", "2025-10"),
         ("The F Suite Boston — CFO Supper Club · The F Suite · Aug 2025",
