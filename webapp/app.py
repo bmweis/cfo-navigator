@@ -58,6 +58,7 @@ TOOL_CATEGORIES = [
     "Collections",
     "Sales Tax",
     "Commission Calculations",
+    "Compensation Data",
     "Contract Management",
     "Procurement",
 ]

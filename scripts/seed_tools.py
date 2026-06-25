@@ -343,6 +343,78 @@ TOOLS = [
         "description": "Global payments and financial infrastructure platform. Provides multi-currency business accounts, FX at interbank rates, international AP, and card issuing — built for companies operating across borders.",
         "categories": ["Spend Management"],
     },
+    {
+        "name": "Carta",
+        "url": "https://carta.com",
+        "description": "Equity management platform for private companies. Manages cap tables, 409A valuations, employee equity grants, and investor reporting — the most widely used cap table tool in venture-backed startups.",
+        "categories": ["Cap Table Management"],
+    },
+    {
+        "name": "Pulley",
+        "url": "https://www.pulley.com",
+        "description": "Modern cap table management platform built for startups. Handles equity grants, scenario modeling, and 409A valuations with a cleaner interface than legacy tools—and faster 409A turnaround.",
+        "categories": ["Cap Table Management"],
+    },
+    {
+        "name": "Ledgy",
+        "url": "https://www.ledgy.com",
+        "description": "Equity management platform for European and global startups. Covers cap table, employee equity plans, vesting schedules, and investor relations with strong multi-jurisdiction support.",
+        "categories": ["Cap Table Management"],
+    },
+    {
+        "name": "Fidelity Private Shares",
+        "url": "https://www.fidelityprivateshares.com",
+        "description": "Fidelity's equity management solution for private companies. Cap table management, 409A valuations, and equity plan administration backed by Fidelity's brokerage infrastructure.",
+        "categories": ["Cap Table Management"],
+    },
+    {
+        "name": "CaptivateIQ",
+        "url": "https://www.captivateiq.com",
+        "description": "Sales commission management platform. Automates complex commission calculations, handles plan design, and gives reps real-time earnings visibility — reducing finance time spent on spreadsheet reconciliation.",
+        "categories": ["Commission Calculations"],
+    },
+    {
+        "name": "Everstage",
+        "url": "https://www.everstage.com",
+        "description": "No-code sales commission software. Automates incentive calculations, provides real-time rep dashboards, and integrates with CRMs and ERPs — built for ops teams that don't want to manage commission logic in code.",
+        "categories": ["Commission Calculations"],
+    },
+    {
+        "name": "QuotaPath",
+        "url": "https://www.quotapath.com",
+        "description": "Commission tracking and compensation management platform. Simplifies complex commission plans, automates calculations, and gives sales teams earnings transparency without the back-and-forth with finance.",
+        "categories": ["Commission Calculations"],
+    },
+    {
+        "name": "Xactly",
+        "url": "https://www.xactlycorp.com",
+        "description": "Enterprise incentive compensation management platform. Handles complex commission plan design, automated calculations, and analytics for large sales organizations with multi-tier structures.",
+        "categories": ["Commission Calculations"],
+    },
+    {
+        "name": "Cube",
+        "url": "https://www.cubesoftware.com",
+        "description": "FP&A platform that integrates with Excel and Google Sheets. Centralizes financial data, automates consolidation and reporting, and enables collaborative planning without replacing existing spreadsheet workflows.",
+        "categories": ["FP&A"],
+    },
+    {
+        "name": "Pave",
+        "url": "https://www.pave.com",
+        "description": "Compensation management and benchmarking platform. Real-time salary, equity, and total compensation data to help companies build and communicate competitive comp structures—with direct integrations into HRIS systems.",
+        "categories": ["Compensation Data"],
+    },
+    {
+        "name": "Culpepper",
+        "url": "https://www.culpeppercomp.com",
+        "description": "Compensation survey and benchmarking data provider. Covers base pay, bonuses, and long-term incentives across industries with robust segmentation by company size, geography, and sector.",
+        "categories": ["Compensation Data"],
+    },
+    {
+        "name": "Radford (Aon)",
+        "url": "https://radford.aon.com",
+        "description": "Aon's compensation benchmarking surveys and data. One of the most widely used comp survey providers—covers tech, life sciences, and other sectors with deep cut of the data by role, level, and geography.",
+        "categories": ["Compensation Data"],
+    },
 ]
 
 
