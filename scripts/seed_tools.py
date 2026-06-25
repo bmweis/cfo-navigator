@@ -74,8 +74,14 @@ TOOLS = [
     {
         "name": "Concourse",
         "url": "https://www.concourse.co",
-        "description": "AI agents for corporate finance teams. Connects to your ERP, CRM, and data warehouse to generate reports, forecasts, and variance analysis through natural language — no SQL required.",
-        "categories": ["FP&A"],
+        "description": "AI agents for corporate finance teams. Connects to your ERP, CRM, and data warehouse to generate reports, forecasts, and variance analysis through natural language—no SQL required.",
+        "categories": ["Finance AI"],
+    },
+    {
+        "name": "AskEnola",
+        "url": "https://askenola.ai",
+        "description": "AI agent built specifically for finance teams. Pre-trained on the questions finance teams actually ask—metrics, variance, reporting—so you get answers without building custom automations or writing SQL.",
+        "categories": ["Finance AI"],
     },
     {
         "name": "Drivetrain",
