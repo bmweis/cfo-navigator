@@ -262,54 +262,123 @@ def _esc(s) -> str:
 # ---------------------------------------------------------------------------
 
 _CSS = """
-:root{--ink:#16130f;--muted:#6b6258;--line:#e6e0d6;--bg:#faf7f2;--accent:#1a4d3c;--accent-light:#eef3f0;}
+:root{
+  /* Surfaces */
+  --bg:#F5F4EF;            /* warm off-white page */
+  --surface:#FFFFFF;       /* cards, inputs */
+  --surface-2:#FAF9F4;     /* subtle alt panels, table stripes */
+  /* Brand */
+  --navy:#002975;          /* primary */
+  --navy-deep:#001B4F;     /* button hover / depth */
+  --accent:#002975;        /* legacy name now = navy (keeps old markup working) */
+  --seafoam:#A3E5D4;       /* accent — tags, badges, active underline */
+  --seafoam-wash:#EAF7F2;  /* soft accent fill — calc readout, table accents */
+  --accent-light:#EEF1F7;  /* legacy name now = soft navy wash (chip/ghost hovers) */
+  /* Text */
+  --ink:#1a1a1a;
+  --ink-soft:#3a3833;
+  --muted:#6F6A60;         /* warm mid-gray */
+  /* Lines (warm-toned) */
+  --line:#E4E0D6;
+  --line-strong:#D6D1C4;
+  /* Semantic — GER calculator readout only */
+  --good:#002975; --caution:#9A6B12; --alert:#9E3B30;
+  /* Type */
+  --font-head:'Outfit',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-body:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
 *{box-sizing:border-box;}
-body{margin:0;font:16px/1.6 ui-sans-serif,-apple-system,Segoe UI,Inter,sans-serif;color:var(--ink);background:var(--bg);}
-a{color:var(--accent);text-decoration:none;}
+body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;}
+a{color:var(--navy);text-decoration:none;}
 a:hover{text-decoration:underline;}
-.site-header{border-bottom:1px solid var(--line);padding:18px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
-.site-header .logo{font-size:17px;font-weight:700;letter-spacing:-0.02em;color:var(--ink);}
-.site-nav{display:flex;gap:24px;font-size:14px;}
+
+/* Rope rule — the one nautical motif: a double hairline */
+.rule{border-top:1px solid var(--line-strong);border-bottom:1px solid var(--line);height:3px;}
+
+/* Header / nav */
+.site-header{padding:18px 28px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:relative;}
+.site-header .logo{font-family:var(--font-head);font-size:19px;font-weight:600;letter-spacing:-0.01em;color:var(--navy);}
+.site-nav{display:flex;align-items:center;gap:22px;font-size:14px;}
 .site-nav a{color:var(--muted);}
 .site-nav a:hover{color:var(--ink);text-decoration:none;}
-.site-nav a.active{color:var(--ink);font-weight:600;}
-.page{max-width:780px;margin:0 auto;padding:48px 24px 80px;}
-h1{font-size:28px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;}
-h2{font-size:20px;font-weight:600;letter-spacing:-0.01em;margin:40px 0 14px;}
-h3{font-size:15px;font-weight:600;margin:0 0 4px;}
-p{margin:0 0 16px;color:#3a352e;}
-.btn{display:inline-block;padding:10px 20px;background:var(--accent);color:#fff;border-radius:10px;font-size:15px;font-weight:500;border:0;cursor:pointer;}
-.btn:hover{opacity:.9;text-decoration:none;}
-.btn-ghost{background:transparent;color:var(--accent);border:1px solid var(--line);padding:9px 18px;}
-.btn-ghost:hover{background:var(--accent-light);opacity:1;}
+.site-nav a.active{color:var(--ink);font-weight:600;border-bottom:2px solid var(--seafoam);padding-bottom:3px;}
+.site-nav .sep{width:1px;height:15px;background:var(--line-strong);}
+.nav-toggle{display:none;background:none;border:1px solid var(--line-strong);border-radius:9px;width:40px;height:40px;color:var(--navy);font-size:18px;cursor:pointer;align-items:center;justify-content:center;}
+
+/* Headings */
+h1{font-family:var(--font-head);font-size:30px;font-weight:600;letter-spacing:-0.02em;color:var(--ink);margin:0 0 6px;}
+h2{font-family:var(--font-head);font-size:21px;font-weight:600;letter-spacing:-0.01em;color:var(--ink);margin:38px 0 14px;}
+h3{font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin:0 0 4px;}
+p{margin:0 0 16px;color:var(--ink-soft);}
+
+.page{max-width:780px;margin:0 auto;padding:48px 24px 72px;}
+
+/* Buttons — primary navy fill, ghost navy outline. Seafoam is NEVER a button. */
+.btn{display:inline-block;padding:11px 22px;background:var(--navy);color:#fff;border-radius:10px;font:600 15px var(--font-body);border:1px solid var(--navy);cursor:pointer;}
+.btn:hover{background:var(--navy-deep);border-color:var(--navy-deep);text-decoration:none;}
+.btn-ghost{background:transparent;color:var(--navy);border:1px solid var(--navy);}
+.btn-ghost:hover{background:var(--accent-light);color:var(--navy);}
+
+/* Inputs — navy focus border + soft seafoam ring */
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(163,229,212,.55);}
+
+/* Footer */
+.site-footer{padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);}
+.site-footer .brand{display:flex;align-items:center;gap:10px;}
+.site-footer .brand b{font-family:var(--font-head);font-weight:600;color:var(--navy);font-size:14px;}
+.site-footer .links{display:flex;gap:18px;align-items:center;}
+.site-footer a{color:var(--muted);}
+
+/* Mobile: nav collapses to a navy hamburger drawer */
+@media(max-width:760px){
+  .nav-toggle{display:flex;}
+  .site-nav{display:none;position:absolute;top:100%;left:0;right:0;flex-direction:column;gap:0;background:var(--navy);padding:6px 0;z-index:20;align-items:stretch;}
+  .site-nav.open{display:flex;}
+  .site-nav a{color:rgba(255,255,255,.82);padding:13px 24px;border-left:3px solid transparent;}
+  .site-nav a:hover{color:#fff;background:rgba(255,255,255,.06);text-decoration:none;}
+  .site-nav a.active{color:#fff;font-weight:600;border-bottom:none;border-left:3px solid var(--seafoam);background:rgba(255,255,255,.06);padding-bottom:13px;}
+  .site-nav .sep{display:none;}
+}
 """
 
 def _page(title: str, active: str, body: str, authed: bool = False) -> str:
-    nav_items = [
-        ("/", "About"),
-        ("/thought-leadership", "Thought Leadership"),
-        ("/contact", "Contact"),
-        ("/tools", "CFO Toolbox"),
-        ("/library", "Library"),
-        ("/feed", "Feed"),
-        ("/ask", "Ask"),
-    ]
-    nav = "".join(
-        f'<a href="{href}" class="{"active" if active == label else ""}">{label}</a>'
-        for href, label in nav_items
-    )
+    public = [("/", "About"), ("/thought-leadership", "Thought Leadership"),
+              ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
+    private = [("/library", "Library"), ("/feed", "Feed"), ("/ask", "Ask")]
+
+    def links(items):
+        return "".join(
+            f'<a href="{href}" class="{"active" if active == label else ""}">{label}</a>'
+            for href, label in items
+        )
+
+    nav = links(public) + '<span class="sep"></span>' + links(private)
     if authed:
         nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin</a>'
         nav += '<a href="/logout">Log out</a>'
+
+    star = ('<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">'
+            '<path d="M8 0 L9.4 6.6 L16 8 L9.4 9.4 L8 16 L6.6 9.4 L0 8 L6.6 6.6 Z" fill="#002975"/></svg>')
+
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
 <style>{_CSS}</style></head><body>
 <header class="site-header">
   <a class="logo" href="/">Brian Weisberg</a>
-  <nav class="site-nav">{nav}</nav>
+  <button class="nav-toggle" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">&#9776;</button>
+  <nav class="site-nav" id="nav">{nav}</nav>
 </header>
+<div class="rule"></div>
 {body}
+<div class="rule"></div>
+<footer class="site-footer">
+  <span class="brand">{star}<b>Brian Weisberg</b> &middot; Strategic finance for companies that are scaling</span>
+  <span class="links"><a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener">LinkedIn</a><a href="/contact">Contact</a><span>&copy; 2026</span></span>
+</footer>
 </body></html>"""
 
 
@@ -372,18 +441,18 @@ def homepage():
     if os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg")):
         avatar = ('<img src="/static/headshot.jpg" alt="Brian Weisberg" '
                   'style="width:140px;height:140px;border-radius:50%;object-fit:cover;'
-                  'object-position:center top;flex-shrink:0;border:3px solid var(--line);">')
+                  'object-position:center top;flex-shrink:0;border:3px solid var(--navy);">')
     else:
         avatar = ('<div aria-label="Brian Weisberg" '
-                  'style="width:140px;height:140px;border-radius:50%;flex-shrink:0;border:3px solid var(--line);'
+                  'style="width:140px;height:140px;border-radius:50%;flex-shrink:0;border:3px solid var(--navy);'
                   'background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;'
                   'font-size:46px;font-weight:700;letter-spacing:-0.02em;">BW</div>')
     body = f"""<div class="page">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
   {avatar}
   <div>
-    <h1 style="margin:0 0 4px;">Brian Weisberg</h1>
-    <p style="color:var(--muted);font-size:15px;margin:0;">CFO &middot; Boston, MA</p>
+    <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">CFO &middot; Boston, MA</div>
+    <h1 style="margin:0 0 4px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">Brian Weisberg</h1>
   </div>
 </div>
 
@@ -432,41 +501,28 @@ the early-to-growth leap. Based in Boston.</p>
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
 def thought_leadership():
-    months = ("", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-
-    def fmt_date(sort_key: str) -> str:
-        # "2025-10" -> "Oct 2025"; "" (pinned/featured rows) -> "".
-        try:
-            y, m = sort_key.split("-")
-            return f"{months[int(m)]} {y}"
-        except (ValueError, IndexError):
-            return ""
-
     def section(title: str, items: list[tuple[str, str, str]]) -> str:
         # items: (label, url, sort_key) — sort_key is "YYYY-MM" or "" to pin to top.
-        # The date is shown in a left-hand column derived from sort_key and stripped
-        # from the label so it isn't repeated. An empty url renders the label as
-        # plain (unlinked) text — e.g. invite-only events with no public page.
+        # Editorial rows separated by warm hairlines, under a small-caps navy label.
+        # The trailing "· Mon YYYY" is stripped from the label (it isn't shown as a
+        # column in this layout). An empty url renders the label as plain (unlinked)
+        # text — e.g. invite-only events with no public page.
         sorted_items = sorted(items, key=lambda x: x[2], reverse=True)
+        link_style = "font:500 16px var(--font-body);color:var(--ink);line-height:1.4;"
         rows = []
-        for label, url, sort_key in sorted_items:
+        for label, url, _sort_key in sorted_items:
             clean = re.sub(r"\s*·\s*[A-Za-z]+\s+20\d{2}\s*$", "", label)
-            title_html = (f'<a href="{url}" target="_blank" rel="noopener">{_esc(clean)}</a>'
-                          if url else f'<span>{_esc(clean)}</span>')
-            rows.append(
-                '<li style="display:flex;gap:16px;margin:0 0 12px;align-items:baseline;">'
-                '<span style="flex:0 0 78px;color:var(--muted);font-size:13px;'
-                f'font-variant-numeric:tabular-nums;white-space:nowrap;">{fmt_date(sort_key)}</span>'
-                f'{title_html}</li>'
-            )
-        return (f'<h2>{title}</h2>'
-                f'<ul style="list-style:none;padding-left:0;margin:0 0 8px;">{"".join(rows)}</ul>')
+            inner = (f'<a href="{url}" target="_blank" rel="noopener" style="{link_style}">{_esc(clean)}</a>'
+                     if url else f'<span style="{link_style}">{_esc(clean)}</span>')
+            rows.append(f'<div style="border-top:1px solid var(--line);padding:13px 0;">{inner}</div>')
+        return (f'<div style="font:600 12px var(--font-body);letter-spacing:.12em;'
+                f'text-transform:uppercase;color:var(--navy);margin:30px 0 2px;">{_esc(title)}</div>'
+                f'{"".join(rows)}')
 
     body = '<div class="page"><h1>Thought Leadership</h1>' + \
         '<p style="color:var(--muted);margin:4px 0 28px;">Podcasts, writing, interviews, and appearances.</p>' + \
         """<a href="/growth-engine-ratio" style="display:block;text-decoration:none;background:var(--accent);color:#fff;border-radius:14px;padding:22px 26px;margin-bottom:36px;">
-  <div style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.75;margin-bottom:6px;">Featured&mdash;New Framework</div>
+  <div style="font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam);margin-bottom:9px;">Featured&mdash;New Framework</div>
   <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;">The Growth Engine Ratio</div>
   <div style="font-size:14px;opacity:.85;line-height:1.5;">A new metric for measuring how R&amp;D and GTM investments work together to drive growth&mdash;with an interactive calculator to see how you stack up. Published with The F Suite &rarr;</div>
 </a>"""
@@ -658,11 +714,11 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
 
 <div class="ger-table-wrap" style="background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 32px;">
   <table class="ger-table" style="width:100%;border-collapse:collapse;font-size:14px;min-width:520px;">
-    <thead><tr style="background:var(--accent-light);">
-      <th style="padding:10px 14px;text-align:left;font-weight:600;">Tier</th>
-      <th style="padding:10px 14px;text-align:left;font-weight:600;">Ratio</th>
-      <th style="padding:10px 14px;text-align:left;font-weight:600;">Years to Break Even</th>
-      <th style="padding:10px 14px;text-align:left;font-weight:600;">What It Means</th>
+    <thead><tr style="background:var(--navy);">
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">Tier</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">Ratio</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">Years to Break Even</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">What It Means</th>
     </tr></thead>
     <tbody>
       <tr style="border-top:1px solid var(--line);">
@@ -773,7 +829,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     </div>
   </div>
 
-  <div id="ger-result" style="display:none;margin-top:28px;padding-top:24px;border-top:1px solid var(--line);">
+  <div id="ger-result" style="display:none;margin-top:26px;background:var(--seafoam-wash);border:1px solid #C9EADF;border-radius:14px;padding:24px 26px;">
     <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap;">
       <div style="flex:0 0 auto;">
         <p style="font-size:13px;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.06em;">Your Growth Engine Ratio</p>
@@ -858,15 +914,15 @@ function fmtRatio(r) { return r >= 0 ? '$' + r.toFixed(2) : '-$' + Math.abs(r).t
 
 // Shared tier lookup so the headline result and the sensitivity panel stay in sync.
 function gerTier(ratio) {
-  if (ratio >= 1.20) return {tier:'&#127942; Elite (top 10%)', color:'#1a4d3c',
+  if (ratio >= 1.20) return {tier:'&#127942; Elite (top 10%)', color:'#002975',
     interp:"You've earned the right to invest aggressively. Every new customer is profitable on acquisition—consider TAM expansion, adjacent markets, or accelerating hiring."};
-  if (ratio >= 0.70) return {tier:'&#11088; Strong (above median)', color:'#2d6a4f',
+  if (ratio >= 0.70) return {tier:'&#11088; Strong (above median)', color:'#002975',
     interp:"Solid performance. Focus on maintaining efficiency as you scale. You're close to the $1.00 break-even—small improvements in NRR or cost discipline can get you there."};
-  if (ratio >= 0.50) return {tier:'&#10003; Typical (near median)', color:'#b45309',
+  if (ratio >= 0.50) return {tier:'&#10003; Typical (near median)', color:'#9A6B12',
     interp:"You're in the pack. Diagnose: is growth too slow, or investment too high? Pick one to improve first. Retention is critical."};
-  if (ratio > 0) return {tier:'&#9888;&#65039; Below target (bottom 25%)', color:'#b91c1c',
+  if (ratio > 0) return {tier:'&#9888;&#65039; Below target (bottom 25%)', color:'#9E3B30',
     interp:"Urgent strategic review needed. Growth likely decelerated while spending stayed elevated. Fix retention and expansion economics before scaling acquisition further."};
-  return {tier:'&#8212; Negative growth', color:'#b91c1c',
+  return {tier:'&#8212; Negative growth', color:'#9E3B30',
     interp:"Revenue declined quarter-over-quarter. Focus on stabilizing the base before evaluating efficiency."};
 }
 
@@ -1124,7 +1180,7 @@ function calcTimeline() {
   // Start the chart at the first measured quarter — skip the empty lookback columns.
   var startIdx = base[0].i;
   var chartLabels = labels.slice(startIdx);
-  var series = [{pts: base.map(function(p) { return {i: p.i - startIdx, y: p.y}; }), color: '#1a4d3c', dotsTier: true, role: 'base'}];
+  var series = [{pts: base.map(function(p) { return {i: p.i - startIdx, y: p.y}; }), color: '#002975', dotsTier: true, role: 'base'}];
 
   var first = base[0], last = base[base.length - 1];
   var curY = gerStripAt(strip, cur); if (curY === null) curY = last.y;
@@ -1190,10 +1246,10 @@ function buildChart(labels, series, n) {
 
   var s = '<svg class="ger-chart" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,-apple-system,Segoe UI,sans-serif">';
   s += band(ymax, 1.20, '#e7f0ec') + band(1.20, 0.70, '#eef3f0') + band(0.70, 0.50, '#fbf3e6') + band(0.50, ymin, '#fbecec');
-  s += tlab((Math.min(ymax, 1.7) + 1.20) / 2, 'Elite', '#1a4d3c');
-  s += tlab(0.95, 'Strong', '#2d6a4f');
-  s += tlab(0.60, 'Typical', '#b45309');
-  s += tlab((0.50 + Math.max(ymin, -0.5)) / 2, 'Below', '#b91c1c');
+  s += tlab((Math.min(ymax, 1.7) + 1.20) / 2, 'Elite', '#002975');
+  s += tlab(0.95, 'Strong', '#002975');
+  s += tlab(0.60, 'Typical', '#9A6B12');
+  s += tlab((0.50 + Math.max(ymin, -0.5)) / 2, 'Below', '#9E3B30');
 
   // break-even reference + axis baseline
   var yb = Y(1.0);
@@ -1281,15 +1337,15 @@ def contact_page(submitted: str = ""):
 <p style="color:var(--muted);margin:4px 0 32px;">I'm always happy to connect with finance leaders, founders, and operators.</p>
 <form method="post" action="/contact" style="display:grid;gap:16px;">
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Name</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name</label>
     <input name="name" required style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;" placeholder="Your name">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Email</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Email</label>
     <input name="email" type="email" required style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;" placeholder="you@example.com">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Message</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Message</label>
     <textarea name="message" required rows="5" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;" placeholder="What's on your mind?"></textarea>
   </div>
   <div>
@@ -1414,11 +1470,11 @@ def tools_directory(request: Request):
 .tcat-btn:hover{{background:var(--accent-light);color:var(--ink);}}
 .tcat-active{{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;}}
 .tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
-.tool-name{{font-size:16px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;}}
+.tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
 .tool-name:hover{{color:var(--accent);}}
 .tool-desc{{font-size:14px;color:#3a352e;margin:0 0 12px;line-height:1.5;}}
 .tool-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
-.tool-cat{{font-size:11px;color:var(--accent);background:var(--accent-light);border-radius:6px;padding:2px 8px;}}
+.tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 .tool-admin{{display:flex;gap:6px;flex-shrink:0;}}
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
@@ -1573,31 +1629,31 @@ def tools_submit_page(submitted: str = ""):
 <p style="color:var(--muted);margin:4px 0 32px;">Know a tool that belongs in the CFO Toolbox? Submit it for review.</p>
 <form method="post" action="/tools/submit" style="display:grid;gap:20px;">
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Tool name *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tool name *</label>
     <input name="name" required maxlength="200"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="e.g. Mosaic">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">URL *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
     <input name="url" type="url" required maxlength="500"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Short description *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short description *</label>
     <textarea name="description" required maxlength="400" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="What does it do? 1–2 sentences."></textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
       {_tool_category_checkboxes()}
     </div>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Your email *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Your email *</label>
     <input name="submitted_by" type="email" required maxlength="200"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="you@example.com">
@@ -1728,24 +1784,24 @@ def admin_tools_new(request: Request):
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
 <form method="post" action="/admin/tools/new" style="display:grid;gap:20px;">
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Tool name *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tool name *</label>
     <input name="name" required maxlength="200"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">URL *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
     <input name="url" type="url" required maxlength="500"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Short description *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short description *</label>
     <textarea name="description" required maxlength="400" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="What does it do? 1–2 sentences."></textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
       {_tool_category_checkboxes()}
     </div>
@@ -1834,22 +1890,22 @@ def admin_tools_edit(request: Request, tool_id: int):
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form method="post" action="/admin/tools/{tool_id}/edit" style="display:grid;gap:20px;">
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Tool name *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tool name *</label>
     <input name="name" required maxlength="200" value="{_esc(tool['name'])}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">URL *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
     <input name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:6px;">Short description *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short description *</label>
     <textarea name="description" required maxlength="400" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(tool['description'])}</textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
       {_tool_category_checkboxes(tool['categories'])}
     </div>
@@ -2262,16 +2318,16 @@ function saveCustomFilters() {{
 
 
 _READER_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500&display=swap');
-:root{--ink:#1a1714;--muted:#7a7068;--line:#e8e2d8;--bg:#f9f6f0;--surface:#ffffff;--accent:#1a4d3c;}
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap');
+:root{--ink:#1a1a1a;--muted:#6F6A60;--line:#E4E0D6;--bg:#F5F4EF;--surface:#FFFFFF;--accent:#002975;}
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--ink);font:18px/1.75 'Lora',Georgia,serif;}
+body{background:var(--bg);color:var(--ink);font:18px/1.75 'Source Serif 4',Georgia,serif;}
 a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
 a:hover{opacity:.8;}
 
 .reader-bar{position:sticky;top:0;z-index:10;background:var(--surface);border-bottom:1px solid var(--line);
   padding:0 24px;height:48px;display:flex;align-items:center;justify-content:space-between;
-  font-family:'Inter',sans-serif;font-size:13px;color:var(--muted);}
+  font-family:'DM Sans',sans-serif;font-size:13px;color:var(--muted);}
 .reader-bar .back{color:var(--accent);text-decoration:none;font-weight:500;display:flex;align-items:center;gap:6px;}
 .reader-bar .back:hover{opacity:.8;}
 .reader-controls{display:flex;align-items:center;gap:16px;}
@@ -2284,7 +2340,7 @@ a:hover{opacity:.8;}
 .reader-meta{margin-bottom:40px;padding-bottom:32px;border-bottom:1px solid var(--line);}
 .reader-meta h1{font-size:clamp(22px,4vw,32px);font-weight:600;line-height:1.25;letter-spacing:-.02em;
   margin-bottom:16px;}
-.reader-meta .byline{font-family:'Inter',sans-serif;font-size:14px;color:var(--muted);line-height:1.5;}
+.reader-meta .byline{font-family:'DM Sans',sans-serif;font-size:14px;color:var(--muted);line-height:1.5;}
 .reader-meta .source-link{color:var(--accent);}
 
 .reader-body{font-size:var(--fs,18px);line-height:1.78;}
@@ -2300,17 +2356,17 @@ a:hover{opacity:.8;}
   font-style:italic;margin:1.5em 0;}
 .reader-body img{max-width:100%;height:auto;border-radius:8px;margin:1.5em 0;}
 .reader-body figure{margin:1.5em 0;}
-.reader-body figcaption{font-size:.85em;color:var(--muted);font-family:'Inter',sans-serif;margin-top:.4em;}
+.reader-body figcaption{font-size:.85em;color:var(--muted);font-family:'DM Sans',sans-serif;margin-top:.4em;}
 .reader-body table{width:100%;border-collapse:collapse;font-size:.9em;margin:1.5em 0;}
 .reader-body th,.reader-body td{padding:8px 12px;border:1px solid var(--line);text-align:left;}
-.reader-body th{background:#f4f0e8;font-family:'Inter',sans-serif;}
+.reader-body th{background:#f4f0e8;font-family:'DM Sans',sans-serif;}
 .reader-body pre,.reader-body code{font-family:ui-monospace,monospace;font-size:.85em;
   background:#f0ece4;border-radius:4px;padding:2px 5px;}
 .reader-body pre{padding:16px;overflow-x:auto;border-radius:8px;margin:1.5em 0;}
 .reader-body pre code{background:none;padding:0;}
 .reader-body hr{border:none;border-top:1px solid var(--line);margin:2.5em 0;}
 
-.reader-empty{text-align:center;padding:60px 20px;color:var(--muted);font-family:'Inter',sans-serif;}
+.reader-empty{text-align:center;padding:60px 20px;color:var(--muted);font-family:'DM Sans',sans-serif;}
 .reader-empty h2{font-size:18px;margin-bottom:12px;color:var(--ink);}
 """
 
@@ -2385,7 +2441,7 @@ def reader(request: Request, url: str = "", id: int = 0):
       style="flex:1;padding:10px 14px;border:1px solid #d0cac0;border-radius:10px;
              font-size:16px;background:#fff;font-family:inherit;">
     <button type="submit"
-      style="padding:10px 20px;background:#1a4d3c;color:#fff;border:none;
+      style="padding:10px 20px;background:#002975;color:#fff;border:none;
              border-radius:10px;font-size:16px;font-family:inherit;cursor:pointer;
              white-space:nowrap;">Read</button>
   </form>
@@ -2611,7 +2667,7 @@ def library(request: Request, q: str = ""):
 .meta{{color:var(--muted);font-size:13px;margin:3px 0 8px;}}
 .summary{{margin:0 0 10px;color:#3a352e;font-size:14px;}}
 .tags{{display:flex;flex-wrap:wrap;gap:6px;}}
-.tags span{{font-size:11px;color:var(--accent);background:var(--accent-light);border-radius:6px;padding:2px 8px;display:inline-flex;align-items:center;gap:2px;}}
+.tags span{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;display:inline-flex;align-items:center;gap:2px;}}
 .tag-x-btn{{background:none;border:none;cursor:pointer;color:var(--muted);font-size:10px;padding:0;line-height:1;opacity:.7;}}
 .tag-x-btn:hover{{color:#b91c1c;opacity:1;}}
 .postbtn{{margin-top:12px;padding:6px 12px;font-size:12px;background:transparent;color:var(--accent);border:1px solid var(--line);border-radius:8px;cursor:pointer;}}
