@@ -48,11 +48,14 @@ SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
 
 TOOL_CATEGORIES = [
     "FP&A",
+    "Headcount Planning",
+    "Treasury",
     "AI Agents",
     "ERP",
     "Cap Table Management",
     "Spend Management",
     "Financial Close",
+    "Financial Reporting",
     "Revenue Recognition",
     "Billing",
     "Collections",
@@ -61,6 +64,9 @@ TOOL_CATEGORIES = [
     "Compensation Data",
     "Contract Management",
     "Procurement",
+    "RevOps",
+    "Cloud/IT Spend",
+    "BI & Analytics",
 ]
 
 # coverage: "Private" | "Public" | "Both"

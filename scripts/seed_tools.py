@@ -415,6 +415,496 @@ TOOLS = [
         "description": "Aon's compensation benchmarking surveys and data. One of the most widely used comp survey providers—covers tech, life sciences, and other sectors with deep cut of the data by role, level, and geography.",
         "categories": ["Compensation Data"],
     },
+    # Treasury / Cash Management
+    {
+        "name": "Agicap",
+        "url": "https://agicap.com",
+        "description": "European cash flow management platform. Aggregates bank accounts, ERPs, and invoices into a real-time cash position and rolling forecast. Strong multi-currency support for companies operating across Europe.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Trovata",
+        "url": "https://trovata.io",
+        "description": "Treasury and cash management platform that connects directly to bank APIs. Automates cash reporting, balance aggregation across accounts and currencies, and rolling cash forecasts—eliminating manual bank file imports.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Tresio",
+        "url": "https://www.tresio.io",
+        "description": "Cash flow forecasting and liquidity planning platform for SMBs and scale-ups. Pulls from bank accounts and ERPs to deliver rolling forecasts and scenario analysis.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Trezy",
+        "url": "https://trezy.com",
+        "description": "European cash flow management and forecasting platform. Connects to bank accounts across multiple currencies for real-time cash visibility and multi-entity consolidation.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Relay Finance",
+        "url": "https://relayfi.com",
+        "description": "Business banking and cash flow platform for SMBs. Combines multi-account banking with cash flow tracking and automated savings—built for founders and finance teams managing lean treasury operations.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Sibill",
+        "url": "https://www.sibill.com",
+        "description": "European cash flow forecasting platform. Connects to bank accounts and ERPs across multiple currencies to deliver rolling cash forecasts, payment planning, and liquidity alerts.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Tidely",
+        "url": "https://www.tidely.com",
+        "description": "Cash flow planning and liquidity management platform with strong European bank connectivity. Provides rolling cash forecasts, multi-currency support, and scenario modeling for SMBs operating across EMEA.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Viably",
+        "url": "https://www.viably.com",
+        "description": "Working capital and cash flow platform for e-commerce businesses. Combines cash flow forecasting with embedded financing to help companies manage inventory cycles and seasonal cash gaps.",
+        "categories": ["Treasury"],
+    },
+    {
+        "name": "Nilus",
+        "url": "https://nilus.com",
+        "description": "Modern treasury management platform for mid-market companies. Provides real-time cash visibility across bank accounts and entities, liquidity forecasting, and payment operations—a lighter-weight alternative to enterprise TMS platforms.",
+        "categories": ["Treasury"],
+    },
+    # Sales Tax additions
+    {
+        "name": "Avalara",
+        "url": "https://www.avalara.com",
+        "description": "The market-leading sales tax compliance platform. Monitors nexus across all US states and 100+ countries, calculates tax in real time, and automates filing and remittance. Integrates with virtually every ERP and billing system.",
+        "categories": ["Sales Tax"],
+    },
+    {
+        "name": "Zamp",
+        "url": "https://www.zamp.com",
+        "description": "Fully managed sales tax service. Handles registration, collection, filing, and remittance on your behalf—so your finance team doesn't touch the workflow. Good fit if you want to hand the whole problem off.",
+        "categories": ["Sales Tax"],
+    },
+    # Financial Reporting
+    {
+        "name": "Liveflow",
+        "url": "https://www.liveflow.io",
+        "description": "Financial reporting automation that pulls live data from QuickBooks and Xero directly into Google Sheets. Finance teams use it to automate P&L, cash flow, and board reporting without leaving spreadsheets.",
+        "categories": ["Financial Reporting"],
+    },
+    {
+        "name": "EMAsphere",
+        "url": "https://www.emasphere.com",
+        "description": "Automated financial and management reporting platform. Consolidates data from ERPs to produce board-ready reports, dashboards, and multi-entity consolidations. Widely used across Europe.",
+        "categories": ["Financial Reporting"],
+    },
+    {
+        "name": "Klipfolio",
+        "url": "https://www.klipfolio.com",
+        "description": "KPI dashboard and business metrics platform. Connects to 100+ data sources for real-time executive dashboards. Finance teams use it for board-level reporting and operational metrics tracking.",
+        "categories": ["Financial Reporting"],
+    },
+    # Financial Close additions
+    {
+        "name": "FloQast",
+        "url": "https://floqast.com",
+        "description": "Close management and accounting automation platform built for controllers. Centralizes close checklists, reconciliations, flux analysis, and audit prep. One of the most widely deployed in mid-market finance teams.",
+        "categories": ["Financial Close"],
+    },
+    {
+        "name": "Silverfin",
+        "url": "https://www.silverfin.com",
+        "description": "Cloud-based financial reporting and close platform for accountants and finance teams. Automates workpapers, reconciliations, and management reporting—with strong multi-entity consolidation support across European jurisdictions.",
+        "categories": ["Financial Close"],
+    },
+    {
+        "name": "Gappify",
+        "url": "https://gappify.com",
+        "description": "Account reconciliation and close automation platform. Automates accruals, reconciliations, and close task management with full audit trails. Competes with FloQast and BlackLine for controller-owned workflows.",
+        "categories": ["Financial Close"],
+    },
+    {
+        "name": "Numeral",
+        "url": "https://www.numeral.io",
+        "description": "Modern financial close and accounting automation platform for high-growth companies. Focuses on automating the month-end process: reconciliations, journal entries, and close reporting in one system.",
+        "categories": ["Financial Close"],
+    },
+    # Cloud/IT Spend
+    {
+        "name": "Apptio",
+        "url": "https://www.apptio.com",
+        "description": "Technology business management and cloud cost optimization platform (IBM). Models total IT spend against business value and cost drivers—used by CFOs and CIOs to understand the true cost of technology at scale.",
+        "categories": ["Cloud/IT Spend"],
+    },
+    {
+        "name": "Finout",
+        "url": "https://www.finout.io",
+        "description": "Cloud cost visibility and FinOps platform. Maps AWS, GCP, and Azure spend to business units, products, and customers to track unit economics like cost-per-customer alongside engineering spend.",
+        "categories": ["Cloud/IT Spend"],
+    },
+    {
+        "name": "nOps",
+        "url": "https://www.nops.io",
+        "description": "AWS cost optimization platform. Automates Reserved Instance and Savings Plan purchases, surfaces idle and underutilized resources, and continuously tracks commitment coverage to reduce cloud waste.",
+        "categories": ["Cloud/IT Spend"],
+    },
+    {
+        "name": "Ternary",
+        "url": "https://ternary.app",
+        "description": "Cloud cost management platform with particularly deep GCP support, built by ex-Google engineers. Covers multi-cloud cost allocation, anomaly detection, and savings recommendations across AWS, GCP, and Azure.",
+        "categories": ["Cloud/IT Spend"],
+    },
+    {
+        "name": "Vantage",
+        "url": "https://www.vantage.sh",
+        "description": "Cloud cost observability platform. Provides unit cost analysis, Kubernetes cost allocation, and savings recommendations across AWS, GCP, and Azure—with a developer-friendly interface finance teams can actually use.",
+        "categories": ["Cloud/IT Spend"],
+    },
+    {
+        "name": "Anodot",
+        "url": "https://www.anodot.com",
+        "description": "Cloud cost monitoring and anomaly detection platform. Uses AI to surface unexpected cost spikes and efficiency opportunities across multi-cloud environments before they show up in the monthly bill.",
+        "categories": ["Cloud/IT Spend"],
+    },
+    {
+        "name": "Torii",
+        "url": "https://www.torii.io",
+        "description": "SaaS management platform. Discovers all software in use across the organization, tracks spend and license utilization, and manages renewals and offboarding workflows to reduce shadow IT and wasted seats.",
+        "categories": ["Cloud/IT Spend"],
+    },
+    {
+        "name": "Zluri",
+        "url": "https://www.zluri.com",
+        "description": "SaaS management and identity governance platform. Tracks software usage and license utilization across the stack, automates provisioning and deprovisioning, and surfaces savings opportunities from unused seats.",
+        "categories": ["Cloud/IT Spend"],
+    },
+    # Procurement additions
+    {
+        "name": "Vertice",
+        "url": "https://www.vertice.one",
+        "description": "SaaS and cloud procurement platform. Benchmarks software pricing against market rates, manages renewal workflows, and negotiates on your behalf—similar to Vendr but with strong pricing intelligence.",
+        "categories": ["Procurement"],
+    },
+    {
+        "name": "Zylo",
+        "url": "https://zylo.com",
+        "description": "Enterprise SaaS management platform. Discovers shadow IT, tracks license utilization and renewal dates, and benchmarks software costs against market data. The enterprise-tier option for companies managing hundreds of software contracts.",
+        "categories": ["Procurement"],
+    },
+    # Contract Management additions
+    {
+        "name": "Dealhub",
+        "url": "https://dealhub.io",
+        "description": "CPQ and contract lifecycle management platform. Connects guided selling, quoting, eSign, and contract management in one revenue workflow—finance teams use it to govern deal terms and track contract obligations.",
+        "categories": ["Contract Management"],
+    },
+    {
+        "name": "Sirion",
+        "url": "https://www.sirionlabs.com",
+        "description": "Enterprise contract lifecycle management powered by AI. Extracts obligations and key terms from executed contracts, tracks renewal and compliance milestones, and provides a searchable contract intelligence layer for legal and finance.",
+        "categories": ["Contract Management"],
+    },
+    # RevOps
+    {
+        "name": "Clari",
+        "url": "https://www.clari.com",
+        "description": "Revenue operations platform. Provides pipeline inspection, forecast accuracy scoring, and deal intelligence from CRM activity data. CFOs use it to improve revenue forecast confidence and board reporting on ARR.",
+        "categories": ["RevOps"],
+    },
+    {
+        "name": "Gong",
+        "url": "https://www.gong.io",
+        "description": "Revenue intelligence platform. Records and analyzes sales calls, surfaces deal risks and coaching opportunities, and tracks pipeline health. CFO owns the budget and uses it for revenue visibility and sales productivity measurement.",
+        "categories": ["RevOps"],
+    },
+    {
+        "name": "Weflow",
+        "url": "https://www.weflow.io",
+        "description": "Salesforce productivity and pipeline management tool. Helps reps update CRM data faster and gives managers real-time pipeline visibility—reducing the noise between what's in Salesforce and what's actually happening in deals.",
+        "categories": ["RevOps"],
+    },
+    {
+        "name": "BoostUp",
+        "url": "https://boostup.ai",
+        "description": "Revenue forecasting and pipeline analytics platform. Combines AI-driven deal scoring, rep activity signals, and forecast roll-ups to improve forecast accuracy and give finance teams a more reliable revenue number.",
+        "categories": ["RevOps"],
+    },
+    {
+        "name": "Revsure",
+        "url": "https://www.revsure.ai",
+        "description": "Pipeline analytics and revenue forecasting AI. Uses historical CRM data to predict deal outcomes, surface at-risk pipeline, and improve forecast accuracy—built for finance and RevOps teams who need a reliable revenue signal.",
+        "categories": ["RevOps"],
+    },
+    {
+        "name": "GrowBlocks",
+        "url": "https://www.growblocks.com",
+        "description": "Revenue planning and go-to-market analytics platform. Models pipeline coverage, headcount, and revenue targets together in a connected plan—bridging the gap between the FP&A model and what's actually happening in the business.",
+        "categories": ["RevOps"],
+    },
+    {
+        "name": "Sightfull",
+        "url": "https://www.sightfull.com",
+        "description": "Revenue analytics platform for SaaS CFOs and RevOps teams. Automates ARR waterfall, NRR, churn, and cohort reporting from CRM and billing data—no SQL or data team required.",
+        "categories": ["RevOps"],
+    },
+    # Billing additions
+    {
+        "name": "m3ter",
+        "url": "https://www.m3ter.com",
+        "description": "Usage-based billing infrastructure for SaaS and cloud companies. Ingests product usage events and powers any pricing model—seat, consumption, hybrid—with real-time metering and invoice generation at scale.",
+        "categories": ["Billing"],
+    },
+    {
+        "name": "Amberflo",
+        "url": "https://www.amberflo.io",
+        "description": "Cloud metering and usage-based billing platform. Handles real-time usage ingestion, flexible pricing plan configuration, and customer-facing usage dashboards—built for teams moving to consumption pricing.",
+        "categories": ["Billing"],
+    },
+    {
+        "name": "Togai",
+        "url": "https://www.togai.com",
+        "description": "Flexible pricing and billing infrastructure. Handles usage metering, pricing experiments, and invoice generation for SaaS companies moving toward consumption or hybrid pricing models.",
+        "categories": ["Billing"],
+    },
+    {
+        "name": "DigitalRoute",
+        "url": "https://www.digitalroute.com",
+        "description": "Enterprise usage data management and monetization platform. Processes high-volume usage events for telco, SaaS, and IoT billing at scale. Strong choice for complex, high-throughput usage-based revenue models.",
+        "categories": ["Billing"],
+    },
+    {
+        "name": "Zuora",
+        "url": "https://www.zuora.com",
+        "description": "Subscription management and recurring billing platform. Handles flexible pricing, recurring invoicing, revenue recognition (ASC 606/IFRS 15), and SaaS metrics reporting. One of the most widely deployed billing platforms at mid-market to enterprise.",
+        "categories": ["Billing"],
+    },
+    {
+        "name": "Paddle",
+        "url": "https://www.paddle.com",
+        "description": "Merchant of record for SaaS companies. Handles payments, subscription billing, global sales tax and VAT compliance, and fraud prevention—so you don't have to register in every jurisdiction. Strong for SaaS companies selling internationally.",
+        "categories": ["Billing", "Sales Tax"],
+    },
+    # Collections additions
+    {
+        "name": "Tesorio",
+        "url": "https://www.tesorio.com",
+        "description": "Cash flow and AR management platform. Automates collections outreach, forecasts cash from open receivables, and gives finance teams real-time visibility into what's owed and when—reducing DSO without adding headcount.",
+        "categories": ["Collections"],
+    },
+    {
+        "name": "Kolleno",
+        "url": "https://www.kolleno.com",
+        "description": "AR and collections automation platform. Automates dunning sequences, cash application, and dispute management for mid-market businesses. A leaner alternative to HighRadius and Billtrust for teams that don't need enterprise-scale complexity.",
+        "categories": ["Collections"],
+    },
+    # Spend Management additions
+    {
+        "name": "Payhawk",
+        "url": "https://www.payhawk.com",
+        "description": "Corporate cards, expense management, and AP automation platform with strong European coverage. Handles multi-currency spend, VAT compliance, and ERP integrations across EMEA—a leading option for European finance teams.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "Pleo",
+        "url": "https://www.pleo.io",
+        "description": "European spend management and corporate cards platform. Smart cards, out-of-pocket reimbursements, and invoice management in one product—built for teams across multiple European countries with multi-currency support.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "Mesh Payments",
+        "url": "https://www.meshpayments.com",
+        "description": "Global corporate payment and spend management platform. Provides virtual and physical cards, AP automation, and cross-border payment capabilities with multi-currency support for companies operating internationally.",
+        "categories": ["Spend Management"],
+    },
+    {
+        "name": "PayEm",
+        "url": "https://www.payem.co",
+        "description": "Global spend and procurement management platform. Handles purchase requests, multi-currency vendor payments, and corporate cards in a single workflow—built for finance teams managing international operations.",
+        "categories": ["Spend Management"],
+    },
+    # Cap Table Management additions
+    {
+        "name": "Capdesk",
+        "url": "https://www.capdesk.com",
+        "description": "European equity management platform. Manages cap tables, employee equity plans, vesting schedules, and secondary transactions—with strong support for UK and European jurisdictions and multi-currency equity modeling.",
+        "categories": ["Cap Table Management"],
+    },
+    {
+        "name": "Eqvista",
+        "url": "https://eqvista.com",
+        "description": "Cap table management and 409A valuation software. A lower-cost alternative to Carta aimed at early-stage startups that need basic equity tracking and annual valuations without the enterprise price tag.",
+        "categories": ["Cap Table Management"],
+    },
+    {
+        "name": "Semper",
+        "url": "https://www.semper.com",
+        "description": "Equity management platform for private companies. Covers cap table management, employee equity plans, and 409A valuations—a newer entrant competing with Carta and Pulley.",
+        "categories": ["Cap Table Management"],
+    },
+    # FP&A additions
+    {
+        "name": "Jirav",
+        "url": "https://www.jirav.com",
+        "description": "FP&A and workforce planning platform for mid-market companies. Connects HR and financial data for headcount planning, budgeting, and management reporting—with a strong focus on the people-cost model.",
+        "categories": ["FP&A"],
+    },
+    {
+        "name": "Vena",
+        "url": "https://www.venasolutions.com",
+        "description": "Excel-native FP&A platform. Works inside Excel with a governed data model and ERP integrations behind it—consolidating actuals, budgets, and forecasts without replacing the spreadsheet workflows finance teams already know.",
+        "categories": ["FP&A"],
+    },
+    {
+        "name": "Board",
+        "url": "https://www.board.com",
+        "description": "Enterprise planning and business intelligence platform. Covers FP&A, sales planning, and supply chain in a unified model. Stronger on multi-dimensional modeling and consolidation than most pure FP&A tools—built for complex, multi-entity organizations.",
+        "categories": ["FP&A"],
+    },
+    {
+        "name": "Digits",
+        "url": "https://www.digits.com",
+        "description": "AI-powered financial analytics platform. Connects to accounting systems and automatically surfaces variance analysis, spend anomalies, and trends—reducing the manual work of month-end reporting and QBR prep.",
+        "categories": ["FP&A"],
+    },
+    {
+        "name": "Farseer",
+        "url": "https://www.farseer.io",
+        "description": "FP&A and integrated business planning platform. Covers budgeting, forecasting, consolidation, and management reporting—with particular strength in Central and Eastern European markets and multi-entity, multi-currency planning.",
+        "categories": ["FP&A"],
+    },
+    {
+        "name": "Phocas",
+        "url": "https://www.phocassoftware.com",
+        "description": "Business intelligence and FP&A platform built for distribution, manufacturing, and retail. Layers analytics on top of ERP data to give operations and finance teams industry-specific reporting without custom SQL.",
+        "categories": ["FP&A"],
+    },
+    {
+        "name": "Workday Adaptive Planning",
+        "url": "https://www.workday.com/en-us/products/adaptive-planning/",
+        "description": "Enterprise FP&A platform and one of the market leaders alongside Anaplan and Planful. Covers budgeting, forecasting, workforce planning, and reporting with strong Workday HCM integration for connected headcount and financial planning.",
+        "categories": ["FP&A"],
+    },
+    # Headcount Planning
+    {
+        "name": "ChartHop",
+        "url": "https://www.charthop.com",
+        "description": "Org management and headcount planning platform. Visualizes the org chart, models headcount scenarios, and connects HR and finance data so CFOs and People leaders share a single source of truth on open reqs and budget.",
+        "categories": ["Headcount Planning"],
+    },
+    {
+        "name": "Doublefin",
+        "url": "https://www.doublefin.com",
+        "description": "Headcount planning and workforce intelligence platform. Purpose-built for the finance–HR handoff: tracks budget vs. actuals on headcount, manages offer approvals, and models hiring scenarios against plan.",
+        "categories": ["Headcount Planning"],
+    },
+    {
+        "name": "Orgvue",
+        "url": "https://www.orgvue.com",
+        "description": "Organizational design and workforce planning platform. Models org structures, spans of control, and headcount scenarios to support transformation planning and ongoing workforce optimization.",
+        "categories": ["Headcount Planning"],
+    },
+    {
+        "name": "Teamohana",
+        "url": "https://www.teamohana.com",
+        "description": "Headcount management platform. Provides a single source of truth for open reqs, planned hires, and budget vs. actuals—connecting HRIS and ATS data to the finance model so headcount plans stay current.",
+        "categories": ["Headcount Planning"],
+    },
+    {
+        "name": "Knoetic",
+        "url": "https://www.knoetic.com",
+        "description": "People analytics platform for CHROs and CFOs. Combines HRIS data with a peer network for benchmarking headcount, attrition, and compensation—giving finance and people teams data to make headcount decisions with context.",
+        "categories": ["Headcount Planning"],
+    },
+    # ERP additions
+    {
+        "name": "Pennylane",
+        "url": "https://www.pennylane.com",
+        "description": "French all-in-one accounting and finance platform. Combines ERP-level bookkeeping, invoicing, and cash management in one product—built for European companies with strong multi-currency support and accountant collaboration.",
+        "categories": ["ERP"],
+    },
+    {
+        "name": "Puzzle",
+        "url": "https://puzzle.io",
+        "description": "Modern accounting software built for startups. A clean general ledger designed for accrual accounting from day one—positioned as the alternative to QuickBooks for early-stage companies that want real accounting, not bookkeeping.",
+        "categories": ["ERP"],
+    },
+    {
+        "name": "Exact",
+        "url": "https://www.exact.com",
+        "description": "Netherlands-based ERP and accounting platform dominant in Benelux. Covers financials, inventory, project accounting, and payroll—with strong multi-currency and multi-entity support for European mid-market companies.",
+        "categories": ["ERP"],
+    },
+    {
+        "name": "FreshBooks",
+        "url": "https://www.freshbooks.com",
+        "description": "SMB accounting and invoicing software. Handles time tracking, invoicing, expenses, and basic reporting for small businesses and freelancers. Below the typical CFO audience but widely used at the early stage.",
+        "categories": ["ERP"],
+    },
+    # BI & Analytics
+    {
+        "name": "Mode",
+        "url": "https://mode.com",
+        "description": "SQL-based analytics and business intelligence platform. Finance and data teams use it for ad-hoc analysis, automated reports, and sharing insights across the business—with Python and R notebook support for more complex analysis.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Tableau",
+        "url": "https://www.tableau.com",
+        "description": "The most widely used enterprise data visualization and BI platform (Salesforce). Finance teams use it to build executive dashboards, custom financial reports, and interactive visualizations from virtually any data source.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Looker",
+        "url": "https://www.looker.com",
+        "description": "Enterprise BI platform with a governed semantic layer (LookML). Strong with data teams building consistent, reusable metrics and finance dashboards on top of data warehouses—now part of Google Cloud.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Snowflake",
+        "url": "https://www.snowflake.com",
+        "description": "Cloud data platform and data warehouse. Not a CFO tool directly, but a major infrastructure cost center CFOs own and a foundational layer that financial reporting and FP&A tools are increasingly built on top of.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Coefficient",
+        "url": "https://coefficient.io",
+        "description": "Live data connector for Google Sheets and Excel. Finance teams use it to pull real-time data from CRMs, ERPs, and billing systems directly into spreadsheets—automating the manual export-import cycle for reporting.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Sisense",
+        "url": "https://www.sisense.com",
+        "description": "Embedded analytics and BI platform. Primarily used by product teams to embed analytics into SaaS applications, but also deployed by finance teams for custom operational dashboards.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Databricks",
+        "url": "https://www.databricks.com",
+        "description": "Data lakehouse platform for large-scale data engineering, ML, and analytics. Infrastructure-level technology that CFOs increasingly own as a significant cost center and that underpins financial data pipelines at scale.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Grow",
+        "url": "https://www.grow.com",
+        "description": "No-code BI and dashboard platform for SMBs. Connects to 150+ data sources for executive-level dashboards without requiring SQL—a practical option for finance teams that need reporting without a data engineer.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Equals",
+        "url": "https://equals.com",
+        "description": "Spreadsheet-based analytics platform with live data connections. Combines the familiarity of a spreadsheet with direct SQL access to your data warehouse—built for finance and ops teams who think in spreadsheets but need database-scale data.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Hex",
+        "url": "https://hex.tech",
+        "description": "Collaborative data notebook and analytics platform. Combines SQL, Python, and no-code visuals in a single shareable workspace—used by finance and data teams for exploratory analysis and automated reporting.",
+        "categories": ["BI & Analytics"],
+    },
+    {
+        "name": "Omni",
+        "url": "https://omni.co",
+        "description": "Modern BI platform that combines a governed semantic layer with ad-hoc spreadsheet-style exploration. Lets finance teams self-serve on data without waiting for the data team, while keeping metrics consistent across the organization.",
+        "categories": ["BI & Analytics"],
+    },
 ]
 
 
