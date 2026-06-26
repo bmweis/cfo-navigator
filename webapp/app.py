@@ -1028,6 +1028,8 @@ function contributionSVG(strip, cur, labels) {
   function fmtM(x) { var a = Math.round(x * 10) / 10; return '$' + (a % 1 === 0 ? a.toFixed(0) : a.toFixed(1)) + 'M'; }
   // Brand data palette: GTM = navy, Revenue = seafoam-teal, R&D = coral.
   var BLUE = '#002975', GREEN = '#2E9C86', RED = '#E8704F', INK = '#1a1a1a', MUT = '#6F6A60';
+  // Small text must use AA-capable -deep variants (BRAND.md 2.2); base seafoam/coral stay for graphics.
+  var GREEN_TX = '#1F7A66', RED_TX = '#B14A30';
 
   var s = '<svg class="ger-contrib" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
   s += '<defs>' +
@@ -1040,18 +1042,18 @@ function contributionSVG(strip, cur, labels) {
   s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Efficiency Ratio = $' + ratio.toFixed(2) + '</text>';
 
   s += '<text x="20" y="186" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
-  s += '<text x="20" y="320" font-size="13" font-weight="700" fill="' + GREEN + '">Revenue</text>';
-  s += '<text x="20" y="498" font-size="13" font-weight="700" fill="' + RED + '">R&amp;D</text>';
+  s += '<text x="20" y="320" font-size="13" font-weight="700" fill="' + GREEN_TX + '">Revenue</text>';
+  s += '<text x="20" y="498" font-size="13" font-weight="700" fill="' + RED_TX + '">R&amp;D</text>';
 
   // One shared scale across spend AND revenue so every box is comparable by $;
   // each is bottom-aligned on its lane baseline with a 25% "pull" cap on top.
   var allMax = Math.max(g[0], g[1], g[2], g[3], r[0], r[1], revC, revP, 1), BARMAX = 142;
   function barH(val) { return Math.max(val / allMax * BARMAX, 3); }
-  function spendBar(c, baseY, val, col, grad) {
+  function spendBar(c, baseY, val, col, grad, txt) {
     var h = barH(val), x = cx(c) - bw / 2, y = baseY - h, capH = h * 0.25;
     var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="6" fill="url(#' + grad + ')" stroke="' + col + '" stroke-opacity="0.45"/>';
     o += '<path d="M' + x.toFixed(1) + ' ' + (y + capH).toFixed(1) + ' L' + x.toFixed(1) + ' ' + (y + 6).toFixed(1) + ' Q' + x.toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + 6).toFixed(1) + ' ' + y.toFixed(1) + ' L' + (x + bw - 6).toFixed(1) + ' ' + y.toFixed(1) + ' Q' + (x + bw).toFixed(1) + ' ' + y.toFixed(1) + ' ' + (x + bw).toFixed(1) + ' ' + (y + 6).toFixed(1) + ' L' + (x + bw).toFixed(1) + ' ' + (y + capH).toFixed(1) + ' Z" fill="' + col + '"/>';
-    if (h >= 8) o += '<text x="' + cx(c).toFixed(1) + '" y="' + (y - 5).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="700" fill="' + col + '">25%</text>';
+    if (h >= 8) o += '<text x="' + cx(c).toFixed(1) + '" y="' + (y - 5).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="700" fill="' + txt + '">25%</text>';
     o += '<text x="' + cx(c).toFixed(1) + '" y="' + (baseY + 15).toFixed(1) + '" text-anchor="middle" font-size="11" fill="' + MUT + '">' + fmtM(val) + '</text>';
     return o;
   }
@@ -1067,7 +1069,7 @@ function contributionSVG(strip, cur, labels) {
   // GTM lane bottom-aligned at gB
   var gB = 174, gTop = gB - barH(Math.max(g[0], g[1], g[2], g[3]));
   s += bracket(1, 4, Math.max(gTop - 22, 76), BLUE, 'GTM Investment = ' + fmtM(gtmInv));
-  for (var c = 1; c <= 4; c++) s += spendBar(c, gB, g[c - 1], BLUE, 'cgB');
+  for (var c = 1; c <= 4; c++) s += spendBar(c, gB, g[c - 1], BLUE, 'cgB', BLUE);
 
   // Revenue lane bottom-aligned at rB (same scale as spend)
   var rB = 388;
@@ -1085,13 +1087,13 @@ function contributionSVG(strip, cur, labels) {
   var gx = cx(5) + bw / 2 + 16, gy = Math.max(curTop, 140), cw = 110;
   s += '<line x1="' + (cx(5) + bw / 2).toFixed(1) + '" y1="' + (gy + 19) + '" x2="' + gx.toFixed(1) + '" y2="' + (gy + 19) + '" stroke="' + GREEN + '" stroke-width="1.4" stroke-dasharray="3 2"/>';
   s += '<rect x="' + gx.toFixed(1) + '" y="' + gy.toFixed(1) + '" width="' + cw + '" height="38" rx="9" fill="#E7F5F0" stroke="' + GREEN + '" stroke-width="1.6"/>';
-  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 18).toFixed(1) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + GREEN + '">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</text>';
-  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 32).toFixed(1) + '" text-anchor="middle" font-size="9.5" fill="' + GREEN + '">Annualized Growth</text>';
+  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 18).toFixed(1) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + GREEN_TX + '">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</text>';
+  s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 32).toFixed(1) + '" text-anchor="middle" font-size="9.5" fill="' + GREEN_TX + '">Annualized Growth</text>';
 
   // R&D lane bottom-aligned at dB (same scale)
   var dB = 494, dTop = dB - barH(Math.max(r[0], r[1]));
   s += bracket(0, 1, dTop - 22, RED, 'R&amp;D Investment = ' + fmtM(rndInv));
-  for (var c = 0; c <= 1; c++) s += spendBar(c, dB, r[c], RED, 'cgR');
+  for (var c = 0; c <= 1; c++) s += spendBar(c, dB, r[c], RED, 'cgR', RED_TX);
 
   // timeline axis
   var ty = 530;
@@ -1105,9 +1107,9 @@ function contributionSVG(strip, cur, labels) {
   // formula pill
   var label2 = (ann >= 0 ? '+' : '') + fmtM(ann) + ' / ( ' + fmtM(gtmInv) + ' + ' + fmtM(rndInv) + ' ) = $' + ratio.toFixed(2);
   var fw = label2.length * 7.3 + 40, fx = W / 2 - fw / 2, fy = 580;
-  var pill = '<tspan fill="' + GREEN + '" font-weight="700">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</tspan> &#247; ( ' +
+  var pill = '<tspan fill="' + GREEN_TX + '" font-weight="700">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</tspan> &#247; ( ' +
     '<tspan fill="' + BLUE + '" font-weight="700">' + fmtM(gtmInv) + '</tspan> + ' +
-    '<tspan fill="' + RED + '" font-weight="700">' + fmtM(rndInv) + '</tspan> ) = ' +
+    '<tspan fill="' + RED_TX + '" font-weight="700">' + fmtM(rndInv) + '</tspan> ) = ' +
     '<tspan fill="' + INK + '" font-weight="700">$' + ratio.toFixed(2) + '</tspan>';
   s += '<rect x="' + fx.toFixed(1) + '" y="' + fy + '" width="' + fw.toFixed(1) + '" height="34" rx="10" fill="#ffffff" stroke="#D6D1C4" stroke-width="1.6"/>';
   s += '<text x="' + (W / 2).toFixed(1) + '" y="' + (fy + 22) + '" text-anchor="middle" font-size="14.5">' + pill + '</text>';
