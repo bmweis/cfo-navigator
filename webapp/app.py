@@ -2775,7 +2775,12 @@ def api_search(request: Request, q: str = "", limit: int = 50, token: str | None
 
 @app.get("/ask", response_class=HTMLResponse)
 def ask_page(request: Request, q: str = ""):
-    if not _is_authed(request):
+    authed = _is_authed(request)
+    # /ask is private today: anonymous visitors are sent to log in. If this is
+    # ever opened to the public, drop this one redirect — the page below already
+    # hides the cost estimate from anonymous users and defaults them to the
+    # cheapest model + effort. (POST /ask should be clamped to match at that point.)
+    if not authed:
         return _login_redirect(request)
 
     from linklib.agent import EFFORT_SETTINGS, COST_ESTIMATES, MODEL_ALIASES
@@ -2786,7 +2791,9 @@ def ask_page(request: Request, q: str = ""):
         ("claude-sonnet-4-6",         "Balanced &middot; default"),
         ("claude-opus-4-8",           "Best quality"),
     ]
-    default_model = "claude-sonnet-4-6"
+    # Logged-in (Brian) gets the balanced default; anonymous users default to
+    # the most efficient model.
+    default_model = "claude-sonnet-4-6" if authed else "claude-haiku-4-5-20251001"
 
     def model_row(mid, desc, checked):
         chk = " checked" if checked else ""
@@ -2816,11 +2823,16 @@ def ask_page(request: Request, q: str = ""):
             f'</label>'
         )
 
-    effort_rows = "".join(effort_row(v, l, d, v == "standard") for v, l, d in effort_details)
+    default_effort = "standard" if authed else "quick"
+    effort_rows = "".join(effort_row(v, l, d, v == default_effort) for v, l, d in effort_details)
 
-    # Bake cost table into JS as a JSON-like literal
+    # Cost estimates are for Brian's eyes only — never exposed to anonymous
+    # users. When not authed, the cost table is empty and the estimate line is
+    # omitted from the page entirely.
     import json as _json
-    cost_js = _json.dumps(COST_ESTIMATES)
+    cost_js = _json.dumps(COST_ESTIMATES) if authed else "{}"
+    cost_span = ('<span id="cost-est" style="font-size:13px;color:var(--muted);"></span>'
+                 if authed else "")
 
     pre_q = _esc(q)
 
@@ -2863,7 +2875,7 @@ def ask_page(request: Request, q: str = ""):
 
 <div style="display:flex;align-items:center;gap:20px;margin-bottom:20px;">
   <button class="btn" onclick="doAsk()" id="ask-btn" style="padding:11px 28px;font-size:15px;">Ask</button>
-  <span id="cost-est" style="font-size:13px;color:var(--muted);"></span>
+  {cost_span}
 </div>
 
 <div id="ask-result" style="display:none;"></div>
