@@ -69,6 +69,11 @@ CREATE TRIGGER IF NOT EXISTS articles_au AFTER UPDATE ON articles BEGIN
     VALUES (new.id, new.title, new.author, new.source, new.summary, new.content, new.notes, new.tags_text);
 END;
 
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS contacts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL DEFAULT '',
@@ -76,11 +81,45 @@ CREATE TABLE IF NOT EXISTS contacts (
     message    TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tools (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL DEFAULT '',
+    slug            TEXT NOT NULL UNIQUE DEFAULT '',
+    description     TEXT NOT NULL DEFAULT '',
+    url             TEXT NOT NULL DEFAULT '',
+    categories_json TEXT NOT NULL DEFAULT '[]',
+    approved        INTEGER NOT NULL DEFAULT 0,
+    advisor         INTEGER NOT NULL DEFAULT 0,
+    submitted_by    TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_tools_approved ON tools(approved);
+
+CREATE TABLE IF NOT EXISTS read_later (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    url         TEXT NOT NULL UNIQUE,
+    title       TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT '',
+    summary     TEXT NOT NULL DEFAULT '',
+    published_at TEXT,
+    added_at    TEXT NOT NULL
+);
 """
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _slugify(name: str) -> str:
+    import re
+    slug = name.lower().strip()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    return slug[:80]
 
 
 @dataclass
@@ -112,6 +151,16 @@ class Library:
         self.conn.execute("PRAGMA foreign_keys=ON;")
         self.conn.executescript(_SCHEMA)
         self.conn.commit()
+        # Migrate: add columns that were added after initial schema
+        for _col_sql in [
+            "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE tools ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
+        ]:
+            try:
+                self.conn.execute(_col_sql)
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass
 
     # -- writes -------------------------------------------------------------
 
@@ -168,6 +217,20 @@ class Library:
         )
         self.conn.commit()
         return existing["id"]
+
+    def update_tags(self, article_id: int, tags: list[str]) -> None:
+        """Replace the tag list on an article (hard-replace, not union)."""
+        clean = sorted(set(t.strip() for t in tags if t.strip()))
+        self.conn.execute(
+            "UPDATE articles SET tags_json=?, tags_text=?, updated_at=? WHERE id=?",
+            (json.dumps(clean), " ".join(clean), _now(), article_id),
+        )
+        self.conn.commit()
+
+    def delete_article(self, article_id: int) -> None:
+        """Permanently remove an article. FTS is updated by the articles_ad trigger."""
+        self.conn.execute("DELETE FROM articles WHERE id=?", (article_id,))
+        self.conn.commit()
 
     def apply_enrichment(self, article_id: int, summary: str, tags: list[str]) -> None:
         row = self.conn.execute("SELECT summary, tags_json FROM articles WHERE id=?", (article_id,)).fetchone()
@@ -240,6 +303,18 @@ class Library:
         d.pop("tags_text", None)
         return d
 
+    def get_setting(self, key: str, default: str = "") -> str:
+        row = self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+        self.conn.commit()
+
     def save_contact(self, name: str, email: str, message: str) -> int:
         cur = self.conn.execute(
             "INSERT INTO contacts (name, email, message, created_at) VALUES (?,?,?,?)",
@@ -253,6 +328,94 @@ class Library:
             "SELECT * FROM contacts ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- tools directory ---------------------------------------------------
+
+    def add_tool(self, name: str, description: str, url: str,
+                 categories: list[str], submitted_by: str = "",
+                 approved: int = 0, advisor: int = 0) -> int:
+        base = _slugify(name)
+        slug = base
+        suffix = 2
+        while self.conn.execute("SELECT 1 FROM tools WHERE slug=?", (slug,)).fetchone():
+            slug = f"{base}-{suffix}"
+            suffix += 1
+        now = _now()
+        cur = self.conn.execute(
+            """INSERT INTO tools (name, slug, description, url, categories_json,
+               approved, advisor, submitted_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (name.strip(), slug, description.strip(), url.strip(),
+             json.dumps(categories), approved, advisor, submitted_by.strip(), now, now),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_tools(self, approved_only: bool = True) -> list[dict]:
+        if approved_only:
+            rows = self.conn.execute(
+                "SELECT * FROM tools WHERE approved=1 ORDER BY name"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM tools ORDER BY approved, created_at DESC"
+            ).fetchall()
+        return [self._tool_to_dict(r) for r in rows]
+
+    def get_tool(self, tool_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM tools WHERE id=?", (tool_id,)).fetchone()
+        return self._tool_to_dict(row) if row else None
+
+    def update_tool(self, tool_id: int, name: str, description: str,
+                    url: str, categories: list[str], advisor: int = 0) -> None:
+        self.conn.execute(
+            """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
+               advisor=?, updated_at=? WHERE id=?""",
+            (name.strip(), description.strip(), url.strip(),
+             json.dumps(categories), advisor, _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def approve_tool(self, tool_id: int) -> None:
+        self.conn.execute("UPDATE tools SET approved=1 WHERE id=?", (tool_id,))
+        self.conn.commit()
+
+    def delete_tool(self, tool_id: int) -> None:
+        self.conn.execute("DELETE FROM tools WHERE id=?", (tool_id,))
+        self.conn.commit()
+
+    @staticmethod
+    def _tool_to_dict(r: sqlite3.Row) -> dict:
+        d = dict(r)
+        d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
+        return d
+
+    # -- read later ------------------------------------------------------------
+
+    def add_read_later(self, url: str, title: str = "", source: str = "",
+                       summary: str = "", published_at: str | None = None) -> None:
+        self.conn.execute(
+            """INSERT INTO read_later (url, title, source, summary, published_at, added_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(url) DO UPDATE SET
+                   title=excluded.title, source=excluded.source,
+                   summary=excluded.summary, published_at=excluded.published_at""",
+            (url, title, source, summary, published_at, _now()),
+        )
+        self.conn.commit()
+
+    def remove_read_later(self, url: str) -> None:
+        self.conn.execute("DELETE FROM read_later WHERE url=?", (url,))
+        self.conn.commit()
+
+    def list_read_later(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM read_later ORDER BY added_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def read_later_urls(self) -> set[str]:
+        return {r[0] for r in self.conn.execute("SELECT url FROM read_later").fetchall()}
 
     def close(self) -> None:
         self.conn.close()
