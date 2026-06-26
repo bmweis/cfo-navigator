@@ -3022,9 +3022,9 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 
 # Admin sections — the hub lists these; each links to its own page.
 _ADMIN_SECTIONS = [
-    ("/admin/social",   "Social",              "Draft LinkedIn posts and manage your voice."),
+    ("/admin/social",   "Social",              "Draft LinkedIn posts in your voice."),
     ("/admin/backup",   "Library backup",      "Download a snapshot or upload a replacement database."),
-    ("/admin/brand",    "Brand standards",     "The living style guide and color system."),
+    ("/admin/brand",    "Brand standards",     "Visual standards, color system, and your writing voice."),
     ("/admin/contacts", "Contact submissions", "Messages from the public contact form."),
     ("/admin/tools",    "Tool submissions",    "Review the CFO Toolbox approval queue."),
 ]
@@ -3055,15 +3055,8 @@ def admin_page(request: Request):
 def admin_social(request: Request, url: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
-    lib = _lib()
-    try:
-        custom_voice = lib.get_setting("voice_prompt")
-    finally:
-        lib.close()
 
-    from linklib.social import DEFAULT_MODEL, BRIAN_VOICE
-    current_voice = custom_voice or BRIAN_VOICE
-    is_customized = bool(custom_voice)
+    from linklib.social import DEFAULT_MODEL
 
     models = [
         ("claude-haiku-4-5-20251001", "Haiku", "Fast &amp; cheap"),
@@ -3095,18 +3088,6 @@ def admin_social(request: Request, url: str = ""):
     )
 
     pre_url = _esc(url)
-
-    if is_customized:
-        voice_badge = ('<span id="voice-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
-                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
-    else:
-        voice_badge = ('<span id="voice-badge" style="font-size:12px;color:var(--muted);'
-                       'margin-left:10px;vertical-align:middle;">Built-in default</span>')
-    reset_btn = (
-        '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
-        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
-        f'{"" if is_customized else "display:none;"}">Reset to default</button>'
-    )
 
     body = f"""<div class="page" style="max-width:820px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -3152,19 +3133,6 @@ def admin_social(request: Request, url: str = ""):
   </div>
 </div>
 
-<h2>Your voice{voice_badge}</h2>
-<p style="color:var(--muted);margin:-6px 0 16px;">The system prompt sent to Claude when drafting posts. Edit it to refine your tone, add new rules, or update your bio. Changes take effect immediately on the next draft.</p>
-
-<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:40px;">
-  <textarea id="voice-prompt" rows="20"
-    style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;">{_esc(current_voice)}</textarea>
-  <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
-    <button id="voice-save-btn" onclick="saveVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Save voice</button>
-    {reset_btn}
-    <span id="voice-status" style="font-size:13px;color:var(--muted);"></span>
-  </div>
-</div>
-
 </div>
 
 <script>
@@ -3191,56 +3159,6 @@ async function doDraft() {{
     output.textContent = 'Something went wrong: ' + e;
   }} finally {{
     btn.disabled = false; btn.textContent = 'Draft post';
-  }}
-}}
-
-async function saveVoice() {{
-  var prompt = document.getElementById('voice-prompt').value;
-  var btn = document.getElementById('voice-save-btn');
-  var status = document.getElementById('voice-status');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  try {{
-    var r = await fetch('/admin/voice', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{voice_prompt: prompt.trim()}})
-    }});
-    if (!r.ok) throw new Error();
-    var d = await r.json();
-    status.textContent = 'Saved.';
-    status.style.color = '#065f46';
-    setTimeout(function() {{ status.textContent = ''; }}, 3000);
-    var badge = document.getElementById('voice-badge');
-    var resetBtn = document.getElementById('reset-btn');
-    if (d.custom) {{
-      badge.textContent = 'Customized';
-      badge.style.cssText = 'font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;';
-      resetBtn.style.display = '';
-    }} else {{
-      badge.textContent = 'Built-in default';
-      badge.style.cssText = 'font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;';
-      resetBtn.style.display = 'none';
-    }}
-  }} catch(e) {{
-    status.textContent = 'Save failed — try again.';
-    status.style.color = '#b91c1c';
-  }} finally {{
-    btn.disabled = false; btn.textContent = 'Save voice';
-  }}
-}}
-
-async function resetVoice() {{
-  if (!confirm('Reset to the built-in default voice prompt? Your edits will be lost.')) return;
-  try {{
-    var r = await fetch('/admin/voice', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{voice_prompt: ''}})
-    }});
-    if (!r.ok) throw new Error();
-    window.location.reload();
-  }} catch(e) {{
-    alert('Reset failed — try again.');
   }}
 }}
 
@@ -3299,6 +3217,27 @@ def admin_brand(request: Request):
     The written reference lives in BRAND.md; this page is the visual companion."""
     if not _is_authed(request):
         return _login_redirect(request)
+
+    # Verbal identity: the voice guide (editable) lives here too — it's part of the brand.
+    lib = _lib()
+    try:
+        custom_voice = lib.get_setting("voice_prompt")
+    finally:
+        lib.close()
+    from linklib.social import BRIAN_VOICE
+    current_voice = custom_voice or BRIAN_VOICE
+    is_customized = bool(custom_voice)
+    if is_customized:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
+                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
+    else:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;color:var(--muted);'
+                       'margin-left:10px;vertical-align:middle;">Built-in default</span>')
+    reset_btn = (
+        '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
+        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
+        f'{"" if is_customized else "display:none;"}">Reset to default</button>'
+    )
 
     # Brand palette (literal hexes mirror the _CSS :root tokens; see BRAND.md §7).
     CORAL, CORAL_WASH, CORAL_DEEP = "#E8704F", "#FBEAE3", "#B14A30"
@@ -3430,6 +3369,30 @@ def admin_brand(request: Request):
         '</div>'
     )
 
+    mono = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
+            "font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;")
+    verbal = (
+        '<div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">'
+        '<span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Voice guide</span>'
+        f'{voice_badge}</div>'
+        '<p style="color:var(--muted);margin:0 0 14px;font-size:14px;">The guide Claude uses to draft in your voice, and the rubric the voice check holds new writing to.</p>'
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
+        f'<textarea id="voice-prompt" rows="16" style="{mono}">{_esc(current_voice)}</textarea>'
+        '<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">'
+        '<button id="voice-save-btn" onclick="saveVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Save voice</button>'
+        f'{reset_btn}'
+        '<span id="voice-status" style="font-size:13px;color:var(--muted);"></span></div></div>'
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>'
+        '<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Paste any draft or page copy. Mechanical rules (banned words, filler, performative phrases) flag instantly; Review adds Claude&rsquo;s read on tone.</p>'
+        f'<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice…" style="{mono}"></textarea>'
+        '<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">'
+        '<button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>'
+        '<span id="vr-status" style="font-size:13px;color:var(--muted);"></span></div>'
+        '<div id="vr-result" style="display:none;margin-top:16px;border-top:1px solid var(--line);padding-top:14px;font-size:14px;line-height:1.6;"></div>'
+        '</div>'
+    )
+
     rules = callout(
         "var(--surface)", "var(--line)",
         '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin-bottom:10px;">Usage rules</div>'
@@ -3473,7 +3436,67 @@ Deep shades are text-capable; base/mid are for graphics and large display; light
 
 <h2>Usage</h2>
 {rules}
-</div>"""
+
+<h2>Verbal identity — your voice</h2>
+{verbal}
+</div>
+
+<script>
+async function saveVoice() {{
+  var prompt = document.getElementById('voice-prompt').value;
+  var btn = document.getElementById('voice-save-btn');
+  var status = document.getElementById('voice-status');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/voice', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{voice_prompt: prompt.trim()}})}});
+    if (!r.ok) throw new Error();
+    var d = await r.json();
+    status.textContent = 'Saved.'; status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+    var badge = document.getElementById('voice-badge'), resetBtn = document.getElementById('reset-btn');
+    if (d.custom) {{
+      badge.textContent = 'Customized';
+      badge.style.cssText = 'font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;';
+      resetBtn.style.display = '';
+    }} else {{
+      badge.textContent = 'Built-in default';
+      badge.style.cssText = 'font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;';
+      resetBtn.style.display = 'none';
+    }}
+  }} catch(e) {{
+    status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save voice'; }}
+}}
+
+async function resetVoice() {{
+  if (!confirm('Reset to the built-in default voice prompt? Your edits will be lost.')) return;
+  try {{
+    var r = await fetch('/admin/voice', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{voice_prompt: ''}})}});
+    if (!r.ok) throw new Error();
+    window.location.reload();
+  }} catch(e) {{ alert('Reset failed — try again.'); }}
+}}
+
+async function reviewVoice() {{
+  var text = document.getElementById('vr-input').value.trim();
+  if (!text) {{ document.getElementById('vr-input').focus(); return; }}
+  var btn = document.getElementById('vr-btn'), box = document.getElementById('vr-result');
+  btn.disabled = true; btn.textContent = 'Reviewing…';
+  box.style.display = 'block'; box.innerHTML = '<em>Checking…</em>';
+  try {{
+    var r = await fetch('/admin/voice/review', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{text: text}})}});
+    var d = await r.json();
+    var mech = d.mechanical || [];
+    var mechHtml = mech.length
+      ? '<div style="margin-bottom:12px;"><strong style="color:#9E3B30;">Mechanical flags (' + mech.length + ')</strong>'
+        + '<ul style="margin:6px 0 0;padding-left:18px;">' + mech.map(function(m) {{ return '<li><code>' + m[1] + '</code> — ' + m[0] + '</li>'; }}).join('') + '</ul></div>'
+      : '<div style="margin-bottom:12px;color:#065f46;"><strong>No mechanical violations.</strong></div>';
+    var rev = (d.review || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\\n/g, '<br>');
+    box.innerHTML = mechHtml + '<div>' + rev + '</div>';
+  }} catch(e) {{ box.innerHTML = 'Review failed — try again.'; }}
+  finally {{ btn.disabled = false; btn.textContent = 'Review against my voice'; }}
+}}
+</script>"""
     return HTMLResponse(_page("Brand standards — Admin", "Admin", body, authed=True))
 
 
@@ -3490,6 +3513,25 @@ async def admin_voice_save(request: Request):
     finally:
         lib.close()
     return JSONResponse({"ok": True, "custom": bool(prompt)})
+
+
+@app.post("/admin/voice/review")
+async def admin_voice_review(request: Request):
+    """Review pasted content against the voice guide (mechanical lint + Claude tone read)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    from linklib.voice_review import review_text
+    lib = _lib()
+    try:
+        custom_voice = lib.get_setting("voice_prompt")
+    finally:
+        lib.close()
+    return JSONResponse(review_text(text, voice_prompt=custom_voice or None))
+
 
 @app.post("/admin/upload-db", response_class=HTMLResponse)
 async def upload_db(request: Request, file: UploadFile = File(...), token: str | None = None):

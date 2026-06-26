@@ -233,9 +233,10 @@ palette and fonts honest — any new color or font outside this system fails CI 
 
 ## 8. Automated enforcement
 
-`tests/test_brand_standards.py` is the guardrail for everything above. It scans the rendered site
-(`webapp/app.py`, including the inline CSS, SVG charts, and JS-built markup) on every push/PR via
-GitHub Actions (`.github/workflows/qa.yml`) and fails if new content drifts off-brand:
+Two test suites run on every push/PR via GitHub Actions (`.github/workflows/qa.yml`):
+`tests/test_brand_standards.py` (visual) and `tests/test_voice_standards.py` (verbal — see §9).
+`test_brand_standards.py` scans the rendered site (`webapp/app.py`, including the inline CSS, SVG
+charts, and JS-built markup) and fails if new content drifts off-brand:
 
 - **Fonts** — only Outfit, DM Sans, Source Serif 4, and system/generic fallbacks may appear. Inter,
   Lora, Arial, Helvetica, Times, Roboto, etc. are banned (this is the exact class of regression that
@@ -253,3 +254,26 @@ To run locally: `pip install -r requirements-dev.txt && pytest -q`.
 When you intentionally introduce a new color (e.g. a new chart series or status state), add it to the
 relevant group in the test's `AUX_COLORS` with a comment — that's the moment the decision gets
 recorded, which is the point.
+
+---
+
+## 9. Verbal identity — voice
+
+The brand is verbal as well as visual. The full voice guide (lead with the point, specific over
+abstract, first-person proof, earned metaphors, the LinkedIn shape, and the hard mechanical rules) is
+the editable **Voice guide** on `/admin/brand` — it's both what Claude uses to draft posts and the
+rubric the voice check holds new writing to.
+
+Like color, voice has two kinds of rules:
+
+- **Mechanical** (deterministic) — banned buzzwords (*delve, robust, seamless, synergy, transformative,
+  game-changer*), filler (*"at the end of the day", "in order to", "needless to say"*), and performative
+  openers/closers (*"thrilled to", "Onward!", "excited for what's next"*). `tests/test_voice_standards.py`
+  scans the site copy in `webapp/app.py` for these and fails the build on a hit. The rules live in
+  `linklib/voice_review.py` (`BANNED_WORDS` / `FILLER_PHRASES` / `PERFORMATIVE`) as the single source
+  of truth. Context-dependent words (*leverage* the noun, *actually*/*honestly* as filler) are left to
+  the holistic review to avoid false positives.
+- **Tone** (judgment) — "does this sound like me." Reviewed on demand by Claude, never in CI (it costs
+  API and isn't deterministic). Use the **Check content against your voice** box on `/admin/brand`, or
+  the CLI: `python -m scripts.voice_review draft.md` (reads a file or stdin; exits non-zero on any
+  mechanical violation, so it can gate a pre-publish script).
