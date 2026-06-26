@@ -504,6 +504,7 @@ the early-to-growth leap. Based in Boston.</p>
   <a href="/thought-leadership" class="btn">Thought Leadership</a>
   <a href="/contact" class="btn btn-ghost">Get in Touch</a>
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
+  <a href="/community" class="btn btn-ghost">CFO Community &rarr;</a>
 </div>
 </div>"""
     return HTMLResponse(_page("Brian Weisberg—CFO", "About", body))
@@ -623,6 +624,12 @@ def thought_leadership():
          "2024-07"),
     ])
 
+    body += """<div style="margin-top:48px;padding:24px 28px;background:var(--navy);border-radius:16px;">
+  <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam);margin-bottom:10px;">CFO Community</div>
+  <p style="font-size:17px;font-weight:600;color:#fff;margin:0 0 8px;letter-spacing:-0.01em;line-height:1.35;">Building something better for CFO peers.</p>
+  <p style="font-size:14px;color:rgba(255,255,255,.78);margin:0 0 18px;line-height:1.6;">I&rsquo;ve spent years inside finance communities&mdash;as a founding member and GM of The F Suite. I know what they get right and where even the best ones fall short. I&rsquo;m working on something new. If you have thoughts on what a well-designed community for CFO peers would look like, I&rsquo;d love to hear from you.</p>
+  <a href="/community" class="btn" style="background:#fff;color:var(--navy);border-color:#fff;font-size:14px;padding:10px 22px;">Share your experience &rarr;</a>
+</div>"""
     body += "</div>"
     return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body))
 
@@ -1386,6 +1393,60 @@ async def contact_submit(request: Request):
     return RedirectResponse("/contact?submitted=1", status_code=303)
 
 
+# TODO: Once hello@[domain].com is set up in Google Workspace, wire the contact
+# form to also email submissions there. Set LINKLIB_CONTACT_EMAIL in Railway and
+# call _send_email() here. The DB record will keep existing as a backup.
+
+# ---------------------------------------------------------------------------
+# Community
+# ---------------------------------------------------------------------------
+
+# TODO: Replace this placeholder with the real Google Form URL once created in
+# Google Workspace. Create the form with: Name, Email, Current/past communities,
+# Gaps in community experiences, What you'd look for in an ideal community (multi-select).
+_COMMUNITY_FORM_URL = "#community-form-coming-soon"
+_COMMUNITY_FORM_CONFIGURED = _COMMUNITY_FORM_URL != "#community-form-coming-soon"
+
+
+@app.get("/community", response_class=HTMLResponse)
+def community_page():
+    cta_block = (
+        f'<a href="{_COMMUNITY_FORM_URL}" target="_blank" rel="noopener" class="btn" '
+        f'style="font-size:15px;padding:12px 26px;">Share your experience &rarr;</a>'
+        if _COMMUNITY_FORM_CONFIGURED else
+        '<div style="background:var(--coral-wash);border:1px solid #F3D3C6;border-radius:12px;'
+        'padding:16px 20px;margin-top:8px;">'
+        '<p style="margin:0;font-size:14px;color:var(--coral-deep);font-weight:500;">'
+        '&#9888; Google Form not yet configured. Create the form in Google Workspace '
+        'and update <code>_COMMUNITY_FORM_URL</code> in <code>webapp/app.py</code>.</p></div>'
+    )
+    body = f"""<div class="page" style="max-width:660px;">
+<div style="font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;">CFO Community</div>
+<h1 style="margin:0 0 28px;">Building something better<br>for CFO peers.</h1>
+
+<p>I&rsquo;ve spent years inside finance communities&mdash;as a founding member and eventually as GM of
+<a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>, the invite-only network
+for CFOs of high-growth tech companies. I&rsquo;ve seen what makes these communities genuinely valuable,
+and I&rsquo;ve seen where even the best ones fall short.</p>
+
+<p>I&rsquo;m working on something new in this space. Before I build anything, I want to hear from
+peers who&rsquo;ve been in these communities: what they got right, what they missed, and what a
+version that actually works would look like for the finance leaders who need it most.</p>
+
+<p>If you have a few minutes, I&rsquo;d love your input. The form takes about two minutes and
+your answers will directly shape what I build.</p>
+
+<div style="margin-top:32px;">
+{cta_block}
+</div>
+
+<div style="margin-top:48px;padding-top:32px;border-top:1px solid var(--line);">
+  <p style="font-size:13px;color:var(--muted);margin:0;">Questions? <a href="/contact">Get in touch directly.</a></p>
+</div>
+</div>"""
+    return HTMLResponse(_page("CFO Community—Brian Weisberg", "", body))
+
+
 @app.get("/tools", response_class=HTMLResponse)
 def tools_directory(request: Request):
     authed = _is_authed(request)
@@ -1405,6 +1466,7 @@ def tools_directory(request: Request):
             "url": t["url"],
             "categories": t["categories"],
             "advisor": bool(t.get("advisor")),
+            "promoted": bool(t.get("promoted")),
         }
         if authed:
             entry["submitted_by"] = t.get("submitted_by") or ""
@@ -1501,6 +1563,26 @@ def tools_directory(request: Request):
 .bench-card:hover .bench-name{{color:var(--accent);}}
 .bench-badge{{font-size:11px;font-weight:500;border-radius:6px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}}
 .bench-desc{{font-size:13px;color:#3a352e;margin:0;line-height:1.5;}}
+.tool-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
+.tool-intro-btn{{font-size:13px;font-weight:600;color:var(--navy);background:none;border:1px solid var(--navy);
+  border-radius:8px;padding:6px 14px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
+.tool-intro-btn:hover{{background:var(--navy-wash);}}
+/* Intro modal */
+.intro-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;
+  align-items:center;justify-content:center;padding:20px;}}
+.intro-overlay.open{{display:flex;}}
+.intro-modal{{background:#fff;border-radius:20px;padding:32px 28px;width:100%;max-width:460px;
+  box-shadow:0 20px 60px rgba(0,0,0,.18);position:relative;}}
+.intro-modal h2{{font-family:var(--font-head);font-size:20px;font-weight:600;letter-spacing:-0.01em;
+  color:var(--ink);margin:0 0 6px;}}
+.intro-modal p{{font-size:14px;color:var(--muted);margin:0 0 20px;}}
+.intro-field{{display:grid;gap:6px;}}
+.intro-field label{{font-size:13px;font-weight:500;color:var(--navy);}}
+.intro-field input,.intro-field select{{width:100%;padding:9px 13px;border:1px solid var(--line);
+  border-radius:9px;font:inherit;font-size:14px;background:var(--bg);}}
+.intro-close{{position:absolute;top:16px;right:20px;background:none;border:none;font-size:20px;
+  color:var(--muted);cursor:pointer;line-height:1;padding:4px 8px;border-radius:6px;}}
+.intro-close:hover{{background:var(--navy-wash);color:var(--ink);}}
 </style>
 
 <script>
@@ -1529,7 +1611,17 @@ function renderTools(tools) {{
   }}
   empty.style.display = 'none';
   count.textContent = tools.length + ' tool' + (tools.length === 1 ? '' : 's');
-  grid.innerHTML = tools.map(function(t) {{
+  // Promoted tools first, then alphabetical within each group
+  var sorted = tools.slice().sort(function(a, b) {{
+    if (a.promoted && !b.promoted) return -1;
+    if (!a.promoted && b.promoted) return 1;
+    return esc(a.name).localeCompare(esc(b.name));
+  }});
+  grid.innerHTML = sorted.map(function(t) {{
+    var promotedBadge = t.promoted
+      ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
+        + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
+      : '';
     var star = t.advisor ? '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' : '';
     var cats = (t.categories || []).map(function(c) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
@@ -1551,15 +1643,20 @@ function renderTools(tools) {{
       if (t.updated_at && t.updated_at !== t.created_at) metaParts.push('Edited ' + t.updated_at);
     }}
     var adminMeta = metaParts.length ? '<div class="tool-meta">' + metaParts.join(' &middot; ') + '</div>' : '';
-    return '<article class="tool-card">'
-      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">'
-      + '<div style="display:flex;align-items:baseline;gap:0;min-width:0;">'
-      + star
+    var introBtn = '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ',\'' + esc(t.name).replace(/'/g,"\\'") + '\')">'
+      + '&#10024; Warm Intro</button>';
+    return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
+      + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
+      + promotedBadge + star
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
       + '</div>'
       + adminControls + '</div>'
       + '<p class="tool-desc">' + esc(t.description) + '</p>'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
       + '<div class="tool-cats">' + cats + '</div>'
+      + introBtn
+      + '</div>'
       + adminMeta + '</article>';
   }}).join('');
 }}
@@ -1614,6 +1711,108 @@ function toggleAdvisor() {{
 function filterTools() {{ renderTools(filtered()); }}
 
 renderTools(ALL_TOOLS);
+</script>"""
+
+    body += """
+<div class="intro-overlay" id="intro-overlay" onclick="if(event.target===this)closeIntroModal()">
+  <div class="intro-modal">
+    <button class="intro-close" onclick="closeIntroModal()" aria-label="Close">&times;</button>
+    <h2>Request a Warm Intro</h2>
+    <p>I&rsquo;ll personally connect you with the team at <strong id="intro-tool-name"></strong>.</p>
+    <div id="intro-form-body" style="display:grid;gap:16px;margin-top:4px;">
+      <div class="intro-field">
+        <label for="intro-name">Your name</label>
+        <input id="intro-name" type="text" placeholder="Jane Smith" maxlength="200">
+      </div>
+      <div class="intro-field">
+        <label for="intro-email">Work email</label>
+        <input id="intro-email" type="email" placeholder="jane@company.com" maxlength="200">
+      </div>
+      <div class="intro-field">
+        <label for="intro-company">Company</label>
+        <input id="intro-company" type="text" placeholder="Acme Corp" maxlength="200">
+      </div>
+      <div class="intro-field">
+        <label for="intro-size">Company size</label>
+        <select id="intro-size">
+          <option value="">Select&hellip;</option>
+          <option value="1-10">1&ndash;10 employees</option>
+          <option value="11-50">11&ndash;50 employees</option>
+          <option value="51-200">51&ndash;200 employees</option>
+          <option value="201-500">201&ndash;500 employees</option>
+          <option value="500+">500+ employees</option>
+        </select>
+      </div>
+      <div id="intro-error" style="display:none;font-size:13px;color:#b91c1c;"></div>
+      <button class="btn" id="intro-submit-btn" onclick="submitIntroForm()" style="justify-content:center;">Send intro request &rarr;</button>
+    </div>
+    <div id="intro-success" style="display:none;text-align:center;padding:16px 0;">
+      <div style="font-size:36px;margin-bottom:12px;">&#10024;</div>
+      <p style="font-size:16px;font-weight:600;color:var(--navy);margin:0 0 6px;">Request sent!</p>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 20px;line-height:1.5;">Brian will be in touch with an intro shortly.</p>
+      <button class="btn btn-ghost" onclick="closeIntroModal()">Close</button>
+    </div>
+  </div>
+</div>
+<script>
+var _introToolId = null;
+function openIntroModal(toolId, toolName) {
+  _introToolId = toolId;
+  document.getElementById('intro-tool-name').textContent = toolName;
+  document.getElementById('intro-name').value = '';
+  document.getElementById('intro-email').value = '';
+  document.getElementById('intro-company').value = '';
+  document.getElementById('intro-size').value = '';
+  document.getElementById('intro-form-body').style.display = 'grid';
+  document.getElementById('intro-success').style.display = 'none';
+  var errEl = document.getElementById('intro-error');
+  errEl.style.display = 'none';
+  errEl.textContent = '';
+  var btn = document.getElementById('intro-submit-btn');
+  btn.disabled = false;
+  btn.textContent = 'Send intro request →';
+  document.getElementById('intro-overlay').classList.add('open');
+}
+function closeIntroModal() {
+  document.getElementById('intro-overlay').classList.remove('open');
+  _introToolId = null;
+}
+function submitIntroForm() {
+  var name = (document.getElementById('intro-name').value || '').trim();
+  var email = (document.getElementById('intro-email').value || '').trim();
+  var company = (document.getElementById('intro-company').value || '').trim();
+  var size = document.getElementById('intro-size').value;
+  var errEl = document.getElementById('intro-error');
+  errEl.style.display = 'none';
+  if (!name || !email || !company || !size) {
+    errEl.textContent = 'Please fill in all fields.';
+    errEl.style.display = 'block';
+    return;
+  }
+  var btn = document.getElementById('intro-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  fetch('/tools/' + _introToolId + '/interest', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: name, email: email, company: company, company_size: size})
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.ok) {
+      document.getElementById('intro-form-body').style.display = 'none';
+      document.getElementById('intro-success').style.display = 'block';
+    } else {
+      errEl.textContent = data.error || 'Something went wrong. Please try again.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Send intro request →';
+    }
+  }).catch(function() {
+    errEl.textContent = 'Network error. Please try again.';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Send intro request →';
+  });
+}
 </script>"""
     return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, authed=authed))
 
@@ -1719,6 +1918,11 @@ def admin_contacts(request: Request):
     body = f"""<div class="page" style="max-width:960px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Contact submissions</h1>
+<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">
+  <strong>TODO:</strong> Set up <code>hello@[yourdomain].com</code> in Google Workspace once the domain is purchased,
+  then set <code>LINKLIB_SMTP_HOST/USER/PASS</code> + <code>LINKLIB_FROM_EMAIL</code> in Railway so contact
+  form submissions are emailed to you automatically. Until then, check this page manually.
+</div>
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:24px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
@@ -1739,6 +1943,8 @@ def admin_tools(request: Request):
     lib = _lib()
     try:
         pending = [t for t in lib.list_tools(approved_only=False) if not t["approved"]]
+        approved = [t for t in lib.list_tools(approved_only=True)]
+        lead_counts = lib.get_tool_lead_counts()
     finally:
         lib.close()
 
@@ -1762,17 +1968,44 @@ def admin_tools(request: Request):
           </td>
         </tr>"""
 
-    rows = "".join(_tool_row(t) for t in pending) or \
+    def _approved_row(t: dict) -> str:
+        cats = ", ".join(t["categories"]) or "—"
+        n_leads = lead_counts.get(t["id"], 0)
+        lead_badge = (f'<a href="/admin/tools/leads?tool_id={t["id"]}" '
+                      f'style="display:inline-block;background:var(--coral);color:#fff;border-radius:5px;'
+                      f'padding:2px 8px;font-size:11px;font-weight:700;text-decoration:none;white-space:nowrap;">'
+                      f'{n_leads} lead{"s" if n_leads != 1 else ""}</a>') if n_leads else \
+                     '<span style="font-size:12px;color:var(--muted);">0 leads</span>'
+        featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if t.get("promoted") else ""
+        return f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(t['name'])}{featured_badge}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
+            <a href="/admin/tools/{t['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+          </td>
+        </tr>"""
+
+    pending_rows = "".join(_tool_row(t) for t in pending) or \
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
+    approved_rows = "".join(_approved_row(t) for t in approved) or \
+        '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No approved tools yet.</td></tr>'
+    total_leads = sum(lead_counts.values())
 
     body = f"""<div class="page" style="max-width:1100px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>CFO Toolbox—Pending submissions</h1>
+  <h1>CFO Toolbox—Admin</h1>
   <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
 </div>
-<p style="margin:0 0 24px;"><a href="/tools" style="font-size:13px;color:var(--muted);">View public directory →</a></p>
-<div style="overflow-x:auto;">
+<p style="margin:0 0 24px;">
+  <a href="/tools" style="font-size:13px;color:var(--muted);">View public directory →</a>
+  &nbsp;&middot;&nbsp;
+  <a href="/admin/tools/leads" style="font-size:13px;color:var(--muted);">View all leads ({total_leads}) →</a>
+</p>
+
+<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
+<div style="overflow-x:auto;margin-bottom:40px;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
@@ -1783,11 +2016,70 @@ def admin_tools(request: Request):
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Submitted by</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
-<tbody>{rows}</tbody>
+<tbody>{pending_rows}</tbody>
+</table>
+</div>
+
+<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved tools</h2>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Leads</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody>{approved_rows}</tbody>
 </table>
 </div>
 </div>"""
     return HTMLResponse(_page("Tools Admin—CFO Toolbox", "", body, authed=True))
+
+
+@app.get("/admin/tools/leads", response_class=HTMLResponse)
+def admin_tools_leads(request: Request, tool_id: int | None = None):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        leads = lib.list_tool_leads(tool_id=tool_id)
+        tool_name_filter = ""
+        if tool_id:
+            t = lib.get_tool(tool_id)
+            tool_name_filter = t["name"] if t else f"Tool #{tool_id}"
+    finally:
+        lib.close()
+    rows = "".join(
+        f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(ld['created_at'][:10])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(ld['tool_name'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{_esc(ld['name'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="mailto:{_esc(ld['email'])}" style="color:var(--accent);">{_esc(ld['email'])}</a></td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{_esc(ld['company'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(ld['company_size'])}</td>
+        </tr>"""
+        for ld in leads
+    ) or '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No leads yet.</td></tr>'
+    title_suffix = f" — {_esc(tool_name_filter)}" if tool_name_filter else ""
+    body = f"""<div class="page" style="max-width:1000px;">
+<p style="margin:0 0 4px;"><a href="/admin/tools" style="font-size:13px;color:var(--muted);">&larr; Tools Admin</a></p>
+<h1>Warm Intro Leads{title_suffix}</h1>
+<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">{len(leads)} lead{"s" if len(leads) != 1 else ""} total</p>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Company</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Size</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>
+</div>"""
+    return HTMLResponse(_page("Tool Leads—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/tools/new", response_class=HTMLResponse)
@@ -1828,6 +2120,18 @@ def admin_tools_new(request: Request):
     </label>
   </div>
   <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="promoted" value="1">
+      <span>&#10024; Featured — pin to top of directory with coral badge</span>
+    </label>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor email <span style="font-weight:400;color:var(--muted);">(for Warm Intro lead notifications)</span></label>
+    <input name="vendor_email" type="email" maxlength="200"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="contact@vendor.com">
+  </div>
+  <div>
     <button type="submit" class="btn">Add to directory</button>
     <a href="/admin/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
@@ -1846,11 +2150,14 @@ async def admin_tools_new_submit(request: Request):
     description = (form.get("description") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
     advisor = 1 if form.get("advisor") == "1" else 0
+    promoted = 1 if form.get("promoted") == "1" else 0
+    vendor_email = (form.get("vendor_email") or "").strip()
     if not (name and url and description and categories):
         raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
     lib = _lib()
     try:
-        lib.add_tool(name, description, url, categories, approved=1, advisor=advisor)
+        lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
+                     promoted=promoted, vendor_email=vendor_email)
     finally:
         lib.close()
     return RedirectResponse("/tools", status_code=303)
@@ -1932,6 +2239,18 @@ def admin_tools_edit(request: Request, tool_id: int):
     </label>
   </div>
   <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
+      <span>&#10024; Featured — pin to top of directory with coral badge</span>
+    </label>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor email <span style="font-weight:400;color:var(--muted);">(for Warm Intro lead notifications)</span></label>
+    <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="contact@vendor.com">
+  </div>
+  <div>
     <button type="submit" class="btn">Save changes</button>
     <a href="/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
@@ -1950,11 +2269,14 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     description = (form.get("description") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
     advisor = 1 if form.get("advisor") == "1" else 0
+    promoted = 1 if form.get("promoted") == "1" else 0
+    vendor_email = (form.get("vendor_email") or "").strip()
     if not (name and url and description and categories):
         raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
     lib = _lib()
     try:
-        lib.update_tool(tool_id, name, description, url, categories, advisor=advisor)
+        lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
+                        promoted=promoted, vendor_email=vendor_email)
     finally:
         lib.close()
     return RedirectResponse("/tools", status_code=303)
@@ -1970,6 +2292,45 @@ def admin_tools_delete(request: Request, tool_id: int):
     finally:
         lib.close()
     return RedirectResponse("/tools", status_code=303)
+
+
+@app.post("/tools/{tool_id}/interest")
+async def tools_interest(tool_id: int, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    name = (body.get("name") or "").strip()
+    email = (body.get("email") or "").strip()
+    company = (body.get("company") or "").strip()
+    company_size = (body.get("company_size") or "").strip()
+    if not (name and email and company and company_size):
+        return JSONResponse({"ok": False, "error": "All fields are required"}, status_code=400)
+    lib = _lib()
+    try:
+        tools = lib.list_tools(approved_only=True)
+        tool = next((t for t in tools if t["id"] == tool_id), None)
+        if not tool:
+            return JSONResponse({"ok": False, "error": "Tool not found"}, status_code=404)
+        tool_name = tool["name"]
+        vendor_email = tool.get("vendor_email") or ""
+        lib.save_tool_lead(tool_id, tool_name, name, email, company, company_size)
+    finally:
+        lib.close()
+    if vendor_email:
+        try:
+            from linklib.email_utils import send_lead_email
+            send_lead_email(
+                to=vendor_email,
+                tool_name=tool_name,
+                name=name,
+                email=email,
+                company=company,
+                company_size=company_size,
+            )
+        except Exception:
+            pass
+    return JSONResponse({"ok": True})
 
 
 # ---------------------------------------------------------------------------
@@ -3025,11 +3386,12 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 
 # Admin sections — the hub lists these; each links to its own page.
 _ADMIN_SECTIONS = [
-    ("/admin/social",   "Social",              "Draft LinkedIn posts in your voice."),
-    ("/admin/backup",   "Library backup",      "Download a snapshot or upload a replacement database."),
-    ("/admin/brand",    "Brand standards",     "Visual standards, color system, and your writing voice."),
-    ("/admin/contacts", "Contact submissions", "Messages from the public contact form."),
-    ("/admin/tools",    "Tool submissions",    "Review the CFO Toolbox approval queue."),
+    ("/admin/social",       "Social",              "Draft LinkedIn posts in your voice."),
+    ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
+    ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
+    ("/admin/contacts",     "Contact submissions", "Messages from the public contact form."),
+    ("/admin/tools",        "Tool submissions",    "Review the CFO Toolbox approval queue and manage featured/vendor settings."),
+    ("/admin/tools/leads",  "Tool leads",          "Warm Intro requests — name, email, company, and size for each tool."),
 ]
 
 
