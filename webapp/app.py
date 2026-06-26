@@ -3405,6 +3405,34 @@ def admin_brand(request: Request):
         '</ul>'
     )
 
+    checks_doc = (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
+        '<div style="overflow-x:auto;">'
+        '<table style="width:100%;border-collapse:collapse;font-size:14px;min-width:560px;">'
+        '<thead><tr style="background:var(--navy);">'
+        '<th style="padding:9px 12px;text-align:left;color:#fff;">Check</th>'
+        '<th style="padding:9px 12px;text-align:left;color:#fff;">What it looks at</th>'
+        '<th style="padding:9px 12px;text-align:left;color:#fff;">When &amp; where</th>'
+        '<th style="padding:9px 12px;text-align:left;color:#fff;">Cost</th>'
+        '</tr></thead><tbody>'
+        '<tr style="border-top:1px solid var(--line);">'
+        '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Brand check</td>'
+        '<td style="padding:10px 12px;">Colors, fonts, and the voice <em>mechanics</em> &mdash; banned buzzwords, filler, performative phrases.</td>'
+        '<td style="padding:10px 12px;"><strong>Automatic.</strong> Every push &amp; pull request via GitHub Actions (<code>.github/workflows/qa.yml</code>); blocks merge on failure. Locally: <code>pytest -q</code>.</td>'
+        '<td style="padding:10px 12px;white-space:nowrap;">Free &middot; deterministic</td>'
+        '</tr>'
+        '<tr style="border-top:1px solid var(--line);background:var(--surface-2);">'
+        '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Tone review</td>'
+        '<td style="padding:10px 12px;">The holistic read &mdash; &ldquo;does this sound like me&rdquo; &mdash; judged by Claude against the voice guide.</td>'
+        '<td style="padding:10px 12px;"><strong>On demand only.</strong> The <em>Check content against your voice</em> box below, or the CLI <code>python -m scripts.voice_review</code>. <strong>Never in CI.</strong></td>'
+        '<td style="padding:10px 12px;white-space:nowrap;">API key, per run</td>'
+        '</tr>'
+        '</tbody></table></div>'
+        '<p style="font-size:13px;color:var(--muted);margin:14px 0 0;">Both share one source of truth: the voice guide below and <code>linklib/voice_review.py</code>. '
+        'Tone review stays out of CI on purpose &mdash; running Claude on every commit would be slow, non-deterministic, and spend the pay-per-use API key.</p>'
+        '</div>'
+    )
+
     body = f"""<div class="page" style="max-width:900px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Brand standards</h1>
@@ -3436,6 +3464,9 @@ Deep shades are text-capable; base/mid are for graphics and large display; light
 
 <h2>Usage</h2>
 {rules}
+
+<h2>How the checks run</h2>
+{checks_doc}
 
 <h2>Verbal identity — your voice</h2>
 {verbal}
