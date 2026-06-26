@@ -158,6 +158,7 @@ def _page(title: str, active: str, body: str, authed: bool = False) -> str:
         ("/library", "Library"),
         ("/feed", "Feed"),
         ("/ask", "Ask"),
+        ("/draft", "Draft"),
     ]
     nav = "".join(
         f'<a href="{href}" class="{"active" if active == label else ""}">{label}</a>'
@@ -1581,6 +1582,261 @@ async def post_draft(request: Request):
         return {"post": d.post}
     finally:
         lib.close()
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn ghostwriter — multi-turn chat with screenshot + URL context
+# ---------------------------------------------------------------------------
+
+_DRAFT_BODY = """<div class="chat-wrap">
+  <div class="chat-head">
+    <div>
+      <h1 style="margin:0 0 4px;">LinkedIn ghostwriter</h1>
+      <p style="color:var(--muted);margin:0;font-size:15px;">Hand me a topic, a link, or a screenshot of a post. I'll take a swing in your voice, then we iterate.</p>
+    </div>
+    <button id="clear-btn" class="btn btn-ghost" onclick="clearChat()" style="white-space:nowrap;">New draft</button>
+  </div>
+
+  <div id="chat" class="chat-log"></div>
+
+  <div id="dropzone" class="composer">
+    <div id="thumbs" class="thumbs"></div>
+    <input id="url-in" type="url" class="url-in" placeholder="Optional: paste a URL for context (best-effort — LinkedIn usually can't be fetched)…">
+    <div class="compose-row">
+      <textarea id="msg-in" rows="2" placeholder="Topic, notes, or feedback…  (Enter to send · Shift+Enter for a newline)"></textarea>
+      <div class="compose-actions">
+        <label class="attach-btn" title="Attach screenshot">&#128206;<input id="file-in" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden></label>
+        <button id="send-btn" class="btn" onclick="send()">Send</button>
+      </div>
+    </div>
+    <div class="hint">Drag, paste, or attach a screenshot of a LinkedIn post to reshare it.</div>
+  </div>
+</div>
+
+<style>
+.chat-wrap{max-width:780px;margin:0 auto;padding:32px 24px 48px;}
+.chat-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;}
+.chat-log{display:flex;flex-direction:column;gap:14px;min-height:180px;margin-bottom:20px;}
+.empty{color:var(--muted);font-size:15px;text-align:center;padding:40px 0;}
+.msg{max-width:88%;border-radius:14px;padding:13px 16px;font-size:15px;line-height:1.6;}
+.msg-user{align-self:flex-end;background:var(--accent-light);border:1px solid var(--line);}
+.msg-assistant{align-self:flex-start;background:#fff;border:1px solid var(--line);position:relative;}
+.msg-text{white-space:pre-wrap;word-wrap:break-word;}
+.msg-text + .msg-text{margin-top:8px;}
+.msg-img{max-width:220px;border-radius:10px;border:1px solid var(--line);margin:4px 0;display:block;}
+.copy{margin-top:10px;font-size:12px;color:var(--accent);background:transparent;border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer;}
+.copy:hover{background:var(--accent-light);}
+.composer{border:1px solid var(--line);border-radius:16px;background:#fff;padding:14px 16px;transition:border-color .12s,background .12s;}
+.composer.drag{border-color:var(--accent);background:var(--accent-light);}
+.thumbs{display:flex;flex-wrap:wrap;gap:8px;}
+.thumbs:not(:empty){margin-bottom:10px;}
+.thumb-wrap{position:relative;}
+.thumb-wrap img{width:60px;height:60px;object-fit:cover;border-radius:8px;border:1px solid var(--line);}
+.thumb-wrap button{position:absolute;top:-7px;right:-7px;width:20px;height:20px;border-radius:50%;border:none;background:var(--ink);color:#fff;font-size:13px;line-height:1;cursor:pointer;}
+.url-in{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:var(--bg);margin-bottom:10px;}
+.compose-row{display:flex;gap:10px;align-items:flex-end;}
+.compose-row textarea{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;min-height:46px;}
+.compose-actions{display:flex;gap:8px;align-items:center;}
+.attach-btn{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-size:18px;background:var(--bg);}
+.attach-btn:hover{background:var(--accent-light);}
+.hint{font-size:12px;color:var(--muted);margin-top:8px;}
+nav.site-nav a[href="/draft"]{color:var(--ink);font-weight:600;}
+</style>
+
+<script>
+var KEY='cfo_draft_history_v1';
+var ALLOWED=['image/png','image/jpeg','image/webp','image/gif'];
+var history=loadHistory();
+var pending=[];   // {media_type, data(base64), dataUrl}
+
+function loadHistory(){try{return JSON.parse(localStorage.getItem(KEY))||[];}catch(e){return [];}}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(history));}catch(e){/* quota — session memory still holds it */}}
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function render(){
+  var c=document.getElementById('chat');
+  if(!history.length){c.innerHTML='<div class="empty">No draft yet. Give me something to work with.</div>';return;}
+  c.innerHTML=history.map(function(m){
+    var inner='';
+    if(typeof m.content==='string'){inner=textBlock(m.content);}
+    else{m.content.forEach(function(b){
+      if(b.type==='text'){inner+=textBlock(b.text);}
+      else if(b.type==='image'){inner+='<img class="msg-img" src="data:'+b.source.media_type+';base64,'+b.source.data+'">';}
+    });}
+    var copy=m.role==='assistant'?'<button class="copy" onclick="copyText(this)">Copy</button>':'';
+    return '<div class="msg msg-'+m.role+'">'+inner+copy+'</div>';
+  }).join('');
+  c.scrollTop=c.scrollHeight;
+}
+function textBlock(t){return '<div class="msg-text">'+esc(t).replace(/\\n/g,'<br>')+'</div>';}
+
+function copyText(btn){
+  var node=btn.parentNode.querySelector('.msg-text');
+  navigator.clipboard.writeText(node?node.innerText:'');
+  btn.textContent='Copied';setTimeout(function(){btn.textContent='Copy';},1500);
+}
+
+function renderThumbs(){
+  var t=document.getElementById('thumbs');
+  t.innerHTML=pending.map(function(p,i){
+    return '<div class="thumb-wrap"><img src="'+p.dataUrl+'"><button onclick="rmThumb('+i+')" title="Remove">&times;</button></div>';
+  }).join('');
+}
+function rmThumb(i){pending.splice(i,1);renderThumbs();}
+
+function addFile(file){
+  if(ALLOWED.indexOf(file.type)<0){alert('Only PNG, JPEG, WebP, or GIF images.');return;}
+  if(file.size>5*1024*1024){alert('That image is over 5MB — please shrink it first.');return;}
+  var reader=new FileReader();
+  reader.onload=function(){
+    var dataUrl=reader.result;
+    pending.push({media_type:file.type,data:dataUrl.split(',')[1],dataUrl:dataUrl});
+    renderThumbs();
+  };
+  reader.readAsDataURL(file);
+}
+
+function showThinking(){
+  var c=document.getElementById('chat');
+  if(!history.length){c.innerHTML='';}
+  var d=document.createElement('div');
+  d.id='pending';d.className='msg msg-assistant';
+  d.innerHTML='<div class="msg-text"><em style="color:var(--muted);">Drafting in your voice…</em></div>';
+  c.appendChild(d);c.scrollTop=c.scrollHeight;
+}
+function clearThinking(){var p=document.getElementById('pending');if(p)p.remove();}
+
+async function send(){
+  var ta=document.getElementById('msg-in');
+  var urlEl=document.getElementById('url-in');
+  var text=ta.value.trim();
+  var url=urlEl.value.trim();
+  if(!text && !pending.length && !url){return;}
+  if(!text){text='Draft a LinkedIn post based on this.';}
+  if(url){text=text+'\\n\\n[URL: '+url+']';}
+
+  var content=[];
+  pending.forEach(function(p){content.push({type:'image',source:{type:'base64',media_type:p.media_type,data:p.data}});});
+  content.push({type:'text',text:text});
+
+  history.push({role:'user',content:content});
+  persist();
+  pending=[];renderThumbs();ta.value='';urlEl.value='';
+  render();
+
+  var btn=document.getElementById('send-btn');
+  btn.disabled=true;btn.textContent='…';
+  showThinking();
+
+  try{
+    var r=await fetch('/draft/message',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messages:history,url:url})});
+    var d=await r.json();
+    clearThinking();
+    if(!r.ok){history.push({role:'assistant',content:'\\u26a0\\ufe0f '+(d.detail||'Something went wrong.')});}
+    else{
+      var reply=d.reply||'';
+      if(d.fetch_note){reply='('+d.fetch_note+')\\n\\n'+reply;}
+      history.push({role:'assistant',content:reply});
+    }
+    persist();render();
+  }catch(e){
+    clearThinking();
+    history.push({role:'assistant',content:'\\u26a0\\ufe0f Network error — try again.'});
+    render();
+  }finally{btn.disabled=false;btn.textContent='Send';}
+}
+
+function clearChat(){
+  if(history.length && !confirm('Clear this conversation and start a new draft?')){return;}
+  history=[];pending=[];persist();renderThumbs();render();
+}
+
+document.getElementById('file-in').addEventListener('change',function(e){
+  Array.prototype.forEach.call(e.target.files,addFile);e.target.value='';
+});
+document.getElementById('msg-in').addEventListener('keydown',function(e){
+  if(e.key==='Enter' && !e.shiftKey){e.preventDefault();send();}
+});
+var dz=document.getElementById('dropzone');
+['dragover','dragenter'].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.add('drag');});});
+['dragleave','dragend'].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.remove('drag');});});
+dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');if(e.dataTransfer&&e.dataTransfer.files){Array.prototype.forEach.call(e.dataTransfer.files,addFile);}});
+document.addEventListener('paste',function(e){
+  if(!e.clipboardData)return;
+  Array.prototype.forEach.call(e.clipboardData.items,function(it){
+    if(it.type.indexOf('image')===0){var f=it.getAsFile();if(f)addFile(f);}
+  });
+});
+
+render();renderThumbs();
+</script>"""
+
+
+@app.get("/draft", response_class=HTMLResponse)
+def draft_page(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    return HTMLResponse(_page("LinkedIn ghostwriter — Brian Weisberg", "Draft", _DRAFT_BODY, authed=True))
+
+
+def _append_context_to_last_user(messages: list, note: str) -> None:
+    """Append a text block carrying fetched URL context to the latest user turn."""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            content = m.get("content")
+            if isinstance(content, str):
+                m["content"] = content + note
+            elif isinstance(content, list):
+                content.append({"type": "text", "text": note})
+            return
+
+
+@app.post("/draft/message")
+async def draft_message(request: Request):
+    _require_api(request)
+    from linklib.social import chat_draft, CHAT_IMAGE_MEDIA_TYPES
+    payload = await request.json()
+    messages = payload.get("messages") or []
+    url = (payload.get("url") or "").strip()
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages required")
+
+    # Defensively validate any image blocks before forwarding to the API.
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "image":
+                    mt = (block.get("source") or {}).get("media_type")
+                    if mt not in CHAT_IMAGE_MEDIA_TYPES:
+                        raise HTTPException(status_code=400, detail=f"unsupported image type: {mt}")
+
+    # Best-effort URL fetch — inject as context, or tell the model to ask for a
+    # screenshot rather than invent the contents.
+    fetch_note = ""
+    if url:
+        from linklib.extract import fetch_page
+        page = fetch_page(url)
+        if page.content:
+            _append_context_to_last_user(
+                messages,
+                f"\n\n[Fetched context from {url}"
+                + (f" — title: {page.title}" if page.title else "")
+                + f"]\n{page.content[:6000]}",
+            )
+            fetch_note = f"Fetched “{page.title or url}” for context."
+        else:
+            _append_context_to_last_user(
+                messages,
+                f"\n\n[Note: the URL {url} could not be fetched server-side "
+                "(likely blocked or login-walled). Do not invent its contents — "
+                "ask for a screenshot instead.]",
+            )
+            fetch_note = "Couldn't fetch that URL — paste a screenshot and I'll read it."
+
+    reply = chat_draft(messages)
+    return {"reply": reply, "fetch_note": fetch_note}
 
 
 @app.post("/feed/save")
