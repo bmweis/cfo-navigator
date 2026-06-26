@@ -1,0 +1,21 @@
+name: QA
+
+# Brand-standards + repo checks. Runs on every PR and on pushes to main, so
+# off-brand content (colors/fonts outside BRAND.md) is caught before it ships.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  brand-standards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run brand-standards QA
+        run: pytest -q

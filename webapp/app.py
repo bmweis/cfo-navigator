@@ -267,13 +267,23 @@ _CSS = """
   --bg:#F5F4EF;            /* warm off-white page */
   --surface:#FFFFFF;       /* cards, inputs */
   --surface-2:#FAF9F4;     /* subtle alt panels, table stripes */
-  /* Brand */
-  --navy:#002975;          /* primary */
+  /* Brand — Navy (primary, cool). deep · base · light · wash */
   --navy-deep:#001B4F;     /* button hover / depth */
+  --navy:#002975;          /* primary base */
+  --navy-light:#3F5C9A;    /* lighter navy — secondary accents, borders */
+  --navy-wash:#EEF1F7;     /* soft navy fill — chip/ghost hovers */
   --accent:#002975;        /* legacy name now = navy (keeps old markup working) */
-  --seafoam:#A3E5D4;       /* accent — tags, badges, active underline */
+  --accent-light:#EEF1F7;  /* legacy name now = --navy-wash */
+  /* Brand — Seafoam/Green (cool accent). deep · mid · base · wash */
+  --seafoam-deep:#1F7A66;  /* deepest teal — text-capable on light (AA) */
+  --seafoam-mid:#2E9C86;   /* mid teal — data-viz (legible as a fill/line) */
+  --seafoam:#A3E5D4;       /* accent base (light mint) — tags, badges, underline */
   --seafoam-wash:#EAF7F2;  /* soft accent fill — calc readout, table accents */
-  --accent-light:#EEF1F7;  /* legacy name now = soft navy wash (chip/ghost hovers) */
+  /* Brand — Coral (warm accent, rare). deep · base · light · wash */
+  --coral-deep:#B14A30;    /* coral that must carry small text (AA on canvas) */
+  --coral:#E8704F;         /* warm accent base — display pop, data-viz R&D series */
+  --coral-light:#F4A98F;   /* lighter coral — soft highlights */
+  --coral-wash:#FBEAE3;    /* soft coral fill — callouts (navy text) */
   /* Text */
   --ink:#1a1a1a;
   --ink-soft:#3a3833;
@@ -630,9 +640,9 @@ def growth_engine_ratio():
   .qlabel{font-size:13px;color:var(--ink);font-weight:500;}
   .qhead{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
   .qrow-proj .ger-in{background:#fbfaf6;border-style:dashed;}
-  .ger-chart{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;background:#fff;}
+  .ger-chart{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;background:#fff;font-family:var(--font-body);}
   .ger-contrib-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  .ger-contrib{width:100%;height:auto;display:block;}
+  .ger-contrib{width:100%;height:auto;display:block;font-family:var(--font-body);}
   .tl-step{display:flex;flex-direction:column;gap:6px;}
   .tl-ctrl{display:inline-flex;align-items:center;gap:16px;border:1px solid var(--line);border-radius:10px;padding:6px 12px;background:#fff;width:max-content;}
   .tl-ctrl button{font:inherit;font-size:18px;line-height:1;width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--accent);cursor:pointer;}
@@ -766,7 +776,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
   <div style="display:grid;gap:20px;">
 
     <div>
-      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">Revenue</p>
+      <p style="font:600 13px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">Revenue</p>
       <div class="ger-grid-2">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Current quarter (Q<sub>n</sub>)</label>
@@ -782,7 +792,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     </div>
 
     <div>
-      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">GTM Spend (Sales &amp; Marketing)—last 4 quarters</p>
+      <p style="font:600 13px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">GTM Spend (Sales &amp; Marketing)—last 4 quarters</p>
       <div class="ger-grid-4">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-4</sub></label>
@@ -808,7 +818,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     </div>
 
     <div>
-      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">R&amp;D Spend—2 quarters (the build window)</p>
+      <p style="font:600 13px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">R&amp;D Spend—2 quarters (the build window)</p>
       <div class="ger-grid-2" style="max-width:320px;">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-5</sub></label>
@@ -833,7 +843,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap;">
       <div style="flex:0 0 auto;">
         <p style="font-size:13px;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.06em;">Your Growth Engine Ratio</p>
-        <p id="ger-value" class="ger-value-big" style="font-size:48px;font-weight:700;letter-spacing:-0.03em;margin:0;color:var(--accent);"></p>
+        <p id="ger-value" class="ger-value-big" style="font-family:var(--font-head);font-size:48px;font-weight:700;letter-spacing:-0.03em;margin:0;color:var(--accent);"></p>
       </div>
       <div style="flex:1;min-width:200px;">
         <p id="ger-tier" style="font-size:18px;font-weight:600;margin:0 0 6px;"></p>
@@ -1012,16 +1022,17 @@ function contributionSVG(strip, cur, labels) {
   var step = (x1 - x0) / n, bw = Math.min(58, step * 0.6);
   function cx(c) { return x0 + step * (c + 0.5); }
   function fmtM(x) { var a = Math.round(x * 10) / 10; return '$' + (a % 1 === 0 ? a.toFixed(0) : a.toFixed(1)) + 'M'; }
-  var BLUE = '#3b82f6', GREEN = '#10b981', RED = '#f4683b', INK = '#1f2937', MUT = '#8a8178';
+  // Brand data palette: GTM = navy, Revenue = seafoam-teal, R&D = coral.
+  var BLUE = '#002975', GREEN = '#2E9C86', RED = '#E8704F', INK = '#1a1a1a', MUT = '#6F6A60';
 
-  var s = '<svg class="ger-contrib" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,-apple-system,Segoe UI,Inter,sans-serif">';
+  var s = '<svg class="ger-contrib" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
   s += '<defs>' +
     '<linearGradient id="cgB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + BLUE + '" stop-opacity="0.30"/><stop offset="1" stop-color="' + BLUE + '" stop-opacity="0.08"/></linearGradient>' +
     '<linearGradient id="cgG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + GREEN + '"/><stop offset="1" stop-color="' + GREEN + '" stop-opacity="0.6"/></linearGradient>' +
     '<linearGradient id="cgR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + RED + '" stop-opacity="0.30"/><stop offset="1" stop-color="' + RED + '" stop-opacity="0.08"/></linearGradient>' +
     '</defs>';
 
-  s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#2c3e50">How ' + labels[cur] + ' is built &#8212; Time-Distributed Contribution</text>';
+  s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#1a1a1a">How ' + labels[cur] + ' is built &#8212; Time-Distributed Contribution</text>';
   s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Efficiency Ratio = $' + ratio.toFixed(2) + '</text>';
 
   s += '<text x="20" y="186" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
@@ -1058,7 +1069,7 @@ function contributionSVG(strip, cur, labels) {
   var rB = 388;
   function revBar(c, val, isCur) {
     var h = barH(val), x = cx(c) - bw / 2, y = rB - h;
-    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="7" fill="' + (isCur ? 'url(#cgG)' : '#d7f0e3') + '" stroke="' + GREEN + '" stroke-opacity="' + (isCur ? '0.55' : '0.3') + '"/>';
+    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="7" fill="' + (isCur ? 'url(#cgG)' : '#D6EFE8') + '" stroke="' + GREEN + '" stroke-opacity="' + (isCur ? '0.55' : '0.3') + '"/>';
     o += '<text x="' + cx(c).toFixed(1) + '" y="' + (isCur ? (y + 19) : (y - 7)).toFixed(1) + '" text-anchor="middle" font-size="' + (isCur ? '12' : '10.5') + '" font-weight="' + (isCur ? '700' : '500') + '" fill="' + (isCur ? '#fff' : MUT) + '">' + fmtM(val) + '</text>';
     return o;
   }
@@ -1069,7 +1080,7 @@ function contributionSVG(strip, cur, labels) {
   var curTop = rB - barH(revC);
   var gx = cx(5) + bw / 2 + 16, gy = Math.max(curTop, 140), cw = 110;
   s += '<line x1="' + (cx(5) + bw / 2).toFixed(1) + '" y1="' + (gy + 19) + '" x2="' + gx.toFixed(1) + '" y2="' + (gy + 19) + '" stroke="' + GREEN + '" stroke-width="1.4" stroke-dasharray="3 2"/>';
-  s += '<rect x="' + gx.toFixed(1) + '" y="' + gy.toFixed(1) + '" width="' + cw + '" height="38" rx="9" fill="#eafaf0" stroke="' + GREEN + '" stroke-width="1.6"/>';
+  s += '<rect x="' + gx.toFixed(1) + '" y="' + gy.toFixed(1) + '" width="' + cw + '" height="38" rx="9" fill="#E7F5F0" stroke="' + GREEN + '" stroke-width="1.6"/>';
   s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 18).toFixed(1) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + GREEN + '">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</text>';
   s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 32).toFixed(1) + '" text-anchor="middle" font-size="9.5" fill="' + GREEN + '">Annualized Growth</text>';
 
@@ -1080,11 +1091,11 @@ function contributionSVG(strip, cur, labels) {
 
   // timeline axis
   var ty = 530;
-  s += '<line x1="' + (x0 - 8) + '" y1="' + ty + '" x2="' + (x1 + 8) + '" y2="' + ty + '" stroke="#cfc8bc" stroke-width="2"/>';
+  s += '<line x1="' + (x0 - 8) + '" y1="' + ty + '" x2="' + (x1 + 8) + '" y2="' + ty + '" stroke="#D6D1C4" stroke-width="2"/>';
   for (var c = 0; c < n; c++) {
     var isCur = (c === 5);
-    s += '<line x1="' + cx(c).toFixed(1) + '" y1="' + (ty - 4) + '" x2="' + cx(c).toFixed(1) + '" y2="' + (ty + 4) + '" stroke="#cfc8bc" stroke-width="1.5"/>';
-    s += '<text x="' + cx(c).toFixed(1) + '" y="' + (ty + 20) + '" text-anchor="middle" font-size="11.5" font-weight="' + (isCur ? '700' : '400') + '" fill="' + (isCur ? '#2c3e50' : MUT) + '">' + labels[cur - 5 + c] + '</text>';
+    s += '<line x1="' + cx(c).toFixed(1) + '" y1="' + (ty - 4) + '" x2="' + cx(c).toFixed(1) + '" y2="' + (ty + 4) + '" stroke="#D6D1C4" stroke-width="1.5"/>';
+    s += '<text x="' + cx(c).toFixed(1) + '" y="' + (ty + 20) + '" text-anchor="middle" font-size="11.5" font-weight="' + (isCur ? '700' : '400') + '" fill="' + (isCur ? '#1a1a1a' : MUT) + '">' + labels[cur - 5 + c] + '</text>';
   }
 
   // formula pill
@@ -1094,7 +1105,7 @@ function contributionSVG(strip, cur, labels) {
     '<tspan fill="' + BLUE + '" font-weight="700">' + fmtM(gtmInv) + '</tspan> + ' +
     '<tspan fill="' + RED + '" font-weight="700">' + fmtM(rndInv) + '</tspan> ) = ' +
     '<tspan fill="' + INK + '" font-weight="700">$' + ratio.toFixed(2) + '</tspan>';
-  s += '<rect x="' + fx.toFixed(1) + '" y="' + fy + '" width="' + fw.toFixed(1) + '" height="34" rx="10" fill="#ffffff" stroke="#d9d2c6" stroke-width="1.6"/>';
+  s += '<rect x="' + fx.toFixed(1) + '" y="' + fy + '" width="' + fw.toFixed(1) + '" height="34" rx="10" fill="#ffffff" stroke="#D6D1C4" stroke-width="1.6"/>';
   s += '<text x="' + (W / 2).toFixed(1) + '" y="' + (fy + 22) + '" text-anchor="middle" font-size="14.5">' + pill + '</text>';
 
   s += '</svg>';
@@ -1189,7 +1200,7 @@ function calcTimeline() {
   var summary =
     '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:baseline;margin-top:18px;">' +
       '<div><p class="qhead" style="margin:0 0 2px;">Current quarter (n)</p>' +
-      '<p style="font-size:32px;font-weight:700;letter-spacing:-0.02em;margin:0;color:' + ct.color + ';">' + fmtRatio(curY) + '</p></div>' +
+      '<p style="font-family:var(--font-head);font-size:32px;font-weight:700;letter-spacing:-0.02em;margin:0;color:' + ct.color + ';">' + fmtRatio(curY) + '</p></div>' +
       '<div style="flex:1;min-width:220px;">' +
       '<p style="font-weight:600;margin:0 0 2px;color:' + ct.color + ';">' + ct.tier + '</p>' +
       '<p style="font-size:14px;color:var(--muted);margin:0;">Across ' + base.length + ' measured quarter' + (base.length > 1 ? 's' : '') +
@@ -1244,8 +1255,8 @@ function buildChart(labels, series, n) {
     return '<polyline points="' + d + '" fill="none" stroke="' + color + '" stroke-width="2.5"' + (dash ? ' stroke-dasharray="6 4"' : '') + '/>';
   }
 
-  var s = '<svg class="ger-chart" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,-apple-system,Segoe UI,sans-serif">';
-  s += band(ymax, 1.20, '#e7f0ec') + band(1.20, 0.70, '#eef3f0') + band(0.70, 0.50, '#fbf3e6') + band(0.50, ymin, '#fbecec');
+  var s = '<svg class="ger-chart" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+  s += band(ymax, 1.20, '#E3F2EC') + band(1.20, 0.70, '#EDF5F1') + band(0.70, 0.50, '#FAF1E1') + band(0.50, ymin, '#F9E8E3');
   s += tlab((Math.min(ymax, 1.7) + 1.20) / 2, 'Elite', '#002975');
   s += tlab(0.95, 'Strong', '#002975');
   s += tlab(0.60, 'Typical', '#9A6B12');
@@ -1253,15 +1264,15 @@ function buildChart(labels, series, n) {
 
   // break-even reference + axis baseline
   var yb = Y(1.0);
-  s += '<line x1="' + mL + '" y1="' + yb.toFixed(1) + '" x2="' + (mL + pw) + '" y2="' + yb.toFixed(1) + '" stroke="#b9b2a6" stroke-width="1" stroke-dasharray="4 3"/>';
-  s += '<text x="' + (mL + 3) + '" y="' + (yb - 4).toFixed(1) + '" font-size="9" fill="#6b6258">$1.00 break-even</text>';
-  s += '<line x1="' + mL + '" y1="' + (mT + ph) + '" x2="' + (mL + pw) + '" y2="' + (mT + ph) + '" stroke="#e6e0d6"/>';
+  s += '<line x1="' + mL + '" y1="' + yb.toFixed(1) + '" x2="' + (mL + pw) + '" y2="' + yb.toFixed(1) + '" stroke="#B8B1A4" stroke-width="1" stroke-dasharray="4 3"/>';
+  s += '<text x="' + (mL + 3) + '" y="' + (yb - 4).toFixed(1) + '" font-size="9" fill="#6F6A60">$1.00 break-even</text>';
+  s += '<line x1="' + mL + '" y1="' + (mT + ph) + '" x2="' + (mL + pw) + '" y2="' + (mT + ph) + '" stroke="#E4E0D6"/>';
   // y endpoints
-  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymax) + 3).toFixed(1) + '" font-size="9" fill="#6b6258" text-anchor="end">' + fmtRatio(ymax) + '</text>';
-  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymin) + 3).toFixed(1) + '" font-size="9" fill="#6b6258" text-anchor="end">' + fmtRatio(ymin) + '</text>';
+  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymax) + 3).toFixed(1) + '" font-size="9" fill="#6F6A60" text-anchor="end">' + fmtRatio(ymax) + '</text>';
+  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymin) + 3).toFixed(1) + '" font-size="9" fill="#6F6A60" text-anchor="end">' + fmtRatio(ymin) + '</text>';
   // x labels
   for (var i = 0; i < n; i++) {
-    s += '<text x="' + X(i).toFixed(1) + '" y="' + (mT + ph + 16) + '" font-size="10" fill="#6b6258" text-anchor="middle">' + labels[i] + '</text>';
+    s += '<text x="' + X(i).toFixed(1) + '" y="' + (mT + ph + 16) + '" font-size="10" fill="#6F6A60" text-anchor="middle">' + labels[i] + '</text>';
   }
 
   // projection uncertainty band (between up and dn series)
@@ -1271,7 +1282,7 @@ function buildChart(labels, series, n) {
     var poly = '';
     up.pts.forEach(function(p) { poly += X(p.i).toFixed(1) + ',' + Y(p.y).toFixed(1) + ' '; });
     for (var k = dn.pts.length - 1; k >= 0; k--) { poly += X(dn.pts[k].i).toFixed(1) + ',' + Y(dn.pts[k].y).toFixed(1) + ' '; }
-    s += '<polygon points="' + poly.trim() + '" fill="#cfd8d3" opacity="0.45"/>';
+    s += '<polygon points="' + poly.trim() + '" fill="#D8D3C8" opacity="0.45"/>';
   }
 
   // lines
@@ -1703,8 +1714,8 @@ def admin_contacts(request: Request):
         for c in contacts
     ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No submissions yet.</td></tr>'
     body = f"""<div class="page" style="max-width:960px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Contact submissions</h1>
-<p style="margin:-2px 0 0;"><a href="/logout" style="font-size:13px;color:var(--muted);">Log out</a></p>
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:24px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
@@ -1715,7 +1726,7 @@ def admin_contacts(request: Request):
 <tbody>{rows}</tbody>
 </table>
 </div>"""
-    return HTMLResponse(_page("Contacts—Admin", "", body))
+    return HTMLResponse(_page("Contacts—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/tools", response_class=HTMLResponse)
@@ -1752,6 +1763,7 @@ def admin_tools(request: Request):
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
 
     body = f"""<div class="page" style="max-width:1100px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>CFO Toolbox—Pending submissions</h1>
   <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
@@ -2503,7 +2515,7 @@ def reader(request: Request, url: str = "", id: int = 0):
         current_tags = article.get("tags", [])
         tags_csv = _esc(",".join(current_tags))
         tag_spans = "".join(
-            f'<span style="font-size:12px;color:var(--accent);background:#eef3f0;'
+            f'<span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);'
             f'border-radius:6px;padding:2px 8px;margin-right:4px;">{_esc(t)}</span>'
             for t in current_tags
         )
@@ -2550,7 +2562,7 @@ async function saveReaderTags() {{
     var box = document.getElementById('reader-tags');
     var esc = function(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
     var spans = (d.tags || []).map(function(t) {{
-      return '<span style="font-size:12px;color:var(--accent);background:#eef3f0;border-radius:6px;padding:2px 8px;margin-right:4px;">' + esc(t) + '</span>';
+      return '<span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:2px 8px;margin-right:4px;">' + esc(t) + '</span>';
     }}).join('');
     var editBtn = '<button onclick="openReaderTagEditor()" style="font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer;margin-left:4px;">Edit tags</button>';
     box.innerHTML = spans + editBtn;
@@ -3008,20 +3020,43 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         lib.close()
 
 
+# Admin sections — the hub lists these; each links to its own page.
+_ADMIN_SECTIONS = [
+    ("/admin/social",   "Social",              "Draft LinkedIn posts in your voice."),
+    ("/admin/backup",   "Library backup",      "Download a snapshot or upload a replacement database."),
+    ("/admin/brand",    "Brand standards",     "Visual standards, color system, and your writing voice."),
+    ("/admin/contacts", "Contact submissions", "Messages from the public contact form."),
+    ("/admin/tools",    "Tool submissions",    "Review the CFO Toolbox approval queue."),
+]
+
+
 @app.get("/admin", response_class=HTMLResponse)
-def admin_page(request: Request, url: str = "", uploaded: str = ""):
+def admin_page(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-    lib = _lib()
-    try:
-        count = lib.count()
-        custom_voice = lib.get_setting("voice_prompt")
-    finally:
-        lib.close()
+    cards = "".join(
+        f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
+        f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
+        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+        f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+        f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+        f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
+        for href, title, desc in _ADMIN_SECTIONS
+    )
+    body = f"""<div class="page" style="max-width:720px;">
+<h1>Admin</h1>
+<p style="color:var(--muted);margin:4px 0 30px;">Manage the site&rsquo;s private tools.</p>
+<div style="display:grid;gap:14px;">{cards}</div>
+</div>"""
+    return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
 
-    from linklib.social import DEFAULT_MODEL, BRIAN_VOICE
-    current_voice = custom_voice or BRIAN_VOICE
-    is_customized = bool(custom_voice)
+
+@app.get("/admin/social", response_class=HTMLResponse)
+def admin_social(request: Request, url: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    from linklib.social import DEFAULT_MODEL
 
     models = [
         ("claude-haiku-4-5-20251001", "Haiku", "Fast &amp; cheap"),
@@ -3054,20 +3089,9 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
 
     pre_url = _esc(url)
 
-    if is_customized:
-        voice_badge = ('<span id="voice-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
-                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
-    else:
-        voice_badge = ('<span id="voice-badge" style="font-size:12px;color:var(--muted);'
-                       'margin-left:10px;vertical-align:middle;">Built-in default</span>')
-    reset_btn = (
-        '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
-        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
-        f'{"" if is_customized else "display:none;"}">Reset to default</button>'
-    )
-
     body = f"""<div class="page" style="max-width:820px;">
-<h1>Admin</h1>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Social</h1>
 
 <h2 style="margin-top:0;">LinkedIn post generator</h2>
 <p style="color:var(--muted);margin:-6px 0 20px;">Draft a post in your voice from any URL or topic.</p>
@@ -3109,41 +3133,6 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
   </div>
 </div>
 
-<h2>Your voice{voice_badge}</h2>
-<p style="color:var(--muted);margin:-6px 0 16px;">The system prompt sent to Claude when drafting posts. Edit it to refine your tone, add new rules, or update your bio. Changes take effect immediately on the next draft.</p>
-
-<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:40px;">
-  <textarea id="voice-prompt" rows="20"
-    style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;">{_esc(current_voice)}</textarea>
-  <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
-    <button id="voice-save-btn" onclick="saveVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Save voice</button>
-    {reset_btn}
-    <span id="voice-status" style="font-size:13px;color:var(--muted);"></span>
-  </div>
-</div>
-
-<h2>Library database</h2>
-{'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;font-size:14px;margin:-6px 0 16px;">Database replaced — ' + _esc(uploaded) + ' articles now live.</p>' if uploaded else ''}
-<p style="color:var(--muted);margin:-6px 0 20px;">Currently <strong>{count:,}</strong> articles.</p>
-
-<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:40px;">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
-    <div>
-      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately — no restart needed.</p>
-      <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
-        <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
-          style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
-      </form>
-    </div>
-    <div style="border-left:1px solid var(--line);padding-left:24px;">
-      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
-      <a href="/admin/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
-    </div>
-  </div>
-</div>
 </div>
 
 <script>
@@ -3173,24 +3162,329 @@ async function doDraft() {{
   }}
 }}
 
+document.addEventListener('keydown', function(e) {{
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doDraft();
+}});
+</script>"""
+    return HTMLResponse(_page("Social — Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/backup", response_class=HTMLResponse)
+def admin_backup(request: Request, uploaded: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        count = lib.count()
+    finally:
+        lib.close()
+    uploaded_banner = (
+        f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+        f'font-size:14px;margin:-6px 0 16px;">Database replaced — {_esc(uploaded)} articles now live.</p>'
+        if uploaded else ''
+    )
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Library backup</h1>
+{uploaded_banner}
+<p style="color:var(--muted);margin:-6px 0 24px;">Currently <strong>{count:,}</strong> articles in the live database.</p>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:40px;">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+    <div>
+      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
+      <a href="/admin/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
+    </div>
+    <div style="border-left:1px solid var(--line);padding-left:24px;">
+      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately — no restart needed.</p>
+      <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+        <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
+          style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
+      </form>
+    </div>
+  </div>
+</div>
+</div>"""
+    return HTMLResponse(_page("Library backup — Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/brand", response_class=HTMLResponse)
+def admin_brand(request: Request):
+    """A living style guide — the brand standards rendered with the real tokens.
+    The written reference lives in BRAND.md; this page is the visual companion."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    # Verbal identity: the voice guide (editable) lives here too — it's part of the brand.
+    lib = _lib()
+    try:
+        custom_voice = lib.get_setting("voice_prompt")
+    finally:
+        lib.close()
+    from linklib.social import BRIAN_VOICE
+    current_voice = custom_voice or BRIAN_VOICE
+    is_customized = bool(custom_voice)
+    if is_customized:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
+                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
+    else:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;color:var(--muted);'
+                       'margin-left:10px;vertical-align:middle;">Built-in default</span>')
+    reset_btn = (
+        '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
+        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
+        f'{"" if is_customized else "display:none;"}">Reset to default</button>'
+    )
+
+    # Brand palette (literal hexes mirror the _CSS :root tokens; see BRAND.md §7).
+    CORAL, CORAL_WASH, CORAL_DEEP = "#E8704F", "#FBEAE3", "#B14A30"
+
+    def swatch(hexv: str, name: str, role: str, border: bool = False, tag: str = "") -> str:
+        bd = ";border-bottom:1px solid var(--line-strong)" if border else ""
+        badge = (f'<span style="background:{CORAL};color:#fff;font:600 9px var(--font-body);'
+                 f'letter-spacing:.08em;text-transform:uppercase;border-radius:5px;padding:1px 6px;'
+                 f'margin-left:6px;vertical-align:middle;">{tag}</span>') if tag else ""
+        return (
+            f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;">'
+            f'<div style="height:60px;background:{hexv}{bd};"></div>'
+            f'<div style="padding:10px 12px;">'
+            f'<div style="font:600 13px var(--font-body);color:var(--ink);">{name}{badge}</div>'
+            f'<div style="font:500 12px ui-monospace,monospace;color:var(--muted);margin-top:2px;">{hexv}</div>'
+            f'<div style="font:400 12px var(--font-body);color:var(--muted);margin-top:5px;line-height:1.45;">{role}</div>'
+            f'</div></div>'
+        )
+
+    def grid(cards: str) -> str:
+        return (f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));'
+                f'gap:14px;margin:0 0 20px;">{cards}</div>')
+
+    star = lambda c: ('<svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">'
+                      f'<path d="M8 0 L9.4 6.6 L16 8 L9.4 9.4 L8 16 L6.6 9.4 L0 8 L6.6 6.6 Z" fill="{c}"/></svg>')
+
+    def ramp_label(text: str) -> str:
+        return (f'<div style="font:600 12px var(--font-body);letter-spacing:.1em;'
+                f'text-transform:uppercase;color:var(--navy);margin:0 0 10px;">{text}</div>')
+
+    navy_ramp = ramp_label("Navy — primary (cool)") + grid(
+        swatch("#001B4F", "Navy-deep", "Button hover, depth.")
+        + swatch("#002975", "Navy", "Base — wordmark, links, buttons, headings accents.")
+        + swatch("#3F5C9A", "Navy-light", "Lighter navy — secondary accents, borders. Text-capable (5.9:1).")
+        + swatch("#EEF1F7", "Navy-wash", "Soft navy fill — chip & ghost-button hovers.", border=True)
+    )
+    green_ramp = ramp_label("Seafoam / Green — cool accent") + grid(
+        swatch("#1F7A66", "Seafoam-deep", "Deepest teal — text-capable on light (4.7:1).")
+        + swatch("#2E9C86", "Seafoam-mid", "Mid teal — data-viz; legible as a fill/line. ≥18px text only.")
+        + swatch("#A3E5D4", "Seafoam", "Base accent (light mint) — tags, badges, active-nav underline.", border=True)
+        + swatch("#EAF7F2", "Seafoam-wash", "Soft fill — readout panels, table accents.", border=True)
+    )
+    coral_ramp = ramp_label("Coral — warm accent (rare)") + grid(
+        swatch(CORAL_DEEP, "Coral-deep", "Text-capable coral (4.9:1) — only when coral must carry small text.")
+        + swatch(CORAL, "Coral", "Base — display pop, badges, data-viz R&D series. Graphics & ≥24px only.")
+        + swatch("#F4A98F", "Coral-light", "Lighter coral — soft highlights, fills only (never text).", border=True)
+        + swatch(CORAL_WASH, "Coral-wash", "Soft fill — callout blocks (put navy text on it).", border=True)
+    )
+
+    dataviz_note = (
+        '<div style="background:var(--seafoam-wash);border:1px solid #C9EADF;border-radius:12px;padding:14px 18px;margin:0 0 20px;">'
+        '<p style="margin:0;font-size:14px;color:var(--navy);"><strong>Data-viz palette:</strong> charts use the three families '
+        'as categories — <strong>GTM&nbsp;=&nbsp;navy</strong>, <strong>Revenue&nbsp;=&nbsp;seafoam-mid teal</strong>, '
+        '<strong>R&amp;D&nbsp;=&nbsp;coral</strong> (coral marks the series to notice). See the Growth Engine Ratio charts. '
+        'Chart text is DM&nbsp;Sans; big readouts are Outfit.</p></div>'
+    )
+
+    neutral_row = grid(
+        swatch("#F5F4EF", "bg", "Page canvas (warm off-white).", border=True)
+        + swatch("#FFFFFF", "surface", "Cards, inputs.", border=True)
+        + swatch("#FAF9F4", "surface-2", "Alt panels, table stripes.", border=True)
+        + swatch("#1a1a1a", "ink", "Headings, primary text.")
+        + swatch("#3a3833", "ink-soft", "Body copy.")
+        + swatch("#6F6A60", "muted", "Meta, captions, kickers.")
+        + swatch("#E4E0D6", "line", "Warm hairline.", border=True)
+        + swatch("#D6D1C4", "line-strong", "Heavier divider / top of the rope rule.", border=True)
+    )
+
+    semantic_row = grid(
+        swatch("#002975", "good", "GER 'Elite/Strong' tiers.")
+        + swatch("#9A6B12", "caution", "GER 'Typical' tier.")
+        + swatch("#9E3B30", "alert", "Errors, GER 'Below target'. Status only — never decorative.")
+    )
+
+    callout = (lambda bg, bd, body_html:
+               f'<div style="background:{bg};border:1px solid {bd};border-radius:12px;padding:16px 20px;margin:0 0 18px;">{body_html}</div>')
+
+    type_specimens = (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;">'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Outfit — headings &amp; display</div>'
+        '<div style="font-family:var(--font-head);font-weight:600;font-size:42px;letter-spacing:-0.025em;line-height:1.05;color:var(--ink);">Brian Weisberg</div>'
+        '<div style="font-family:var(--font-head);font-weight:600;font-size:21px;letter-spacing:-0.01em;color:var(--ink);margin-top:10px;">Strategic finance for companies that are scaling</div>'
+        '<div style="height:18px;"></div>'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">DM Sans — body &amp; UI</div>'
+        '<p style="margin:0;color:var(--ink-soft);">The quick brown fox jumps over the lazy dog. Body copy is DM Sans at 16px / 1.65 — warm, readable, and quiet enough to disappear behind the content. Eyebrows and labels use the same family, uppercase, with wide tracking.</p>'
+        '<div style="height:18px;"></div>'
+        '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4 — long-form reading only (/read)</div>'
+        '<p style="margin:0;font-family:\'Source Serif 4\',Georgia,serif;font-size:18px;line-height:1.75;color:var(--ink);">Revenue recognized today is the result of investments made over the past several quarters, not just last quarter. Features ship before they\'re sold; pipeline built in Q1 converts in Q3. The serif appears nowhere else in the system.</p>'
+        '</div>'
+    )
+
+    motif = (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;">'
+        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Rope rule — the double hairline. Frames the header/footer or separates major sections. Never repeated decoratively.</div>'
+        '<div class="rule"></div>'
+        '<div style="height:26px;"></div>'
+        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Compass star — one per page, in the footer. Navy by default; a coral variant is reserved for special headers.</div>'
+        f'<div style="display:flex;align-items:center;gap:20px;">{star("#002975")}{star(CORAL)}</div>'
+        '<div style="margin-top:14px;font:500 13px var(--font-body);color:var(--alert);">No anchors, ropes-everywhere, boats, waves, knots, or clip-art. These two marks are the entire nautical vocabulary.</div>'
+        '</div>'
+    )
+
+    components = (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;display:grid;gap:22px;">'
+        # buttons
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Buttons — navy fill or ghost outline (never a color fill)</div>'
+        '<a class="btn" href="#" onclick="return false;">Primary</a> '
+        '<a class="btn btn-ghost" href="#" onclick="return false;" style="margin-left:8px;">Ghost</a></div>'
+        # tags
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Tags — seafoam fill, navy text</div>'
+        '<span style="font:600 11px var(--font-body);color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;">FP&amp;A</span> '
+        '<span style="font:600 11px var(--font-body);color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;margin-left:4px;">Treasury</span></div>'
+        # input
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Input — click to see the seafoam focus ring</div>'
+        '<input type="text" placeholder="Search…" style="width:100%;max-width:320px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--surface);"></div>'
+        # table
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Table — navy header, white text</div>'
+        '<table style="width:100%;max-width:380px;border-collapse:collapse;font-size:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;">'
+        '<thead><tr style="background:var(--navy);"><th style="padding:8px 12px;text-align:left;color:#fff;">Tier</th><th style="padding:8px 12px;text-align:left;color:#fff;">Ratio</th></tr></thead>'
+        '<tbody><tr style="border-top:1px solid var(--line);"><td style="padding:8px 12px;">Elite</td><td style="padding:8px 12px;">&gt; $1.20</td></tr>'
+        '<tr style="border-top:1px solid var(--line);background:var(--surface-2);"><td style="padding:8px 12px;">Strong</td><td style="padding:8px 12px;">$0.70–1.20</td></tr></tbody></table></div>'
+        # coral in action
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Coral in action — rare, decorative, never status</div>'
+        f'<span style="font:600 11px var(--font-body);letter-spacing:.06em;text-transform:uppercase;color:#fff;background:{CORAL};border-radius:6px;padding:3px 10px;">New</span>'
+        f'<div style="background:{CORAL_WASH};border:1px solid #F3D3C6;border-radius:12px;padding:14px 18px;margin-top:12px;">'
+        f'<span style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:{CORAL_DEEP};">Highlight</span>'
+        '<p style="margin:6px 0 0;color:var(--navy);">A coral-wash callout carries navy text at 11:1 contrast — the accessible way to make coral carry a block of copy.</p></div></div>'
+        '</div>'
+    )
+
+    mono = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
+            "font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;")
+    verbal = (
+        '<div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">'
+        '<span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Voice guide</span>'
+        f'{voice_badge}</div>'
+        '<p style="color:var(--muted);margin:0 0 14px;font-size:14px;">The guide Claude uses to draft in your voice, and the rubric the voice check holds new writing to.</p>'
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
+        f'<textarea id="voice-prompt" rows="16" style="{mono}">{_esc(current_voice)}</textarea>'
+        '<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">'
+        '<button id="voice-save-btn" onclick="saveVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Save voice</button>'
+        f'{reset_btn}'
+        '<span id="voice-status" style="font-size:13px;color:var(--muted);"></span></div></div>'
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>'
+        '<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Paste any draft or page copy. Mechanical rules (banned words, filler, performative phrases) flag instantly; Review adds Claude&rsquo;s read on tone.</p>'
+        f'<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice…" style="{mono}"></textarea>'
+        '<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">'
+        '<button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>'
+        '<span id="vr-status" style="font-size:13px;color:var(--muted);"></span></div>'
+        '<div id="vr-result" style="display:none;margin-top:16px;border-top:1px solid var(--line);padding-top:14px;font-size:14px;line-height:1.6;"></div>'
+        '</div>'
+    )
+
+    rules = callout(
+        "var(--surface)", "var(--line)",
+        '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin-bottom:10px;">Usage rules</div>'
+        '<ul style="margin:0;padding-left:20px;color:var(--ink-soft);line-height:1.7;">'
+        '<li><strong>Balance ~70 / 20 / 10</strong> — navy + neutrals, then seafoam, then a sliver of coral. One coral element per screen, max.</li>'
+        '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart — keep it that way.</li>'
+        '<li><strong>Coral is display-only.</strong> It\'s too light for body text (2.8:1); use coral-deep, or navy-on-coral-wash, when text is involved.</li>'
+        '<li><strong>Buttons are navy or ghost</strong> — never a seafoam or coral fill.</li>'
+        '<li><strong>One rope rule, one compass star</strong> per page. Outfit for headings, DM Sans for everything, Source Serif 4 for reading only.</li>'
+        '</ul>'
+    )
+
+    checks_doc = (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
+        '<div style="overflow-x:auto;">'
+        '<table style="width:100%;border-collapse:collapse;font-size:14px;min-width:560px;">'
+        '<thead><tr style="background:var(--navy);">'
+        '<th style="padding:9px 12px;text-align:left;color:#fff;">Check</th>'
+        '<th style="padding:9px 12px;text-align:left;color:#fff;">What it looks at</th>'
+        '<th style="padding:9px 12px;text-align:left;color:#fff;">When &amp; where</th>'
+        '<th style="padding:9px 12px;text-align:left;color:#fff;">Cost</th>'
+        '</tr></thead><tbody>'
+        '<tr style="border-top:1px solid var(--line);">'
+        '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Brand check</td>'
+        '<td style="padding:10px 12px;">Colors, fonts, and the voice <em>mechanics</em> &mdash; banned buzzwords, filler, performative phrases.</td>'
+        '<td style="padding:10px 12px;"><strong>Automatic.</strong> Every push &amp; pull request via GitHub Actions (<code>.github/workflows/qa.yml</code>); blocks merge on failure. Locally: <code>pytest -q</code>.</td>'
+        '<td style="padding:10px 12px;white-space:nowrap;">Free &middot; deterministic</td>'
+        '</tr>'
+        '<tr style="border-top:1px solid var(--line);background:var(--surface-2);">'
+        '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Tone review</td>'
+        '<td style="padding:10px 12px;">The holistic read &mdash; &ldquo;does this sound like me&rdquo; &mdash; judged by Claude against the voice guide.</td>'
+        '<td style="padding:10px 12px;"><strong>On demand only.</strong> The <em>Check content against your voice</em> box below, or the CLI <code>python -m scripts.voice_review</code>. <strong>Never in CI.</strong></td>'
+        '<td style="padding:10px 12px;white-space:nowrap;">API key, per run</td>'
+        '</tr>'
+        '</tbody></table></div>'
+        '<p style="font-size:13px;color:var(--muted);margin:14px 0 0;">Both share one source of truth: the voice guide below and <code>linklib/voice_review.py</code>. '
+        'Tone review stays out of CI on purpose &mdash; running Claude on every commit would be slow, non-deterministic, and spend the pay-per-use API key.</p>'
+        '</div>'
+    )
+
+    body = f"""<div class="page" style="max-width:900px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Brand standards</h1>
+<p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com — New England nautical, restrained.
+The full written reference is <code>BRAND.md</code> in the repo; an automated check
+(<code>tests/test_brand_standards.py</code>) keeps new content on-palette.</p>
+
+<h2 style="margin-top:0;">Brand colors</h2>
+<p style="color:var(--muted);margin:-6px 0 18px;font-size:14px;">Three families, each with a working ramp.
+Deep shades are text-capable; base/mid are for graphics and large display; light/wash are fills only.</p>
+{navy_ramp}
+{green_ramp}
+{coral_ramp}
+{dataviz_note}
+<h2>Neutrals</h2>
+{neutral_row}
+<h2>Semantic — status only</h2>
+<p style="color:var(--muted);margin:-6px 0 16px;font-size:14px;">Reserved for state. Never used decoratively, and never confused with coral.</p>
+{semantic_row}
+
+<h2>Typography</h2>
+{type_specimens}
+
+<h2>The nautical motif</h2>
+{motif}
+
+<h2>Components</h2>
+{components}
+
+<h2>Usage</h2>
+{rules}
+
+<h2>How the checks run</h2>
+{checks_doc}
+
+<h2>Verbal identity — your voice</h2>
+{verbal}
+</div>
+
+<script>
 async function saveVoice() {{
   var prompt = document.getElementById('voice-prompt').value;
   var btn = document.getElementById('voice-save-btn');
   var status = document.getElementById('voice-status');
   btn.disabled = true; btn.textContent = 'Saving…';
   try {{
-    var r = await fetch('/admin/voice', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{voice_prompt: prompt.trim()}})
-    }});
+    var r = await fetch('/admin/voice', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{voice_prompt: prompt.trim()}})}});
     if (!r.ok) throw new Error();
     var d = await r.json();
-    status.textContent = 'Saved.';
-    status.style.color = '#065f46';
+    status.textContent = 'Saved.'; status.style.color = '#065f46';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
-    var badge = document.getElementById('voice-badge');
-    var resetBtn = document.getElementById('reset-btn');
+    var badge = document.getElementById('voice-badge'), resetBtn = document.getElementById('reset-btn');
     if (d.custom) {{
       badge.textContent = 'Customized';
       badge.style.cssText = 'font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;';
@@ -3201,34 +3495,40 @@ async function saveVoice() {{
       resetBtn.style.display = 'none';
     }}
   }} catch(e) {{
-    status.textContent = 'Save failed — try again.';
-    status.style.color = '#b91c1c';
-  }} finally {{
-    btn.disabled = false; btn.textContent = 'Save voice';
-  }}
+    status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save voice'; }}
 }}
 
 async function resetVoice() {{
   if (!confirm('Reset to the built-in default voice prompt? Your edits will be lost.')) return;
   try {{
-    var r = await fetch('/admin/voice', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{voice_prompt: ''}})
-    }});
+    var r = await fetch('/admin/voice', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{voice_prompt: ''}})}});
     if (!r.ok) throw new Error();
     window.location.reload();
-  }} catch(e) {{
-    alert('Reset failed — try again.');
-  }}
+  }} catch(e) {{ alert('Reset failed — try again.'); }}
 }}
 
-document.addEventListener('keydown', function(e) {{
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doDraft();
-}});
+async function reviewVoice() {{
+  var text = document.getElementById('vr-input').value.trim();
+  if (!text) {{ document.getElementById('vr-input').focus(); return; }}
+  var btn = document.getElementById('vr-btn'), box = document.getElementById('vr-result');
+  btn.disabled = true; btn.textContent = 'Reviewing…';
+  box.style.display = 'block'; box.innerHTML = '<em>Checking…</em>';
+  try {{
+    var r = await fetch('/admin/voice/review', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{text: text}})}});
+    var d = await r.json();
+    var mech = d.mechanical || [];
+    var mechHtml = mech.length
+      ? '<div style="margin-bottom:12px;"><strong style="color:#9E3B30;">Mechanical flags (' + mech.length + ')</strong>'
+        + '<ul style="margin:6px 0 0;padding-left:18px;">' + mech.map(function(m) {{ return '<li><code>' + m[1] + '</code> — ' + m[0] + '</li>'; }}).join('') + '</ul></div>'
+      : '<div style="margin-bottom:12px;color:#065f46;"><strong>No mechanical violations.</strong></div>';
+    var rev = (d.review || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\\n/g, '<br>');
+    box.innerHTML = mechHtml + '<div>' + rev + '</div>';
+  }} catch(e) {{ box.innerHTML = 'Review failed — try again.'; }}
+  finally {{ btn.disabled = false; btn.textContent = 'Review against my voice'; }}
+}}
 </script>"""
-
-    return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+    return HTMLResponse(_page("Brand standards — Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/voice")
@@ -3244,6 +3544,25 @@ async def admin_voice_save(request: Request):
     finally:
         lib.close()
     return JSONResponse({"ok": True, "custom": bool(prompt)})
+
+
+@app.post("/admin/voice/review")
+async def admin_voice_review(request: Request):
+    """Review pasted content against the voice guide (mechanical lint + Claude tone read)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    from linklib.voice_review import review_text
+    lib = _lib()
+    try:
+        custom_voice = lib.get_setting("voice_prompt")
+    finally:
+        lib.close()
+    return JSONResponse(review_text(text, voice_prompt=custom_voice or None))
+
 
 @app.post("/admin/upload-db", response_class=HTMLResponse)
 async def upload_db(request: Request, file: UploadFile = File(...), token: str | None = None):
@@ -3281,7 +3600,7 @@ async def upload_db(request: Request, file: UploadFile = File(...), token: str |
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
 
-    return RedirectResponse(f"/admin?uploaded={n}", status_code=303)
+    return RedirectResponse(f"/admin/backup?uploaded={n}", status_code=303)
 
 
 @app.get("/admin/download-db")
