@@ -3068,6 +3068,11 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
 
     body = f"""<div class="page" style="max-width:820px;">
 <h1>Admin</h1>
+<div style="display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 30px;">
+  <a href="/admin/brand" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Brand standards</a>
+  <a href="/admin/contacts" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Contact submissions</a>
+  <a href="/admin/tools" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Tool submissions</a>
+</div>
 
 <h2 style="margin-top:0;">LinkedIn post generator</h2>
 <p style="color:var(--muted);margin:-6px 0 20px;">Draft a post in your voice from any URL or topic.</p>
@@ -3229,6 +3234,165 @@ document.addEventListener('keydown', function(e) {{
 </script>"""
 
     return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+
+
+@app.get("/admin/brand", response_class=HTMLResponse)
+def admin_brand(request: Request):
+    """A living style guide — the brand standards rendered with the real tokens.
+    The written reference lives in BRAND.md; this page is the visual companion."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    # Coral is the new third brand color. It isn't wired into _CSS yet, so the
+    # swatches below carry literal hexes; see BRAND.md §7 for the token block.
+    CORAL, CORAL_WASH, CORAL_DEEP = "#E8704F", "#FBEAE3", "#B14A30"
+
+    def swatch(hexv: str, name: str, role: str, border: bool = False, tag: str = "") -> str:
+        bd = ";border-bottom:1px solid var(--line-strong)" if border else ""
+        badge = (f'<span style="background:{CORAL};color:#fff;font:600 9px var(--font-body);'
+                 f'letter-spacing:.08em;text-transform:uppercase;border-radius:5px;padding:1px 6px;'
+                 f'margin-left:6px;vertical-align:middle;">{tag}</span>') if tag else ""
+        return (
+            f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;">'
+            f'<div style="height:60px;background:{hexv}{bd};"></div>'
+            f'<div style="padding:10px 12px;">'
+            f'<div style="font:600 13px var(--font-body);color:var(--ink);">{name}{badge}</div>'
+            f'<div style="font:500 12px ui-monospace,monospace;color:var(--muted);margin-top:2px;">{hexv}</div>'
+            f'<div style="font:400 12px var(--font-body);color:var(--muted);margin-top:5px;line-height:1.45;">{role}</div>'
+            f'</div></div>'
+        )
+
+    def grid(cards: str) -> str:
+        return (f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));'
+                f'gap:14px;margin:0 0 20px;">{cards}</div>')
+
+    star = lambda c: ('<svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">'
+                      f'<path d="M8 0 L9.4 6.6 L16 8 L9.4 9.4 L8 16 L6.6 9.4 L0 8 L6.6 6.6 Z" fill="{c}"/></svg>')
+
+    brand_row = grid(
+        swatch("#002975", "Navy", "Primary. Wordmark, headings accents, links, buttons, structure.")
+        + swatch("#001B4F", "Navy-deep", "Button hover and depth.")
+        + swatch("#A3E5D4", "Seafoam", "Cool accent. Tags, badges, active-nav underline, calculator accents.", border=True)
+        + swatch("#EAF7F2", "Seafoam-wash", "Soft cool fill. Readout panels, callouts.", border=True)
+        + swatch(CORAL, "Coral", "The rare warm pop. Display accents, badges, underlines, data-viz third series.", tag="New")
+        + swatch(CORAL_WASH, "Coral-wash", "Soft warm fill. Callout blocks — put navy text on it.", border=True, tag="New")
+        + swatch(CORAL_DEEP, "Coral-deep", "Only when coral must carry small text (AA on the canvas).", tag="New")
+    )
+
+    neutral_row = grid(
+        swatch("#F5F4EF", "bg", "Page canvas (warm off-white).", border=True)
+        + swatch("#FFFFFF", "surface", "Cards, inputs.", border=True)
+        + swatch("#FAF9F4", "surface-2", "Alt panels, table stripes.", border=True)
+        + swatch("#1a1a1a", "ink", "Headings, primary text.")
+        + swatch("#3a3833", "ink-soft", "Body copy.")
+        + swatch("#6F6A60", "muted", "Meta, captions, kickers.")
+        + swatch("#E4E0D6", "line", "Warm hairline.", border=True)
+        + swatch("#D6D1C4", "line-strong", "Heavier divider / top of the rope rule.", border=True)
+    )
+
+    semantic_row = grid(
+        swatch("#002975", "good", "GER 'Elite/Strong' tiers.")
+        + swatch("#9A6B12", "caution", "GER 'Typical' tier.")
+        + swatch("#9E3B30", "alert", "Errors, GER 'Below target'. Status only — never decorative.")
+    )
+
+    callout = (lambda bg, bd, body_html:
+               f'<div style="background:{bg};border:1px solid {bd};border-radius:12px;padding:16px 20px;margin:0 0 18px;">{body_html}</div>')
+
+    type_specimens = (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;">'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Outfit — headings &amp; display</div>'
+        '<div style="font-family:var(--font-head);font-weight:600;font-size:42px;letter-spacing:-0.025em;line-height:1.05;color:var(--ink);">Brian Weisberg</div>'
+        '<div style="font-family:var(--font-head);font-weight:600;font-size:21px;letter-spacing:-0.01em;color:var(--ink);margin-top:10px;">Strategic finance for companies that are scaling</div>'
+        '<div style="height:18px;"></div>'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">DM Sans — body &amp; UI</div>'
+        '<p style="margin:0;color:var(--ink-soft);">The quick brown fox jumps over the lazy dog. Body copy is DM Sans at 16px / 1.65 — warm, readable, and quiet enough to disappear behind the content. Eyebrows and labels use the same family, uppercase, with wide tracking.</p>'
+        '<div style="height:18px;"></div>'
+        '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4 — long-form reading only (/read)</div>'
+        '<p style="margin:0;font-family:\'Source Serif 4\',Georgia,serif;font-size:18px;line-height:1.75;color:var(--ink);">Revenue recognized today is the result of investments made over the past several quarters, not just last quarter. Features ship before they\'re sold; pipeline built in Q1 converts in Q3. The serif appears nowhere else in the system.</p>'
+        '</div>'
+    )
+
+    motif = (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;">'
+        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Rope rule — the double hairline. Frames the header/footer or separates major sections. Never repeated decoratively.</div>'
+        '<div class="rule"></div>'
+        '<div style="height:26px;"></div>'
+        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Compass star — one per page, in the footer. Navy by default; a coral variant is reserved for special headers.</div>'
+        f'<div style="display:flex;align-items:center;gap:20px;">{star("#002975")}{star(CORAL)}</div>'
+        '<div style="margin-top:14px;font:500 13px var(--font-body);color:var(--alert);">No anchors, ropes-everywhere, boats, waves, knots, or clip-art. These two marks are the entire nautical vocabulary.</div>'
+        '</div>'
+    )
+
+    components = (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;display:grid;gap:22px;">'
+        # buttons
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Buttons — navy fill or ghost outline (never a color fill)</div>'
+        '<a class="btn" href="#" onclick="return false;">Primary</a> '
+        '<a class="btn btn-ghost" href="#" onclick="return false;" style="margin-left:8px;">Ghost</a></div>'
+        # tags
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Tags — seafoam fill, navy text</div>'
+        '<span style="font:600 11px var(--font-body);color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;">FP&amp;A</span> '
+        '<span style="font:600 11px var(--font-body);color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;margin-left:4px;">Treasury</span></div>'
+        # input
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Input — click to see the seafoam focus ring</div>'
+        '<input type="text" placeholder="Search…" style="width:100%;max-width:320px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--surface);"></div>'
+        # table
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Table — navy header, white text</div>'
+        '<table style="width:100%;max-width:380px;border-collapse:collapse;font-size:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;">'
+        '<thead><tr style="background:var(--navy);"><th style="padding:8px 12px;text-align:left;color:#fff;">Tier</th><th style="padding:8px 12px;text-align:left;color:#fff;">Ratio</th></tr></thead>'
+        '<tbody><tr style="border-top:1px solid var(--line);"><td style="padding:8px 12px;">Elite</td><td style="padding:8px 12px;">&gt; $1.20</td></tr>'
+        '<tr style="border-top:1px solid var(--line);background:var(--surface-2);"><td style="padding:8px 12px;">Strong</td><td style="padding:8px 12px;">$0.70–1.20</td></tr></tbody></table></div>'
+        # coral in action
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Coral in action — rare, decorative, never status</div>'
+        f'<span style="font:600 11px var(--font-body);letter-spacing:.06em;text-transform:uppercase;color:#fff;background:{CORAL};border-radius:6px;padding:3px 10px;">New</span>'
+        f'<div style="background:{CORAL_WASH};border:1px solid #F3D3C6;border-radius:12px;padding:14px 18px;margin-top:12px;">'
+        f'<span style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:{CORAL_DEEP};">Highlight</span>'
+        '<p style="margin:6px 0 0;color:var(--navy);">A coral-wash callout carries navy text at 11:1 contrast — the accessible way to make coral carry a block of copy.</p></div></div>'
+        '</div>'
+    )
+
+    rules = callout(
+        "var(--surface)", "var(--line)",
+        '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin-bottom:10px;">Usage rules</div>'
+        '<ul style="margin:0;padding-left:20px;color:var(--ink-soft);line-height:1.7;">'
+        '<li><strong>Balance ~70 / 20 / 10</strong> — navy + neutrals, then seafoam, then a sliver of coral. One coral element per screen, max.</li>'
+        '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart — keep it that way.</li>'
+        '<li><strong>Coral is display-only.</strong> It\'s too light for body text (2.8:1); use coral-deep, or navy-on-coral-wash, when text is involved.</li>'
+        '<li><strong>Buttons are navy or ghost</strong> — never a seafoam or coral fill.</li>'
+        '<li><strong>One rope rule, one compass star</strong> per page. Outfit for headings, DM Sans for everything, Source Serif 4 for reading only.</li>'
+        '</ul>'
+    )
+
+    body = f"""<div class="page" style="max-width:900px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Brand standards</h1>
+<p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com — New England nautical, restrained.
+The full written reference is <code>BRAND.md</code> in the repo. Coral is the new third brand color
+(not yet wired into the site CSS).</p>
+
+<h2 style="margin-top:0;">Brand colors</h2>
+{brand_row}
+<h2>Neutrals</h2>
+{neutral_row}
+<h2>Semantic — status only</h2>
+<p style="color:var(--muted);margin:-6px 0 16px;font-size:14px;">Reserved for state. Never used decoratively, and never confused with coral.</p>
+{semantic_row}
+
+<h2>Typography</h2>
+{type_specimens}
+
+<h2>The nautical motif</h2>
+{motif}
+
+<h2>Components</h2>
+{components}
+
+<h2>Usage</h2>
+{rules}
+</div>"""
+    return HTMLResponse(_page("Brand standards — Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/voice")
