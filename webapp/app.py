@@ -1703,8 +1703,8 @@ def admin_contacts(request: Request):
         for c in contacts
     ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No submissions yet.</td></tr>'
     body = f"""<div class="page" style="max-width:960px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Contact submissions</h1>
-<p style="margin:-2px 0 0;"><a href="/logout" style="font-size:13px;color:var(--muted);">Log out</a></p>
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:24px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
@@ -1715,7 +1715,7 @@ def admin_contacts(request: Request):
 <tbody>{rows}</tbody>
 </table>
 </div>"""
-    return HTMLResponse(_page("Contacts—Admin", "", body))
+    return HTMLResponse(_page("Contacts—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/tools", response_class=HTMLResponse)
@@ -1752,6 +1752,7 @@ def admin_tools(request: Request):
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
 
     body = f"""<div class="page" style="max-width:1100px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>CFO Toolbox—Pending submissions</h1>
   <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
@@ -3008,13 +3009,43 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         lib.close()
 
 
+# Admin sections — the hub lists these; each links to its own page.
+_ADMIN_SECTIONS = [
+    ("/admin/social",   "Social",              "Draft LinkedIn posts and manage your voice."),
+    ("/admin/backup",   "Library backup",      "Download a snapshot or upload a replacement database."),
+    ("/admin/brand",    "Brand standards",     "The living style guide and color system."),
+    ("/admin/contacts", "Contact submissions", "Messages from the public contact form."),
+    ("/admin/tools",    "Tool submissions",    "Review the CFO Toolbox approval queue."),
+]
+
+
 @app.get("/admin", response_class=HTMLResponse)
-def admin_page(request: Request, url: str = "", uploaded: str = ""):
+def admin_page(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    cards = "".join(
+        f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
+        f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
+        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+        f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+        f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+        f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
+        for href, title, desc in _ADMIN_SECTIONS
+    )
+    body = f"""<div class="page" style="max-width:720px;">
+<h1>Admin</h1>
+<p style="color:var(--muted);margin:4px 0 30px;">Manage the site&rsquo;s private tools.</p>
+<div style="display:grid;gap:14px;">{cards}</div>
+</div>"""
+    return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+
+
+@app.get("/admin/social", response_class=HTMLResponse)
+def admin_social(request: Request, url: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
     try:
-        count = lib.count()
         custom_voice = lib.get_setting("voice_prompt")
     finally:
         lib.close()
@@ -3067,12 +3098,8 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
     )
 
     body = f"""<div class="page" style="max-width:820px;">
-<h1>Admin</h1>
-<div style="display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 30px;">
-  <a href="/admin/brand" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Brand standards</a>
-  <a href="/admin/contacts" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Contact submissions</a>
-  <a href="/admin/tools" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Tool submissions</a>
-</div>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Social</h1>
 
 <h2 style="margin-top:0;">LinkedIn post generator</h2>
 <p style="color:var(--muted);margin:-6px 0 20px;">Draft a post in your voice from any URL or topic.</p>
@@ -3127,28 +3154,6 @@ def admin_page(request: Request, url: str = "", uploaded: str = ""):
   </div>
 </div>
 
-<h2>Library database</h2>
-{'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;font-size:14px;margin:-6px 0 16px;">Database replaced — ' + _esc(uploaded) + ' articles now live.</p>' if uploaded else ''}
-<p style="color:var(--muted);margin:-6px 0 20px;">Currently <strong>{count:,}</strong> articles.</p>
-
-<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:40px;">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
-    <div>
-      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately — no restart needed.</p>
-      <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
-        <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
-          style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
-      </form>
-    </div>
-    <div style="border-left:1px solid var(--line);padding-left:24px;">
-      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
-      <a href="/admin/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
-    </div>
-  </div>
-</div>
 </div>
 
 <script>
@@ -3232,8 +3237,49 @@ document.addEventListener('keydown', function(e) {{
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doDraft();
 }});
 </script>"""
+    return HTMLResponse(_page("Social — Admin", "Admin", body, authed=True))
 
-    return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+
+@app.get("/admin/backup", response_class=HTMLResponse)
+def admin_backup(request: Request, uploaded: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        count = lib.count()
+    finally:
+        lib.close()
+    uploaded_banner = (
+        f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+        f'font-size:14px;margin:-6px 0 16px;">Database replaced — {_esc(uploaded)} articles now live.</p>'
+        if uploaded else ''
+    )
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Library backup</h1>
+{uploaded_banner}
+<p style="color:var(--muted);margin:-6px 0 24px;">Currently <strong>{count:,}</strong> articles in the live database.</p>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:40px;">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+    <div>
+      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
+      <a href="/admin/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
+    </div>
+    <div style="border-left:1px solid var(--line);padding-left:24px;">
+      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately — no restart needed.</p>
+      <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+        <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
+          style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
+      </form>
+    </div>
+  </div>
+</div>
+</div>"""
+    return HTMLResponse(_page("Library backup — Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/brand", response_class=HTMLResponse)
@@ -3445,7 +3491,7 @@ async def upload_db(request: Request, file: UploadFile = File(...), token: str |
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
 
-    return RedirectResponse(f"/admin?uploaded={n}", status_code=303)
+    return RedirectResponse(f"/admin/backup?uploaded={n}", status_code=303)
 
 
 @app.get("/admin/download-db")
