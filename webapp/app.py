@@ -532,7 +532,10 @@ def thought_leadership():
     body = '<div class="page"><h1>Thought Leadership</h1>' + \
         '<p style="color:var(--muted);margin:4px 0 28px;">Podcasts, writing, interviews, and appearances.</p>' + \
         """<a href="/growth-engine-ratio" style="display:block;text-decoration:none;background:var(--accent);color:#fff;border-radius:14px;padding:22px 26px;margin-bottom:36px;">
-  <div style="font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam);margin-bottom:9px;">Featured&mdash;New Framework</div>
+  <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px;">
+    <span style="background:var(--coral);color:#fff;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;border-radius:5px;padding:2px 8px;">New</span>
+    <span style="font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam);">Featured Framework</span>
+  </div>
   <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;">The Growth Engine Ratio</div>
   <div style="font-size:14px;opacity:.85;line-height:1.5;">A new metric for measuring how R&amp;D and GTM investments work together to drive growth&mdash;with an interactive calculator to see how you stack up. Published with The F Suite &rarr;</div>
 </a>"""
