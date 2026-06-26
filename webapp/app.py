@@ -274,6 +274,9 @@ _CSS = """
   --seafoam:#A3E5D4;       /* accent — tags, badges, active underline */
   --seafoam-wash:#EAF7F2;  /* soft accent fill — calc readout, table accents */
   --accent-light:#EEF1F7;  /* legacy name now = soft navy wash (chip/ghost hovers) */
+  --coral:#E8704F;         /* warm accent — rare display pop, data-viz R&D series */
+  --coral-wash:#FBEAE3;    /* soft coral fill — callouts (navy text) */
+  --coral-deep:#B14A30;    /* coral that must carry small text (AA on canvas) */
   /* Text */
   --ink:#1a1a1a;
   --ink-soft:#3a3833;
@@ -630,9 +633,9 @@ def growth_engine_ratio():
   .qlabel{font-size:13px;color:var(--ink);font-weight:500;}
   .qhead{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
   .qrow-proj .ger-in{background:#fbfaf6;border-style:dashed;}
-  .ger-chart{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;background:#fff;}
+  .ger-chart{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;background:#fff;font-family:var(--font-body);}
   .ger-contrib-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  .ger-contrib{width:100%;height:auto;display:block;}
+  .ger-contrib{width:100%;height:auto;display:block;font-family:var(--font-body);}
   .tl-step{display:flex;flex-direction:column;gap:6px;}
   .tl-ctrl{display:inline-flex;align-items:center;gap:16px;border:1px solid var(--line);border-radius:10px;padding:6px 12px;background:#fff;width:max-content;}
   .tl-ctrl button{font:inherit;font-size:18px;line-height:1;width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--accent);cursor:pointer;}
@@ -766,7 +769,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
   <div style="display:grid;gap:20px;">
 
     <div>
-      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">Revenue</p>
+      <p style="font:600 13px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">Revenue</p>
       <div class="ger-grid-2">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Current quarter (Q<sub>n</sub>)</label>
@@ -782,7 +785,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     </div>
 
     <div>
-      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">GTM Spend (Sales &amp; Marketing)—last 4 quarters</p>
+      <p style="font:600 13px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">GTM Spend (Sales &amp; Marketing)—last 4 quarters</p>
       <div class="ger-grid-4">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-4</sub></label>
@@ -808,7 +811,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     </div>
 
     <div>
-      <p style="font-weight:600;font-size:14px;margin:0 0 12px;color:var(--ink);">R&amp;D Spend—2 quarters (the build window)</p>
+      <p style="font:600 13px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">R&amp;D Spend—2 quarters (the build window)</p>
       <div class="ger-grid-2" style="max-width:320px;">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-5</sub></label>
@@ -833,7 +836,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap;">
       <div style="flex:0 0 auto;">
         <p style="font-size:13px;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.06em;">Your Growth Engine Ratio</p>
-        <p id="ger-value" class="ger-value-big" style="font-size:48px;font-weight:700;letter-spacing:-0.03em;margin:0;color:var(--accent);"></p>
+        <p id="ger-value" class="ger-value-big" style="font-family:var(--font-head);font-size:48px;font-weight:700;letter-spacing:-0.03em;margin:0;color:var(--accent);"></p>
       </div>
       <div style="flex:1;min-width:200px;">
         <p id="ger-tier" style="font-size:18px;font-weight:600;margin:0 0 6px;"></p>
@@ -1012,16 +1015,17 @@ function contributionSVG(strip, cur, labels) {
   var step = (x1 - x0) / n, bw = Math.min(58, step * 0.6);
   function cx(c) { return x0 + step * (c + 0.5); }
   function fmtM(x) { var a = Math.round(x * 10) / 10; return '$' + (a % 1 === 0 ? a.toFixed(0) : a.toFixed(1)) + 'M'; }
-  var BLUE = '#3b82f6', GREEN = '#10b981', RED = '#f4683b', INK = '#1f2937', MUT = '#8a8178';
+  // Brand data palette: GTM = navy, Revenue = seafoam-teal, R&D = coral.
+  var BLUE = '#002975', GREEN = '#2E9C86', RED = '#E8704F', INK = '#1a1a1a', MUT = '#6F6A60';
 
-  var s = '<svg class="ger-contrib" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,-apple-system,Segoe UI,Inter,sans-serif">';
+  var s = '<svg class="ger-contrib" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
   s += '<defs>' +
     '<linearGradient id="cgB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + BLUE + '" stop-opacity="0.30"/><stop offset="1" stop-color="' + BLUE + '" stop-opacity="0.08"/></linearGradient>' +
     '<linearGradient id="cgG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + GREEN + '"/><stop offset="1" stop-color="' + GREEN + '" stop-opacity="0.6"/></linearGradient>' +
     '<linearGradient id="cgR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + RED + '" stop-opacity="0.30"/><stop offset="1" stop-color="' + RED + '" stop-opacity="0.08"/></linearGradient>' +
     '</defs>';
 
-  s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#2c3e50">How ' + labels[cur] + ' is built &#8212; Time-Distributed Contribution</text>';
+  s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#1a1a1a">How ' + labels[cur] + ' is built &#8212; Time-Distributed Contribution</text>';
   s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Efficiency Ratio = $' + ratio.toFixed(2) + '</text>';
 
   s += '<text x="20" y="186" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
@@ -1058,7 +1062,7 @@ function contributionSVG(strip, cur, labels) {
   var rB = 388;
   function revBar(c, val, isCur) {
     var h = barH(val), x = cx(c) - bw / 2, y = rB - h;
-    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="7" fill="' + (isCur ? 'url(#cgG)' : '#d7f0e3') + '" stroke="' + GREEN + '" stroke-opacity="' + (isCur ? '0.55' : '0.3') + '"/>';
+    var o = '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="7" fill="' + (isCur ? 'url(#cgG)' : '#D6EFE8') + '" stroke="' + GREEN + '" stroke-opacity="' + (isCur ? '0.55' : '0.3') + '"/>';
     o += '<text x="' + cx(c).toFixed(1) + '" y="' + (isCur ? (y + 19) : (y - 7)).toFixed(1) + '" text-anchor="middle" font-size="' + (isCur ? '12' : '10.5') + '" font-weight="' + (isCur ? '700' : '500') + '" fill="' + (isCur ? '#fff' : MUT) + '">' + fmtM(val) + '</text>';
     return o;
   }
@@ -1069,7 +1073,7 @@ function contributionSVG(strip, cur, labels) {
   var curTop = rB - barH(revC);
   var gx = cx(5) + bw / 2 + 16, gy = Math.max(curTop, 140), cw = 110;
   s += '<line x1="' + (cx(5) + bw / 2).toFixed(1) + '" y1="' + (gy + 19) + '" x2="' + gx.toFixed(1) + '" y2="' + (gy + 19) + '" stroke="' + GREEN + '" stroke-width="1.4" stroke-dasharray="3 2"/>';
-  s += '<rect x="' + gx.toFixed(1) + '" y="' + gy.toFixed(1) + '" width="' + cw + '" height="38" rx="9" fill="#eafaf0" stroke="' + GREEN + '" stroke-width="1.6"/>';
+  s += '<rect x="' + gx.toFixed(1) + '" y="' + gy.toFixed(1) + '" width="' + cw + '" height="38" rx="9" fill="#E7F5F0" stroke="' + GREEN + '" stroke-width="1.6"/>';
   s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 18).toFixed(1) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + GREEN + '">' + (ann >= 0 ? '+' : '') + fmtM(ann) + '</text>';
   s += '<text x="' + (gx + cw / 2).toFixed(1) + '" y="' + (gy + 32).toFixed(1) + '" text-anchor="middle" font-size="9.5" fill="' + GREEN + '">Annualized Growth</text>';
 
@@ -1080,11 +1084,11 @@ function contributionSVG(strip, cur, labels) {
 
   // timeline axis
   var ty = 530;
-  s += '<line x1="' + (x0 - 8) + '" y1="' + ty + '" x2="' + (x1 + 8) + '" y2="' + ty + '" stroke="#cfc8bc" stroke-width="2"/>';
+  s += '<line x1="' + (x0 - 8) + '" y1="' + ty + '" x2="' + (x1 + 8) + '" y2="' + ty + '" stroke="#D6D1C4" stroke-width="2"/>';
   for (var c = 0; c < n; c++) {
     var isCur = (c === 5);
-    s += '<line x1="' + cx(c).toFixed(1) + '" y1="' + (ty - 4) + '" x2="' + cx(c).toFixed(1) + '" y2="' + (ty + 4) + '" stroke="#cfc8bc" stroke-width="1.5"/>';
-    s += '<text x="' + cx(c).toFixed(1) + '" y="' + (ty + 20) + '" text-anchor="middle" font-size="11.5" font-weight="' + (isCur ? '700' : '400') + '" fill="' + (isCur ? '#2c3e50' : MUT) + '">' + labels[cur - 5 + c] + '</text>';
+    s += '<line x1="' + cx(c).toFixed(1) + '" y1="' + (ty - 4) + '" x2="' + cx(c).toFixed(1) + '" y2="' + (ty + 4) + '" stroke="#D6D1C4" stroke-width="1.5"/>';
+    s += '<text x="' + cx(c).toFixed(1) + '" y="' + (ty + 20) + '" text-anchor="middle" font-size="11.5" font-weight="' + (isCur ? '700' : '400') + '" fill="' + (isCur ? '#1a1a1a' : MUT) + '">' + labels[cur - 5 + c] + '</text>';
   }
 
   // formula pill
@@ -1094,7 +1098,7 @@ function contributionSVG(strip, cur, labels) {
     '<tspan fill="' + BLUE + '" font-weight="700">' + fmtM(gtmInv) + '</tspan> + ' +
     '<tspan fill="' + RED + '" font-weight="700">' + fmtM(rndInv) + '</tspan> ) = ' +
     '<tspan fill="' + INK + '" font-weight="700">$' + ratio.toFixed(2) + '</tspan>';
-  s += '<rect x="' + fx.toFixed(1) + '" y="' + fy + '" width="' + fw.toFixed(1) + '" height="34" rx="10" fill="#ffffff" stroke="#d9d2c6" stroke-width="1.6"/>';
+  s += '<rect x="' + fx.toFixed(1) + '" y="' + fy + '" width="' + fw.toFixed(1) + '" height="34" rx="10" fill="#ffffff" stroke="#D6D1C4" stroke-width="1.6"/>';
   s += '<text x="' + (W / 2).toFixed(1) + '" y="' + (fy + 22) + '" text-anchor="middle" font-size="14.5">' + pill + '</text>';
 
   s += '</svg>';
@@ -1189,7 +1193,7 @@ function calcTimeline() {
   var summary =
     '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:baseline;margin-top:18px;">' +
       '<div><p class="qhead" style="margin:0 0 2px;">Current quarter (n)</p>' +
-      '<p style="font-size:32px;font-weight:700;letter-spacing:-0.02em;margin:0;color:' + ct.color + ';">' + fmtRatio(curY) + '</p></div>' +
+      '<p style="font-family:var(--font-head);font-size:32px;font-weight:700;letter-spacing:-0.02em;margin:0;color:' + ct.color + ';">' + fmtRatio(curY) + '</p></div>' +
       '<div style="flex:1;min-width:220px;">' +
       '<p style="font-weight:600;margin:0 0 2px;color:' + ct.color + ';">' + ct.tier + '</p>' +
       '<p style="font-size:14px;color:var(--muted);margin:0;">Across ' + base.length + ' measured quarter' + (base.length > 1 ? 's' : '') +
@@ -1244,8 +1248,8 @@ function buildChart(labels, series, n) {
     return '<polyline points="' + d + '" fill="none" stroke="' + color + '" stroke-width="2.5"' + (dash ? ' stroke-dasharray="6 4"' : '') + '/>';
   }
 
-  var s = '<svg class="ger-chart" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,-apple-system,Segoe UI,sans-serif">';
-  s += band(ymax, 1.20, '#e7f0ec') + band(1.20, 0.70, '#eef3f0') + band(0.70, 0.50, '#fbf3e6') + band(0.50, ymin, '#fbecec');
+  var s = '<svg class="ger-chart" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+  s += band(ymax, 1.20, '#E3F2EC') + band(1.20, 0.70, '#EDF5F1') + band(0.70, 0.50, '#FAF1E1') + band(0.50, ymin, '#F9E8E3');
   s += tlab((Math.min(ymax, 1.7) + 1.20) / 2, 'Elite', '#002975');
   s += tlab(0.95, 'Strong', '#002975');
   s += tlab(0.60, 'Typical', '#9A6B12');
@@ -1253,15 +1257,15 @@ function buildChart(labels, series, n) {
 
   // break-even reference + axis baseline
   var yb = Y(1.0);
-  s += '<line x1="' + mL + '" y1="' + yb.toFixed(1) + '" x2="' + (mL + pw) + '" y2="' + yb.toFixed(1) + '" stroke="#b9b2a6" stroke-width="1" stroke-dasharray="4 3"/>';
-  s += '<text x="' + (mL + 3) + '" y="' + (yb - 4).toFixed(1) + '" font-size="9" fill="#6b6258">$1.00 break-even</text>';
-  s += '<line x1="' + mL + '" y1="' + (mT + ph) + '" x2="' + (mL + pw) + '" y2="' + (mT + ph) + '" stroke="#e6e0d6"/>';
+  s += '<line x1="' + mL + '" y1="' + yb.toFixed(1) + '" x2="' + (mL + pw) + '" y2="' + yb.toFixed(1) + '" stroke="#B8B1A4" stroke-width="1" stroke-dasharray="4 3"/>';
+  s += '<text x="' + (mL + 3) + '" y="' + (yb - 4).toFixed(1) + '" font-size="9" fill="#6F6A60">$1.00 break-even</text>';
+  s += '<line x1="' + mL + '" y1="' + (mT + ph) + '" x2="' + (mL + pw) + '" y2="' + (mT + ph) + '" stroke="#E4E0D6"/>';
   // y endpoints
-  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymax) + 3).toFixed(1) + '" font-size="9" fill="#6b6258" text-anchor="end">' + fmtRatio(ymax) + '</text>';
-  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymin) + 3).toFixed(1) + '" font-size="9" fill="#6b6258" text-anchor="end">' + fmtRatio(ymin) + '</text>';
+  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymax) + 3).toFixed(1) + '" font-size="9" fill="#6F6A60" text-anchor="end">' + fmtRatio(ymax) + '</text>';
+  s += '<text x="' + (mL - 6) + '" y="' + (Y(ymin) + 3).toFixed(1) + '" font-size="9" fill="#6F6A60" text-anchor="end">' + fmtRatio(ymin) + '</text>';
   // x labels
   for (var i = 0; i < n; i++) {
-    s += '<text x="' + X(i).toFixed(1) + '" y="' + (mT + ph + 16) + '" font-size="10" fill="#6b6258" text-anchor="middle">' + labels[i] + '</text>';
+    s += '<text x="' + X(i).toFixed(1) + '" y="' + (mT + ph + 16) + '" font-size="10" fill="#6F6A60" text-anchor="middle">' + labels[i] + '</text>';
   }
 
   // projection uncertainty band (between up and dn series)
@@ -1271,7 +1275,7 @@ function buildChart(labels, series, n) {
     var poly = '';
     up.pts.forEach(function(p) { poly += X(p.i).toFixed(1) + ',' + Y(p.y).toFixed(1) + ' '; });
     for (var k = dn.pts.length - 1; k >= 0; k--) { poly += X(dn.pts[k].i).toFixed(1) + ',' + Y(dn.pts[k].y).toFixed(1) + ' '; }
-    s += '<polygon points="' + poly.trim() + '" fill="#cfd8d3" opacity="0.45"/>';
+    s += '<polygon points="' + poly.trim() + '" fill="#D8D3C8" opacity="0.45"/>';
   }
 
   // lines
