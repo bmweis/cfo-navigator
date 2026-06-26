@@ -267,16 +267,23 @@ _CSS = """
   --bg:#F5F4EF;            /* warm off-white page */
   --surface:#FFFFFF;       /* cards, inputs */
   --surface-2:#FAF9F4;     /* subtle alt panels, table stripes */
-  /* Brand */
-  --navy:#002975;          /* primary */
+  /* Brand — Navy (primary, cool). deep · base · light · wash */
   --navy-deep:#001B4F;     /* button hover / depth */
+  --navy:#002975;          /* primary base */
+  --navy-light:#3F5C9A;    /* lighter navy — secondary accents, borders */
+  --navy-wash:#EEF1F7;     /* soft navy fill — chip/ghost hovers */
   --accent:#002975;        /* legacy name now = navy (keeps old markup working) */
-  --seafoam:#A3E5D4;       /* accent — tags, badges, active underline */
+  --accent-light:#EEF1F7;  /* legacy name now = --navy-wash */
+  /* Brand — Seafoam/Green (cool accent). deep · mid · base · wash */
+  --seafoam-deep:#1F7A66;  /* deepest teal — text-capable on light (AA) */
+  --seafoam-mid:#2E9C86;   /* mid teal — data-viz (legible as a fill/line) */
+  --seafoam:#A3E5D4;       /* accent base (light mint) — tags, badges, underline */
   --seafoam-wash:#EAF7F2;  /* soft accent fill — calc readout, table accents */
-  --accent-light:#EEF1F7;  /* legacy name now = soft navy wash (chip/ghost hovers) */
-  --coral:#E8704F;         /* warm accent — rare display pop, data-viz R&D series */
-  --coral-wash:#FBEAE3;    /* soft coral fill — callouts (navy text) */
+  /* Brand — Coral (warm accent, rare). deep · base · light · wash */
   --coral-deep:#B14A30;    /* coral that must carry small text (AA on canvas) */
+  --coral:#E8704F;         /* warm accent base — display pop, data-viz R&D series */
+  --coral-light:#F4A98F;   /* lighter coral — soft highlights */
+  --coral-wash:#FBEAE3;    /* soft coral fill — callouts (navy text) */
   /* Text */
   --ink:#1a1a1a;
   --ink-soft:#3a3833;
@@ -2508,7 +2515,7 @@ def reader(request: Request, url: str = "", id: int = 0):
         current_tags = article.get("tags", [])
         tags_csv = _esc(",".join(current_tags))
         tag_spans = "".join(
-            f'<span style="font-size:12px;color:var(--accent);background:#eef3f0;'
+            f'<span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);'
             f'border-radius:6px;padding:2px 8px;margin-right:4px;">{_esc(t)}</span>'
             for t in current_tags
         )
@@ -2555,7 +2562,7 @@ async function saveReaderTags() {{
     var box = document.getElementById('reader-tags');
     var esc = function(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
     var spans = (d.tags || []).map(function(t) {{
-      return '<span style="font-size:12px;color:var(--accent);background:#eef3f0;border-radius:6px;padding:2px 8px;margin-right:4px;">' + esc(t) + '</span>';
+      return '<span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:2px 8px;margin-right:4px;">' + esc(t) + '</span>';
     }}).join('');
     var editBtn = '<button onclick="openReaderTagEditor()" style="font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer;margin-left:4px;">Edit tags</button>';
     box.innerHTML = spans + editBtn;
@@ -3293,8 +3300,7 @@ def admin_brand(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
 
-    # Coral is the new third brand color. It isn't wired into _CSS yet, so the
-    # swatches below carry literal hexes; see BRAND.md §7 for the token block.
+    # Brand palette (literal hexes mirror the _CSS :root tokens; see BRAND.md §7).
     CORAL, CORAL_WASH, CORAL_DEEP = "#E8704F", "#FBEAE3", "#B14A30"
 
     def swatch(hexv: str, name: str, role: str, border: bool = False, tag: str = "") -> str:
@@ -3319,14 +3325,35 @@ def admin_brand(request: Request):
     star = lambda c: ('<svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">'
                       f'<path d="M8 0 L9.4 6.6 L16 8 L9.4 9.4 L8 16 L6.6 9.4 L0 8 L6.6 6.6 Z" fill="{c}"/></svg>')
 
-    brand_row = grid(
-        swatch("#002975", "Navy", "Primary. Wordmark, headings accents, links, buttons, structure.")
-        + swatch("#001B4F", "Navy-deep", "Button hover and depth.")
-        + swatch("#A3E5D4", "Seafoam", "Cool accent. Tags, badges, active-nav underline, calculator accents.", border=True)
-        + swatch("#EAF7F2", "Seafoam-wash", "Soft cool fill. Readout panels, callouts.", border=True)
-        + swatch(CORAL, "Coral", "The rare warm pop. Display accents, badges, underlines, data-viz third series.", tag="New")
-        + swatch(CORAL_WASH, "Coral-wash", "Soft warm fill. Callout blocks — put navy text on it.", border=True, tag="New")
-        + swatch(CORAL_DEEP, "Coral-deep", "Only when coral must carry small text (AA on the canvas).", tag="New")
+    def ramp_label(text: str) -> str:
+        return (f'<div style="font:600 12px var(--font-body);letter-spacing:.1em;'
+                f'text-transform:uppercase;color:var(--navy);margin:0 0 10px;">{text}</div>')
+
+    navy_ramp = ramp_label("Navy — primary (cool)") + grid(
+        swatch("#001B4F", "Navy-deep", "Button hover, depth.")
+        + swatch("#002975", "Navy", "Base — wordmark, links, buttons, headings accents.")
+        + swatch("#3F5C9A", "Navy-light", "Lighter navy — secondary accents, borders. Text-capable (5.9:1).")
+        + swatch("#EEF1F7", "Navy-wash", "Soft navy fill — chip & ghost-button hovers.", border=True)
+    )
+    green_ramp = ramp_label("Seafoam / Green — cool accent") + grid(
+        swatch("#1F7A66", "Seafoam-deep", "Deepest teal — text-capable on light (4.7:1).")
+        + swatch("#2E9C86", "Seafoam-mid", "Mid teal — data-viz; legible as a fill/line. ≥18px text only.")
+        + swatch("#A3E5D4", "Seafoam", "Base accent (light mint) — tags, badges, active-nav underline.", border=True)
+        + swatch("#EAF7F2", "Seafoam-wash", "Soft fill — readout panels, table accents.", border=True)
+    )
+    coral_ramp = ramp_label("Coral — warm accent (rare)") + grid(
+        swatch(CORAL_DEEP, "Coral-deep", "Text-capable coral (4.9:1) — only when coral must carry small text.")
+        + swatch(CORAL, "Coral", "Base — display pop, badges, data-viz R&D series. Graphics & ≥24px only.")
+        + swatch("#F4A98F", "Coral-light", "Lighter coral — soft highlights, fills only (never text).", border=True)
+        + swatch(CORAL_WASH, "Coral-wash", "Soft fill — callout blocks (put navy text on it).", border=True)
+    )
+
+    dataviz_note = (
+        '<div style="background:var(--seafoam-wash);border:1px solid #C9EADF;border-radius:12px;padding:14px 18px;margin:0 0 20px;">'
+        '<p style="margin:0;font-size:14px;color:var(--navy);"><strong>Data-viz palette:</strong> charts use the three families '
+        'as categories — <strong>GTM&nbsp;=&nbsp;navy</strong>, <strong>Revenue&nbsp;=&nbsp;seafoam-mid teal</strong>, '
+        '<strong>R&amp;D&nbsp;=&nbsp;coral</strong> (coral marks the series to notice). See the Growth Engine Ratio charts. '
+        'Chart text is DM&nbsp;Sans; big readouts are Outfit.</p></div>'
     )
 
     neutral_row = grid(
@@ -3419,11 +3446,16 @@ def admin_brand(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Brand standards</h1>
 <p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com — New England nautical, restrained.
-The full written reference is <code>BRAND.md</code> in the repo. Coral is the new third brand color
-(not yet wired into the site CSS).</p>
+The full written reference is <code>BRAND.md</code> in the repo; an automated check
+(<code>tests/test_brand_standards.py</code>) keeps new content on-palette.</p>
 
 <h2 style="margin-top:0;">Brand colors</h2>
-{brand_row}
+<p style="color:var(--muted);margin:-6px 0 18px;font-size:14px;">Three families, each with a working ramp.
+Deep shades are text-capable; base/mid are for graphics and large display; light/wash are fills only.</p>
+{navy_ramp}
+{green_ramp}
+{coral_ramp}
+{dataviz_note}
 <h2>Neutrals</h2>
 {neutral_row}
 <h2>Semantic — status only</h2>

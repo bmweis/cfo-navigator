@@ -22,17 +22,39 @@ accent, and coral is the rare highlight you notice precisely *because* it's rare
 
 ## 2. Color
 
-### 2.1 The three brand colors
+### 2.1 The three brand colors — each with a working ramp
 
-| Role | Name | Hex | Notes |
+Three families: **Navy** (primary, cool), **Seafoam/Green** (cool accent), **Coral** (warm accent).
+Each has a few shades so you're never stuck reaching outside the system. Contrast figures are
+measured on the `#F5F4EF` canvas.
+
+**Navy — primary (cool)**
+| Token | Hex | Contrast | Use |
 |---|---|---|---|
-| **Primary** | Navy | `#002975` | Wordmark, headings accents, links, buttons, structure |
-| | Navy-deep | `#001B4F` | Button hover, depth |
-| **Cool accent** | Seafoam | `#A3E5D4` | Tags, badges, active-nav underline, calculator accents |
-| | Seafoam-wash | `#EAF7F2` | Soft fills (readout panels, callouts) |
-| **Warm accent (NEW)** | **Coral** | **`#E8704F`** | The rare 10% pop — see §2.3 for exactly where |
-| | **Coral-wash** | **`#FBEAE3`** | Soft coral tint fills (parallels seafoam-wash) |
-| | **Coral-deep** | **`#B14A30`** | *Only* when coral must carry small text (AA on canvas) |
+| `--navy-deep` | `#001B4F` | 14:1 | Button hover, depth |
+| `--navy` | `#002975` | 12:1 | Base — wordmark, links, buttons, headings accents |
+| `--navy-light` | `#3F5C9A` | 5.9:1 | Lighter navy — secondary accents, borders (text-capable) |
+| `--navy-wash` | `#EEF1F7` | fill | Soft navy fill — chip & ghost-button hovers |
+
+**Seafoam / Green — cool accent**
+| Token | Hex | Contrast | Use |
+|---|---|---|---|
+| `--seafoam-deep` | `#1F7A66` | 4.7:1 | Deepest teal — text-capable on light (AA) |
+| `--seafoam-mid` | `#2E9C86` | 3.1:1 | Mid teal — **data-viz** (legible as a fill/line); ≥18px text only |
+| `--seafoam` | `#A3E5D4` | fill | Base accent (light mint) — tags, badges, active-nav underline |
+| `--seafoam-wash` | `#EAF7F2` | fill | Soft fill — calculator readout, table accents |
+
+**Coral — warm accent (rare)**
+| Token | Hex | Contrast | Use |
+|---|---|---|---|
+| `--coral-deep` | `#B14A30` | 4.9:1 | Text-capable coral (AA) — *only* when coral must carry small text |
+| `--coral` | `#E8704F` | 3.1:1 | Base — display pop, badges, data-viz; graphics & ≥24px only |
+| `--coral-light` | `#F4A98F` | fill | Lighter coral — soft highlights, fills only (never text) |
+| `--coral-wash` | `#FBEAE3` | fill | Soft fill — callout blocks (put **navy** text on it) |
+
+> **Read the ramps the same way each time:** *deep* shades are dark enough for small text (AA);
+> *base/mid* are for graphics, fills, and large display; *light/wash* are fills only. When in doubt,
+> small text is navy, ink, or a `-deep`; never a `base`/`light`/`wash`.
 
 ### 2.2 Neutrals & semantic
 
@@ -70,12 +92,28 @@ Coral is the **warm counterweight** to a cool palette. Use it as a graphic/displ
 - Status/error states (that's `--alert`)
 - More than ~one coral element per viewport — if you see two, remove one
 
-### 2.4 Usage balance
+### 2.4 Data-visualization palette
+
+Charts use the three brand families as categorical colors — cool for structure and outcome,
+warm to draw the eye. The GER calculator is the reference implementation:
+
+| Series / role | Color | Token |
+|---|---|---|
+| GTM (investment) | Navy `#002975` | `--navy` |
+| Revenue / growth (outcome) | Seafoam-mid teal `#2E9C86` | `--seafoam-mid` |
+| R&D — the series to highlight ("the missing half") | Coral `#E8704F` | `--coral` |
+| Tier / quality bands | seafoam · amber · coral **tints** | (light tints) |
+| Axes, gridlines, reference lines | `#E4E0D6` · `#D6D1C4` · `#6F6A60` | `--line` / `--line-strong` / `--muted` |
+
+Coral marks the one series you want noticed. Chart text is **DM Sans**; big readouts are **Outfit**.
+Never reintroduce the old generic data palette (`#3b82f6` / `#10b981` / `#f4683b`).
+
+### 2.5 Usage balance
 
 Think **70 / 20 / 10**: ~70% navy + neutrals (structure and text), ~20% seafoam (tags, active
 states, soft panels), ~10% — really less — coral (one highlight per screen). White space is a color too.
 
-### 2.5 Pairings & accessibility (measured on the `#F5F4EF` canvas)
+### 2.6 Pairings & accessibility (measured on the `#F5F4EF` canvas)
 
 | Combination | Ratio | Verdict |
 |---|---|---|
@@ -167,11 +205,13 @@ Generous page padding (≈48px top). Whitespace before density.
 :root{
   /* Surfaces */
   --bg:#F5F4EF; --surface:#FFFFFF; --surface-2:#FAF9F4;
-  /* Brand — cool */
-  --navy:#002975; --navy-deep:#001B4F; --accent:#002975; /* legacy alias = navy */
-  --seafoam:#A3E5D4; --seafoam-wash:#EAF7F2; --accent-light:#EEF1F7;
-  /* Brand — warm (NEW) */
-  --coral:#E8704F; --coral-wash:#FBEAE3; --coral-deep:#B14A30;
+  /* Brand — Navy (primary): deep · base · light · wash */
+  --navy-deep:#001B4F; --navy:#002975; --navy-light:#3F5C9A; --navy-wash:#EEF1F7;
+  --accent:#002975; --accent-light:#EEF1F7; /* legacy aliases = navy / navy-wash */
+  /* Brand — Seafoam/Green (cool accent): deep · mid · base · wash */
+  --seafoam-deep:#1F7A66; --seafoam-mid:#2E9C86; --seafoam:#A3E5D4; --seafoam-wash:#EAF7F2;
+  /* Brand — Coral (warm accent): deep · base · light · wash */
+  --coral-deep:#B14A30; --coral:#E8704F; --coral-light:#F4A98F; --coral-wash:#FBEAE3;
   /* Text */
   --ink:#1a1a1a; --ink-soft:#3a3833; --muted:#6F6A60;
   /* Lines */
@@ -185,6 +225,31 @@ Generous page padding (≈48px top). Whitespace before density.
 }
 ```
 
-The three `--coral*` tokens are **new** — not yet wired into the live `_CSS` in `webapp/app.py`.
-Adding them is a one-line change; introducing coral into actual UI should be done deliberately,
-one placement at a time, per §2.3.
+This token block is wired into the live `_CSS` in `webapp/app.py`. Coral is in use on the GER charts
+(the data-viz R&D series). The automated brand check in `tests/test_brand_standards.py` keeps the
+palette and fonts honest — any new color or font outside this system fails CI (see §8).
+
+---
+
+## 8. Automated enforcement
+
+`tests/test_brand_standards.py` is the guardrail for everything above. It scans the rendered site
+(`webapp/app.py`, including the inline CSS, SVG charts, and JS-built markup) on every push/PR via
+GitHub Actions (`.github/workflows/qa.yml`) and fails if new content drifts off-brand:
+
+- **Fonts** — only Outfit, DM Sans, Source Serif 4, and system/generic fallbacks may appear. Inter,
+  Lora, Arial, Helvetica, Times, Roboto, etc. are banned (this is the exact class of regression that
+  slipped in before the refresh).
+- **Colors** — every hex in the codebase must be a brand token (parsed from the `:root` above, so the
+  palette is its single source of truth) or one of the explicitly-documented auxiliary colors
+  (status/feedback, benchmark badges, chart tints). A brand-new off-palette hex fails the build,
+  forcing a deliberate choice: add it to the system or fix it.
+- **Banned legacy colors** — the specific values purged in the refresh (old greens, the generic
+  `#3b82f6`/`#10b981`/`#f4683b` data palette) can never reappear.
+- **Token integrity** — the full token set (all three ramps + neutrals + semantic) must be present.
+
+To run locally: `pip install -r requirements-dev.txt && pytest -q`.
+
+When you intentionally introduce a new color (e.g. a new chart series or status state), add it to the
+relevant group in the test's `AUX_COLORS` with a comment — that's the moment the decision gets
+recorded, which is the point.
