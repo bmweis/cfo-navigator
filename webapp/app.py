@@ -4183,34 +4183,60 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         lib.close()
 
 
-# Admin sections — the hub lists these; each links to its own page.
-_ADMIN_SECTIONS = [
-    ("/admin/queue",        "Library Queue",       "Review proposed saves, edit tags, and approve them into the library."),
-    ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
-    ("/admin/backfill",     "Historical sweep",    "One-time sitemap catch-up: queue articles from your subscribed sources going back to your saves cutoff."),
-    ("/admin/enrich",       "Re-enrich library",   "Backfill or force-refresh Claude summaries and tags across all articles."),
-    ("/admin/social",       "Social",              "Draft LinkedIn posts in your voice."),
-    ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
-    ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
-    ("/admin/contacts",     "Contact submissions", "Messages from the public contact form."),
-    ("/admin/tools",        "Tool submissions",    "Review the CFO Toolbox approval queue and manage featured/vendor settings."),
-    ("/admin/tools/leads",  "Tool leads",          "Warm Intro requests — name, email, company, and size for each tool."),
+# Admin sections — grouped on the hub; each links to its own page. The Library
+# group holds everything that maintains the article corpus: review the queue,
+# catch up history, (re-)enrich, prune off-audience rows, and back up/restore.
+_ADMIN_GROUPS = [
+    ("Library", "Build, curate, and maintain the article corpus.", [
+        ("/admin/queue",        "Library Queue",       "Review proposed saves, edit tags, and approve them into the library."),
+        ("/admin/backfill",     "Historical sweep",    "One-time sitemap catch-up: queue articles from your subscribed sources going back to your saves cutoff."),
+        ("/admin/enrich",       "Re-enrich library",   "Backfill or force-refresh Claude summaries and tags across all articles."),
+        ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
+        ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
+    ]),
+    ("Site", "Voice, brand, and the public-facing surface.", [
+        ("/admin/social",       "Social",              "Draft LinkedIn posts in your voice."),
+        ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
+        ("/admin/contacts",     "Contact submissions", "Messages from the public contact form."),
+    ]),
+    ("CFO Toolbox", "The public tools directory and its lead pipeline.", [
+        ("/admin/tools",        "Tool submissions",    "Review the CFO Toolbox approval queue and manage featured/vendor settings."),
+        ("/admin/tools/leads",  "Tool leads",          "Warm Intro requests — name, email, company, and size for each tool."),
+    ]),
 ]
+
+# Flat view kept for any code/tests that iterate every section.
+_ADMIN_SECTIONS = [s for _, _, items in _ADMIN_GROUPS for s in items]
 
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-    cards = "".join(
-        f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
-        f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
-        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-        f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-        f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
-        f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
-        for href, title, desc in _ADMIN_SECTIONS
-    )
+
+    def _card(href, title, desc):
+        return (
+            f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
+            f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+            f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
+        )
+
+    groups_html = ""
+    for gname, gdesc, items in _ADMIN_GROUPS:
+        cards = "".join(_card(*s) for s in items)
+        groups_html += (
+            f'<section style="margin-bottom:34px;">'
+            f'<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">'
+            f'<h2 style="margin:0;font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);">{gname}</h2>'
+            f'</div>'
+            f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
+            f'<div style="display:grid;gap:14px;">{cards}</div>'
+            f'</section>'
+        )
+
     body = f"""<div class="page" style="max-width:720px;">
 <h1>Admin</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
@@ -4223,7 +4249,7 @@ def admin_page(request: Request):
     <li>Tighten <code>agent.py</code> so an answer can never fall back to raw <code>content</code> when a summary is missing (today it can, at <code>_format_all_sources</code>).</li>
   </ul>
 </div>
-<div style="display:grid;gap:14px;">{cards}</div>
+{groups_html}
 </div>"""
     return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
 
