@@ -3719,7 +3719,7 @@ def library(request: Request, q: str = ""):
           <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
             <a href="/read?id={r['id']}" class="postbtn" style="text-decoration:none;">Read</a>
             <button class="postbtn" onclick="openTagEditor({r['id']})">Edit tags</button>
-            <form method="post" action="/library/{r['id']}/delete" style="display:inline;"
+            <form method="post" action="/library/{r['id']}/delete" style="display:contents;"
                   onsubmit="return confirm('Permanently delete this article?');">
               <button type="submit" class="postbtn" style="color:#b91c1c;">Delete</button>
             </form>
@@ -4187,19 +4187,19 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 # group holds everything that maintains the article corpus: review the queue,
 # catch up history, (re-)enrich, prune off-audience rows, and back up/restore.
 _ADMIN_GROUPS = [
-    ("Library", "Build, curate, and maintain the article corpus.", [
+    ("Library", "Build the library, keep it current, and back it up.", [
         ("/admin/queue",        "Library Queue",       "Review proposed saves, edit tags, and approve them into the library."),
         ("/admin/backfill",     "Historical sweep",    "One-time sitemap catch-up: queue articles from your subscribed sources going back to your saves cutoff."),
         ("/admin/enrich",       "Re-enrich library",   "Backfill or force-refresh Claude summaries and tags across all articles."),
         ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
         ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
     ]),
-    ("Site", "Voice, brand, and the public-facing surface.", [
+    ("Site", "Your voice, your brand, and the public site.", [
         ("/admin/social",       "Social",              "Draft LinkedIn posts in your voice."),
         ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
         ("/admin/contacts",     "Contact submissions", "Messages from the public contact form."),
     ]),
-    ("CFO Toolbox", "The public tools directory and its lead pipeline.", [
+    ("CFO Toolbox", "The public tools directory and the leads it brings in.", [
         ("/admin/tools",        "Tool submissions",    "Review the CFO Toolbox approval queue and manage featured/vendor settings."),
         ("/admin/tools/leads",  "Tool leads",          "Warm Intro requests — name, email, company, and size for each tool."),
     ]),
@@ -4459,16 +4459,21 @@ def admin_queue(request: Request, scanning: int = 0):
     for source, cards in groups.items():
         cards_html = "".join(_card(c) for c in cards)
         s = _esc(source)
-        group_blocks += f"""<div data-group style="margin-bottom:30px;">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line-strong);padding-bottom:8px;margin-bottom:14px;">
-    <h2 style="margin:0;font-size:18px;">{s} <span class="grp-count" style="color:var(--muted);font-weight:500;font-size:14px;">({len(cards)})</span></h2>
-    <div style="display:flex;gap:9px;">
-      <button class="btn btn-ghost" onclick="addAll(this)" style="font-size:12px;padding:6px 14px;">Add all</button>
-      <button class="btn btn-ghost" onclick="dismissAll(this)" style="font-size:12px;padding:6px 14px;">Dismiss all</button>
-    </div>
+        group_blocks += f"""<details data-group class="q-group" style="margin-bottom:12px;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+  <summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;">
+    <span style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <span class="q-chevron" style="color:var(--navy);font-size:12px;line-height:1;transition:transform .15s;flex-shrink:0;">&#9654;</span>
+      <h2 style="margin:0;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{s} <span class="grp-count" style="color:var(--muted);font-weight:500;font-size:14px;">({len(cards)})</span></h2>
+    </span>
+    <span style="display:flex;gap:9px;flex-shrink:0;">
+      <button class="btn btn-ghost" onclick="event.stopPropagation();addAll(this)" style="font-size:12px;padding:6px 14px;">Add all</button>
+      <button class="btn btn-ghost" onclick="event.stopPropagation();dismissAll(this)" style="font-size:12px;padding:6px 14px;">Dismiss all</button>
+    </span>
+  </summary>
+  <div style="padding:2px 18px 8px;">
+    {cards_html}
   </div>
-  {cards_html}
-</div>"""
+</details>"""
 
     pending_n = len(pending)
     if pending_n == 0:
@@ -4485,13 +4490,25 @@ def admin_queue(request: Request, scanning: int = 0):
     dismissed_note = (f'<span style="color:var(--muted);font-size:13px;">{dismissed_n} dismissed</span>'
                       if dismissed_n else "")
 
+    expand_controls = (
+        '<span style="font-size:13px;color:var(--muted);">'
+        '<a href="#" onclick="setAllGroups(true);return false;" style="color:var(--navy);">Expand all</a>'
+        ' &middot; <a href="#" onclick="setAllGroups(false);return false;" style="color:var(--navy);">Collapse all</a>'
+        '</span>' if pending_n else ''
+    )
+
     body = f"""<div class="page" style="max-width:820px;">
+<style>
+.q-group summary::-webkit-details-marker{{display:none;}}
+.q-group[open] .q-chevron{{transform:rotate(90deg);}}
+.q-group summary:hover{{background:var(--surface);}}
+</style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Library Queue</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Proposed saves waiting for your review. Approve them into the library&nbsp;&mdash;&nbsp;edit the tags first if you like&nbsp;&mdash;&nbsp;or dismiss what you don&rsquo;t want.</p>
 {scan_notice}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px;">
-  <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note}</div>
+  <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note} &nbsp; {expand_controls}</div>
   <form method="post" action="/admin/queue/refresh-feed" style="margin:0;"><button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Scan feed</button></form>
 </div>
 {group_blocks}
@@ -4532,6 +4549,9 @@ async function addOne(btn){{
 async function dismissOne(btn){{
   const card = cardOf(btn);
   if (await postForm('/admin/queue/dismiss', {{url: card.dataset.url}})) removeCard(card);
+}}
+function setAllGroups(open){{
+  document.querySelectorAll('.q-group').forEach(function(g){{ g.open = open; }});
 }}
 async function addAll(btn){{
   const grp = btn.closest('[data-group]');
@@ -4774,9 +4794,9 @@ def admin_enrich(request: Request):
         status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done — {job_done} articles enriched with {_esc(job_model)}.</div>'
 
     models = [
-        ("claude-opus-4-8",           "Opus 4.8",   "Best quality — recommended for library standardization"),
-        ("claude-sonnet-4-6",         "Sonnet 4.6",  "Balanced quality and cost"),
-        ("claude-haiku-4-5-20251001", "Haiku 4.5",   "Fast and cheap — good for large unenriched backlogs"),
+        ("claude-opus-4-8",           "Opus 4.8",   "Deepest summaries. The one to standardize the library on."),
+        ("claude-sonnet-4-6",         "Sonnet 4.6",  "Solid summaries at a lower cost."),
+        ("claude-haiku-4-5-20251001", "Haiku 4.5",   "Fast and cheap. Good for clearing a big unenriched backlog."),
     ]
 
     def _mrow(mid, label, detail):
@@ -4793,7 +4813,7 @@ def admin_enrich(request: Request):
     body = f"""<div class="page" style="max-width:720px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Re-enrich library</h1>
-<p style="color:var(--muted);margin:-6px 0 22px;">Run Claude enrichment (summaries + tags) over your saved articles, server-side.</p>
+<p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what the Ask feature reasons from, so depth here pays off there.</p>
 
 <div id="poll-container">{status_html}</div>
 
@@ -5015,11 +5035,11 @@ def admin_backfill(request: Request):
     body = f"""<div class="page" style="max-width:820px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Historical sweep</h1>
-<p style="color:var(--muted);margin:-6px 0 20px;">One-time catch-up: walks your subscribed sources&rsquo; sitemaps and queues article candidates you haven&rsquo;t saved yet, for review.</p>
+<p style="color:var(--muted);margin:-6px 0 20px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review. A one-time catch-up on your back catalog.</p>
 
 <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:22px;font-size:13.5px;color:#92400e;line-height:1.6;">
-  <strong>One-time operation.</strong> Run this once to catch up on your history. After that, the <a href="/admin/queue">Library Queue</a> feed scan keeps things current automatically.
-  Start with <strong>dry run</strong> to preview reach before spending API calls on enrichment.
+  <strong>Run this once.</strong> It catches up your back catalog; after that, the <a href="/admin/queue">Library Queue</a> feed scan keeps you current.
+  Start with a <strong>dry run</strong> to see the reach before any sweep spends API calls.
 </div>
 
 <div id="poll-container">{status_html}</div>
