@@ -118,3 +118,45 @@ def test_scan_handles_source_without_sitemap(tmp_path, monkeypatch):
     assert report[0]["note"] == "no usable sitemap"
     assert report[0]["candidates"] == 0
     lib.close()
+
+
+def test_excluded_category_skipped_before_network(tmp_path, monkeypatch):
+    """News-category sources are read in /feed but never swept into the library.
+    They must be skipped without touching the network."""
+    lib = Library(str(tmp_path / "t.db"))
+
+    # Any sitemap call would be a test failure for the excluded source.
+    def _boom(*a, **k):
+        raise AssertionError("network hit for an excluded-category source")
+    monkeypatch.setattr(q, "discover_sitemaps", _boom)
+    monkeypatch.setattr(q, "fetch_sitemap_entries", _boom)
+
+    feeds = [
+        FeedMeta(name="TechCrunch", xml_url="", html_url="https://techcrunch.com", category="News"),
+    ]
+    report = q.scan_sitemaps_into_queue(
+        lib, feeds, datetime(2024, 8, 1, tzinfo=timezone.utc), enrich=False,
+    )
+    assert report[0]["candidates"] == 0
+    assert "News category" in report[0]["note"]
+    assert lib.queue_count() == 0
+    lib.close()
+
+
+def test_exclude_categories_is_overridable(tmp_path, monkeypatch):
+    """A caller can pass its own exclusion set (e.g. to include News, or add
+    another category)."""
+    lib = Library(str(tmp_path / "t.db"))
+    entries = [{"url": "https://tc.com/post", "lastmod": datetime(2025, 3, 1, tzinfo=timezone.utc)}]
+    monkeypatch.setattr(q, "discover_sitemaps", lambda site: ["https://tc.com/sitemap.xml"])
+    monkeypatch.setattr(q, "fetch_sitemap_entries", lambda sm: entries)
+
+    feeds = [FeedMeta(name="TechCrunch", xml_url="", html_url="https://tc.com", category="News")]
+    cutoff = datetime(2024, 8, 1, tzinfo=timezone.utc)
+
+    # Override with an empty set → News is no longer excluded, so it scans.
+    report = q.scan_sitemaps_into_queue(lib, feeds, cutoff, enrich=False,
+                                        exclude_categories=set())
+    assert report[0]["candidates"] == 1
+    assert report[0]["added"] == 1
+    lib.close()

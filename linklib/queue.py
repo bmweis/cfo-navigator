@@ -34,6 +34,15 @@ from .db import Library
 # https://docs.claude.com/en/docs/about-claude/models
 QUEUE_ENRICH_MODEL = os.environ.get("LINKLIB_QUEUE_ENRICH_MODEL", "claude-opus-4-8")
 
+# OPML categories that belong in the /feed reader but NOT the curated library.
+# News is timely and high-volume — good to read, not something Brian saves. These
+# sources stay live in the feed; they're just never proposed into the queue.
+# Comma-separated env override, e.g. LINKLIB_QUEUE_EXCLUDE_CATEGORIES="News,Market Insights".
+QUEUE_EXCLUDE_CATEGORIES = {
+    c.strip() for c in os.environ.get("LINKLIB_QUEUE_EXCLUDE_CATEGORIES", "News").split(",")
+    if c.strip()
+}
+
 
 def suggest_tags_heuristic(title: str, summary: str, source: str,
                            vocab: list[str], max_tags: int = 5) -> list[str]:
@@ -102,12 +111,18 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
 
 def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
                          model: str = QUEUE_ENRICH_MODEL, max_total: int = 300,
+                         exclude_categories: Optional[set[str]] = None,
                          progress=lambda *_: None) -> dict:
     """Pull current feed items, queue the ones not already saved or queued.
 
     Returns stats: {"scanned", "new", "added"}. Deduping happens before
     enrichment, so we only spend API calls on genuinely new candidates.
+
+    Sources in `exclude_categories` (default: News and friends) are read in
+    /feed but never proposed to the library, so the queue stays curation-grade.
     """
+    if exclude_categories is None:
+        exclude_categories = QUEUE_EXCLUDE_CATEGORIES
     try:
         from .feed import get_feed_items
         items, _ = get_feed_items(opml_path, max_total=max_total)
@@ -115,7 +130,9 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
         return {"scanned": 0, "new": 0, "added": 0}
 
     seen = lib.article_urls() | lib.queue_urls()
-    new_items = [it for it in items if it.get("url") and it["url"] not in seen]
+    new_items = [it for it in items
+                 if it.get("url") and it["url"] not in seen
+                 and it.get("category", "") not in exclude_categories]
 
     added = 0
     skipped_scope = 0
@@ -272,6 +289,7 @@ def fetch_sitemap_entries(sitemap_url: str, *, _depth: int = 0,
 def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
                              model: str = QUEUE_ENRICH_MODEL,
                              per_source_limit: int = 150, dry_run: bool = False,
+                             exclude_categories: Optional[set[str]] = None,
                              progress=lambda *_: None) -> list[dict]:
     """One-time historical sweep across `feeds` (FeedMeta with .name/.html_url),
     queuing article candidates published on/after `since` (a datetime or ISO
@@ -279,7 +297,12 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
 
     `dry_run` reports candidate counts without fetching/enriching/saving — use
     it to preview reach before spending API calls.
+
+    Sources whose `.category` is in `exclude_categories` (default: News and
+    friends) are skipped — they belong in /feed, not the curated library.
     """
+    if exclude_categories is None:
+        exclude_categories = QUEUE_EXCLUDE_CATEGORIES
     since = _ensure_aware(since)
     seen = lib.article_urls() | lib.queue_urls()
     report: list[dict] = []
@@ -288,6 +311,10 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
         site = getattr(f, "html_url", "") or ""
         stat = {"source": f.name, "site": site, "sitemap": None,
                 "candidates": 0, "added": 0, "undated": 0, "skipped_scope": 0, "note": ""}
+        if getattr(f, "category", "") in exclude_categories:
+            stat["note"] = f"skipped — {f.category} category (feed-only, not library)"
+            report.append(stat)
+            continue
         if not site:
             stat["note"] = "no site URL in OPML"
             report.append(stat)
