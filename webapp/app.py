@@ -4103,6 +4103,7 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 
 # Admin sections — the hub lists these; each links to its own page.
 _ADMIN_SECTIONS = [
+    ("/admin/queue",        "Library Queue",       "Review proposed saves, edit tags, and approve them into the library."),
     ("/admin/social",       "Social",              "Draft LinkedIn posts in your voice."),
     ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
     ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
@@ -4249,6 +4250,204 @@ document.addEventListener('keydown', function(e) {{
 }});
 </script>"""
     return HTMLResponse(_page("Social — Admin", "Admin", body, authed=True))
+
+
+# ---------------------------------------------------------------------------
+# Library Queue — staging area for proposed saves
+# ---------------------------------------------------------------------------
+
+def _scan_feed_background() -> None:
+    """Pull current feed items into the queue (enriched). Runs off-request."""
+    lib = _lib()
+    try:
+        from linklib.queue import scan_feed_into_queue
+        scan_feed_into_queue(lib, OPML_PATH)
+        backup.maybe_backup(DB_PATH)
+    except Exception:
+        pass
+    finally:
+        lib.close()
+
+
+@app.get("/admin/queue", response_class=HTMLResponse)
+def admin_queue(request: Request, scanning: int = 0):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        pending = lib.list_queue(status="pending")
+        dismissed_n = lib.queue_count(status="dismissed")
+    finally:
+        lib.close()
+
+    # Group by source so you can approve a whole publication at once.
+    groups: dict[str, list[dict]] = {}
+    for c in pending:
+        groups.setdefault(c.get("source") or "Other", []).append(c)
+
+    def _badge(enriched: int) -> str:
+        if enriched:
+            return ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
+                    'background:var(--seafoam-wash);color:var(--seafoam-deep);">enriched</span>')
+        return ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
+                'background:var(--surface-2);color:var(--muted);">needs enrichment</span>')
+
+    def _card(c: dict) -> str:
+        url = _esc(c["url"])
+        title = _esc(c.get("title") or c["url"])
+        date = _esc((c.get("published_at") or "")[:10])
+        summary = _esc((c.get("summary") or "")[:340])
+        tags_val = _esc(", ".join(c.get("suggested_tags") or []))
+        meta = date or ""
+        return f"""<div data-card data-url="{url}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+    <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
+    {_badge(c.get("enriched"))}
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin:3px 0 8px;">{meta}</div>
+  <p style="font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{summary}</p>
+  <label style="display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;">Tags</label>
+  <input class="qtags" type="text" value="{tags_val}" style="width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:var(--bg);margin-bottom:12px;">
+  <div style="display:flex;gap:9px;">
+    <button class="add-btn btn" onclick="addOne(this)" style="font-size:13px;padding:8px 18px;">Add to library</button>
+    <button class="btn btn-ghost" onclick="dismissOne(this)" style="font-size:13px;padding:8px 18px;">Dismiss</button>
+  </div>
+</div>"""
+
+    group_blocks = ""
+    for source, cards in groups.items():
+        cards_html = "".join(_card(c) for c in cards)
+        s = _esc(source)
+        group_blocks += f"""<div data-group style="margin-bottom:30px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line-strong);padding-bottom:8px;margin-bottom:14px;">
+    <h2 style="margin:0;font-size:18px;">{s} <span class="grp-count" style="color:var(--muted);font-weight:500;font-size:14px;">({len(cards)})</span></h2>
+    <div style="display:flex;gap:9px;">
+      <button class="btn btn-ghost" onclick="addAll(this)" style="font-size:12px;padding:6px 14px;">Add all</button>
+      <button class="btn btn-ghost" onclick="dismissAll(this)" style="font-size:12px;padding:6px 14px;">Dismiss all</button>
+    </div>
+  </div>
+  {cards_html}
+</div>"""
+
+    pending_n = len(pending)
+    if pending_n == 0:
+        group_blocks = ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+                        'padding:32px;text-align:center;color:var(--muted);">Nothing waiting. Scan the feed to '
+                        'find recent articles you haven&rsquo;t saved yet.</div>')
+
+    scan_notice = ""
+    if scanning:
+        scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
+                       'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
+                       'Scanning the feed in the background &mdash; reload this page in a minute to see new candidates.</div>')
+
+    dismissed_note = (f'<span style="color:var(--muted);font-size:13px;">{dismissed_n} dismissed</span>'
+                      if dismissed_n else "")
+
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Library Queue</h1>
+<p style="color:var(--muted);margin:4px 0 22px;">Proposed saves waiting for your review. Approve them into the library&nbsp;&mdash;&nbsp;edit the tags first if you like&nbsp;&mdash;&nbsp;or dismiss what you don&rsquo;t want.</p>
+{scan_notice}
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px;">
+  <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note}</div>
+  <form method="post" action="/admin/queue/refresh-feed" style="margin:0;"><button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Scan feed</button></form>
+</div>
+{group_blocks}
+</div>
+
+<script>
+function cardOf(btn){{ return btn.closest('[data-card]'); }}
+async function postForm(path, data){{
+  try {{
+    const r = await fetch(path, {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:new URLSearchParams(data)}});
+    return r.ok;
+  }} catch(e) {{ return false; }}
+}}
+function setPending(delta){{
+  const el = document.getElementById('pending-count');
+  el.textContent = Math.max(0, parseInt(el.textContent || '0', 10) + delta);
+}}
+function removeCard(card){{
+  const grp = card.closest('[data-group]');
+  card.remove();
+  setPending(-1);
+  if (grp) {{
+    const left = grp.querySelectorAll('[data-card]').length;
+    const cnt = grp.querySelector('.grp-count');
+    if (cnt) cnt.textContent = '(' + left + ')';
+    if (left === 0) grp.remove();
+  }}
+}}
+async function addOne(btn){{
+  const card = cardOf(btn);
+  const addBtn = card.querySelector('.add-btn');
+  addBtn.disabled = true; addBtn.textContent = 'Adding…';
+  const ok = await postForm('/admin/queue/add', {{url: card.dataset.url, tags: card.querySelector('.qtags').value}});
+  if (ok) {{ removeCard(card); }}
+  else {{ addBtn.disabled = false; addBtn.textContent = 'Add to library'; }}
+  return ok;
+}}
+async function dismissOne(btn){{
+  const card = cardOf(btn);
+  if (await postForm('/admin/queue/dismiss', {{url: card.dataset.url}})) removeCard(card);
+}}
+async function addAll(btn){{
+  const grp = btn.closest('[data-group]');
+  const cards = Array.from(grp.querySelectorAll('[data-card]'));
+  for (const c of cards) {{ await addOne(c.querySelector('.add-btn')); }}
+}}
+async function dismissAll(btn){{
+  const grp = btn.closest('[data-group]');
+  const cards = Array.from(grp.querySelectorAll('[data-card]'));
+  for (const c of cards) {{ await dismissOne(c.querySelector('.add-btn')); }}
+}}
+</script>"""
+    return HTMLResponse(_page("Library Queue — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/queue/refresh-feed")
+def admin_queue_refresh(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    background_tasks.add_task(_scan_feed_background)
+    return RedirectResponse("/admin/queue?scanning=1", status_code=303)
+
+
+@app.post("/admin/queue/add")
+async def admin_queue_add(request: Request, background_tasks: BackgroundTasks):
+    _require_api(request)
+    form = await request.form()
+    url = (form.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    tags_raw = form.get("tags")
+    tags = ([t.strip() for t in tags_raw.split(",") if t.strip()]
+            if tags_raw is not None else None)
+    lib = _lib()
+    try:
+        article_id = lib.promote_queue_item(url, tags=tags)
+        if not article_id:
+            raise HTTPException(status_code=404, detail="not in queue")
+        background_tasks.add_task(backup.maybe_backup, DB_PATH)
+        return JSONResponse({"ok": True, "id": article_id})
+    finally:
+        lib.close()
+
+
+@app.post("/admin/queue/dismiss")
+async def admin_queue_dismiss(request: Request):
+    _require_api(request)
+    form = await request.form()
+    url = (form.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    lib = _lib()
+    try:
+        lib.dismiss_queue_item(url)
+        return JSONResponse({"ok": True})
+    finally:
+        lib.close()
 
 
 @app.get("/admin/backup", response_class=HTMLResponse)

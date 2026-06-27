@@ -121,6 +121,31 @@ CREATE TABLE IF NOT EXISTS tool_leads (
 
 CREATE INDEX IF NOT EXISTS idx_tool_leads_tool_id ON tool_leads(tool_id);
 CREATE INDEX IF NOT EXISTS idx_tool_leads_created  ON tool_leads(created_at);
+
+-- Staging area for proposed library additions (the "Library Queue"). Candidates
+-- — from the live feed or a one-time historical sweep — land here enriched but
+-- unsaved, so they can be reviewed before they enter the library (and the Ask
+-- corpus). URL is the natural key, matching `articles`. `content` (third-party
+-- full text) is an internal enrichment/search input only; the resale-safe
+-- surface is `summary` + tags. Promoting a row moves it into `articles`,
+-- preserving any enrichment already paid for.
+CREATE TABLE IF NOT EXISTS library_queue (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    url           TEXT NOT NULL UNIQUE,
+    title         TEXT NOT NULL DEFAULT '',
+    author        TEXT NOT NULL DEFAULT '',
+    source        TEXT NOT NULL DEFAULT '',
+    summary       TEXT NOT NULL DEFAULT '',      -- enriched summary (resale-safe asset)
+    content       TEXT NOT NULL DEFAULT '',      -- full text, internal input only
+    suggested_tags_json TEXT NOT NULL DEFAULT '[]',
+    published_at  TEXT,
+    origin        TEXT NOT NULL DEFAULT '',       -- 'feed' | 'backfill:<source>'
+    status        TEXT NOT NULL DEFAULT 'pending',-- 'pending' | 'dismissed'
+    enriched      INTEGER NOT NULL DEFAULT 0,     -- 1 once a Claude summary/tags applied
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_queue_status ON library_queue(status);
 """
 
 
@@ -435,6 +460,104 @@ class Library:
 
     def read_later_urls(self) -> set[str]:
         return {r[0] for r in self.conn.execute("SELECT url FROM read_later").fetchall()}
+
+    # -- library queue ---------------------------------------------------------
+
+    def article_urls(self) -> set[str]:
+        """Every URL already in the library — the dedupe set for the queue."""
+        return {r[0] for r in self.conn.execute("SELECT url FROM articles")}
+
+    def queue_urls(self) -> set[str]:
+        """Every URL in the queue (pending OR dismissed), so we never re-surface
+        a candidate you've already saved or rejected."""
+        return {r[0] for r in self.conn.execute("SELECT url FROM library_queue")}
+
+    def last_saved_at(self) -> Optional[str]:
+        """The most recent `saved_at` in the library — i.e. your saves cutoff.
+
+        Used by the one-time historical sweep to know how far back to reach.
+        """
+        row = self.conn.execute("SELECT MAX(saved_at) FROM articles").fetchone()
+        return row[0] if row and row[0] else None
+
+    def add_to_queue(self, url: str, title: str = "", author: str = "",
+                     source: str = "", summary: str = "", content: str = "",
+                     suggested_tags: Optional[list[str]] = None,
+                     published_at: Optional[str] = None, origin: str = "",
+                     enriched: bool = False) -> bool:
+        """Queue a candidate. No-op (returns False) if the URL is already in the
+        library or already queued — keeps the queue idempotent like `upsert`."""
+        url = (url or "").strip()
+        if not url:
+            return False
+        if self.conn.execute("SELECT 1 FROM articles WHERE url=?", (url,)).fetchone():
+            return False
+        if self.conn.execute("SELECT 1 FROM library_queue WHERE url=?", (url,)).fetchone():
+            return False
+        tags = sorted(set(t.strip() for t in (suggested_tags or []) if t.strip()))
+        self.conn.execute(
+            """INSERT INTO library_queue
+               (url, title, author, source, summary, content, suggested_tags_json,
+                published_at, origin, status, enriched, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (url, title, author, source, summary, content, json.dumps(tags),
+             published_at, origin, "pending", int(enriched), _now()),
+        )
+        self.conn.commit()
+        return True
+
+    def list_queue(self, status: str = "pending", limit: int = 2000) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT * FROM library_queue WHERE status=?
+               ORDER BY COALESCE(published_at,'') DESC, id DESC LIMIT ?""",
+            (status, limit),
+        ).fetchall()
+        return [self._queue_to_dict(r) for r in rows]
+
+    def queue_count(self, status: str = "pending") -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM library_queue WHERE status=?", (status,)
+        ).fetchone()[0]
+
+    def dismiss_queue_item(self, url: str) -> None:
+        """Reject a candidate. It stays in the table as 'dismissed' so a later
+        sweep won't propose it again."""
+        self.conn.execute(
+            "UPDATE library_queue SET status='dismissed' WHERE url=?", (url,)
+        )
+        self.conn.commit()
+
+    def remove_from_queue(self, url: str) -> None:
+        self.conn.execute("DELETE FROM library_queue WHERE url=?", (url,))
+        self.conn.commit()
+
+    def promote_queue_item(self, url: str, tags: Optional[list[str]] = None) -> int:
+        """Move a queued candidate into the library, preserving its enrichment,
+        then drop it from the queue. `tags`, if given, overrides the suggestions
+        (so your edits at review time win). Returns the article id, or 0 if the
+        URL isn't queued."""
+        row = self.conn.execute(
+            "SELECT * FROM library_queue WHERE url=?", (url,)
+        ).fetchone()
+        if row is None:
+            return 0
+        use_tags = tags if tags is not None else json.loads(row["suggested_tags_json"] or "[]")
+        art = Article(
+            url=row["url"], title=row["title"], author=row["author"],
+            source=row["source"], summary=row["summary"], content=row["content"],
+            tags=use_tags, published_at=row["published_at"],
+            saved_at=_now(), enriched=bool(row["enriched"]),
+        )
+        article_id = self.upsert(art)
+        self.conn.execute("DELETE FROM library_queue WHERE url=?", (url,))
+        self.conn.commit()
+        return article_id
+
+    @staticmethod
+    def _queue_to_dict(r: sqlite3.Row) -> dict:
+        d = dict(r)
+        d["suggested_tags"] = json.loads(d.pop("suggested_tags_json", "[]") or "[]")
+        return d
 
     # -- tool leads ------------------------------------------------------------
 
