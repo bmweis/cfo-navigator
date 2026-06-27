@@ -79,6 +79,13 @@ AUX_COLORS = {
     "#dbeafe", "#1d4ed8",            # Private
     "#dcfce7", "#16a34a",            # Public
     "#ede9fe", "#7c3aed",            # Both
+    # In-progress / info state (admin job progress bars and banners)
+    "#eff6ff", "#bfdbfe", "#2563eb",  # blue info bg / border / fill for running jobs
+    # Success state border (admin completion banners alongside existing #d1fae5 / #065f46)
+    "#6ee7b7",  # success border green (emerald-300, complements #d1fae5 success bg)
+    # Amber / warning tones (admin one-time-operation advisory and needs-enrichment count)
+    "#d97706",  # amber text for "needs enrichment" stat (amber-600)
+    "#fefce8", "#fde68a",  # amber warning banner bg / border (yellow-50 / yellow-200)
     # Misc
     "#b8860b",  # advisor gold-star marker
 }

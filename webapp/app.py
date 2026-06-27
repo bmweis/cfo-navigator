@@ -33,6 +33,7 @@ import hmac
 import os
 import re
 import sys
+import threading
 import time
 from datetime import datetime
 from urllib.parse import quote
@@ -200,6 +201,22 @@ def _seed_toolbox():
 
 def _lib() -> Library:
     return Library(DB_PATH)
+
+
+# Module-level job state for long-running admin tasks (single-process deployment).
+# Each key is a job name ("enrich", "backfill"); value is a progress dict.
+_JOB_LOCK = threading.Lock()
+_JOB_STATE: dict[str, dict] = {}
+
+
+def _job_set(name: str, **kw) -> None:
+    with _JOB_LOCK:
+        _JOB_STATE.setdefault(name, {}).update(kw)
+
+
+def _job_get(name: str) -> dict:
+    with _JOB_LOCK:
+        return dict(_JOB_STATE.get(name, {}))
 
 
 # --- Session cookie helpers (stdlib HMAC — no extra dependency) --------------
@@ -4170,6 +4187,8 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 _ADMIN_SECTIONS = [
     ("/admin/queue",        "Library Queue",       "Review proposed saves, edit tags, and approve them into the library."),
     ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
+    ("/admin/backfill",     "Historical sweep",    "One-time sitemap catch-up: queue articles from your subscribed sources going back to your saves cutoff."),
+    ("/admin/enrich",       "Re-enrich library",   "Backfill or force-refresh Claude summaries and tags across all articles."),
     ("/admin/social",       "Social",              "Draft LinkedIn posts in your voice."),
     ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
     ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
@@ -4646,6 +4665,426 @@ async def admin_review_remove(request: Request, background_tasks: BackgroundTask
         return JSONResponse({"ok": True})
     finally:
         lib.close()
+
+
+# ---------------------------------------------------------------------------
+# Re-enrich library — force-refresh Claude summaries + tags server-side
+# ---------------------------------------------------------------------------
+
+def _enrich_job(force: bool, model: str, limit: int) -> None:
+    """Background thread: run enrich_library, updating _JOB_STATE["enrich"]."""
+    _job_set("enrich", running=True, done=0, total=0, error="", model=model)
+    lib = _lib()
+    try:
+        from linklib import pipeline as _pl
+        from linklib import enrich as _enrich_mod
+
+        rows = lib.all_articles(limit=limit) if force else lib.unenriched(limit=limit)
+        total = len(rows)
+        _job_set("enrich", total=total)
+
+        def _progress(done, _total, _title):
+            _job_set("enrich", done=done)
+
+        _pl.enrich_library(lib, limit=limit, fetch=False, force=force,
+                           model=model, progress=_progress)
+        backup.maybe_backup(DB_PATH)
+        _job_set("enrich", running=False, done=total)
+    except Exception as exc:
+        _job_set("enrich", running=False, error=str(exc))
+    finally:
+        lib.close()
+
+
+@app.get("/admin/enrich", response_class=HTMLResponse)
+def admin_enrich(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        total = lib.count()
+        unenriched = len(lib.unenriched(limit=100000))
+    finally:
+        lib.close()
+
+    from linklib.enrich import DEFAULT_MODEL, ENRICH_RULES_VERSION
+
+    job = _job_get("enrich")
+    running = job.get("running", False)
+    job_done = job.get("done", 0)
+    job_total = job.get("total", 0)
+    job_error = job.get("error", "")
+    job_model = job.get("model", "")
+
+    enriched = total - unenriched
+    pct = round(enriched / total * 100) if total else 0
+
+    status_html = ""
+    if running:
+        prog_pct = round(job_done / job_total * 100) if job_total else 0
+        status_html = f"""
+<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">
+  <div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:6px;">Re-enrichment in progress&hellip;</div>
+  <div style="font-size:13px;color:var(--muted);">Model: <strong>{_esc(job_model)}</strong> &middot; {job_done} / {job_total} done</div>
+  <div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">
+    <div style="background:#2563eb;height:8px;width:{prog_pct}%;transition:width .3s;"></div>
+  </div>
+</div>"""
+    elif job_error:
+        status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: {_esc(job_error)}</div>'
+    elif job_done and not running:
+        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done — {job_done} articles enriched with {_esc(job_model)}.</div>'
+
+    models = [
+        ("claude-opus-4-8",           "Opus 4.8",   "Best quality — recommended for library standardization"),
+        ("claude-sonnet-4-6",         "Sonnet 4.6",  "Balanced quality and cost"),
+        ("claude-haiku-4-5-20251001", "Haiku 4.5",   "Fast and cheap — good for large unenriched backlogs"),
+    ]
+
+    def _mrow(mid, label, detail):
+        chk = " checked" if mid == DEFAULT_MODEL else ""
+        return (
+            f'<label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;padding:7px 0;border-top:1px solid var(--line);">'
+            f'<input type="radio" name="model" value="{mid}"{chk} style="margin-top:3px;accent-color:var(--accent);flex-shrink:0;">'
+            f'<span><strong>{label}</strong><span style="display:block;font-size:12px;color:var(--muted);">{detail}</span></span></label>'
+        )
+
+    model_radios = "".join(_mrow(m, l, d) for m, l, d in models)
+    disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
+
+    body = f"""<div class="page" style="max-width:720px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Re-enrich library</h1>
+<p style="color:var(--muted);margin:-6px 0 22px;">Run Claude enrichment (summaries + tags) over your saved articles, server-side.</p>
+
+{status_html}
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:18px;">
+    <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:26px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{total:,}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;">Total articles</div>
+    </div>
+    <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:26px;font-weight:700;color:#16a34a;font-family:var(--font-head);">{enriched:,}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;">Enriched ({pct}%)</div>
+    </div>
+    <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{unenriched:,}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;">Need enrichment</div>
+    </div>
+  </div>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Current rules version: <strong>{ENRICH_RULES_VERSION}</strong></p>
+
+  <form id="enrich-form" method="post" action="/admin/enrich/start" style="display:grid;gap:18px;">
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px;">Model</div>
+      <div style="display:flex;flex-direction:column;">{model_radios}</div>
+    </div>
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Scope</div>
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="force" value="1" style="margin-top:3px;accent-color:var(--accent);">
+        <span><strong>Force re-enrich all articles</strong>
+        <span style="display:block;font-size:12px;color:var(--muted);">Re-run every article, not just unenriched ones. Use this to standardize the library on a new model or rules version. Summary is overwritten; existing tags are merged.</span></span>
+      </label>
+    </div>
+    <div>
+      <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {disable}>Start enrichment</button>
+      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs in the background — you can leave this page.</span>
+    </div>
+  </form>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
+  <p style="font-size:13.5px;color:var(--muted);margin:0;line-height:1.6;">
+    <strong>After finishing:</strong> visit <a href="/admin/review-removals">Review removals</a> to confirm any articles the enricher flagged as off-audience,
+    and check the enriched summaries in the <a href="/library">Library</a>.
+  </p>
+</div>
+
+<div id="poll-container"></div>
+</div>
+<script>
+(function() {{
+  var statusDiv = document.getElementById('job-status') || null;
+  function poll() {{
+    fetch('/admin/enrich/status').then(r => r.json()).then(function(s) {{
+      var container = document.getElementById('poll-container');
+      if (!s.running && !container) return;
+      var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
+      var html = '';
+      if (s.running) {{
+        html = '<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-top:16px;">'
+          + '<div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:6px;">Re-enrichment in progress&hellip;</div>'
+          + '<div style="font-size:13px;color:var(--muted);">Model: <strong>' + s.model + '</strong> &middot; ' + s.done + ' / ' + s.total + ' done</div>'
+          + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
+          + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div></div>';
+        container.innerHTML = html;
+        setTimeout(poll, 2000);
+      }} else if (s.done > 0 && !s.error) {{
+        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#065f46;">Done — ' + s.done + ' articles enriched with ' + s.model + '.</div>';
+      }} else if (s.error) {{
+        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
+      }}
+    }}).catch(function() {{ setTimeout(poll, 3000); }});
+  }}
+  if ({str(running).lower()}) {{ setTimeout(poll, 2000); }}
+  document.getElementById('enrich-form').addEventListener('submit', function() {{
+    setTimeout(function() {{ poll(); }}, 1500);
+  }});
+}})();
+</script>"""
+    return HTMLResponse(_page("Re-enrich library — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/enrich/start")
+async def admin_enrich_start(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if _job_get("enrich").get("running"):
+        return RedirectResponse("/admin/enrich?running=1", status_code=303)
+    form = await request.form()
+    force = bool(form.get("force"))
+    model = (form.get("model") or "").strip()
+    if not model:
+        from linklib.enrich import DEFAULT_MODEL
+        model = DEFAULT_MODEL
+    t = threading.Thread(target=_enrich_job, args=(force, model, 100000), daemon=True)
+    t.start()
+    return RedirectResponse("/admin/enrich", status_code=303)
+
+
+@app.get("/admin/enrich/status")
+def admin_enrich_status(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401)
+    return JSONResponse(_job_get("enrich"))
+
+
+# ---------------------------------------------------------------------------
+# Historical sitemap backfill — queue articles going back to the saves cutoff
+# ---------------------------------------------------------------------------
+
+def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool) -> None:
+    """Background thread: run scan_sitemaps_into_queue, updating _JOB_STATE["backfill"]."""
+    _job_set("backfill", running=True, report=[], error="", done=0, total=0)
+    lib = _lib()
+    try:
+        from linklib.feed import parse_opml
+        from linklib.queue import scan_sitemaps_into_queue
+
+        feeds = parse_opml(OPML_PATH)
+        total = len(feeds)
+        _job_set("backfill", total=total)
+        sources_done = [0]
+
+        def _progress(source_name, i, n):
+            if i == n:  # last item in this source
+                sources_done[0] += 1
+                _job_set("backfill", done=sources_done[0])
+
+        report = scan_sitemaps_into_queue(
+            lib, feeds, since_str,
+            enrich=True, model=model,
+            per_source_limit=per_source,
+            dry_run=dry_run,
+            progress=_progress,
+        )
+        _job_set("backfill", running=False, report=report, done=total)
+        if not dry_run:
+            backup.maybe_backup(DB_PATH)
+    except Exception as exc:
+        _job_set("backfill", running=False, error=str(exc))
+    finally:
+        lib.close()
+
+
+@app.get("/admin/backfill", response_class=HTMLResponse)
+def admin_backfill(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        last_saved = lib.last_saved_at()
+    finally:
+        lib.close()
+
+    from linklib.enrich import DEFAULT_MODEL
+    from linklib.queue import QUEUE_ENRICH_MODEL
+
+    default_since = (last_saved or "2024-06-01")[:10]
+    job = _job_get("backfill")
+    running = job.get("running", False)
+    job_error = job.get("error", "")
+    report = job.get("report", [])
+    job_done = job.get("done", 0)
+    job_total = job.get("total", 0)
+
+    status_html = ""
+    if running:
+        prog_pct = round(job_done / job_total * 100) if job_total else 0
+        status_html = f"""
+<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">
+  <div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:4px;">Sitemap sweep in progress&hellip;</div>
+  <div style="font-size:13px;color:var(--muted);">{job_done} / {job_total} sources scanned</div>
+  <div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">
+    <div style="background:#2563eb;height:8px;width:{prog_pct}%;transition:width .3s;"></div>
+  </div>
+</div>"""
+    elif job_error:
+        status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: {_esc(job_error)}</div>'
+    elif report:
+        total_added = sum(r.get("added", 0) for r in report)
+        total_cands = sum(r.get("candidates", 0) for r in report)
+        total_scope = sum(r.get("skipped_scope", 0) for r in report)
+        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete &mdash; {total_added} articles queued from {total_cands} candidates ({total_scope} skipped as off-audience). <a href="/admin/queue">Review in Library Queue &rarr;</a></div>'
+
+    def _report_row(r):
+        added = r.get("added", 0)
+        cands = r.get("candidates", 0)
+        scope = r.get("skipped_scope", 0)
+        note = r.get("note", "")
+        sitemap = r.get("sitemap") or ""
+        sm_link = f'<a href="{_esc(sitemap)}" style="font-size:11px;color:var(--muted);" target="_blank">{_esc(sitemap[:60])}{"…" if len(sitemap)>60 else ""}</a>' if sitemap else '<span style="font-size:11px;color:var(--muted);">—</span>'
+        status = note if note else f'{added} added / {cands} candidates{f" / {scope} off-audience" if scope else ""}'
+        status_color = "#b91c1c" if note else ("#16a34a" if added else "#92400e")
+        return (f'<tr><td style="padding:8px 12px;font-size:13px;font-weight:500;">{_esc(r.get("source",""))}</td>'
+                f'<td style="padding:8px 12px;">{sm_link}</td>'
+                f'<td style="padding:8px 12px;font-size:13px;color:{status_color};">{_esc(status)}</td></tr>')
+
+    report_html = ""
+    if report:
+        rows_html = "".join(_report_row(r) for r in report)
+        report_html = f"""
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:20px;">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;font-size:14px;">Coverage report</div>
+  <div style="overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
+      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Sitemap</th>
+      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Result</th>
+    </tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+  </div>
+</div>"""
+
+    disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
+
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Historical sweep</h1>
+<p style="color:var(--muted);margin:-6px 0 20px;">One-time catch-up: walks your subscribed sources&rsquo; sitemaps and queues article candidates you haven&rsquo;t saved yet, for review.</p>
+
+<div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:22px;font-size:13.5px;color:#92400e;line-height:1.6;">
+  <strong>One-time operation.</strong> Run this once to catch up on your history. After that, the <a href="/admin/queue">Library Queue</a> feed scan keeps things current automatically.
+  Start with <strong>dry run</strong> to preview reach before spending API calls on enrichment.
+</div>
+
+{status_html}
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
+  <form id="backfill-form" method="post" action="/admin/backfill/start" style="display:grid;gap:18px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div>
+        <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Articles published since</label>
+        <input type="date" name="since" value="{default_since}" max="{datetime.now().strftime('%Y-%m-%d')}"
+          style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);" required>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Auto-detected from your oldest save: <strong>{default_since}</strong></p>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Max articles per source</label>
+        <input type="number" name="per_source" value="150" min="10" max="500"
+          style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">150 is a safe starting point.</p>
+      </div>
+    </div>
+    <div>
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Enrichment model</label>
+      <select name="model" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);min-width:240px;">
+        <option value="claude-opus-4-8" {"selected" if QUEUE_ENRICH_MODEL=="claude-opus-4-8" else ""}>Opus 4.8 — best quality (recommended)</option>
+        <option value="claude-sonnet-4-6" {"selected" if QUEUE_ENRICH_MODEL=="claude-sonnet-4-6" else ""}>Sonnet 4.6 — balanced</option>
+        <option value="claude-haiku-4-5-20251001" {"selected" if QUEUE_ENRICH_MODEL=="claude-haiku-4-5-20251001" else ""}>Haiku 4.5 — fast and cheap</option>
+      </select>
+    </div>
+    <div>
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="dry_run" value="1" checked style="margin-top:3px;accent-color:var(--accent);">
+        <span><strong>Dry run</strong>
+        <span style="display:block;font-size:12px;color:var(--muted);">Count candidates without fetching or enriching anything. Uncheck to do the real sweep.</span></span>
+      </label>
+    </div>
+    <div>
+      <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {disable}>Run sweep</button>
+      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side &mdash; you can leave this page. Results appear in the <a href="/admin/queue">Library Queue</a>.</span>
+    </div>
+  </form>
+</div>
+
+{report_html}
+
+<div id="poll-container"></div>
+</div>
+<script>
+(function() {{
+  function poll() {{
+    fetch('/admin/backfill/status').then(r => r.json()).then(function(s) {{
+      var container = document.getElementById('poll-container');
+      var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
+      var html = '';
+      if (s.running) {{
+        html = '<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-top:16px;">'
+          + '<div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:4px;">Sitemap sweep in progress&hellip;</div>'
+          + '<div style="font-size:13px;color:var(--muted);">' + s.done + ' / ' + s.total + ' sources scanned</div>'
+          + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
+          + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div></div>';
+        container.innerHTML = html;
+        setTimeout(poll, 3000);
+      }} else if (s.report && s.report.length) {{
+        var totalAdded = s.report.reduce((a, r) => a + (r.added || 0), 0);
+        var totalCands = s.report.reduce((a, r) => a + (r.candidates || 0), 0);
+        var totalScope = s.report.reduce((a, r) => a + (r.skipped_scope || 0), 0);
+        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#065f46;">Sweep complete &mdash; ' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/queue\\">Review in Library Queue &rarr;</a></div>';
+      }} else if (s.error) {{
+        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
+      }}
+    }}).catch(function() {{ setTimeout(poll, 4000); }});
+  }}
+  if ({str(running).lower()}) {{ setTimeout(poll, 3000); }}
+  document.getElementById('backfill-form').addEventListener('submit', function() {{
+    setTimeout(function() {{ poll(); }}, 2000);
+  }});
+}})();
+</script>"""
+    return HTMLResponse(_page("Historical sweep — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/backfill/start")
+async def admin_backfill_start(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if _job_get("backfill").get("running"):
+        return RedirectResponse("/admin/backfill?running=1", status_code=303)
+    form = await request.form()
+    since = (form.get("since") or "2024-06-01").strip()
+    try:
+        per_source = int(form.get("per_source") or 150)
+    except ValueError:
+        per_source = 150
+    model = (form.get("model") or "claude-opus-4-8").strip()
+    dry_run = bool(form.get("dry_run"))
+    t = threading.Thread(target=_backfill_job, args=(since, per_source, model, dry_run), daemon=True)
+    t.start()
+    return RedirectResponse("/admin/backfill", status_code=303)
+
+
+@app.get("/admin/backfill/status")
+def admin_backfill_status(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401)
+    return JSONResponse(_job_get("backfill"))
 
 
 @app.get("/admin/backup", response_class=HTMLResponse)
