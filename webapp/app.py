@@ -539,112 +539,55 @@ def thought_leadership():
                 f'text-transform:uppercase;color:var(--navy);margin:30px 0 2px;">{_esc(title)}</div>'
                 f'{"".join(rows)}')
 
-    body = '<div class="page"><h1>Thought Leadership</h1>' + \
-        '<p style="color:var(--muted);margin:4px 0 20px;">Podcasts, writing, interviews, and appearances.</p>' + \
-        """<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:36px;">
-  <a href="/growth-engine-ratio" style="display:block;text-decoration:none;background:var(--accent);color:#fff;border-radius:14px;padding:22px 24px;">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-      <span style="background:var(--coral);color:#fff;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;border-radius:5px;padding:2px 8px;">New</span>
-      <span style="font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam);">Framework</span>
-    </div>
-    <div style="font-size:18px;font-weight:700;letter-spacing:-.02em;margin-bottom:7px;line-height:1.25;">The Growth Engine Ratio</div>
-    <div style="font-size:13px;opacity:.85;line-height:1.5;">A metric for measuring how R&amp;D and GTM investments work together—with an interactive calculator. Published with The F Suite &rarr;</div>
-  </a>
-  <a href="/finops-ai-hackathon" style="display:block;text-decoration:none;background:var(--navy-wash);color:var(--ink);border:1px solid var(--line-strong);border-radius:14px;padding:22px 24px;">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-      <span style="background:var(--seafoam);color:var(--navy);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;border-radius:5px;padding:2px 8px;">New</span>
-      <span style="font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);">Playbook</span>
-    </div>
-    <div style="font-size:18px;font-weight:700;letter-spacing:-.02em;margin-bottom:7px;line-height:1.25;color:var(--ink);">Sail, Don't Row</div>
-    <div style="font-size:13px;color:var(--ink-soft);line-height:1.5;">How to run an AI hackathon with your finance team—the full format, facilitation mechanics, and what to do after to make it stick &rarr;</div>
-  </a>
-</div>
-<a href="/netsuite-mcp" style="display:block;text-decoration:none;background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:12px;padding:16px 22px;margin-bottom:36px;display:flex;align-items:center;gap:16px;">
-  <span style="font-size:22px;flex-shrink:0;">🔌</span>
-  <div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-      <span style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--seafoam-deep);">Setup Guide</span>
-    </div>
-    <div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:3px;">Connecting Claude to NetSuite</div>
-    <div style="font-size:13px;color:var(--ink-soft);line-height:1.5;">End-to-end setup for the two-role OAuth architecture—what it is, why it's secure, and how to use it once it's live &rarr;</div>
-  </div>
-</a>"""
+    # Featured: three flagship pieces, one consistent card treatment. The only
+    # per-card variation is the small category tag colour — no full-colour floods,
+    # which is what made the old top read as busy.
+    def fcard(href, tag, tag_color, title, desc, cta):
+        return (
+            f'<a href="{href}" class="tl-card">'
+            f'<span class="tl-tag" style="color:{tag_color};">{tag}</span>'
+            f'<h3>{title}</h3><p>{desc}</p>'
+            f'<span class="tl-go">{cta} &rarr;</span></a>'
+        )
 
-    body += """<div style="display:grid;grid-template-columns:2fr 3fr;gap:10px;margin-bottom:36px;">
-  <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking at the Abacum AI Summit, April 2026"
-    style="width:100%;height:220px;object-fit:cover;object-position:center top;border-radius:10px;display:block;">
-  <img src="/static/speaking-wide.jpg" alt="Panel discussion at the Abacum AI Summit, April 2026"
-    style="width:100%;height:220px;object-fit:cover;object-position:center 30%;border-radius:10px;display:block;">
-</div>
-<p style="font-size:12px;color:var(--muted);margin:-28px 0 36px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>"""
+    featured = (
+        '<div class="tl-featured">'
+        + fcard("/growth-engine-ratio", "Framework", "var(--coral-deep)",
+                "The Growth Engine Ratio",
+                "A metric for how R&amp;D and GTM investments work together to drive growth—with an interactive calculator.",
+                "Read the framework")
+        + fcard("/finops-ai-hackathon", "Playbook", "var(--seafoam-deep)",
+                "Sail, Don&rsquo;t Row",
+                "How to run an AI hackathon with your finance team—the full format, facilitation mechanics, and how to make it stick.",
+                "Read the playbook")
+        + fcard("/netsuite-mcp", "Setup Guide", "var(--navy-light)",
+                "Connecting Claude to NetSuite",
+                "End-to-end setup for the two-role OAuth architecture—what it is, why it&rsquo;s secure, and how to use it.",
+                "Read the guide")
+        + '</div>'
+    )
 
-    body += section("Events Hosted", [
-        ("Abacum AI Summit — Recording · Abacum · Apr 2026",
-         "https://www.youtube.com/watch?v=MDBz0OpR1II", "2026-04"),
-        ("Claude in Action for Finance — The F Suite Virtual Panel · The F Suite · Apr 2026",
-         "https://fsuitevirtualpanel430.splashthat.com", "2026-04"),
-        ("The F Suite Boston — Growth CFO Salon · The F Suite · Nov 2025",
-         "", "2025-11"),
-        ("The F Suite Cash Cycle Demo Day — Opening & Closing Remarks · The F Suite · Oct 2025",
-         "https://cashcycledemoday.splashthat.com/", "2025-10"),
-        ("The F Suite Boston — CFO Supper Club · The F Suite · Aug 2025",
-         "", "2025-08"),
-        ("Fidelity CFO Roundtable — M&A and Managing Uncertainty · Fidelity · Mar 2025",
-         "https://luma.com/7fwtr2n8", "2025-03"),
-        ("The F Suite Boston — Private Dinner & Guided Discussion · The F Suite · Apr 2024",
-         "", "2024-04"),
-        ("The F Suite Boston — CFO Dinner · The F Suite · Dec 2023",
-         "", "2023-12"),
-        ("The F Suite — NC Launch Dinner · The F Suite · Jun 2023",
-         "", "2023-06"),
-        ("Teampay Agile Finance Summit · Teampay · Oct 2021",
-         "https://www.accelevents.com/e/agile-finance-summit-2021", "2021-10"),
-    ])
+    body = (
+        '<div class="page">'
+        '<style>'
+        '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
+        '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'
+        'border-radius:14px;padding:22px 22px 18px;text-decoration:none;transition:border-color .15s,box-shadow .15s,transform .15s;}'
+        '.tl-card:hover{border-color:var(--navy-light);box-shadow:0 6px 20px rgba(0,41,117,.08);transform:translateY(-2px);text-decoration:none;}'
+        '.tl-tag{font:700 10px var(--font-body);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;}'
+        '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
+        '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
+        '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
+        '.tl-photos{display:grid;grid-template-columns:2fr 3fr;gap:10px;margin:8px 0 6px;}'
+        '.tl-photos img{width:100%;height:200px;object-fit:cover;border-radius:10px;display:block;}'
+        '@media(max-width:560px){.tl-photos{grid-template-columns:1fr;}.tl-photos img{height:170px;}}'
+        '</style>'
+        '<h1>Thought Leadership</h1>'
+        '<p style="color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press &mdash; from a tech CFO working in the thick of the business.</p>'
+        + featured
+    )
 
-    body += section("Podcast—Host: The Cash Flow Show", [
-        ("The Cash Flow Show — Conversations about how tech companies make money (full episode feed) · OnlyCFO",
-         "https://www.onlycfo.io/podcast", ""),
-        ("Adopting AI in Finance & Accounting — with Sowmya Ranganathan (former Controller, OpenAI) · The Cash Flow Show · Aug 2025",
-         "https://open.spotify.com/episode/6uXkeypUPX5g5yB8lHGq2V", "2025-08"),
-        ("State of Fundraising / Equity Market · The Cash Flow Show · Jun 2025",
-         "https://open.spotify.com/episode/0rSm42OSNRzjiG3cYye3tX", "2025-06"),
-        ("Is ARR Dead? · The Cash Flow Show · Jun 2025",
-         "https://open.spotify.com/episode/5G0GUaRrOeGXxJwFh9WsPw", "2025-06"),
-        ("Commission Plan Strategies in 2025 — with Meir Rotenberg & David Ma · The Cash Flow Show · Mar 2025",
-         "https://open.spotify.com/episode/64DsKmsDgOshd3LQdM4Cte", "2025-03"),
-        ("The M&A Playbook · The Cash Flow Show · Mar 2025",
-         "https://open.spotify.com/episode/5kMa3kkutDhsoc4SBoOBZ1", "2025-03"),
-    ])
-
-    body += section("Podcasts—Guest", [
-        ("Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks · Monetizely · Sep 2023",
-         "https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn",
-         "2023-09"),
-        ("OpexEngine — SaaS Conversations: Dynamic Planning for SaaS Finance Leaders · OpexEngine · May 2023",
-         "https://www.opexengine.com/webinar/opexengine-saas-conversations-dynamic-planning-for-saas-finance-leaders",
-         "2023-05"),
-        ("Role Forward Podcast — The Heuristics of Forecasting · Mosaic Tech · Dec 2022",
-         "https://www.youtube.com/watch?v=mqVvcVVTSrk", "2022-12"),
-        ("Role Forward Podcast — Collaborative Budgeting · Mosaic Tech · Apr 2022",
-         "https://www.youtube.com/watch?v=GPdRstJ_sKw", "2022-04"),
-    ])
-
-    body += section("Webinar—Host", [
-        ("Numeric — Lean Accounting Team · Numeric · Mar 2024",
-         "https://numeric.lpages.co/lean-accounting-team-webinar/", "2024-03"),
-    ])
-
-    body += section("Webinar—Panelist", [
-        ("Abacum — Beyond the Spreadsheet: What FP&A Platforms Need to Deliver in an AI-First Era · Abacum · Jun 2026",
-         "https://www.abacum.ai/webinars/beyond-the-spreadsheet-what-fp-a-platforms-need-to-deliver-in-an-ai-first-era", "2026-06"),
-    ])
-
-    body += section("Interview", [
-        ("Sequence — From $1M to $100M: 6 Finance Lessons from the Frontline · Sequence · Jul 2025",
-         "https://www.sequencehq.com/blog/from-1m-to-100m-6-finance-lessons-from-the-frontline", "2025-07"),
-    ])
-
-    body += section("Authored", [
+    body += section("Writing", [
         ("The Growth Engine Ratio: Accounting for the Missing Half of Your Efficiency Equation · The F Suite · Jun 2026",
          "/growth-engine-ratio", "2026-06"),
         ("Sail, Don't Row: A Playbook for Running an AI Hackathon With Your Finance Team · Jun 2026",
@@ -657,7 +600,68 @@ def thought_leadership():
          "https://www.onlycfo.io/p/building-dashboards-that-matter", "2024-04"),
     ])
 
-    body += section("Cited & Quoted", [
+    # On-stage photos lead the Speaking section, where they have context.
+    body += """<div class="tl-photos">
+  <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking at the Abacum AI Summit, April 2026">
+  <img src="/static/speaking-wide.jpg" alt="Panel discussion at the Abacum AI Summit, April 2026">
+</div>
+<p style="font-size:12px;color:var(--muted);margin:0 0 4px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>"""
+
+    body += section("Speaking & Events", [
+        ("Abacum AI Summit — Recording · Abacum · Apr 2026",
+         "https://www.youtube.com/watch?v=MDBz0OpR1II", "2026-04"),
+        ("Abacum — Beyond the Spreadsheet: What FP&A Platforms Need to Deliver in an AI-First Era (Webinar Panel) · Abacum · Jun 2026",
+         "https://www.abacum.ai/webinars/beyond-the-spreadsheet-what-fp-a-platforms-need-to-deliver-in-an-ai-first-era", "2026-06"),
+        ("Claude in Action for Finance — The F Suite Virtual Panel · The F Suite · Apr 2026",
+         "https://fsuitevirtualpanel430.splashthat.com", "2026-04"),
+        ("The F Suite Boston — Growth CFO Salon · The F Suite · Nov 2025",
+         "", "2025-11"),
+        ("The F Suite Cash Cycle Demo Day — Opening & Closing Remarks · The F Suite · Oct 2025",
+         "https://cashcycledemoday.splashthat.com/", "2025-10"),
+        ("The F Suite Boston — CFO Supper Club · The F Suite · Aug 2025",
+         "", "2025-08"),
+        ("Fidelity CFO Roundtable — M&A and Managing Uncertainty · Fidelity · Mar 2025",
+         "https://luma.com/7fwtr2n8", "2025-03"),
+        ("Numeric — Lean Accounting Team (Webinar Host) · Numeric · Mar 2024",
+         "https://numeric.lpages.co/lean-accounting-team-webinar/", "2024-03"),
+        ("The F Suite Boston — Private Dinner & Guided Discussion · The F Suite · Apr 2024",
+         "", "2024-04"),
+        ("The F Suite Boston — CFO Dinner · The F Suite · Dec 2023",
+         "", "2023-12"),
+        ("The F Suite — NC Launch Dinner · The F Suite · Jun 2023",
+         "", "2023-06"),
+        ("Teampay Agile Finance Summit · Teampay · Oct 2021",
+         "https://www.accelevents.com/e/agile-finance-summit-2021", "2021-10"),
+    ])
+
+    body += section("Podcasts", [
+        ("The Cash Flow Show — Conversations about how tech companies make money (host · full episode feed) · OnlyCFO",
+         "https://www.onlycfo.io/podcast", ""),
+        ("Adopting AI in Finance & Accounting — with Sowmya Ranganathan (former Controller, OpenAI) · The Cash Flow Show · Aug 2025",
+         "https://open.spotify.com/episode/6uXkeypUPX5g5yB8lHGq2V", "2025-08"),
+        ("State of Fundraising / Equity Market · The Cash Flow Show · Jun 2025",
+         "https://open.spotify.com/episode/0rSm42OSNRzjiG3cYye3tX", "2025-06"),
+        ("Is ARR Dead? · The Cash Flow Show · Jun 2025",
+         "https://open.spotify.com/episode/5G0GUaRrOeGXxJwFh9WsPw", "2025-06"),
+        ("Commission Plan Strategies in 2025 — with Meir Rotenberg & David Ma · The Cash Flow Show · Mar 2025",
+         "https://open.spotify.com/episode/64DsKmsDgOshd3LQdM4Cte", "2025-03"),
+        ("The M&A Playbook · The Cash Flow Show · Mar 2025",
+         "https://open.spotify.com/episode/5kMa3kkutDhsoc4SBoOBZ1", "2025-03"),
+        ("Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks (guest) · Monetizely · Sep 2023",
+         "https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn",
+         "2023-09"),
+        ("OpexEngine — SaaS Conversations: Dynamic Planning for SaaS Finance Leaders (guest) · OpexEngine · May 2023",
+         "https://www.opexengine.com/webinar/opexengine-saas-conversations-dynamic-planning-for-saas-finance-leaders",
+         "2023-05"),
+        ("Role Forward Podcast — The Heuristics of Forecasting (guest) · Mosaic Tech · Dec 2022",
+         "https://www.youtube.com/watch?v=mqVvcVVTSrk", "2022-12"),
+        ("Role Forward Podcast — Collaborative Budgeting (guest) · Mosaic Tech · Apr 2022",
+         "https://www.youtube.com/watch?v=GPdRstJ_sKw", "2022-04"),
+    ])
+
+    body += section("Press", [
+        ("Sequence — From $1M to $100M: 6 Finance Lessons from the Frontline · Sequence · Jul 2025",
+         "https://www.sequencehq.com/blog/from-1m-to-100m-6-finance-lessons-from-the-frontline", "2025-07"),
         ("LegalDive — GC/CFO Collaboration · LegalDive · Mar 2023",
          "https://www.legaldive.com/news/gc-cfo-collaboration-svb-techgc-the-f-suite-silicon-valley-bank/646561/",
          "2023-03"),
