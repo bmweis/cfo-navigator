@@ -4795,7 +4795,7 @@ def admin_enrich(request: Request):
 <h1>Re-enrich library</h1>
 <p style="color:var(--muted);margin:-6px 0 22px;">Run Claude enrichment (summaries + tags) over your saved articles, server-side.</p>
 
-{status_html}
+<div id="poll-container">{status_html}</div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:18px;">
@@ -4841,33 +4841,34 @@ def admin_enrich(request: Request):
   </p>
 </div>
 
-<div id="poll-container"></div>
 </div>
 <script>
 (function() {{
-  var statusDiv = document.getElementById('job-status') || null;
+  var reloadOnDone = false;
   function poll() {{
     fetch('/admin/enrich/status').then(r => r.json()).then(function(s) {{
       var container = document.getElementById('poll-container');
-      if (!s.running && !container) return;
+      if (!container) return;
       var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
-      var html = '';
       if (s.running) {{
-        html = '<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-top:16px;">'
+        reloadOnDone = true;
+        container.innerHTML = '<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">'
           + '<div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:6px;">Re-enrichment in progress&hellip;</div>'
           + '<div style="font-size:13px;color:var(--muted);">Model: <strong>' + s.model + '</strong> &middot; ' + s.done + ' / ' + s.total + ' done</div>'
           + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
           + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div></div>';
-        container.innerHTML = html;
         setTimeout(poll, 2000);
+      }} else if (reloadOnDone) {{
+        // Job finished while we were watching — reload so the stat counters refresh.
+        window.location.reload();
       }} else if (s.done > 0 && !s.error) {{
-        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#065f46;">Done — ' + s.done + ' articles enriched with ' + s.model + '.</div>';
+        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done — ' + s.done + ' articles enriched with ' + s.model + '.</div>';
       }} else if (s.error) {{
-        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
+        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
       }}
     }}).catch(function() {{ setTimeout(poll, 3000); }});
   }}
-  if ({str(running).lower()}) {{ setTimeout(poll, 2000); }}
+  if ({str(running).lower()}) {{ reloadOnDone = true; setTimeout(poll, 2000); }}
   document.getElementById('enrich-form').addEventListener('submit', function() {{
     setTimeout(function() {{ poll(); }}, 1500);
   }});
@@ -5021,7 +5022,7 @@ def admin_backfill(request: Request):
   Start with <strong>dry run</strong> to preview reach before spending API calls on enrichment.
 </div>
 
-{status_html}
+<div id="poll-container">{status_html}</div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
   <form id="backfill-form" method="post" action="/admin/backfill/start" style="display:grid;gap:18px;">
@@ -5062,35 +5063,37 @@ def admin_backfill(request: Request):
 </div>
 
 {report_html}
-
-<div id="poll-container"></div>
 </div>
 <script>
 (function() {{
+  var reloadOnDone = false;
   function poll() {{
     fetch('/admin/backfill/status').then(r => r.json()).then(function(s) {{
       var container = document.getElementById('poll-container');
+      if (!container) return;
       var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
-      var html = '';
       if (s.running) {{
-        html = '<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-top:16px;">'
+        reloadOnDone = true;
+        container.innerHTML = '<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">'
           + '<div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:4px;">Sitemap sweep in progress&hellip;</div>'
           + '<div style="font-size:13px;color:var(--muted);">' + s.done + ' / ' + s.total + ' sources scanned</div>'
           + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
           + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div></div>';
-        container.innerHTML = html;
         setTimeout(poll, 3000);
+      }} else if (reloadOnDone) {{
+        // Job finished while we were watching — reload so the full coverage table renders.
+        window.location.reload();
       }} else if (s.report && s.report.length) {{
         var totalAdded = s.report.reduce((a, r) => a + (r.added || 0), 0);
         var totalCands = s.report.reduce((a, r) => a + (r.candidates || 0), 0);
         var totalScope = s.report.reduce((a, r) => a + (r.skipped_scope || 0), 0);
-        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#065f46;">Sweep complete &mdash; ' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/queue\\">Review in Library Queue &rarr;</a></div>';
+        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete &mdash; ' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/queue\\">Review in Library Queue &rarr;</a></div>';
       }} else if (s.error) {{
-        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
+        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
       }}
     }}).catch(function() {{ setTimeout(poll, 4000); }});
   }}
-  if ({str(running).lower()}) {{ setTimeout(poll, 3000); }}
+  if ({str(running).lower()}) {{ reloadOnDone = true; setTimeout(poll, 3000); }}
   document.getElementById('backfill-form').addEventListener('submit', function() {{
     setTimeout(function() {{ poll(); }}, 2000);
   }});
