@@ -502,7 +502,15 @@ companies make money, how finance teams earn their seat at the table, and what i
 scale a business with discipline. I also write on startup finance and advise finance leaders making
 the early-to-growth leap. Based in Boston.</p>
 
-<div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap;">
+<div style="display:grid;grid-template-columns:2fr 3fr;gap:10px;margin-top:32px;">
+  <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking on stage"
+    style="width:100%;height:200px;object-fit:cover;object-position:center top;border-radius:10px;display:block;">
+  <img src="/static/speaking-wide.jpg" alt="Brian Weisberg on stage at the Abacum AI Summit"
+    style="width:100%;height:200px;object-fit:cover;object-position:center 30%;border-radius:10px;display:block;">
+</div>
+<p style="font-size:12px;color:var(--muted);margin:8px 0 24px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;">
   <a href="/thought-leadership" class="btn">Thought Leadership</a>
   <a href="/contact" class="btn btn-ghost">Get in Touch</a>
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
@@ -562,11 +570,17 @@ def thought_leadership():
   </div>
 </a>"""
 
+    body += """<div style="display:grid;grid-template-columns:2fr 3fr;gap:10px;margin-bottom:36px;">
+  <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking at the Abacum AI Summit, April 2026"
+    style="width:100%;height:220px;object-fit:cover;object-position:center top;border-radius:10px;display:block;">
+  <img src="/static/speaking-wide.jpg" alt="Panel discussion at the Abacum AI Summit, April 2026"
+    style="width:100%;height:220px;object-fit:cover;object-position:center 30%;border-radius:10px;display:block;">
+</div>
+<p style="font-size:12px;color:var(--muted);margin:-28px 0 36px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>"""
+
     body += section("Events Hosted", [
         ("Abacum AI Summit — Recording · Abacum · Apr 2026",
          "https://www.youtube.com/watch?v=MDBz0OpR1II", "2026-04"),
-        ("Abacum AI Summit — Event Photos · Abacum · Apr 2026",
-         "https://www.snappr.com/gallery/new-york-city-ny/event/09-apr-2026/tyanna-s-event-photoshoot", "2026-04"),
         ("Claude in Action for Finance — The F Suite Virtual Panel · The F Suite · Apr 2026",
          "https://fsuitevirtualpanel430.splashthat.com", "2026-04"),
         ("The F Suite Boston — Growth CFO Salon · The F Suite · Nov 2025",
