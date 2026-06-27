@@ -4169,6 +4169,7 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 # Admin sections — the hub lists these; each links to its own page.
 _ADMIN_SECTIONS = [
     ("/admin/queue",        "Library Queue",       "Review proposed saves, edit tags, and approve them into the library."),
+    ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
     ("/admin/social",       "Social",              "Draft LinkedIn posts in your voice."),
     ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
     ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
@@ -4528,6 +4529,120 @@ async def admin_queue_dismiss(request: Request):
     lib = _lib()
     try:
         lib.dismiss_queue_item(url)
+        return JSONResponse({"ok": True})
+    finally:
+        lib.close()
+
+
+# ---------------------------------------------------------------------------
+# Review removals — articles the enricher flagged as off-audience
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/review-removals", response_class=HTMLResponse)
+def admin_review_removals(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        flagged = lib.list_flagged()
+    finally:
+        lib.close()
+
+    def _card(a: dict) -> str:
+        aid = a["id"]
+        url = _esc(a["url"])
+        title = _esc(a.get("title") or a["url"])
+        source = _esc(a.get("source") or "")
+        reason = _esc(a.get("scope_reason") or "flagged off-audience")
+        summary = _esc((a.get("summary") or "")[:300])
+        return f"""<div data-card data-id="{aid}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+  <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
+  <div style="font-size:12px;color:var(--muted);margin:3px 0 6px;">{source}</div>
+  <div style="font-size:12px;color:var(--muted);font-style:italic;margin-bottom:8px;">Flagged: {reason}</div>
+  <p style="font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{summary}</p>
+  <div style="display:flex;gap:9px;">
+    <button class="keep-btn btn btn-ghost" onclick="keepOne(this)" style="font-size:13px;padding:8px 18px;">Keep</button>
+    <button class="btn btn-ghost" onclick="removeOne(this)" style="font-size:13px;padding:8px 18px;color:var(--alert);border-color:var(--alert);">Remove</button>
+  </div>
+</div>"""
+
+    n = len(flagged)
+    if n == 0:
+        cards = ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+                 'padding:32px;text-align:center;color:var(--muted);">Nothing flagged for removal. '
+                 'After a re-enrichment pass, off-audience articles (e.g. how-to-get-into-VC) show up here.</div>')
+    else:
+        cards = "".join(_card(a) for a in flagged)
+
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Review removals</h1>
+<p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as off-audience for this library &mdash; most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so. Keep the false positives; remove the rest.</p>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px;">
+  <div><span id="flagged-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{n}</span> <span style="color:var(--muted);">flagged</span></div>
+  <button class="btn btn-ghost" onclick="removeAll()" style="font-size:12px;padding:6px 14px;color:var(--alert);border-color:var(--alert);">Remove all</button>
+</div>
+{cards}
+</div>
+
+<script>
+function cardOf(btn){{ return btn.closest('[data-card]'); }}
+async function postForm(path, data){{
+  try {{
+    const r = await fetch(path, {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:new URLSearchParams(data)}});
+    return r.ok;
+  }} catch(e) {{ return false; }}
+}}
+function dropCard(card){{
+  card.remove();
+  const el = document.getElementById('flagged-count');
+  el.textContent = Math.max(0, parseInt(el.textContent || '0', 10) - 1);
+}}
+async function keepOne(btn){{
+  const card = cardOf(btn);
+  if (await postForm('/admin/review-removals/keep', {{id: card.dataset.id}})) dropCard(card);
+}}
+async function removeOne(btn){{
+  const card = cardOf(btn);
+  if (await postForm('/admin/review-removals/remove', {{id: card.dataset.id}})) dropCard(card);
+}}
+async function removeAll(){{
+  if (!confirm('Remove all flagged articles? This deletes them from the library.')) return;
+  const cards = Array.from(document.querySelectorAll('[data-card]'));
+  for (const c of cards) {{ await removeOne(c.querySelector('button:last-child')); }}
+}}
+</script>"""
+    return HTMLResponse(_page("Review removals — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/review-removals/keep")
+async def admin_review_keep(request: Request):
+    _require_api(request)
+    form = await request.form()
+    try:
+        article_id = int(form.get("id") or 0)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad id")
+    lib = _lib()
+    try:
+        lib.keep_article(article_id)
+        return JSONResponse({"ok": True})
+    finally:
+        lib.close()
+
+
+@app.post("/admin/review-removals/remove")
+async def admin_review_remove(request: Request, background_tasks: BackgroundTasks):
+    _require_api(request)
+    form = await request.form()
+    try:
+        article_id = int(form.get("id") or 0)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad id")
+    lib = _lib()
+    try:
+        lib.delete_article(article_id)
+        background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True})
     finally:
         lib.close()

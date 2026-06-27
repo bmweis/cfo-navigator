@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS articles (
     enriched    INTEGER NOT NULL DEFAULT 0,    -- 1 once Claude summary/tags applied
     enrich_model TEXT NOT NULL DEFAULT '',      -- model that produced the enrichment
     enrich_rules TEXT NOT NULL DEFAULT '',      -- ENRICH_RULES_VERSION used
+    in_scope    INTEGER NOT NULL DEFAULT 1,     -- 0 = flagged off-audience for review
+    scope_reason TEXT NOT NULL DEFAULT '',      -- why it was flagged in/out of scope
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -208,6 +210,9 @@ class Library:
             "ALTER TABLE articles ADD COLUMN enrich_rules TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE library_queue ADD COLUMN enrich_model TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE library_queue ADD COLUMN enrich_rules TEXT NOT NULL DEFAULT ''",
+            # Audience-scope review — flag off-audience rows (e.g. how-to-get-into-VC).
+            "ALTER TABLE articles ADD COLUMN in_scope INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE articles ADD COLUMN scope_reason TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -290,16 +295,38 @@ class Library:
         self.conn.commit()
 
     def apply_enrichment(self, article_id: int, summary: str, tags: list[str],
-                         model: str = "", rules: str = "") -> None:
+                         model: str = "", rules: str = "",
+                         in_scope: bool = True, scope_reason: str = "") -> None:
         row = self.conn.execute("SELECT summary, tags_json FROM articles WHERE id=?", (article_id,)).fetchone()
         if row is None:
             return
         merged_tags = sorted(set(json.loads(row["tags_json"]) or []) | set(tags))
         self.conn.execute(
             "UPDATE articles SET summary=?, tags_json=?, tags_text=?, enriched=1, "
-            "enrich_model=?, enrich_rules=?, updated_at=? WHERE id=?",
+            "enrich_model=?, enrich_rules=?, in_scope=?, scope_reason=?, updated_at=? WHERE id=?",
             (summary or row["summary"], json.dumps(merged_tags), " ".join(merged_tags),
-             model, rules, _now(), article_id),
+             model, rules, int(in_scope), scope_reason, _now(), article_id),
+        )
+        self.conn.commit()
+
+    # -- audience-scope review (Phase 3) ---------------------------------------
+
+    def list_flagged(self, limit: int = 2000) -> list[dict]:
+        """Articles the enricher flagged as off-audience (in_scope=0), for review."""
+        rows = self.conn.execute(
+            "SELECT * FROM articles WHERE in_scope=0 ORDER BY id LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def flagged_count(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM articles WHERE in_scope=0"
+        ).fetchone()[0]
+
+    def keep_article(self, article_id: int) -> None:
+        """Clear an out-of-scope flag — a false positive you want to keep."""
+        self.conn.execute(
+            "UPDATE articles SET in_scope=1, updated_at=? WHERE id=?", (_now(), article_id)
         )
         self.conn.commit()
 
