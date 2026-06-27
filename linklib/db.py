@@ -327,6 +327,15 @@ class Library:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def all_articles(self, limit: int = 100000) -> list[dict]:
+        """Every row, oldest first. Used by a forced re-enrichment pass that
+        re-runs even already-enriched articles (e.g. to standardize the whole
+        library on a more capable model)."""
+        rows = self.conn.execute(
+            "SELECT * FROM articles ORDER BY id LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
 
