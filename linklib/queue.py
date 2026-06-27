@@ -60,6 +60,7 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
     enriched = False
     enrich_model = ""
     enrich_rules = ""
+    in_scope = True
 
     if enrich:
         try:
@@ -85,6 +86,7 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
             enriched = True
             enrich_model = result.model
             enrich_rules = result.rules_version
+            in_scope = result.in_scope
 
     if not tags:
         tags = suggest_tags_heuristic(title, summary, source, vocab)
@@ -94,6 +96,7 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
         suggested_tags=tags, published_at=item.get("published_at") or None,
         origin=item.get("origin", "feed"), enriched=enriched,
         enrich_model=enrich_model, enrich_rules=enrich_rules,
+        in_scope=in_scope,
     )
 
 
@@ -115,13 +118,19 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
     new_items = [it for it in items if it.get("url") and it["url"] not in seen]
 
     added = 0
+    skipped_scope = 0
     for i, it in enumerate(new_items):
         cand = _enrich_candidate(it, lib.known_tags(), enrich=enrich, model=model)
+        if not cand.pop("in_scope", True):
+            skipped_scope += 1       # off-audience — don't even propose it
+            progress(i + 1, len(new_items), it.get("title", ""))
+            continue
         if lib.add_to_queue(**cand):
             added += 1
         progress(i + 1, len(new_items), it.get("title", ""))
 
-    return {"scanned": len(items), "new": len(new_items), "added": added}
+    return {"scanned": len(items), "new": len(new_items),
+            "added": added, "skipped_scope": skipped_scope}
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +287,7 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
     for f in feeds:
         site = getattr(f, "html_url", "") or ""
         stat = {"source": f.name, "site": site, "sitemap": None,
-                "candidates": 0, "added": 0, "undated": 0, "note": ""}
+                "candidates": 0, "added": 0, "undated": 0, "skipped_scope": 0, "note": ""}
         if not site:
             stat["note"] = "no site URL in OPML"
             report.append(stat)
@@ -315,6 +324,10 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
                         "published_at": e["lastmod"].isoformat(),
                         "origin": f"backfill:{f.name}"}
                 cand = _enrich_candidate(item, lib.known_tags(), enrich=enrich, model=model)
+                if not cand.pop("in_scope", True):
+                    stat["skipped_scope"] += 1   # off-audience — don't propose it
+                    progress(f.name, i + 1, len(candidates))
+                    continue
                 if lib.add_to_queue(**cand):
                     stat["added"] += 1
                     seen.add(e["url"])

@@ -7,9 +7,10 @@ Requires the `anthropic` SDK and an API key:
     pip install anthropic
     export ANTHROPIC_API_KEY=sk-ant-...
 
-Defaults to Haiku because you'll be enriching a few thousand articles and
-it's the cheapest capable model. Override with LINKLIB_ENRICH_MODEL.
-Model names change over time — verify current options at
+Defaults to Opus for depth: the summary is the material the Ask assistant
+reasons from and the resale-safe surface, so quality matters more than the
+per-article cost of a one-time or low-volume run. Override with
+LINKLIB_ENRICH_MODEL. Model names change over time — verify current options at
 https://docs.claude.com/en/docs/about-claude/models
 """
 from __future__ import annotations
@@ -18,27 +19,50 @@ import json
 import os
 from dataclasses import dataclass
 
-DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-haiku-4-5-20251001")
+DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-4-8")
 
 # Version of the enrichment "rules" (the prompt below). Stored alongside each
 # article's enrichment so you can tell which ruleset produced a given summary,
 # and re-run rows enriched under older rules. BUMP THIS whenever _PROMPT changes.
-ENRICH_RULES_VERSION = "v1"
+ENRICH_RULES_VERSION = "v2"
 
-_PROMPT = """You are enriching a personal finance/business research library so it
-is highly searchable. Given an article's title and text, return STRICT JSON only
-(no prose, no markdown fences) with exactly two keys:
+_PROMPT = """You are enriching a curated research library for a specific audience:
+finance leaders at high-growth technology companies — people running FP&A or
+strategic finance at a startup or scaleup, and the operators and founders growing
+into that work.
 
-  "summary": 3-5 sentences. Capture the core argument, plus any specific
-     frameworks, metrics, benchmarks, formulas, and named people or companies.
-     Favor concrete, searchable terms over generic description — someone should
-     be able to find this article later by searching for what it actually says.
+The library powers two things: (1) an AI assistant that ANSWERS finance questions
+by retrieving and synthesizing these articles, and (2) a search box. So the
+summary must be substantive and retrievable — it is the material the assistant
+reasons from, not a teaser.
+
+Given an article's title and text, return STRICT JSON only (no prose, no markdown
+fences) with exactly these four keys:
+
+  "summary": 4-7 sentences, written to be retrieved and reasoned from. Lead with
+     the article's central claim or recommendation. Include the specific figures
+     it gives (benchmarks, ranges, percentages, multiples) and name the
+     frameworks, metrics, formulas, companies, and people it discusses. Make
+     explicit the practical question(s) a finance leader could use this article
+     to answer. Favor concrete, searchable terms over generic description.
 
   "tags": 3-7 topic tags. PREFER reusing tags from this existing vocabulary
      wherever they fit (match the wording exactly):
 {known}
 
      Only invent a new lowercase tag when nothing in the vocabulary fits.
+
+  "in_scope": true or false. TRUE if the article is useful to a finance leader,
+     founder, or executive at a high-growth tech company — INCLUDING venture
+     capital and fundraising content that helps operators (how investors evaluate
+     metrics, term sheets, board management, raising a round). FALSE only when it
+     is clearly off-audience — most importantly, content about pursuing a personal
+     CAREER in venture capital (how to break into VC, get a job at a fund, become
+     an investor), or material unrelated to operating and finance leadership.
+     When in doubt, return true.
+
+  "scope_reason": one short phrase explaining the in_scope decision (e.g.
+     "operator fundraising guidance - keep" or "how to get a job in VC - off-audience").
 
 Title: {title}
 
@@ -53,6 +77,8 @@ class Enrichment:
     tags: list[str]
     model: str = ""           # model that produced this enrichment
     rules_version: str = ""   # ENRICH_RULES_VERSION at the time
+    in_scope: bool = True     # False = off-audience (e.g. how-to-get-into-VC)
+    scope_reason: str = ""    # short rationale for the in_scope call
 
 
 def enrich(title: str, text: str, known_tags: list[str] | None = None,
@@ -71,14 +97,18 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=600,
+            max_tokens=1000,  # room for a fuller answer-bearing summary + scope JSON
             messages=[{"role": "user", "content": _PROMPT.format(known=known, title=title, text=snippet)}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
         tags = [str(t).strip() for t in data.get("tags", []) if str(t).strip()]
-        return Enrichment(summary=str(data.get("summary", "")).strip(), tags=tags,
-                          model=model, rules_version=ENRICH_RULES_VERSION)
+        return Enrichment(
+            summary=str(data.get("summary", "")).strip(), tags=tags,
+            model=model, rules_version=ENRICH_RULES_VERSION,
+            in_scope=bool(data.get("in_scope", True)),
+            scope_reason=str(data.get("scope_reason", "")).strip(),
+        )
     except Exception:
         return None
