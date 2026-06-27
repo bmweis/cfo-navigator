@@ -5,6 +5,8 @@ Public routes (no auth):
     GET  /                     Bio homepage
     GET  /thought-leadership   Podcasts, writing, interviews
     GET  /growth-engine-ratio  GER framework + calculator
+    GET  /finops-ai-hackathon  AI hackathon playbook
+    GET  /netsuite-mcp         Claude–NetSuite setup guide
     GET  /contact              Contact form
     POST /contact              Submit contact form
     GET  /login / POST /login  Password sign-in (sets a signed session cookie)
@@ -501,7 +503,15 @@ companies make money, how finance teams earn their seat at the table, and what i
 scale a business with discipline. I also write on startup finance and advise finance leaders making
 the early-to-growth leap. Based in Boston.</p>
 
-<div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap;">
+<div style="display:grid;grid-template-columns:2fr 3fr;gap:10px;margin-top:32px;">
+  <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking on stage"
+    style="width:100%;height:200px;object-fit:cover;object-position:center top;border-radius:10px;display:block;">
+  <img src="/static/speaking-wide.jpg" alt="Brian Weisberg on stage at the Abacum AI Summit"
+    style="width:100%;height:200px;object-fit:cover;object-position:center 30%;border-radius:10px;display:block;">
+</div>
+<p style="font-size:12px;color:var(--muted);margin:8px 0 24px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;">
   <a href="/thought-leadership" class="btn">Thought Leadership</a>
   <a href="/contact" class="btn btn-ghost">Get in Touch</a>
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
@@ -531,20 +541,79 @@ def thought_leadership():
                 f'text-transform:uppercase;color:var(--navy);margin:30px 0 2px;">{_esc(title)}</div>'
                 f'{"".join(rows)}')
 
-    body = '<div class="page"><h1>Thought Leadership</h1>' + \
-        '<p style="color:var(--muted);margin:4px 0 28px;">Podcasts, writing, interviews, and appearances.</p>' + \
-        """<a href="/growth-engine-ratio" style="display:block;text-decoration:none;background:var(--accent);color:#fff;border-radius:14px;padding:22px 26px;margin-bottom:36px;">
-  <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px;">
-    <span style="background:var(--coral);color:#fff;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;border-radius:5px;padding:2px 8px;">New</span>
-    <span style="font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam);">Featured Framework</span>
-  </div>
-  <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;">The Growth Engine Ratio</div>
-  <div style="font-size:14px;opacity:.85;line-height:1.5;">A new metric for measuring how R&amp;D and GTM investments work together to drive growth&mdash;with an interactive calculator to see how you stack up. Published with The F Suite &rarr;</div>
-</a>"""
+    # Featured: three flagship pieces, one consistent card treatment. The only
+    # per-card variation is the small category tag colour — no full-colour floods,
+    # which is what made the old top read as busy.
+    def fcard(href, tag, tag_color, title, desc, cta):
+        return (
+            f'<a href="{href}" class="tl-card">'
+            f'<span class="tl-tag" style="color:{tag_color};">{tag}</span>'
+            f'<h3>{title}</h3><p>{desc}</p>'
+            f'<span class="tl-go">{cta} &rarr;</span></a>'
+        )
 
-    body += section("Events Hosted", [
-        ("Abacum AI Summit · Abacum · Apr 2026",
-         "https://www.abacum.ai/summit-post", "2026-04"),
+    featured = (
+        '<div class="tl-featured">'
+        + fcard("/growth-engine-ratio", "Framework", "var(--coral-deep)",
+                "The Growth Engine Ratio",
+                "A metric for how R&amp;D and GTM investments work together to drive growth—with an interactive calculator.",
+                "Read the framework")
+        + fcard("/finops-ai-hackathon", "Playbook", "var(--seafoam-deep)",
+                "Sail, Don&rsquo;t Row",
+                "How to run an AI hackathon with your finance team—the full format, facilitation mechanics, and how to make it stick.",
+                "Read the playbook")
+        + fcard("/netsuite-mcp", "Setup Guide", "var(--navy-light)",
+                "Connecting Claude to NetSuite",
+                "End-to-end setup for the two-role OAuth architecture—what it is, why it&rsquo;s secure, and how to use it.",
+                "Read the guide")
+        + '</div>'
+    )
+
+    body = (
+        '<div class="page">'
+        '<style>'
+        '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
+        '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'
+        'border-radius:14px;padding:22px 22px 18px;text-decoration:none;transition:border-color .15s,box-shadow .15s,transform .15s;}'
+        '.tl-card:hover{border-color:var(--navy-light);box-shadow:0 6px 20px rgba(0,41,117,.08);transform:translateY(-2px);text-decoration:none;}'
+        '.tl-tag{font:700 10px var(--font-body);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;}'
+        '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
+        '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
+        '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
+        '.tl-photos{display:grid;grid-template-columns:2fr 3fr;gap:10px;margin:8px 0 6px;}'
+        '.tl-photos img{width:100%;height:200px;object-fit:cover;border-radius:10px;display:block;}'
+        '@media(max-width:560px){.tl-photos{grid-template-columns:1fr;}.tl-photos img{height:170px;}}'
+        '</style>'
+        '<h1>Thought Leadership</h1>'
+        '<p style="color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press &mdash; from a tech CFO working in the thick of the business.</p>'
+        + featured
+    )
+
+    body += section("Writing", [
+        ("The Growth Engine Ratio: Accounting for the Missing Half of Your Efficiency Equation · The F Suite · Jun 2026",
+         "/growth-engine-ratio", "2026-06"),
+        ("Sail, Don't Row: A Playbook for Running an AI Hackathon With Your Finance Team · Jun 2026",
+         "/finops-ai-hackathon", "2026-06"),
+        ("Connecting Claude to NetSuite: A Setup Guide for Finance Teams · Jun 2026",
+         "/netsuite-mcp", "2026-06"),
+        ("The F Suite — Exit Readiness for CFOs · The F Suite · Mar 2026",
+         "https://www.fsuite.co/blog/exit-readiness-cfos", "2026-03"),
+        ("OnlyCFO — Building Dashboards That Matter · OnlyCFO · Apr 2024",
+         "https://www.onlycfo.io/p/building-dashboards-that-matter", "2024-04"),
+    ])
+
+    # On-stage photos lead the Speaking section, where they have context.
+    body += """<div class="tl-photos">
+  <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking at the Abacum AI Summit, April 2026">
+  <img src="/static/speaking-wide.jpg" alt="Panel discussion at the Abacum AI Summit, April 2026">
+</div>
+<p style="font-size:12px;color:var(--muted);margin:0 0 4px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>"""
+
+    body += section("Speaking & Events", [
+        ("Abacum AI Summit — Recording · Abacum · Apr 2026",
+         "https://www.youtube.com/watch?v=MDBz0OpR1II", "2026-04"),
+        ("Abacum — Beyond the Spreadsheet: What FP&A Platforms Need to Deliver in an AI-First Era (Webinar Panel) · Abacum · Jun 2026",
+         "https://www.abacum.ai/webinars/beyond-the-spreadsheet-what-fp-a-platforms-need-to-deliver-in-an-ai-first-era", "2026-06"),
         ("Claude in Action for Finance — The F Suite Virtual Panel · The F Suite · Apr 2026",
          "https://fsuitevirtualpanel430.splashthat.com", "2026-04"),
         ("The F Suite Boston — Growth CFO Salon · The F Suite · Nov 2025",
@@ -555,6 +624,8 @@ def thought_leadership():
          "", "2025-08"),
         ("Fidelity CFO Roundtable — M&A and Managing Uncertainty · Fidelity · Mar 2025",
          "https://luma.com/7fwtr2n8", "2025-03"),
+        ("Numeric — Lean Accounting Team (Webinar Host) · Numeric · Mar 2024",
+         "https://numeric.lpages.co/lean-accounting-team-webinar/", "2024-03"),
         ("The F Suite Boston — Private Dinner & Guided Discussion · The F Suite · Apr 2024",
          "", "2024-04"),
         ("The F Suite Boston — CFO Dinner · The F Suite · Dec 2023",
@@ -565,8 +636,8 @@ def thought_leadership():
          "https://www.accelevents.com/e/agile-finance-summit-2021", "2021-10"),
     ])
 
-    body += section("Podcast—Host: The Cash Flow Show", [
-        ("The Cash Flow Show — Conversations about how tech companies make money (full episode feed) · OnlyCFO",
+    body += section("Podcasts", [
+        ("The Cash Flow Show — Conversations about how tech companies make money (host · full episode feed) · OnlyCFO",
          "https://www.onlycfo.io/podcast", ""),
         ("Adopting AI in Finance & Accounting — with Sowmya Ranganathan (former Controller, OpenAI) · The Cash Flow Show · Aug 2025",
          "https://open.spotify.com/episode/6uXkeypUPX5g5yB8lHGq2V", "2025-08"),
@@ -578,41 +649,21 @@ def thought_leadership():
          "https://open.spotify.com/episode/64DsKmsDgOshd3LQdM4Cte", "2025-03"),
         ("The M&A Playbook · The Cash Flow Show · Mar 2025",
          "https://open.spotify.com/episode/5kMa3kkutDhsoc4SBoOBZ1", "2025-03"),
-    ])
-
-    body += section("Podcasts—Guest", [
-        ("Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks · Monetizely · Sep 2023",
+        ("Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks (guest) · Monetizely · Sep 2023",
          "https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn",
          "2023-09"),
-        ("OpexEngine — SaaS Conversations: Dynamic Planning for SaaS Finance Leaders · OpexEngine · May 2023",
+        ("OpexEngine — SaaS Conversations: Dynamic Planning for SaaS Finance Leaders (guest) · OpexEngine · May 2023",
          "https://www.opexengine.com/webinar/opexengine-saas-conversations-dynamic-planning-for-saas-finance-leaders",
          "2023-05"),
-        ("Role Forward Podcast — The Heuristics of Forecasting · Mosaic Tech · Dec 2022",
+        ("Role Forward Podcast — The Heuristics of Forecasting (guest) · Mosaic Tech · Dec 2022",
          "https://www.youtube.com/watch?v=mqVvcVVTSrk", "2022-12"),
-        ("Role Forward Podcast — Collaborative Budgeting · Mosaic Tech · Apr 2022",
+        ("Role Forward Podcast — Collaborative Budgeting (guest) · Mosaic Tech · Apr 2022",
          "https://www.youtube.com/watch?v=GPdRstJ_sKw", "2022-04"),
     ])
 
-    body += section("Webinar—Host", [
-        ("Numeric — Lean Accounting Team · Numeric · Mar 2024",
-         "https://numeric.lpages.co/lean-accounting-team-webinar/", "2024-03"),
-    ])
-
-    body += section("Interview", [
+    body += section("Press", [
         ("Sequence — From $1M to $100M: 6 Finance Lessons from the Frontline · Sequence · Jul 2025",
          "https://www.sequencehq.com/blog/from-1m-to-100m-6-finance-lessons-from-the-frontline", "2025-07"),
-    ])
-
-    body += section("Authored", [
-        ("The Growth Engine Ratio: Accounting for the Missing Half of Your Efficiency Equation · The F Suite · Jun 2026",
-         "/growth-engine-ratio", "2026-06"),
-        ("The F Suite — Exit Readiness for CFOs · The F Suite · Mar 2026",
-         "https://www.fsuite.co/blog/exit-readiness-cfos", "2026-03"),
-        ("OnlyCFO — Building Dashboards That Matter · OnlyCFO · Apr 2024",
-         "https://www.onlycfo.io/p/building-dashboards-that-matter", "2024-04"),
-    ])
-
-    body += section("Cited & Quoted", [
         ("LegalDive — GC/CFO Collaboration · LegalDive · Mar 2023",
          "https://www.legaldive.com/news/gc-cfo-collaboration-svb-techgc-the-f-suite-silicon-valley-bank/646561/",
          "2023-03"),
@@ -1344,6 +1395,657 @@ function loadTimelineExample() {
 renderTL();
 </script>"""
     return HTMLResponse(_page("The Growth Engine Ratio—Brian Weisberg", "Thought Leadership", body))
+
+
+@app.get("/finops-ai-hackathon", response_class=HTMLResponse)
+def finops_ai_hackathon():
+    body = """<div class="page" style="max-width:820px;">
+<style>
+  .fah-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
+  .fah-pull p{margin:0;font-size:17px;font-style:italic;line-height:1.55;color:var(--ink);}
+  .fah-callout{background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);border-radius:0 0 10px 10px;padding:20px 24px;margin:28px 0;}
+  .fah-callout-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
+  .fah-callout p,.fah-callout li{font-size:15px;color:var(--ink-soft);margin-bottom:6px;}
+  .fah-callout ul{padding-left:20px;margin:0;}
+  .fah-callout li{margin-bottom:5px;}
+  .fah-warn{background:var(--coral-wash);border-top:2px solid var(--coral);border-radius:0 0 10px 10px;padding:18px 22px;margin:24px 0;}
+  .fah-warn-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--coral-deep);margin-bottom:8px;}
+  .fah-warn p{font-size:14px;color:var(--ink-soft);margin:0;}
+  /* Phase track */
+  .fah-track{display:flex;flex-direction:column;gap:0;margin:28px 0;}
+  .fah-step{display:flex;gap:18px;position:relative;}
+  .fah-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}
+  .fah-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}
+  .fah-body{padding-bottom:26px;flex:1;}
+  .fah-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}
+  .fah-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}
+  .fah-tag{display:inline-block;font:600 11px var(--font-body);letter-spacing:.05em;color:var(--muted);border:1px solid var(--line-strong);border-radius:5px;padding:2px 8px;margin-top:4px;}
+  /* 2x2 Matrix */
+  .fah-matrix{margin:28px 0;}
+  .fah-matrix-label{text-align:center;font:700 11px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
+  .fah-matrix-grid{display:grid;grid-template-columns:28px 1fr 1fr;grid-template-rows:1fr 1fr 28px;gap:0;height:280px;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}
+  .fah-m-y{writing-mode:vertical-rl;transform:rotate(180deg);font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:1/3;grid-column:1;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}
+  .fah-m-x{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:3;grid-column:2/4;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}
+  .fah-q{padding:16px 18px;font-size:13px;line-height:1.45;display:flex;flex-direction:column;border:1px solid var(--line);}
+  .fah-q-label{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;}
+  .fah-q-star{background:var(--navy);color:#fff;}.fah-q-star .fah-q-label{color:rgba(255,255,255,.75);}
+  .fah-q-b{background:var(--navy-wash);color:var(--ink-soft);}.fah-q-b .fah-q-label{color:var(--muted);}
+  .fah-q-c{background:#fff;color:var(--muted);}.fah-q-c .fah-q-label{color:var(--line-strong);}
+  /* Verdict chips */
+  .fah-verdicts{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0;}
+  .fah-verdict{padding:10px 18px;border-radius:8px;font-size:14px;}
+  .fah-v-ship{background:var(--navy);color:#fff;}
+  .fah-v-iterate{background:var(--coral-wash);color:var(--coral-deep);border:1px solid var(--coral-light);}
+  .fah-v-park{background:var(--surface-2);color:var(--muted);border:1px solid var(--line-strong);}
+  .fah-v-label{font:700 11px var(--font-body);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
+  /* Resource links */
+  .fah-resources{display:flex;flex-direction:column;gap:0;margin:20px 0;border-top:1px solid var(--line-strong);}
+  .fah-resource{display:flex;align-items:flex-start;gap:14px;padding:14px 4px;text-decoration:none;color:inherit;border-bottom:1px solid var(--line);}
+  .fah-resource:hover{background:var(--navy-wash);}
+  .fah-r-icon{font-size:18px;flex-shrink:0;margin-top:1px;}
+  .fah-r-title{font:600 15px var(--font-head);color:var(--navy);margin-bottom:2px;}
+  .fah-r-desc{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}
+  .fah-r-src{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-top:3px;}
+  /* Notion template box */
+  .fah-template{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:26px 30px;margin:28px 0;}
+  .fah-template-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+  .fah-template h3{font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin:18px 0 6px;}
+  .fah-template h3:first-of-type{margin-top:0;}
+  .fah-template p,.fah-template li{font-size:14px;color:var(--ink-soft);}
+  .fah-template ul{padding-left:18px;margin:0 0 8px;}
+  .fah-template li{margin-bottom:4px;}
+  /* Tier strip */
+  .fah-tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:22px 0;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}
+  .fah-tier{padding:18px 16px;}
+  .fah-tier:not(:last-child){border-right:1px solid var(--line);}
+  .fah-tier-title{font-family:var(--font-head);font-size:15px;font-weight:700;margin-bottom:6px;}
+  .fah-tier p{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}
+  .fah-t-ship{background:var(--navy);}.fah-t-ship .fah-tier-title{color:#fff;}.fah-t-ship p{color:rgba(255,255,255,.8);}
+  .fah-t-iter{background:var(--coral-wash);}.fah-t-iter .fah-tier-title{color:var(--coral-deep);}
+  .fah-t-park{background:var(--surface-2);}.fah-t-park .fah-tier-title{color:var(--muted);}
+  /* Sailboat SVG motif */
+  .fah-motif{text-align:center;margin:32px 0 24px;}
+  @media(max-width:640px){
+    .fah-matrix-grid{height:220px;}
+    .fah-tiers{grid-template-columns:1fr;}
+    .fah-tier:not(:last-child){border-right:none;border-bottom:1px solid var(--line);}
+    .fah-verdicts{flex-direction:column;}
+  }
+</style>
+
+<p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Playbook</p>
+<h1 style="margin:0 0 8px;">Sail, Don't Row</h1>
+<p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">A playbook for running an AI hackathon with your finance team</p>
+<p style="color:var(--muted);font-size:14px;margin:0 0 36px;">By Brian Weisberg &middot; June 2026</p>
+
+<p>There are two ways to approach the AI moment in finance. The first is to row harder: one-off solutions, manual handoffs, each person finding their own tool at their own pace. Exhausting. Doesn't scale. The second is to sail: build the infrastructure deliberately, rig it carefully, and let the conditions do the work. The difference isn't capability. It's intention.</p>
+
+<p>A hackathon is how a finance team learns to sail. It creates protected time and a low-stakes space to learn something hard together—as a team, where nobody has to already know the answer. The builds you ship at the end are real, but they're a byproduct. The point is the skill that stays when everyone goes home.</p>
+
+<p>I've run one of these with my own finance and ops team, and this is the format distilled—what worked, why it worked, and how to run it yourself.</p>
+
+<div class="fah-pull"><p>"Before any piece of work, two questions: Is this worth doing? And am I sailing or rowing—is there a template, an automation, a repeatable version that keeps this from being a one-off someone owns forever?"</p></div>
+
+<h2>Why a hackathon—and why now</h2>
+<p>AI adoption in finance doesn't happen on its own. It gets crowded out by the close, the board deck, the forecast update. There's always something more urgent. Left to find the time on their own, most teams never do.</p>
+
+<p>A hackathon fixes that by force. It carves out protected time and makes <em>exploring together</em> the actual assignment. The format works for three reasons:</p>
+<ul style="padding-left:22px;margin:0 0 20px;">
+  <li style="margin-bottom:10px;"><strong>Psychological safety.</strong> When everyone is learning at the same time, in the same room, there's no expert to defer to and no reason to hide. Half-formed ideas get air.</li>
+  <li style="margin-bottom:10px;"><strong>Time-boxing as a feature.</strong> The constraint—ninety minutes to build something shippable—focuses effort better than a two-week sprint with no end in sight. Done is better than perfect.</li>
+  <li style="margin-bottom:10px;"><strong>Compounding returns.</strong> A team that has learned something together learns faster next time. The first hackathon is the hardest. Run it annually and it becomes a flywheel.</li>
+</ul>
+
+<p>The goal isn't to automate the whole finance function. It's to close the gap between your team's potential and its current velocity—on purpose, together, in a way that compounds.</p>
+
+<h2>The method behind it: design thinking</h2>
+<p>Before the mechanics, the philosophy. The prioritization format I use—post-its, dot stickers, a 2×2—isn't a team-building exercise. It's the application of a specific method: design thinking.</p>
+
+<p>Design thinking is a problem-solving approach that starts with the people experiencing the problem, not with the solution. It works in two modes:</p>
+
+<div class="fah-pull"><p>"Diverge first. Everyone generates ideas independently, without talking. Then converge. The separation matters—if you skip the silent step and just go around the room, the first voice anchors every other answer."</p></div>
+
+<p>The other half is the ground rule going in: <strong>no bad ideas.</strong> No judgment, no evaluating while generating. The only requirement is a clear persona and use case: a real person with a real problem, not a vague wish. That's what makes people comfortable putting the half-formed thing on the wall—which is exactly where the good ones tend to start.</p>
+
+<p>This method started in product design but works anywhere you need a group to surface and prioritize ideas without the usual political drag. A few examples of what it looks like at scale:</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--line-strong);border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;margin:20px 0;">
+  <div style="background:#fff;padding:18px 16px;">
+    <div style="font:700 10px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Airbnb</div>
+    <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">Early growth</div>
+    <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Bookings were flat. They visited hosts, looked at listings, and realized photos were terrible. One non-technical intervention. The insight came from observing the problem directly.</p>
+  </div>
+  <div style="background:#fff;padding:18px 16px;">
+    <div style="font:700 10px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">IBM</div>
+    <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">Enterprise shift</div>
+    <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Flipped the order: start with what the customer needs, then figure out the technology. Built internal design studios. Retrained thousands. Outputs improved. So did relationships.</p>
+  </div>
+  <div style="background:#fff;padding:18px 16px;">
+    <div style="font:700 10px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Google</div>
+    <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">20% rule</div>
+    <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Structured diverge time with real stakes attached. Gmail, Google News, and AdSense all started there. The roadmap never would have produced them.</p>
+  </div>
+</div>
+
+<p style="font-size:14px;color:var(--muted);margin:0 0 8px;">Three resources worth sending as pre-reading before you run this:</p>
+<div class="fah-resources">
+  <a href="https://www.nngroup.com/articles/design-thinking/" target="_blank" rel="noopener" class="fah-resource">
+    <span class="fah-r-icon">📖</span>
+    <div><div class="fah-r-title">Design Thinking 101</div><p class="fah-r-desc">Covers the six phases and why this isn't just a brainstorming session with a fancier name.</p><div class="fah-r-src">Nielsen Norman Group</div></div>
+  </a>
+  <a href="https://www.nngroup.com/articles/diverge-converge/" target="_blank" rel="noopener" class="fah-resource">
+    <span class="fah-r-icon">🔀</span>
+    <div><div class="fah-r-title">The Diverge-and-Converge Technique</div><p class="fah-r-desc">Why you split ideation from prioritization, and what goes wrong when you don't.</p><div class="fah-r-src">Nielsen Norman Group</div></div>
+  </a>
+  <a href="https://www.nngroup.com/articles/dot-voting/" target="_blank" rel="noopener" class="fah-resource">
+    <span class="fah-r-icon">🟢</span>
+    <div><div class="fah-r-title">Dot Voting</div><p class="fah-r-desc">How many dots to give, when to rerun a vote, and the failure modes to watch for—especially the person who campaigns out loud before the stickers go up.</p><div class="fah-r-src">Nielsen Norman Group</div></div>
+  </a>
+  <a href="https://designthinking.ideo.com/" target="_blank" rel="noopener" class="fah-resource">
+    <span class="fah-r-icon">💡</span>
+    <div><div class="fah-r-title">IDEO Design Thinking</div><p class="fah-r-desc">The original source—where the method came from, with toolkits and examples across industries.</p><div class="fah-r-src">IDEO</div></div>
+  </a>
+</div>
+
+<h2>Before you arrive: the setup</h2>
+<p>The single biggest mistake in running a hackathon is walking into the room cold. If the first thing you do is ask "so what should we build?"—you'll spend half your time generating half-baked ideas and the other half convincing people to try something. Do the intake work before you're in a room together.</p>
+
+<div class="fah-callout">
+  <div class="fah-callout-title">Async intake — 1–2 weeks before the event</div>
+  <ul>
+    <li>Set up a simple intake form (Notion works well) with these fields: <strong>problem statement</strong> (one sentence), <strong>who it hurts</strong>, <strong>type</strong> (automation / visibility / missing skill / analysis), <strong>impact and feasibility</strong> (a first guess), and <strong>definition of done</strong>.</li>
+    <li>Ask specific questions. <em>"What do you do every week that feels like copy-paste?"</em> gets better answers than <em>"What problems do you have?"</em></li>
+    <li>Make it frictionless. Let people dump free text if that's easier—you or an AI agent can structure it afterward. The goal is honest input, not a polished pitch.</li>
+    <li>Optional: use AI to auto-fill the structured fields from each submission, then have people review and correct. That task itself is a small AI adoption moment.</li>
+  </ul>
+</div>
+
+<p>Also before the event: get your integrations connected. If you're building with Claude or another AI assistant, make sure it's linked to the systems you actually use—NetSuite, Notion, Google Drive, Slack. Spending build time on setup is demoralizing. Arrive ready to build.</p>
+
+<p>Consider sending the design thinking pre-reads (linked above) a few days out. Not required, but teams that arrive with the method in their heads move faster once they're in the room.</p>
+
+<h2>Day zero: from problems to priorities</h2>
+<p>This is the framing session—the day (or half-day) before the build. Its job is to turn a backlog of submitted problems into a ranked shortlist of sprint candidates. Here's the full sequence:</p>
+
+<div class="fah-track">
+  <div class="fah-step">
+    <div class="fah-num">1</div>
+    <div class="fah-body">
+      <h3>Transcribe to post-its</h3>
+      <p>During a break, the facilitator writes each submitted problem onto a physical sticky note—one problem per note. This forces a human edit pass. You spot duplicates, catch problems that are really the same thing framed twice, and produce something the whole room can see simultaneously. Keep laptops closed for the rest of this session.</p>
+      <span class="fah-tag">⏱ 15–20 min · facilitator only · done during a break</span>
+    </div>
+  </div>
+  <div class="fah-step">
+    <div class="fah-num">2</div>
+    <div class="fah-body">
+      <h3>Live additions + clustering</h3>
+      <p>Give the room a few minutes to add anything not submitted async. Then cluster: pull duplicate or overlapping stickies together before voting. Facilitator-led, fast—group what's obviously similar and move on. Don't debate the clusters. Debate costs time and anchors thinking before the vote.</p>
+      <span class="fah-tag">⏱ 10–15 min · whole team</span>
+    </div>
+  </div>
+  <div class="fah-step">
+    <div class="fah-num">3</div>
+    <div class="fah-body">
+      <h3>Silent dot voting</h3>
+      <p>Everyone gets five dot stickers. You can stack all five on one idea or spread them across five. <strong>No talking while voting.</strong> Silence prevents the loudest voice from anchoring the group—the most common failure mode in group prioritization. Once votes are tallied, log totals back into your intake database so the prioritization is permanent.</p>
+      <span class="fah-tag">⏱ 5–10 min · whole team · silence required</span>
+    </div>
+  </div>
+  <div class="fah-step">
+    <div class="fah-num">4</div>
+    <div class="fah-body">
+      <h3>The 2×2: value vs. effort</h3>
+      <p>With vote tallies as a guide, place stickies on a 2×2 grid together as a team. <strong>Value</strong> on the vertical axis. <strong>Effort</strong> on the horizontal—and effort means all-in effort: time, skill required, data access, dependencies. Facilitator guides, team places. The conversation happens around placement, not around lobbying for ideas.</p>
+    </div>
+  </div>
+</div>
+
+<div class="fah-matrix">
+  <div class="fah-matrix-label">Value vs. Effort — how to sort your ideas</div>
+  <div class="fah-matrix-grid">
+    <div class="fah-m-y">Value &uarr;</div>
+    <div class="fah-q fah-q-star">
+      <div class="fah-q-label">&#10022; Sprint targets</div>
+      <div style="font-size:13px;line-height:1.45;">High value, achievable in 90 min. These are your hackathon finalists. Pick 3–4, pair up, build.</div>
+    </div>
+    <div class="fah-q fah-q-b">
+      <div class="fah-q-label">Scope &amp; own</div>
+      <div style="font-size:13px;line-height:1.45;color:var(--ink-soft);">High value, high effort. Real initiatives—not hackathon material. Each gets a named owner and goes on the roadmap.</div>
+    </div>
+    <div class="fah-q fah-q-c">
+      <div class="fah-q-label" style="color:var(--line-strong);">Intentionally skip</div>
+      <div style="font-size:13px;line-height:1.45;color:var(--line-strong);">Low value, low effort. Name it explicitly. Agree to leave it alone.</div>
+    </div>
+    <div class="fah-q fah-q-c">
+      <div class="fah-q-label" style="color:var(--line-strong);">Intentionally skip</div>
+      <div style="font-size:13px;line-height:1.45;color:var(--line-strong);">Low value, high effort. Clear no.</div>
+    </div>
+    <div class="fah-m-x">Effort &rarr;</div>
+  </div>
+</div>
+
+<div class="fah-warn">
+  <div class="fah-warn-title">Name what you're skipping</div>
+  <p>Things that "fall off the list" have a way of coming back. Things you've explicitly decided to skip don't. For every idea below the line: name it, say it out loud, agree to leave it alone. <em>"Intentionally skipping"</em> and <em>"fell off the list"</em> are not the same thing.</p>
+</div>
+
+<div class="fah-track" style="margin-top:24px;">
+  <div class="fah-step">
+    <div class="fah-num">5</div>
+    <div class="fah-body">
+      <h3>Two final cuts: when, and whether it's ready</h3>
+      <p>Sort the upper-right survivors two ways. First, <strong>timing:</strong> Build (do it at the hackathon), Later (worth doing, not this week), Even Later (needs scoping first). Second, <strong>readiness:</strong> can you touch this right now, or does it have a dependency, a data question, an unknown to resolve? A high-value idea that isn't ready to build isn't a sprint candidate—it's a scoping task. Naming that distinction keeps you honest.</p>
+      <span class="fah-tag">⏱ 10–15 min · whole team</span>
+    </div>
+  </div>
+  <div class="fah-step">
+    <div class="fah-num">6</div>
+    <div class="fah-body">
+      <h3>Assign pairs</h3>
+      <p>Match people to Build-ready ideas. Pairs, not solo work—two people per build keeps momentum up when one gets stuck. Assign 1–2 floaters (ideally including yourself if you're the leader) who stay unattached and circulate to unblock teams during the sprint.</p>
+      <span class="fah-tag">⏱ 5 min · facilitator-led</span>
+    </div>
+  </div>
+</div>
+
+<h2>Protect the gap: inspire, sleep, build</h2>
+<p>Here's the sequencing decision that separates a good hackathon from a great one: <strong>don't build on the framing day.</strong></p>
+
+<p>The framing session is dense with new thinking—a full backlog processed, clustered, voted on, and prioritized. Ending there—inspired rather than rushed—gives that thinking time to settle. People go home with a problem in their head. They think about it in the shower. They wake up with the approach half-formed. That overnight processing is doing real work.</p>
+
+<div class="fah-pull"><p>"Inspire → Sleep → Build. That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method."</p></div>
+
+<p>Add one more step on the morning of the build day before anyone opens a laptop: <strong>15–20 minutes of inspiration.</strong> Show examples of what other finance teams have actually built with AI. Real demos, not slides. Actual workflows someone is using. Then—and this is the move worth stealing—clear the votes and run a second idea-generation round from scratch. The second round is almost always better than the first. People arrive with new angles, sharper problem statements, and sometimes a completely different sense of what they want to build.</p>
+
+<h2>The build day</h2>
+<p>The build sprint is simple by design. Complexity is the enemy of shipping.</p>
+
+<div class="fah-callout">
+  <div class="fah-callout-title">Build day structure</div>
+  <ul>
+    <li><strong>Morning reboot (15–20 min):</strong> Inspiration videos, second idea-generation round, confirm pairs and targets.</li>
+    <li><strong>Sprint #1 (90 min):</strong> Pairs build. Floaters circulate. No whole-group check-ins until time's called—mid-sprint interruptions break flow.</li>
+    <li><strong>Optional midpoint (45 min in):</strong> 5-minute pulse check per team. Not a demo—just calibration. Are you stuck? Do you need to scope down?</li>
+    <li><strong>Demos + verdicts:</strong> Regroup as a full team. Each pair demos what they built or learned. 10 minutes per team, 2 minutes for the verdict decision. Every demo gets a verdict and a named owner before the next team starts.</li>
+  </ul>
+</div>
+
+<p>The constraint—90 minutes—is the point. It forces scope decisions early. A team that's trying to build the perfect reconciliation engine will fail. A team that's trying to build a working prototype of one slice of that engine will ship something. "Done enough to demo" is the bar.</p>
+
+<p>What floaters actually do: when a pair is stuck on a tool behavior, a data question, or scope creep, the floater doesn't solve the problem for them. They ask one question: <em>"What's the smallest thing you could build that would prove this works?"</em> That's usually enough to unblock.</p>
+
+<h2>Closing with verdicts and owners</h2>
+<p>The close is where most hackathons fail. Teams demo, everyone claps, and then... nothing. The builds sit in a Notion database for three months and quietly become shelf-ware. What prevents that is a discipline: <strong>every demo gets a verdict and a named owner before the room empties.</strong></p>
+
+<div class="fah-tiers">
+  <div class="fah-tier fah-t-ship">
+    <div class="fah-tier-title">Ship</div>
+    <p>Push it to production now. It's working, it's useful, it's ready. Assign an owner whose job is to not let it die.</p>
+  </div>
+  <div class="fah-tier fah-t-iter">
+    <div class="fah-tier-title">Iterate</div>
+    <p>Another pass before it's ready. Assign an owner and a target date. <em>Iterate without a date is just Park with extra steps.</em></p>
+  </div>
+  <div class="fah-tier fah-t-park">
+    <div class="fah-tier-title">Park</div>
+    <p>Not the right moment—but documented for later. This is a legitimate verdict. Honor it by writing down why.</p>
+  </div>
+</div>
+
+<p>The Park verdict deserves more credit than it gets. It's not failure—it's intellectual honesty. Naming why something isn't ready (wrong timing, missing data, dependency on something else) is more useful than letting it die quietly. A well-documented Park can become a Ship six months later when the conditions change.</p>
+
+<div class="fah-pull"><p>"The goal is at least one thing in production before anyone gets on a plane. Aim for that. It changes the energy of the room and sets the bar for everything that follows."</p></div>
+
+<h2>The operating system: a Notion setup that compounds</h2>
+<p>The post-its get the attention. They're not what makes this work. What makes it work is the underlying system—one intake database, one page per idea, a structured record that outlives the event.</p>
+
+<div class="fah-template">
+  <div class="fah-template-title">📋 Hackathon intake form — fields that matter</div>
+  <h3>Submission name</h3>
+  <p>A 3–6 word label. Forces clarity before anyone has read the full submission.</p>
+  <h3>Problem statement</h3>
+  <p>One sentence. The constraint is the discipline—a problem that needs "and" is really two problems. Split it.</p>
+  <h3>Who it hurts</h3>
+  <p>A specific person or role. "The team" is not a persona. "The controller on every close" is.</p>
+  <h3>Type</h3>
+  <p>Automation / visibility / missing skill / analysis / ops plumbing. Useful for spotting patterns—if half the submissions are "I can't see X," that's a signal.</p>
+  <h3>Impact + feasibility</h3>
+  <p>A first guess, not a commitment. You'll refine it during the 2×2.</p>
+  <h3>Definition of done</h3>
+  <p>Describe the two-minute demo. What does success look like when someone watches it work? This field does more work than any other.</p>
+</div>
+
+<p>The move worth stealing: <strong>one page per idea.</strong> Not just a row in a table—an actual page that becomes the full record. What the team submitted, live notes from the build, what they learned, what broke, what to do next. The page carries the idea through the event and becomes searchable institutional knowledge.</p>
+
+<p>Without this, the hackathon produces prototypes. With it, it produces compounding assets. The next person who picks up a similar problem starts from the answer, not from scratch.</p>
+
+<p>Two database views worth setting up: an <strong>effort × value matrix</strong> (the digital twin of your sticky-note 2×2, auto-sorted by vote count) and a <strong>groups board</strong> by theme. The groups view is useful for spotting when one area—say, month-end close—quietly dominates the shortlist, which is usually a signal worth paying attention to.</p>
+
+<h2>After: building the AI Lab</h2>
+<p>The hackathon is a beginning, not a destination. What makes it compound over time is institutionalizing what you learned: a shared space—call it the AI Lab, call it whatever fits your culture—where builds live and can be forked.</p>
+
+<p>The operating model is simple:</p>
+<ul style="padding-left:22px;margin:0 0 20px;">
+  <li style="margin-bottom:8px;">Build something useful → document it → drop it in the Lab.</li>
+  <li style="margin-bottom:8px;">Find something someone else built → fork it → adapt it to your context.</li>
+  <li style="margin-bottom:8px;">Review the Lab quarterly. What's still in use? What needs updating? What opened up new possibilities?</li>
+</ul>
+
+<p>Run the hackathon again next year. The format gets easier the second time—the setup is faster, people know what to expect, and the ideas are sharper because everyone has spent a year noticing problems worth solving. The first one is the hardest. The flywheel needs one good push.</p>
+
+<div class="fah-callout">
+  <div class="fah-callout-title">What good looks like when you leave</div>
+  <ul>
+    <li>3–4 working prototypes, each with a verdict and a named owner</li>
+    <li>A prioritized backlog in Notion for everything that didn't get built—with owners on anything that moves forward</li>
+    <li>At least one thing in production before anyone leaves</li>
+    <li>A shared Lab space where builds live and can be forked</li>
+    <li>A date on the calendar for the next one</li>
+  </ul>
+</div>
+
+<p>The teams that get the most out of AI aren't the ones with the best tools. They're the ones that got good at using them—together, on purpose, through deliberate practice. A hackathon is how you start that. Sail, don't row.</p>
+
+<div style="border-top:1px solid var(--line-strong);margin-top:48px;padding-top:24px;">
+  <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
+</div>
+
+</div>"""
+    return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought Leadership", body))
+
+
+@app.get("/netsuite-mcp", response_class=HTMLResponse)
+def netsuite_mcp():
+    body = """<div class="page" style="max-width:820px;">
+<style>
+  .ns-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
+  .ns-pull p{margin:0;font-size:16px;font-style:italic;line-height:1.55;color:var(--ink);}
+  .ns-callout{background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);border-radius:0 0 10px 10px;padding:20px 24px;margin:24px 0;}
+  .ns-callout-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
+  .ns-callout p,.ns-callout li{font-size:15px;color:var(--ink-soft);margin-bottom:6px;}
+  .ns-callout ul{padding-left:20px;margin:0;}
+  .ns-callout li{margin-bottom:4px;}
+  .ns-warn{background:var(--coral-wash);border-top:2px solid var(--coral);border-radius:0 0 10px 10px;padding:16px 22px;margin:18px 0;}
+  .ns-warn-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--coral-deep);margin-bottom:6px;}
+  .ns-warn p{font-size:14px;color:var(--ink-soft);margin:0;}
+  .ns-note{background:var(--surface-2);border-left:3px solid var(--line-strong);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}
+  .ns-note p{font-size:14px;color:var(--muted);margin:0;}
+  /* Phase track */
+  .ns-track{display:flex;flex-direction:column;gap:0;margin:24px 0;}
+  .ns-step{display:flex;gap:18px;position:relative;}
+  .ns-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}
+  .ns-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}
+  .ns-body{padding-bottom:24px;flex:1;}
+  .ns-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}
+  .ns-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}
+  /* Use case cards */
+  .ns-cases{display:grid;grid-template-columns:1fr;gap:12px;margin:20px 0;}
+  .ns-case{background:#fff;border:1px solid var(--line-strong);border-radius:10px;padding:20px 22px;}
+  .ns-case-label{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}
+  .ns-case-title{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin-bottom:8px;}
+  .ns-case p{font-size:14px;color:var(--ink-soft);margin-bottom:10px;line-height:1.55;}
+  .ns-tip{background:var(--seafoam-wash);border-radius:6px;padding:10px 14px;font-size:13px;color:var(--seafoam-deep);margin-top:8px;}
+  .ns-tip strong{font-weight:600;}
+  /* Permission table */
+  .ns-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0;}
+  .ns-table{width:100%;border-collapse:collapse;font-size:14px;min-width:360px;}
+  .ns-table th{background:var(--navy);color:#fff;padding:9px 14px;text-align:left;font-weight:600;}
+  .ns-table td{padding:9px 14px;border-top:1px solid var(--line);}
+  .ns-table tr:nth-child(even) td{background:var(--surface-2);}
+  /* Troubleshooting table */
+  .ns-trouble{width:100%;border-collapse:collapse;font-size:14px;margin:16px 0;}
+  .ns-trouble th{background:var(--surface-2);padding:9px 14px;text-align:left;font-weight:600;border-bottom:2px solid var(--line-strong);}
+  .ns-trouble td{padding:10px 14px;border-top:1px solid var(--line);vertical-align:top;line-height:1.5;}
+  .ns-trouble tr:hover td{background:var(--navy-wash);}
+  /* Quick ref */
+  .ns-qr{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:24px 28px;margin:28px 0;}
+  .ns-qr-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;}
+  .ns-qr h3{font-family:var(--font-head);font-size:14px;font-weight:600;color:var(--ink);margin:16px 0 6px;}
+  .ns-qr h3:first-of-type{margin-top:0;}
+  .ns-qr ul{padding-left:18px;margin:0 0 4px;}
+  .ns-qr li{font-size:13px;color:var(--ink-soft);margin-bottom:3px;line-height:1.5;}
+  @media(max-width:640px){
+    .ns-trouble{font-size:13px;}
+    .ns-trouble td,.ns-trouble th{padding:8px 10px;}
+  }
+</style>
+
+<p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Setup Guide</p>
+<h1 style="margin:0 0 8px;">Connecting Claude to NetSuite</h1>
+<p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">An end-to-end guide to the two-role OAuth setup for finance teams</p>
+<p style="color:var(--muted);font-size:14px;margin:0 0 36px;">By Brian Weisberg &middot; June 2026</p>
+
+<p>This guide walks through connecting Claude to NetSuite so you can ask questions about your financial data and get answers directly—no logging into NetSuite, no writing queries, no manual exports.</p>
+
+<p>Once connected, you can ask things like <em>"how much did we spend with this vendor last year?"</em> or <em>"what's the deferred revenue balance for this customer?"</em> and Claude will query NetSuite and return the answer in plain language, a table, or a formatted report. The connection runs through something called an MCP integration. You don't need to understand the underlying technology to use it—this guide covers everything you need.</p>
+
+<div class="ns-callout">
+  <div class="ns-callout-title">Before you start</div>
+  <p>Check that the NetSuite AI Connector SuiteApp is installed: <strong>Customization → SuiteCloud → Installed SuiteApps</strong>, look for <code>com.netsuite.mcpstandardtools</code>. It should show <strong>Status: COMPLETE</strong>. If it's not installed, go to the SuiteApp Marketplace and search for it by name before continuing.</p>
+</div>
+
+<h2>What you can do with this</h2>
+<p>Three examples to get your wheels turning. The right use cases depend on your business, but the pattern is consistent: ask a question in plain language, Claude queries NetSuite, you get something ready to share or act on.</p>
+
+<div class="ns-cases">
+  <div class="ns-case">
+    <div class="ns-case-label">Use case 01</div>
+    <div class="ns-case-title">Revenue flow tracker</div>
+    <p>If you work with deferred revenue—annual contracts, prepaid arrangements, usage-based billing—it's hard to get a clear picture of how money is moving at any point in time. Claude can pull a month-by-month view showing how revenue is loading into deferred, releasing into recognized, and what the ending balance looks like. Run it for the whole business or for a specific customer.</p>
+    <p>A typical output: a waterfall table (deferred loaded, released, ending balance by month), a transaction-level trace from invoice through recognition, and a findings section flagging anything off—like a balance that should have cleared at contract termination but didn't.</p>
+    <div class="ns-tip"><strong>Tip:</strong> Ask Claude to include a math check confirming every ending balance ties back to the underlying arithmetic. Easy to add, catches rounding errors before they make it into something you share.</div>
+  </div>
+  <div class="ns-case">
+    <div class="ns-case-label">Use case 02</div>
+    <div class="ns-case-title">Vendor spend analysis</div>
+    <p>Vendor spend is deceptively messy in NetSuite. The same vendor might appear under different names across bills. Some vendors route through a spend management platform (Ramp, Navan, Brex), which means they show up as a single vendor with the actual vendor buried in a memo field. Others route through a marketplace, invisible unless you know where to look.</p>
+    <p>Claude can learn these patterns. Once you show it how your vendors are recorded—<em>"this vendor always comes through as the platform with the name in the memo"</em>—it applies that logic consistently. The result is a spend picture that reflects reality, not just whatever's in the vendor field.</p>
+    <div class="ns-tip"><strong>Tip:</strong> The first time you run a vendor spend query, ask Claude to show you a sample of raw transaction data before it aggregates anything. Easy way to spot non-obvious mappings before they roll up into a wrong total.</div>
+  </div>
+  <div class="ns-case">
+    <div class="ns-case-label">Use case 03</div>
+    <div class="ns-case-title">Per-employee benefit and stipend tracking</div>
+    <p>If your company offers benefits employees draw on over time—L&amp;D stipends, wellness budgets, home office allowances—and those transactions flow through NetSuite in any form, Claude can extract and organize them by person. A useful output: each employee's YTD usage broken down by category, with transaction-level detail on demand. Useful for answering "who has used their full allocation?" without compiling spreadsheets manually.</p>
+    <div class="ns-tip"><strong>Tip:</strong> Employee names in NetSuite memos are often inconsistent—nicknames, initials, misspellings. Ask Claude to show you the distinct name variations it finds before attributing spend, so you can confirm the mapping is right.</div>
+  </div>
+</div>
+
+<h2>The security architecture</h2>
+<p>The setup involves creating a dedicated read-only role in NetSuite for Claude to authenticate as. The reason matters.</p>
+
+<p>Claude's NetSuite integration includes tools that can create and update records—not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do. The protection is enforced by NetSuite, not by hoping Claude behaves.</p>
+
+<div class="ns-warn">
+  <div class="ns-warn-title">One thing that trips people up</div>
+  <p>When you connect Claude, you need to be logged into NetSuite under your <strong>normal working role</strong>—not the new read-only role you're about to create. You'll select the read-only role on a screen that appears during the connection flow. More on this in Part 2.</p>
+</div>
+
+<h2>Part 1 — NetSuite setup</h2>
+<p style="color:var(--muted);font-size:14px;margin:-8px 0 20px;">You need Administrator access for these steps, or ask your NetSuite admin to complete them.</p>
+
+<div class="ns-track">
+  <div class="ns-step">
+    <div class="ns-num">1</div>
+    <div class="ns-body">
+      <h3>Confirm the SuiteApp is installed</h3>
+      <p>Go to <strong>Customization → SuiteCloud → Installed SuiteApps</strong>. Look for <strong>NetSuite AI Connector Service</strong> (bundle ID: <code>com.netsuite.mcpstandardtools</code>). Confirm it shows <strong>Status: COMPLETE</strong>. If it's not there, install it from the SuiteApp Marketplace before continuing.</p>
+    </div>
+  </div>
+  <div class="ns-step">
+    <div class="ns-num">2</div>
+    <div class="ns-body">
+      <h3>Create the read-only "Netsuite MCP" role</h3>
+      <p>Go to <strong>Setup → Users/Roles → Manage Roles → New</strong>. Name it <strong>Netsuite MCP</strong> (this name appears on the authorization screen when you connect Claude). Check <strong>Web Services Only Role</strong>—this prevents anyone from using this role to log into NetSuite directly and ensures it appears correctly during the connection flow.</p>
+      <p>On the <strong>Permissions tab → Setup subtab</strong>, add these six permissions at Full level:</p>
+      <div class="ns-table-wrap">
+        <table class="ns-table">
+          <thead><tr><th>Permission</th><th>Level</th></tr></thead>
+          <tbody>
+            <tr><td>MCP Server Connection</td><td>Full</td></tr>
+            <tr><td>REST Web Services</td><td>Full</td></tr>
+            <tr><td>Log in using OAuth 2.0 Access Tokens</td><td>Full</td></tr>
+            <tr><td>Log in using Access Tokens</td><td>Full</td></tr>
+            <tr><td>User Access Tokens</td><td>Full</td></tr>
+            <tr><td>SuiteScript</td><td>Full</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Save the role. Do not add any permissions related to creating, editing, approving, or posting transactions. This role should stay read-only.</p>
+      <div class="ns-warn" style="margin-top:12px;">
+        <div class="ns-warn-title">Known issue</div>
+        <p>The Web Services Only Role checkbox is easy to miss but critical. Without it, the role may not show up correctly during the connection flow, and you may see a "does not support OAuth 2.0 login" error.</p>
+      </div>
+    </div>
+  </div>
+  <div class="ns-step">
+    <div class="ns-num">3</div>
+    <div class="ns-body">
+      <h3>Assign the role to your user account</h3>
+      <p>Go to <strong>Lists → Employees → Employees</strong>. Find and open your employee record. Click the <strong>Access tab</strong>, find the Roles section, and add <strong>Netsuite MCP</strong>. Save. You'll now see Netsuite MCP in the role selector in the top-right corner of NetSuite—though you won't need to switch into it during normal use.</p>
+    </div>
+  </div>
+  <div class="ns-step">
+    <div class="ns-num">4</div>
+    <div class="ns-body">
+      <h3>A note on the integration record (no action needed)</h3>
+      <p>If you look at the integration record Claude uses (<strong>Setup → Integration → Manage Integrations</strong>, look for "NetSuite AI Connector Service"), you'll notice the REST Web Services checkbox is greyed out and can't be checked. That's normal—Anthropic created this integration and its settings are locked. Don't try to edit it. The role you created in Step 2 is what gives Claude the access it needs.</p>
+    </div>
+  </div>
+</div>
+
+<h2>Part 2 — Connecting Claude</h2>
+<p style="color:var(--muted);font-size:14px;margin:-8px 0 20px;">NetSuite is set up. This part takes about two minutes per person.</p>
+
+<div class="ns-track">
+  <div class="ns-step">
+    <div class="ns-num">5</div>
+    <div class="ns-body">
+      <h3>Make sure you're in the right NetSuite role first</h3>
+      <p>Before going to Claude, check which role you're currently in on the NetSuite side. You need to be logged in under your <strong>normal working role</strong>—not the Netsuite MCP role you just created. Netsuite MCP is what you'll select during the connection flow, not what you're already in. Check the role indicator in the top-right corner of NetSuite. If it says Netsuite MCP, switch to your normal role first.</p>
+      <div class="ns-warn" style="margin-top:8px;">
+        <div class="ns-warn-title">Most common mistake when reconnecting</div>
+        <p>Going straight to Claude without checking your NetSuite role first. Always confirm you're in your normal working role in NetSuite before clicking Connect in Claude. This step catches more than half of all connection failures.</p>
+      </div>
+    </div>
+  </div>
+  <div class="ns-step">
+    <div class="ns-num">6</div>
+    <div class="ns-body">
+      <h3>Connect NetSuite in Claude</h3>
+      <p>In Claude, go to <strong>Settings → Connectors</strong>. Find NetSuite and click <strong>Connect</strong>. A NetSuite page will open asking you to authorize the connection. On the role selector, choose <strong>Netsuite MCP</strong>. Click <strong>Authorize</strong>. You'll be brought back to Claude automatically.</p>
+    </div>
+  </div>
+  <div class="ns-step">
+    <div class="ns-num">7</div>
+    <div class="ns-body">
+      <h3>Test that it works</h3>
+      <p>The NetSuite connector in Claude should now show as connected. Confirm it's actually working with a simple test: <em>"Run a quick NetSuite query to confirm the connection is working—just pull the first 3 rows from the transaction table."</em> If Claude returns a few rows, you're set. If it says the tools are unavailable, see Troubleshooting below.</p>
+    </div>
+  </div>
+</div>
+
+<div class="ns-note">
+  <p><strong>Note:</strong> The connection is per person, not shared. Each person who wants to use Claude with NetSuite needs to go through setup themselves and connect their own Claude account. If a colleague's connection is working, that tells you nothing about whether yours is.</p>
+</div>
+
+<h2>Tips for getting good results</h2>
+
+<h3 style="font-size:16px;margin:24px 0 8px;">Ask for everything, not just bills</h3>
+<p>When you ask Claude to look something up, it may default to querying only vendor bills or invoices. This can miss a lot. Journal entries are a separate transaction type—and many common workflows post through JEs: month-end accruals, prepayment amortizations, corporate card programs. A query limited to vendor bills misses them entirely.</p>
+<div class="ns-callout">
+  <div class="ns-callout-title">Sanity check for any spend query</div>
+  <p>Ask Claude to first pull a grand total with no filters other than the account and date range, then compare against the detailed results. If they don't match, something is being filtered out. The discrepancy tells you what to investigate next.</p>
+</div>
+
+<h3 style="font-size:16px;margin:24px 0 8px;">Filter at the line level, not the header</h3>
+<p>Revenue recognition journal entries are often posted as a single large entry covering many customers at once. The customer is recorded at the line level inside the entry, not on the entry itself. If Claude filters at the wrong level, it can return results for a completely different customer—or nothing at all.</p>
+<p>If results for a customer look wrong—too high, too low, or zero when you know there should be activity—ask Claude: <em>"Are you filtering on the transaction line entity, not the transaction header entity?"</em> That question catches the most common mistake.</p>
+
+<h3 style="font-size:16px;margin:24px 0 8px;">If you get zero results, pull an unfiltered sample first</h3>
+<p>Zero results almost always mean a filter is wrong, not that the data is missing. Ask Claude to run a quick sample: <em>"Can you pull 5–10 raw rows with no filters so we can see what's actually there?"</em> This almost always reveals the issue—a filter too narrow, a date range that doesn't match, or a field with data in a slightly different format than expected.</p>
+
+<h3 style="font-size:16px;margin:24px 0 8px;">Claude can run saved searches, not create them</h3>
+<p>Claude can run existing saved searches and list available ones. It can't create new ones. If you need a new saved search built, ask Claude what criteria and columns to use, then create it yourself: <strong>Reports → Saved Searches → New → Transaction</strong>.</p>
+
+<h2>Troubleshooting</h2>
+<div class="ns-table-wrap">
+  <table class="ns-trouble">
+    <thead><tr><th>Error / symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>"This connector has no tools available"</td>
+        <td>Usually a stale session, not a permissions problem</td>
+        <td>Open a new Claude conversation first. If that fails, go to Settings → Connectors, disconnect NetSuite, and reconnect—making sure to select Netsuite MCP on the authorization screen.</td>
+      </tr>
+      <tr>
+        <td>"Your role does not support OAuth 2.0 login"</td>
+        <td>You're logged into NetSuite under a role that can't initiate the connection flow—often happens when you're already in the Netsuite MCP role</td>
+        <td>Switch to your normal working role in NetSuite first, then go back to Claude and connect. Select Netsuite MCP on the authorization screen.</td>
+      </tr>
+      <tr>
+        <td>Netsuite MCP doesn't appear as an option on the authorization screen</td>
+        <td>Role hasn't been assigned to your user yet, or Web Services Only Role isn't checked</td>
+        <td>Ask your NetSuite admin to assign Netsuite MCP to your employee record and confirm Web Services Only Role is checked on the role definition.</td>
+      </tr>
+      <tr>
+        <td>Connection keeps dropping</td>
+        <td>Normal—the connection doesn't stay active indefinitely</td>
+        <td>Open a new Claude conversation. Fixes it most of the time. If not, go to Settings → Connectors, disconnect, and reconnect.</td>
+      </tr>
+      <tr>
+        <td>Can't find a Claude token in NetSuite's Access Tokens list</td>
+        <td>Expected—the connection uses a different token type that doesn't appear there</td>
+        <td>Nothing to do. Its absence from that list doesn't mean anything is wrong.</td>
+      </tr>
+      <tr>
+        <td>Totals look wrong or suspiciously large</td>
+        <td>Often filtering at the transaction header instead of the line entity on large journal entries</td>
+        <td>Ask Claude: "Are you filtering on the transaction line entity, not the header?" Then ask it to pull an unfiltered sample to verify.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2>When the connection drops</h2>
+<p>The connection between Claude and NetSuite drops periodically. This is normal and doesn't mean anything is misconfigured. Try this first: <strong>open a new Claude conversation.</strong> The connection re-establishes on a new session most of the time.</p>
+
+<p>If a new conversation doesn't fix it: go to <strong>Customize</strong> (bottom-left of the chat window) or <strong>Settings → Connectors</strong>. Find NetSuite, click Disconnect, then Connect. On the NetSuite authorization screen, confirm you're in your normal working role, then select Netsuite MCP and authorize. Test with a quick query.</p>
+
+<div class="ns-qr">
+  <div class="ns-qr-title">📋 Quick reference</div>
+  <h3>First-time setup (done once, by your NetSuite admin)</h3>
+  <ul>
+    <li>Install the NetSuite AI Connector SuiteApp (<code>com.netsuite.mcpstandardtools</code>)</li>
+    <li>Create the Netsuite MCP role: Web Services Only Role checked, 6 permissions at Full, no write access</li>
+    <li>Assign the role to each user who will connect Claude</li>
+  </ul>
+  <h3>Connecting Claude (done once per person)</h3>
+  <ul>
+    <li>In NetSuite, confirm you're logged in under your normal working role</li>
+    <li>In Claude → Settings → Connectors, click Connect next to NetSuite</li>
+    <li>On the authorization screen, select Netsuite MCP</li>
+    <li>Test with a quick query to confirm it's working</li>
+  </ul>
+  <h3>If the connection drops</h3>
+  <ul>
+    <li>Open a new Claude conversation and try again—fixes it most of the time</li>
+    <li>If that doesn't work: confirm your NetSuite role, then go to Customize or Settings → Connectors in Claude and reconnect</li>
+  </ul>
+  <h3>If results look wrong</h3>
+  <ul>
+    <li>Ask Claude if it's including journal entries, not just bills</li>
+    <li>Ask Claude if it's filtering on the transaction line entity (not the transaction header)</li>
+    <li>Ask Claude to pull a small unfiltered sample to see what's actually in the data</li>
+  </ul>
+</div>
+
+<div style="border-top:1px solid var(--line-strong);margin-top:48px;padding-top:24px;">
+  <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
+</div>
+
+</div>"""
+    return HTMLResponse(_page("Connecting Claude to NetSuite—Brian Weisberg", "Thought Leadership", body))
 
 
 @app.get("/contact", response_class=HTMLResponse)
