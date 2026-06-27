@@ -563,8 +563,10 @@ def thought_leadership():
 </a>"""
 
     body += section("Events Hosted", [
-        ("Abacum AI Summit · Abacum · Apr 2026",
-         "https://www.abacum.ai/summit-post", "2026-04"),
+        ("Abacum AI Summit — Recording · Abacum · Apr 2026",
+         "https://www.youtube.com/watch?v=MDBz0OpR1II", "2026-04"),
+        ("Abacum AI Summit — Event Photos · Abacum · Apr 2026",
+         "https://www.snappr.com/gallery/new-york-city-ny/event/09-apr-2026/tyanna-s-event-photoshoot", "2026-04"),
         ("Claude in Action for Finance — The F Suite Virtual Panel · The F Suite · Apr 2026",
          "https://fsuitevirtualpanel430.splashthat.com", "2026-04"),
         ("The F Suite Boston — Growth CFO Salon · The F Suite · Nov 2025",
