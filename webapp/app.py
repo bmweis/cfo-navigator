@@ -618,6 +618,11 @@ def thought_leadership():
          "https://numeric.lpages.co/lean-accounting-team-webinar/", "2024-03"),
     ])
 
+    body += section("Webinar—Panelist", [
+        ("Abacum — Beyond the Spreadsheet: What FP&A Platforms Need to Deliver in an AI-First Era · Abacum · Jun 2026",
+         "https://www.abacum.ai/webinars/beyond-the-spreadsheet-what-fp-a-platforms-need-to-deliver-in-an-ai-first-era", "2026-06"),
+    ])
+
     body += section("Interview", [
         ("Sequence — From $1M to $100M: 6 Finance Lessons from the Frontline · Sequence · Jul 2025",
          "https://www.sequencehq.com/blog/from-1m-to-100m-6-finance-lessons-from-the-frontline", "2025-07"),
