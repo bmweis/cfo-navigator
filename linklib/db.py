@@ -107,6 +107,20 @@ CREATE TABLE IF NOT EXISTS read_later (
     published_at TEXT,
     added_at    TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tool_leads (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_id      INTEGER NOT NULL,
+    tool_name    TEXT NOT NULL DEFAULT '',
+    name         TEXT NOT NULL DEFAULT '',
+    email        TEXT NOT NULL DEFAULT '',
+    company      TEXT NOT NULL DEFAULT '',
+    company_size TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_leads_tool_id ON tool_leads(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_leads_created  ON tool_leads(created_at);
 """
 
 
@@ -155,6 +169,8 @@ class Library:
         for _col_sql in [
             "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tools ADD COLUMN vendor_email TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE tools ADD COLUMN promoted INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -333,7 +349,8 @@ class Library:
 
     def add_tool(self, name: str, description: str, url: str,
                  categories: list[str], submitted_by: str = "",
-                 approved: int = 0, advisor: int = 0) -> int:
+                 approved: int = 0, advisor: int = 0,
+                 promoted: int = 0, vendor_email: str = "") -> int:
         base = _slugify(name)
         slug = base
         suffix = 2
@@ -343,10 +360,11 @@ class Library:
         now = _now()
         cur = self.conn.execute(
             """INSERT INTO tools (name, slug, description, url, categories_json,
-               approved, advisor, submitted_by, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+               approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, description.strip(), url.strip(),
-             json.dumps(categories), approved, advisor, submitted_by.strip(), now, now),
+             json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
+             promoted, vendor_email.strip()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -367,12 +385,13 @@ class Library:
         return self._tool_to_dict(row) if row else None
 
     def update_tool(self, tool_id: int, name: str, description: str,
-                    url: str, categories: list[str], advisor: int = 0) -> None:
+                    url: str, categories: list[str], advisor: int = 0,
+                    promoted: int = 0, vendor_email: str = "") -> None:
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
-               advisor=?, updated_at=? WHERE id=?""",
+               advisor=?, promoted=?, vendor_email=?, updated_at=? WHERE id=?""",
             (name.strip(), description.strip(), url.strip(),
-             json.dumps(categories), advisor, _now(), tool_id),
+             json.dumps(categories), advisor, promoted, vendor_email.strip(), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -416,6 +435,36 @@ class Library:
 
     def read_later_urls(self) -> set[str]:
         return {r[0] for r in self.conn.execute("SELECT url FROM read_later").fetchall()}
+
+    # -- tool leads ------------------------------------------------------------
+
+    def save_tool_lead(self, tool_id: int, tool_name: str, name: str,
+                       email: str, company: str, company_size: str) -> int:
+        cur = self.conn.execute(
+            """INSERT INTO tool_leads (tool_id, tool_name, name, email, company, company_size, created_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (tool_id, tool_name.strip(), name.strip(), email.strip(),
+             company.strip(), company_size.strip(), _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_tool_leads(self, tool_id: int | None = None) -> list[dict]:
+        if tool_id is not None:
+            rows = self.conn.execute(
+                "SELECT * FROM tool_leads WHERE tool_id=? ORDER BY created_at DESC", (tool_id,)
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM tool_leads ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_tool_lead_counts(self) -> dict:
+        rows = self.conn.execute(
+            "SELECT tool_id, COUNT(*) as n FROM tool_leads GROUP BY tool_id"
+        ).fetchall()
+        return {r["tool_id"]: r["n"] for r in rows}
 
     def close(self) -> None:
         self.conn.close()
