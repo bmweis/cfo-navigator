@@ -13,7 +13,7 @@ import os
 from dataclasses import dataclass
 
 from .db import Library
-from .agent import retrieve
+from .agent import retrieve, _get_client
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
 AUTHOR_TITLE = os.environ.get("LINKLIB_AUTHOR_TITLE", "CFO")
@@ -34,7 +34,7 @@ VOICE:
 - Confident, not boastful. No gratitude theater.
 
 HARD MECHANICAL RULES (never violate):
-- Emdashes have NO surrounding spaces, and are used sparingly — one well-placed, never peppered.
+- Emdashes have NO surrounding spaces, and are used sparingly—one well-placed, never peppered.
 - Sentence case for any heading/title; proper nouns and acronyms stay capped (Mux, NetSuite, FP&A, AI, Ramp).
 - Spell out "and"; never "&" except in terms like FP&A.
 - No performative openers or closers ("I'm excited to share", "thrilled to", "Onward!", "Excited for what's next").
@@ -70,7 +70,8 @@ class Draft:
 
 def draft_post(lib: Library, article_id: int | None = None, url: str | None = None,
                topic: str | None = None, mode: str = "original",
-               model: str = DEFAULT_MODEL) -> Draft:
+               model: str = DEFAULT_MODEL,
+               system_prompt: str | None = None) -> Draft:
     """Draft a LinkedIn post from a saved article (by id/url) or a topic."""
     source_rows: list[dict] = []
     if article_id is not None:
@@ -103,10 +104,76 @@ def draft_post(lib: Library, article_id: int | None = None, url: str | None = No
         client = Anthropic()
         resp = client.messages.create(
             model=model, max_tokens=900,
-            system=BRIAN_VOICE,
+            system=system_prompt or BRIAN_VOICE,
             messages=[{"role": "user", "content": user}],
         )
         post = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
         return Draft(post=post, based_on=source_rows)
     except Exception as e:
         return Draft(post=f"(Draft call failed: {e})", based_on=source_rows)
+
+
+# ---------------------------------------------------------------------------
+# Multi-turn LinkedIn ghostwriter (chat). Used by the /draft page.
+#
+# The voice guide below is the single source of truth for this tool — edit it
+# here to retune the assistant's voice without touching any route or UI code.
+# It is sent as the system prompt on every request.
+# ---------------------------------------------------------------------------
+
+# Image media types the chat will accept and forward to the vision model.
+CHAT_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+
+LINKEDIN_CHAT_SYSTEM = """You write and edit LinkedIn posts in Brian's voice. Brian is a tech professional with 15+ years of experience, mostly with open source businesses in remote settings. He's an active speaker and a vocal peer in the finance-leader community, focused on honest conversations about AI implementation, not hype. Grounded, practical, peer-to-peer. Never vendor-y, never theoretical. His core belief: "Opinions are easy. Honest conversations are rare."
+
+Your job: take raw thoughts, bullets, rough drafts, a URL, or a screenshot of a post and turn them into a punchy LinkedIn post in his voice. Or tighten a draft he pastes — cut hedges, break up paragraphs, sharpen the hook, preserve his words. Take a swing first; don't ask a pile of clarifying questions. After you draft, flag 1–3 specific choices he might want to steer. Iterate fast on his feedback, and when he gives you his own phrasing, use it.
+
+Voice and mechanics:
+- Conversational and authentic. Write like he talks, not like a corporate memo.
+- Direct and punchy. Get to the point. No fluff.
+- Short sentences. Use periods liberally. Short paragraphs, 1–3 sentences max.
+- Self-aware, light irony, supportive. Celebrate others by name and make it about their work, not about Brian.
+- Active voice. Contractions. Plain language over finance jargon.
+- Emojis sparingly — one or two in a whole post, placed where they map to a beat. Favorites: 🔥 🤘 🙌 ❤️ 📣
+- Em dashes sparingly — at most one per post, and always with no spaces around them (word—word).
+- No semicolons. Find another construction.
+- No hedge phrases ("I'm not sure about you, but…", "To be honest…"). Let the observation stand.
+- No hashtags. No engagement bait ("comment below!", "what do you think?"). No listicles or numbered frameworks unless asked. No long essay-style posts.
+- No AI writing tics: "Here's the thing," "It's worth noting," "Let's dive in," "Excited to share," "Delve," "let that sink in." Never open with "I am excited to be…".
+
+Structure when drafting an original post:
+- Opening hook: a relatable truth or bold statement that stops the scroll. Repetition for emphasis is fine when it lands ("Making friends as an adult is hard. Really hard.").
+- Story/context: just enough background. Show momentum with specific numbers when celebrating someone (e.g., 15 women → thousands, 15+ cities). Don't over-explain.
+- The point: the "so what" — what's being shared and why anyone should care.
+- CTA: clear and specific. Two-part is good — bare link first ("Check it out: [link]"), then a short line on who should engage. Prefer bare links over "I wrote this."
+
+When the input is a URL or screenshot of someone else's post: read it, pull the relevant line (quoting their phrasing verbatim is often stronger than paraphrasing), and frame Brian's reshare around it. If a URL can't be fetched, say so in one line and ask for a screenshot — never invent the post's contents.
+
+Before sending a draft, self-check: would Brian say this out loud to a colleague? Is every sentence necessary? Are paragraphs broken up? Is the CTA clear? No jargon or AI tics? No hedges? More than one em dash (there shouldn't be)? Any semicolons (remove them)? No hashtags? No engagement bait?"""
+
+
+def chat_draft(messages: list[dict], model: str = DEFAULT_MODEL,
+               max_tokens: int = 1200) -> str:
+    """Run one turn of the multi-turn LinkedIn ghostwriter.
+
+    `messages` is the full conversation in Anthropic format (the API is
+    stateless, so the caller resends the whole history each turn). User turns
+    may carry image blocks for screenshot context. Returns the assistant's
+    reply text, or a friendly diagnostic string on failure.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return "(Set ANTHROPIC_API_KEY to enable drafting.)"
+    import importlib.util
+    if importlib.util.find_spec("anthropic") is None:
+        return "(Install `anthropic` to enable drafting.)"
+    try:
+        resp = _get_client().messages.create(
+            model=model, max_tokens=max_tokens,
+            system=LINKEDIN_CHAT_SYSTEM,
+            messages=messages,
+        )
+        return "".join(
+            b.text for b in resp.content if getattr(b, "type", None) == "text"
+        ).strip()
+    except Exception as e:
+        return f"(Draft call failed: {e})"
