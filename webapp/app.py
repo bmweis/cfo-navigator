@@ -1918,7 +1918,7 @@ def admin_contacts(request: Request):
     body = f"""<div class="page" style="max-width:960px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Contact submissions</h1>
-<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">
+<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">
   <strong>TODO:</strong> Set up <code>hello@[yourdomain].com</code> in Google Workspace once the domain is purchased,
   then set <code>LINKLIB_SMTP_HOST/USER/PASS</code> + <code>LINKLIB_FROM_EMAIL</code> in Railway so contact
   form submissions are emailed to you automatically. Until then, check this page manually.
