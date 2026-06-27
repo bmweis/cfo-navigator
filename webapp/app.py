@@ -4128,7 +4128,16 @@ def admin_page(request: Request):
     )
     body = f"""<div class="page" style="max-width:720px;">
 <h1>Admin</h1>
-<p style="color:var(--muted);margin:4px 0 30px;">Manage the site&rsquo;s private tools.</p>
+<p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
+<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 28px;">
+  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--coral-deep);margin-bottom:6px;">Before opening the library to paid subscribers &mdash; read this</div>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">The library stores the full text of other people&rsquo;s articles. That&rsquo;s fine for your own research, but charging readers for access to it would mean redistributing content you don&rsquo;t own. Settle licensing with the authors you can, and before any paid access goes live:</p>
+  <ul style="font-size:13.5px;color:var(--ink-soft);margin:0;padding-left:18px;line-height:1.6;">
+    <li>Make subscriber-facing feed items <strong>link out</strong> to the original source; keep the in-app reader (<code>/read</code>) private to you.</li>
+    <li>Serve only <strong>summaries, tags, and citations</strong> &mdash; never the stored full text (the <code>content</code> field).</li>
+    <li>Tighten <code>agent.py</code> so an answer can never fall back to raw <code>content</code> when a summary is missing (today it can, at <code>_format_all_sources</code>).</li>
+  </ul>
+</div>
 <div style="display:grid;gap:14px;">{cards}</div>
 </div>"""
     return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
