@@ -4227,7 +4227,7 @@ def admin_page(request: Request):
     groups_html = ""
     for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
         cards = "".join(_card(*s) for s in items)
-        open_attr = " open" if i == 0 else ""   # Library expanded by default; rest collapsed
+        open_attr = ""   # all groups start collapsed — click to expand
         groups_html += (
             f'<details class="admin-group"{open_attr} style="margin-bottom:14px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
             f'<summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">'
