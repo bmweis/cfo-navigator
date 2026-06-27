@@ -3943,7 +3943,10 @@ def ask_page(request: Request, q: str = ""):
   {cost_span}
 </div>
 
-<div id="ask-result" style="display:none;"></div>
+<div id="ask-thread"></div>
+<div id="ask-capped" style="display:none;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:14px;color:var(--muted);">
+  You&rsquo;ve reached the limit for this conversation. <a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.
+</div>
 </div>
 
 <style>
@@ -3958,6 +3961,7 @@ def ask_page(request: Request, q: str = ""):
 .ask-radio-desc{{font-size:12px;color:var(--muted);}}
 .ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 24px;font-size:15px;line-height:1.7;}}
 .ask-answer p{{margin:0 0 14px;}}
+.ask-q-bubble{{background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--navy);margin-bottom:8px;}}
 .ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-direction:column;gap:6px;}}
 .ask-src-list li{{font-size:13px;}}
 .ask-src-list a{{color:var(--accent);}}
@@ -3976,9 +3980,41 @@ function updateEstimate() {{
   el.textContent = c != null ? '~$' + c.toFixed(3) + ' estimated per query' : '';
 }}
 
+var convo = [];        // [{{role, content}}] prior turns, sent as history
+var asked = false;
+
+function escapeHtml(s) {{
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}}
+function answerToHtml(text) {{
+  return '<p>' + escapeHtml(text).replace(/\\n\\n/g,'</p><p>').replace(/\\n/g,'<br>') + '</p>';
+}}
+function srcListHtml(d) {{
+  var items = [];
+  (d.sources || []).forEach(function(s, i) {{
+    items.push('<li>&#128218; <a href="' + encodeURI(s.url) + '" target="_blank" rel="noopener">[' + (i+1) + '] ' + escapeHtml(s.title) + '</a></li>');
+  }});
+  var feedOffset = (d.sources || []).length;
+  (d.feed_sources || []).forEach(function(s, i) {{
+    items.push('<li>&#128240; <a href="' + encodeURI(s.url) + '" target="_blank" rel="noopener">[' + (feedOffset+i+1) + '] ' + escapeHtml(s.title) + '</a></li>');
+  }});
+  (d.web_sources || []).forEach(function(s) {{
+    items.push('<li>&#127760; <a href="' + encodeURI(s.url) + '" target="_blank" rel="noopener">' + escapeHtml(s.title) + '</a></li>');
+  }});
+  return items.length ? '<ul class="ask-src-list">' + items.join('') + '</ul>' : '';
+}}
+function resetConvo() {{
+  convo = []; asked = false;
+  document.getElementById('ask-thread').innerHTML = '';
+  document.getElementById('ask-capped').style.display = 'none';
+  var btn = document.getElementById('ask-btn'); btn.disabled = false; btn.textContent = 'Ask';
+  var q = document.getElementById('ask-q'); q.placeholder = 'e.g. What frameworks do CFOs use for headcount planning in uncertain environments?'; q.focus();
+}}
+
 async function doAsk() {{
-  var q = document.getElementById('ask-q').value.trim();
-  if (!q) {{ document.getElementById('ask-q').focus(); return; }}
+  var qEl = document.getElementById('ask-q');
+  var q = qEl.value.trim();
+  if (!q) {{ qEl.focus(); return; }}
 
   var model = document.querySelector('input[name="model"]:checked')?.value || 'claude-sonnet-4-6';
   var effort = document.querySelector('input[name="effort"]:checked')?.value || 'standard';
@@ -3989,41 +4025,52 @@ async function doAsk() {{
   if (!sources.length) {{ alert('Select at least one source.'); return; }}
 
   var btn = document.getElementById('ask-btn');
-  var box = document.getElementById('ask-result');
+  var thread = document.getElementById('ask-thread');
+  var turn = document.createElement('div');
+  turn.style.marginTop = '18px';
+  turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(q) + '</div>' +
+                   '<div class="ask-answer"><em style="color:var(--muted);">Querying sources…</em></div>';
+  thread.appendChild(turn);
+  var answerEl = turn.querySelector('.ask-answer');
+
   btn.disabled = true; btn.textContent = 'Thinking…';
-  box.style.display = 'block';
-  box.innerHTML = '<div class="ask-answer"><em style="color:var(--muted);">Querying sources…</em></div>';
+  qEl.value = '';
+  turn.scrollIntoView({{behavior:'smooth', block:'nearest'}});
 
   try {{
     var resp = await fetch('/ask', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{ question: q, model: model, effort: effort, sources: sources }})
+      body: JSON.stringify({{ question: q, model: model, effort: effort, sources: sources, history: convo }})
     }});
     var d = await resp.json();
-    if (!resp.ok) {{ box.innerHTML = '<div class="ask-answer" style="color:#b91c1c;">' + (d.detail || 'Error') + '</div>'; return; }}
+    if (!resp.ok) {{
+      answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(d.detail || 'Error') + '</span>';
+      btn.disabled = false; btn.textContent = asked ? 'Ask follow-up' : 'Ask';
+      return;
+    }}
 
-    var answerHtml = '<p>' + (d.answer || '').replace(/\\n\\n/g, '</p><p>').replace(/\\n/g, '<br>') + '</p>';
+    answerEl.innerHTML = answerToHtml(d.answer) + srcListHtml(d);
 
-    var srcItems = [];
-    (d.sources || []).forEach(function(s, i) {{
-      srcItems.push('<li>&#128218; <a href="' + s.url + '" target="_blank" rel="noopener">[' + (i+1) + '] ' + s.title + '</a></li>');
-    }});
-    var feedOffset = (d.sources || []).length;
-    (d.feed_sources || []).forEach(function(s, i) {{
-      srcItems.push('<li>&#128240; <a href="' + s.url + '" target="_blank" rel="noopener">[' + (feedOffset+i+1) + '] ' + s.title + '</a></li>');
-    }});
-    (d.web_sources || []).forEach(function(s) {{
-      srcItems.push('<li>&#127760; <a href="' + s.url + '" target="_blank" rel="noopener">' + s.title + '</a></li>');
-    }});
+    if (d.capped) {{
+      document.getElementById('ask-capped').style.display = 'block';
+      btn.disabled = true; btn.textContent = 'Limit reached';
+      return;
+    }}
 
-    box.innerHTML = '<div class="ask-answer">' + answerHtml +
-      (srcItems.length ? '<ul class="ask-src-list">' + srcItems.join('') + '</ul>' : '') +
-      '</div>';
+    convo.push({{role:'user', content:q}});
+    convo.push({{role:'assistant', content:d.answer}});
+    asked = true;
+    qEl.placeholder = 'Ask a follow-up…';
+    btn.disabled = false; btn.textContent = 'Ask follow-up';
+
+    if (d.followups_left === 0) {{
+      document.getElementById('ask-capped').style.display = 'block';
+      btn.disabled = true; btn.textContent = 'Limit reached';
+    }}
   }} catch(e) {{
-    box.innerHTML = '<div class="ask-answer" style="color:#b91c1c;">Something went wrong: ' + e + '</div>';
-  }} finally {{
-    btn.disabled = false; btn.textContent = 'Ask';
+    answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong: ' + escapeHtml(String(e)) + '</span>';
+    btn.disabled = false; btn.textContent = asked ? 'Ask follow-up' : 'Ask';
   }}
 }}
 
@@ -4040,7 +4087,7 @@ updateEstimate();
 @app.post("/ask")
 async def ask(request: Request):
     _require_api(request)
-    from linklib.agent import answer_question, MODEL_ALIASES
+    from linklib.agent import answer_question, count_prior_questions, MAX_FOLLOWUPS
     payload = await request.json()
     question = (payload.get("question") or "").strip()
     if not question:
@@ -4048,6 +4095,21 @@ async def ask(request: Request):
 
     model = (payload.get("model") or "")
     effort = (payload.get("effort") or "standard")
+
+    # Conversation history for follow-ups: [{role, content}, ...]. The follow-up
+    # cap is enforced here (invisible cost guard) — a capped conversation never
+    # reaches the API.
+    history = payload.get("history") or []
+    if not isinstance(history, list):
+        history = []
+    prior_questions = count_prior_questions(history)
+    if prior_questions >= 1 + MAX_FOLLOWUPS:
+        return {
+            "capped": True,
+            "answer": "We've reached the limit for this conversation. "
+                      "Start a new question to keep going.",
+            "sources": [], "feed_sources": [], "web_sources": [],
+        }
 
     raw_sources = payload.get("sources") or ["library", "web"]
     if isinstance(raw_sources, str):
@@ -4066,12 +4128,15 @@ async def ask(request: Request):
             use_feed=use_feed,
             use_web=use_web,
             opml_path=OPML_PATH if (use_feed or use_web) else None,
+            history=history,
         )
+        followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
         return {
             "answer": ans.text,
             "sources":      [{"title": s["title"], "url": s["url"]} for s in ans.sources],
             "feed_sources": [{"title": s["title"], "url": s["url"]} for s in ans.feed_sources],
             "web_sources":  ans.web_sources,
+            "followups_left": followups_left,
         }
     finally:
         lib.close()
@@ -4294,10 +4359,19 @@ def admin_queue(request: Request, scanning: int = 0):
     for c in pending:
         groups.setdefault(c.get("source") or "Other", []).append(c)
 
-    def _badge(enriched: int) -> str:
-        if enriched:
+    def _short_model(m: str) -> str:
+        # claude-opus-4-8 -> opus; claude-haiku-4-5-20251001 -> haiku
+        parts = (m or "").split("-")
+        return parts[1] if len(parts) > 1 and parts[0] == "claude" else (m or "")
+
+    def _badge(c: dict) -> str:
+        if c.get("enriched"):
+            label = "enriched"
+            sm = _short_model(c.get("enrich_model") or "")
+            if sm:
+                label = f"enriched &middot; {_esc(sm)}"
             return ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
-                    'background:var(--seafoam-wash);color:var(--seafoam-deep);">enriched</span>')
+                    f'background:var(--seafoam-wash);color:var(--seafoam-deep);">{label}</span>')
         return ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
                 'background:var(--surface-2);color:var(--muted);">needs enrichment</span>')
 
@@ -4311,7 +4385,7 @@ def admin_queue(request: Request, scanning: int = 0):
         return f"""<div data-card data-url="{url}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
     <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
-    {_badge(c.get("enriched"))}
+    {_badge(c)}
   </div>
   <div style="font-size:12px;color:var(--muted);margin:3px 0 8px;">{meta}</div>
   <p style="font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{summary}</p>

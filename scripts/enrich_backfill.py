@@ -23,6 +23,12 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=1000)
     ap.add_argument("--no-fetch", action="store_true",
                     help="skip live full-text fetch (summarize from title only)")
+    ap.add_argument("--force", action="store_true",
+                    help="re-enrich EVERY row, not just unenriched ones — use to "
+                         "standardize the whole library on one model (with --model)")
+    ap.add_argument("--model", default=None,
+                    help="enrichment model override, e.g. claude-opus-4-8 "
+                         "(default: LINKLIB_ENRICH_MODEL)")
     args = ap.parse_args()
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -31,10 +37,17 @@ def main() -> int:
 
     lib = Library(args.db)
 
+    if args.force:
+        total = lib.count()
+        print(f"Force re-enrichment of up to {min(total, args.limit)} rows"
+              f"{f' with {args.model}' if args.model else ''} — summaries overwritten, "
+              f"tags unioned.\n")
+
     def progress(done, total, title):
         print(f"  [{done}/{total}] {title[:70]}")
 
-    n = enrich_library(lib, limit=args.limit, fetch=not args.no_fetch, progress=progress)
+    n = enrich_library(lib, limit=args.limit, fetch=not args.no_fetch,
+                       force=args.force, model=args.model, progress=progress)
     print(f"\nEnriched {n} articles.")
     lib.close()
     return 0

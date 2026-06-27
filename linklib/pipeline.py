@@ -51,13 +51,15 @@ def ingest_url(
     if do_enrich:
         result = enrich_mod.enrich(art.title, content or art.title, known_tags=lib.known_tags())
         if result:
-            lib.apply_enrichment(article_id, result.summary, result.tags)
+            lib.apply_enrichment(article_id, result.summary, result.tags,
+                                 model=result.model, rules=result.rules_version)
 
     return next((r for r in lib.search("", limit=10000) if r["id"] == article_id),
                 {"id": article_id, "url": url})
 
 
 def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
+                   force: bool = False, model: Optional[str] = None,
                    progress=lambda *_: None) -> int:
     """Backfill enrichment over unenriched rows. Returns count enriched.
 
@@ -65,11 +67,18 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
     summary is built from the article body, not just the title — and the body
     itself gets indexed for search. Dead/paywalled links fall back to the title.
     Tags are biased toward your existing vocabulary.
+
+    `force` re-enriches every row, not just unenriched ones — use it to
+    standardize the whole library on a single (more capable) `model`. The
+    summary is overwritten with the new one; tags are unioned, so any
+    hand-curated or board tags survive. Rows that already have stored content
+    aren't re-fetched, so a re-run is mostly API time, not crawling.
     """
     from .extract import fetch_page
 
+    use_model = model or enrich_mod.DEFAULT_MODEL
     vocab = lib.known_tags()
-    rows = lib.unenriched(limit=limit)
+    rows = lib.all_articles(limit=limit) if force else lib.unenriched(limit=limit)
     done = 0
     for row in rows:
         text = row["content"] or row["summary"] or ""
@@ -85,9 +94,11 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
                     (page.title, _now(), row["id"]),
                 )
                 lib.conn.commit()
-        result = enrich_mod.enrich(row["title"] or row["url"], text or row["title"], known_tags=vocab)
+        result = enrich_mod.enrich(row["title"] or row["url"], text or row["title"],
+                                   known_tags=vocab, model=use_model)
         if result:
-            lib.apply_enrichment(row["id"], result.summary, result.tags)
+            lib.apply_enrichment(row["id"], result.summary, result.tags,
+                                 model=result.model, rules=result.rules_version)
             done += 1
         progress(done, len(rows), row["title"])
     return done

@@ -58,6 +58,8 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
     content = ""
     tags: list[str] = []
     enriched = False
+    enrich_model = ""
+    enrich_rules = ""
 
     if enrich:
         try:
@@ -81,6 +83,8 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
             summary = result.summary or summary
             tags = result.tags
             enriched = True
+            enrich_model = result.model
+            enrich_rules = result.rules_version
 
     if not tags:
         tags = suggest_tags_heuristic(title, summary, source, vocab)
@@ -89,6 +93,7 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
         url=url, title=title, source=source, summary=summary, content=content,
         suggested_tags=tags, published_at=item.get("published_at") or None,
         origin=item.get("origin", "feed"), enriched=enriched,
+        enrich_model=enrich_model, enrich_rules=enrich_rules,
     )
 
 

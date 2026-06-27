@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS articles (
     saved_at    TEXT,                          -- ISO 8601, when you saved it in Feedly
     feedly_id   TEXT,                           -- original Feedly entry id, for dedupe
     enriched    INTEGER NOT NULL DEFAULT 0,    -- 1 once Claude summary/tags applied
+    enrich_model TEXT NOT NULL DEFAULT '',      -- model that produced the enrichment
+    enrich_rules TEXT NOT NULL DEFAULT '',      -- ENRICH_RULES_VERSION used
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -142,6 +144,8 @@ CREATE TABLE IF NOT EXISTS library_queue (
     origin        TEXT NOT NULL DEFAULT '',       -- 'feed' | 'backfill:<source>'
     status        TEXT NOT NULL DEFAULT 'pending',-- 'pending' | 'dismissed'
     enriched      INTEGER NOT NULL DEFAULT 0,     -- 1 once a Claude summary/tags applied
+    enrich_model  TEXT NOT NULL DEFAULT '',       -- model that produced the enrichment
+    enrich_rules  TEXT NOT NULL DEFAULT '',       -- ENRICH_RULES_VERSION used
     created_at    TEXT NOT NULL
 );
 
@@ -176,6 +180,8 @@ class Article:
     saved_at: Optional[str] = None
     feedly_id: Optional[str] = None
     enriched: bool = False
+    enrich_model: str = ""
+    enrich_rules: str = ""
 
     def tags_text(self) -> str:
         return " ".join(self.tags)
@@ -196,6 +202,12 @@ class Library:
             "ALTER TABLE tools ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tools ADD COLUMN vendor_email TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN promoted INTEGER NOT NULL DEFAULT 0",
+            # Enrichment provenance — added after the queue shipped, so existing
+            # articles/library_queue tables need these backfilled.
+            "ALTER TABLE articles ADD COLUMN enrich_model TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE articles ADD COLUMN enrich_rules TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE library_queue ADD COLUMN enrich_model TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE library_queue ADD COLUMN enrich_rules TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -221,12 +233,12 @@ class Library:
                 """INSERT INTO articles
                    (url, title, author, source, summary, content, notes,
                     tags_json, tags_text, published_at, saved_at, feedly_id,
-                    enriched, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    enriched, enrich_model, enrich_rules, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (art.url, art.title, art.author, art.source, art.summary,
                  art.content, art.notes, json.dumps(art.tags), art.tags_text(),
                  art.published_at, art.saved_at, art.feedly_id,
-                 int(art.enriched), now, now),
+                 int(art.enriched), art.enrich_model, art.enrich_rules, now, now),
             )
             self.conn.commit()
             return self.conn.execute("SELECT id FROM articles WHERE url = ?", (art.url,)).fetchone()[0]
@@ -246,15 +258,19 @@ class Library:
             "saved_at": existing["saved_at"] or art.saved_at,
             "feedly_id": existing["feedly_id"] or art.feedly_id,
             "enriched": existing["enriched"] or int(art.enriched),
+            "enrich_model": existing["enrich_model"] or art.enrich_model,
+            "enrich_rules": existing["enrich_rules"] or art.enrich_rules,
         }
         self.conn.execute(
             """UPDATE articles SET title=?, author=?, source=?, summary=?,
                content=?, notes=?, tags_json=?, tags_text=?, published_at=?,
-               saved_at=?, feedly_id=?, enriched=?, updated_at=? WHERE id=?""",
+               saved_at=?, feedly_id=?, enriched=?, enrich_model=?, enrich_rules=?,
+               updated_at=? WHERE id=?""",
             (merged["title"], merged["author"], merged["source"], merged["summary"],
              merged["content"], merged["notes"], merged["tags_json"], merged["tags_text"],
              merged["published_at"], merged["saved_at"], merged["feedly_id"],
-             merged["enriched"], now, existing["id"]),
+             merged["enriched"], merged["enrich_model"], merged["enrich_rules"],
+             now, existing["id"]),
         )
         self.conn.commit()
         return existing["id"]
@@ -273,14 +289,17 @@ class Library:
         self.conn.execute("DELETE FROM articles WHERE id=?", (article_id,))
         self.conn.commit()
 
-    def apply_enrichment(self, article_id: int, summary: str, tags: list[str]) -> None:
+    def apply_enrichment(self, article_id: int, summary: str, tags: list[str],
+                         model: str = "", rules: str = "") -> None:
         row = self.conn.execute("SELECT summary, tags_json FROM articles WHERE id=?", (article_id,)).fetchone()
         if row is None:
             return
         merged_tags = sorted(set(json.loads(row["tags_json"]) or []) | set(tags))
         self.conn.execute(
-            "UPDATE articles SET summary=?, tags_json=?, tags_text=?, enriched=1, updated_at=? WHERE id=?",
-            (summary or row["summary"], json.dumps(merged_tags), " ".join(merged_tags), _now(), article_id),
+            "UPDATE articles SET summary=?, tags_json=?, tags_text=?, enriched=1, "
+            "enrich_model=?, enrich_rules=?, updated_at=? WHERE id=?",
+            (summary or row["summary"], json.dumps(merged_tags), " ".join(merged_tags),
+             model, rules, _now(), article_id),
         )
         self.conn.commit()
 
@@ -324,6 +343,15 @@ class Library:
     def unenriched(self, limit: int = 1000) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM articles WHERE enriched=0 ORDER BY id LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def all_articles(self, limit: int = 100000) -> list[dict]:
+        """Every row, oldest first. Used by a forced re-enrichment pass that
+        re-runs even already-enriched articles (e.g. to standardize the whole
+        library on a more capable model)."""
+        rows = self.conn.execute(
+            "SELECT * FROM articles ORDER BY id LIMIT ?", (limit,)
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
@@ -484,7 +512,8 @@ class Library:
                      source: str = "", summary: str = "", content: str = "",
                      suggested_tags: Optional[list[str]] = None,
                      published_at: Optional[str] = None, origin: str = "",
-                     enriched: bool = False) -> bool:
+                     enriched: bool = False, enrich_model: str = "",
+                     enrich_rules: str = "") -> bool:
         """Queue a candidate. No-op (returns False) if the URL is already in the
         library or already queued — keeps the queue idempotent like `upsert`."""
         url = (url or "").strip()
@@ -498,10 +527,12 @@ class Library:
         self.conn.execute(
             """INSERT INTO library_queue
                (url, title, author, source, summary, content, suggested_tags_json,
-                published_at, origin, status, enriched, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                published_at, origin, status, enriched, enrich_model, enrich_rules,
+                created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (url, title, author, source, summary, content, json.dumps(tags),
-             published_at, origin, "pending", int(enriched), _now()),
+             published_at, origin, "pending", int(enriched), enrich_model,
+             enrich_rules, _now()),
         )
         self.conn.commit()
         return True
@@ -547,6 +578,7 @@ class Library:
             source=row["source"], summary=row["summary"], content=row["content"],
             tags=use_tags, published_at=row["published_at"],
             saved_at=_now(), enriched=bool(row["enriched"]),
+            enrich_model=row["enrich_model"], enrich_rules=row["enrich_rules"],
         )
         article_id = self.upsert(art)
         self.conn.execute("DELETE FROM library_queue WHERE url=?", (url,))
