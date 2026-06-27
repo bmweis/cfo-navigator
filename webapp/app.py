@@ -4225,19 +4225,31 @@ def admin_page(request: Request):
         )
 
     groups_html = ""
-    for gname, gdesc, items in _ADMIN_GROUPS:
+    for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
         cards = "".join(_card(*s) for s in items)
+        open_attr = " open" if i == 0 else ""   # Library expanded by default; rest collapsed
         groups_html += (
-            f'<section style="margin-bottom:34px;">'
-            f'<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">'
-            f'<h2 style="margin:0;font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);">{gname}</h2>'
-            f'</div>'
+            f'<details class="admin-group"{open_attr} style="margin-bottom:14px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
+            f'<summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
+            f'<span style="font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{gname}</span>'
+            f'<span style="font-size:12px;color:var(--muted);">{len(items)} {"tool" if len(items)==1 else "tools"}</span>'
+            f'</span>'
+            f'<span class="admin-chevron" style="color:var(--navy);font-size:13px;line-height:1;transition:transform .15s;">&#9660;</span>'
+            f'</summary>'
+            f'<div style="padding:0 20px 20px;">'
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
             f'<div style="display:grid;gap:14px;">{cards}</div>'
-            f'</section>'
+            f'</div>'
+            f'</details>'
         )
 
     body = f"""<div class="page" style="max-width:720px;">
+<style>
+.admin-group summary::-webkit-details-marker{{display:none;}}
+.admin-group[open] .admin-chevron{{transform:rotate(180deg);}}
+.admin-group summary:hover{{background:var(--surface);}}
+</style>
 <h1>Admin</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
 <div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 28px;">
