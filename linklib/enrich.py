@@ -20,6 +20,11 @@ from dataclasses import dataclass
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-haiku-4-5-20251001")
 
+# Version of the enrichment "rules" (the prompt below). Stored alongside each
+# article's enrichment so you can tell which ruleset produced a given summary,
+# and re-run rows enriched under older rules. BUMP THIS whenever _PROMPT changes.
+ENRICH_RULES_VERSION = "v1"
+
 _PROMPT = """You are enriching a personal finance/business research library so it
 is highly searchable. Given an article's title and text, return STRICT JSON only
 (no prose, no markdown fences) with exactly two keys:
@@ -46,6 +51,8 @@ Text:
 class Enrichment:
     summary: str
     tags: list[str]
+    model: str = ""           # model that produced this enrichment
+    rules_version: str = ""   # ENRICH_RULES_VERSION at the time
 
 
 def enrich(title: str, text: str, known_tags: list[str] | None = None,
@@ -71,6 +78,7 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
         tags = [str(t).strip() for t in data.get("tags", []) if str(t).strip()]
-        return Enrichment(summary=str(data.get("summary", "")).strip(), tags=tags)
+        return Enrichment(summary=str(data.get("summary", "")).strip(), tags=tags,
+                          model=model, rules_version=ENRICH_RULES_VERSION)
     except Exception:
         return None

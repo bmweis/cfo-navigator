@@ -51,7 +51,8 @@ def ingest_url(
     if do_enrich:
         result = enrich_mod.enrich(art.title, content or art.title, known_tags=lib.known_tags())
         if result:
-            lib.apply_enrichment(article_id, result.summary, result.tags)
+            lib.apply_enrichment(article_id, result.summary, result.tags,
+                                 model=result.model, rules=result.rules_version)
 
     return next((r for r in lib.search("", limit=10000) if r["id"] == article_id),
                 {"id": article_id, "url": url})
@@ -96,7 +97,8 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
         result = enrich_mod.enrich(row["title"] or row["url"], text or row["title"],
                                    known_tags=vocab, model=use_model)
         if result:
-            lib.apply_enrichment(row["id"], result.summary, result.tags)
+            lib.apply_enrichment(row["id"], result.summary, result.tags,
+                                 model=result.model, rules=result.rules_version)
             done += 1
         progress(done, len(rows), row["title"])
     return done

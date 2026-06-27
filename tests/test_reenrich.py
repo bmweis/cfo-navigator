@@ -67,3 +67,30 @@ def test_force_preserves_existing_tags(lib, monkeypatch):
     tags = lib.search("")[0]["tags"]
     assert "board:fpa" in tags          # curated tag survives
     assert "opus-tag" in tags           # new tag added
+
+
+def test_enrichment_provenance_is_recorded(lib, monkeypatch):
+    """apply_enrichment (via the pipeline) records which model + rules ran."""
+    from linklib.enrich import Enrichment
+    lib.upsert(Article(url="u1", title="A", content="body", enriched=False))
+
+    def fake(title, text, known_tags=None, model="?"):
+        return Enrichment(summary="s", tags=["t"], model=model, rules_version="v9")
+    monkeypatch.setattr(pipeline.enrich_mod, "enrich", fake)
+
+    pipeline.enrich_library(lib, fetch=False, force=False, model="claude-opus-4-8")
+    row = lib.search("")[0]
+    assert row["enrich_model"] == "claude-opus-4-8"
+    assert row["enrich_rules"] == "v9"
+
+
+def test_queue_provenance_survives_promotion(lib):
+    """A queued candidate's model/rules carry into the library on approval."""
+    lib.add_to_queue("https://ex.com/a", title="A", summary="s", enriched=True,
+                     enrich_model="claude-opus-4-8", enrich_rules="v1")
+    queued = lib.list_queue()[0]
+    assert queued["enrich_model"] == "claude-opus-4-8"
+    lib.promote_queue_item("https://ex.com/a")
+    art = lib.search("")[0]
+    assert art["enrich_model"] == "claude-opus-4-8"
+    assert art["enrich_rules"] == "v1"

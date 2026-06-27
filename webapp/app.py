@@ -4294,10 +4294,19 @@ def admin_queue(request: Request, scanning: int = 0):
     for c in pending:
         groups.setdefault(c.get("source") or "Other", []).append(c)
 
-    def _badge(enriched: int) -> str:
-        if enriched:
+    def _short_model(m: str) -> str:
+        # claude-opus-4-8 -> opus; claude-haiku-4-5-20251001 -> haiku
+        parts = (m or "").split("-")
+        return parts[1] if len(parts) > 1 and parts[0] == "claude" else (m or "")
+
+    def _badge(c: dict) -> str:
+        if c.get("enriched"):
+            label = "enriched"
+            sm = _short_model(c.get("enrich_model") or "")
+            if sm:
+                label = f"enriched &middot; {_esc(sm)}"
             return ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
-                    'background:var(--seafoam-wash);color:var(--seafoam-deep);">enriched</span>')
+                    f'background:var(--seafoam-wash);color:var(--seafoam-deep);">{label}</span>')
         return ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
                 'background:var(--surface-2);color:var(--muted);">needs enrichment</span>')
 
@@ -4311,7 +4320,7 @@ def admin_queue(request: Request, scanning: int = 0):
         return f"""<div data-card data-url="{url}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
     <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
-    {_badge(c.get("enriched"))}
+    {_badge(c)}
   </div>
   <div style="font-size:12px;color:var(--muted);margin:3px 0 8px;">{meta}</div>
   <p style="font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{summary}</p>

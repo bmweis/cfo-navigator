@@ -47,6 +47,9 @@ def main() -> int:
     ap.add_argument("--url", default="", help="article URL to fetch and enrich")
     ap.add_argument("--db", default="", help="library DB (to pull a saved article / vocab)")
     ap.add_argument("--id", type=int, default=0, help="article id within --db")
+    ap.add_argument("--query", default="",
+                    help="pick the top library search hit for this query "
+                         "(e.g. an Ask question) — needs --db")
     ap.add_argument("--models", default=DEFAULT_MODELS,
                     help="comma-separated model IDs to compare")
     args = ap.parse_args()
@@ -64,6 +67,14 @@ def main() -> int:
         from linklib.extract import fetch_page
         page = fetch_page(args.url)
         title, text, url = page.title, page.content, args.url
+    elif lib and args.query:
+        hits = lib.search(args.query, limit=1)
+        if not hits:
+            print(f"ERROR: no library hits for {args.query!r}", file=sys.stderr)
+            return 2
+        row = hits[0]
+        title, text, url = row["title"], row["content"] or row["summary"], row["url"]
+        print(f"(top hit for {args.query!r})")
     elif lib and args.id:
         row = next((r for r in lib.all_articles() if r["id"] == args.id), None)
         if not row:
