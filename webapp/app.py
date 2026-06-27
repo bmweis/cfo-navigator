@@ -4925,8 +4925,14 @@ def admin_enrich_status(request: Request):
 # Historical sitemap backfill — queue articles going back to the saves cutoff
 # ---------------------------------------------------------------------------
 
-def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool) -> None:
-    """Background thread: run scan_sitemaps_into_queue, updating _JOB_STATE["backfill"]."""
+def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool,
+                  only_sources_raw: str = "") -> None:
+    """Background thread: run scan_sitemaps_into_queue, updating _JOB_STATE["backfill"].
+
+    `only_sources_raw` (comma/newline separated) restricts the sweep to matching
+    sources — case-insensitive substring match against the OPML name, so
+    "Stratechery" matches "Ben Thompson (Stratechery)". Empty = all sources.
+    """
     _job_set("backfill", running=True, report=[], error="", done=0, total=0)
     lib = _lib()
     try:
@@ -4934,6 +4940,9 @@ def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool) ->
         from linklib.queue import scan_sitemaps_into_queue
 
         feeds = parse_opml(OPML_PATH)
+        tokens = [t.strip().lower() for t in only_sources_raw.replace("\n", ",").split(",") if t.strip()]
+        if tokens:
+            feeds = [f for f in feeds if any(tok in f.name.lower() for tok in tokens)]
         total = len(feeds)
         _job_set("backfill", total=total)
         sources_done = [0]
@@ -5055,10 +5064,16 @@ def admin_backfill(request: Request):
       </div>
       <div>
         <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Max articles per source</label>
-        <input type="number" name="per_source" value="150" min="10" max="500"
+        <input type="number" name="per_source" value="150" min="10" max="2000"
           style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-        <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">150 is a safe starting point.</p>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">150 is a safe starting point. Raise it to reach further back — the sweep takes the most recent N, so a low cap stops early on prolific sources.</p>
       </div>
+    </div>
+    <div>
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Limit to sources <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
+      <input type="text" name="only_sources" placeholder="e.g. Kellblog, Stratechery, SaaStr"
+        style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Comma-separated. Leave blank to sweep everything. Re-running is safe — already-queued and saved URLs are skipped, so a bigger limit only adds the older articles you haven&rsquo;t seen yet.</p>
     </div>
     <div>
       <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Enrichment model</label>
@@ -5136,7 +5151,9 @@ async def admin_backfill_start(request: Request):
         per_source = 150
     model = (form.get("model") or "claude-opus-4-8").strip()
     dry_run = bool(form.get("dry_run"))
-    t = threading.Thread(target=_backfill_job, args=(since, per_source, model, dry_run), daemon=True)
+    only_sources = (form.get("only_sources") or "").strip()
+    t = threading.Thread(target=_backfill_job,
+                         args=(since, per_source, model, dry_run, only_sources), daemon=True)
     t.start()
     return RedirectResponse("/admin/backfill", status_code=303)
 

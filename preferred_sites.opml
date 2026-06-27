@@ -11,34 +11,25 @@
   <outline text="Blogs" title="Blogs">
     <outline type="rss" text="VC Adventure" title="VC Adventure" xmlUrl="https://www.sethlevine.com/feed/" htmlUrl="https://sethlevine.com/"/>
     <outline type="rss" text="Tomasz Tunguz (Redpoint)" title="Tomasz Tunguz (Redpoint)" xmlUrl="http://tomtunguz.com/index.xml" htmlUrl="https://www.tomtunguz.com/"/>
-    <outline type="rss" text="Shockwave Innovations" title="Shockwave Innovations" xmlUrl="https://shockwaveinnovations.com/feed/" htmlUrl="https://shockwaveinnovations.com/"/>
     <outline type="rss" text="Brad Feld (Foundry)" title="Brad Feld (Foundry)" xmlUrl="http://feeds.feedburner.com/FeldThoughts" htmlUrl="https://feld.com/"/>
     <outline type="rss" text="For Entrepreneur" title="For Entrepreneur" xmlUrl="http://feeds.feedburner.com/forentrepreneurs" htmlUrl="https://www.forentrepreneurs.com/"/>
     <outline type="rss" text="Kellblog" title="Kellblog" xmlUrl="http://kellblog.com/feed/" htmlUrl="https://www.kellblog.com/"/>
-    <outline type="rss" text="Fred Wilson (USV)" title="Fred Wilson (USV)" xmlUrl="http://feeds.feedburner.com/AVc" htmlUrl="https://avc.com/"/>
+    <outline type="rss" text="Fred Wilson (USV)" title="Fred Wilson (USV)" xmlUrl="https://avc.xyz/feed" htmlUrl="https://avc.xyz/"/>
     <outline type="rss" text="Hunter Walk (Homebrew)" title="Hunter Walk (Homebrew)" xmlUrl="http://www.hunterwalk.com/feeds/posts/default" htmlUrl="https://hunterwalk.com"/>
     <outline type="rss" text="Ben Thompson (Stratechery)" title="Ben Thompson (Stratechery)" xmlUrl="http://stratechery.com/feed/" htmlUrl="https://stratechery.com"/>
-    <outline type="rss" text="The Business Behind jOOQ" title="The Business Behind jOOQ" xmlUrl="https://business.jooq.org/feed/" htmlUrl="https://business.jooq.org"/>
-    <outline type="rss" text="Jason Calacanis" title="Jason Calacanis" xmlUrl="http://calacanis.com/feed/" htmlUrl="https://calacanis.com"/>
-
     <outline type="rss" text="Above the Crowd" title="Above the Crowd" xmlUrl="http://abovethecrowd.com/feed/" htmlUrl="https://abovethecrowd.com/"/>
     <outline type="rss" text="SaaStr" title="SaaStr" xmlUrl="https://www.saastr.com/feed/" htmlUrl="https://www.saastr.com/"/>
-    <outline type="rss" text="Christoph Janz" title="Christoph Janz" xmlUrl="https://christophjanz.blogspot.com/feeds/posts/default" htmlUrl="https://christophjanz.blogspot.com/"/>
-    <outline type="rss" text="OpexEngine" title="OpexEngine" xmlUrl="https://www.opexengine.com/articles" htmlUrl="https://www.opexengine.com/articles"/>
-    <outline type="rss" text="25iq" title="25iq" xmlUrl="https://25iq.com/feed/" htmlUrl="https://25iq.com/"/>
+    <outline type="rss" text="Christoph Janz" title="Christoph Janz" xmlUrl="https://chrija.medium.com/feed" htmlUrl="https://chrija.medium.com/"/>
   </outline>
   <outline text="Tools" title="Tools">
-    <outline type="rss" text="Team Ohana" title="Team Ohana" xmlUrl="https://www.teamohana.com/blog/feed/" htmlUrl="https://www.teamohana.com/"/>
     <outline type="rss" text="Carta" title="Carta" xmlUrl="https://carta.com/feed/" htmlUrl="https://carta.com/"/>
-    <outline type="rss" text="Pave" title="Pave" xmlUrl="https://www.pave.com/blog/feed/" htmlUrl="https://www.pave.com/"/>
-    <outline type="rss" text="Pulley" title="Pulley" xmlUrl="https://pulley.com/blog/feed/" htmlUrl="https://pulley.com/"/>
   </outline>
   <outline text="Substacks" title="Substacks">
     <outline type="rss" text="OnlyCFO" title="OnlyCFO" xmlUrl="https://www.onlycfo.io/feed" htmlUrl="https://www.onlycfo.io/"/>
-    <outline type="rss" text="Alex Wilhelm" title="Alex Wilhelm" xmlUrl="https://awilhelm.substack.com/feed" htmlUrl="https://awilhelm.substack.com/"/>
-    <outline type="rss" text="Growth Unhinged (Kyle Poyar)" title="Growth Unhinged (Kyle Poyar)" xmlUrl="https://kylepoyar.substack.com/feed" htmlUrl="https://kylepoyar.substack.com/"/>
-    <outline type="rss" text="Looking for Leverage" title="Looking for Leverage" xmlUrl="https://lookingforleverage.substack.com/feed" htmlUrl="https://lookingforleverage.substack.com/"/>
-    <outline type="rss" text="Mostly Metrics (CJ Gustafson)" title="Mostly Metrics (CJ Gustafson)" xmlUrl="https://cjgustafson.substack.com/feed" htmlUrl="https://cjgustafson.substack.com/"/>
+    <outline type="rss" text="Alex Wilhelm" title="Alex Wilhelm" xmlUrl="https://www.cautiousoptimism.news/feed" htmlUrl="https://www.cautiousoptimism.news/"/>
+    <outline type="rss" text="Growth Unhinged (Kyle Poyar)" title="Growth Unhinged (Kyle Poyar)" xmlUrl="https://www.growthunhinged.com/feed" htmlUrl="https://www.growthunhinged.com/"/>
+    <outline type="rss" text="Looking for Leverage" title="Looking for Leverage" xmlUrl="https://www.lookingforleverage.com/feed" htmlUrl="https://www.lookingforleverage.com/"/>
+    <outline type="rss" text="Mostly Metrics (CJ Gustafson)" title="Mostly Metrics (CJ Gustafson)" xmlUrl="https://www.mostlymetrics.com/feed" htmlUrl="https://www.mostlymetrics.com/"/>
     <outline type="rss" text="New Age Accounting" title="New Age Accounting" xmlUrl="https://www.newageaccounting.ai/feed" htmlUrl="https://www.newageaccounting.ai/"/>
   </outline>
 </body></opml>

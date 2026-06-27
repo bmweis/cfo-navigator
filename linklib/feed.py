@@ -26,8 +26,10 @@ _UA = "Mozilla/5.0 (compatible; CFONavigator/1.0; +https://bmweis.com)"
 # Domains known to be fully or substantially paywalled.
 # Items whose URL contains one of these get paywalled=True.
 PAYWALLED_DOMAINS = {
-    "stratechery.com",       # members-only daily + weekly
-    "blog.publiccomps.com",  # subscription newsletter
+    "stratechery.com",         # members-only daily + weekly
+    "blog.publiccomps.com",    # subscription newsletter
+    "lookingforleverage.com",  # paid Substack — public RSS carries previews only
+    "mostlymetrics.com",       # paid Substack — public RSS carries previews only
 }
 
 _cache: dict[str, tuple[float, list[dict]]] = {}
