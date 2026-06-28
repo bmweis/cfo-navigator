@@ -54,10 +54,33 @@ def _cookie_for(url: str) -> str:
     return ""
 
 
+# Phrases a logged-out reader sees on a paid post — used to tell "cookie worked"
+# (full text) from "cookie missing/expired" (preview wall).
+_PAYWALL_MARKERS = (
+    "this post is for pa",            # "...paid subscribers" / "...paying subscribers"
+    "this post is for free and paid",
+    "available to paid subscribers",
+    "become a paid subscriber",
+    "subscribe to read",
+    "this episode is for pa",
+)
+
+
+def looks_paywalled(html: str, content: str) -> bool:
+    """Heuristic: does this page look like the logged-out preview of paid content?
+    True when a known paywall phrase appears, or the body is suspiciously thin
+    next to a subscribe prompt."""
+    low = (html or "").lower()
+    if any(m in low for m in _PAYWALL_MARKERS):
+        return True
+    return len(content or "") < 400 and ('class="paywall"' in low or "subscribe-widget" in low)
+
+
 @dataclass
 class PageData:
     title: str
     content: str
+    blocked: bool = False   # looked like a logged-out paywall (cookie missing/expired)
 
 
 def fetch_page(url: str, timeout: int = 20) -> PageData:
@@ -66,6 +89,8 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     Always returns a PageData; fields are empty strings on failure. For domains
     with a configured auth cookie (LINKLIB_AUTH_COOKIES), the request is sent
     authenticated so subscriber-only full text is fetched instead of a preview.
+    `blocked` flags a response that still looks paywalled — the signal that a
+    configured cookie is missing or expired.
     """
     headers = dict(_HEADERS)
     cookie = _cookie_for(url)
@@ -80,7 +105,7 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
 
     title = _extract_title(html)
     content = _extract_content(html)
-    return PageData(title=title, content=content)
+    return PageData(title=title, content=content, blocked=looks_paywalled(html, content))
 
 
 def fetch_fulltext(url: str, timeout: int = 20) -> str:

@@ -4209,10 +4209,48 @@ _ADMIN_GROUPS = [
 _ADMIN_SECTIONS = [s for _, _, items in _ADMIN_GROUPS for s in items]
 
 
+def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:
+    """Banner for the Admin hub: warn when a paid-newsletter auth cookie has
+    expired, with refresh steps. Only active when LINKLIB_AUTH_COOKIES is set.
+    Kicks a background re-check when the stored status is missing or stale."""
+    from linklib.extract import _auth_cookies
+    if not _auth_cookies():
+        return ""   # feature dormant until cookies are configured
+
+    from linklib import authcheck
+    lib = _lib()
+    try:
+        status = authcheck.get_auth_status(lib)
+    finally:
+        lib.close()
+
+    age = authcheck.status_age_seconds(status)
+    if age is None or age > 12 * 3600:          # stale or never run -> refresh in background
+        background_tasks.add_task(_auth_recheck_background)
+
+    stale = authcheck.stale_domains(status)
+    if not stale:
+        return ""
+
+    doms = ", ".join(f"<strong>{_esc(d)}</strong>" for d in stale)
+    return f"""<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 22px;">
+  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--coral-deep);margin-bottom:6px;">Subscriber cookie expired &mdash; full text isn&rsquo;t pulling for {doms}</div>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">These paid newsletters are falling back to previews, so new posts won&rsquo;t enrich with full text. Refresh the cookie:</p>
+  <ol style="font-size:13.5px;color:var(--ink-soft);margin:0 0 10px;padding-left:18px;line-height:1.6;">
+    <li>Log into the site, open DevTools &rarr; <strong>Network</strong>, reload, click the request to the domain.</li>
+    <li>Copy the full <code>Cookie:</code> request-header value.</li>
+    <li>Update <code>LINKLIB_AUTH_COOKIES</code> in Railway &rarr; Variables (JSON: <code>{{"domain":"cookie"}}</code>) and let it redeploy.</li>
+  </ol>
+  <form method="post" action="/admin/auth/recheck" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">Re-check now</button></form>
+</div>"""
+
+
 @app.get("/admin", response_class=HTMLResponse)
-def admin_page(request: Request):
+def admin_page(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
+
+    auth_banner = _auth_cookie_banner(request, background_tasks)
 
     def _card(href, title, desc):
         return (
@@ -4252,6 +4290,7 @@ def admin_page(request: Request):
 </style>
 <h1>Admin</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
+{auth_banner}
 <div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 28px;">
   <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--coral-deep);margin-bottom:6px;">Before opening the library to paid subscribers &mdash; read this</div>
   <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">The library stores the full text of other people&rsquo;s articles. That&rsquo;s fine for your own research, but charging readers for access to it would mean redistributing content you don&rsquo;t own. Settle licensing with the authors you can, and before any paid access goes live:</p>
@@ -4264,6 +4303,31 @@ def admin_page(request: Request):
 {groups_html}
 </div>"""
     return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+
+
+def _auth_recheck_background() -> None:
+    """Probe the configured auth cookies and store their health. Runs off-request."""
+    lib = _lib()
+    try:
+        from linklib import authcheck
+        authcheck.check_auth_cookies(lib, OPML_PATH)
+    except Exception:
+        pass
+    finally:
+        lib.close()
+
+
+@app.post("/admin/auth/recheck")
+def admin_auth_recheck(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        from linklib import authcheck
+        authcheck.check_auth_cookies(lib, OPML_PATH)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin", status_code=303)
 
 
 @app.get("/admin/social", response_class=HTMLResponse)
