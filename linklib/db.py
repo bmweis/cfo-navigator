@@ -337,6 +337,50 @@ class Library:
         self.conn.execute("DELETE FROM articles WHERE id=?", (article_id,))
         self.conn.commit()
 
+    def rename_tag(self, old: str, new: str) -> int:
+        """Rename a tag across the whole library. If `new` already exists on an
+        article, the two merge (deduped). Returns the number of articles changed.
+        Updating tags_text fires the FTS trigger, so search stays in sync."""
+        old, new = old.strip(), new.strip()
+        if not old or not new or old == new:
+            return 0
+        changed = 0
+        for row in self.conn.execute(
+            "SELECT id, tags_json FROM articles WHERE tags_json LIKE ?", (f'%"{old}"%',)
+        ).fetchall():
+            tags = json.loads(row["tags_json"]) or []
+            if old not in tags:
+                continue
+            merged = sorted(set(new if t == old else t for t in tags))
+            self.conn.execute(
+                "UPDATE articles SET tags_json=?, tags_text=?, updated_at=? WHERE id=?",
+                (json.dumps(merged), " ".join(merged), _now(), row["id"]),
+            )
+            changed += 1
+        self.conn.commit()
+        return changed
+
+    def delete_tag(self, tag: str) -> int:
+        """Remove a tag from every article. Returns the number of articles changed."""
+        tag = tag.strip()
+        if not tag:
+            return 0
+        changed = 0
+        for row in self.conn.execute(
+            "SELECT id, tags_json FROM articles WHERE tags_json LIKE ?", (f'%"{tag}"%',)
+        ).fetchall():
+            tags = json.loads(row["tags_json"]) or []
+            if tag not in tags:
+                continue
+            kept = sorted(t for t in tags if t != tag)
+            self.conn.execute(
+                "UPDATE articles SET tags_json=?, tags_text=?, updated_at=? WHERE id=?",
+                (json.dumps(kept), " ".join(kept), _now(), row["id"]),
+            )
+            changed += 1
+        self.conn.commit()
+        return changed
+
     def apply_enrichment(self, article_id: int, summary: str, tags: list[str],
                          model: str = "", rules: str = "",
                          in_scope: bool = True, scope_reason: str = "") -> None:

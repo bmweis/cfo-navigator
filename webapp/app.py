@@ -3696,10 +3696,9 @@ def library(request: Request, q: str = ""):
 
     def _card(r):
         tags_csv = _esc(",".join(r.get("tags", [])))
+        # Tags are auto-generated; show them as labels. Editing is behind "Edit tags".
         tag_spans = "".join(
-            f'<span class="tag-chip" data-tag="{_esc(t)}">{_esc(t)}'
-            f' <button class="tag-x-btn" data-article-id="{r["id"]}" data-tag="{_esc(t)}"'
-            f' onclick="quickRemoveTagBtn(this)">&times;</button></span>'
+            f'<span class="tag-chip" data-tag="{_esc(t)}">{_esc(t)}</span>'
             for t in r.get("tags", [])
         )
         return f"""<article class="card" id="card-{r['id']}">
@@ -4192,6 +4191,7 @@ _ADMIN_GROUPS = [
         ("/admin/backfill",     "Historical sweep",    "One-time sitemap catch-up: queue articles from your subscribed sources going back to your saves cutoff."),
         ("/admin/enrich",       "Re-enrich library",   "Backfill or force-refresh Claude summaries and tags across all articles."),
         ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
+        ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags to keep the auto-generated vocabulary tidy."),
         ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
     ]),
     ("Site", "Your voice, your brand, and the public site.", [
@@ -4515,7 +4515,12 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0):
         title = _esc(c.get("title") or c["url"])
         date = _esc((c.get("published_at") or "")[:10])
         summary = _esc((c.get("summary") or "")[:340])
-        tags_val = _esc(", ".join(c.get("suggested_tags") or []))
+        tags_list = c.get("suggested_tags") or []
+        tags_val = _esc(", ".join(tags_list))
+        chips = "".join(
+            f'<span style="font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:2px 8px;">{_esc(t)}</span>'
+            for t in tags_list
+        ) or '<span style="font-size:12px;color:var(--muted);">auto-tagged on enrich</span>'
         meta = date or ""
         return f"""<div data-card data-url="{url}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
@@ -4524,8 +4529,11 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0):
   </div>
   <div style="font-size:12px;color:var(--muted);margin:3px 0 8px;">{meta}</div>
   <p style="font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{summary}</p>
-  <label style="display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;">Tags</label>
-  <input class="qtags" type="text" value="{tags_val}" style="width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:var(--bg);margin-bottom:12px;">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+    {chips}
+    <button type="button" onclick="editQTags(this)" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline;padding:0;">edit</button>
+  </div>
+  <input class="qtags" type="text" value="{tags_val}" style="display:none;width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:var(--bg);margin-bottom:12px;">
   <div style="display:flex;gap:9px;">
     <button class="add-btn btn" onclick="addOne(this)" style="font-size:13px;padding:8px 18px;">Add to library</button>
     <button class="btn btn-ghost" onclick="dismissOne(this)" style="font-size:13px;padding:8px 18px;">Dismiss</button>
@@ -4639,6 +4647,14 @@ async function dismissOne(btn){{
 function setAllGroups(open){{
   document.querySelectorAll('.q-group').forEach(function(g){{ g.open = open; }});
 }}
+function editQTags(btn){{
+  // Reveal the (otherwise hidden) tag input — tags are auto-set; editing is opt-in.
+  const card = btn.closest('[data-card]');
+  const input = card.querySelector('.qtags');
+  btn.parentElement.style.display = 'none';
+  input.style.display = 'block';
+  input.focus();
+}}
 async function addAll(btn){{
   const grp = btn.closest('[data-group]');
   const cards = Array.from(grp.querySelectorAll('[data-card]'));
@@ -4669,6 +4685,96 @@ async def admin_queue_redate(request: Request, background_tasks: BackgroundTasks
     source = (form.get("source") or "").strip()
     background_tasks.add_task(_redate_background, source)
     return RedirectResponse("/admin/queue?redating=1", status_code=303)
+
+
+@app.get("/admin/tags", response_class=HTMLResponse)
+def admin_tags(request: Request, msg: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        tags = lib.all_tags()   # [(tag, count)] desc by count
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+
+    rows = ""
+    for tag, count in tags:
+        t = _esc(tag)
+        rows += f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:9px 12px;font-size:14px;font-weight:500;">{t}</td>
+  <td style="padding:9px 12px;font-size:13px;color:var(--muted);">{count}</td>
+  <td style="padding:9px 12px;">
+    <form method="post" action="/admin/tags/rename" style="display:flex;gap:6px;align-items:center;margin:0;">
+      <input type="hidden" name="old" value="{t}">
+      <input type="text" name="new" value="{t}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:180px;">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Rename</button>
+    </form>
+  </td>
+  <td style="padding:9px 12px;">
+    <form method="post" action="/admin/tags/delete" style="margin:0;" onsubmit="return confirm('Remove the tag &quot;{t}&quot; from every article?');">
+      <input type="hidden" name="tag" value="{t}">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+    if not tags:
+        rows = '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--muted);">No tags yet.</td></tr>'
+
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Tag cleanup</h1>
+<p style="color:var(--muted);margin:-6px 0 18px;">Tags are generated automatically during enrichment. Use this to tidy the vocabulary &mdash; <strong>renaming a tag to one that already exists merges them</strong>, and deleting removes it from every article. Search and the tag facets update immediately.</p>
+{banner}
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">{len(tags)} tags across the library</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tag</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Articles</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Rename / merge</th>
+      <th style="padding:9px 12px;"></th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+</div>"""
+    return HTMLResponse(_page("Tag cleanup — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/tags/rename")
+async def admin_tags_rename(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    old = (form.get("old") or "").strip()
+    new = (form.get("new") or "").strip()
+    lib = _lib()
+    try:
+        n = lib.rename_tag(old, new)
+    finally:
+        lib.close()
+    background_tasks.add_task(backup.maybe_backup, DB_PATH)
+    msg = f'Renamed “{old}” → “{new}” on {n} article{"s" if n != 1 else ""}.' if n else f'No change — “{old}” not found.'
+    return RedirectResponse(f"/admin/tags?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/tags/delete")
+async def admin_tags_delete(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    tag = (form.get("tag") or "").strip()
+    lib = _lib()
+    try:
+        n = lib.delete_tag(tag)
+    finally:
+        lib.close()
+    background_tasks.add_task(backup.maybe_backup, DB_PATH)
+    msg = f'Removed “{tag}” from {n} article{"s" if n != 1 else ""}.'
+    return RedirectResponse(f"/admin/tags?msg={quote(msg)}", status_code=303)
 
 
 @app.post("/admin/queue/add")
