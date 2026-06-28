@@ -13,7 +13,7 @@ from linklib import enrich
 
 
 def test_rules_version_bumped():
-    assert enrich.ENRICH_RULES_VERSION == "v3"
+    assert enrich.ENRICH_RULES_VERSION == "v4"
 
 
 def test_prompt_excludes_recordings_slides_predictions():
@@ -24,7 +24,15 @@ def test_prompt_excludes_recordings_slides_predictions():
     assert "20vc" in p          # the concrete example the user hit (podcast on SaaStr)
 
 
+def test_prompt_excludes_fund_and_lp_content():
+    # Content for fund managers / GPs / LPs (the Carta case) is excluded...
+    p = enrich._PROMPT.lower()
+    assert "fund managers" in p or "gps" in p
+    assert "lp" in p
+
+
 def test_prompt_still_keeps_operator_vc_content():
-    # We exclude career-in-VC and recordings, but keep operator fundraising content.
+    # ...but operator fundraising content (deal with investors) is kept.
     p = enrich._PROMPT.lower()
     assert "fundraising" in p and "term sheets" in p
+    assert "raising a round" in p

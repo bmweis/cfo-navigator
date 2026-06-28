@@ -117,6 +117,11 @@ def test_public_pages_are_role_aware(env):
     assert ">Sign in<" in anon.get("/").text and "Log out" not in anon.get("/").text
 
 
-def test_admin_nav_has_admin_and_draft(env):
+def test_admin_nav_mirrors_member_plus_admin(env):
+    # Admin sees the member nav + Admin + Log out. Draft is an admin tool that
+    # lives in the Admin hub, not the top nav.
     html = _admin_client(env).get("/").text
-    assert ">Admin<" in html and ">Draft<" in html and "Log out" in html
+    assert ">Admin<" in html and "Log out" in html
+    assert ">Library<" in html and ">CFO Toolbox<" in html   # member links
+    nav = html.split("<nav")[1].split("</nav>")[0]
+    assert ">Draft<" not in nav

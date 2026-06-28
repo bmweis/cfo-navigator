@@ -24,7 +24,7 @@ DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-4-8")
 # Version of the enrichment "rules" (the prompt below). Stored alongside each
 # article's enrichment so you can tell which ruleset produced a given summary,
 # and re-run rows enriched under older rules. BUMP THIS whenever _PROMPT changes.
-ENRICH_RULES_VERSION = "v3"
+ENRICH_RULES_VERSION = "v4"
 
 _PROMPT = """You are enriching a curated research library for a specific audience:
 finance leaders at high-growth technology companies — people running FP&A or
@@ -57,10 +57,20 @@ fences) with exactly these four keys:
      capital and fundraising content that helps operators (how investors evaluate
      metrics, term sheets, board management, raising a round).
 
-     Return FALSE when the piece is off-audience OR is not the kind of thing this
-     library collects. Specifically FALSE for:
+     The audience is OPERATORS — finance leaders, founders, and executives running
+     companies. It is NOT people who work at an investment fund. So return FALSE
+     when the piece is off-audience OR is not the kind of thing this library
+     collects. Specifically FALSE for:
        - content about pursuing a personal CAREER in venture capital (how to break
          into VC, get a job at a fund, become an investor);
+       - content written FOR fund professionals rather than company operators —
+         i.e. for VC or PE fund managers/GPs (running or operating a fund, fund
+         strategy, deal sourcing, portfolio support as an investor), fund
+         administration/accounting, management fees or carry, fund formation, or
+         for LPs (how LPs evaluate and pick funds, LP portfolio construction, fund
+         performance benchmarking). KEEP content that helps a company operator deal
+         with investors (raising a round, what investors look for in YOUR metrics,
+         managing your board);
        - a PODCAST or podcast episode, a WEBINAR, a video, or an audio show — even
          when summarized or republished on a blog (e.g. a 20VC episode posted on
          SaaStr). These are recordings, not articles;
@@ -71,8 +81,9 @@ fences) with exactly these four keys:
      Otherwise, when in doubt, return true.
 
   "scope_reason": one short phrase explaining the in_scope decision (e.g.
-     "operator fundraising guidance - keep", "20VC podcast episode - not an article",
-     "2026 predictions roundup - excluded", "how to get a job in VC - off-audience").
+     "operator fundraising guidance - keep", "for VC fund managers - off-audience",
+     "LP fund selection - off-audience", "20VC podcast episode - not an article",
+     "2026 predictions roundup - excluded").
 
 Title: {title}
 

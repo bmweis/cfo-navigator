@@ -435,7 +435,8 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 
     nav = links(public) + '<span class="sep"></span>' + links(member)
     if role == "admin":
-        nav += f'<a href="/draft" class="{"active" if active == "Draft" else ""}">Draft</a>'
+        # Admin sees exactly what a member sees, plus the Admin hub (which holds
+        # the admin-only tools like Draft). Keeps the top nav uncluttered.
         nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin</a>'
         nav += '<a href="/logout">Log out</a>'
     elif role == "user":
@@ -4417,21 +4418,23 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         lib.close()
 
 
-# Admin sections — grouped on the hub; each links to its own page. The Library
-# group holds everything that maintains the article corpus: review the queue,
-# catch up history, (re-)enrich, prune off-audience rows, and back up/restore.
+# Library management lives on its own page (/admin/library) so the hub stays
+# uncluttered — everything that maintains the article corpus is here.
+_LIBRARY_TOOLS = [
+    ("/admin/queue",        "Library Queue",       "Review proposed saves, edit tags, and approve them into the library."),
+    ("/admin/backfill",     "Historical sweep",    "One-time sitemap catch-up: queue articles from your subscribed sources going back to your saves cutoff."),
+    ("/admin/enrich",       "Re-enrich library",   "Backfill or force-refresh Claude summaries and tags across all articles."),
+    ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
+    ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags to keep the auto-generated vocabulary tidy."),
+    ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your library, so auto-tagging matches your judgment."),
+    ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
+]
+
+# Admin sections — grouped on the hub; each links to its own page.
 _ADMIN_GROUPS = [
-    ("Library", "Build the library, keep it current, and back it up.", [
-        ("/admin/queue",        "Library Queue",       "Review proposed saves, edit tags, and approve them into the library."),
-        ("/admin/backfill",     "Historical sweep",    "One-time sitemap catch-up: queue articles from your subscribed sources going back to your saves cutoff."),
-        ("/admin/enrich",       "Re-enrich library",   "Backfill or force-refresh Claude summaries and tags across all articles."),
-        ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
-        ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags to keep the auto-generated vocabulary tidy."),
-        ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your library, so auto-tagging matches your judgment."),
-        ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
-    ]),
     ("Site", "Your voice, your brand, and the public site.", [
         ("/admin/social",       "Social",              "Draft LinkedIn posts in your voice."),
+        ("/draft",              "Draft",               "Draft and refine a post in a conversation."),
         ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
         ("/admin/contacts",     "Contact submissions", "Messages from the public contact form."),
     ]),
@@ -4445,7 +4448,7 @@ _ADMIN_GROUPS = [
 ]
 
 # Flat view kept for any code/tests that iterate every section.
-_ADMIN_SECTIONS = [s for _, _, items in _ADMIN_GROUPS for s in items]
+_ADMIN_SECTIONS = _LIBRARY_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
 
 
 def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:
@@ -4527,7 +4530,12 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    groups_html = ""
+    # Library gets a single prominent card linking to its own management page,
+    # so the hub stays uncluttered.
+    library_card = _card("/admin/library", "Library",
+                         f"Build, curate, enrich, and back up your library &mdash; {len(_LIBRARY_TOOLS)} tools.")
+
+    groups_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
     for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
         cards = "".join(_card(*s) for s in items)
         open_attr = ""   # all groups start collapsed — click to expand
@@ -4568,6 +4576,28 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 {groups_html}
 </div>"""
     return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+
+
+@app.get("/admin/library", response_class=HTMLResponse)
+def admin_library(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    cards = "".join(
+        f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
+        f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
+        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+        f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+        f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+        f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
+        for href, title, desc in _LIBRARY_TOOLS
+    )
+    body = f"""<div class="page" style="max-width:720px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Library</h1>
+<p style="color:var(--muted);margin:4px 0 26px;">Build, curate, enrich, and back up your library.</p>
+<div style="display:grid;gap:14px;">{cards}</div>
+</div>"""
+    return HTMLResponse(_page("Library — Admin", "Admin", body, authed=True))
 
 
 def _auth_recheck_background() -> None:
