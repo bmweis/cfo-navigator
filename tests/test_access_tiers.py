@@ -104,3 +104,19 @@ def test_member_nav_shows_logout_not_admin(env):
     html = c.get("/library").text
     assert "Log out" in html
     assert ">Admin<" not in html and ">Draft<" not in html
+
+
+def test_public_pages_are_role_aware(env):
+    """A signed-in member sees Log out (not Sign in) even on public pages;
+    an anonymous visitor sees Sign in."""
+    member = _member_client(env)
+    for path in ["/", "/about", "/thought-leadership", "/contact"]:
+        html = member.get(path).text
+        assert "Log out" in html and ">Sign in<" not in html, path
+    anon = _client(env)
+    assert ">Sign in<" in anon.get("/").text and "Log out" not in anon.get("/").text
+
+
+def test_admin_nav_has_admin_and_draft(env):
+    html = _admin_client(env).get("/").text
+    assert ">Admin<" in html and ">Draft<" in html and "Log out" in html

@@ -550,7 +550,7 @@ def _avatar(size: int = 140) -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def homepage():
+def homepage(request: Request):
     def _rcard(href, title, desc, external=False):
         attrs = ' target="_blank" rel="noopener"' if external else ''
         return (
@@ -596,11 +596,11 @@ def homepage():
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
 </div>
 </div>"""
-    return HTMLResponse(_page("Brian Weisberg — strategic finance for high-growth tech", "Home", body))
+    return HTMLResponse(_page("Brian Weisberg — strategic finance for high-growth tech", "Home", body, role=_role(request)))
 
 
 @app.get("/about", response_class=HTMLResponse)
-def about_page():
+def about_page(request: Request):
     body = f"""<div class="page">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
   {_avatar(140)}
@@ -659,11 +659,11 @@ the early-to-growth leap. Based in Boston.</p>
   <a href="/community" class="btn btn-ghost">CFO Community &rarr;</a>
 </div>
 </div>"""
-    return HTMLResponse(_page("About — Brian Weisberg", "About", body))
+    return HTMLResponse(_page("About — Brian Weisberg", "About", body, role=_role(request)))
 
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
-def thought_leadership():
+def thought_leadership(request: Request):
     def section(title: str, items: list[tuple[str, str, str]]) -> str:
         # items: (label, url, sort_key) — sort_key is "YYYY-MM" or "" to pin to top.
         # Editorial rows separated by warm hairlines, under a small-caps navy label.
@@ -824,7 +824,7 @@ def thought_leadership():
   <a href="/community" class="btn" style="background:#fff;color:var(--navy);border-color:#fff;font-size:14px;padding:10px 22px;">Share your experience &rarr;</a>
 </div>"""
     body += "</div>"
-    return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body))
+    return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
 @app.get("/growth-engine-ratio", response_class=HTMLResponse)
@@ -2196,14 +2196,14 @@ def netsuite_mcp(request: Request):
 
 
 @app.get("/contact", response_class=HTMLResponse)
-def contact_page(submitted: str = ""):
+def contact_page(request: Request, submitted: str = ""):
     if submitted == "1":
         body = """<div class="page" style="max-width:560px;">
 <h1>Thanks for reaching out.</h1>
 <p>I'll get back to you shortly.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
-        return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body))
+        return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request)))
 
     body = """<div class="page" style="max-width:560px;">
 <h1>Get in Touch</h1>
@@ -2226,7 +2226,7 @@ def contact_page(submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body))
+    return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request)))
 
 
 @app.post("/contact")
@@ -2261,14 +2261,14 @@ async def contact_submit(request: Request):
 # ---------------------------------------------------------------------------
 
 @app.get("/library/submit", response_class=HTMLResponse)
-def library_submit_page(submitted: str = ""):
+def library_submit_page(request: Request, submitted: str = ""):
     if submitted == "1":
         body = """<div class="page" style="max-width:560px;">
 <h1>Thanks&mdash;suggestion received.</h1>
 <p>I review every suggestion personally. If it's a fit for the library, it'll join the collection.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
-        return HTMLResponse(_page("Suggestion received — Brian Weisberg", "", body))
+        return HTMLResponse(_page("Suggestion received — Brian Weisberg", "", body, role=_role(request)))
 
     body = """<div class="page" style="max-width:560px;">
 <h1>Suggest a piece for the library</h1>
@@ -2305,7 +2305,7 @@ def library_submit_page(submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Suggest a piece — Brian Weisberg", "", body))
+    return HTMLResponse(_page("Suggest a piece — Brian Weisberg", "", body, role=_role(request)))
 
 
 @app.post("/library/submit")
@@ -2349,7 +2349,7 @@ _COMMUNITY_FORM_CONFIGURED = _COMMUNITY_FORM_URL != "#community-form-coming-soon
 
 
 @app.get("/community", response_class=HTMLResponse)
-def community_page():
+def community_page(request: Request):
     cta_block = (
         f'<a href="{_COMMUNITY_FORM_URL}" target="_blank" rel="noopener" class="btn" '
         f'style="font-size:15px;padding:12px 26px;">Share your experience &rarr;</a>'
@@ -2384,7 +2384,7 @@ your answers will directly shape what I build.</p>
   <p style="font-size:13px;color:var(--muted);margin:0;">Questions? <a href="/contact">Get in touch directly.</a></p>
 </div>
 </div>"""
-    return HTMLResponse(_page("CFO Community—Brian Weisberg", "", body))
+    return HTMLResponse(_page("CFO Community—Brian Weisberg", "", body, role=_role(request)))
 
 
 @app.get("/tools", response_class=HTMLResponse)
