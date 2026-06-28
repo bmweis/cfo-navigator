@@ -4449,11 +4449,14 @@ _ADMIN_SECTIONS = [s for _, _, items in _ADMIN_GROUPS for s in items]
 
 
 def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:
-    """Banner for the Admin hub: warn when a paid-newsletter auth cookie has
-    expired, with refresh steps. Only active when LINKLIB_AUTH_COOKIES is set.
-    Kicks a background re-check when the stored status is missing or stale."""
+    """Subscriber-cookie status panel for the Admin hub: shows each configured
+    paid-newsletter cookie's health (working / expired / untested) with a
+    Re-check button, and refresh steps when one is stale. Only rendered when
+    LINKLIB_AUTH_COOKIES is set. Kicks a background re-check when the stored
+    status is missing or stale."""
     from linklib.extract import _auth_cookies
-    if not _auth_cookies():
+    cookies = _auth_cookies()
+    if not cookies:
         return ""   # feature dormant until cookies are configured
 
     from linklib import authcheck
@@ -4468,19 +4471,42 @@ def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> 
         background_tasks.add_task(_auth_recheck_background)
 
     stale = authcheck.stale_domains(status)
-    if not stale:
-        return ""
+    any_bad = bool(stale)
+    border = "var(--coral)" if any_bad else "var(--seafoam)"
+    wash = "var(--coral-wash)" if any_bad else "var(--seafoam-wash)"
 
-    doms = ", ".join(f"<strong>{_esc(d)}</strong>" for d in stale)
-    return f"""<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 22px;">
-  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--coral-deep);margin-bottom:6px;">Subscriber cookie expired &mdash; full text isn&rsquo;t pulling for {doms}</div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">These paid newsletters are falling back to previews, so new posts won&rsquo;t enrich with full text. Refresh the cookie:</p>
-  <ol style="font-size:13.5px;color:var(--ink-soft);margin:0 0 10px;padding-left:18px;line-height:1.6;">
-    <li>Log into the site, open DevTools &rarr; <strong>Network</strong>, reload, click the request to the domain.</li>
-    <li>Copy the full <code>Cookie:</code> request-header value.</li>
-    <li>Update <code>LINKLIB_AUTH_COOKIES</code> in Railway &rarr; Variables (JSON: <code>{{"domain":"cookie"}}</code>) and let it redeploy.</li>
-  </ol>
-  <form method="post" action="/admin/auth/recheck" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">Re-check now</button></form>
+    # Per-domain status lines.
+    rows = ""
+    for dom in cookies:
+        s = status.get(dom)
+        if not s or s.get("ok") is None:
+            dot, label, detail = "&#9679;", "untested", (s or {}).get("detail", "not checked yet")
+            color = "var(--muted)"
+        elif s.get("ok"):
+            dot, label, color = "&#9679;", "working", "var(--seafoam-deep)"
+            detail = s.get("detail", "")
+        else:
+            dot, label, color = "&#9679;", "expired", "var(--coral-deep)"
+            detail = s.get("detail", "")
+        checked = _esc((s or {}).get("checked_at", "")[:16].replace("T", " ")) if s else ""
+        rows += (f'<div style="display:flex;align-items:baseline;gap:8px;font-size:13.5px;margin:2px 0;">'
+                 f'<span style="color:{color};">{dot}</span>'
+                 f'<strong>{_esc(dom)}</strong>'
+                 f'<span style="color:{color};font-weight:600;">{label}</span>'
+                 f'<span style="color:var(--muted);">&mdash; {_esc(detail)}{(" &middot; " + checked) if checked else ""}</span></div>')
+
+    refresh_steps = ""
+    if any_bad:
+        refresh_steps = ("""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;line-height:1.55;">To refresh an expired cookie: log into the site, open DevTools &rarr; <strong>Network</strong>, reload, click the request to the domain, copy the full <code>Cookie:</code> header, and update <code>LINKLIB_AUTH_COOKIES</code> in Railway &rarr; Variables.</p>""")
+
+    heading = ("Subscriber cookie expired" if any_bad else "Subscriber access")
+    return f"""<div style="background:{wash};border:1px solid {border};border-radius:12px;padding:16px 18px;margin:0 0 22px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);">{heading}</div>
+    <form method="post" action="/admin/auth/recheck" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">Re-check now</button></form>
+  </div>
+  <div style="margin-top:8px;">{rows}</div>
+  {refresh_steps}
 </div>"""
 
 

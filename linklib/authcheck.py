@@ -26,21 +26,37 @@ def _host(url: str) -> str:
 
 
 def _recent_post_url(domain: str, opml_path: str) -> tuple[str, str]:
-    """Find a recent post URL for `domain` from its OPML feed. Returns
-    (url, title) or ("", "") if no feed/items are found."""
+    """Find a recent post URL for `domain` to probe. Tries the OPML feed first,
+    then falls back to the site's sitemap (so the probe still works when the RSS
+    feed URL is wrong — e.g. a beehiiv custom domain). Returns (url, title) or
+    ("", "")."""
+    # 1) RSS feed from the OPML.
     try:
         from .feed import parse_opml, _fetch_feed
+        for f in parse_opml(opml_path):
+            if _host(f.html_url) == domain or _host(f.xml_url) == domain:
+                try:
+                    items = _fetch_feed(f)
+                except Exception:
+                    items = []
+                for it in items:
+                    if it.get("url"):
+                        return it["url"], it.get("title", "")
     except Exception:
-        return "", ""
-    for f in parse_opml(opml_path):
-        if _host(f.html_url) == domain or _host(f.xml_url) == domain:
-            try:
-                items = _fetch_feed(f)
-            except Exception:
-                items = []
-            for it in items:
-                if it.get("url"):
-                    return it["url"], it.get("title", "")
+        pass
+    # 2) Sitemap fallback — find a post-like URL on the domain.
+    try:
+        from .queue import discover_sitemaps, fetch_sitemap_entries, _looks_like_post
+        for sm in discover_sitemaps(f"https://{domain}"):
+            entries = fetch_sitemap_entries(sm)
+            posts = [e for e in entries if _looks_like_post(e["url"])]
+            if not posts:
+                continue
+            dated = [e for e in posts if e.get("lastmod")]
+            best = max(dated, key=lambda e: e["lastmod"]) if dated else posts[0]
+            return best["url"], ""
+    except Exception:
+        pass
     return "", ""
 
 
