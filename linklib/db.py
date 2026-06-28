@@ -78,6 +78,18 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL DEFAULT '',
+    role          TEXT NOT NULL DEFAULT 'user',   -- 'user' or 'admin'
+    active        INTEGER NOT NULL DEFAULT 1,
+    name          TEXT NOT NULL DEFAULT '',
+    email         TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT '',
+    last_login_at TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS contacts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL DEFAULT '',
@@ -497,6 +509,69 @@ class Library:
             (key, value),
         )
         self.conn.commit()
+
+    # -- users / accounts ------------------------------------------------------
+
+    def create_user(self, username: str, password: str, role: str = "user",
+                    name: str = "", email: str = "") -> int:
+        """Create an account. Raises sqlite3.IntegrityError if the username exists."""
+        from .passwords import hash_password
+        username = (username or "").strip().lower()
+        role = role if role in ("user", "admin") else "user"
+        cur = self.conn.execute(
+            "INSERT INTO users (username, password_hash, role, active, name, email, created_at) "
+            "VALUES (?,?,?,1,?,?,?)",
+            (username, hash_password(password), role, name.strip(), email.strip(), _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def authenticate(self, username: str, password: str) -> Optional[dict]:
+        """Return the user dict on a correct password for an active account, else None."""
+        from .passwords import verify_password
+        row = self.conn.execute(
+            "SELECT * FROM users WHERE username=?", ((username or "").strip().lower(),)
+        ).fetchone()
+        if not row or not row["active"] or not verify_password(password, row["password_hash"]):
+            return None
+        self.conn.execute("UPDATE users SET last_login_at=? WHERE id=?", (_now(), row["id"]))
+        self.conn.commit()
+        d = dict(row)
+        d.pop("password_hash", None)
+        return d
+
+    def list_users(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, username, role, active, name, email, created_at, last_login_at "
+            "FROM users ORDER BY role DESC, username"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_user(self, username: str) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT id, username, role, active, name, email, created_at, last_login_at "
+            "FROM users WHERE username=?", ((username or "").strip().lower(),)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_user_active(self, user_id: int, active: bool) -> None:
+        self.conn.execute("UPDATE users SET active=? WHERE id=?", (int(active), user_id))
+        self.conn.commit()
+
+    def set_user_password(self, user_id: int, password: str) -> None:
+        from .passwords import hash_password
+        self.conn.execute("UPDATE users SET password_hash=? WHERE id=?",
+                          (hash_password(password), user_id))
+        self.conn.commit()
+
+    def delete_user(self, user_id: int) -> None:
+        self.conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        self.conn.commit()
+
+    def count_users(self, role: Optional[str] = None) -> int:
+        if role:
+            return self.conn.execute("SELECT COUNT(*) FROM users WHERE role=?", (role,)).fetchone()[0]
+        return self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
     def save_contact(self, name: str, email: str, message: str) -> int:
         cur = self.conn.execute(

@@ -226,29 +226,54 @@ def _sign(value: str) -> str:
     return f"{value}.{sig}"
 
 
-def _make_session() -> str:
-    """A signed cookie value that expires SESSION_TTL seconds from now."""
-    return _sign(str(int(time.time()) + SESSION_TTL))
+def _make_session(role: str = "admin", username: str = "") -> str:
+    """A signed cookie value carrying expiry, role, and username. Expires
+    SESSION_TTL seconds from now."""
+    exp = int(time.time()) + SESSION_TTL
+    username = re.sub(r"[^a-z0-9._-]", "", (username or "").lower())[:64]
+    return _sign(f"{exp}|{role}|{username}")
 
 
-def _valid_session(cookie: str | None) -> bool:
+def _session_claims(cookie: str | None) -> dict | None:
+    """Verify the cookie signature + expiry and return {exp, role, username},
+    or None. Old single-number cookies (pre-roles) are treated as admin."""
     if not cookie or "." not in cookie:
-        return False
+        return None
     value, _, sig = cookie.rpartition(".")
     expected = hmac.new(SECRET_KEY.encode(), value.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
-        return False
+        return None
+    parts = value.split("|")
     try:
-        return int(value) > int(time.time())
-    except ValueError:
-        return False
+        exp = int(parts[0])
+    except (ValueError, IndexError):
+        return None
+    if exp <= int(time.time()):
+        return None
+    role = parts[1] if len(parts) > 1 else "admin"      # legacy cookie = admin
+    username = parts[2] if len(parts) > 2 else ""
+    return {"exp": exp, "role": role, "username": username}
+
+
+def _current_claims(request: Request) -> dict | None:
+    return _session_claims(request.cookies.get(COOKIE_NAME))
 
 
 def _is_authed(request: Request) -> bool:
-    """True if the request carries a valid login session (or no password set)."""
+    """True for an admin session (or when no password is configured — local dev).
+    Admin is the gate for every currently-private route; user-tier gating is layered
+    on top in the re-tier phase."""
     if not AUTH_PASSWORD:
         return True
-    return _valid_session(request.cookies.get(COOKIE_NAME))
+    claims = _current_claims(request)
+    return bool(claims and claims["role"] == "admin")
+
+
+def _is_member(request: Request) -> bool:
+    """True for any valid signed-in session (user OR admin), or local dev."""
+    if not AUTH_PASSWORD:
+        return True
+    return _current_claims(request) is not None
 
 
 def _login_redirect(request: Request) -> RedirectResponse:
@@ -420,15 +445,17 @@ def _page(title: str, active: str, body: str, authed: bool = False) -> str:
 def login_page(request: Request, next: str = "/library", error: str = ""):
     if _is_authed(request):
         return RedirectResponse(next or "/library", status_code=303)
-    err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">Incorrect password — try again.</p>'
+    err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That didn&rsquo;t work — check your details and try again.</p>'
            if error else "")
     body = f"""<div class="page" style="max-width:420px;">
 <h1>Sign in</h1>
-<p style="color:var(--muted);margin:4px 0 28px;">This area is private. Enter the password to continue.</p>
+<p style="color:var(--muted);margin:4px 0 28px;">Members sign in with a username and password. (Admin can leave the username blank.)</p>
 {err}
 <form method="post" action="/login" style="display:grid;gap:16px;">
   <input type="hidden" name="next" value="{_esc(next or '/library')}">
-  <input name="password" type="password" required autofocus placeholder="Password"
+  <input name="username" type="text" autocomplete="username" placeholder="Username"
+         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <input name="password" type="password" required autofocus autocomplete="current-password" placeholder="Password"
          style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   <button type="submit" class="btn">Sign in</button>
 </form>
@@ -439,16 +466,31 @@ def login_page(request: Request, next: str = "/library", error: str = ""):
 @app.post("/login")
 async def login_submit(request: Request):
     form = await request.form()
+    username = (form.get("username") or "").strip()
     password = form.get("password") or ""
     nxt = form.get("next") or "/library"
     if not nxt.startswith("/"):  # never redirect off-site
         nxt = "/library"
-    if AUTH_PASSWORD and hmac.compare_digest(password, AUTH_PASSWORD):
+
+    role = username_for_cookie = None
+    if username:
+        lib = _lib()
+        try:
+            user = lib.authenticate(username, password)
+        finally:
+            lib.close()
+        if user:
+            role, username_for_cookie = user["role"], user["username"]
+    elif AUTH_PASSWORD and hmac.compare_digest(password, AUTH_PASSWORD):
+        role, username_for_cookie = "admin", ""   # env-password bootstrap admin
+
+    if role:
         resp = RedirectResponse(nxt, status_code=303)
         secure = (request.url.scheme == "https"
                   or request.headers.get("x-forwarded-proto") == "https")
-        resp.set_cookie(COOKIE_NAME, _make_session(), max_age=SESSION_TTL,
-                        httponly=True, samesite="lax", secure=secure, path="/")
+        resp.set_cookie(COOKIE_NAME, _make_session(role, username_for_cookie),
+                        max_age=SESSION_TTL, httponly=True, samesite="lax",
+                        secure=secure, path="/")
         return resp
     return RedirectResponse(f"/login?error=1&next={quote(nxt, safe='')}", status_code=303)
 
@@ -4343,6 +4385,9 @@ _ADMIN_GROUPS = [
         ("/admin/tools",        "Tool submissions",    "Review the CFO Toolbox approval queue and manage featured/vendor settings."),
         ("/admin/tools/leads",  "Tool leads",          "Warm Intro requests — name, email, company, and size for each tool."),
     ]),
+    ("Access", "Member accounts and who can see what.", [
+        ("/admin/users",        "Users",               "Create and manage member accounts for the gated sections."),
+    ]),
 ]
 
 # Flat view kept for any code/tests that iterate every section.
@@ -5049,6 +5094,157 @@ async def admin_tag_style_clear(request: Request):
     finally:
         lib.close()
     return RedirectResponse("/admin/tag-style", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# User accounts (admin-provisioned). The gated member tier is layered on these.
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users(request: Request, msg: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        users = lib.list_users()
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+
+    rows = ""
+    for u in users:
+        uid = u["id"]
+        active = u["active"]
+        status = ('<span style="font-size:12px;font-weight:600;color:#065f46;">active</span>' if active
+                  else '<span style="font-size:12px;font-weight:600;color:#b91c1c;">disabled</span>')
+        role_badge = (f'<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
+                      f'background:{"var(--coral-wash);color:var(--coral-deep)" if u["role"]=="admin" else "var(--seafoam-wash);color:var(--seafoam-deep)"};">{_esc(u["role"])}</span>')
+        last = _esc((u["last_login_at"] or "")[:10]) or "—"
+        rows += f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:9px 12px;font-size:14px;font-weight:500;">{_esc(u["username"])}<div style="font-size:12px;color:var(--muted);font-weight:400;">{_esc(u["email"] or u["name"] or "")}</div></td>
+  <td style="padding:9px 12px;">{role_badge}</td>
+  <td style="padding:9px 12px;">{status}</td>
+  <td style="padding:9px 12px;font-size:12px;color:var(--muted);">{last}</td>
+  <td style="padding:9px 12px;">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">{"Disable" if active else "Enable"}</button></form>
+      <form method="post" action="/admin/users/{uid}/password" style="margin:0;display:flex;gap:4px;align-items:center;">
+        <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:130px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Reset</button>
+      </form>
+      <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
+    </div>
+  </td>
+</tr>"""
+    if not users:
+        rows = '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</td></tr>'
+
+    body = f"""<div class="page" style="max-width:880px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Users</h1>
+<p style="color:var(--muted);margin:-6px 0 18px;">Member accounts for the gated sections. You create accounts here (no public sign-up yet). You always keep admin access via the host password, so you can&rsquo;t lock yourself out.</p>
+{banner}
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:26px;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">User</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Role</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Status</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last in</th>
+      <th style="padding:9px 12px;"></th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+
+<h2 style="font-size:18px;">Add a member</h2>
+<form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Username *</label>
+    <input name="username" required maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="jane.doe" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Temporary password *</label>
+    <input name="password" type="text" required minlength="8" placeholder="at least 8 characters" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Name</label>
+    <input name="name" maxlength="120" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Email</label>
+    <input name="email" type="email" maxlength="200" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);"></div>
+  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Role</label>
+    <select name="role" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+      <option value="user">Member (user)</option>
+      <option value="admin">Admin</option>
+    </select></div>
+  <div style="display:flex;align-items:flex-end;"><button type="submit" class="btn" style="font-size:14px;padding:9px 22px;">Create account</button></div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Users — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/users/create")
+async def admin_users_create(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    username = (form.get("username") or "").strip()
+    password = form.get("password") or ""
+    role = (form.get("role") or "user").strip()
+    name = (form.get("name") or "").strip()
+    email = (form.get("email") or "").strip()
+    if not username or len(password) < 8:
+        return RedirectResponse(f"/admin/users?msg={quote('Username and an 8+ char password are required.')}", status_code=303)
+    lib = _lib()
+    try:
+        import sqlite3 as _sql
+        try:
+            lib.create_user(username, password, role=role, name=name, email=email)
+            msg = f'Created account “{username.lower()}” ({role}).'
+        except _sql.IntegrityError:
+            msg = f'Username “{username.lower()}” already exists.'
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/toggle")
+def admin_users_toggle(request: Request, user_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        u = next((x for x in lib.list_users() if x["id"] == user_id), None)
+        if u:
+            lib.set_user_active(user_id, not u["active"])
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/password")
+async def admin_users_password(request: Request, user_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    password = form.get("password") or ""
+    msg = "Password too short (8+ characters)." if len(password) < 8 else "Password reset."
+    if len(password) >= 8:
+        lib = _lib()
+        try:
+            lib.set_user_password(user_id, password)
+        finally:
+            lib.close()
+    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/delete")
+def admin_users_delete(request: Request, user_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.delete_user(user_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/users", status_code=303)
 
 
 @app.post("/admin/queue/add")
