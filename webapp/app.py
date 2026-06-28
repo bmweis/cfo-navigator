@@ -4781,14 +4781,33 @@ def _redate_background(source: str) -> None:
         lib.close()
 
 
+def _suggest_background(source: str) -> None:
+    """Predict keep/skip for a source's pending queue from past picks. Off-request."""
+    lib = _lib()
+    try:
+        import json as _json
+        from linklib.suggest import suggest_approvals
+        preds = suggest_approvals(lib, source)
+        if preds:
+            existing = _json.loads(lib.get_setting("queue_suggestions") or "{}")
+            existing.update(preds)
+            lib.set_setting("queue_suggestions", _json.dumps(existing))
+    except Exception:
+        pass
+    finally:
+        lib.close()
+
+
 @app.get("/admin/queue", response_class=HTMLResponse)
-def admin_queue(request: Request, scanning: int = 0, redating: int = 0):
+def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesting: int = 0):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
     try:
         pending = lib.list_queue(status="pending")
         dismissed_n = lib.queue_count(status="dismissed")
+        import json as _json
+        suggestions = _json.loads(lib.get_setting("queue_suggestions") or "{}")
     finally:
         lib.close()
 
@@ -4828,12 +4847,27 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0):
                      'background:var(--coral-wash);color:var(--coral-deep);margin-right:6px;">Reader suggestion</span>'
                      if (c.get("origin") or "").startswith("submission:") else "")
         meta = f"{sub_badge}{date}" if date else sub_badge
-        return f"""<div data-card data-url="{url}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+        # Approval prediction (advisory) from the suggestion engine.
+        sug = suggestions.get(c["url"])
+        suggest_attr = ""
+        suggest_badge = ""
+        if sug:
+            keep = bool(sug.get("keep"))
+            suggest_attr = f' data-suggest="{"keep" if keep else "skip"}"'
+            reason = _esc(sug.get("reason", ""))
+            if keep:
+                suggest_badge = (f'<div style="font-size:12px;color:var(--seafoam-deep);margin:0 0 8px;">'
+                                 f'&#10003; <strong>Likely keep</strong>{(" &mdash; " + reason) if reason else ""}</div>')
+            else:
+                suggest_badge = (f'<div style="font-size:12px;color:var(--coral-deep);margin:0 0 8px;">'
+                                 f'&#8855; <strong>Likely skip</strong>{(" &mdash; " + reason) if reason else ""}</div>')
+        return f"""<div data-card data-url="{url}"{suggest_attr} style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
     <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
     {_badge(c)}
   </div>
   <div style="font-size:12px;color:var(--muted);margin:3px 0 8px;">{meta}</div>
+  {suggest_badge}
   <p style="font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{summary}</p>
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
     {chips}
@@ -4850,6 +4884,14 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0):
     for source, cards in groups.items():
         cards_html = "".join(_card(c) for c in cards)
         s = _esc(source)
+        keeps = sum(1 for c in cards if (suggestions.get(c["url"]) or {}).get("keep") is True)
+        skips = sum(1 for c in cards if (suggestions.get(c["url"]) or {}).get("keep") is False)
+        suggest_bar = ""
+        if keeps or skips:
+            kb = (f'<button class="btn btn-ghost" onclick="approveKeeps(this)" style="font-size:12px;padding:6px 14px;color:var(--seafoam-deep);">Approve {keeps} likely keep{"s" if keeps != 1 else ""}</button>' if keeps else "")
+            sb = (f'<button class="btn btn-ghost" onclick="dismissSkips(this)" style="font-size:12px;padding:6px 14px;color:var(--coral-deep);">Dismiss {skips} likely skip{"s" if skips != 1 else ""}</button>' if skips else "")
+            suggest_bar = (f'<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 12px;font-size:13px;color:var(--muted);">'
+                           f'<span>Predicted from your past picks:</span>{kb}{sb}</div>')
         group_blocks += f"""<details data-group class="q-group" style="margin-bottom:12px;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;">
     <span style="display:flex;align-items:center;gap:10px;min-width:0;">
@@ -4857,11 +4899,13 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0):
       <h2 style="margin:0;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{s} <span class="grp-count" style="color:var(--muted);font-weight:500;font-size:14px;">({len(cards)})</span></h2>
     </span>
     <span style="display:flex;gap:9px;flex-shrink:0;">
+      <form method="post" action="/admin/queue/suggest" style="margin:0;" onsubmit="event.stopPropagation();"><input type="hidden" name="source" value="{s}"><button type="submit" onclick="event.stopPropagation();" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Suggest</button></form>
       <button class="btn btn-ghost" onclick="event.stopPropagation();addAll(this)" style="font-size:12px;padding:6px 14px;">Add all</button>
       <button class="btn btn-ghost" onclick="event.stopPropagation();dismissAll(this)" style="font-size:12px;padding:6px 14px;">Dismiss all</button>
     </span>
   </summary>
   <div style="padding:2px 18px 8px;">
+    {suggest_bar}
     {cards_html}
   </div>
 </details>"""
@@ -4881,6 +4925,10 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0):
         scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
                        'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
                        'Re-reading publish dates from the article pages in the background &mdash; reload in a minute to see corrected dates.</div>')
+    elif suggesting:
+        scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
+                       'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
+                       'Predicting which candidates you&rsquo;d keep, from your past picks &mdash; reload in a minute to see &ldquo;Likely keep / skip&rdquo; on each card.</div>')
 
     dismissed_note = (f'<span style="color:var(--muted);font-size:13px;">{dismissed_n} dismissed</span>'
                       if dismissed_n else "")
@@ -4966,6 +5014,16 @@ async function addAll(btn){{
   const cards = Array.from(grp.querySelectorAll('[data-card]'));
   for (const c of cards) {{ await addOne(c.querySelector('.add-btn')); }}
 }}
+async function approveKeeps(btn){{
+  const grp = btn.closest('[data-group]');
+  const cards = Array.from(grp.querySelectorAll('[data-card][data-suggest="keep"]'));
+  for (const c of cards) {{ await addOne(c.querySelector('.add-btn')); }}
+}}
+async function dismissSkips(btn){{
+  const grp = btn.closest('[data-group]');
+  const cards = Array.from(grp.querySelectorAll('[data-card][data-suggest="skip"]'));
+  for (const c of cards) {{ await dismissOne(c.querySelector('.add-btn')); }}
+}}
 async function dismissAll(btn){{
   const grp = btn.closest('[data-group]');
   const cards = Array.from(grp.querySelectorAll('[data-card]'));
@@ -4991,6 +5049,16 @@ async def admin_queue_redate(request: Request, background_tasks: BackgroundTasks
     source = (form.get("source") or "").strip()
     background_tasks.add_task(_redate_background, source)
     return RedirectResponse("/admin/queue?redating=1", status_code=303)
+
+
+@app.post("/admin/queue/suggest")
+async def admin_queue_suggest(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    source = (form.get("source") or "").strip()
+    background_tasks.add_task(_suggest_background, source)
+    return RedirectResponse("/admin/queue?suggesting=1", status_code=303)
 
 
 @app.get("/admin/tags", response_class=HTMLResponse)
