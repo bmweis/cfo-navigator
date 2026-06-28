@@ -57,6 +57,23 @@ def test_generate_guide_none_when_no_tags(lib, monkeypatch):
     assert tagstyle.generate_tag_guide(lib) is None
 
 
+def test_objective_default_and_override(lib):
+    # Unset -> default objective; the strategic-thought-partner framing is present.
+    obj = tagstyle.get_tag_objective(lib)
+    assert "strategic thought partner" in obj and "GTM efficiency" in obj
+    lib.set_setting("tag_objective", "Tag for fundraising readiness.")
+    assert tagstyle.get_tag_objective(lib) == "Tag for fundraising readiness."
+
+
+def test_effective_guidance_composes_objective_and_guide(lib):
+    # Objective always present; guide appended when set.
+    g0 = tagstyle.effective_tag_guidance(lib)
+    assert "Why these tags exist" in g0 and "How this librarian tags" not in g0
+    lib.set_setting("tag_guide", "Tag arr when recurring revenue.")
+    g1 = tagstyle.effective_tag_guidance(lib)
+    assert "Why these tags exist" in g1 and "recurring revenue" in g1
+
+
 def test_enrich_injects_tag_guide_into_prompt(monkeypatch):
     captured = {}
 

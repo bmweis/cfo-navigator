@@ -180,7 +180,8 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
 
     added = 0
     skipped_scope = 0
-    guide = lib.get_setting("tag_guide")
+    from . import tagstyle
+    guide = tagstyle.effective_tag_guidance(lib)
     for i, it in enumerate(new_items):
         cand = _enrich_candidate(it, lib.known_tags(), enrich=enrich, model=model, tag_guide=guide)
         if not cand.pop("in_scope", True):
@@ -350,7 +351,8 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
         exclude_categories = QUEUE_EXCLUDE_CATEGORIES
     since = _ensure_aware(since)
     seen = {normalize_url(u) for u in (lib.article_urls() | lib.queue_urls())}
-    guide = lib.get_setting("tag_guide")
+    from . import tagstyle
+    guide = tagstyle.effective_tag_guidance(lib)
     report: list[dict] = []
 
     for f in feeds:

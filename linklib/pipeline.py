@@ -49,9 +49,10 @@ def ingest_url(
     article_id = lib.upsert(art)
 
     if do_enrich:
+        from . import tagstyle
         result = enrich_mod.enrich(art.title, content or art.title,
                                    known_tags=lib.known_tags(),
-                                   tag_guide=lib.get_setting("tag_guide"))
+                                   tag_guide=tagstyle.effective_tag_guidance(lib))
         if result:
             lib.apply_enrichment(article_id, result.summary, result.tags,
                                  model=result.model, rules=result.rules_version,
@@ -79,9 +80,10 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
     """
     from .extract import fetch_page
 
+    from . import tagstyle
     use_model = model or enrich_mod.DEFAULT_MODEL
     vocab = lib.known_tags()
-    guide = lib.get_setting("tag_guide")
+    guide = tagstyle.effective_tag_guidance(lib)
     rows = lib.all_articles(limit=limit) if force else lib.unenriched(limit=limit)
     done = 0
     for row in rows:

@@ -21,9 +21,40 @@ from .db import Library
 GUIDE_MODEL = os.environ.get("LINKLIB_TAG_GUIDE_MODEL", "claude-opus-4-8")
 
 TAG_GUIDE_KEY = "tag_guide"
+TAG_OBJECTIVE_KEY = "tag_objective"
+
+# The "why" behind the tags — editable. Tags exist to help a finance leader act as
+# a strategic thought partner, so they should map to the jobs that role gets pulled
+# into, not academic topic labels. This frames both the learning and live tagging.
+DEFAULT_TAG_OBJECTIVE = (
+    "These tags exist to help a finance leader at a high-growth tech company act as a "
+    "strategic thought partner across the business — e.g. GTM efficiency, org-wide team "
+    "design and staffing, mentorship and talent development, and the cross-functional "
+    "decisions a strategic-finance leader weighs in on. Tag for those jobs-to-be-done: "
+    "prefer tags that map to the strategic questions a finance leader gets pulled into, "
+    "not just academic topic labels."
+)
+
+
+def get_tag_objective(lib: Library) -> str:
+    return (lib.get_setting(TAG_OBJECTIVE_KEY) or "").strip() or DEFAULT_TAG_OBJECTIVE
+
+
+def effective_tag_guidance(lib: Library) -> str:
+    """The full tagging guidance injected into enrichment: the objective (why the
+    tags exist) plus the learned guide (how this librarian tags). The objective
+    always applies, so tagging is steered even before a guide is generated."""
+    parts = [f"Why these tags exist:\n{get_tag_objective(lib)}"]
+    guide = (lib.get_setting(TAG_GUIDE_KEY) or "").strip()
+    if guide:
+        parts.append(f"How this librarian tags (learned from their library):\n{guide}")
+    return "\n\n".join(parts)
 
 _GUIDE_PROMPT = """You are studying how one finance leader tagged their personal
 research library so an automated tagger can imitate their judgment.
+
+THE PURPOSE OF THESE TAGS (orient every rule around this):
+{objective}
 
 Below are their most-used tags, each with how many articles carry it and a few
 example articles (title — summary). Infer their tagging *style*, then write a
@@ -108,7 +139,8 @@ def generate_tag_guide(lib: Library, model: str | None = None) -> str | None:
             model=model or GUIDE_MODEL,
             max_tokens=1500,
             messages=[{"role": "user",
-                       "content": _GUIDE_PROMPT.format(data=profile_to_text(profile))}],
+                       "content": _GUIDE_PROMPT.format(objective=get_tag_objective(lib),
+                                                       data=profile_to_text(profile))}],
         )
         guide = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
         return guide or None

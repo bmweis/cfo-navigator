@@ -4801,10 +4801,12 @@ def _tag_guide_background() -> None:
 def admin_tag_style(request: Request, generating: int = 0):
     if not _is_authed(request):
         return _login_redirect(request)
+    from linklib import tagstyle
     lib = _lib()
     try:
         guide = lib.get_setting("tag_guide")
         status = lib.get_setting("tag_guide_status")
+        objective = tagstyle.get_tag_objective(lib)
         n_tags = len(lib.all_tags())
     finally:
         lib.close()
@@ -4827,6 +4829,13 @@ def admin_tag_style(request: Request, generating: int = 0):
 <h1>Tagging style{state_badge}</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Auto-tagging already reuses your vocabulary. This goes further: it studies <strong>how</strong> you tagged your {n_tags} tags &mdash; what each one means, how granular you go, what you leave untagged &mdash; and distills soft rules that get injected into enrichment so new tags match your judgment. Review and edit anything below; your edits are what the tagger follows.</p>
 {notice}
+
+<form method="post" action="/admin/tag-style/objective" style="margin:0 0 22px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;">
+  <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging objective &mdash; why these tags exist</label>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">The north star for tagging. It steers both the learning below and live auto-tagging, even before a guide exists. Frame it around the jobs a strategic finance leader gets pulled into.</p>
+  <textarea name="objective" rows="5" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(objective)}</textarea>
+  <button type="submit" class="btn" style="font-size:14px;padding:8px 18px;margin-top:10px;">Save objective</button>
+</form>
 
 <form method="post" action="/admin/tag-style/generate" style="margin:0 0 18px;">
   <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" {"disabled style='opacity:.5;'" if is_generating else ""}>{gen_label}</button>
@@ -4869,6 +4878,20 @@ async def admin_tag_style_save(request: Request):
     lib = _lib()
     try:
         lib.set_setting("tag_guide", guide)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tag-style", status_code=303)
+
+
+@app.post("/admin/tag-style/objective")
+async def admin_tag_style_objective(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    objective = (form.get("objective") or "").strip()
+    lib = _lib()
+    try:
+        lib.set_setting("tag_objective", objective)   # blank falls back to the default
     finally:
         lib.close()
     return RedirectResponse("/admin/tag-style", status_code=303)
