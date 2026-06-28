@@ -490,6 +490,15 @@ class Library:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def recent_articles(self, limit: int = 40) -> list[dict]:
+        """Most-recently-saved articles across the whole library — the fallback
+        taste profile when one source has few prior approvals."""
+        rows = self.conn.execute(
+            "SELECT * FROM articles ORDER BY COALESCE(saved_at,'') DESC, id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
 

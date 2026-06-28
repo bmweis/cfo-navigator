@@ -4782,18 +4782,38 @@ def _redate_background(source: str) -> None:
 
 
 def _suggest_background(source: str) -> None:
-    """Predict keep/skip for a source's pending queue from past picks. Off-request."""
+    """Predict keep/skip for a source's pending queue from past picks. Off-request.
+    Records a status so the queue page can show what happened (no silent no-ops)."""
+    import json as _json
+    from datetime import datetime, timezone
     lib = _lib()
     try:
-        import json as _json
         from linklib.suggest import suggest_approvals
         preds = suggest_approvals(lib, source)
-        if preds:
+        now = datetime.now(timezone.utc).isoformat()
+        if preds is None:
+            note = (f"Couldn’t predict {source}. Approve a few articles first so it has "
+                    f"something to learn from — or the AI may be briefly unavailable.")
+            n = 0
+        elif not preds:
+            note = f"No pending candidates for {source}."
+            n = 0
+        else:
             existing = _json.loads(lib.get_setting("queue_suggestions") or "{}")
             existing.update(preds)
             lib.set_setting("queue_suggestions", _json.dumps(existing))
-    except Exception:
-        pass
+            n = len(preds)
+            note = f"Predicted {n} {source} candidate{'s' if n != 1 else ''} from your past picks."
+        lib.set_setting("queue_suggest_status",
+                        _json.dumps({"source": source, "n": n, "note": note, "at": now}))
+    except Exception as exc:
+        try:
+            from datetime import datetime, timezone
+            lib.set_setting("queue_suggest_status", _json.dumps(
+                {"source": source, "n": 0, "note": f"Prediction failed: {exc}",
+                 "at": datetime.now(timezone.utc).isoformat()}))
+        except Exception:
+            pass
     finally:
         lib.close()
 
@@ -4808,6 +4828,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
         dismissed_n = lib.queue_count(status="dismissed")
         import json as _json
         suggestions = _json.loads(lib.get_setting("queue_suggestions") or "{}")
+        suggest_status = _json.loads(lib.get_setting("queue_suggest_status") or "{}")
     finally:
         lib.close()
 
@@ -4929,6 +4950,15 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
         scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
                        'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
                        'Predicting which candidates you&rsquo;d keep, from your past picks &mdash; reload in a minute to see &ldquo;Likely keep / skip&rdquo; on each card.</div>')
+    elif suggest_status.get("note"):
+        # Show the result of the last prediction run so it's never a silent no-op.
+        ok = suggest_status.get("n", 0) > 0
+        bg = "var(--seafoam-wash)" if ok else "var(--coral-wash)"
+        bd = "var(--seafoam)" if ok else "var(--coral)"
+        col = "var(--seafoam-deep)" if ok else "var(--coral-deep)"
+        scan_notice = (f'<div style="background:{bg};border:1px solid {bd};border-radius:10px;'
+                       f'padding:12px 16px;margin-bottom:20px;font-size:14px;color:{col};">'
+                       f'{_esc(suggest_status["note"])}</div>')
 
     dismissed_note = (f'<span style="color:var(--muted);font-size:13px;">{dismissed_n} dismissed</span>'
                       if dismissed_n else "")

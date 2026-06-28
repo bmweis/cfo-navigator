@@ -23,9 +23,10 @@ high-growth tech companies. They keep substantive written articles and skip
 podcasts/webinars, slide decks, annual predictions, and content aimed at VC/PE
 fund managers or LPs (rather than company operators).
 
-Below is what they have KEPT from "{source}" and what they have SKIPPED, then a
-list of CANDIDATES awaiting review. For each candidate, predict whether this
-curator would keep it, based on the patterns in their keeps and skips.
+Below is what they have KEPT in their library (recent saves, especially from
+"{source}") and what they have SKIPPED, then a list of CANDIDATES from "{source}"
+awaiting review. For each candidate, predict whether this curator would keep it,
+based on the patterns in their keeps and skips.
 
 Return STRICT JSON only: an array of objects, one per candidate, each
 {{"url": "<the candidate url>", "keep": true|false, "reason": "<≤10 words>"}}.
@@ -72,9 +73,19 @@ def suggest_approvals(lib: Library, source: str, model: str | None = None,
     Returns {url: {"keep": bool, "reason": str}} for the predicted items, {} when
     there's nothing to predict, or None when we can't learn/judge (no examples or
     no API)."""
+    # Taste profile: prefer same-source approvals; supplement with library-wide
+    # recent saves when this source has few (so it works on a fresh backlog too).
     kept = lib.recent_articles_by_source(source, limit=25)
+    if len(kept) < 8:
+        seen = {a["url"] for a in kept}
+        for a in lib.recent_articles(limit=40):
+            if a["url"] not in seen:
+                kept.append(a)
+                seen.add(a["url"])
+            if len(kept) >= 25:
+                break
     if not kept:
-        return None  # no approved examples from this source to learn from
+        return None  # nothing approved anywhere yet to learn from
     pending = [c for c in lib.list_queue(status="pending") if (c.get("source") or "") == source]
     if not pending:
         return {}
