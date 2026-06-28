@@ -371,7 +371,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
 """
 
 def _page(title: str, active: str, body: str, authed: bool = False) -> str:
-    public = [("/", "About"), ("/thought-leadership", "Thought Leadership"),
+    public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
               ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
     private = [("/library", "Library"), ("/feed", "Feed"), ("/ask", "Ask"),
                ("/draft", "Draft")]
@@ -464,22 +464,72 @@ def logout():
 # Public pages
 # ---------------------------------------------------------------------------
 
+def _avatar(size: int = 140) -> str:
+    """Headshot if present, else a clean monogram — shown the moment headshot.jpg lands."""
+    if os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg")):
+        return (f'<img src="/static/headshot.jpg" alt="Brian Weisberg" '
+                f'style="width:{size}px;height:{size}px;border-radius:50%;object-fit:cover;'
+                f'object-position:center top;flex-shrink:0;border:3px solid var(--navy);">')
+    return (f'<div aria-label="Brian Weisberg" '
+            f'style="width:{size}px;height:{size}px;border-radius:50%;flex-shrink:0;border:3px solid var(--navy);'
+            f'background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;'
+            f'font-size:{round(size/3)}px;font-weight:700;letter-spacing:-0.02em;">BW</div>')
+
+
 @app.get("/", response_class=HTMLResponse)
 def homepage():
-    # Show the photo if it's present; otherwise a clean monogram. This way the
-    # headshot displays automatically the moment headshot.jpg lands in static/.
-    if os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg")):
-        avatar = ('<img src="/static/headshot.jpg" alt="Brian Weisberg" '
-                  'style="width:140px;height:140px;border-radius:50%;object-fit:cover;'
-                  'object-position:center top;flex-shrink:0;border:3px solid var(--navy);">')
-    else:
-        avatar = ('<div aria-label="Brian Weisberg" '
-                  'style="width:140px;height:140px;border-radius:50%;flex-shrink:0;border:3px solid var(--navy);'
-                  'background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;'
-                  'font-size:46px;font-weight:700;letter-spacing:-0.02em;">BW</div>')
+    def _rcard(href, title, desc, external=False):
+        attrs = ' target="_blank" rel="noopener"' if external else ''
+        return (
+            f'<a href="{href}"{attrs} style="display:block;background:var(--surface);border:1px solid var(--line);'
+            f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+            f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
+        )
+
+    cards = "".join([
+        _rcard("/thought-leadership", "Thought Leadership",
+               "Podcasts, writing, and talks on how tech companies make money and how finance earns its seat."),
+        _rcard("/tools", "CFO Toolbox",
+               "A curated directory of the tools high-growth finance teams actually use."),
+        _rcard("/growth-engine-ratio", "Growth Engine Ratio",
+               "A framework and calculator for pressure-testing GTM efficiency."),
+        _rcard("/community", "CFO Community",
+               "What a well-designed community for finance peers should look like — and what I'm building."),
+    ])
+
+    body = f"""<div class="page">
+<div style="max-width:680px;">
+  <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO for CFOs</div>
+  <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">Be the strategic partner your leadership team leans on&mdash;not just the scorekeeper.</h1>
+  <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);">This is where I share the writing, tools, and hard-won lessons that help finance leaders at high-growth tech companies step into that role: GTM efficiency, headcount and org design, mentorship, and the cross-functional calls finance gets pulled into as a company scales.</p>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:34px 0 8px;">{cards}</div>
+
+<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:26px;">
+  {_avatar(64)}
+  <div style="flex:1;min-width:240px;">
+    <p style="margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">I'm <strong>Brian Weisberg</strong>, VP of Business Operations and Strategic Finance at <a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>. Fifteen-plus years scaling B2B SaaS finance, from the founder's corner. <a href="/about">More about me &rarr;</a></p>
+  </div>
+</div>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
+  <a href="/thought-leadership" class="btn">Thought Leadership</a>
+  <a href="/contact" class="btn btn-ghost">Get in Touch</a>
+  <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
+</div>
+</div>"""
+    return HTMLResponse(_page("Brian Weisberg — strategic finance for high-growth tech", "Home", body))
+
+
+@app.get("/about", response_class=HTMLResponse)
+def about_page():
     body = f"""<div class="page">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
-  {avatar}
+  {_avatar(140)}
   <div>
     <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">CFO &middot; Boston, MA</div>
     <h1 style="margin:0 0 4px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">Brian Weisberg</h1>
@@ -535,7 +585,7 @@ the early-to-growth leap. Based in Boston.</p>
   <a href="/community" class="btn btn-ghost">CFO Community &rarr;</a>
 </div>
 </div>"""
-    return HTMLResponse(_page("Brian Weisberg—CFO", "About", body))
+    return HTMLResponse(_page("About — Brian Weisberg", "About", body))
 
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
