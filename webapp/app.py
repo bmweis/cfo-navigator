@@ -4419,15 +4419,15 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 
 
 # Library management lives on its own page (/admin/library) so the hub stays
-# uncluttered — everything that maintains the article corpus is here.
+# uncluttered. Ordered as the recommended workflow — top to bottom.
 _LIBRARY_TOOLS = [
-    ("/admin/queue",        "Library Queue",       "Review proposed saves, edit tags, and approve them into the library."),
-    ("/admin/backfill",     "Historical sweep",    "One-time sitemap catch-up: queue articles from your subscribed sources going back to your saves cutoff."),
-    ("/admin/enrich",       "Re-enrich library",   "Backfill or force-refresh Claude summaries and tags across all articles."),
-    ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
-    ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags to keep the auto-generated vocabulary tidy."),
-    ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your library, so auto-tagging matches your judgment."),
-    ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
+    ("/admin/backup",       "Library backup",      "Snapshot the database before you start, so you can roll back if needed."),
+    ("/admin/backfill",     "Historical sweep",    "Catch up the back catalog: queue older articles from your sources (raise the per-source limit to reach further back)."),
+    ("/admin/queue",        "Library Queue",       "Review proposed saves, fix dates, edit tags, and approve them into the library."),
+    ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
+    ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your library and edit the guide, so auto-tagging matches your judgment."),
+    ("/admin/enrich",       "Re-enrich library",   "The big pass: force-refresh summaries + tags on Opus, applying your tag style and the scope rules."),
+    ("/admin/review-removals", "Review removals",  "Confirm or keep what the re-enrich flagged as off-audience (podcasts, predictions, fund/LP content)."),
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
@@ -4582,20 +4582,28 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 def admin_library(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-    cards = "".join(
-        f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
-        f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
-        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-        f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-        f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
-        f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
-        for href, title, desc in _LIBRARY_TOOLS
-    )
+
+    def _step(n, href, title, desc):
+        return (
+            f'<a href="{href}" style="display:flex;gap:16px;align-items:flex-start;background:var(--surface);'
+            f'border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;">'
+            f'<span style="flex-shrink:0;width:30px;height:30px;border-radius:50%;background:var(--navy);color:#fff;'
+            f'display:flex;align-items:center;justify-content:center;font-family:var(--font-head);font-weight:600;font-size:15px;">{n}</span>'
+            f'<span style="flex:1;">'
+            f'<span style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></span>'
+            f'<span style="display:block;margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</span>'
+            f'</span></a>'
+        )
+
+    cards = "".join(_step(i + 1, href, title, desc)
+                    for i, (href, title, desc) in enumerate(_LIBRARY_TOOLS))
     body = f"""<div class="page" style="max-width:720px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Library</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Build, curate, enrich, and back up your library.</p>
-<div style="display:grid;gap:14px;">{cards}</div>
+<p style="color:var(--muted);margin:4px 0 26px;">Build, curate, enrich, and back up your library. For a first-time cleanup, work top to bottom &mdash; each step sets up the next. You can also jump to any tool directly anytime.</p>
+<div style="display:grid;gap:12px;">{cards}</div>
 </div>"""
     return HTMLResponse(_page("Library — Admin", "Admin", body, authed=True))
 
@@ -5544,8 +5552,18 @@ def admin_enrich(request: Request):
     try:
         total = lib.count()
         unenriched = len(lib.unenriched(limit=100000))
+        cleanup_on = lib.get_setting("scope_cleanup", "on") != "off"
     finally:
         lib.close()
+
+    cleanup_state = ("on" if cleanup_on else "off")
+    cleanup_toggle = f"""<div style="background:{'var(--seafoam-wash)' if cleanup_on else 'var(--surface)'};border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+  <div style="font-size:13.5px;color:var(--ink-soft);max-width:520px;line-height:1.5;">
+    <strong>First-time cleanup exclusions: {cleanup_state.upper()}.</strong>
+    {'Podcasts/webinars, slide decks, annual predictions, and fund/LP content are flagged out of scope. Turn this off once the cleanup is done — ongoing queue review is the gate from then on.' if cleanup_on else 'Only the standard audience rules apply (off-audience + career-in-VC). Turn back on for another cleanup pass.'}
+  </div>
+  <form method="post" action="/admin/enrich/cleanup-toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;white-space:nowrap;">Turn {'off' if cleanup_on else 'on'}</button></form>
+</div>"""
 
     from linklib.enrich import DEFAULT_MODEL, ENRICH_RULES_VERSION
 
@@ -5615,6 +5633,7 @@ def admin_enrich(request: Request):
     </div>
   </div>
   <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Current rules version: <strong>{ENRICH_RULES_VERSION}</strong></p>
+  {cleanup_toggle}
 
   <form id="enrich-form" method="post" action="/admin/enrich/start" style="display:grid;gap:18px;">
     <div>
@@ -5677,6 +5696,19 @@ def admin_enrich(request: Request):
 }})();
 </script>"""
     return HTMLResponse(_page("Re-enrich library — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/enrich/cleanup-toggle")
+def admin_enrich_cleanup_toggle(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        on = lib.get_setting("scope_cleanup", "on") != "off"
+        lib.set_setting("scope_cleanup", "off" if on else "on")
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/enrich", status_code=303)
 
 
 @app.post("/admin/enrich/start")

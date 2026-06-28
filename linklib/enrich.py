@@ -58,11 +58,26 @@ fences) with exactly these four keys:
      metrics, term sheets, board management, raising a round).
 
      The audience is OPERATORS — finance leaders, founders, and executives running
-     companies. It is NOT people who work at an investment fund. So return FALSE
-     when the piece is off-audience OR is not the kind of thing this library
-     collects. Specifically FALSE for:
-       - content about pursuing a personal CAREER in venture capital (how to break
-         into VC, get a job at a fund, become an investor);
+     companies. So return FALSE when the piece is off-audience — most importantly
+     content about pursuing a personal CAREER in venture capital (how to break into
+     VC, get a job at a fund, become an investor), or material unrelated to
+     operating and finance leadership.{cleanup_block}
+     Otherwise, when in doubt, return true.
+
+  "scope_reason": one short phrase explaining the in_scope decision (e.g.
+     "operator fundraising guidance - keep", "how to get a job in VC - off-audience").
+
+Title: {title}
+
+Text:
+{text}
+"""
+
+# Stricter exclusions applied during the first-time library cleanup. Toggleable
+# (setting `scope_cleanup`) so they don't have to live forever — once the library
+# is clean, ongoing queue review is the gate. Injected into the prompt only when
+# cleanup mode is on.
+_CLEANUP_EXCLUSIONS = """ For this library cleanup, ALSO return FALSE for:
        - content written FOR fund professionals rather than company operators —
          i.e. for VC or PE fund managers/GPs (running or operating a fund, fund
          strategy, deal sourcing, portfolio support as an investor), fund
@@ -75,20 +90,7 @@ fences) with exactly these four keys:
          when summarized or republished on a blog (e.g. a 20VC episode posted on
          SaaStr). These are recordings, not articles;
        - a SLIDE DECK or third-party slides / conference presentation;
-       - an annual PREDICTIONS or year-ahead roundup (e.g. "10 predictions for 2026",
-         "what's next in SaaS in 2026") — these date quickly and aren't kept;
-       - material unrelated to operating and finance leadership.
-     Otherwise, when in doubt, return true.
-
-  "scope_reason": one short phrase explaining the in_scope decision (e.g.
-     "operator fundraising guidance - keep", "for VC fund managers - off-audience",
-     "LP fund selection - off-audience", "20VC podcast episode - not an article",
-     "2026 predictions roundup - excluded").
-
-Title: {title}
-
-Text:
-{text}
+       - an annual PREDICTIONS or year-ahead roundup (e.g. "10 predictions for 2026").
 """
 
 
@@ -103,12 +105,17 @@ class Enrichment:
 
 
 def enrich(title: str, text: str, known_tags: list[str] | None = None,
-           model: str = DEFAULT_MODEL, tag_guide: str = "") -> Enrichment | None:
+           model: str = DEFAULT_MODEL, tag_guide: str = "",
+           cleanup_mode: bool = False) -> Enrichment | None:
     """Return an Enrichment, or None if the SDK/key is unavailable or the call fails.
 
     `tag_guide`, when set, is a short description of how the librarian tags (learned
     from their original library) — injected so auto-tagging mimics their judgment,
     not just their vocabulary.
+
+    `cleanup_mode` adds the stricter first-time-cleanup exclusions (fund/LP content,
+    podcasts/webinars, slide decks, predictions). Toggleable so it doesn't persist
+    past the cleanup.
     """
     try:
         from anthropic import Anthropic
@@ -121,12 +128,13 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
     known = "\n".join(f"     - {t}" for t in (known_tags or [])) or "     (none yet)"
     guide_block = (f"\n     How this librarian tags (follow these soft rules):\n{tag_guide.strip()}\n"
                    if tag_guide and tag_guide.strip() else "")
+    cleanup_block = ("\n" + _CLEANUP_EXCLUSIONS) if cleanup_mode else ""
     try:
         client = Anthropic()
         resp = client.messages.create(
             model=model,
             max_tokens=1000,  # room for a fuller answer-bearing summary + scope JSON
-            messages=[{"role": "user", "content": _PROMPT.format(known=known, guide_block=guide_block, title=title, text=snippet)}],
+            messages=[{"role": "user", "content": _PROMPT.format(known=known, guide_block=guide_block, cleanup_block=cleanup_block, title=title, text=snippet)}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
