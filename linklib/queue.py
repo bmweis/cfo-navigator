@@ -27,7 +27,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
-from .db import Library
+from .db import Library, normalize_url
 
 # Depth over thrift: summaries/tags are the product surface. Overridable so a
 # big sweep can dial down if needed. Verify current IDs at
@@ -129,9 +129,9 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
     except Exception:
         return {"scanned": 0, "new": 0, "added": 0}
 
-    seen = lib.article_urls() | lib.queue_urls()
+    seen = {normalize_url(u) for u in (lib.article_urls() | lib.queue_urls())}
     new_items = [it for it in items
-                 if it.get("url") and it["url"] not in seen
+                 if it.get("url") and normalize_url(it["url"]) not in seen
                  and it.get("category", "") not in exclude_categories]
 
     added = 0
@@ -304,7 +304,7 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
     if exclude_categories is None:
         exclude_categories = QUEUE_EXCLUDE_CATEGORIES
     since = _ensure_aware(since)
-    seen = lib.article_urls() | lib.queue_urls()
+    seen = {normalize_url(u) for u in (lib.article_urls() | lib.queue_urls())}
     report: list[dict] = []
 
     for f in feeds:
@@ -334,7 +334,7 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
         candidates: list[dict] = []
         for e in entries:
             url = e["url"]
-            if not _looks_like_post(url) or url in seen:
+            if not _looks_like_post(url) or normalize_url(url) in seen:
                 continue
             if e["lastmod"] is None:
                 stat["undated"] += 1
@@ -357,7 +357,7 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
                     continue
                 if lib.add_to_queue(**cand):
                     stat["added"] += 1
-                    seen.add(e["url"])
+                    seen.add(normalize_url(e["url"]))
                 progress(f.name, i + 1, len(candidates))
 
         report.append(stat)

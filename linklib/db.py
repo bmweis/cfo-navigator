@@ -159,6 +159,47 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Query params that identify a campaign/referrer, not the article — dropped so
+# the same piece arriving via two share links collapses to one row.
+_TRACKING_PARAMS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "utm_id", "utm_name", "utm_reader", "ref", "ref_src", "ref_url", "source",
+    "fbclid", "gclid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "igshid", "cmpid",
+    "spm", "ncid", "_bhlid", "amp",
+}
+
+
+def normalize_url(url: str) -> str:
+    """Canonicalize a URL for dedup so trivial variants of the same article map
+    to one key: force https, drop a leading 'www.', strip the fragment and common
+    tracking params, and remove a trailing slash. Fetching still works because
+    requests follows the resulting redirect. Best-effort — returns the stripped
+    input if it can't be parsed."""
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    url = (url or "").strip()
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return url
+    if not parts.scheme or not parts.netloc:
+        return url.rstrip("/") or url
+    host = parts.netloc.lower()
+    if host.endswith(":80"):
+        host = host[:-3]
+    elif host.endswith(":443"):
+        host = host[:-4]
+    if host.startswith("www."):
+        host = host[4:]
+    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if k.lower() not in _TRACKING_PARAMS]
+    path = parts.path
+    if len(path) > 1 and path.endswith("/"):
+        path = path.rstrip("/")
+    return urlunsplit(("https", host, path, urlencode(kept), ""))
+
+
 def _slugify(name: str) -> str:
     import re
     slug = name.lower().strip()
@@ -227,8 +268,10 @@ class Library:
 
         On conflict we union the tag lists and fill any empty fields, so
         re-running the import — or an article living on several boards — is
-        safe and idempotent.
+        safe and idempotent. The URL is canonicalized first so trivial variants
+        (http/https, www, trailing slash, tracking params) merge into one row.
         """
+        art.url = normalize_url(art.url)
         cur = self.conn.execute("SELECT * FROM articles WHERE url = ?", (art.url,))
         existing = cur.fetchone()
         now = _now()
@@ -542,8 +585,9 @@ class Library:
                      enriched: bool = False, enrich_model: str = "",
                      enrich_rules: str = "") -> bool:
         """Queue a candidate. No-op (returns False) if the URL is already in the
-        library or already queued — keeps the queue idempotent like `upsert`."""
-        url = (url or "").strip()
+        library or already queued — keeps the queue idempotent like `upsert`.
+        The URL is canonicalized first so trivial variants collapse to one."""
+        url = normalize_url(url)
         if not url:
             return False
         if self.conn.execute("SELECT 1 FROM articles WHERE url=?", (url,)).fetchone():
