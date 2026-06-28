@@ -24,7 +24,7 @@ DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-4-8")
 # Version of the enrichment "rules" (the prompt below). Stored alongside each
 # article's enrichment so you can tell which ruleset produced a given summary,
 # and re-run rows enriched under older rules. BUMP THIS whenever _PROMPT changes.
-ENRICH_RULES_VERSION = "v2"
+ENRICH_RULES_VERSION = "v3"
 
 _PROMPT = """You are enriching a curated research library for a specific audience:
 finance leaders at high-growth technology companies — people running FP&A or
@@ -52,17 +52,27 @@ fences) with exactly these four keys:
 
      Only invent a new lowercase tag when nothing in the vocabulary fits.
 {guide_block}
-  "in_scope": true or false. TRUE if the article is useful to a finance leader,
-     founder, or executive at a high-growth tech company — INCLUDING venture
+  "in_scope": true or false. TRUE if this is a WRITTEN ARTICLE useful to a finance
+     leader, founder, or executive at a high-growth tech company — INCLUDING venture
      capital and fundraising content that helps operators (how investors evaluate
-     metrics, term sheets, board management, raising a round). FALSE only when it
-     is clearly off-audience — most importantly, content about pursuing a personal
-     CAREER in venture capital (how to break into VC, get a job at a fund, become
-     an investor), or material unrelated to operating and finance leadership.
-     When in doubt, return true.
+     metrics, term sheets, board management, raising a round).
+
+     Return FALSE when the piece is off-audience OR is not the kind of thing this
+     library collects. Specifically FALSE for:
+       - content about pursuing a personal CAREER in venture capital (how to break
+         into VC, get a job at a fund, become an investor);
+       - a PODCAST or podcast episode, a WEBINAR, a video, or an audio show — even
+         when summarized or republished on a blog (e.g. a 20VC episode posted on
+         SaaStr). These are recordings, not articles;
+       - a SLIDE DECK or third-party slides / conference presentation;
+       - an annual PREDICTIONS or year-ahead roundup (e.g. "10 predictions for 2026",
+         "what's next in SaaS in 2026") — these date quickly and aren't kept;
+       - material unrelated to operating and finance leadership.
+     Otherwise, when in doubt, return true.
 
   "scope_reason": one short phrase explaining the in_scope decision (e.g.
-     "operator fundraising guidance - keep" or "how to get a job in VC - off-audience").
+     "operator fundraising guidance - keep", "20VC podcast episode - not an article",
+     "2026 predictions roundup - excluded", "how to get a job in VC - off-audience").
 
 Title: {title}
 
