@@ -49,7 +49,9 @@ def ingest_url(
     article_id = lib.upsert(art)
 
     if do_enrich:
-        result = enrich_mod.enrich(art.title, content or art.title, known_tags=lib.known_tags())
+        result = enrich_mod.enrich(art.title, content or art.title,
+                                   known_tags=lib.known_tags(),
+                                   tag_guide=lib.get_setting("tag_guide"))
         if result:
             lib.apply_enrichment(article_id, result.summary, result.tags,
                                  model=result.model, rules=result.rules_version,
@@ -79,6 +81,7 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
 
     use_model = model or enrich_mod.DEFAULT_MODEL
     vocab = lib.known_tags()
+    guide = lib.get_setting("tag_guide")
     rows = lib.all_articles(limit=limit) if force else lib.unenriched(limit=limit)
     done = 0
     for row in rows:
@@ -96,7 +99,7 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
                 )
                 lib.conn.commit()
         result = enrich_mod.enrich(row["title"] or row["url"], text or row["title"],
-                                   known_tags=vocab, model=use_model)
+                                   known_tags=vocab, model=use_model, tag_guide=guide)
         if result:
             lib.apply_enrichment(row["id"], result.summary, result.tags,
                                  model=result.model, rules=result.rules_version,

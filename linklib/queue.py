@@ -54,7 +54,7 @@ def suggest_tags_heuristic(title: str, summary: str, source: str,
 
 
 def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
-                      model: str) -> dict:
+                      model: str, tag_guide: str = "") -> dict:
     """Fetch + enrich one candidate into the kwargs `Library.add_to_queue` wants.
 
     `item` is a feed/sitemap dict with at least `url`; `title`, `source`,
@@ -87,7 +87,7 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
             from . import enrich as enrich_mod
             result = enrich_mod.enrich(
                 title or url, content or summary or title,
-                known_tags=vocab, model=model,
+                known_tags=vocab, model=model, tag_guide=tag_guide,
             )
         except Exception:
             result = None
@@ -180,8 +180,9 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
 
     added = 0
     skipped_scope = 0
+    guide = lib.get_setting("tag_guide")
     for i, it in enumerate(new_items):
-        cand = _enrich_candidate(it, lib.known_tags(), enrich=enrich, model=model)
+        cand = _enrich_candidate(it, lib.known_tags(), enrich=enrich, model=model, tag_guide=guide)
         if not cand.pop("in_scope", True):
             skipped_scope += 1       # off-audience — don't even propose it
             progress(i + 1, len(new_items), it.get("title", ""))
@@ -349,6 +350,7 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
         exclude_categories = QUEUE_EXCLUDE_CATEGORIES
     since = _ensure_aware(since)
     seen = {normalize_url(u) for u in (lib.article_urls() | lib.queue_urls())}
+    guide = lib.get_setting("tag_guide")
     report: list[dict] = []
 
     for f in feeds:
@@ -394,7 +396,7 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
                 item = {"url": e["url"], "source": f.name,
                         "published_at": e["lastmod"].isoformat(),
                         "origin": f"backfill:{f.name}"}
-                cand = _enrich_candidate(item, lib.known_tags(), enrich=enrich, model=model)
+                cand = _enrich_candidate(item, lib.known_tags(), enrich=enrich, model=model, tag_guide=guide)
                 if not cand.pop("in_scope", True):
                     stat["skipped_scope"] += 1   # off-audience — don't propose it
                     progress(f.name, i + 1, len(candidates))

@@ -25,7 +25,7 @@ def lib(tmp_path):
 
 
 def _fake_enricher(calls):
-    def fake(title, text, known_tags=None, model="?"):
+    def fake(title, text, known_tags=None, model="?", tag_guide=""):
         calls.append(model)
         return Enrichment(summary=f"NEW::{title}", tags=["opus-tag"])
     return fake
@@ -74,7 +74,7 @@ def test_enrichment_provenance_is_recorded(lib, monkeypatch):
     from linklib.enrich import Enrichment
     lib.upsert(Article(url="u1", title="A", content="body", enriched=False))
 
-    def fake(title, text, known_tags=None, model="?"):
+    def fake(title, text, known_tags=None, model="?", tag_guide=""):
         return Enrichment(summary="s", tags=["t"], model=model, rules_version="v9")
     monkeypatch.setattr(pipeline.enrich_mod, "enrich", fake)
 
@@ -104,7 +104,7 @@ def test_scope_flag_recorded_and_reviewable(lib, monkeypatch):
     lib.upsert(Article(url="https://ex.com/ok", title="SaaS NRR benchmarks",
                        content="net revenue retention by stage", enriched=False))
 
-    def fake(title, text, known_tags=None, model="?"):
+    def fake(title, text, known_tags=None, model="?", tag_guide=""):
         off = "vc" in title.lower() and "job" in title.lower()
         return Enrichment(summary="s", tags=["t"], model=model, rules_version="v2",
                           in_scope=not off,

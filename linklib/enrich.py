@@ -51,7 +51,7 @@ fences) with exactly these four keys:
 {known}
 
      Only invent a new lowercase tag when nothing in the vocabulary fits.
-
+{guide_block}
   "in_scope": true or false. TRUE if the article is useful to a finance leader,
      founder, or executive at a high-growth tech company — INCLUDING venture
      capital and fundraising content that helps operators (how investors evaluate
@@ -82,8 +82,13 @@ class Enrichment:
 
 
 def enrich(title: str, text: str, known_tags: list[str] | None = None,
-           model: str = DEFAULT_MODEL) -> Enrichment | None:
-    """Return an Enrichment, or None if the SDK/key is unavailable or the call fails."""
+           model: str = DEFAULT_MODEL, tag_guide: str = "") -> Enrichment | None:
+    """Return an Enrichment, or None if the SDK/key is unavailable or the call fails.
+
+    `tag_guide`, when set, is a short description of how the librarian tags (learned
+    from their original library) — injected so auto-tagging mimics their judgment,
+    not just their vocabulary.
+    """
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -93,12 +98,14 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
 
     snippet = (text or title)[:12000]  # more room now that we feed full text
     known = "\n".join(f"     - {t}" for t in (known_tags or [])) or "     (none yet)"
+    guide_block = (f"\n     How this librarian tags (follow these soft rules):\n{tag_guide.strip()}\n"
+                   if tag_guide and tag_guide.strip() else "")
     try:
         client = Anthropic()
         resp = client.messages.create(
             model=model,
             max_tokens=1000,  # room for a fuller answer-bearing summary + scope JSON
-            messages=[{"role": "user", "content": _PROMPT.format(known=known, title=title, text=snippet)}],
+            messages=[{"role": "user", "content": _PROMPT.format(known=known, guide_block=guide_block, title=title, text=snippet)}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()

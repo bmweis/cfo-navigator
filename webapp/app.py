@@ -4192,6 +4192,7 @@ _ADMIN_GROUPS = [
         ("/admin/enrich",       "Re-enrich library",   "Backfill or force-refresh Claude summaries and tags across all articles."),
         ("/admin/review-removals", "Review removals",  "Confirm or keep articles flagged as off-audience for the library."),
         ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags to keep the auto-generated vocabulary tidy."),
+        ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your library, so auto-tagging matches your judgment."),
         ("/admin/backup",       "Library backup",      "Download a snapshot or upload a replacement database."),
     ]),
     ("Site", "Your voice, your brand, and the public site.", [
@@ -4775,6 +4776,114 @@ async def admin_tags_delete(request: Request, background_tasks: BackgroundTasks)
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
     msg = f'Removed “{tag}” from {n} article{"s" if n != 1 else ""}.'
     return RedirectResponse(f"/admin/tags?msg={quote(msg)}", status_code=303)
+
+
+def _tag_guide_background() -> None:
+    """Learn the tagging guide from the library and save it. Off-request (Claude call)."""
+    lib = _lib()
+    try:
+        from linklib import tagstyle
+        guide = tagstyle.generate_tag_guide(lib)
+        if guide:
+            lib.set_setting("tag_guide", guide)
+        lib.set_setting("tag_guide_status", "")
+        backup.maybe_backup(DB_PATH)
+    except Exception:
+        try:
+            lib.set_setting("tag_guide_status", "")
+        except Exception:
+            pass
+    finally:
+        lib.close()
+
+
+@app.get("/admin/tag-style", response_class=HTMLResponse)
+def admin_tag_style(request: Request, generating: int = 0):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        guide = lib.get_setting("tag_guide")
+        status = lib.get_setting("tag_guide_status")
+        n_tags = len(lib.all_tags())
+    finally:
+        lib.close()
+
+    is_generating = bool(generating) or status == "generating"
+    notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
+              'padding:12px 16px;margin-bottom:18px;font-size:14px;color:var(--seafoam-deep);">'
+              'Studying your library in the background &mdash; reload in about a minute to see the guide.</div>'
+              if is_generating else '')
+
+    has_guide = bool(guide and guide.strip())
+    state_badge = ('<span style="font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Active</span>'
+                   if has_guide else
+                   '<span style="font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;">Not set &mdash; auto-tagging uses your vocabulary only</span>')
+
+    gen_label = "Re-learn from my library" if has_guide else "Learn from my library"
+
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Tagging style{state_badge}</h1>
+<p style="color:var(--muted);margin:-6px 0 18px;">Auto-tagging already reuses your vocabulary. This goes further: it studies <strong>how</strong> you tagged your {n_tags} tags &mdash; what each one means, how granular you go, what you leave untagged &mdash; and distills soft rules that get injected into enrichment so new tags match your judgment. Review and edit anything below; your edits are what the tagger follows.</p>
+{notice}
+
+<form method="post" action="/admin/tag-style/generate" style="margin:0 0 18px;">
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" {"disabled style='opacity:.5;'" if is_generating else ""}>{gen_label}</button>
+  <span style="font-size:13px;color:var(--muted);margin-left:12px;">Reads your tags + example articles and writes the guide. Runs in the background.</span>
+</form>
+
+<form method="post" action="/admin/tag-style/save" style="margin:0;">
+  <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging guide</label>
+  <textarea name="guide" rows="20" placeholder="Click “{gen_label}” to draft this from your library, or write your own rules here."
+    style="width:100%;padding:14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(guide)}</textarea>
+  <div style="display:flex;gap:10px;margin-top:12px;">
+    <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Save guide</button>
+    <button type="submit" formaction="/admin/tag-style/clear" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;color:#b91c1c;border-color:#fca5a5;"
+      onclick="return confirm('Clear the tagging guide? Auto-tagging will fall back to vocabulary only.');">Clear</button>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Tagging style — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/tag-style/generate")
+def admin_tag_style_generate(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.set_setting("tag_guide_status", "generating")
+    finally:
+        lib.close()
+    background_tasks.add_task(_tag_guide_background)
+    return RedirectResponse("/admin/tag-style?generating=1", status_code=303)
+
+
+@app.post("/admin/tag-style/save")
+async def admin_tag_style_save(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    guide = (form.get("guide") or "").strip()
+    lib = _lib()
+    try:
+        lib.set_setting("tag_guide", guide)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tag-style", status_code=303)
+
+
+@app.post("/admin/tag-style/clear")
+async def admin_tag_style_clear(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.set_setting("tag_guide", "")
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tag-style", status_code=303)
 
 
 @app.post("/admin/queue/add")
