@@ -70,6 +70,7 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
     enrich_model = ""
     enrich_rules = ""
     in_scope = True
+    page_published = ""
 
     if enrich:
         try:
@@ -79,6 +80,7 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
                 content = page.content
             if page.title and not title:
                 title = page.title
+            page_published = page.published
         except Exception:
             pass
         try:
@@ -100,13 +102,55 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
     if not tags:
         tags = suggest_tags_heuristic(title, summary, source, vocab)
 
+    # The page's own metadata beats a sitemap lastmod (static sites stamp every
+    # URL with the build date), so prefer it when we found one.
+    published_at = page_published or item.get("published_at") or None
+
     return dict(
         url=url, title=title, source=source, summary=summary, content=content,
-        suggested_tags=tags, published_at=item.get("published_at") or None,
+        suggested_tags=tags, published_at=published_at,
         origin=item.get("origin", "feed"), enriched=enriched,
         enrich_model=enrich_model, enrich_rules=enrich_rules,
         in_scope=in_scope,
     )
+
+
+def redate_from_article_pages(lib: Library, source_substr: str = "",
+                              progress=lambda *_: None) -> dict:
+    """Repair publish dates by re-reading each article page's own metadata.
+
+    The historical sweep takes dates from sitemaps; static sites stamp every URL
+    with the build date, so a whole source can land on one wrong day. This re-reads
+    the true date from pending queue items (and saved articles) whose source matches
+    `source_substr` (case-insensitive; blank = all) and updates the ones it can fix.
+    Cheap — fetches the page but does not re-enrich. Returns {scanned, updated}.
+    """
+    from .extract import fetch_page
+
+    sub = source_substr.strip().lower()
+    def _match(src: str) -> bool:
+        return (not sub) or (sub in (src or "").lower())
+
+    targets = [("queue", r["url"], None, r.get("source", ""))
+               for r in lib.list_queue(status="pending") if _match(r.get("source", ""))]
+    targets += [("article", a["url"], a["id"], a.get("source", ""))
+                for a in lib.all_articles(limit=100000) if _match(a.get("source", ""))]
+
+    scanned = updated = 0
+    for i, (kind, url, art_id, _src) in enumerate(targets):
+        scanned += 1
+        try:
+            page = fetch_page(url)
+        except Exception:
+            page = None
+        if page and page.published:
+            if kind == "queue":
+                lib.update_queue_published(url, page.published)
+            else:
+                lib.update_article_published(art_id, page.published)
+            updated += 1
+        progress(i + 1, len(targets), url)
+    return {"scanned": scanned, "updated": updated}
 
 
 def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,

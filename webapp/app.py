@@ -4465,8 +4465,21 @@ def _scan_feed_background() -> None:
         lib.close()
 
 
+def _redate_background(source: str) -> None:
+    """Re-read true publish dates from article pages for a source. Off-request."""
+    lib = _lib()
+    try:
+        from linklib.queue import redate_from_article_pages
+        redate_from_article_pages(lib, source)
+        backup.maybe_backup(DB_PATH)
+    except Exception:
+        pass
+    finally:
+        lib.close()
+
+
 @app.get("/admin/queue", response_class=HTMLResponse)
-def admin_queue(request: Request, scanning: int = 0):
+def admin_queue(request: Request, scanning: int = 0, redating: int = 0):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -4550,6 +4563,10 @@ def admin_queue(request: Request, scanning: int = 0):
         scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
                        'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
                        'Scanning the feed in the background &mdash; reload this page in a minute to see new candidates.</div>')
+    elif redating:
+        scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
+                       'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
+                       'Re-reading publish dates from the article pages in the background &mdash; reload in a minute to see corrected dates.</div>')
 
     dismissed_note = (f'<span style="color:var(--muted);font-size:13px;">{dismissed_n} dismissed</span>'
                       if dismissed_n else "")
@@ -4571,10 +4588,15 @@ def admin_queue(request: Request, scanning: int = 0):
 <h1>Library Queue</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Proposed saves waiting for your review. Approve them into the library&nbsp;&mdash;&nbsp;edit the tags first if you like&nbsp;&mdash;&nbsp;or dismiss what you don&rsquo;t want.</p>
 {scan_notice}
-<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px;">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
   <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note} &nbsp; {expand_controls}</div>
   <form method="post" action="/admin/queue/refresh-feed" style="margin:0;"><button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Scan feed</button></form>
 </div>
+<form method="post" action="/admin/queue/redate" style="margin:0 0 24px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+  <span style="font-size:13px;color:var(--muted);">Dates look wrong? Re-read them from the article pages</span>
+  <input type="text" name="source" placeholder="source (blank = all)" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);width:180px;">
+  <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">Fix dates</button>
+</form>
 {group_blocks}
 </div>
 
@@ -4637,6 +4659,16 @@ def admin_queue_refresh(request: Request, background_tasks: BackgroundTasks):
         return _login_redirect(request)
     background_tasks.add_task(_scan_feed_background)
     return RedirectResponse("/admin/queue?scanning=1", status_code=303)
+
+
+@app.post("/admin/queue/redate")
+async def admin_queue_redate(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    source = (form.get("source") or "").strip()
+    background_tasks.add_task(_redate_background, source)
+    return RedirectResponse("/admin/queue?redating=1", status_code=303)
 
 
 @app.post("/admin/queue/add")

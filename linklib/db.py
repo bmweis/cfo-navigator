@@ -633,6 +633,22 @@ class Library:
         self.conn.execute("DELETE FROM library_queue WHERE url=?", (url,))
         self.conn.commit()
 
+    def update_queue_published(self, url: str, published_at: str) -> None:
+        """Correct a queued candidate's publish date (e.g. after re-reading it from
+        the article page when the sitemap date was a build stamp)."""
+        self.conn.execute(
+            "UPDATE library_queue SET published_at=? WHERE url=?", (published_at, url)
+        )
+        self.conn.commit()
+
+    def update_article_published(self, article_id: int, published_at: str) -> None:
+        """Correct a saved article's publish date."""
+        self.conn.execute(
+            "UPDATE articles SET published_at=?, updated_at=? WHERE id=?",
+            (published_at, _now(), article_id),
+        )
+        self.conn.commit()
+
     def promote_queue_item(self, url: str, tags: Optional[list[str]] = None) -> int:
         """Move a queued candidate into the library, preserving its enrichment,
         then drop it from the queue. `tags`, if given, overrides the suggestions

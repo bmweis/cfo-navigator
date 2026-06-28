@@ -91,7 +91,8 @@ def looks_paywalled(html: str, content: str) -> bool:
 class PageData:
     title: str
     content: str
-    blocked: bool = False   # looked like a logged-out paywall (cookie missing/expired)
+    blocked: bool = False    # looked like a logged-out paywall (cookie missing/expired)
+    published: str = ""      # true publish date (ISO) parsed from the page, if found
 
 
 def fetch_page(url: str, timeout: int = 20) -> PageData:
@@ -116,12 +117,59 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
 
     title = _extract_title(html)
     content = _extract_content(html)
-    return PageData(title=title, content=content, blocked=looks_paywalled(html, content))
+    return PageData(title=title, content=content,
+                    blocked=looks_paywalled(html, content),
+                    published=_extract_published(html))
 
 
 def fetch_fulltext(url: str, timeout: int = 20) -> str:
     """Return cleaned article text, or "" on any failure."""
     return fetch_page(url, timeout=timeout).content
+
+
+def _extract_published(html: str) -> str:
+    """Best-effort true publish date (ISO 8601) from the article page. Static-site
+    sitemaps stamp every URL with the last build date, so the page's own metadata
+    is the authoritative source. Returns "" if none found."""
+    import re
+    # 1) Meta tags: article:published_time (OG), or common date metas.
+    meta_pat = re.compile(
+        r'<meta[^>]+(?:property|name)=["\'](?:article:published_time|'
+        r'og:article:published_time|datePublished|publish-date|date|'
+        r'parsely-pub-date|sailthru\.date)["\'][^>]*\bcontent=["\']([^"\']+)["\']',
+        re.IGNORECASE)
+    # 2) <time datetime="..."> — the first one on a post is almost always the date.
+    time_pat = re.compile(r'<time[^>]*\bdatetime=["\']([^"\']+)["\']', re.IGNORECASE)
+    # 3) JSON-LD "datePublished": "..."
+    ld_pat = re.compile(r'"datePublished"\s*:\s*"([^"]+)"', re.IGNORECASE)
+    for pat in (meta_pat, ld_pat, time_pat):
+        m = pat.search(html or "")
+        if m:
+            val = _normalize_date(m.group(1))
+            if val:
+                return val
+    return ""
+
+
+def _normalize_date(s: str) -> str:
+    """Coerce a date/datetime string to an ISO string; "" if unparseable or absurd."""
+    from datetime import datetime, timezone
+    s = (s or "").strip()
+    if not s:
+        return ""
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        try:
+            dt = datetime.strptime(s[:10], "%Y-%m-%d")
+        except Exception:
+            return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    # guard against placeholder/build dates far in the future
+    if dt.year < 1990 or dt > datetime.now(timezone.utc):
+        return ""
+    return dt.isoformat()
 
 
 def _extract_title(html: str) -> str:
