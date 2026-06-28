@@ -22,6 +22,17 @@ from bs4 import BeautifulSoup
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; linklib/1.0)"}
 
+# When sending an auth cookie we're impersonating the logged-in browser, so pair
+# it with a realistic browser User-Agent + Accept to reduce WAF friction
+# (Cloudflare cf_clearance is also IP-bound, so this helps but isn't a guarantee).
+_BROWSER_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/124.0.0.0 Safari/537.36"),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 
 def _auth_cookies() -> dict[str, str]:
     """Per-domain auth cookies for fetching subscriber-only content (e.g. paid
@@ -92,8 +103,8 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     `blocked` flags a response that still looks paywalled — the signal that a
     configured cookie is missing or expired.
     """
-    headers = dict(_HEADERS)
     cookie = _cookie_for(url)
+    headers = dict(_BROWSER_HEADERS if cookie else _HEADERS)
     if cookie:
         headers["Cookie"] = cookie
     try:
