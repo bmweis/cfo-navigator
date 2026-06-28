@@ -508,6 +508,7 @@ def homepage():
 </div>
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:34px 0 8px;">{cards}</div>
+<p style="margin:14px 0 0;font-size:14px;color:var(--muted);">Read something a finance leader should have in their back pocket? <a href="/library/submit">Suggest a piece for the library &rarr;</a></p>
 
 <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:26px;">
   {_avatar(64)}
@@ -2168,6 +2169,94 @@ async def contact_submit(request: Request):
 # TODO: Once hello@[domain].com is set up in Google Workspace, wire the contact
 # form to also email submissions there. Set LINKLIB_CONTACT_EMAIL in Railway and
 # call _send_email() here. The DB record will keep existing as a backup.
+
+
+# ---------------------------------------------------------------------------
+# Library submissions — a public "suggest a piece" form. Submissions land
+# UN-ENRICHED in the Library Queue (no server-side fetch, no Claude call), so a
+# public endpoint can't be used to run up cost or fetch arbitrary URLs. Brian
+# reviews them in /admin/queue; enrichment happens only on approval.
+#
+# Public for now; the handler is self-contained, so gating it behind the future
+# paid login is a one-line auth check.
+# ---------------------------------------------------------------------------
+
+@app.get("/library/submit", response_class=HTMLResponse)
+def library_submit_page(submitted: str = ""):
+    if submitted == "1":
+        body = """<div class="page" style="max-width:560px;">
+<h1>Thanks&mdash;suggestion received.</h1>
+<p>I review every suggestion personally. If it's a fit for the library, it'll join the collection.</p>
+<a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
+</div>"""
+        return HTMLResponse(_page("Suggestion received — Brian Weisberg", "", body))
+
+    body = """<div class="page" style="max-width:560px;">
+<h1>Suggest a piece for the library</h1>
+<p style="color:var(--muted);margin:4px 0 32px;">Read something a finance leader should have in their back pocket? Send it my way. I review every suggestion before it joins the library.</p>
+<form method="post" action="/library/submit" style="display:grid;gap:20px;">
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Article URL *</label>
+    <input name="url" type="url" required maxlength="500"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Why it belongs <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+    <textarea name="why" maxlength="600" rows="3"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="What makes this worth saving?"></textarea>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Your name <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+    <input name="name" maxlength="120"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="So I know who to thank">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Your email <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+    <input name="email" type="email" maxlength="200"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="you@example.com">
+  </div>
+  <input type="text" name="website" tabindex="-1" autocomplete="off"
+    style="position:absolute;left:-9999px;width:1px;height:1px;" aria-hidden="true">
+  <div>
+    <button type="submit" class="btn">Suggest for the library</button>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Suggest a piece — Brian Weisberg", "", body))
+
+
+@app.post("/library/submit")
+async def library_submit(request: Request):
+    form = await request.form()
+    # Honeypot: bots fill the hidden "website" field. Pretend success, drop silently.
+    if (form.get("website") or "").strip():
+        return RedirectResponse("/library/submit?submitted=1", status_code=303)
+    url = (form.get("url") or "").strip()
+    if not url or not re.match(r"^https?://", url, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="A valid http(s) URL is required")
+    why = (form.get("why") or "").strip()[:600]
+    name = (form.get("name") or "").strip()[:120]
+    email = (form.get("email") or "").strip()[:200]
+
+    who = name or "anonymous"
+    note_bits = [f"Reader suggestion from {who}" + (f" ({email})" if email else "") + "."]
+    if why:
+        note_bits.append(f"Why: {why}")
+    note = " ".join(note_bits)
+
+    lib = _lib()
+    try:
+        # Un-enriched insert; no fetch. add_to_queue dedupes against library + queue.
+        lib.add_to_queue(url, source="Reader submissions", summary=note,
+                         origin=f"submission:{who}", enriched=False)
+    finally:
+        lib.close()
+    # Always confirm — never reveal whether the URL was already in the library.
+    return RedirectResponse("/library/submit?submitted=1", status_code=303)
 
 # ---------------------------------------------------------------------------
 # Community
@@ -4572,7 +4661,10 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0):
             f'<span style="font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:2px 8px;">{_esc(t)}</span>'
             for t in tags_list
         ) or '<span style="font-size:12px;color:var(--muted);">auto-tagged on enrich</span>'
-        meta = date or ""
+        sub_badge = ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
+                     'background:var(--coral-wash);color:var(--coral-deep);margin-right:6px;">Reader suggestion</span>'
+                     if (c.get("origin") or "").startswith("submission:") else "")
+        meta = f"{sub_badge}{date}" if date else sub_badge
         return f"""<div data-card data-url="{url}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
     <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
