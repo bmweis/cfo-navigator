@@ -276,6 +276,16 @@ def _is_member(request: Request) -> bool:
     return _current_claims(request) is not None
 
 
+def _role(request: Request) -> str:
+    """'admin' | 'user' | 'guest' — drives the nav."""
+    if not AUTH_PASSWORD:
+        return "admin"
+    claims = _current_claims(request)
+    if not claims:
+        return "guest"
+    return "admin" if claims["role"] == "admin" else "user"
+
+
 def _login_redirect(request: Request) -> RedirectResponse:
     nxt = request.url.path + (("?" + request.url.query) if request.url.query else "")
     return RedirectResponse(f"/login?next={quote(nxt, safe='')}", status_code=303)
@@ -288,8 +298,18 @@ def _check_token(token: str | None) -> None:
 
 
 def _require_api(request: Request, token: str | None = None) -> None:
-    """Allow API access via a valid login cookie OR a valid token header/param."""
+    """Admin-only API: a valid admin cookie OR the save token."""
     if _is_authed(request):
+        return
+    tok = token or request.headers.get("X-Save-Token")
+    if SAVE_TOKEN and tok and hmac.compare_digest(tok, SAVE_TOKEN):
+        return
+    raise HTTPException(status_code=401, detail="unauthorized")
+
+
+def _require_member(request: Request, token: str | None = None) -> None:
+    """Member-tier API: any signed-in session (user or admin), OR the save token."""
+    if _is_member(request):
         return
     tok = token or request.headers.get("X-Save-Token")
     if SAVE_TOKEN and tok and hmac.compare_digest(tok, SAVE_TOKEN):
@@ -395,11 +415,17 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
 }
 """
 
-def _page(title: str, active: str, body: str, authed: bool = False) -> str:
+def _page(title: str, active: str, body: str, authed: bool = False,
+          role: str | None = None) -> str:
+    # role: "admin" | "user" | "guest". Falls back to authed for legacy callers.
+    if role is None:
+        role = "admin" if authed else "guest"
     public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
-              ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
-    private = [("/library", "Library"), ("/feed", "Feed"), ("/ask", "Ask"),
-               ("/draft", "Draft")]
+              ("/contact", "Contact")]
+    # Members-only sections — shown to everyone so the gated area is discoverable;
+    # clicking them when signed out lands on the login screen.
+    member = [("/library", "Library"), ("/feed", "Feed"),
+              ("/tools", "CFO Toolbox"), ("/ask", "Ask")]
 
     def links(items):
         return "".join(
@@ -407,10 +433,15 @@ def _page(title: str, active: str, body: str, authed: bool = False) -> str:
             for href, label in items
         )
 
-    nav = links(public) + '<span class="sep"></span>' + links(private)
-    if authed:
+    nav = links(public) + '<span class="sep"></span>' + links(member)
+    if role == "admin":
+        nav += f'<a href="/draft" class="{"active" if active == "Draft" else ""}">Draft</a>'
         nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin</a>'
         nav += '<a href="/logout">Log out</a>'
+    elif role == "user":
+        nav += '<a href="/logout">Log out</a>'
+    else:
+        nav += f'<a href="/login" class="{"active" if active == "Sign in" else ""}">Sign in</a>'
 
     star = ('<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">'
             '<path d="M8 0 L9.4 6.6 L16 8 L9.4 9.4 L8 16 L6.6 9.4 L0 8 L6.6 6.6 Z" fill="#002975"/></svg>')
@@ -443,7 +474,7 @@ def _page(title: str, active: str, body: str, authed: bool = False) -> str:
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/library", error: str = ""):
-    if _is_authed(request):
+    if _is_member(request):   # already signed in (member or admin) — go on in
         return RedirectResponse(next or "/library", status_code=303)
     err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That didn&rsquo;t work — check your details and try again.</p>'
            if error else "")
@@ -797,7 +828,9 @@ def thought_leadership():
 
 
 @app.get("/growth-engine-ratio", response_class=HTMLResponse)
-def growth_engine_ratio():
+def growth_engine_ratio(request: Request):
+    if not _is_member(request):
+        return _login_redirect(request)
     body = """<div class="page" style="max-width:820px;">
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -1504,11 +1537,13 @@ function loadTimelineExample() {
 // Build the timeline table up front so its rows exist before the user switches tabs.
 renderTL();
 </script>"""
-    return HTMLResponse(_page("The Growth Engine Ratio—Brian Weisberg", "Thought Leadership", body))
+    return HTMLResponse(_page("The Growth Engine Ratio—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
 @app.get("/finops-ai-hackathon", response_class=HTMLResponse)
-def finops_ai_hackathon():
+def finops_ai_hackathon(request: Request):
+    if not _is_member(request):
+        return _login_redirect(request)
     body = """<div class="page" style="max-width:820px;">
 <style>
   .fah-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
@@ -1862,11 +1897,13 @@ def finops_ai_hackathon():
 </div>
 
 </div>"""
-    return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought Leadership", body))
+    return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
 @app.get("/netsuite-mcp", response_class=HTMLResponse)
-def netsuite_mcp():
+def netsuite_mcp(request: Request):
+    if not _is_member(request):
+        return _login_redirect(request)
     body = """<div class="page" style="max-width:820px;">
 <style>
   .ns-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
@@ -2155,7 +2192,7 @@ def netsuite_mcp():
 </div>
 
 </div>"""
-    return HTMLResponse(_page("Connecting Claude to NetSuite—Brian Weisberg", "Thought Leadership", body))
+    return HTMLResponse(_page("Connecting Claude to NetSuite—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
 @app.get("/contact", response_class=HTMLResponse)
@@ -2352,7 +2389,9 @@ your answers will directly shape what I build.</p>
 
 @app.get("/tools", response_class=HTMLResponse)
 def tools_directory(request: Request):
-    authed = _is_authed(request)
+    if not _is_member(request):
+        return _login_redirect(request)
+    authed = _is_authed(request)   # admin sees the management controls
     lib = _lib()
     try:
         tools = lib.list_tools(approved_only=True)
@@ -2717,7 +2756,7 @@ function submitIntroForm() {
   });
 }
 </script>"""
-    return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, authed=authed))
+    return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
 def _tool_category_checkboxes(selected: list[str] | None = None) -> str:
@@ -2731,14 +2770,16 @@ def _tool_category_checkboxes(selected: list[str] | None = None) -> str:
 
 
 @app.get("/tools/submit", response_class=HTMLResponse)
-def tools_submit_page(submitted: str = ""):
+def tools_submit_page(request: Request, submitted: str = ""):
+    if not _is_member(request):
+        return _login_redirect(request)
     if submitted == "1":
         body = """<div class="page" style="max-width:560px;">
 <h1>Thanks—submission received.</h1>
 <p>Your tool has been submitted for review. If approved, it'll appear in the CFO Toolbox shortly.</p>
 <a href="/tools" class="btn btn-ghost" style="margin-top:8px;">Back to CFO Toolbox</a>
 </div>"""
-        return HTMLResponse(_page("Submission received—CFO Toolbox", "CFO Toolbox", body))
+        return HTMLResponse(_page("Submission received—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
     body = f"""<div class="page" style="max-width:560px;">
 <h1>Submit a Tool</h1>
@@ -2779,11 +2820,13 @@ def tools_submit_page(submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Submit a Tool—CFO Toolbox", "CFO Toolbox", body))
+    return HTMLResponse(_page("Submit a Tool—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
 @app.post("/tools/submit")
 async def tools_submit(request: Request):
+    if not _is_member(request):
+        return _login_redirect(request)
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
@@ -3199,6 +3242,7 @@ def admin_tools_delete(request: Request, tool_id: int):
 
 @app.post("/tools/{tool_id}/interest")
 async def tools_interest(tool_id: int, request: Request):
+    _require_member(request)
     try:
         body = await request.json()
     except Exception:
@@ -3245,8 +3289,9 @@ OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferr
 
 @app.get("/feed", response_class=HTMLResponse)
 def feed_reader(request: Request, cat: str = "", rl: str = ""):
-    if not _is_authed(request):
+    if not _is_member(request):
         return _login_redirect(request)
+    is_admin = _is_authed(request)   # admin: in-app reader + save/read-later/curation
 
     import json as _json
     lib = _lib()
@@ -3275,7 +3320,7 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
         except Exception as e:
             return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed",
                 f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
-                authed=True))
+                role=_role(request)))
 
     # Tab bar
     if rl:
@@ -3306,11 +3351,15 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
         paywalled = item.get("paywalled", False)
         paywall_badge = (' <span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:600;vertical-align:middle;">&#128274; Paywalled</span>'
                          if paywalled else '')
-        read_btn = ('' if paywalled
-                    else f'<a href="/read?url={quote(url, safe="")}" class="faction">&#9654; Read</a>')
+        # In-app reader + save/read-later are admin-only (resale-safe); members
+        # read on the original source via the card title.
+        read_btn = (f'<a href="/read?url={quote(url, safe="")}" class="faction">&#9654; Read</a>'
+                    if (is_admin and not paywalled) else '')
         is_rl_mode = item.get("_rl_mode", False)
         is_rl = is_rl_mode or (url in rl_urls)
-        if is_rl_mode:
+        if not is_admin:
+            rl_btn = save_btn = ''
+        elif is_rl_mode:
             rl_btn = '<button class="faction rl-active" onclick="removeReadLater(this)">&#10003; Read later</button>'
             save_btn = ''
         else:
@@ -3593,7 +3642,7 @@ function saveCustomFilters() {{
 {feed_css}
 {feed_js}"""
 
-    return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Feed", body, authed=True))
+    return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Feed", body, role=_role(request)))
 
 
 _READER_CSS = """
@@ -3686,6 +3735,8 @@ function adj(d) {{
 
 @app.get("/read", response_class=HTMLResponse)
 def reader(request: Request, url: str = "", id: int = 0):
+    # Admin-only by design: the in-app reader renders full article text, which we
+    # don't serve to members (resale-safe). Members link out to the source instead.
     if not _is_authed(request):
         return _login_redirect(request)
     from linklib.extract import fetch_page
@@ -3864,9 +3915,9 @@ async function deleteArticle(id) {{
 
 @app.get("/library", response_class=HTMLResponse)
 def library(request: Request, q: str = ""):
-    authed = _is_authed(request)
-    if not authed:
+    if not _is_member(request):
         return _login_redirect(request)
+    authed = _is_authed(request)   # admin: shows tag-edit / delete controls
     lib = _lib()
     try:
         results = lib.search(q, limit=100)
@@ -3882,12 +3933,10 @@ def library(request: Request, q: str = ""):
             f'<span class="tag-chip" data-tag="{_esc(t)}">{_esc(t)}</span>'
             for t in r.get("tags", [])
         )
-        return f"""<article class="card" id="card-{r['id']}">
-          <a class="card-title" href="{r['url']}" target="_blank" rel="noopener">{_esc(r['title'])}</a>
-          <div class="meta">{_esc(r.get('source',''))}{' &middot; ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
-          <p class="summary">{_esc(r.get('summary',''))[:280]}</p>
-          <div class="tags" id="tags-{r['id']}" data-tags="{tags_csv}">{tag_spans}</div>
-          <div id="tag-editor-{r['id']}" style="display:none;margin-top:8px;">
+        url = _esc(r['url'])
+        if authed:
+            # Admin: in-app reader + curation controls.
+            editor = f"""<div id="tag-editor-{r['id']}" style="display:none;margin-top:8px;">
             <input type="text" id="tag-input-{r['id']}" value="{tags_csv}"
               placeholder="comma-separated tags"
               style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;">
@@ -3895,15 +3944,23 @@ def library(request: Request, q: str = ""):
               <button class="postbtn" onclick="saveTags({r['id']})">Save</button>
               <button class="postbtn" onclick="cancelTags({r['id']})">Cancel</button>
             </div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-            <a href="/read?id={r['id']}" class="postbtn" style="text-decoration:none;">Read</a>
-            <button class="postbtn" onclick="openTagEditor({r['id']})">Edit tags</button>
-            <form method="post" action="/library/{r['id']}/delete" style="display:contents;"
-                  onsubmit="return confirm('Permanently delete this article?');">
-              <button type="submit" class="postbtn" style="color:#b91c1c;">Delete</button>
-            </form>
-          </div>
+          </div>"""
+            actions = (f'<a href="/read?id={r["id"]}" class="postbtn" style="text-decoration:none;">Read</a>'
+                       f'<button class="postbtn" onclick="openTagEditor({r["id"]})">Edit tags</button>'
+                       f'<form method="post" action="/library/{r["id"]}/delete" style="display:contents;" '
+                       f'onsubmit="return confirm(\'Permanently delete this article?\');">'
+                       f'<button type="submit" class="postbtn" style="color:#b91c1c;">Delete</button></form>')
+        else:
+            # Member: read on the original source (no in-app full text).
+            editor = ""
+            actions = f'<a href="{url}" target="_blank" rel="noopener" class="postbtn" style="text-decoration:none;">Read on source &rarr;</a>'
+        return f"""<article class="card" id="card-{r['id']}">
+          <a class="card-title" href="{url}" target="_blank" rel="noopener">{_esc(r['title'])}</a>
+          <div class="meta">{_esc(r.get('source',''))}{' &middot; ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
+          <p class="summary">{_esc(r.get('summary',''))[:280]}</p>
+          <div class="tags" id="tags-{r['id']}" data-tags="{tags_csv}">{tag_spans}</div>
+          {editor}
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">{actions}</div>
         </article>"""
 
     cards = "".join(_card(r) for r in results) or '<p style="color:var(--muted);">No matches.</p>'
@@ -4013,7 +4070,7 @@ async function ask(){{
 }}
 </script>"""
 
-    return HTMLResponse(_page("Library—Brian Weisberg", "Library", page_body, authed=authed))
+    return HTMLResponse(_page("Library—Brian Weisberg", "Library", page_body, role=_role(request)))
 
 
 # ---------------------------------------------------------------------------
@@ -4027,7 +4084,7 @@ def health():
 
 @app.get("/api/search")
 def api_search(request: Request, q: str = "", limit: int = 50, token: str | None = None):
-    _require_api(request, token)
+    _require_member(request, token)
     lib = _lib()
     try:
         return {"query": q, "results": lib.search(q, limit=limit)}
@@ -4037,13 +4094,10 @@ def api_search(request: Request, q: str = "", limit: int = 50, token: str | None
 
 @app.get("/ask", response_class=HTMLResponse)
 def ask_page(request: Request, q: str = ""):
-    authed = _is_authed(request)
-    # /ask is private today: anonymous visitors are sent to log in. If this is
-    # ever opened to the public, drop this one redirect — the page below already
-    # hides the cost estimate from anonymous users and defaults them to the
-    # cheapest model + effort. (POST /ask should be clamped to match at that point.)
-    if not authed:
+    # Member-gated: signed-in members and admin. Anonymous visitors go to login.
+    if not _is_member(request):
         return _login_redirect(request)
+    authed = _is_authed(request)   # admin flag (e.g. for any admin-only affordances)
 
     from linklib.agent import EFFORT_SETTINGS, COST_ESTIMATES, MODEL_ALIASES
 
@@ -4278,12 +4332,12 @@ document.addEventListener('keydown', function(e) {{
 updateEstimate();
 </script>"""
 
-    return HTMLResponse(_page("Ask—Brian Weisberg", "Ask", body, authed=True))
+    return HTMLResponse(_page("Ask—Brian Weisberg", "Ask", body, role=_role(request)))
 
 
 @app.post("/ask")
 async def ask(request: Request):
-    _require_api(request)
+    _require_member(request)
     from linklib.agent import answer_question, count_prior_questions, MAX_FOLLOWUPS
     payload = await request.json()
     question = (payload.get("question") or "").strip()
