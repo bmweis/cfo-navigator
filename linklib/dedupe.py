@@ -10,6 +10,7 @@ dupes out of the library.
 """
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -148,6 +149,15 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b)
 
 
+def _seqratio(a: str, b: str) -> float:
+    """Symmetric SequenceMatcher ratio. difflib's ratio() is order-dependent
+    (ratio(a,b) != ratio(b,a)), which made the pairwise check and the cluster
+    check disagree on borderline pairs; take the max so the result is stable."""
+    if not a or not b:
+        return 0.0
+    return max(SequenceMatcher(None, a, b).ratio(), SequenceMatcher(None, b, a).ratio())
+
+
 def _date(s) -> datetime | None:
     s = (s or "")
     try:
@@ -162,7 +172,7 @@ def _date(s) -> datetime | None:
 def _components(a: dict, b: dict, source: str) -> tuple[float, float, float]:
     """(title_sim, body_jac, summary_jac) — the raw signals for two articles."""
     ta, tb = _norm_title(a.get("title", ""), source), _norm_title(b.get("title", ""), source)
-    title_ratio = SequenceMatcher(None, ta, tb).ratio() if ta and tb else 0.0
+    title_ratio = _seqratio(ta, tb)
     title_jac = _jaccard(_tokens(ta), _tokens(tb))
     body_jac = _jaccard(
         _tokens(f'{a.get("title","")} {a.get("summary","") or ""}'),
@@ -255,7 +265,7 @@ def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
         sj = _jaccard(summ_toks[i], summ_toks[j])
         if _is_dup(tj, bj, sj, threshold):
             return True
-        tr = SequenceMatcher(None, norm_titles[i], norm_titles[j]).ratio() if norm_titles[i] and norm_titles[j] else 0.0
+        tr = _seqratio(norm_titles[i], norm_titles[j])
         return _is_dup(max(tr, tj), bj, sj, threshold)
 
     def _in_window(i, j) -> bool:
@@ -298,3 +308,146 @@ def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
         out.append(cluster)
     out.sort(key=len, reverse=True)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Keeper selection + Claude verification
+#
+# Title similarity is a high-recall *candidate* generator: it reliably surfaces
+# possible dupes but can't tell "same talk, different headline" (a real dupe)
+# from "VP of Sales vs VP of CS, one phrase different" (not a dupe) — that needs
+# the article's meaning, not its characters. So candidates are verified by Claude
+# against title + summary. With no API key it degrades to the raw candidates.
+# ---------------------------------------------------------------------------
+
+def _is_dear(a: dict) -> bool:
+    """A "Dear SaaStr: …" / "Ask SaaStr: …" advice-column post (the rehash), as
+    opposed to an original article."""
+    return bool(re.match(r"\s*(dear|ask)\s+saastr\s*[:,]", (a.get("title") or ""), re.IGNORECASE))
+
+
+def _keeper_sorted(cluster: list[dict]) -> list[dict]:
+    """Order a cluster so the article to KEEP is first: prefer a non-"Dear SaaStr"
+    original over the column rehash, then the newest publish date."""
+    def key(a: dict):
+        d = _date(a.get("published_at"))
+        ts = d.timestamp() if d else float("-inf")
+        return (_is_dear(a), -ts)   # non-dear first; newest first
+    return sorted(cluster, key=key)
+
+
+def _rekey_cluster(cluster: list[dict], source: str = "") -> list[dict]:
+    """Pick the keeper (non-Dear, then newest), put it first, and annotate every
+    other member with `_dup_score` = similarity to that keeper for the UI."""
+    ordered = _keeper_sorted(cluster)
+    keeper = ordered[0]
+    for a in ordered[1:]:
+        a["_dup_score"] = round(similarity(a, keeper, source), 2)
+    keeper.pop("_dup_score", None)
+    return ordered
+
+
+_VERIFY_MODEL = os.environ.get("LINKLIB_DEDUPE_MODEL",
+                               os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6"))
+
+_VERIFY_PROMPT = """A finance leader is de-duplicating a research library. A fast
+text filter flagged the articles below as POSSIBLE near-duplicates, but it only
+compares titles and over-flags. Decide which are TRULY duplicates.
+
+Two articles are duplicates ONLY if they cover the same underlying piece: the same
+specific question with the same answer, the same talk/interview retitled, or the
+same article republished under a different headline. They are NOT duplicates if
+they differ in any material way, even when the wording looks similar — for example:
+- a different role or seniority level (VP of Sales vs VP of Customer Success; a CFO
+  vs a first finance hire; an SDR vs an SDR manager; an AE vs a sales rep),
+- a different focus (building/managing a team vs being effective in the role;
+  quota vs ramp time; paying on monthly deals vs on renewals; a comp plan vs a
+  hiring plan),
+- a different company, revenue milestone, or stage,
+- a genuinely different question, even if it shares a template ("Dear SaaStr…",
+  "The #1 mistake…", "5 Interesting Learnings…").
+
+Conversely, DO group two articles that are clearly the same content retitled (e.g.
+a talk summarized two ways, naming the same speakers/companies).
+
+The filter's candidate groupings are shown only as hints — regroup freely. It is
+fine to return no groups at all.
+
+Return STRICT JSON only: {{"groups": [["<id>", "<id>", ...], ...]}} where each inner
+array lists the ids of 2+ articles that genuinely duplicate one another. Omit any
+article with no duplicate. No prose, no markdown.
+
+CANDIDATE GROUPS (the filter's guesses — verify each):
+{blocks}
+"""
+
+
+def _verify_blocks(clusters: list[list[dict]]) -> tuple[str, dict]:
+    """Render candidate clusters for the prompt and return (text, id->article)."""
+    by_id: dict[str, dict] = {}
+    lines = []
+    for gi, c in enumerate(clusters, 1):
+        lines.append(f"[Group {gi}]")
+        for a in c:
+            aid = str(a.get("id") or a.get("url"))
+            by_id[aid] = a
+            title = (a.get("title") or a.get("url") or "").strip()
+            date = (a.get("published_at") or "")[:10]
+            summ = (a.get("summary") or "").strip().replace("\n", " ")[:240]
+            line = f"- id={aid} — {date} — {title}"
+            if summ:
+                line += f" — {summ}"
+            lines.append(line)
+        lines.append("")
+    return "\n".join(lines), by_id
+
+
+def verify_clusters(clusters: list[list[dict]], *, source: str = "",
+                    model: str | None = None) -> list[list[dict]]:
+    """Confirm which candidate near-dup clusters are real, using Claude's judgment
+    over title + summary. Splits/drops over-flagged groups and re-picks the keeper
+    (non-"Dear SaaStr", then newest) for each surviving group.
+
+    Degrades gracefully: with no anthropic SDK / API key (or on any error) it
+    returns the candidate clusters unchanged except for keeper re-selection — so
+    the "keep the non-Dear post" rule still applies even offline."""
+    clusters = [c for c in clusters if len(c) >= 2]
+    if not clusters:
+        return []
+
+    def _fallback():
+        return [_rekey_cluster(c, source) for c in clusters]
+
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return _fallback()
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return _fallback()
+
+    blocks, by_id = _verify_blocks(clusters)
+    try:
+        import json
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model or _VERIFY_MODEL, max_tokens=2000,
+            messages=[{"role": "user", "content": _VERIFY_PROMPT.format(blocks=blocks)}],
+        )
+        raw = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+        out = []
+        for grp in data.get("groups", []):
+            members = []
+            seen = set()
+            for gid in grp:
+                a = by_id.get(str(gid))
+                if a is not None and id(a) not in seen:
+                    members.append(a)
+                    seen.add(id(a))
+            if len(members) >= 2:
+                out.append(_rekey_cluster(members, source))
+        out.sort(key=len, reverse=True)
+        return out
+    except Exception:
+        return _fallback()

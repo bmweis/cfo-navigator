@@ -14,6 +14,10 @@ def _a(title, summary="", date="2025-03-01"):
     return {"id": id(title), "title": title, "summary": summary, "published_at": date, "url": title}
 
 
+def _ai(aid, title, summary="", date="2025-03-01"):
+    return {"id": aid, "title": title, "summary": summary, "published_at": date, "url": f"u{aid}"}
+
+
 def test_similar_titles_flagged():
     a = _a("The 5 Metrics Every SaaS CFO Must Track | SaaStr")
     b = _a("5 Metrics Every SaaS CFO Should Track")
@@ -150,3 +154,75 @@ def test_screenshot_cluster_splits_correctly():
     assert len(clusters[0]) == 2
     titles = {x["title"] for x in clusters[0]}
     assert all("Comp Plan" in t for t in titles)
+
+
+# --- keeper selection -------------------------------------------------------
+
+def test_keeper_prefers_non_dear_over_newer_dear():
+    # Even though the "Dear SaaStr" post is newer, the original article is kept.
+    dear = _a("Dear SaaStr: How Should I Build Our First Sales Comp Plan? | SaaStrAI", date="2025-06-25")
+    orig = _a("8 Top Tips to Building Your Very First Sales Comp Plan | SaaStrAI", date="2025-04-14")
+    ordered = dd._rekey_cluster([dear, orig], source="SaaStr")
+    assert ordered[0] is orig                     # non-Dear kept
+    assert "_dup_score" in ordered[1]             # the Dear post is the dup
+    assert "_dup_score" not in ordered[0]
+
+
+def test_keeper_falls_back_to_newest_when_all_dear():
+    older = _a("Dear SaaStr: How Do I Raise a Series A? | SaaStrAI", date="2025-01-01")
+    newer = _a("Dear SaaStr: How Should I Raise My Series A? | SaaStrAI", date="2025-03-01")
+    ordered = dd._rekey_cluster([older, newer], source="SaaStr")
+    assert ordered[0] is newer                    # newest among all-Dear
+
+
+# --- Claude verification pass ----------------------------------------------
+
+class _FakeResp:
+    def __init__(self, text):
+        self.content = [type("B", (), {"type": "text", "text": text})()]
+
+
+def _fake_anthropic(groups_json, monkeypatch):
+    """Install a fake anthropic.Anthropic whose messages.create returns groups_json."""
+    import sys, types
+    mod = types.ModuleType("anthropic")
+
+    class _Client:
+        def __init__(self, *a, **k):
+            self.messages = self
+        def create(self, *a, **k):
+            return _FakeResp(groups_json)
+
+    mod.Anthropic = _Client
+    monkeypatch.setitem(sys.modules, "anthropic", mod)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+
+
+def test_verify_drops_false_positive_cluster(monkeypatch):
+    # The filter grouped a real dupe pair with a look-alike; Claude keeps only the pair.
+    cluster = [
+        _ai(1, "Dear SaaStr: How Can I Become a Better VP of Sales?", date="2025-03-06"),
+        _ai(2, "Dear SaaStr: How Do I Become a Great Sales Rep?", date="2025-02-01"),
+    ]
+    _fake_anthropic('{"groups": []}', monkeypatch)   # Claude says: not dupes
+    assert dd.verify_clusters([cluster], source="SaaStr") == []
+
+
+def test_verify_confirms_and_rekeys(monkeypatch):
+    # Same talk retitled: Claude confirms; keeper is the non-Dear original.
+    a = _ai(10, "How to Build a World-Class CS Machine: Lessons from the CRO of Notion", date="2025-08-18")
+    b = _ai(11, "Dear SaaStr: The 10% Rule — Invest in CS, With the CRO of Notion", date="2025-08-21")
+    _fake_anthropic('{"groups": [["10", "11"]]}', monkeypatch)
+    out = dd.verify_clusters([[b, a]], source="SaaStr")
+    assert len(out) == 1 and len(out[0]) == 2
+    assert out[0][0] is a                          # non-Dear original kept
+
+
+def test_verify_degrades_without_api(monkeypatch):
+    # No API key -> candidates returned unchanged, but keeper still re-selected.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    dear = _ai(20, "Dear SaaStr: How Should I Build Our First Sales Comp Plan?", date="2025-06-25")
+    orig = _ai(21, "8 Top Tips to Building Your Very First Sales Comp Plan", date="2025-04-14")
+    out = dd.verify_clusters([[dear, orig]], source="SaaStr")
+    assert len(out) == 1
+    assert out[0][0] is orig                       # keeper rule applied offline

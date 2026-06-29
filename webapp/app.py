@@ -5455,6 +5455,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
         if source:
             arts = lib.articles_by_source(source)
             clusters = dd.find_clusters(arts, days=days, threshold=threshold, source=source)
+            clusters = dd.verify_clusters(clusters, source=source)
     finally:
         lib.close()
 
@@ -5505,7 +5506,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                     keep = i == 0
                     d = _esc((a.get("published_at") or "")[:10])
                     if keep:
-                        tag = '<span style="font-size:11px;font-weight:600;color:var(--seafoam-deep);white-space:nowrap;">KEEP (newest)</span>'
+                        tag = '<span style="font-size:11px;font-weight:600;color:var(--seafoam-deep);white-space:nowrap;">KEEP</span>'
                         match = ""
                     else:
                         tag = (f'<form method="post" action="/admin/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this article?\');"><input type="hidden" name="id" value="{a["id"]}"><input type="hidden" name="back" value="{_esc(source)}|{level}|{days}"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
@@ -5516,10 +5517,10 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                              f'<div style="min-width:0;"><a href="{_esc(a["url"])}" target="_blank" rel="noopener" style="font-size:14px;color:var(--navy);font-weight:500;">{_esc(a.get("title") or a["url"])}</a>'
                              f'<div style="font-size:12px;color:var(--muted);">{d}</div>{match}</div>{tag}</div>')
                 blocks += (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px 18px 14px;margin-bottom:14px;">'
-                           f'<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:10px 0 2px;">{len(c)} near-duplicates &mdash; keeping the newest</div>{rows}</div>')
-            bulk = f"""<form method="post" action="/admin/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} older duplicate(s), keeping the newest in each group? A backup is taken first.');">
+                           f'<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:10px 0 2px;">{len(c)} near-duplicates &mdash; verified by Claude</div>{rows}</div>')
+            bulk = f"""<form method="post" action="/admin/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} duplicate(s), keeping one per group? A backup is taken first.');">
   <input type="hidden" name="source" value="{_esc(source)}"><input type="hidden" name="level" value="{level}"><input type="hidden" name="days" value="{days}">
-  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Remove all {dupe_total} older duplicate{'s' if dupe_total != 1 else ''} (keep newest)</button>
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Remove all {dupe_total} duplicate{'s' if dupe_total != 1 else ''} (keep one each)</button>
   <span style="font-size:13px;color:var(--muted);margin-left:10px;">{len(clusters)} duplicate group{'s' if len(clusters) != 1 else ''} found.</span>
 </form>"""
             body_inner += toggle + bulk + blocks
@@ -5527,7 +5528,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
     body = f"""<div class="page" style="max-width:760px;">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Find duplicates</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">Catches the same piece republished under a different title within a date window &mdash; the kind exact-URL dedup misses. Pick a source and scan; remove the older copies and keep the newest. Turn on auto-skip to keep new dupes out going forward.</p>
+<p style="color:var(--muted);margin:-6px 0 18px;">Catches the same piece republished under a different title within a date window &mdash; the kind exact-URL dedup misses. A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged. The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest. Turn on auto-skip to keep new dupes out going forward.</p>
 {banner}
 {body_inner}
 </div>"""
@@ -5576,8 +5577,9 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
         backup.maybe_backup(DB_PATH)   # snapshot before a bulk delete
         clusters = dd.find_clusters(lib.articles_by_source(source), days=days,
                                     threshold=threshold, source=source)
+        clusters = dd.verify_clusters(clusters, source=source)
         for c in clusters:
-            for a in c[1:]:            # keep the first (newest), remove the rest
+            for a in c[1:]:            # keep the first (the keeper), remove the rest
                 lib.delete_article(a["id"])
                 removed += 1
     finally:
