@@ -572,6 +572,12 @@ def homepage(request: Request):
                "A curated directory of the tools high-growth finance teams actually use."),
     ])
 
+    # The "suggest a piece" prompt is shown only to signed-in members — submissions
+    # are account-only now, to keep public spam out.
+    suggest = ('<p style="margin:14px 0 0;font-size:14px;color:var(--muted);">Read something a finance '
+               'leader should have in their back pocket? <a href="/library/submit">Suggest a piece for '
+               'the archive &rarr;</a></p>') if _is_member(request) else ''
+
     body = f"""<div class="page">
 <div style="max-width:680px;">
   <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO for CFOs</div>
@@ -580,7 +586,7 @@ def homepage(request: Request):
 </div>
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:34px 0 8px;">{cards}</div>
-<p style="margin:14px 0 0;font-size:14px;color:var(--muted);">Read something a finance leader should have in their back pocket? <a href="/library/submit">Suggest a piece for the archive &rarr;</a></p>
+{suggest}
 
 <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:26px;">
   {_avatar(64)}
@@ -2261,6 +2267,8 @@ async def contact_submit(request: Request):
 
 @app.get("/library/submit", response_class=HTMLResponse)
 def library_submit_page(request: Request, submitted: str = ""):
+    if not _is_member(request):   # account-only, to keep public spam out
+        return _login_redirect(request)
     if submitted == "1":
         body = """<div class="page" style="max-width:560px;">
 <h1>Thanks&mdash;suggestion received.</h1>
@@ -2309,6 +2317,8 @@ def library_submit_page(request: Request, submitted: str = ""):
 
 @app.post("/library/submit")
 async def library_submit(request: Request):
+    if not _is_member(request):
+        return _login_redirect(request)
     form = await request.form()
     # Honeypot: bots fill the hidden "website" field. Pretend success, drop silently.
     if (form.get("website") or "").strip():
