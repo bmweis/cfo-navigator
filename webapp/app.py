@@ -5585,7 +5585,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
             body_inner += toggle + bulk + blocks
 
     body = f"""<div class="page" style="max-width:760px;">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Find duplicates</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Catches the same piece republished under a different title within a date window &mdash; the kind exact-URL dedup misses. A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged. The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest. Turn on auto-skip to keep new dupes out going forward.</p>
 {banner}
@@ -6948,7 +6948,7 @@ async def upload_db(request: Request, file: UploadFile = File(...), token: str |
             check.close()
         except Exception as e:
             raise HTTPException(status_code=400,
-                                detail=f"That doesn't look like a library database: {e}")
+                                detail=f"That doesn't look like a valid database: {e}")
         # Atomic swap, then clear any stale WAL sidecars from the old file.
         os.replace(tmp, dest)
         tmp = None
