@@ -49,11 +49,12 @@ def _admin_client(appmod):
 
 
 PUBLIC = ["/", "/about", "/thought-leadership", "/contact", "/library/submit",
-          # CFO Toolbox and everything linked from the thought-leadership page are
-          # fully public; only the account tools below stay gated.
-          "/tools", "/tools/submit", "/growth-engine-ratio", "/netsuite-mcp",
-          "/finops-ai-hackathon"]
-MEMBER = ["/library", "/feed", "/ask"]
+          # CFO Toolbox browsing and everything linked from the thought-leadership
+          # page are fully public; only the account tools below stay gated.
+          "/tools", "/growth-engine-ratio", "/netsuite-mcp", "/finops-ai-hackathon"]
+# Submitting a tool / requesting a warm intro is account-only, even though the
+# directory itself is public.
+MEMBER = ["/library", "/archive", "/feed", "/ask", "/tools/submit"]
 
 
 def test_public_pages_open_to_anonymous(env):

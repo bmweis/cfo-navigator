@@ -422,9 +422,10 @@ def _page(title: str, active: str, body: str, authed: bool = False,
         role = "admin" if authed else "guest"
     public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
               ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
-    # Account-only sections — shown to everyone so the gated area is discoverable;
-    # clicking them when signed out lands on the login screen.
-    member = [("/library", "Library"), ("/feed", "Feed"), ("/ask", "Ask")]
+    # Account-only section — one nav entry ("Library") that opens a hub linking to
+    # Archive, Feed, and Ask. Shown to everyone so the gated area is discoverable;
+    # clicking it when signed out lands on the login screen.
+    member = [("/library", "Library")]
 
     def links(items):
         return "".join(
@@ -564,13 +565,11 @@ def homepage(request: Request):
 
     cards = "".join([
         _rcard("/thought-leadership", "Thought Leadership",
-               "Podcasts, writing, and talks on how tech companies make money and how finance earns its seat."),
+               "Frameworks and playbooks worth keeping: the Growth Engine Ratio for pressure-testing GTM "
+               "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
+               "connecting Claude to NetSuite — plus the podcasts, writing, and press."),
         _rcard("/tools", "CFO Toolbox",
                "A curated directory of the tools high-growth finance teams actually use."),
-        _rcard("/growth-engine-ratio", "Growth Engine Ratio",
-               "A framework and calculator for pressure-testing GTM efficiency."),
-        _rcard("/community", "CFO Community",
-               "What a well-designed community for finance peers should look like — and what I'm building."),
     ])
 
     body = f"""<div class="page">
@@ -2384,6 +2383,7 @@ your answers will directly shape what I build.</p>
 @app.get("/tools", response_class=HTMLResponse)
 def tools_directory(request: Request):
     authed = _is_authed(request)   # admin sees the management controls
+    is_member = _is_member(request)  # submit / warm-intro are account-only
     lib = _lib()
     try:
         tools = lib.list_tools(approved_only=True)
@@ -2440,7 +2440,7 @@ def tools_directory(request: Request):
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
-<a href="/tools/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Submit a tool</a></p>
+{'<a href="/tools/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Submit a tool</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to submit a tool</a>'}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
   <input id="tool-search" type="search" placeholder="Search tools…"
@@ -2470,7 +2470,7 @@ def tools_directory(request: Request):
 <div style="margin-top:40px;padding-top:28px;border-top:1px solid var(--line);">
   <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these companies.</p>
   <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
-    <a href="/tools/submit" style="font-weight:500;">Submit it for review →</a></p>
+    {'<a href="/tools/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit a tool →</a>'}</p>
 </div>
 </div>
 
@@ -2501,6 +2501,8 @@ def tools_directory(request: Request):
 .tool-intro-btn{{font-size:13px;font-weight:600;color:var(--navy);background:none;border:1px solid var(--navy);
   border-radius:8px;padding:6px 14px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
 .tool-intro-btn:hover{{background:var(--navy-wash);}}
+.tool-intro-btn:disabled{{color:var(--muted);border-color:var(--line);cursor:not-allowed;}}
+.tool-intro-btn:disabled:hover{{background:none;}}
 /* Intro modal */
 .intro-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;
   align-items:center;justify-content:center;padding:20px;}}
@@ -2522,6 +2524,7 @@ def tools_directory(request: Request):
 <script>
 var ALL_TOOLS = {tools_json};
 var AUTHED = {'true' if authed else 'false'};
+var MEMBER = {'true' if is_member else 'false'};
 var activeCats = new Set();
 var advisorOnly = false;
 
@@ -2577,8 +2580,10 @@ function renderTools(tools) {{
       if (t.updated_at && t.updated_at !== t.created_at) metaParts.push('Edited ' + t.updated_at);
     }}
     var adminMeta = metaParts.length ? '<div class="tool-meta">' + metaParts.join(' &middot; ') + '</div>' : '';
-    var introBtn = '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ',\'' + esc(t.name).replace(/'/g,"\\'") + '\')">'
-      + '&#10024; Warm Intro</button>';
+    var introBtn = MEMBER
+      ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ',\'' + esc(t.name).replace(/'/g,"\\'") + '\')">'
+        + '&#10024; Warm Intro</button>'
+      : '<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">&#10024; Warm Intro</button>';
     return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
@@ -2763,6 +2768,8 @@ def _tool_category_checkboxes(selected: list[str] | None = None) -> str:
 
 @app.get("/tools/submit", response_class=HTMLResponse)
 def tools_submit_page(request: Request, submitted: str = ""):
+    if not _is_member(request):
+        return _login_redirect(request)
     if submitted == "1":
         body = """<div class="page" style="max-width:560px;">
 <h1>Thanks—submission received.</h1>
@@ -2815,6 +2822,8 @@ def tools_submit_page(request: Request, submitted: str = ""):
 
 @app.post("/tools/submit")
 async def tools_submit(request: Request):
+    if not _is_member(request):
+        return _login_redirect(request)
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
@@ -3230,6 +3239,7 @@ def admin_tools_delete(request: Request, tool_id: int):
 
 @app.post("/tools/{tool_id}/interest")
 async def tools_interest(tool_id: int, request: Request):
+    _require_member(request)
     try:
         body = await request.json()
     except Exception:
@@ -3305,7 +3315,7 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
         try:
             items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
         except Exception as e:
-            return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Feed",
+            return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Library",
                 f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
                 role=_role(request)))
 
@@ -3629,7 +3639,7 @@ function saveCustomFilters() {{
 {feed_css}
 {feed_js}"""
 
-    return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Feed", body, role=_role(request)))
+    return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Library", body, role=_role(request)))
 
 
 _READER_CSS = """
@@ -3729,8 +3739,8 @@ def reader(request: Request, url: str = "", id: int = 0):
     from linklib.extract import fetch_page
     import html as html_mod
 
-    back_url = "/library"
-    back_label = "Library"
+    back_url = "/archive"
+    back_label = "Archive"
 
     # Try to load from DB first (may have cached content)
     article = None
@@ -3751,7 +3761,7 @@ def reader(request: Request, url: str = "", id: int = 0):
         body_html = """<div class="reader-empty">
   <h2>Read any article</h2>
   <p style="margin-bottom:1.5rem;">Paste a URL below, or open an article from your
-    <a href="/library">Library</a> or <a href="/feed">Feed</a>.</p>
+    <a href="/archive">Archive</a> or <a href="/feed">Feed</a>.</p>
   <form method="get" action="/read"
         style="display:flex;gap:8px;max-width:500px;margin:0 auto;">
     <input type="url" name="url" placeholder="https://…" autofocus required
@@ -3900,8 +3910,8 @@ async function deleteArticle(id) {{
     ))
 
 
-@app.get("/library", response_class=HTMLResponse)
-def library(request: Request, q: str = ""):
+@app.get("/archive", response_class=HTMLResponse)
+def archive(request: Request, q: str = ""):
     if not _is_member(request):
         return _login_redirect(request)
     authed = _is_authed(request)   # admin: shows tag-edit / delete controls
@@ -3953,7 +3963,7 @@ def library(request: Request, q: str = ""):
     cards = "".join(_card(r) for r in results) or '<p style="color:var(--muted);">No matches.</p>'
 
     tagbar = "".join(
-        f'<a href="/library?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
+        f'<a href="/archive?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
     )
 
     page_body = f"""<div style="border-bottom:1px solid var(--line);padding:20px 24px;">
@@ -3962,7 +3972,7 @@ def library(request: Request, q: str = ""):
       <span>{total} saved</span>
       <a href="/read" style="color:var(--accent);font-weight:500;">&#9654; Article Reader</a>
     </div>
-    <form method="get" action="/library" style="display:flex;gap:8px;max-width:680px;">
+    <form method="get" action="/archive" style="display:flex;gap:8px;max-width:680px;">
       <input type="search" name="q" value="{_esc(q)}" placeholder="Search titles, summaries, notes, tags…"
              style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font-size:15px;background:#fff;" autofocus>
       <button type="submit" class="btn">Search</button>
@@ -3994,7 +4004,7 @@ def library(request: Request, q: str = ""):
 .tag-x-btn:hover{{color:#b91c1c;opacity:1;}}
 .postbtn{{margin-top:12px;padding:6px 12px;font-size:12px;background:transparent;color:var(--accent);border:1px solid var(--line);border-radius:8px;cursor:pointer;}}
 .postbtn:hover{{background:var(--accent-light);}}
-nav.site-nav a[href="/library"]{{color:var(--ink);font-weight:600;}}
+nav.site-nav a[href="/library"]{{color:var(--ink);font-weight:600;}}  /* bold the Library nav item while in the Archive */
 </style>
 <script>
 function openTagEditor(id) {{
@@ -4057,7 +4067,42 @@ async function ask(){{
 }}
 </script>"""
 
-    return HTMLResponse(_page("Library—Brian Weisberg", "Library", page_body, role=_role(request)))
+    return HTMLResponse(_page("Archive—Brian Weisberg", "Library", page_body, role=_role(request)))
+
+
+@app.get("/library", response_class=HTMLResponse)
+def library(request: Request):
+    """Account hub: a landing page linking to the Archive, Feed, and Ask."""
+    if not _is_member(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        total = lib.count()
+    finally:
+        lib.close()
+
+    def _hcard(href, title, desc):
+        return (
+            f'<a href="{href}" style="display:block;border:1px solid var(--line);background:var(--surface);'
+            f'border-radius:14px;padding:22px 24px;text-decoration:none;">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+            f'<p style="margin:7px 0 0;font-size:14.5px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
+        )
+
+    cards = "".join([
+        _hcard("/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag &mdash; your curated reading history."),
+        _hcard("/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive."),
+        _hcard("/ask", "Ask", "Put an FP&amp;A question to your library &mdash; a cited answer drawn from the Archive plus trusted web sources."),
+    ])
+
+    body = f"""<div class="page" style="max-width:680px;">
+<h1 style="margin:0 0 6px;">Library</h1>
+<p style="color:var(--muted);margin:0 0 26px;">Your private workspace &mdash; the curated archive, the live feed, and the FP&amp;A assistant.</p>
+<div style="display:grid;gap:14px;">{cards}</div>
+</div>"""
+    return HTMLResponse(_page("Library—Brian Weisberg", "Library", body, role=_role(request)))
 
 
 # ---------------------------------------------------------------------------
@@ -4319,7 +4364,7 @@ document.addEventListener('keydown', function(e) {{
 updateEstimate();
 </script>"""
 
-    return HTMLResponse(_page("Ask—Brian Weisberg", "Ask", body, role=_role(request)))
+    return HTMLResponse(_page("Ask—Brian Weisberg", "Library", body, role=_role(request)))
 
 
 @app.post("/ask")
@@ -6090,7 +6135,7 @@ def admin_enrich(request: Request):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
   <p style="font-size:13.5px;color:var(--muted);margin:0;line-height:1.6;">
     <strong>After finishing:</strong> visit <a href="/admin/review-removals">Review removals</a> to confirm any articles the enricher flagged as off-audience,
-    and check the enriched summaries in the <a href="/library">Library</a>.
+    and check the enriched summaries in the <a href="/archive">Archive</a>.
   </p>
 </div>
 
@@ -6878,7 +6923,7 @@ def backup_now_route(request: Request, token: str | None = None):
     except Exception as e:
         msg = f"Backup failed: {e}"
     body = f"""<div class="page"><h1>Backup</h1><p>{msg}</p>
-  <p style="margin-top:1rem;"><a href="/library">Back to the library →</a></p></div>"""
+  <p style="margin-top:1rem;"><a href="/archive">Back to the archive →</a></p></div>"""
     return HTMLResponse(_page("Backup", "", body, authed=True))
 
 
@@ -7268,7 +7313,7 @@ def library_delete(request: Request, article_id: int):
         lib.delete_article(article_id)
     finally:
         lib.close()
-    return RedirectResponse("/library", status_code=303)
+    return RedirectResponse("/archive", status_code=303)
 
 
 @app.get("/static/{filename}")
