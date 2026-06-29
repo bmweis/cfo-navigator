@@ -372,7 +372,7 @@ a talk summarized two ways, naming the same speakers/companies).
 
 The filter's candidate groupings are shown only as hints — regroup freely. It is
 fine to return no groups at all.
-
+{learned}
 Return STRICT JSON only: {{"groups": [["<id>", "<id>", ...], ...]}} where each inner
 array lists the ids of 2+ articles that genuinely duplicate one another. Omit any
 article with no duplicate. No prose, no markdown.
@@ -380,6 +380,46 @@ article with no duplicate. No prose, no markdown.
 CANDIDATE GROUPS (the filter's guesses — verify each):
 {blocks}
 """
+
+
+def _learned_block(decisions: list[dict] | None) -> str:
+    """Few-shot guidance distilled from the curator's own past calls, so the
+    verifier matches their judgment on similar pairs over time."""
+    if not decisions:
+        return ""
+    dup = [d for d in decisions if d.get("verdict") == "dup"]
+    distinct = [d for d in decisions if d.get("verdict") == "distinct"]
+    lines = ["\nHOW THIS CURATOR HAS JUDGED PAST PAIRS (match this judgment):"]
+    if distinct:
+        lines.append("Pairs they said are NOT duplicates (keep both):")
+        for d in distinct[:25]:
+            lines.append(f'  - "{d.get("title_a","")}"  VS  "{d.get("title_b","")}"')
+    if dup:
+        lines.append("Pairs they confirmed ARE duplicates (same piece):")
+        for d in dup[:15]:
+            lines.append(f'  - "{d.get("title_a","")}"  ==  "{d.get("title_b","")}"')
+    return "\n".join(lines) + "\n"
+
+
+def _pair_key(a: dict, b: dict) -> str:
+    # Must match Library._pair_key so distinct_pairs lookups line up.
+    return "\n".join(sorted([a.get("url", "") or "", b.get("url", "") or ""]))
+
+
+def _prune_distinct(group: list[dict], distinct_pairs: set | None) -> list[list[dict]]:
+    """Remove edges the curator marked 'distinct'. The keeper anchors the group;
+    any member the curator said is NOT a dupe of the keeper is split out. Returns
+    the surviving group(s) of 2+ (the pruned member could still dup another, so it
+    is re-offered on its own — but in practice it just drops out)."""
+    if not distinct_pairs:
+        return [group]
+    ordered = _keeper_sorted(group)
+    keeper = ordered[0]
+    kept = [keeper]
+    for m in ordered[1:]:
+        if _pair_key(keeper, m) not in distinct_pairs:
+            kept.append(m)
+    return [kept] if len(kept) >= 2 else []
 
 
 def _verify_blocks(clusters: list[list[dict]]) -> tuple[str, dict]:
@@ -403,20 +443,33 @@ def _verify_blocks(clusters: list[list[dict]]) -> tuple[str, dict]:
 
 
 def verify_clusters(clusters: list[list[dict]], *, source: str = "",
-                    model: str | None = None) -> list[list[dict]]:
+                    model: str | None = None, distinct_pairs: set | None = None,
+                    decisions: list[dict] | None = None) -> list[list[dict]]:
     """Confirm which candidate near-dup clusters are real, using Claude's judgment
     over title + summary. Splits/drops over-flagged groups and re-picks the keeper
     (non-"Dear SaaStr", then newest) for each surviving group.
 
+    Learns from the curator's feedback: `distinct_pairs` (pairs already marked
+    "not a duplicate") are pruned so they're never re-shown, and `decisions` (their
+    past dup/distinct calls) are given to Claude as few-shot guidance.
+
     Degrades gracefully: with no anthropic SDK / API key (or on any error) it
-    returns the candidate clusters unchanged except for keeper re-selection — so
-    the "keep the non-Dear post" rule still applies even offline."""
+    returns the candidate clusters with the keeper re-selected and known-distinct
+    pairs pruned — so feedback still takes effect even offline."""
     clusters = [c for c in clusters if len(c) >= 2]
     if not clusters:
         return []
 
+    def _finish(groups: list[list[dict]]) -> list[list[dict]]:
+        out = []
+        for g in groups:
+            for pruned in _prune_distinct(g, distinct_pairs):
+                out.append(_rekey_cluster(pruned, source))
+        out.sort(key=len, reverse=True)
+        return out
+
     def _fallback():
-        return [_rekey_cluster(c, source) for c in clusters]
+        return _finish(clusters)
 
     try:
         from anthropic import Anthropic
@@ -431,12 +484,13 @@ def verify_clusters(clusters: list[list[dict]], *, source: str = "",
         client = Anthropic()
         resp = client.messages.create(
             model=model or _VERIFY_MODEL, max_tokens=2000,
-            messages=[{"role": "user", "content": _VERIFY_PROMPT.format(blocks=blocks)}],
+            messages=[{"role": "user", "content": _VERIFY_PROMPT.format(
+                blocks=blocks, learned=_learned_block(decisions))}],
         )
         raw = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
-        out = []
+        groups = []
         for grp in data.get("groups", []):
             members = []
             seen = set()
@@ -446,8 +500,7 @@ def verify_clusters(clusters: list[list[dict]], *, source: str = "",
                     members.append(a)
                     seen.add(id(a))
             if len(members) >= 2:
-                out.append(_rekey_cluster(members, source))
-        out.sort(key=len, reverse=True)
-        return out
+                groups.append(members)
+        return _finish(groups)
     except Exception:
         return _fallback()

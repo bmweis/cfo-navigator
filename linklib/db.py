@@ -164,6 +164,26 @@ CREATE TABLE IF NOT EXISTS library_queue (
 );
 
 CREATE INDEX IF NOT EXISTS idx_queue_status ON library_queue(status);
+
+-- Curator feedback on near-duplicate judgments. Each row is one decision about a
+-- *pair* of articles: 'dup' (the curator removed one as a duplicate) or
+-- 'distinct' (the curator said "not a duplicate"). `pair_key` is the two URLs
+-- sorted + joined, so a decision about a pair is stored once regardless of order
+-- and can be upserted. Used to (a) suppress pairs already judged distinct from
+-- future scans and (b) teach the Claude verifier the curator's calls.
+CREATE TABLE IF NOT EXISTS dedupe_decisions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    pair_key   TEXT NOT NULL UNIQUE,
+    url_a      TEXT NOT NULL DEFAULT '',
+    url_b      TEXT NOT NULL DEFAULT '',
+    title_a    TEXT NOT NULL DEFAULT '',
+    title_b    TEXT NOT NULL DEFAULT '',
+    source     TEXT NOT NULL DEFAULT '',
+    verdict    TEXT NOT NULL DEFAULT 'distinct',   -- 'dup' | 'distinct'
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dedupe_verdict ON dedupe_decisions(verdict);
 """
 
 
@@ -543,6 +563,56 @@ class Library:
             (key, value),
         )
         self.conn.commit()
+
+    # --- near-duplicate feedback ------------------------------------------
+
+    @staticmethod
+    def _pair_key(url_a: str, url_b: str) -> str:
+        """Order-independent key for a pair of article URLs."""
+        return "\n".join(sorted([url_a or "", url_b or ""]))
+
+    def record_dedupe_decision(self, a: dict, b: dict, verdict: str,
+                               source: str = "") -> None:
+        """Remember the curator's call on a pair: 'dup' or 'distinct'. Upserts on
+        the unordered URL pair, so re-deciding overwrites the prior verdict."""
+        ua, ub = a.get("url", ""), b.get("url", "")
+        # store with url_a/title_a being the lexicographically smaller url, stable
+        first_a = (ua or "") <= (ub or "")
+        xa, xb = (a, b) if first_a else (b, a)
+        self.conn.execute(
+            "INSERT INTO dedupe_decisions (pair_key, url_a, url_b, title_a, title_b, "
+            "source, verdict, created_at) VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(pair_key) DO UPDATE SET verdict=excluded.verdict, "
+            "created_at=excluded.created_at",
+            (self._pair_key(ua, ub), xa.get("url", ""), xb.get("url", ""),
+             xa.get("title", ""), xb.get("title", ""), source, verdict, _now()),
+        )
+        self.conn.commit()
+
+    def distinct_pairs(self) -> set:
+        """Set of pair_keys the curator marked 'distinct' (not duplicates)."""
+        rows = self.conn.execute(
+            "SELECT pair_key FROM dedupe_decisions WHERE verdict='distinct'").fetchall()
+        return {r[0] for r in rows}
+
+    def dedupe_decisions(self, source: str | None = None, limit: int = 40) -> list[dict]:
+        """Recent decisions (newest first) for teaching the verifier."""
+        if source:
+            rows = self.conn.execute(
+                "SELECT title_a, title_b, verdict, source FROM dedupe_decisions "
+                "WHERE source=? ORDER BY created_at DESC LIMIT ?", (source, limit)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT title_a, title_b, verdict, source FROM dedupe_decisions "
+                "ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [{"title_a": r[0], "title_b": r[1], "verdict": r[2], "source": r[3]} for r in rows]
+
+    def dedupe_decision_counts(self) -> tuple[int, int]:
+        """(dup_count, distinct_count) — for a 'learned from N decisions' note."""
+        d = self.conn.execute(
+            "SELECT verdict, COUNT(*) FROM dedupe_decisions GROUP BY verdict").fetchall()
+        m = {v: c for v, c in d}
+        return m.get("dup", 0), m.get("distinct", 0)
 
     # -- users / accounts ------------------------------------------------------
 

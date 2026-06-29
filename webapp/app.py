@@ -5451,11 +5451,15 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
     try:
         sources = lib.article_sources()
         auto = _dedupe_sources(lib)
+        dup_n, distinct_n = lib.dedupe_decision_counts()
         clusters = []
         if source:
             arts = lib.articles_by_source(source)
             clusters = dd.find_clusters(arts, days=days, threshold=threshold, source=source)
-            clusters = dd.verify_clusters(clusters, source=source)
+            clusters = dd.verify_clusters(
+                clusters, source=source,
+                distinct_pairs=lib.distinct_pairs(),
+                decisions=lib.dedupe_decisions(limit=40))
     finally:
         lib.close()
 
@@ -5485,6 +5489,11 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
 </form>"""
 
     body_inner = controls
+    if dup_n or distinct_n:
+        body_inner += (f'<p style="font-size:13px;color:var(--muted);margin:-8px 0 16px;">'
+                       f'&#10024; Learning from your calls: <strong>{distinct_n}</strong> marked &ldquo;not a dupe&rdquo;, '
+                       f'<strong>{dup_n}</strong> confirmed. Pairs you reject won&rsquo;t be shown again, and Claude '
+                       f'uses your past calls to judge new ones.</p>')
     if source:
         is_auto = source in auto
         toggle = f"""<form method="post" action="/admin/dedupe/auto" style="margin:0 0 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:{'var(--seafoam-wash)' if is_auto else 'var(--surface)'};border:1px solid var(--line);border-radius:12px;padding:12px 16px;">
@@ -5500,7 +5509,8 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
             dupe_total = sum(len(c) - 1 for c in clusters)
             blocks = ""
             for c in clusters:
-                keep_title = _esc((c[0].get("title") or c[0]["url"])[:70])
+                keeper = c[0]
+                keep_title = _esc((keeper.get("title") or keeper["url"])[:70])
                 rows = ""
                 for i, a in enumerate(c):
                     keep = i == 0
@@ -5509,7 +5519,19 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                         tag = '<span style="font-size:11px;font-weight:600;color:var(--seafoam-deep);white-space:nowrap;">KEEP</span>'
                         match = ""
                     else:
-                        tag = (f'<form method="post" action="/admin/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this article?\');"><input type="hidden" name="id" value="{a["id"]}"><input type="hidden" name="back" value="{_esc(source)}|{level}|{days}"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
+                        # Shared context so each decision is recorded against the pair.
+                        ctx = (f'<input type="hidden" name="keeper_url" value="{_esc(keeper["url"])}">'
+                               f'<input type="hidden" name="keeper_title" value="{_esc(keeper.get("title") or "")}">'
+                               f'<input type="hidden" name="dup_url" value="{_esc(a["url"])}">'
+                               f'<input type="hidden" name="dup_title" value="{_esc(a.get("title") or "")}">'
+                               f'<input type="hidden" name="source" value="{_esc(source)}">'
+                               f'<input type="hidden" name="back" value="{_esc(source)}|{level}|{days}">')
+                        accept = (f'<form method="post" action="/admin/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this duplicate?\');">'
+                                  f'<input type="hidden" name="id" value="{a["id"]}">{ctx}'
+                                  f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
+                        reject = (f'<form method="post" action="/admin/dedupe/not-dupe" style="margin:0;">{ctx}'
+                                  f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:var(--ink-soft);">Not a dupe</button></form>')
+                        tag = f'<div style="display:flex;gap:6px;flex-shrink:0;">{reject}{accept}</div>'
                         pct = round(a.get("_dup_score", 0) * 100)
                         match = (f'<div style="font-size:12px;color:var(--coral-deep);margin-top:2px;">'
                                  f'&#8627; duplicate of &ldquo;{keep_title}&rdquo; &middot; {pct}% match</div>')
@@ -5535,6 +5557,21 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
     return HTMLResponse(_page("Find duplicates — Admin", "Admin", body, authed=True))
 
 
+def _dedupe_pair(form) -> tuple[dict, dict, str]:
+    """Reconstruct the (keeper, duplicate, source) a dedupe decision is about."""
+    keeper = {"url": (form.get("keeper_url") or "").strip(), "title": form.get("keeper_title") or ""}
+    dup = {"url": (form.get("dup_url") or "").strip(), "title": form.get("dup_title") or ""}
+    return keeper, dup, (form.get("source") or "").strip()
+
+
+def _dedupe_back(form) -> str:
+    back = (form.get("back") or "").split("|")
+    src = quote(back[0]) if back and back[0] else ""
+    lvl = back[1] if len(back) > 1 else "balanced"
+    dys = back[2] if len(back) > 2 else "90"
+    return f"/admin/dedupe?source={src}&level={lvl}&days={dys}"
+
+
 @app.post("/admin/dedupe/remove")
 async def admin_dedupe_remove(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
@@ -5544,18 +5581,32 @@ async def admin_dedupe_remove(request: Request, background_tasks: BackgroundTask
         aid = int(form.get("id") or 0)
     except ValueError:
         aid = 0
-    back = (form.get("back") or "").split("|")
+    keeper, dup, source = _dedupe_pair(form)
     lib = _lib()
     try:
+        if keeper["url"] and dup["url"]:
+            lib.record_dedupe_decision(keeper, dup, "dup", source)   # accept = it's a dupe
         if aid:
             lib.delete_article(aid)
     finally:
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
-    src = quote(back[0]) if back and back[0] else ""
-    lvl = back[1] if len(back) > 1 else "balanced"
-    dys = back[2] if len(back) > 2 else "90"
-    return RedirectResponse(f"/admin/dedupe?source={src}&level={lvl}&days={dys}", status_code=303)
+    return RedirectResponse(_dedupe_back(form), status_code=303)
+
+
+@app.post("/admin/dedupe/not-dupe")
+async def admin_dedupe_not_dupe(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    keeper, dup, source = _dedupe_pair(form)
+    lib = _lib()
+    try:
+        if keeper["url"] and dup["url"]:
+            lib.record_dedupe_decision(keeper, dup, "distinct", source)  # reject = keep both
+    finally:
+        lib.close()
+    return RedirectResponse(_dedupe_back(form), status_code=303)
 
 
 @app.post("/admin/dedupe/remove-older")
@@ -5577,9 +5628,13 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
         backup.maybe_backup(DB_PATH)   # snapshot before a bulk delete
         clusters = dd.find_clusters(lib.articles_by_source(source), days=days,
                                     threshold=threshold, source=source)
-        clusters = dd.verify_clusters(clusters, source=source)
+        clusters = dd.verify_clusters(clusters, source=source,
+                                      distinct_pairs=lib.distinct_pairs(),
+                                      decisions=lib.dedupe_decisions(limit=40))
         for c in clusters:
+            keeper = c[0]
             for a in c[1:]:            # keep the first (the keeper), remove the rest
+                lib.record_dedupe_decision(keeper, a, "dup", source)
                 lib.delete_article(a["id"])
                 removed += 1
     finally:
