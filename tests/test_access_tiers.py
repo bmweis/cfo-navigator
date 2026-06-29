@@ -129,3 +129,34 @@ def test_admin_nav_mirrors_member_plus_admin(env):
     assert ">Library<" in html and ">CFO Toolbox<" in html   # member links
     nav = html.split("<nav")[1].split("</nav>")[0]
     assert ">Draft<" not in nav
+
+
+def test_last_admin_cannot_be_demoted_disabled_or_deleted(env):
+    from linklib.db import Library
+    db = os.environ["LINKLIB_DB"]
+    lib = Library(db)
+    boss = lib.create_user("boss", "supersecret", role="admin")
+    lib.close()
+    c = _admin_client(env)   # host-password admin session
+
+    def _boss():
+        lib = Library(db)
+        try:
+            return lib.get_user("boss")
+        finally:
+            lib.close()
+
+    # The only DB admin is protected on all three destructive actions.
+    c.post(f"/admin/users/{boss}/role", follow_redirects=False)
+    assert _boss()["role"] == "admin"
+    c.post(f"/admin/users/{boss}/toggle", follow_redirects=False)
+    assert _boss()["active"] == 1
+    c.post(f"/admin/users/{boss}/delete", follow_redirects=False)
+    assert _boss() is not None
+
+    # With a second admin present, the guard lifts.
+    lib = Library(db)
+    lib.create_user("boss2", "supersecret", role="admin")
+    lib.close()
+    c.post(f"/admin/users/{boss}/role", follow_redirects=False)
+    assert _boss()["role"] == "user"

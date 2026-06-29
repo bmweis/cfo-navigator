@@ -5836,18 +5836,29 @@ async def admin_users_edit(request: Request, user_id: int):
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
+def _is_last_active_admin(users: list[dict], user_id: int) -> bool:
+    """True if user_id is the only active admin account — so demoting, disabling,
+    or deleting it would leave the site with no admin. Guards against lockout."""
+    active_admins = [u for u in users if u["role"] == "admin" and u["active"]]
+    return len(active_admins) == 1 and active_admins[0]["id"] == user_id
+
+
 @app.post("/admin/users/{user_id}/toggle")
 def admin_users_toggle(request: Request, user_id: int):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
+    msg = ""
     try:
-        u = next((x for x in lib.list_users() if x["id"] == user_id), None)
-        if u:
+        users = lib.list_users()
+        u = next((x for x in users if x["id"] == user_id), None)
+        if u and u["active"] and _is_last_active_admin(users, user_id):
+            msg = "Can’t disable the last admin account."
+        elif u:
             lib.set_user_active(user_id, not u["active"])
     finally:
         lib.close()
-    return RedirectResponse("/admin/users", status_code=303)
+    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
 @app.post("/admin/users/{user_id}/role")
@@ -5857,8 +5868,11 @@ def admin_users_role(request: Request, user_id: int):
     lib = _lib()
     msg = ""
     try:
-        u = next((x for x in lib.list_users() if x["id"] == user_id), None)
-        if u:
+        users = lib.list_users()
+        u = next((x for x in users if x["id"] == user_id), None)
+        if u and u["role"] == "admin" and _is_last_active_admin(users, user_id):
+            msg = "Can’t demote the last admin account."
+        elif u:
             new_role = "user" if u["role"] == "admin" else "admin"
             lib.set_user_role(user_id, new_role)
             msg = f'“{u["username"]}” is now {"an admin" if new_role == "admin" else "a member"}.'
@@ -5888,11 +5902,16 @@ def admin_users_delete(request: Request, user_id: int):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
+    msg = ""
     try:
-        lib.delete_user(user_id)
+        users = lib.list_users()
+        if _is_last_active_admin(users, user_id):
+            msg = "Can’t delete the last admin account."
+        else:
+            lib.delete_user(user_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/users", status_code=303)
+    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
 @app.post("/admin/queue/add")
