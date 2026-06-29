@@ -138,6 +138,12 @@ def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
         for tok in (tt | st):
             index.setdefault(tok, []).append(i)
 
+    # Block only on DISTINCTIVE tokens: ubiquitous finance jargon (high document
+    # frequency) appears in most posts and would make the candidate set ~everything,
+    # so skip it. Dupes still share their rare/topic words.
+    max_df = max(25, n // 20)
+    rare_tokens = {tok for tok, docs in index.items() if len(docs) <= max_df}
+
     parent = list(range(n))
 
     def find(x):
@@ -147,10 +153,14 @@ def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
         return x
 
     def _dup(i, j) -> bool:
-        tr = SequenceMatcher(None, norm_titles[i], norm_titles[j]).ratio() if norm_titles[i] and norm_titles[j] else 0.0
         tj = _jaccard(title_toks[i], title_toks[j])
         bj = _jaccard(title_toks[i] | summ_toks[i], title_toks[j] | summ_toks[j])
         sj = _jaccard(summ_toks[i], summ_toks[j])
+        if _is_dup(tj, bj, sj, threshold):
+            return True   # cheap token signals already decide it
+        # Candidate set is bounded by rare-token blocking, so the char matcher
+        # (catches "5"/"five", "track"/"tracks") is affordable on the rest.
+        tr = SequenceMatcher(None, norm_titles[i], norm_titles[j]).ratio() if norm_titles[i] and norm_titles[j] else 0.0
         return _is_dup(max(tr, tj), bj, sj, threshold)
 
     def _in_window(i, j) -> bool:
@@ -159,9 +169,9 @@ def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
         return True
 
     for i in range(n):
-        # Candidate j's: share ≥1 content token with i (and j > i, not already merged).
+        # Candidate j's: share ≥1 distinctive token with i (and j > i).
         cands = set()
-        for tok in (title_toks[i] | summ_toks[i]):
+        for tok in ((title_toks[i] | summ_toks[i]) & rare_tokens):
             for j in index.get(tok, ()):
                 if j > i:
                     cands.add(j)
