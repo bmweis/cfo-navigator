@@ -31,8 +31,76 @@ _STOP = {
     # generic finance/business terms that recur across most posts
     "cfo", "ceo", "revenue", "growth", "business", "team", "market", "year",
     "best", "new", "great", "way", "every", "should", "must", "need", "get",
-    "saastr", "saastrai", "dear",
+    "saastr", "saastrai", "dear", "interesting", "learnings", "learning", "about",
 }
+
+# Revenue milestones in a title ("$100M ARR", "$1B", "$1 billion"). Two posts that
+# cite DIFFERENT milestones aren't duplicates even if the rest reads the same
+# (e.g. "5 Interesting Learnings about Snowflake at $100M" vs "...at $1B").
+_FIGURE_RE = re.compile(r"\$?\s*(\d+(?:\.\d+)?)\s*(m|b|k|million|billion|thousand)\b", re.IGNORECASE)
+
+
+def _figures(text: str) -> set[str]:
+    out = set()
+    for num, unit in _FIGURE_RE.findall(text or ""):
+        out.add(f"{num}{unit[0].lower()}")   # "100m", "1b", "1.5b"
+    return out
+
+
+# "Your first VP of Sales hire" posts are only dups when they're about the SAME
+# role AND level — "first VP of Sales" ≠ "first VP of Marketing" ≠ "first Head of
+# Sales". We pull the role/level words out of a "first … hire" title and veto a
+# match when two such posts don't share an identical signature.
+_FIRST_HIRE_RE = re.compile(r"\bfirst\s+(.+?)\s+hires?\b", re.IGNORECASE)
+_ROLE_WORDS = {
+    # functions / departments
+    "sales", "marketing", "product", "engineering", "engineer", "finance",
+    "revenue", "success", "people", "hr", "operations", "ops", "design",
+    "data", "growth", "support", "recruiting", "recruiter", "legal",
+    "accounting", "partnerships", "bizops", "analytics", "demand", "brand",
+    # seniority / titles
+    "cfo", "cro", "cmo", "cto", "coo", "cpo", "chro", "ceo", "cso", "cco",
+    "vp", "svp", "evp", "head", "director", "chief", "manager", "lead",
+    "controller", "founder", "rep", "gm",
+}
+
+
+def _role_sig(title: str) -> frozenset[str]:
+    """Role/level tokens from a 'your first X hire' post, else empty. Two such
+    posts are dups only if their signatures are identical, so a differing
+    signature (different role and/or level) vetoes a match."""
+    m = _FIRST_HIRE_RE.search(title or "")
+    if not m:
+        return frozenset()
+    return frozenset(w for w in re.findall(r"[a-z]+", m.group(1).lower())
+                     if w in _ROLE_WORDS)
+
+
+def _first_topic(title: str) -> frozenset[str]:
+    """For a 'your first X' title, the significant tokens after 'first' — the
+    object the post is actually about. SaaStr reuses the "build your first sales
+    ___" template across unrelated topics (a *comp plan* vs a *team/hire*); two
+    such posts about different objects aren't dups even though the lead-in matches."""
+    m = re.search(r"\bfirst\b(.*)$", (title or "").lower())
+    if not m:
+        return frozenset()
+    return frozenset(_tokens(m.group(1)))
+
+
+def _veto(a_title: str, b_title: str) -> bool:
+    """A discriminator that says two posts CAN'T be dups regardless of overall
+    similarity: a different revenue milestone, a different role/level in a 'first
+    hire' post, or a different object in a 'your first X' template post."""
+    fa, fb = _figures(a_title), _figures(b_title)
+    if fa and fb and fa.isdisjoint(fb):
+        return True
+    ra, rb = _role_sig(a_title), _role_sig(b_title)
+    if ra and rb and ra != rb:
+        return True
+    oa, ob = _first_topic(a_title), _first_topic(b_title)
+    if oa and ob and _jaccard(set(oa), set(ob)) < 0.5:
+        return True
+    return False
 
 
 def _norm_title(title: str, source: str = "") -> str:
@@ -41,6 +109,10 @@ def _norm_title(title: str, source: str = "") -> str:
     t = re.sub(r"\s*\|\s*[^|]*$", "", t)
     # Drop a leading column marker ("dear saastr:", "ask saastr -", ...).
     t = re.sub(r"^(dear|ask)\s+[\w&]+\s*[:,\-–—]\s*", "", t)
+    # Drop the "N interesting learnings about/on/from …" series prefix so what
+    # remains is the distinctive company + milestone (the figure veto guards the
+    # milestone; this keeps the boilerplate from inflating title similarity).
+    t = re.sub(r"^\d*\s*interesting\s+learnings?\s+(?:about|on|from|with|of|at)?\s*", "", t)
     # Drop an explicit source suffix even without a pipe.
     if source:
         t = re.sub(r"\s*[\-–—:]\s*" + re.escape(source.lower()) + r"\s*$", "", t)
@@ -106,6 +178,8 @@ def is_near_dup(a: dict, b: dict, *, days: int = DEFAULT_WINDOW_DAYS,
                 threshold: float = DEFAULT_THRESHOLD, source: str = "") -> bool:
     if not _within_window(a, b, days):
         return False
+    if _veto(a.get("title", ""), b.get("title", "")):
+        return False
     ts, bj, sj = _components(a, b, source)
     return _is_dup(ts, bj, sj, threshold)
 
@@ -157,6 +231,8 @@ def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
         return max(ts, bj, sj)
 
     def _dup(i, j) -> bool:
+        if _veto(articles[i].get("title", ""), articles[j].get("title", "")):
+            return False
         tj = _jaccard(title_toks[i], title_toks[j])
         bj = _jaccard(title_toks[i] | summ_toks[i], title_toks[j] | summ_toks[j])
         sj = _jaccard(summ_toks[i], summ_toks[j])

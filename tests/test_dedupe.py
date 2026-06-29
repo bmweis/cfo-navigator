@@ -60,3 +60,67 @@ def test_is_dup_of_any():
     cand = _a("How to scale your finance team", date="2025-03-10")
     assert dd.is_dup_of_any(cand, existing, source="SaaStr")
     assert not dd.is_dup_of_any(_a("Unrelated pricing strategy piece"), existing)
+
+
+def test_interesting_learnings_same_company_milestone_flagged():
+    a = _a("5 Interesting Learnings about Snowflake at $1B in ARR | SaaStr", date="2025-03-01")
+    b = _a("Interesting Learnings from Snowflake at $1 Billion in ARR", date="2025-02-20")
+    assert dd.is_near_dup(a, b, source="SaaStr")
+
+
+def test_interesting_learnings_different_milestone_not_flagged():
+    # Same company, DIFFERENT revenue milestone -> not a duplicate.
+    a = _a("5 Interesting Learnings about Snowflake at $100M ARR | SaaStr", date="2025-03-01")
+    b = _a("5 Interesting Learnings about Snowflake at $1B ARR | SaaStr", date="2025-02-20")
+    assert not dd.is_near_dup(a, b, source="SaaStr")
+
+
+def test_first_hire_same_role_flagged():
+    a = _a("Hiring Your First VP of Sales | SaaStr", date="2025-03-01")
+    b = _a("Your First VP of Sales Hire | SaaStr", date="2025-02-15")
+    assert dd.is_near_dup(a, b, source="SaaStr")
+
+
+def test_first_hire_different_role_not_flagged():
+    a = _a("Your First VP of Sales Hire | SaaStr", date="2025-03-01")
+    b = _a("Your First VP of Marketing Hire | SaaStr", date="2025-02-15")
+    assert not dd.is_near_dup(a, b, source="SaaStr")
+
+
+def test_first_hire_different_level_not_flagged():
+    a = _a("Your First VP of Sales Hire | SaaStr", date="2025-03-01")
+    b = _a("Your First Head of Sales Hire | SaaStr", date="2025-02-15")
+    assert not dd.is_near_dup(a, b, source="SaaStr")
+
+
+def test_first_template_different_object_not_flagged():
+    # The screenshot case: same "build your first sales ___" template, different
+    # object — a comp plan vs a team — must NOT be flagged as duplicates.
+    a = _a("8 Top Tips to Building Your Very First Sales Comp Plan | SaaStr", date="2025-06-25")
+    b = _a("Dear SaaStr: What Are Your Top Tips to Building Your First Sales Team? | SaaStr",
+           date="2025-04-14")
+    assert not dd.is_near_dup(a, b, source="SaaStr")
+
+
+def test_first_template_same_object_flagged():
+    # Same object (comp plan), reworded -> still a duplicate.
+    a = _a("8 Top Tips to Building Your Very First Sales Comp Plan | SaaStr", date="2025-06-25")
+    b = _a("Dear SaaStr: How Should I Build Our First Sales Comp Plan? | SaaStr", date="2025-04-14")
+    assert dd.is_near_dup(a, b, source="SaaStr")
+
+
+def test_screenshot_cluster_splits_correctly():
+    # The full 3-item cluster from the screenshot: the comp-plan pair should
+    # cluster, the sales-team post should fall out as its own.
+    arts = [
+        _a("8 Top Tips to Building Your Very First Sales Comp Plan | SaaStr", date="2025-06-25"),
+        _a("Dear SaaStr: How Should I Build Our First Sales Comp Plan? | SaaStr", date="2025-04-14"),
+        _a("Dear SaaStr: What Are Your Top Tips to Building Your First Sales Team? | SaaStr",
+           date="2025-04-14"),
+    ]
+    clusters = dd.find_clusters(arts, source="SaaStr")
+    # only the two comp-plan posts cluster; the sales-team post stands alone
+    assert len(clusters) == 1
+    assert len(clusters[0]) == 2
+    titles = {x["title"] for x in clusters[0]}
+    assert all("Comp Plan" in t for t in titles)
