@@ -442,9 +442,39 @@ def _verify_blocks(clusters: list[list[dict]]) -> tuple[str, dict]:
     return "\n".join(lines), by_id
 
 
+_VERIFY_BATCH = 10   # clusters per Claude call, so the JSON reply never truncates
+
+
+def _verify_one_batch(client, batch: list[list[dict]], model: str | None,
+                      decisions: list[dict] | None) -> list[list[dict]]:
+    """Ask Claude to confirm one batch of candidate clusters. Returns the member
+    lists it judged to be true duplicate groups. Raises on API/parse failure."""
+    import json
+    blocks, by_id = _verify_blocks(batch)
+    resp = client.messages.create(
+        model=model or _VERIFY_MODEL, max_tokens=4000,
+        messages=[{"role": "user", "content": _VERIFY_PROMPT.format(
+            blocks=blocks, learned=_learned_block(decisions))}],
+    )
+    raw = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    data = json.loads(raw)
+    groups = []
+    for grp in data.get("groups", []):
+        members, seen = [], set()
+        for gid in grp:
+            a = by_id.get(str(gid))
+            if a is not None and id(a) not in seen:
+                members.append(a)
+                seen.add(id(a))
+        if len(members) >= 2:
+            groups.append(members)
+    return groups
+
+
 def verify_clusters(clusters: list[list[dict]], *, source: str = "",
                     model: str | None = None, distinct_pairs: set | None = None,
-                    decisions: list[dict] | None = None) -> list[list[dict]]:
+                    decisions: list[dict] | None = None) -> tuple[list[list[dict]], str]:
     """Confirm which candidate near-dup clusters are real, using Claude's judgment
     over title + summary. Splits/drops over-flagged groups and re-picks the keeper
     (non-"Dear SaaStr", then newest) for each surviving group.
@@ -453,12 +483,16 @@ def verify_clusters(clusters: list[list[dict]], *, source: str = "",
     "not a duplicate") are pruned so they're never re-shown, and `decisions` (their
     past dup/distinct calls) are given to Claude as few-shot guidance.
 
-    Degrades gracefully: with no anthropic SDK / API key (or on any error) it
-    returns the candidate clusters with the keeper re-selected and known-distinct
-    pairs pruned — so feedback still takes effect even offline."""
+    Returns (clusters, status) where status is "verified" when Claude actually
+    judged every batch, or "no_sdk" / "no_key" / "error: …" when it couldn't —
+    in which case the *raw* title-match clusters are returned (keeper re-selected,
+    known-distinct pairs pruned) and the caller should label them as unverified.
+
+    Clusters are verified in small batches so a big scan's reply can't truncate
+    (the bug that made everything silently fall back)."""
     clusters = [c for c in clusters if len(c) >= 2]
     if not clusters:
-        return []
+        return [], "verified"
 
     def _finish(groups: list[list[dict]]) -> list[list[dict]]:
         out = []
@@ -468,39 +502,21 @@ def verify_clusters(clusters: list[list[dict]], *, source: str = "",
         out.sort(key=len, reverse=True)
         return out
 
-    def _fallback():
-        return _finish(clusters)
-
     try:
         from anthropic import Anthropic
     except ImportError:
-        return _fallback()
+        return _finish(clusters), "no_sdk"
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        return _fallback()
+        return _finish(clusters), "no_key"
 
-    blocks, by_id = _verify_blocks(clusters)
-    try:
-        import json
-        client = Anthropic()
-        resp = client.messages.create(
-            model=model or _VERIFY_MODEL, max_tokens=2000,
-            messages=[{"role": "user", "content": _VERIFY_PROMPT.format(
-                blocks=blocks, learned=_learned_block(decisions))}],
-        )
-        raw = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
-        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        data = json.loads(raw)
-        groups = []
-        for grp in data.get("groups", []):
-            members = []
-            seen = set()
-            for gid in grp:
-                a = by_id.get(str(gid))
-                if a is not None and id(a) not in seen:
-                    members.append(a)
-                    seen.add(id(a))
-            if len(members) >= 2:
-                groups.append(members)
-        return _finish(groups)
-    except Exception:
-        return _fallback()
+    client = Anthropic()
+    all_groups: list[list[dict]] = []
+    err = None
+    for i in range(0, len(clusters), _VERIFY_BATCH):
+        batch = clusters[i:i + _VERIFY_BATCH]
+        try:
+            all_groups.extend(_verify_one_batch(client, batch, model, decisions))
+        except Exception as e:                       # keep this batch raw, note why
+            err = err or f"error: {type(e).__name__}: {str(e)[:140]}"
+            all_groups.extend(batch)
+    return _finish(all_groups), (err or "verified")

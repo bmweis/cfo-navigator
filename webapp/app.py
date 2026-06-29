@@ -5490,15 +5490,30 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
         auto = _dedupe_sources(lib)
         dup_n, distinct_n = lib.dedupe_decision_counts()
         clusters = []
+        verify_status = "verified"
         if source:
             arts = lib.articles_by_source(source)
             clusters = dd.find_clusters(arts, days=days, threshold=threshold, source=source)
-            clusters = dd.verify_clusters(
+            clusters, verify_status = dd.verify_clusters(
                 clusters, source=source,
                 distinct_pairs=lib.distinct_pairs(),
                 decisions=lib.dedupe_decisions(limit=40))
     finally:
         lib.close()
+
+    verified = verify_status == "verified"
+    if verify_status == "no_key":
+        verify_note = ("&#9888;&#65039; <strong>Claude verification is off</strong> — no <code>ANTHROPIC_API_KEY</code> "
+                       "is set on the host, so these are raw title matches and look-alikes (different role, "
+                       "milestone, or question) may appear. Set the key in Railway to turn on semantic verification. "
+                       "Your &ldquo;Not a dupe&rdquo; calls still stick.")
+    elif verify_status == "no_sdk":
+        verify_note = "&#9888;&#65039; <strong>Claude verification unavailable</strong> (anthropic SDK not installed). Showing raw title matches."
+    elif verify_status.startswith("error"):
+        verify_note = (f"&#9888;&#65039; <strong>Claude verification failed</strong>, showing raw title matches. "
+                       f"<span style=\"color:var(--muted);\">{_esc(verify_status)}</span>")
+    else:
+        verify_note = ""
 
     banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
               f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
@@ -5575,14 +5590,19 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                     rows += (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);">'
                              f'<div style="min-width:0;"><a href="{_esc(a["url"])}" target="_blank" rel="noopener" style="font-size:14px;color:var(--navy);font-weight:500;">{_esc(a.get("title") or a["url"])}</a>'
                              f'<div style="font-size:12px;color:var(--muted);">{d}</div>{match}</div>{tag}</div>')
+                cluster_label = ("near-duplicates &mdash; verified by Claude" if verified
+                                 else "title matches &mdash; <span style=\"color:var(--coral-deep);\">not verified</span>")
                 blocks += (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px 18px 14px;margin-bottom:14px;">'
-                           f'<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:10px 0 2px;">{len(c)} near-duplicates &mdash; verified by Claude</div>{rows}</div>')
+                           f'<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:10px 0 2px;">{len(c)} {cluster_label}</div>{rows}</div>')
+            verify_banner = (f'<p style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;'
+                             f'padding:10px 14px;font-size:13px;margin:0 0 16px;line-height:1.5;">{verify_note}</p>'
+                             if verify_note else '')
             bulk = f"""<form method="post" action="/admin/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} duplicate(s), keeping one per group? A backup is taken first.');">
   <input type="hidden" name="source" value="{_esc(source)}"><input type="hidden" name="level" value="{level}"><input type="hidden" name="days" value="{days}">
   <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Remove all {dupe_total} duplicate{'s' if dupe_total != 1 else ''} (keep one each)</button>
   <span style="font-size:13px;color:var(--muted);margin-left:10px;">{len(clusters)} duplicate group{'s' if len(clusters) != 1 else ''} found.</span>
 </form>"""
-            body_inner += toggle + bulk + blocks
+            body_inner += toggle + verify_banner + bulk + blocks
 
     body = f"""<div class="page" style="max-width:760px;">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
@@ -5665,9 +5685,9 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
         backup.maybe_backup(DB_PATH)   # snapshot before a bulk delete
         clusters = dd.find_clusters(lib.articles_by_source(source), days=days,
                                     threshold=threshold, source=source)
-        clusters = dd.verify_clusters(clusters, source=source,
-                                      distinct_pairs=lib.distinct_pairs(),
-                                      decisions=lib.dedupe_decisions(limit=40))
+        clusters, _ = dd.verify_clusters(clusters, source=source,
+                                         distinct_pairs=lib.distinct_pairs(),
+                                         decisions=lib.dedupe_decisions(limit=40))
         for c in clusters:
             keeper = c[0]
             for a in c[1:]:            # keep the first (the keeper), remove the rest

@@ -64,8 +64,8 @@ def test_verify_prunes_known_distinct_pairs(lib, monkeypatch):
     lib.record_dedupe_decision(a, b, "distinct", "SaaStr")
     # Even with no API key (fallback path), the rejected pair is pruned away.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    out = dd.verify_clusters([[a, b]], source="SaaStr",
-                             distinct_pairs=lib.distinct_pairs())
+    out, _status = dd.verify_clusters([[a, b]], source="SaaStr",
+                                      distinct_pairs=lib.distinct_pairs())
     assert out == []
 
 

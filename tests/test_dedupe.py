@@ -205,7 +205,8 @@ def test_verify_drops_false_positive_cluster(monkeypatch):
         _ai(2, "Dear SaaStr: How Do I Become a Great Sales Rep?", date="2025-02-01"),
     ]
     _fake_anthropic('{"groups": []}', monkeypatch)   # Claude says: not dupes
-    assert dd.verify_clusters([cluster], source="SaaStr") == []
+    out, status = dd.verify_clusters([cluster], source="SaaStr")
+    assert out == [] and status == "verified"
 
 
 def test_verify_confirms_and_rekeys(monkeypatch):
@@ -213,16 +214,40 @@ def test_verify_confirms_and_rekeys(monkeypatch):
     a = _ai(10, "How to Build a World-Class CS Machine: Lessons from the CRO of Notion", date="2025-08-18")
     b = _ai(11, "Dear SaaStr: The 10% Rule — Invest in CS, With the CRO of Notion", date="2025-08-21")
     _fake_anthropic('{"groups": [["10", "11"]]}', monkeypatch)
-    out = dd.verify_clusters([[b, a]], source="SaaStr")
+    out, status = dd.verify_clusters([[b, a]], source="SaaStr")
     assert len(out) == 1 and len(out[0]) == 2
     assert out[0][0] is a                          # non-Dear original kept
+    assert status == "verified"
 
 
 def test_verify_degrades_without_api(monkeypatch):
-    # No API key -> candidates returned unchanged, but keeper still re-selected.
+    # No API key -> candidates returned unchanged, keeper still re-selected, and
+    # the status reports the reason so the UI can stop claiming "verified".
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     dear = _ai(20, "Dear SaaStr: How Should I Build Our First Sales Comp Plan?", date="2025-06-25")
     orig = _ai(21, "8 Top Tips to Building Your Very First Sales Comp Plan", date="2025-04-14")
-    out = dd.verify_clusters([[dear, orig]], source="SaaStr")
+    out, status = dd.verify_clusters([[dear, orig]], source="SaaStr")
     assert len(out) == 1
     assert out[0][0] is orig                       # keeper rule applied offline
+    assert status == "no_key"
+
+
+def test_verify_reports_error_status_on_api_failure(monkeypatch):
+    # If the Claude call throws, the batch is kept raw and the status says so.
+    import sys, types
+    mod = types.ModuleType("anthropic")
+
+    class _Client:
+        def __init__(self, *a, **k):
+            self.messages = self
+        def create(self, *a, **k):
+            raise RuntimeError("boom")
+
+    mod.Anthropic = _Client
+    monkeypatch.setitem(sys.modules, "anthropic", mod)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    cluster = [_ai(1, "A reworded title", date="2025-03-01"),
+               _ai(2, "A reworded title v2", date="2025-02-01")]
+    out, status = dd.verify_clusters([cluster], source="SaaStr")
+    assert len(out) == 1                            # kept raw, not silently dropped
+    assert status.startswith("error")
