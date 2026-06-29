@@ -31,13 +31,19 @@ _STOP = {
     # generic finance/business terms that recur across most posts
     "cfo", "ceo", "revenue", "growth", "business", "team", "market", "year",
     "best", "new", "great", "way", "every", "should", "must", "need", "get",
+    "saastr", "saastrai", "dear",
 }
 
 
 def _norm_title(title: str, source: str = "") -> str:
-    t = (title or "").lower()
+    t = (title or "").lower().strip()
+    # Drop a trailing "| Publication" segment ("| saastrai", "| saastr", ...).
+    t = re.sub(r"\s*\|\s*[^|]*$", "", t)
+    # Drop a leading column marker ("dear saastr:", "ask saastr -", ...).
+    t = re.sub(r"^(dear|ask)\s+[\w&]+\s*[:,\-–—]\s*", "", t)
+    # Drop an explicit source suffix even without a pipe.
     if source:
-        t = re.sub(r"\s*[|\-–—:]\s*" + re.escape(source.lower()) + r"\s*$", "", t)
+        t = re.sub(r"\s*[\-–—:]\s*" + re.escape(source.lower()) + r"\s*$", "", t)
     t = re.sub(r"[^a-z0-9 ]+", " ", t)
     return re.sub(r"\s+", " ", t).strip()
 
@@ -114,20 +120,24 @@ def is_dup_of_any(candidate: dict, existing: list[dict], *,
 
 def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
                   threshold: float = DEFAULT_THRESHOLD, source: str = "") -> list[list[dict]]:
-    """Group near-duplicate articles into clusters of 2+ (union-find). Each cluster
-    is sorted newest-first, so the first item is the natural one to keep.
+    """Group near-duplicate articles by LEADER clustering: process newest-first;
+    each article either joins an existing group whose *kept* article (the leader,
+    the newest) it directly duplicates, or starts its own group. No transitive
+    chaining — so unrelated posts can't be linked through an intermediary — and
+    every non-leader is, by construction, a dup of the one article that's kept.
 
-    Scales to thousands of articles: tokens/titles are precomputed once, and only
-    candidate pairs that share a content token (inverted index) AND fall within the
-    date window are compared — instead of all O(n²) pairs.
+    Returns clusters of 2+ (leader first). Each non-leader dict is annotated with
+    `_dup_score` (0..1 similarity to its leader) so the UI can show what it dups.
+
+    Scales to thousands: tokens precomputed once; candidates found via an inverted
+    index on distinctive (rare) tokens only, then gated by the date window.
     """
     n = len(articles)
     _MIN = datetime.min.replace(tzinfo=timezone.utc)
 
-    # Precompute per-article fields once (not per pair).
-    norm_titles, title_toks, summ_toks, dates = [], [], [], []
-    index: dict[str, list[int]] = {}
-    for i, a in enumerate(articles):
+    norm_titles, title_toks, summ_toks, dates, all_toks = [], [], [], [], []
+    df: dict[str, int] = {}
+    for a in articles:
         nt = _norm_title(a.get("title", ""), source)
         tt = _tokens(nt)
         st = _tokens(a.get("summary", "") or "")
@@ -135,31 +145,23 @@ def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
         title_toks.append(tt)
         summ_toks.append(st)
         dates.append(_date(a.get("published_at")))
-        for tok in (tt | st):
-            index.setdefault(tok, []).append(i)
+        toks = tt | st
+        all_toks.append(toks)
+        for tok in toks:
+            df[tok] = df.get(tok, 0) + 1
 
-    # Block only on DISTINCTIVE tokens: ubiquitous finance jargon (high document
-    # frequency) appears in most posts and would make the candidate set ~everything,
-    # so skip it. Dupes still share their rare/topic words.
-    max_df = max(25, n // 20)
-    rare_tokens = {tok for tok, docs in index.items() if len(docs) <= max_df}
+    max_df = max(25, n // 20)   # skip ubiquitous jargon when finding candidates
 
-    parent = list(range(n))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
+    def _score(i, j) -> float:
+        ts, bj, sj = _components(articles[i], articles[j], source)
+        return max(ts, bj, sj)
 
     def _dup(i, j) -> bool:
         tj = _jaccard(title_toks[i], title_toks[j])
         bj = _jaccard(title_toks[i] | summ_toks[i], title_toks[j] | summ_toks[j])
         sj = _jaccard(summ_toks[i], summ_toks[j])
         if _is_dup(tj, bj, sj, threshold):
-            return True   # cheap token signals already decide it
-        # Candidate set is bounded by rare-token blocking, so the char matcher
-        # (catches "5"/"five", "track"/"tracks") is affordable on the rest.
+            return True
         tr = SequenceMatcher(None, norm_titles[i], norm_titles[j]).ratio() if norm_titles[i] and norm_titles[j] else 0.0
         return _is_dup(max(tr, tj), bj, sj, threshold)
 
@@ -168,24 +170,38 @@ def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
             return abs((dates[i] - dates[j]).days) <= days
         return True
 
-    for i in range(n):
-        # Candidate j's: share ≥1 distinctive token with i (and j > i).
+    order = sorted(range(n), key=lambda i: dates[i] or _MIN, reverse=True)  # newest first
+    members: dict[int, list[int]] = {}     # leader idx -> member idxs (excl. leader)
+    scores: dict[int, float] = {}          # member idx -> similarity to its leader
+    leader_index: dict[str, list[int]] = {}  # rare token -> existing leader idxs
+
+    for idx in order:
+        rare = {t for t in all_toks[idx] if df.get(t, 0) <= max_df}
         cands = set()
-        for tok in ((title_toks[i] | summ_toks[i]) & rare_tokens):
-            for j in index.get(tok, ()):
-                if j > i:
-                    cands.add(j)
-        for j in cands:
-            if find(i) == find(j):
-                continue
-            if _in_window(i, j) and _dup(i, j):
-                parent[find(i)] = find(j)
+        for tok in rare:
+            cands.update(leader_index.get(tok, ()))
+        best, best_s = None, 0.0
+        for L in cands:
+            if _in_window(idx, L) and _dup(idx, L):
+                s = _score(idx, L)
+                if s > best_s:
+                    best, best_s = L, s
+        if best is not None:
+            members[best].append(idx)
+            scores[idx] = best_s
+        else:
+            members[idx] = []           # new leader
+            for tok in rare:
+                leader_index.setdefault(tok, []).append(idx)
 
-    groups: dict[int, list[dict]] = {}
-    for i in range(n):
-        groups.setdefault(find(i), []).append(articles[i])
-
-    out = [sorted(g, key=lambda a: _date(a.get("published_at")) or _MIN, reverse=True)
-           for g in groups.values() if len(g) > 1]
+    out = []
+    for L, mem in members.items():
+        if not mem:
+            continue
+        cluster = [articles[L]]
+        for m in mem:
+            articles[m]["_dup_score"] = round(scores.get(m, 0.0), 2)
+            cluster.append(articles[m])
+        out.append(cluster)
     out.sort(key=len, reverse=True)
     return out

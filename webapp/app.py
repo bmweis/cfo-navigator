@@ -5499,18 +5499,24 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
             dupe_total = sum(len(c) - 1 for c in clusters)
             blocks = ""
             for c in clusters:
+                keep_title = _esc((c[0].get("title") or c[0]["url"])[:70])
                 rows = ""
                 for i, a in enumerate(c):
                     keep = i == 0
                     d = _esc((a.get("published_at") or "")[:10])
-                    tag = ('<span style="font-size:11px;font-weight:600;color:var(--seafoam-deep);">KEEP (newest)</span>'
-                           if keep else
-                           f'<form method="post" action="/admin/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this article?\');"><input type="hidden" name="id" value="{a["id"]}"><input type="hidden" name="back" value="{_esc(source)}|{level}|{days}"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
+                    if keep:
+                        tag = '<span style="font-size:11px;font-weight:600;color:var(--seafoam-deep);white-space:nowrap;">KEEP (newest)</span>'
+                        match = ""
+                    else:
+                        tag = (f'<form method="post" action="/admin/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this article?\');"><input type="hidden" name="id" value="{a["id"]}"><input type="hidden" name="back" value="{_esc(source)}|{level}|{days}"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
+                        pct = round(a.get("_dup_score", 0) * 100)
+                        match = (f'<div style="font-size:12px;color:var(--coral-deep);margin-top:2px;">'
+                                 f'&#8627; duplicate of &ldquo;{keep_title}&rdquo; &middot; {pct}% match</div>')
                     rows += (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);">'
                              f'<div style="min-width:0;"><a href="{_esc(a["url"])}" target="_blank" rel="noopener" style="font-size:14px;color:var(--navy);font-weight:500;">{_esc(a.get("title") or a["url"])}</a>'
-                             f'<div style="font-size:12px;color:var(--muted);">{d}</div></div>{tag}</div>')
+                             f'<div style="font-size:12px;color:var(--muted);">{d}</div>{match}</div>{tag}</div>')
                 blocks += (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px 18px 14px;margin-bottom:14px;">'
-                           f'<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:10px 0 2px;">{len(c)} near-duplicates</div>{rows}</div>')
+                           f'<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:10px 0 2px;">{len(c)} near-duplicates &mdash; keeping the newest</div>{rows}</div>')
             bulk = f"""<form method="post" action="/admin/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} older duplicate(s), keeping the newest in each group? A backup is taken first.');">
   <input type="hidden" name="source" value="{_esc(source)}"><input type="hidden" name="level" value="{level}"><input type="hidden" name="days" value="{days}">
   <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Remove all {dupe_total} older duplicate{'s' if dupe_total != 1 else ''} (keep newest)</button>
