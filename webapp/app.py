@@ -2502,19 +2502,19 @@ def tools_directory(request: Request):
 
 <p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
 
-<div style="margin-top:56px;padding-top:40px;border-top:1px solid var(--line);">
+<div style="margin-top:40px;padding-top:28px;border-top:1px solid var(--line);">
+  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these companies.</p>
+  <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
+    {'<a href="/tools/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit a tool →</a>'}</p>
+</div>
+
+<div style="margin-top:48px;padding-top:40px;border-top:1px solid var(--line);">
   <h2 style="font-size:20px;font-weight:700;margin:0 0 6px;">Benchmarking Resources</h2>
   <p style="color:var(--muted);font-size:14px;margin:0 0 12px;">The benchmarking sources I actually use.</p>
   <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a>&mdash;it&rsquo;s not always what you think it is.</p>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
     {bench_cards}
   </div>
-</div>
-
-<div style="margin-top:40px;padding-top:28px;border-top:1px solid var(--line);">
-  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these companies.</p>
-  <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
-    {'<a href="/tools/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit a tool →</a>'}</p>
 </div>
 </div>
 
