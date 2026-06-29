@@ -421,11 +421,10 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     if role is None:
         role = "admin" if authed else "guest"
     public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
-              ("/contact", "Contact")]
-    # Members-only sections — shown to everyone so the gated area is discoverable;
+              ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
+    # Account-only sections — shown to everyone so the gated area is discoverable;
     # clicking them when signed out lands on the login screen.
-    member = [("/library", "Library"), ("/feed", "Feed"),
-              ("/tools", "CFO Toolbox"), ("/ask", "Ask")]
+    member = [("/library", "Library"), ("/feed", "Feed"), ("/ask", "Ask")]
 
     def links(items):
         return "".join(
@@ -830,8 +829,6 @@ def thought_leadership(request: Request):
 
 @app.get("/growth-engine-ratio", response_class=HTMLResponse)
 def growth_engine_ratio(request: Request):
-    if not _is_member(request):
-        return _login_redirect(request)
     body = """<div class="page" style="max-width:820px;">
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -1543,8 +1540,6 @@ renderTL();
 
 @app.get("/finops-ai-hackathon", response_class=HTMLResponse)
 def finops_ai_hackathon(request: Request):
-    if not _is_member(request):
-        return _login_redirect(request)
     body = """<div class="page" style="max-width:820px;">
 <style>
   .fah-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
@@ -1903,8 +1898,6 @@ def finops_ai_hackathon(request: Request):
 
 @app.get("/netsuite-mcp", response_class=HTMLResponse)
 def netsuite_mcp(request: Request):
-    if not _is_member(request):
-        return _login_redirect(request)
     body = """<div class="page" style="max-width:820px;">
 <style>
   .ns-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
@@ -2390,8 +2383,6 @@ your answers will directly shape what I build.</p>
 
 @app.get("/tools", response_class=HTMLResponse)
 def tools_directory(request: Request):
-    if not _is_member(request):
-        return _login_redirect(request)
     authed = _is_authed(request)   # admin sees the management controls
     lib = _lib()
     try:
@@ -2772,8 +2763,6 @@ def _tool_category_checkboxes(selected: list[str] | None = None) -> str:
 
 @app.get("/tools/submit", response_class=HTMLResponse)
 def tools_submit_page(request: Request, submitted: str = ""):
-    if not _is_member(request):
-        return _login_redirect(request)
     if submitted == "1":
         body = """<div class="page" style="max-width:560px;">
 <h1>Thanks—submission received.</h1>
@@ -2826,8 +2815,6 @@ def tools_submit_page(request: Request, submitted: str = ""):
 
 @app.post("/tools/submit")
 async def tools_submit(request: Request):
-    if not _is_member(request):
-        return _login_redirect(request)
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
@@ -3243,7 +3230,6 @@ def admin_tools_delete(request: Request, tool_id: int):
 
 @app.post("/tools/{tool_id}/interest")
 async def tools_interest(tool_id: int, request: Request):
-    _require_member(request)
     try:
         body = await request.json()
     except Exception:

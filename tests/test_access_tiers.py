@@ -48,9 +48,12 @@ def _admin_client(appmod):
     return c
 
 
-PUBLIC = ["/", "/about", "/thought-leadership", "/contact", "/library/submit"]
-MEMBER = ["/library", "/feed", "/ask", "/tools", "/growth-engine-ratio",
-          "/netsuite-mcp", "/finops-ai-hackathon"]
+PUBLIC = ["/", "/about", "/thought-leadership", "/contact", "/library/submit",
+          # CFO Toolbox and everything linked from the thought-leadership page are
+          # fully public; only the account tools below stay gated.
+          "/tools", "/tools/submit", "/growth-engine-ratio", "/netsuite-mcp",
+          "/finops-ai-hackathon"]
+MEMBER = ["/library", "/feed", "/ask"]
 
 
 def test_public_pages_open_to_anonymous(env):
