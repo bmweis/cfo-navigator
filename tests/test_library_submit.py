@@ -73,5 +73,5 @@ def test_duplicate_url_confirms_without_leaking(client):
 
 
 def test_submit_page_renders(client):
-    assert "Suggest a piece for the library" in client.get("/library/submit").text
+    assert "Suggest a piece for the archive" in client.get("/library/submit").text
     assert "suggestion received" in client.get("/library/submit?submitted=1").text.lower()

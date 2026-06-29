@@ -20,7 +20,7 @@ Private routes (require login cookie; API routes also accept a token):
     GET  /read                 Article reader (Instapaper-style clean view)
     POST /ask                  FP&A Q&A
     POST /post                 Draft a LinkedIn post
-    POST /feed/save            Save a feed item to the library
+    POST /feed/save            Save a feed item to the archive
     POST /save                 Capture a link (token auth — used by bookmarklet)
     GET  /api/search           JSON search API
     GET  /bookmarklet          One-click saver script
@@ -580,7 +580,7 @@ def homepage(request: Request):
 </div>
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:34px 0 8px;">{cards}</div>
-<p style="margin:14px 0 0;font-size:14px;color:var(--muted);">Read something a finance leader should have in their back pocket? <a href="/library/submit">Suggest a piece for the library &rarr;</a></p>
+<p style="margin:14px 0 0;font-size:14px;color:var(--muted);">Read something a finance leader should have in their back pocket? <a href="/library/submit">Suggest a piece for the archive &rarr;</a></p>
 
 <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:26px;">
   {_avatar(64)}
@@ -2251,7 +2251,7 @@ async def contact_submit(request: Request):
 
 # ---------------------------------------------------------------------------
 # Library submissions — a public "suggest a piece" form. Submissions land
-# UN-ENRICHED in the Library Queue (no server-side fetch, no Claude call), so a
+# UN-ENRICHED in the Archive Queue (no server-side fetch, no Claude call), so a
 # public endpoint can't be used to run up cost or fetch arbitrary URLs. Brian
 # reviews them in /admin/queue; enrichment happens only on approval.
 #
@@ -2264,14 +2264,14 @@ def library_submit_page(request: Request, submitted: str = ""):
     if submitted == "1":
         body = """<div class="page" style="max-width:560px;">
 <h1>Thanks&mdash;suggestion received.</h1>
-<p>I review every suggestion personally. If it's a fit for the library, it'll join the collection.</p>
+<p>I review every suggestion personally. If it's a fit for the archive, it'll join the collection.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
         return HTMLResponse(_page("Suggestion received — Brian Weisberg", "", body, role=_role(request)))
 
     body = """<div class="page" style="max-width:560px;">
-<h1>Suggest a piece for the library</h1>
-<p style="color:var(--muted);margin:4px 0 32px;">Read something a finance leader should have in their back pocket? Send it my way. I review every suggestion before it joins the library.</p>
+<h1>Suggest a piece for the archive</h1>
+<p style="color:var(--muted);margin:4px 0 32px;">Read something a finance leader should have in their back pocket? Send it my way. I review every suggestion before it joins the archive.</p>
 <form method="post" action="/library/submit" style="display:grid;gap:20px;">
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Article URL *</label>
@@ -2300,7 +2300,7 @@ def library_submit_page(request: Request, submitted: str = ""):
   <input type="text" name="website" tabindex="-1" autocomplete="off"
     style="position:absolute;left:-9999px;width:1px;height:1px;" aria-hidden="true">
   <div>
-    <button type="submit" class="btn">Suggest for the library</button>
+    <button type="submit" class="btn">Suggest for the archive</button>
   </div>
 </form>
 </div>"""
@@ -2333,7 +2333,7 @@ async def library_submit(request: Request):
                          origin=f"submission:{who}", enriched=False)
     finally:
         lib.close()
-    # Always confirm — never reveal whether the URL was already in the library.
+    # Always confirm — never reveal whether the URL was already in the archive.
     return RedirectResponse("/library/submit?submitted=1", status_code=303)
 
 # ---------------------------------------------------------------------------
@@ -3893,7 +3893,7 @@ async function saveReaderTags() {{
   }}
 }}
 async function deleteArticle(id) {{
-  if (!confirm('Permanently delete this article from your library?')) return;
+  if (!confirm('Permanently delete this article from your archive?')) return;
   try {{
     var form = new FormData();
     var r = await fetch('/library/' + id + '/delete', {{method: 'POST', body: form}});
@@ -3985,7 +3985,7 @@ def archive(request: Request, q: str = ""):
     </form>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;">{tagbar}</div>
     <div style="display:flex;gap:8px;margin-top:14px;max-width:680px;">
-      <textarea id="askq" rows="2" placeholder="Ask your library an FP&amp;A question…"
+      <textarea id="askq" rows="2" placeholder="Ask your archive an FP&amp;A question…"
         style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"></textarea>
       <button class="btn" onclick="ask()">Ask</button>
     </div>
@@ -4100,7 +4100,7 @@ def library(request: Request):
     cards = "".join([
         _hcard("/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag &mdash; your curated reading history."),
         _hcard("/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive."),
-        _hcard("/ask", "Ask", "Put an FP&amp;A question to your library &mdash; a cited answer drawn from the Archive plus trusted web sources."),
+        _hcard("/ask", "Ask", "Put an FP&amp;A question to your archive &mdash; a cited answer drawn from the Archive plus trusted web sources."),
     ])
 
     body = f"""<div class="page" style="max-width:680px;">
@@ -4162,9 +4162,9 @@ def ask_page(request: Request, q: str = ""):
     model_rows = "".join(model_row(mid, desc, mid == default_model) for mid, desc in models)
 
     effort_details = [
-        ("quick",    "Quick",    "4 library &middot; 2 web searches &middot; ~700 tokens out"),
-        ("standard", "Standard", "8 library &middot; 4 web searches &middot; ~1,500 tokens out"),
-        ("deep",     "Deep",     "16 library &middot; 6 web searches &middot; ~2,500 tokens out"),
+        ("quick",    "Quick",    "4 archive &middot; 2 web searches &middot; ~700 tokens out"),
+        ("standard", "Standard", "8 archive &middot; 4 web searches &middot; ~1,500 tokens out"),
+        ("deep",     "Deep",     "16 archive &middot; 6 web searches &middot; ~2,500 tokens out"),
     ]
 
     def effort_row(val, label, detail, checked):
@@ -4192,7 +4192,7 @@ def ask_page(request: Request, q: str = ""):
 
     body = f"""<div class="page" style="max-width:820px;">
 <h1 style="margin-bottom:6px;">Ask a question</h1>
-<p style="color:var(--muted);margin:0 0 28px;">Query your saved library, RSS feed, and trusted web sources. Tune cost vs. depth before each query.</p>
+<p style="color:var(--muted);margin:0 0 28px;">Query your saved archive, RSS feed, and trusted web sources. Tune cost vs. depth before each query.</p>
 
 <div class="ask-card">
   <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
@@ -4205,7 +4205,7 @@ def ask_page(request: Request, q: str = ""):
   <div class="ask-card">
     <div class="ask-section-label">Sources</div>
     <div style="display:flex;flex-direction:column;gap:8px;">
-      <label class="ask-check-label"><input type="checkbox" id="src-library" checked onchange="updateEstimate()"> My saved library</label>
+      <label class="ask-check-label"><input type="checkbox" id="src-library" checked onchange="updateEstimate()"> My saved archive</label>
       <label class="ask-check-label"><input type="checkbox" id="src-feed" onchange="updateEstimate()"> Current RSS feed</label>
       <label class="ask-check-label"><input type="checkbox" id="src-web" checked onchange="updateEstimate()"> Web search (trusted sites)</label>
     </div>
@@ -4458,12 +4458,12 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 # Library management lives on its own page (/admin/library) so the hub stays
 # uncluttered. Ordered as the recommended workflow — top to bottom.
 _LIBRARY_TOOLS = [
-    ("/admin/backup",       "Library backup",      "Snapshot the database before you start, so you can roll back if needed."),
+    ("/admin/backup",       "Archive backup",      "Snapshot the database before you start, so you can roll back if needed."),
     ("/admin/backfill",     "Historical sweep",    "Catch up the back catalog: queue older articles from your sources (raise the per-source limit to reach further back)."),
-    ("/admin/queue",        "Library Queue",       "Review proposed saves, fix dates, edit tags, and approve them into the library."),
+    ("/admin/queue",        "Archive Queue",       "Review proposed saves, fix dates, edit tags, and approve them into the archive."),
     ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
-    ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your library and edit the guide, so auto-tagging matches your judgment."),
-    ("/admin/enrich",       "Re-enrich library",   "The big pass: force-refresh summaries + tags on Opus, applying your tag style and the scope rules."),
+    ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
+    ("/admin/enrich",       "Re-enrich archive",   "The big pass: force-refresh summaries + tags on Opus, applying your tag style and the scope rules."),
     ("/admin/review-removals", "Review removals",  "Confirm or keep what the re-enrich flagged as off-audience (podcasts, predictions, fund/LP content)."),
     ("/admin/dedupe",       "Find duplicates",     "Catch near-duplicate articles (similar content within ~3 months) from a source and remove them."),
 ]
@@ -4568,10 +4568,10 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    # Library gets a single prominent card linking to its own management page,
+    # Archive gets a single prominent card linking to its own management page,
     # so the hub stays uncluttered.
-    library_card = _card("/admin/library", "Library",
-                         f"Build, curate, enrich, and back up your library &mdash; {len(_LIBRARY_TOOLS)} tools.")
+    library_card = _card("/admin/library", "Archive",
+                         f"Build, curate, enrich, and back up your archive &mdash; {len(_LIBRARY_TOOLS)} tools.")
 
     groups_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
     for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
@@ -4603,8 +4603,8 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 <p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
 {auth_banner}
 <div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 28px;">
-  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--coral-deep);margin-bottom:6px;">Before opening the library to paid subscribers &mdash; read this</div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">The library stores the full text of other people&rsquo;s articles. That&rsquo;s fine for your own research, but charging readers for access to it would mean redistributing content you don&rsquo;t own. Settle licensing with the authors you can, and before any paid access goes live:</p>
+  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--coral-deep);margin-bottom:6px;">Before opening the archive to paid subscribers &mdash; read this</div>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">The archive stores the full text of other people&rsquo;s articles. That&rsquo;s fine for your own research, but charging readers for access to it would mean redistributing content you don&rsquo;t own. Settle licensing with the authors you can, and before any paid access goes live:</p>
   <ul style="font-size:13.5px;color:var(--ink-soft);margin:0;padding-left:18px;line-height:1.6;">
     <li>Make subscriber-facing feed items <strong>link out</strong> to the original source; keep the in-app reader (<code>/read</code>) private to you.</li>
     <li>Serve only <strong>summaries, tags, and citations</strong> &mdash; never the stored full text (the <code>content</code> field).</li>
@@ -4639,11 +4639,11 @@ def admin_library(request: Request):
                     for i, (href, title, desc) in enumerate(_LIBRARY_TOOLS))
     body = f"""<div class="page" style="max-width:720px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Library</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Build, curate, enrich, and back up your library. For a first-time cleanup, work top to bottom &mdash; each step sets up the next. You can also jump to any tool directly anytime.</p>
+<h1>Archive</h1>
+<p style="color:var(--muted);margin:4px 0 26px;">Build, curate, enrich, and back up your archive. For a first-time cleanup, work top to bottom &mdash; each step sets up the next. You can also jump to any tool directly anytime.</p>
 <div style="display:grid;gap:12px;">{cards}</div>
 </div>"""
-    return HTMLResponse(_page("Library — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Archive — Admin", "Admin", body, authed=True))
 
 
 def _auth_recheck_background() -> None:
@@ -4724,7 +4724,7 @@ def admin_social(request: Request, url: str = ""):
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
     </div>
     <div>
-      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">Or topic <span style="font-weight:400;text-transform:none;letter-spacing:0;">(used when URL is blank; pulls from your library)</span></label>
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">Or topic <span style="font-weight:400;text-transform:none;letter-spacing:0;">(used when URL is blank; pulls from your archive)</span></label>
       <input id="post-topic" type="text" placeholder="e.g. headcount planning in uncertain environments"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
     </div>
@@ -4790,7 +4790,7 @@ document.addEventListener('keydown', function(e) {{
 
 
 # ---------------------------------------------------------------------------
-# Library Queue — staging area for proposed saves
+# Archive Queue — staging area for proposed saves
 # ---------------------------------------------------------------------------
 
 def _scan_feed_background() -> None:
@@ -5015,8 +5015,8 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
 .q-group summary:hover{{background:var(--surface);}}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Library Queue</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Proposed saves waiting for your review. Approve them into the library&nbsp;&mdash;&nbsp;edit the tags first if you like&nbsp;&mdash;&nbsp;or dismiss what you don&rsquo;t want.</p>
+<h1>Archive Queue</h1>
+<p style="color:var(--muted);margin:4px 0 22px;">Proposed saves waiting for your review. Approve them into the archive&nbsp;&mdash;&nbsp;edit the tags first if you like&nbsp;&mdash;&nbsp;or dismiss what you don&rsquo;t want.</p>
 {scan_notice}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
   <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note} &nbsp; {expand_controls}</div>
@@ -5098,7 +5098,7 @@ async function dismissAll(btn){{
   for (const c of cards) {{ await dismissOne(c.querySelector('.add-btn')); }}
 }}
 </script>"""
-    return HTMLResponse(_page("Library Queue — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Archive Queue — Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/queue/refresh-feed")
@@ -5230,7 +5230,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
 <p style="color:var(--muted);margin:-6px 0 18px;">Tags are generated automatically during enrichment. Use this to tidy the vocabulary &mdash; <strong>renaming a tag to one that already exists merges them</strong>, and deleting removes it from every article. Search and the tag facets update immediately.</p>
 {banner}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap;">
-  <p style="font-size:13px;color:var(--muted);margin:0;">{len(tags)} tags across the library</p>
+  <p style="font-size:13px;color:var(--muted);margin:0;">{len(tags)} tags across the archive</p>
   <form method="post" action="/admin/tags/suggest-merges" style="margin:0;"><button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Suggest merges</button></form>
 </div>
 {merge_html}
@@ -5334,7 +5334,7 @@ async def admin_tags_delete(request: Request, background_tasks: BackgroundTasks)
 
 
 def _tag_guide_background() -> None:
-    """Learn the tagging guide from the library and save it. Off-request (Claude call)."""
+    """Learn the tagging guide from the archive and save it. Off-request (Claude call)."""
     lib = _lib()
     try:
         from linklib import tagstyle
@@ -5369,7 +5369,7 @@ def admin_tag_style(request: Request, generating: int = 0):
     is_generating = bool(generating) or status == "generating"
     notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
               'padding:12px 16px;margin-bottom:18px;font-size:14px;color:var(--seafoam-deep);">'
-              'Studying your library in the background &mdash; reload in about a minute to see the guide.</div>'
+              'Studying your archive in the background &mdash; reload in about a minute to see the guide.</div>'
               if is_generating else '')
 
     has_guide = bool(guide and guide.strip())
@@ -5377,7 +5377,7 @@ def admin_tag_style(request: Request, generating: int = 0):
                    if has_guide else
                    '<span style="font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;">Not set &mdash; auto-tagging uses your vocabulary only</span>')
 
-    gen_label = "Re-learn from my library" if has_guide else "Learn from my library"
+    gen_label = "Re-learn from my archive" if has_guide else "Learn from my archive"
 
     body = f"""<div class="page" style="max-width:820px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -5399,7 +5399,7 @@ def admin_tag_style(request: Request, generating: int = 0):
 
 <form method="post" action="/admin/tag-style/save" style="margin:0;">
   <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging guide</label>
-  <textarea name="guide" rows="20" placeholder="Click “{gen_label}” to draft this from your library, or write your own rules here."
+  <textarea name="guide" rows="20" placeholder="Click “{gen_label}” to draft this from your archive, or write your own rules here."
     style="width:100%;padding:14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(guide)}</textarea>
   <div style="display:flex;gap:10px;margin-top:12px;">
     <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Save guide</button>
@@ -5956,7 +5956,7 @@ def admin_review_removals(request: Request):
     body = f"""<div class="page" style="max-width:820px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Review removals</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as off-audience for this library &mdash; most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so. Keep the false positives; remove the rest.</p>
+<p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as off-audience for this archive &mdash; most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so. Keep the false positives; remove the rest.</p>
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px;">
   <div><span id="flagged-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{n}</span> <span style="color:var(--muted);">flagged</span></div>
   <button class="btn btn-ghost" onclick="removeAll()" style="font-size:12px;padding:6px 14px;color:var(--alert);border-color:var(--alert);">Remove all</button>
@@ -5986,7 +5986,7 @@ async function removeOne(btn){{
   if (await postForm('/admin/review-removals/remove', {{id: card.dataset.id}})) dropCard(card);
 }}
 async function removeAll(){{
-  if (!confirm('Remove all flagged articles? This deletes them from the library.')) return;
+  if (!confirm('Remove all flagged articles? This deletes them from the archive.')) return;
   const cards = Array.from(document.querySelectorAll('[data-card]'));
   for (const c of cards) {{ await removeOne(c.querySelector('button:last-child')); }}
 }}
@@ -6028,7 +6028,7 @@ async def admin_review_remove(request: Request, background_tasks: BackgroundTask
 
 
 # ---------------------------------------------------------------------------
-# Re-enrich library — force-refresh Claude summaries + tags server-side
+# Re-enrich archive — force-refresh Claude summaries + tags server-side
 # ---------------------------------------------------------------------------
 
 def _enrich_job(force: bool, model: str, limit: int) -> None:
@@ -6106,7 +6106,7 @@ def admin_enrich(request: Request):
         status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done — {job_done} articles enriched with {_esc(job_model)}.</div>'
 
     models = [
-        ("claude-opus-4-8",           "Opus 4.8",   "Deepest summaries. The one to standardize the library on."),
+        ("claude-opus-4-8",           "Opus 4.8",   "Deepest summaries. The one to standardize the archive on."),
         ("claude-sonnet-4-6",         "Sonnet 4.6",  "Solid summaries at a lower cost."),
         ("claude-haiku-4-5-20251001", "Haiku 4.5",   "Fast and cheap. Good for clearing a big unenriched backlog."),
     ]
@@ -6124,7 +6124,7 @@ def admin_enrich(request: Request):
 
     body = f"""<div class="page" style="max-width:720px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Re-enrich library</h1>
+<h1>Re-enrich archive</h1>
 <p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what the Ask feature reasons from, so depth here pays off there.</p>
 
 <div id="poll-container">{status_html}</div>
@@ -6157,7 +6157,7 @@ def admin_enrich(request: Request):
       <label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
         <input type="checkbox" name="force" value="1" style="margin-top:3px;accent-color:var(--accent);">
         <span><strong>Force re-enrich all articles</strong>
-        <span style="display:block;font-size:12px;color:var(--muted);">Re-run every article, not just unenriched ones. Use this to standardize the library on a new model or rules version. Summary is overwritten; existing tags are merged.</span></span>
+        <span style="display:block;font-size:12px;color:var(--muted);">Re-run every article, not just unenriched ones. Use this to standardize the archive on a new model or rules version. Summary is overwritten; existing tags are merged.</span></span>
       </label>
     </div>
     <div>
@@ -6207,7 +6207,7 @@ def admin_enrich(request: Request):
   }});
 }})();
 </script>"""
-    return HTMLResponse(_page("Re-enrich library — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Re-enrich archive — Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/enrich/cleanup-toggle")
@@ -6332,7 +6332,7 @@ def admin_backfill(request: Request):
         total_added = sum(r.get("added", 0) for r in report)
         total_cands = sum(r.get("candidates", 0) for r in report)
         total_scope = sum(r.get("skipped_scope", 0) for r in report)
-        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete &mdash; {total_added} articles queued from {total_cands} candidates ({total_scope} skipped as off-audience). <a href="/admin/queue">Review in Library Queue &rarr;</a></div>'
+        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete &mdash; {total_added} articles queued from {total_cands} candidates ({total_scope} skipped as off-audience). <a href="/admin/queue">Review in Archive Queue &rarr;</a></div>'
 
     def _report_row(r):
         added = r.get("added", 0)
@@ -6375,7 +6375,7 @@ def admin_backfill(request: Request):
 <p style="color:var(--muted);margin:-6px 0 20px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review. A one-time catch-up on your back catalog.</p>
 
 <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:22px;font-size:13.5px;color:#92400e;line-height:1.6;">
-  <strong>Run this once.</strong> It catches up your back catalog; after that, the <a href="/admin/queue">Library Queue</a> feed scan keeps you current.
+  <strong>Run this once.</strong> It catches up your back catalog; after that, the <a href="/admin/queue">Archive Queue</a> feed scan keeps you current.
   Start with a <strong>dry run</strong> to see the reach before any sweep spends API calls.
 </div>
 
@@ -6420,7 +6420,7 @@ def admin_backfill(request: Request):
     </div>
     <div>
       <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {disable}>Run sweep</button>
-      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side &mdash; you can leave this page. Results appear in the <a href="/admin/queue">Library Queue</a>.</span>
+      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side &mdash; you can leave this page. Results appear in the <a href="/admin/queue">Archive Queue</a>.</span>
     </div>
   </form>
 </div>
@@ -6450,7 +6450,7 @@ def admin_backfill(request: Request):
         var totalAdded = s.report.reduce((a, r) => a + (r.added || 0), 0);
         var totalCands = s.report.reduce((a, r) => a + (r.candidates || 0), 0);
         var totalScope = s.report.reduce((a, r) => a + (r.skipped_scope || 0), 0);
-        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete &mdash; ' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/queue\\">Review in Library Queue &rarr;</a></div>';
+        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete &mdash; ' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/queue\\">Review in Archive Queue &rarr;</a></div>';
       }} else if (s.error) {{
         container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
       }}
@@ -6509,7 +6509,7 @@ def admin_backup(request: Request, uploaded: str = ""):
     )
     body = f"""<div class="page" style="max-width:820px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Library backup</h1>
+<h1>Archive backup</h1>
 {uploaded_banner}
 <p style="color:var(--muted);margin:-6px 0 24px;">Currently <strong>{count:,}</strong> articles in the live database.</p>
 
@@ -6532,7 +6532,7 @@ def admin_backup(request: Request, uploaded: str = ""):
   </div>
 </div>
 </div>"""
-    return HTMLResponse(_page("Library backup — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Archive backup — Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/brand", response_class=HTMLResponse)
