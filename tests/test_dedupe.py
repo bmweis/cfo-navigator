@@ -109,6 +109,32 @@ def test_first_template_same_object_flagged():
     assert dd.is_near_dup(a, b, source="SaaStr")
 
 
+def test_hiring_advice_distinct_roles_not_clustered():
+    # All four are distinct hires: an AE, a first finance hire, and two CFO posts
+    # (one a guest cross-post). None should be flagged as duplicates.
+    arts = [
+        _a("Dear SaaStr: When Should I Hire My First AE? | SaaStrAI", date="2025-03-21"),
+        _a("Dear SaaStr: When Should You Make Your First Finance Hire? | SaaStrAI", date="2025-03-11"),
+        _a("When to Hire Your First CFO — From OnlyCFO | SaaStrAI", date="2025-03-07"),
+        _a("Dear SaaStr: When Should I Hire a CFO? | SaaStrAI", date="2025-01-02"),
+    ]
+    clusters = dd.find_clusters(arts, source="SaaStr")
+    assert clusters == []   # keep all four
+
+
+def test_hiring_finance_hire_not_dup_of_cfo():
+    a = _a("Dear SaaStr: When Should You Make Your First Finance Hire? | SaaStrAI", date="2025-03-11")
+    b = _a("Dear SaaStr: When Should I Hire a CFO? | SaaStrAI", date="2025-01-02")
+    assert not dd.is_near_dup(a, b, source="SaaStr")
+
+
+def test_hiring_guest_crosspost_not_dup_of_native_column():
+    # Same role (CFO) but one is a "— From OnlyCFO" guest cross-post -> distinct.
+    a = _a("When to Hire Your First CFO — From OnlyCFO | SaaStrAI", date="2025-03-07")
+    b = _a("Dear SaaStr: When Should I Hire a CFO? | SaaStrAI", date="2025-01-02")
+    assert not dd.is_near_dup(a, b, source="SaaStr")
+
+
 def test_screenshot_cluster_splits_correctly():
     # The full 3-item cluster from the screenshot: the comp-plan pair should
     # cluster, the sales-team post should fall out as its own.

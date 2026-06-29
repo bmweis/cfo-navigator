@@ -47,33 +47,48 @@ def _figures(text: str) -> set[str]:
     return out
 
 
-# "Your first VP of Sales hire" posts are only dups when they're about the SAME
-# role AND level — "first VP of Sales" ≠ "first VP of Marketing" ≠ "first Head of
-# Sales". We pull the role/level words out of a "first … hire" title and veto a
-# match when two such posts don't share an identical signature.
-_FIRST_HIRE_RE = re.compile(r"\bfirst\s+(.+?)\s+hires?\b", re.IGNORECASE)
+# Hiring-advice posts ("When should I hire my first AE?", "When to hire a CFO")
+# are only dups when they're about the SAME role/level. A first AE, a first
+# finance hire, and a CFO are different hires — distinct posts, not reruns — so a
+# differing role signature vetoes a match. Catches "hire a/your [first] X" forms,
+# not just "first … hire".
+_HIRE_RE = re.compile(r"\bhir(?:e|es|ed|ing)\b", re.IGNORECASE)
 _ROLE_WORDS = {
     # functions / departments
     "sales", "marketing", "product", "engineering", "engineer", "finance",
     "revenue", "success", "people", "hr", "operations", "ops", "design",
     "data", "growth", "support", "recruiting", "recruiter", "legal",
     "accounting", "partnerships", "bizops", "analytics", "demand", "brand",
+    # individual-contributor / sales roles
+    "ae", "sdr", "bdr", "rep", "ic",
     # seniority / titles
     "cfo", "cro", "cmo", "cto", "coo", "cpo", "chro", "ceo", "cso", "cco",
     "vp", "svp", "evp", "head", "director", "chief", "manager", "lead",
-    "controller", "founder", "rep", "gm",
+    "controller", "founder", "gm",
 }
 
+# A trailing "— From <Publication>" / "(From <Publication>)" byline marks a guest
+# cross-post: a different author's article, distinct even when the topic matches a
+# native column piece. Searched after stripping a "| Publication" suffix.
+_GUEST_RE = re.compile(r"[—–\-(]\s*from\s+([a-z0-9][\w .&]*?)\s*\)?$", re.IGNORECASE)
 
-def _role_sig(title: str) -> frozenset[str]:
-    """Role/level tokens from a 'your first X hire' post, else empty. Two such
-    posts are dups only if their signatures are identical, so a differing
-    signature (different role and/or level) vetoes a match."""
-    m = _FIRST_HIRE_RE.search(title or "")
-    if not m:
+
+def _hire_role(title: str) -> frozenset[str]:
+    """Role/level tokens from a hiring-advice title, else empty. Two hiring posts
+    are dups only if their role signatures match, so different roles or seniority
+    levels veto a match."""
+    t = (title or "").lower()
+    if not _HIRE_RE.search(t):
         return frozenset()
-    return frozenset(w for w in re.findall(r"[a-z]+", m.group(1).lower())
-                     if w in _ROLE_WORDS)
+    return frozenset(w for w in re.findall(r"[a-z]+", t) if w in _ROLE_WORDS)
+
+
+def _guest_source(title: str) -> str:
+    """The publication in a "— From <X>" guest byline, else "". A differing source
+    means different authors' articles, which aren't dups of each other."""
+    t = re.sub(r"\s*\|\s*[^|]*$", "", (title or "").lower()).strip()
+    m = _GUEST_RE.search(t)
+    return m.group(1).strip() if m else ""
 
 
 def _first_topic(title: str) -> frozenset[str]:
@@ -89,13 +104,15 @@ def _first_topic(title: str) -> frozenset[str]:
 
 def _veto(a_title: str, b_title: str) -> bool:
     """A discriminator that says two posts CAN'T be dups regardless of overall
-    similarity: a different revenue milestone, a different role/level in a 'first
-    hire' post, or a different object in a 'your first X' template post."""
+    similarity: a different revenue milestone, a different role/level in a hiring
+    post, a different guest author, or a different object in a 'first X' template."""
     fa, fb = _figures(a_title), _figures(b_title)
     if fa and fb and fa.isdisjoint(fb):
         return True
-    ra, rb = _role_sig(a_title), _role_sig(b_title)
+    ra, rb = _hire_role(a_title), _hire_role(b_title)
     if ra and rb and ra != rb:
+        return True
+    if _guest_source(a_title) != _guest_source(b_title):
         return True
     oa, ob = _first_topic(a_title), _first_topic(b_title)
     if oa and ob and _jaccard(set(oa), set(ob)) < 0.5:
