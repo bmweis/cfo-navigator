@@ -165,6 +165,10 @@ PUBLIC_BASE = os.environ.get("LINKLIB_PUBLIC_BASE", "http://localhost:8000")
 # both the login screen and the bookmarklet/token API. If neither is set, the
 # private routes are open (convenient for local-only use).
 AUTH_PASSWORD = os.environ.get("LINKLIB_PASSWORD") or SAVE_TOKEN
+# Everyone signs in with a username. The host password (AUTH_PASSWORD) is the
+# lockout-proof break-glass admin — it works with this reserved username (default
+# "admin", overridable) rather than a blank one.
+ADMIN_USERNAME = (os.environ.get("LINKLIB_ADMIN_USERNAME") or "admin").strip().lower()
 SECRET_KEY = os.environ.get("LINKLIB_SECRET_KEY") or AUTH_PASSWORD or "dev-insecure-key"
 COOKIE_NAME = "cfo_session"
 SESSION_TTL = 30 * 24 * 3600  # 30 days
@@ -481,13 +485,13 @@ def login_page(request: Request, next: str = "/library", error: str = ""):
            if error else "")
     body = f"""<div class="page" style="max-width:420px;">
 <h1>Sign in</h1>
-<p style="color:var(--muted);margin:4px 0 28px;">Members sign in with a username and password. (Admin can leave the username blank.)</p>
+<p style="color:var(--muted);margin:4px 0 28px;">Sign in with your username and password.</p>
 {err}
 <form method="post" action="/login" style="display:grid;gap:16px;">
   <input type="hidden" name="next" value="{_esc(next or '/library')}">
-  <input name="username" type="text" autocomplete="username" placeholder="Username"
+  <input name="username" type="text" required autofocus autocomplete="username" placeholder="Username"
          style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  <input name="password" type="password" required autofocus autocomplete="current-password" placeholder="Password"
+  <input name="password" type="password" required autocomplete="current-password" placeholder="Password"
          style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   <button type="submit" class="btn">Sign in</button>
 </form>
@@ -513,8 +517,10 @@ async def login_submit(request: Request):
             lib.close()
         if user:
             role, username_for_cookie = user["role"], user["username"]
-    elif AUTH_PASSWORD and hmac.compare_digest(password, AUTH_PASSWORD):
-        role, username_for_cookie = "admin", ""   # env-password bootstrap admin
+        elif (AUTH_PASSWORD and username.lower() == ADMIN_USERNAME
+              and hmac.compare_digest(password, AUTH_PASSWORD)):
+            # break-glass: the host password, used with the reserved admin username
+            role, username_for_cookie = "admin", ADMIN_USERNAME
 
     if role:
         resp = RedirectResponse(nxt, status_code=303)
@@ -656,13 +662,6 @@ the early-to-growth leap. Based in Boston.</p>
     style="width:100%;height:200px;object-fit:cover;object-position:center 30%;border-radius:10px;display:block;">
 </div>
 <p style="font-size:12px;color:var(--muted);margin:8px 0 24px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>
-
-<a href="/community" style="display:block;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:22px 24px;text-decoration:none;margin:0 0 24px;">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-    <span style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);letter-spacing:-0.01em;">CFO Community</span>
-    <span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>
-  <p style="margin:7px 0 0;font-size:14.5px;color:var(--muted);line-height:1.5;">What a well-designed community for finance peers should look like &mdash; and what I&rsquo;m building.</p>
-</a>
 
 <div style="display:flex;gap:12px;flex-wrap:wrap;">
   <a href="/thought-leadership" class="btn">Thought Leadership</a>
@@ -828,12 +827,6 @@ def thought_leadership(request: Request):
          "2024-07"),
     ])
 
-    body += """<div style="margin-top:48px;padding:24px 28px;background:var(--navy);border-radius:16px;">
-  <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam);margin-bottom:10px;">CFO Community</div>
-  <p style="font-size:17px;font-weight:600;color:#fff;margin:0 0 8px;letter-spacing:-0.01em;line-height:1.35;">Building something better for CFO peers.</p>
-  <p style="font-size:14px;color:rgba(255,255,255,.78);margin:0 0 18px;line-height:1.6;">I&rsquo;ve spent years inside finance communities&mdash;as a founding member and GM of The F Suite. I know what they get right and where even the best ones fall short. I&rsquo;m working on something new. If you have thoughts on what a well-designed community for CFO peers would look like, I&rsquo;d love to hear from you.</p>
-  <a href="/community" class="btn" style="background:#fff;color:var(--navy);border-color:#fff;font-size:14px;padding:10px 22px;">Share your experience &rarr;</a>
-</div>"""
     body += "</div>"
     return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
@@ -2359,6 +2352,10 @@ _COMMUNITY_FORM_CONFIGURED = _COMMUNITY_FORM_URL != "#community-form-coming-soon
 
 @app.get("/community", response_class=HTMLResponse)
 def community_page(request: Request):
+    # Parked: kept reachable for admin (so the idea/copy isn't lost) but off the
+    # public site — the signed-out site is a clean bio while job-hunting.
+    if not _is_authed(request):
+        return _login_redirect(request)
     cta_block = (
         f'<a href="{_COMMUNITY_FORM_URL}" target="_blank" rel="noopener" class="btn" '
         f'style="font-size:15px;padding:12px 26px;">Share your experience &rarr;</a>'
@@ -4485,6 +4482,7 @@ _ADMIN_GROUPS = [
         ("/draft",              "Draft",               "Draft and refine a post in a conversation."),
         ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
         ("/admin/contacts",     "Contact submissions", "Messages from the public contact form."),
+        ("/community",          "CFO Community (parked)", "Your community idea + form — parked off the public site for now."),
     ]),
     ("CFO Toolbox", "The public tools directory and the leads it brings in.", [
         ("/admin/tools",        "Tool submissions",    "Review the CFO Toolbox approval queue and manage featured/vendor settings."),

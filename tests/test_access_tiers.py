@@ -44,7 +44,7 @@ def _member_client(appmod):
 
 def _admin_client(appmod):
     c = _client(appmod)
-    c.post("/login", data={"password": "adminpass"}, follow_redirects=False)
+    c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
     return c
 
 
@@ -129,6 +129,33 @@ def test_admin_nav_mirrors_member_plus_admin(env):
     assert ">Library<" in html and ">CFO Toolbox<" in html   # member links
     nav = html.split("<nav")[1].split("</nav>")[0]
     assert ">Draft<" not in nav
+
+
+def test_blank_username_no_longer_logs_in(env):
+    # The old "leave username blank" admin shortcut is gone — a username is required.
+    c = _client(env)
+    c.post("/login", data={"username": "", "password": "adminpass"}, follow_redirects=False)
+    assert c.get("/admin", follow_redirects=False).status_code == 303   # not signed in
+
+
+def test_admin_username_breakglass_with_host_password(env):
+    # Host password still works as lockout-proof admin, but with the reserved username.
+    c = _client(env)
+    c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    assert c.get("/admin", follow_redirects=False).status_code == 200
+
+
+def test_community_is_admin_only(env):
+    anon, member, admin = _client(env), _member_client(env), _admin_client(env)
+    assert anon.get("/community", follow_redirects=False).status_code == 303
+    assert member.get("/community", follow_redirects=False).status_code == 303
+    assert admin.get("/community", follow_redirects=False).status_code == 200
+
+
+def test_public_pages_have_no_community_links(env):
+    c = _client(env)
+    for path in ["/", "/about", "/thought-leadership"]:
+        assert 'href="/community"' not in c.get(path).text, path
 
 
 def test_last_admin_cannot_be_demoted_disabled_or_deleted(env):
