@@ -490,6 +490,22 @@ class Library:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def articles_by_source(self, source: str) -> list[dict]:
+        """Every saved article from one source — used by near-duplicate clustering."""
+        rows = self.conn.execute(
+            "SELECT * FROM articles WHERE source=? ORDER BY COALESCE(published_at,'') DESC, id DESC",
+            (source,)
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def article_sources(self) -> list[tuple[str, int]]:
+        """Distinct sources with article counts, most first."""
+        rows = self.conn.execute(
+            "SELECT COALESCE(NULLIF(source,''),'(none)') AS s, COUNT(*) n "
+            "FROM articles GROUP BY s ORDER BY n DESC"
+        ).fetchall()
+        return [(r["s"], r["n"]) for r in rows]
+
     def recent_articles(self, limit: int = 40) -> list[dict]:
         """Most-recently-saved articles across the whole library — the fallback
         taste profile when one source has few prior approvals."""

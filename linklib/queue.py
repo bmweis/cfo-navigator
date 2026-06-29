@@ -181,10 +181,27 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
 
     added = 0
     skipped_scope = 0
+    skipped_dup = 0
     from . import tagstyle
+    from . import dedupe as _dd
     guide = tagstyle.effective_tag_guidance(lib)
     cleanup = lib.get_setting("scope_cleanup", "on") != "off"
+    dedupe_srcs = {s.strip() for s in (lib.get_setting("dedupe_sources", "SaaStr") or "").split(",") if s.strip()}
+    dup_existing: dict[str, list] = {}   # source -> existing items, built lazily
+
+    def _existing_for(src: str):
+        if src not in dup_existing:
+            dup_existing[src] = lib.articles_by_source(src) + [
+                c for c in lib.list_queue(status="pending") if (c.get("source") or "") == src]
+        return dup_existing[src]
+
     for i, it in enumerate(new_items):
+        src = it.get("source", "") or ""
+        # Near-dup check uses the feed item's own title/summary (no fetch needed).
+        if src in dedupe_srcs and _dd.is_dup_of_any(it, _existing_for(src), source=src):
+            skipped_dup += 1
+            progress(i + 1, len(new_items), it.get("title", ""))
+            continue
         cand = _enrich_candidate(it, lib.known_tags(), enrich=enrich, model=model,
                                  tag_guide=guide, cleanup_mode=cleanup)
         if not cand.pop("in_scope", True):
@@ -193,10 +210,12 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
             continue
         if lib.add_to_queue(**cand):
             added += 1
+            if src in dedupe_srcs:
+                _existing_for(src).append(cand)
         progress(i + 1, len(new_items), it.get("title", ""))
 
-    return {"scanned": len(items), "new": len(new_items),
-            "added": added, "skipped_scope": skipped_scope}
+    return {"scanned": len(items), "new": len(new_items), "added": added,
+            "skipped_scope": skipped_scope, "skipped_dup": skipped_dup}
 
 
 # ---------------------------------------------------------------------------
@@ -355,14 +374,22 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
     since = _ensure_aware(since)
     seen = {normalize_url(u) for u in (lib.article_urls() | lib.queue_urls())}
     from . import tagstyle
+    from . import dedupe as _dd
     guide = tagstyle.effective_tag_guidance(lib)
     cleanup = lib.get_setting("scope_cleanup", "on") != "off"
+    dedupe_srcs = {s.strip() for s in (lib.get_setting("dedupe_sources", "SaaStr") or "").split(",") if s.strip()}
     report: list[dict] = []
 
     for f in feeds:
         site = getattr(f, "html_url", "") or ""
         stat = {"source": f.name, "site": site, "sitemap": None,
-                "candidates": 0, "added": 0, "undated": 0, "skipped_scope": 0, "note": ""}
+                "candidates": 0, "added": 0, "undated": 0, "skipped_scope": 0,
+                "skipped_dup": 0, "note": ""}
+        # Near-dup guard for configured sources: build the existing-items list once.
+        dup_existing = None
+        if f.name in dedupe_srcs:
+            dup_existing = lib.articles_by_source(f.name) + [
+                c for c in lib.list_queue(status="pending") if (c.get("source") or "") == f.name]
         if getattr(f, "category", "") in exclude_categories:
             stat["note"] = f"skipped — {f.category} category (feed-only, not library)"
             report.append(stat)
@@ -408,9 +435,15 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
                     stat["skipped_scope"] += 1   # off-audience — don't propose it
                     progress(f.name, i + 1, len(candidates))
                     continue
+                if dup_existing is not None and _dd.is_dup_of_any(cand, dup_existing, source=f.name):
+                    stat["skipped_dup"] += 1     # near-duplicate of something we already have
+                    progress(f.name, i + 1, len(candidates))
+                    continue
                 if lib.add_to_queue(**cand):
                     stat["added"] += 1
                     seen.add(normalize_url(e["url"]))
+                    if dup_existing is not None:
+                        dup_existing.append(cand)   # catch intra-batch dupes too
                 progress(f.name, i + 1, len(candidates))
 
         report.append(stat)

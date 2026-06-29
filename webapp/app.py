@@ -4428,6 +4428,7 @@ _LIBRARY_TOOLS = [
     ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your library and edit the guide, so auto-tagging matches your judgment."),
     ("/admin/enrich",       "Re-enrich library",   "The big pass: force-refresh summaries + tags on Opus, applying your tag style and the scope rules."),
     ("/admin/review-removals", "Review removals",  "Confirm or keep what the re-enrich flagged as off-audience (podcasts, predictions, fund/LP content)."),
+    ("/admin/dedupe",       "Find duplicates",     "Catch near-duplicate articles (similar content within ~3 months) from a source and remove them."),
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
@@ -5313,6 +5314,176 @@ async def admin_tag_style_clear(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Near-duplicate cleanup — catch reworded reruns (e.g. SaaStr) the exact-URL
+# dedup misses, within a publish-date window.
+# ---------------------------------------------------------------------------
+
+_DEDUPE_PRESETS = {"aggressive": 0.55, "balanced": 0.62, "strict": 0.72}
+
+
+def _dedupe_sources(lib) -> set[str]:
+    raw = lib.get_setting("dedupe_sources", "SaaStr") or ""
+    return {s.strip() for s in raw.split(",") if s.strip()}
+
+
+@app.get("/admin/dedupe", response_class=HTMLResponse)
+def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
+                 days: int = 90, msg: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    from linklib import dedupe as dd
+    threshold = _DEDUPE_PRESETS.get(level, 0.62)
+    lib = _lib()
+    try:
+        sources = lib.article_sources()
+        auto = _dedupe_sources(lib)
+        clusters = []
+        if source:
+            arts = lib.articles_by_source(source)
+            clusters = dd.find_clusters(arts, days=days, threshold=threshold, source=source)
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+
+    # Source picker (default suggestion: SaaStr).
+    opts = ""
+    for s, n in sources:
+        sel = " selected" if s == source else ""
+        opts += f'<option value="{_esc(s)}"{sel}>{_esc(s)} ({n})</option>'
+    level_opts = "".join(
+        f'<option value="{k}"{" selected" if k == level else ""}>{k.capitalize()} ({v})</option>'
+        for k, v in _DEDUPE_PRESETS.items())
+    days_opts = "".join(
+        f'<option value="{d}"{" selected" if d == days else ""}>±{d} days</option>'
+        for d in (30, 90, 180, 365))
+
+    controls = f"""<form method="get" action="/admin/dedupe" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;">
+  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Source</label>
+    <select name="source" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);min-width:180px;"><option value="">Choose a source…</option>{opts}</select></div>
+  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Strictness</label>
+    <select name="level" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">{level_opts}</select></div>
+  <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Window</label>
+    <select name="days" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">{days_opts}</select></div>
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Scan</button>
+</form>"""
+
+    body_inner = controls
+    if source:
+        is_auto = source in auto
+        toggle = f"""<form method="post" action="/admin/dedupe/auto" style="margin:0 0 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:{'var(--seafoam-wash)' if is_auto else 'var(--surface)'};border:1px solid var(--line);border-radius:12px;padding:12px 16px;">
+  <input type="hidden" name="source" value="{_esc(source)}">
+  <span style="font-size:13.5px;color:var(--ink-soft);">Going-forward: {'<strong>auto-skipping</strong> near-dupes from this source during sweeps.' if is_auto else 'new near-dupes from this source are <strong>not</strong> auto-skipped yet.'}</span>
+  <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">{'Stop auto-skip' if is_auto else 'Auto-skip new dupes'}</button>
+</form>"""
+        if not clusters:
+            body_inner += toggle + ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+                                    'padding:32px;text-align:center;color:var(--muted);">No near-duplicates found for '
+                                    f'<strong>{_esc(source)}</strong> at this strictness/window. Try a more aggressive setting if you suspect some.</div>')
+        else:
+            dupe_total = sum(len(c) - 1 for c in clusters)
+            blocks = ""
+            for c in clusters:
+                rows = ""
+                for i, a in enumerate(c):
+                    keep = i == 0
+                    d = _esc((a.get("published_at") or "")[:10])
+                    tag = ('<span style="font-size:11px;font-weight:600;color:var(--seafoam-deep);">KEEP (newest)</span>'
+                           if keep else
+                           f'<form method="post" action="/admin/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this article?\');"><input type="hidden" name="id" value="{a["id"]}"><input type="hidden" name="back" value="{_esc(source)}|{level}|{days}"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
+                    rows += (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);">'
+                             f'<div style="min-width:0;"><a href="{_esc(a["url"])}" target="_blank" rel="noopener" style="font-size:14px;color:var(--navy);font-weight:500;">{_esc(a.get("title") or a["url"])}</a>'
+                             f'<div style="font-size:12px;color:var(--muted);">{d}</div></div>{tag}</div>')
+                blocks += (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px 18px 14px;margin-bottom:14px;">'
+                           f'<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:10px 0 2px;">{len(c)} near-duplicates</div>{rows}</div>')
+            bulk = f"""<form method="post" action="/admin/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} older duplicate(s), keeping the newest in each group? A backup is taken first.');">
+  <input type="hidden" name="source" value="{_esc(source)}"><input type="hidden" name="level" value="{level}"><input type="hidden" name="days" value="{days}">
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Remove all {dupe_total} older duplicate{'s' if dupe_total != 1 else ''} (keep newest)</button>
+  <span style="font-size:13px;color:var(--muted);margin-left:10px;">{len(clusters)} duplicate group{'s' if len(clusters) != 1 else ''} found.</span>
+</form>"""
+            body_inner += toggle + bulk + blocks
+
+    body = f"""<div class="page" style="max-width:760px;">
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<h1>Find duplicates</h1>
+<p style="color:var(--muted);margin:-6px 0 18px;">Catches the same piece republished under a different title within a date window &mdash; the kind exact-URL dedup misses. Pick a source and scan; remove the older copies and keep the newest. Turn on auto-skip to keep new dupes out going forward.</p>
+{banner}
+{body_inner}
+</div>"""
+    return HTMLResponse(_page("Find duplicates — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/dedupe/remove")
+async def admin_dedupe_remove(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    try:
+        aid = int(form.get("id") or 0)
+    except ValueError:
+        aid = 0
+    back = (form.get("back") or "").split("|")
+    lib = _lib()
+    try:
+        if aid:
+            lib.delete_article(aid)
+    finally:
+        lib.close()
+    background_tasks.add_task(backup.maybe_backup, DB_PATH)
+    src = quote(back[0]) if back and back[0] else ""
+    lvl = back[1] if len(back) > 1 else "balanced"
+    dys = back[2] if len(back) > 2 else "90"
+    return RedirectResponse(f"/admin/dedupe?source={src}&level={lvl}&days={dys}", status_code=303)
+
+
+@app.post("/admin/dedupe/remove-older")
+async def admin_dedupe_remove_older(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    from linklib import dedupe as dd
+    form = await request.form()
+    source = (form.get("source") or "").strip()
+    level = (form.get("level") or "balanced").strip()
+    try:
+        days = int(form.get("days") or 90)
+    except ValueError:
+        days = 90
+    threshold = _DEDUPE_PRESETS.get(level, 0.62)
+    removed = 0
+    lib = _lib()
+    try:
+        backup.maybe_backup(DB_PATH)   # snapshot before a bulk delete
+        clusters = dd.find_clusters(lib.articles_by_source(source), days=days,
+                                    threshold=threshold, source=source)
+        for c in clusters:
+            for a in c[1:]:            # keep the first (newest), remove the rest
+                lib.delete_article(a["id"])
+                removed += 1
+    finally:
+        lib.close()
+    msg = f"Removed {removed} older duplicate{'s' if removed != 1 else ''} from {source}."
+    return RedirectResponse(f"/admin/dedupe?source={quote(source)}&level={level}&days={days}&msg={quote(msg)}",
+                            status_code=303)
+
+
+@app.post("/admin/dedupe/auto")
+async def admin_dedupe_auto(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    source = (form.get("source") or "").strip()
+    lib = _lib()
+    try:
+        srcs = _dedupe_sources(lib)
+        srcs.symmetric_difference_update({source})   # toggle membership
+        lib.set_setting("dedupe_sources", ", ".join(sorted(srcs)))
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/dedupe?source={quote(source)}", status_code=303)
+
+
+# ---------------------------------------------------------------------------
 # User accounts (admin-provisioned). The gated member tier is layered on these.
 # ---------------------------------------------------------------------------
 
@@ -5924,10 +6095,12 @@ def admin_backfill(request: Request):
         added = r.get("added", 0)
         cands = r.get("candidates", 0)
         scope = r.get("skipped_scope", 0)
+        dup = r.get("skipped_dup", 0)
         note = r.get("note", "")
         sitemap = r.get("sitemap") or ""
         sm_link = f'<a href="{_esc(sitemap)}" style="font-size:11px;color:var(--muted);" target="_blank">{_esc(sitemap[:60])}{"…" if len(sitemap)>60 else ""}</a>' if sitemap else '<span style="font-size:11px;color:var(--muted);">—</span>'
-        status = note if note else f'{added} added / {cands} candidates{f" / {scope} off-audience" if scope else ""}'
+        extra = (f" / {scope} off-audience" if scope else "") + (f" / {dup} dup" if dup else "")
+        status = note if note else f'{added} added / {cands} candidates{extra}'
         status_color = "#b91c1c" if note else ("#16a34a" if added else "#92400e")
         return (f'<tr><td style="padding:8px 12px;font-size:13px;font-weight:500;">{_esc(r.get("source",""))}</td>'
                 f'<td style="padding:8px 12px;">{sm_link}</td>'
