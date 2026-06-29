@@ -651,11 +651,17 @@ the early-to-growth leap. Based in Boston.</p>
 </div>
 <p style="font-size:12px;color:var(--muted);margin:8px 0 24px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>
 
+<a href="/community" style="display:block;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:22px 24px;text-decoration:none;margin:0 0 24px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+    <span style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);letter-spacing:-0.01em;">CFO Community</span>
+    <span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>
+  <p style="margin:7px 0 0;font-size:14.5px;color:var(--muted);line-height:1.5;">What a well-designed community for finance peers should look like &mdash; and what I&rsquo;m building.</p>
+</a>
+
 <div style="display:flex;gap:12px;flex-wrap:wrap;">
   <a href="/thought-leadership" class="btn">Thought Leadership</a>
   <a href="/contact" class="btn btn-ghost">Get in Touch</a>
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
-  <a href="/community" class="btn btn-ghost">CFO Community &rarr;</a>
 </div>
 </div>"""
     return HTMLResponse(_page("About — Brian Weisberg", "About", body, role=_role(request)))
@@ -4928,7 +4934,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
   </div>
   <input class="qtags" type="text" value="{tags_val}" style="display:none;width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:var(--bg);margin-bottom:12px;">
   <div style="display:flex;gap:9px;">
-    <button class="add-btn btn" onclick="addOne(this)" style="font-size:13px;padding:8px 18px;">Add to library</button>
+    <button class="add-btn btn" onclick="addOne(this)" style="font-size:13px;padding:8px 18px;">Add to archive</button>
     <button class="btn btn-ghost" onclick="dismissOne(this)" style="font-size:13px;padding:8px 18px;">Dismiss</button>
   </div>
 </div>"""
@@ -5053,7 +5059,7 @@ async function addOne(btn){{
   addBtn.disabled = true; addBtn.textContent = 'Adding…';
   const ok = await postForm('/admin/queue/add', {{url: card.dataset.url, tags: card.querySelector('.qtags').value}});
   if (ok) {{ removeCard(card); }}
-  else {{ addBtn.disabled = false; addBtn.textContent = 'Add to library'; }}
+  else {{ addBtn.disabled = false; addBtn.textContent = 'Add to archive'; }}
   return ok;
 }}
 async function dismissOne(btn){{
@@ -5718,12 +5724,18 @@ def admin_users(request: Request, msg: str = ""):
                       f'background:{"var(--coral-wash);color:var(--coral-deep)" if u["role"]=="admin" else "var(--seafoam-wash);color:var(--seafoam-deep)"};">{_esc(u["role"])}</span>')
         last = _esc((u["last_login_at"] or "")[:10]) or "—"
         rows += f"""<tr style="border-top:1px solid var(--line);">
-  <td style="padding:9px 12px;font-size:14px;font-weight:500;">{_esc(u["username"])}<div style="font-size:12px;color:var(--muted);font-weight:400;">{_esc(u["email"] or u["name"] or "")}</div></td>
+  <td style="padding:9px 12px;font-size:14px;font-weight:500;">{_esc(u["username"])}<div style="font-size:12px;color:var(--muted);font-weight:400;">{_esc(u["email"] or "")}</div></td>
+  <td style="padding:9px 12px;font-size:14px;">{_esc(u["name"] or "") or '<span style="color:var(--muted);">—</span>'}</td>
   <td style="padding:9px 12px;">{role_badge}</td>
   <td style="padding:9px 12px;">{status}</td>
   <td style="padding:9px 12px;font-size:12px;color:var(--muted);">{last}</td>
   <td style="padding:9px 12px;">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <form method="post" action="/admin/users/{uid}/edit" style="margin:0;display:flex;gap:4px;align-items:center;">
+        <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:110px;">
+        <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:120px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
+      </form>
       <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">{"Disable" if active else "Enable"}</button></form>
       <form method="post" action="/admin/users/{uid}/password" style="margin:0;display:flex;gap:4px;align-items:center;">
         <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:130px;">
@@ -5734,7 +5746,7 @@ def admin_users(request: Request, msg: str = ""):
   </td>
 </tr>"""
     if not users:
-        rows = '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</td></tr>'
+        rows = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</td></tr>'
 
     body = f"""<div class="page" style="max-width:880px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -5745,6 +5757,7 @@ def admin_users(request: Request, msg: str = ""):
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">User</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Role</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Status</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last in</th>
@@ -5795,6 +5808,28 @@ async def admin_users_create(request: Request):
             msg = f'Created account “{username.lower()}” ({role}).'
         except _sql.IntegrityError:
             msg = f'Username “{username.lower()}” already exists.'
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/edit")
+async def admin_users_edit(request: Request, user_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    username = (form.get("username") or "").strip()
+    name = (form.get("name") or "").strip()
+    if not username:
+        return RedirectResponse(f"/admin/users?msg={quote('Username is required.')}", status_code=303)
+    lib = _lib()
+    try:
+        import sqlite3 as _sql
+        try:
+            lib.update_user(user_id, username=username, name=name)
+            msg = f'Updated “{username.lower()}”.'
+        except _sql.IntegrityError:
+            msg = f'Username “{username.lower()}” is already taken.'
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
@@ -6938,7 +6973,7 @@ def bookmarklet(request: Request):
         "if(t===null)return;"
         "var u=location.href;"
         f"fetch('{PUBLIC_BASE}/save{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
-        "body:JSON.stringify({url:u,tags:t})}}).then(function(r){alert(r.ok?'Saved to library':'Error saving');});"
+        "body:JSON.stringify({url:u,tags:t})}}).then(function(r){alert(r.ok?'Saved to archive':'Error saving');});"
         "})();"
     )
     return js

@@ -63,6 +63,30 @@ def test_duplicate_username_rejected(lib):
         lib.create_user("DUP", "supersecret")   # case-insensitive collision
 
 
+def test_update_user_username_and_name(lib):
+    uid = lib.create_user("sfunk", "supersecret", name="S. Funk")
+    lib.update_user(uid, username="sarah.funk", name="Sarah Funk")
+    assert lib.get_user("sfunk") is None
+    u = lib.get_user("sarah.funk")
+    assert u and u["name"] == "Sarah Funk"
+    # auth follows the new username; the renamed account still works
+    assert lib.authenticate("sarah.funk", "supersecret") is not None
+
+
+def test_update_user_name_only(lib):
+    uid = lib.create_user("kim", "supersecret")
+    lib.update_user(uid, name="Kim Lee")
+    assert lib.get_user("kim")["name"] == "Kim Lee"   # username unchanged
+
+
+def test_update_user_username_collision_rejected(lib):
+    lib.create_user("taken", "supersecret")
+    uid = lib.create_user("mover", "supersecret")
+    import sqlite3
+    with pytest.raises(sqlite3.IntegrityError):
+        lib.update_user(uid, username="TAKEN")   # case-insensitive collision
+
+
 # --- session cookie (role-aware) ------------------------------------------
 
 @pytest.fixture

@@ -668,6 +668,23 @@ class Library:
                           (hash_password(password), user_id))
         self.conn.commit()
 
+    def update_user(self, user_id: int, username: str | None = None,
+                    name: str | None = None) -> None:
+        """Edit an account's username and/or display name. Username is normalized
+        (lowercased/trimmed) and unique — raises sqlite3.IntegrityError if taken."""
+        sets, vals = [], []
+        if username is not None:
+            sets.append("username=?")
+            vals.append(username.strip().lower())
+        if name is not None:
+            sets.append("name=?")
+            vals.append(name.strip())
+        if not sets:
+            return
+        vals.append(user_id)
+        self.conn.execute(f"UPDATE users SET {', '.join(sets)} WHERE id=?", vals)
+        self.conn.commit()
+
     def delete_user(self, user_id: int) -> None:
         self.conn.execute("DELETE FROM users WHERE id=?", (user_id,))
         self.conn.commit()
