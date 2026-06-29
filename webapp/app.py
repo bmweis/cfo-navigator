@@ -99,6 +99,7 @@ CATEGORY_DESCRIPTIONS = {
 }
 
 # coverage: "Private" | "Public" | "Both"
+# pricing:  "free" (default) | "paid" | "freemium"  -> shows a $ badge
 BENCHMARKS = [
     {
         "name": "ICONIQ Growth",
@@ -108,27 +109,34 @@ BENCHMARKS = [
     },
     {
         "name": "ICONIQ Compass",
-        "url": "https://iconiqcapital.com/growth/compass/",
+        "url": "https://compass.iconiqgrowth.com/",
         "description": "Their interactive benchmarking tool. Lets you slice the data by ARR range, growth rate, and other filters so you're actually comparing against something relevant.",
         "coverage": "Private",
     },
     {
         "name": "HighAlpha (formerly OpenView)",
-        "url": "https://highalpha.com/resources/",
+        "url": "https://www.highalpha.com/saas-benchmarks",
         "description": "Took over OpenView's annual SaaS benchmarks report. NRR, GRR, CAC payback, and the usual suspects for private SaaS companies.",
         "coverage": "Private",
     },
     {
         "name": "Benchmarkit",
-        "url": "https://benchmarkit.solutions/",
+        "url": "https://www.benchmarkit.ai/",
         "description": "Ray Rike's interactive benchmarking tool. Better segmentation than most—you can control who you're comparing against, which is the whole point.",
         "coverage": "Private",
     },
     {
+        "name": "SaaStr Benchmarking",
+        "url": "https://saastr.ai/startup-benchmarking",
+        "description": "Startup benchmarking hub for early-stage SaaS—revenue, growth, and efficiency marks by stage, with Jason Lemkin's take on what 'good' actually looks like.",
+        "coverage": "Private",
+    },
+    {
         "name": "OpexEngine",
-        "url": "https://www.opexengine.com/saas-financial-benchmarks/",
+        "url": "https://www.opexengine.com/",
         "description": "Private and public SaaS benchmarks across Rule of 40, unit economics, and operating metrics. One of the more comprehensive data sets out there.",
         "coverage": "Both",
+        "pricing": "paid",
     },
     {
         "name": "Bessemer Venture Partners",
@@ -143,16 +151,23 @@ BENCHMARKS = [
         "coverage": "Public",
     },
     {
-        "name": "Meritech Capital",
-        "url": "https://www.meritechcapital.com/benchmarking",
+        "name": "Meritech Analytics",
+        "url": "https://meritechanalytics.com/",
         "description": "Interactive public cloud benchmarks—growth, efficiency, and valuation multiples, updated in real time. Great for understanding where public comps are trading.",
         "coverage": "Public",
     },
     {
         "name": "PublicComps",
-        "url": "https://www.publiccomps.com",
+        "url": "https://www.publiccomps.com/",
         "description": "Public SaaS comps and operating metrics. Good filters by category and scale.",
         "coverage": "Public",
+        "pricing": "freemium",
+    },
+    {
+        "name": "Baremetrics Open Benchmarks",
+        "url": "https://baremetrics.com/open-benchmarks",
+        "description": "Real, anonymized metrics—MRR growth, churn, ARPU, LTV—aggregated from thousands of Baremetrics-tracked subscription businesses. Skews SMB, but it's actual data, not a survey.",
+        "coverage": "Private",
     },
 ]
 _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -454,6 +469,8 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(title)}</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="apple-touch-icon" href="/static/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
@@ -2436,11 +2453,25 @@ def tools_directory(request: Request):
             "Both":    "background:#ede9fe;color:#7c3aed",
         }.get(cov, "background:var(--accent-light);color:var(--accent)")
 
+    def _bench_pricing_badge(b: dict) -> str:
+        p = (b.get("pricing") or "free").lower()
+        if p == "paid":
+            label = "$ Paid"
+        elif p == "freemium":
+            label = "$ Free + paid"
+        else:
+            return ""
+        return (f'<span class="bench-badge" title="Paid resource" '
+                f'style="background:#fef3c7;color:#92400e;">{label}</span>')
+
     bench_cards = "".join(
         f'<a class="bench-card" href="{_esc(b["url"])}" target="_blank" rel="noopener">'
         f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px;">'
         f'<span class="bench-name">{_esc(b["name"])}</span>'
+        f'<span style="display:flex;gap:6px;align-items:center;flex-shrink:0;">'
+        f'{_bench_pricing_badge(b)}'
         f'<span class="bench-badge" style="{_bench_badge_style(b["coverage"])}">{_esc(b["coverage"])}</span>'
+        f'</span>'
         f'</div>'
         f'<p class="bench-desc">{_esc(b["description"])}</p>'
         f'</a>'
@@ -3711,6 +3742,7 @@ a:hover{opacity:.8;}
 _READER_TMPL = """<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <style>{css}</style>
 </head><body>
 <div class="reader-bar">
