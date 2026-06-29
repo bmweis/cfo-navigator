@@ -675,9 +675,10 @@ class Library:
         self.conn.commit()
 
     def update_user(self, user_id: int, username: str | None = None,
-                    name: str | None = None) -> None:
-        """Edit an account's username and/or display name. Username is normalized
-        (lowercased/trimmed) and unique — raises sqlite3.IntegrityError if taken."""
+                    name: str | None = None, email: str | None = None) -> None:
+        """Edit an account's username, display name, and/or email. Username is
+        normalized (lowercased/trimmed) and unique — raises sqlite3.IntegrityError
+        if taken. Pass None to leave a field unchanged."""
         sets, vals = [], []
         if username is not None:
             sets.append("username=?")
@@ -685,6 +686,9 @@ class Library:
         if name is not None:
             sets.append("name=?")
             vals.append(name.strip())
+        if email is not None:
+            sets.append("email=?")
+            vals.append(email.strip())
         if not sets:
             return
         vals.append(user_id)

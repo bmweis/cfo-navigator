@@ -5791,9 +5791,10 @@ def admin_users(request: Request, msg: str = ""):
   <td style="padding:9px 12px;font-size:12px;color:var(--muted);">{last}</td>
   <td style="padding:9px 12px;">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-      <form method="post" action="/admin/users/{uid}/edit" style="margin:0;display:flex;gap:4px;align-items:center;">
-        <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:110px;">
+      <form method="post" action="/admin/users/{uid}/edit" style="margin:0;display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+        <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" placeholder="username" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:110px;">
         <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:120px;">
+        <input name="email" type="email" value="{_esc(u["email"] or "")}" maxlength="200" placeholder="email" title="email" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:160px;">
         <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
       </form>
       <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
@@ -5881,13 +5882,14 @@ async def admin_users_edit(request: Request, user_id: int):
     form = await request.form()
     username = (form.get("username") or "").strip()
     name = (form.get("name") or "").strip()
+    email = (form.get("email") or "").strip()
     if not username:
         return RedirectResponse(f"/admin/users?msg={quote('Username is required.')}", status_code=303)
     lib = _lib()
     try:
         import sqlite3 as _sql
         try:
-            lib.update_user(user_id, username=username, name=name)
+            lib.update_user(user_id, username=username, name=name, email=email)
             msg = f'Updated “{username.lower()}”.'
         except _sql.IntegrityError:
             msg = f'Username “{username.lower()}” is already taken.'

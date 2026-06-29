@@ -90,6 +90,13 @@ def test_update_user_name_only(lib):
     assert lib.get_user("kim")["name"] == "Kim Lee"   # username unchanged
 
 
+def test_update_user_email(lib):
+    uid = lib.create_user("rob", "supersecret", email="old@x.com", name="Rob")
+    lib.update_user(uid, username="rob", name="Rob", email="new@x.com")
+    u = lib.get_user("rob")
+    assert u["email"] == "new@x.com" and u["name"] == "Rob"
+
+
 def test_update_user_username_collision_rejected(lib):
     lib.create_user("taken", "supersecret")
     uid = lib.create_user("mover", "supersecret")
