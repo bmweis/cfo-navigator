@@ -5092,18 +5092,77 @@ async def admin_queue_suggest(request: Request, background_tasks: BackgroundTask
     return RedirectResponse("/admin/queue?suggesting=1", status_code=303)
 
 
+def _tag_merge_background() -> None:
+    """Ask Claude to propose tag-merge groups; store them. Runs off-request."""
+    lib = _lib()
+    try:
+        import json as _json
+        from linklib import tagstyle
+        groups = tagstyle.suggest_tag_merges(lib)
+        lib.set_setting("tag_merge_suggestions", _json.dumps(groups if groups else []))
+        lib.set_setting("tag_merge_status", "" if groups is not None else "unavailable")
+    except Exception:
+        pass
+    finally:
+        lib.close()
+
+
 @app.get("/admin/tags", response_class=HTMLResponse)
-def admin_tags(request: Request, msg: str = ""):
+def admin_tags(request: Request, msg: str = "", merging: int = 0):
     if not _is_authed(request):
         return _login_redirect(request)
+    import json as _json
     lib = _lib()
     try:
         tags = lib.all_tags()   # [(tag, count)] desc by count
+        proposals = _json.loads(lib.get_setting("tag_merge_suggestions") or "[]")
+        merge_status = lib.get_setting("tag_merge_status")
     finally:
         lib.close()
 
     banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
               f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+
+    # Proposed merges (from "Suggest merges").
+    live_tags = {t for t, _ in tags}
+    merge_html = ""
+    if merging:
+        merge_html = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
+                      'padding:12px 16px;margin-bottom:16px;font-size:14px;color:var(--seafoam-deep);">'
+                      'Looking for tags to consolidate &mdash; reload in a few seconds to see proposed merges.</div>')
+    elif merge_status == "unavailable":
+        merge_html = ('<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:10px;'
+                      'padding:12px 16px;margin-bottom:16px;font-size:14px;color:var(--coral-deep);">'
+                      'Couldn&rsquo;t generate merge suggestions (AI unavailable). You can still rename/merge by hand below.</div>')
+    else:
+        # only show groups whose tags still exist
+        groups = [g for g in proposals
+                  if all(m in live_tags for m in g.get("merge", [])) and g.get("merge")]
+        if groups:
+            cards = ""
+            for gi, g in enumerate(groups):
+                canon = _esc(g["canonical"])
+                chips = "".join(f'<span style="font-size:12px;background:var(--surface-2);color:var(--ink-soft);border-radius:6px;padding:2px 8px;">{_esc(m)}</span>' for m in g["merge"])
+                reason = _esc(g.get("reason", ""))
+                merges_val = _esc("\n".join(g["merge"]))
+                cards += f"""<div style="border-top:1px solid var(--line);padding:10px 0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+  <div style="font-size:13.5px;color:var(--ink-soft);min-width:0;">
+    <span style="display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center;">{chips}</span>
+    <span style="color:var(--muted);"> &rarr; </span><strong>{canon}</strong>
+    {f'<span style="color:var(--muted);font-size:12px;"> &middot; {reason}</span>' if reason else ''}
+  </div>
+  <form method="post" action="/admin/tags/merge-group" style="margin:0;">
+    <input type="hidden" name="canonical" value="{canon}"><textarea name="merge" style="display:none;">{merges_val}</textarea>
+    <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Merge</button>
+  </form>
+</div>"""
+            merge_html = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 18px;margin-bottom:18px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <strong style="font-family:var(--font-head);font-size:15px;color:var(--navy);">Proposed merges ({len(groups)})</strong>
+    <form method="post" action="/admin/tags/merge-all" style="margin:0;" onsubmit="return confirm('Apply all {len(groups)} proposed merges?');"><button type="submit" class="btn" style="font-size:13px;padding:6px 16px;">Apply all</button></form>
+  </div>
+  {cards}
+</div>"""
 
     rows = ""
     for tag, count in tags:
@@ -5133,7 +5192,11 @@ def admin_tags(request: Request, msg: str = ""):
 <h1>Tag cleanup</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Tags are generated automatically during enrichment. Use this to tidy the vocabulary &mdash; <strong>renaming a tag to one that already exists merges them</strong>, and deleting removes it from every article. Search and the tag facets update immediately.</p>
 {banner}
-<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">{len(tags)} tags across the library</p>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap;">
+  <p style="font-size:13px;color:var(--muted);margin:0;">{len(tags)} tags across the library</p>
+  <form method="post" action="/admin/tags/suggest-merges" style="margin:0;"><button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Suggest merges</button></form>
+</div>
+{merge_html}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
@@ -5147,6 +5210,57 @@ def admin_tags(request: Request, msg: str = ""):
 </div>
 </div>"""
     return HTMLResponse(_page("Tag cleanup — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/tags/suggest-merges")
+def admin_tags_suggest_merges(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    background_tasks.add_task(_tag_merge_background)
+    return RedirectResponse("/admin/tags?merging=1", status_code=303)
+
+
+@app.post("/admin/tags/merge-group")
+async def admin_tags_merge_group(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    canonical = (form.get("canonical") or "").strip()
+    merges = [m.strip() for m in (form.get("merge") or "").splitlines() if m.strip()]
+    total = 0
+    lib = _lib()
+    try:
+        for m in merges:
+            total += lib.rename_tag(m, canonical)
+    finally:
+        lib.close()
+    background_tasks.add_task(backup.maybe_backup, DB_PATH)
+    msg = f'Merged {len(merges)} tag{"s" if len(merges) != 1 else ""} into “{canonical}” ({total} article updates).'
+    return RedirectResponse(f"/admin/tags?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/tags/merge-all")
+def admin_tags_merge_all(request: Request, background_tasks: BackgroundTasks):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    import json as _json
+    lib = _lib()
+    try:
+        groups = _json.loads(lib.get_setting("tag_merge_suggestions") or "[]")
+        live = {t for t, _ in lib.all_tags()}
+        applied = 0
+        for g in groups:
+            canon = (g.get("canonical") or "").strip()
+            for m in g.get("merge", []):
+                if m in live and m != canon:
+                    lib.rename_tag(m, canon)
+                    applied += 1
+        lib.set_setting("tag_merge_suggestions", "[]")   # consumed
+    finally:
+        lib.close()
+    background_tasks.add_task(backup.maybe_backup, DB_PATH)
+    return RedirectResponse(f"/admin/tags?msg={quote(f'Applied all proposed merges ({applied} tags folded in).')}",
+                            status_code=303)
 
 
 @app.post("/admin/tags/rename")

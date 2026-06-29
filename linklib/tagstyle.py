@@ -146,3 +146,67 @@ def generate_tag_guide(lib: Library, model: str | None = None) -> str | None:
         return guide or None
     except Exception:
         return None
+
+
+_MERGE_PROMPT = """A curated finance-library has accumulated too many tags. Below
+are its tags with article counts. Propose consolidations: group tags that are
+synonyms, near-synonyms, or minor variants of each other and should be merged
+into one.
+
+Rules:
+- Only merge tags that mean essentially the SAME thing (e.g. "saas metrics" /
+  "saas-metrics" / "metrics-saas"; "hiring" / "recruiting" / "talent"; "arr" /
+  "annual recurring revenue"). Do NOT merge tags that are genuinely distinct.
+- For each group, pick the cleanest canonical tag (prefer the clearer wording;
+  ties go to the higher count). Use lowercase, hyphenated form when sensible.
+- It's fine to leave most tags alone. Return only the groups worth merging.
+
+Return STRICT JSON only: an array of
+  {{"canonical": "<tag to keep>", "merge": ["<tag>", ...], "reason": "<≤8 words>"}}
+where "merge" lists the OTHER tags to fold into canonical (not including canonical
+itself). No prose, no markdown.
+
+TAGS (tag — count):
+{tags}
+"""
+
+
+def suggest_tag_merges(lib: Library, model: str | None = None) -> list | None:
+    """Ask Claude to propose tag-merge groups from the library's vocabulary.
+    Returns [{"canonical", "merge":[...], "reason"}], filtered to real existing
+    tags, or None if unavailable / nothing to do."""
+    tags = lib.all_tags()  # [(tag, count)] desc
+    if len(tags) < 3:
+        return []
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    listing = "\n".join(f"- {t} — {c}" for t, c in tags)
+    valid = {t for t, _ in tags}
+    counts = dict(tags)
+    try:
+        import json
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model or GUIDE_MODEL, max_tokens=4000,
+            messages=[{"role": "user", "content": _MERGE_PROMPT.format(tags=listing)}],
+        )
+        raw = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
+        raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+        out = []
+        for g in data:
+            canon = str(g.get("canonical", "")).strip()
+            merge = [str(m).strip() for m in g.get("merge", []) if str(m).strip()]
+            # keep only real tags; canonical may be new wording but must differ from merges
+            merge = [m for m in merge if m in valid and m != canon]
+            if canon and merge:
+                out.append({"canonical": canon, "merge": merge,
+                            "reason": str(g.get("reason", "")).strip()[:60],
+                            "count": sum(counts.get(m, 0) for m in merge) + counts.get(canon, 0)})
+        return out
+    except Exception:
+        return None
