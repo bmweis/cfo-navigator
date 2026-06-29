@@ -73,6 +73,17 @@ def test_update_user_username_and_name(lib):
     assert lib.authenticate("sarah.funk", "supersecret") is not None
 
 
+def test_set_user_role(lib):
+    uid = lib.create_user("promo", "supersecret", role="user")
+    assert lib.get_user("promo")["role"] == "user"
+    lib.set_user_role(uid, "admin")
+    assert lib.get_user("promo")["role"] == "admin"
+    lib.set_user_role(uid, "user")          # demote back
+    assert lib.get_user("promo")["role"] == "user"
+    lib.set_user_role(uid, "superuser")     # invalid coerces to 'user'
+    assert lib.get_user("promo")["role"] == "user"
+
+
 def test_update_user_name_only(lib):
     uid = lib.create_user("kim", "supersecret")
     lib.update_user(uid, name="Kim Lee")

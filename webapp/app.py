@@ -5736,6 +5736,7 @@ def admin_users(request: Request, msg: str = ""):
         <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:120px;">
         <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
       </form>
+      <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
       <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">{"Disable" if active else "Enable"}</button></form>
       <form method="post" action="/admin/users/{uid}/password" style="margin:0;display:flex;gap:4px;align-items:center;">
         <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:130px;">
@@ -5847,6 +5848,23 @@ def admin_users_toggle(request: Request, user_id: int):
     finally:
         lib.close()
     return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/role")
+def admin_users_role(request: Request, user_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    msg = ""
+    try:
+        u = next((x for x in lib.list_users() if x["id"] == user_id), None)
+        if u:
+            new_role = "user" if u["role"] == "admin" else "admin"
+            lib.set_user_role(user_id, new_role)
+            msg = f'“{u["username"]}” is now {"an admin" if new_role == "admin" else "a member"}.'
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
 @app.post("/admin/users/{user_id}/password")

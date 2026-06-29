@@ -662,6 +662,12 @@ class Library:
         self.conn.execute("UPDATE users SET active=? WHERE id=?", (int(active), user_id))
         self.conn.commit()
 
+    def set_user_role(self, user_id: int, role: str) -> None:
+        """Promote/demote an account. Role is coerced to 'user' or 'admin'."""
+        role = role if role in ("user", "admin") else "user"
+        self.conn.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+        self.conn.commit()
+
     def set_user_password(self, user_id: int, password: str) -> None:
         from .passwords import hash_password
         self.conn.execute("UPDATE users SET password_hash=? WHERE id=?",
