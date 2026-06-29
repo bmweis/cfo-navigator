@@ -5014,7 +5014,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
 .q-group[open] .q-chevron{{transform:rotate(90deg);}}
 .q-group summary:hover{{background:var(--surface);}}
 </style>
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Archive Queue</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Proposed saves waiting for your review. Approve them into the archive&nbsp;&mdash;&nbsp;edit the tags first if you like&nbsp;&mdash;&nbsp;or dismiss what you don&rsquo;t want.</p>
 {scan_notice}
@@ -5225,7 +5225,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
         rows = '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--muted);">No tags yet.</td></tr>'
 
     body = f"""<div class="page" style="max-width:820px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Tag cleanup</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Tags are generated automatically during enrichment. Use this to tidy the vocabulary &mdash; <strong>renaming a tag to one that already exists merges them</strong>, and deleting removes it from every article. Search and the tag facets update immediately.</p>
 {banner}
@@ -5380,7 +5380,7 @@ def admin_tag_style(request: Request, generating: int = 0):
     gen_label = "Re-learn from my archive" if has_guide else "Learn from my archive"
 
     body = f"""<div class="page" style="max-width:820px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Tagging style{state_badge}</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Auto-tagging already reuses your vocabulary. This goes further: it studies <strong>how</strong> you tagged your {n_tags} tags &mdash; what each one means, how granular you go, what you leave untagged &mdash; and distills soft rules that get injected into enrichment so new tags match your judgment. Review and edit anything below; your edits are what the tagger follows.</p>
 {notice}
@@ -5585,7 +5585,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
             body_inner += toggle + bulk + blocks
 
     body = f"""<div class="page" style="max-width:760px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Find duplicates</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Catches the same piece republished under a different title within a date window &mdash; the kind exact-URL dedup misses. A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged. The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest. Turn on auto-skip to keep new dupes out going forward.</p>
 {banner}
@@ -5991,7 +5991,7 @@ def admin_review_removals(request: Request):
         cards = "".join(_card(a) for a in flagged)
 
     body = f"""<div class="page" style="max-width:820px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Review removals</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as off-audience for this archive &mdash; most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so. Keep the false positives; remove the rest.</p>
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px;">
@@ -6160,7 +6160,7 @@ def admin_enrich(request: Request):
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
 
     body = f"""<div class="page" style="max-width:720px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Re-enrich archive</h1>
 <p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what the Ask feature reasons from, so depth here pays off there.</p>
 
@@ -6407,7 +6407,7 @@ def admin_backfill(request: Request):
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
 
     body = f"""<div class="page" style="max-width:820px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Historical sweep</h1>
 <p style="color:var(--muted);margin:-6px 0 20px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review. A one-time catch-up on your back catalog.</p>
 
@@ -6545,7 +6545,7 @@ def admin_backup(request: Request, uploaded: str = ""):
         if uploaded else ''
     )
     body = f"""<div class="page" style="max-width:820px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Archive backup</h1>
 {uploaded_banner}
 <p style="color:var(--muted);margin:-6px 0 24px;">Currently <strong>{count:,}</strong> articles in the live database.</p>
