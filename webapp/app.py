@@ -464,7 +464,9 @@ def _page(title: str, active: str, body: str, authed: bool = False,
         nav += f'<a href="/login" class="{"active" if active == "Sign in" else ""}">Sign in</a>'
 
     star = ('<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">'
-            '<path d="M8 0 L9.4 6.6 L16 8 L9.4 9.4 L8 16 L6.6 9.4 L0 8 L6.6 6.6 Z" fill="#002975"/></svg>')
+            '<path d="M 8.00 0.00 L 8.55 6.66 L 10.76 5.24 L 9.34 7.45 L 16.00 8.00 L 9.34 8.55 '
+            'L 10.76 10.76 L 8.55 9.34 L 8.00 16.00 L 7.45 9.34 L 5.24 10.76 L 6.66 8.55 L 0.00 8.00 '
+            'L 6.66 7.45 L 5.24 5.24 L 7.45 6.66 Z" fill="#002975"/></svg>')
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
