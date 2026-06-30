@@ -10,8 +10,8 @@ Requires the `anthropic` SDK and an API key:
 Defaults to Opus for depth: the summary is the material the Ask assistant
 reasons from and the resale-safe surface, so quality matters more than the
 per-article cost of a one-time or low-volume run. Override with
-LINKLIB_ENRICH_MODEL. Model names change over time — verify current options at
-https://docs.claude.com/en/docs/about-claude/models
+LINKLIB_ENRICH_MODEL. The web pickers source their options from
+``linklib.models`` (curated registry reconciled with the live Models API).
 """
 from __future__ import annotations
 

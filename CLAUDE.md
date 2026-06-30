@@ -194,8 +194,17 @@ a PR and passing checks — the convention here so tooling/agents follow it rega
 - Enrichment: `claude-haiku-4-5-20251001` (cheap, processes thousands of articles)
 - Q&A and post drafting: `claude-sonnet-4-6` (better synthesis quality)
 
-Both are overridable via environment variables. Check current model IDs at
-https://docs.anthropic.com/en/docs/about-claude/models before changing defaults.
+Both are overridable via environment variables.
+
+**The model pickers are dynamic** (`linklib/models.py`): a single curated registry
+feeds every picker (Q&A, posts, re-enrich, backfill), and `models_for` reconciles it
+with the live Anthropic Models API — retired models drop off the lists on their own,
+and newly released models surface on the chat pickers automatically. So there's no
+longer a manual "check the current model IDs" step before a new model can be used:
+add a row to `_REGISTRY` to give it a curated label/blurb, or just let the live list
+surface it. The enrichment pickers stay curated (no auto-surfacing) so a whole-archive
+re-enrich can't be pointed at an unexpectedly pricey new model by accident. When the
+API/key is unavailable, every picker falls back to the static registry.
 
 ## Billing note
 

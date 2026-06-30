@@ -19,9 +19,10 @@ DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
 
 # Friendly alias → canonical model ID
 MODEL_ALIASES: dict[str, str] = {
-    "haiku":  "claude-haiku-4-5-20251001",
-    "sonnet": "claude-sonnet-4-6",
-    "opus":   "claude-opus-4-8",
+    "haiku":   "claude-haiku-4-5-20251001",
+    "sonnet":  "claude-sonnet-4-6",
+    "sonnet5": "claude-sonnet-5",
+    "opus":    "claude-opus-4-8",
 }
 
 # Controls how many sources are pulled and how long synthesis runs.
@@ -51,6 +52,7 @@ def count_prior_questions(history) -> int:
 COST_ESTIMATES: dict[str, dict[str, float]] = {
     "claude-haiku-4-5-20251001": {"quick": 0.004,  "standard": 0.008,  "deep": 0.013},
     "claude-sonnet-4-6":         {"quick": 0.014,  "standard": 0.028,  "deep": 0.048},
+    "claude-sonnet-5":           {"quick": 0.014,  "standard": 0.028,  "deep": 0.048},
     "claude-opus-4-8":           {"quick": 0.069,  "standard": 0.141,  "deep": 0.240},
 }
 
