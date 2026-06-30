@@ -4521,6 +4521,7 @@ _ADMIN_GROUPS = [
         ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
         ("/admin/contacts",     "Contact submissions", "Messages from the public contact form."),
         ("/community",          "CFO Community (parked)", "Your community idea + form — parked off the public site for now."),
+        ("/admin/open-source",  "Open source",         "The open-source projects this site is built on — with gratitude."),
     ]),
     ("CFO Toolbox", "The public tools directory and the leads it brings in.", [
         ("/admin/tools",        "Tool submissions",    "Review the CFO Toolbox approval queue and manage featured/vendor settings."),
@@ -4533,6 +4534,135 @@ _ADMIN_GROUPS = [
 
 # Flat view kept for any code/tests that iterate every section.
 _ADMIN_SECTIONS = _LIBRARY_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
+
+
+# Open-source the site is built on — celebrated on /admin/open-source.
+# (name, dist-for-version-lookup or None, license, homepage, what we use it for)
+_OPEN_SOURCE = [
+    ("Runs the site", "The web stack every page and request is served through.", [
+        ("FastAPI", "fastapi", "MIT", "https://fastapi.tiangolo.com",
+         "The web framework the whole app is written in — every route, page, and API."),
+        ("Starlette", "starlette", "BSD-3-Clause", "https://www.starlette.io",
+         "The ASGI toolkit under FastAPI — routing, responses, and the test client."),
+        ("Uvicorn", "uvicorn", "BSD-3-Clause", "https://www.uvicorn.org",
+         "The fast ASGI server that actually runs the site in production."),
+        ("Pydantic", "pydantic", "MIT", "https://docs.pydantic.dev",
+         "Parses and validates incoming request data behind FastAPI."),
+        ("python-multipart", "python-multipart", "Apache-2.0", "https://github.com/Kludex/python-multipart",
+         "Reads the form posts — login, contact, and tool submissions."),
+    ]),
+    ("Stores & searches", "Where your archive lives and how it's searched.", [
+        ("SQLite + FTS5", None, "Public Domain", "https://www.sqlite.org",
+         "The entire database is a single SQLite file, with FTS5 powering full-text search across your archive."),
+        ("Python", None, "PSF License", "https://www.python.org",
+         "The language it's all written in — and its standard library does a lot of the quiet heavy lifting."),
+    ]),
+    ("Reads the web", "Fetching articles and feeds, and making sense of messy pages.", [
+        ("Requests", "requests", "Apache-2.0", "https://requests.readthedocs.io",
+         "Fetches article pages and RSS/Atom feeds."),
+        ("Beautiful Soup", "beautifulsoup4", "MIT", "https://www.crummy.com/software/BeautifulSoup/",
+         "Parses real-world HTML — the fallback full-text extractor."),
+        ("trafilatura", "trafilatura", "Apache-2.0", "https://trafilatura.readthedocs.io",
+         "The preferred extractor — pulls clean article text out of a noisy page."),
+        ("lxml", "lxml", "BSD-3-Clause", "https://lxml.de",
+         "The fast C-backed parser the extractors lean on."),
+    ]),
+    ("Intelligence", "The AI behind enrichment, Ask, drafting, and dedupe verification.", [
+        ("Anthropic SDK", "anthropic", "MIT", "https://github.com/anthropics/anthropic-sdk-python",
+         "The Python client for Claude — summaries, auto-tags, cited Ask answers, post drafts, and duplicate checks."),
+    ]),
+    ("Built & kept tidy", "The tools that make and maintain the site — including a couple we leaned on right here.", [
+        ("pytest", "pytest", "MIT", "https://pytest.org",
+         "Runs the test suite that guards every change."),
+        ("pyflakes", "pyflakes", "MIT", "https://github.com/PyCQA/pyflakes",
+         "Keeps the wire clean — catches unused imports and dead code on every push (just wired into CI)."),
+        ("Pillow", "pillow", "HPND", "https://python-pillow.org",
+         "Drew the compass-rose favicons — the PNG and .ico — from a few lines of code."),
+        ("httpx", "httpx", "BSD-3-Clause", "https://www.python-httpx.org",
+         "The HTTP client powering the test client."),
+    ]),
+    ("Type & craft", "The look of the site.", [
+        ("Outfit", None, "SIL OFL 1.1", "https://fonts.google.com/specimen/Outfit",
+         "The headline typeface."),
+        ("DM Sans", None, "SIL OFL 1.1", "https://fonts.google.com/specimen/DM+Sans",
+         "The body typeface."),
+    ]),
+]
+
+
+@app.get("/admin/open-source", response_class=HTMLResponse)
+def admin_open_source(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    from importlib.metadata import version as _pkg_version
+    import sqlite3 as _sql
+    import platform as _platform
+
+    def _ver(name: str, dist: str | None) -> str:
+        if dist:
+            try:
+                return "v" + _pkg_version(dist)
+            except Exception:
+                return ""
+        if name == "Python":
+            return "v" + _platform.python_version()
+        if name.startswith("SQLite"):
+            return "v" + _sql.sqlite_version
+        return ""
+
+    groups_html = ""
+    for title, blurb, items in _OPEN_SOURCE:
+        cards = ""
+        for name, dist, lic, url, role in items:
+            ver = _ver(name, dist)
+            ver_block = (f'<div style="margin:1px 0 6px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;">{_esc(ver)}</div>'
+                         if ver else '<div style="height:6px;"></div>')
+            cards += (
+                f'<a href="{_esc(url)}" target="_blank" rel="noopener" '
+                f'style="display:block;background:var(--bg);border:1px solid var(--line);border-radius:12px;'
+                f'padding:14px 16px;text-decoration:none;">'
+                f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;">'
+                f'<span style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);">{_esc(name)}</span>'
+                f'<span style="font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;'
+                f'background:var(--seafoam-wash);color:var(--seafoam-deep);border-radius:5px;padding:2px 7px;white-space:nowrap;flex-shrink:0;">{_esc(lic)}</span>'
+                f'</div>'
+                f'{ver_block}'
+                f'<p style="margin:0;font-size:13px;color:var(--ink-soft);line-height:1.5;">{_esc(role)}</p>'
+                f'</a>'
+            )
+        groups_html += (
+            f'<section style="margin-bottom:28px;">'
+            f'<h2 style="font-size:16px;font-weight:700;margin:0 0 2px;">{_esc(title)}</h2>'
+            f'<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">{_esc(blurb)}</p>'
+            f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;">{cards}</div>'
+            f'</section>'
+        )
+
+    # A lighter "built with open-source love" strip. Logos via Simple Icons
+    # (CC0 / public-domain, itself an open-source project), in each brand's color.
+    _ICONS = [("python", "Python"), ("fastapi", "FastAPI"), ("sqlite", "SQLite"),
+              ("pydantic", "Pydantic"), ("pytest", "pytest"), ("anthropic", "Anthropic"),
+              ("githubactions", "GitHub Actions"), ("railway", "Railway")]
+    icons_html = "".join(
+        f'<img src="https://cdn.simpleicons.org/{slug}" alt="{_esc(label)}" title="{_esc(label)}" '
+        f'height="30" loading="lazy" style="opacity:.85;">'
+        for slug, label in _ICONS)
+    love = (f'<div style="margin-top:40px;padding-top:28px;border-top:1px solid var(--line);text-align:center;">'
+            f'<div style="display:flex;flex-wrap:wrap;gap:26px;align-items:center;justify-content:center;margin-bottom:14px;">{icons_html}</div>'
+            f'<p style="font-size:13px;color:var(--muted);margin:0;">Built with open-source love. '
+            f'Icons by <a href="https://simpleicons.org" target="_blank" rel="noopener" style="color:var(--accent);">Simple Icons</a> (CC0).</p>'
+            f'</div>')
+
+    total = sum(len(items) for _, _, items in _OPEN_SOURCE)
+    body = f"""<div class="page" style="max-width:880px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Built with open source</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 6px;font-size:16px;line-height:1.6;">This whole site stands on the shoulders of {total}-plus open-source projects&mdash;maintained by people who gave their work away so the rest of us could build. From the framework that serves every page to the tiny tool that keeps the code tidy and the one that drew the favicon, none of it would exist without them. With gratitude. &#129518;</p>
+<p style="color:var(--muted);margin:0 0 28px;font-size:13px;">If you maintain one of these &mdash; thank you. Consider <a href="https://opencollective.com" target="_blank" rel="noopener" style="color:var(--accent);">sponsoring a maintainer</a> you rely on.</p>
+{groups_html}
+{love}
+</div>"""
+    return HTMLResponse(_page("Open source — Admin", "Admin", body, authed=True))
 
 
 def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:

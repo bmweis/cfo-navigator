@@ -5,3 +5,4 @@
 
 pytest>=8
 httpx>=0.27   # required by the FastAPI/Starlette TestClient used in tests
+pyflakes>=3   # catches unused imports / dead code in CI

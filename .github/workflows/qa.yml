@@ -17,5 +17,17 @@ jobs:
           python-version: "3.11"
       - name: Install dev dependencies
         run: pip install -r requirements-dev.txt
+      - name: Lint — unused imports / dead code (pyflakes)
+        run: python -m pyflakes linklib webapp scripts
       - name: Run brand-standards QA
         run: pytest -q
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret scan (TruffleHog)
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --only-verified   # fail only on secrets verified as live
