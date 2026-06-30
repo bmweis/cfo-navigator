@@ -468,6 +468,11 @@ def _page(title: str, active: str, body: str, authed: bool = False,
             'L 10.76 10.76 L 8.55 9.34 L 8.00 16.00 L 7.45 9.34 L 5.24 10.76 L 6.66 8.55 L 0.00 8.00 '
             'L 6.66 7.45 L 5.24 5.24 L 7.45 6.66 Z" fill="#002975"/></svg>')
 
+    # "Built with open-source love" — links to the showcase for admins, plain for visitors.
+    _love = 'Built with open-source love <span style="color:var(--coral-deep);">&#9829;</span>'
+    oss_love = (f'<a href="/admin/open-source">{_love}</a>' if role == "admin"
+                else f'<span>{_love}</span>')
+
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(title)}</title>
@@ -490,6 +495,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 <footer class="site-footer">
   <span class="brand">{star}<b>Brian Weisberg</b> &middot; Strategic finance for companies that are scaling</span>
   <span class="links"><a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener">LinkedIn</a><a href="/contact">Contact</a><span>&copy; 2026</span></span>
+  <span style="flex-basis:100%;text-align:center;font-size:12px;color:var(--muted);">{oss_love}</span>
 </footer>
 </body></html>"""
 
