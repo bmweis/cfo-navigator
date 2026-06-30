@@ -458,7 +458,13 @@ def _verify_one_batch(client, batch: list[list[dict]], model: str | None,
     )
     raw = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
     raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    data = json.loads(raw)
+    # Tolerate any prose/markdown around the JSON: decode the first {...} object
+    # and ignore trailing text (Claude sometimes appends a sentence of reasoning,
+    # which made strict json.loads raise "Extra data").
+    start = raw.find("{")
+    if start == -1:
+        raise ValueError("no JSON object in verification reply")
+    data, _end = json.JSONDecoder().raw_decode(raw[start:])
     groups = []
     for grp in data.get("groups", []):
         members, seen = [], set()

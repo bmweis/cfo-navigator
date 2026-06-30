@@ -220,6 +220,18 @@ def test_verify_confirms_and_rekeys(monkeypatch):
     assert status == "verified"
 
 
+def test_verify_tolerates_prose_around_json(monkeypatch):
+    # Claude sometimes wraps the JSON in a fence and/or appends a sentence — the
+    # parser must still extract the object (the JSONDecodeError seen in prod).
+    a = _ai(10, "How to Build a World-Class CS Machine: Lessons from the CRO of Notion", date="2025-08-18")
+    b = _ai(11, "Dear SaaStr: The 10% Rule — Invest in CS, With the CRO of Notion", date="2025-08-21")
+    _fake_anthropic('```json\n{"groups": [["10", "11"]]}\n```\nThese are the same talk, retitled.',
+                    monkeypatch)
+    out, status = dd.verify_clusters([[b, a]], source="SaaStr")
+    assert status == "verified"
+    assert len(out) == 1 and len(out[0]) == 2
+
+
 def test_verify_degrades_without_api(monkeypatch):
     # No API key -> candidates returned unchanged, keeper still re-selected, and
     # the status reports the reason so the UI can stop claiming "verified".
