@@ -20,11 +20,11 @@ def test_run_all_well_formed():
     assert results, "no checks returned"
     for r in results:
         assert {"name", "what", "where", "ok", "detail"} <= set(r), r
-        assert r["where"] in ("In-app", "CI")
+        assert r["where"] in ("Live + CI", "CI")
         assert r["name"] and r["what"] and r["detail"]
 
 
 def test_live_checks_currently_pass():
     for r in checks.run_all():
-        if r["where"] == "In-app":
+        if r["ok"] is not None:        # ran live in this environment
             assert r["ok"] is True, f"{r['name']} failing: {r['detail']}"

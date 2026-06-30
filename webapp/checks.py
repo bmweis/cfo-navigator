@@ -87,42 +87,42 @@ def run_all() -> list[dict]:
 
     bf = brand_check.findings(src)
     results.append({
-        "name": "Brand standards", "where": "In-app", "ok": not bf,
+        "name": "Brand standards", "where": "Live + CI", "ok": not bf,
         "what": "Every color is a brand token or a documented exception; only on-brand fonts.",
-        "detail": "; ".join(bf) if bf else "All colors and fonts on palette."})
+        "detail": "; ".join(bf) if bf else "All colors and fonts on palette. (test_brand_standards)"})
 
     vf = voice_review.mechanical_findings(src)
     results.append({
-        "name": "Voice standards", "where": "In-app", "ok": not vf,
+        "name": "Voice standards", "where": "Live + CI", "ok": not vf,
         "what": "No banned buzzwords, filler, or performative phrases in the site copy.",
-        "detail": ", ".join(f"{rule}: “{phrase}”" for rule, phrase in vf) if vf else "Copy is on-voice."})
+        "detail": ", ".join(f"{rule}: “{phrase}”" for rule, phrase in vf) if vf else "Copy is on-voice. (test_voice_standards)"})
 
     op = open_source_problems()
     results.append({
-        "name": "Open-source showcase in sync", "where": "In-app", "ok": not op,
+        "name": "Open-source showcase in sync", "where": "Live + CI", "ok": not op,
         "what": "Every dependency is celebrated, and nothing showcased is no longer a dependency.",
-        "detail": "; ".join(op) if op else "Showcase matches requirements."})
+        "detail": "; ".join(op) if op else "Showcase matches requirements. (test_open_source)"})
 
     pf = _pyflakes_problems()
     if pf is None:
         results.append({
-            "name": "Dead code / unused imports", "where": "CI", "ok": None,
-            "what": "pyflakes finds no unused imports or dead code in linklib/webapp/scripts.",
-            "detail": "Runs in CI on every push."})
+            "name": "Dead code / unused imports (pyflakes)", "where": "CI", "ok": None,
+            "what": "No unused imports or dead code in linklib / webapp / scripts.",
+            "detail": "Lint step in the QA workflow."})
     else:
         results.append({
-            "name": "Dead code / unused imports", "where": "In-app", "ok": not pf,
-            "what": "pyflakes finds no unused imports or dead code in linklib/webapp/scripts.",
-            "detail": "; ".join(pf[:6]) if pf else "No unused imports or dead code."})
+            "name": "Dead code / unused imports (pyflakes)", "where": "Live + CI", "ok": not pf,
+            "what": "No unused imports or dead code in linklib / webapp / scripts.",
+            "detail": "; ".join(pf[:6]) if pf else "No unused imports or dead code. (pyflakes lint step)"})
 
     results.append({
-        "name": "Full test suite (pytest)", "where": "CI", "ok": None,
-        "what": "Access tiers, auth, dedupe, publish dates, tagging, users, and more.",
-        "detail": "Runs the whole suite in CI on every push."})
+        "name": "Rest of the test suite (pytest)", "where": "CI", "ok": None,
+        "what": "Everything else the suite covers — access tiers, auth, dedupe, publish dates, tagging, users.",
+        "detail": "Runs the whole suite (including the three above) on every commit."})
 
     results.append({
         "name": "Secret scan (TruffleHog)", "where": "CI", "ok": None,
         "what": "No verified, live secrets committed anywhere in the repo.",
-        "detail": "Runs in CI on every push and pull request."})
+        "detail": "Separate secret-scan job on every commit."})
 
     return results
