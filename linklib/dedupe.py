@@ -188,35 +188,10 @@ def similarity(a: dict, b: dict, source: str = "") -> float:
     return max(ts, bj, sj)
 
 
-def _within_window(a: dict, b: dict, days: int) -> bool:
-    da, db = _date(a.get("published_at")), _date(b.get("published_at"))
-    if da and db:
-        return abs((da - db).days) <= days
-    return True   # a missing date can't rule out a dup — compare on text
-
-
 def _is_dup(title_sim: float, body_jac: float, summary_jac: float, threshold: float) -> bool:
     # Title similarity is the strictness-controlled signal; body/summary overlap
     # only links on its own when strong (fixed bars), to avoid over-merging.
     return title_sim >= threshold or body_jac >= _BODY_BAR or summary_jac >= _SUMMARY_BAR
-
-
-def is_near_dup(a: dict, b: dict, *, days: int = DEFAULT_WINDOW_DAYS,
-                threshold: float = DEFAULT_THRESHOLD, source: str = "") -> bool:
-    if not _within_window(a, b, days):
-        return False
-    if _veto(a.get("title", ""), b.get("title", "")):
-        return False
-    ts, bj, sj = _components(a, b, source)
-    return _is_dup(ts, bj, sj, threshold)
-
-
-def is_dup_of_any(candidate: dict, existing: list[dict], *,
-                  days: int = DEFAULT_WINDOW_DAYS, threshold: float = DEFAULT_THRESHOLD,
-                  source: str = "") -> bool:
-    """True if `candidate` near-duplicates any item in `existing` (same source)."""
-    return any(is_near_dup(candidate, e, days=days, threshold=threshold, source=source)
-               for e in existing)
 
 
 def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,

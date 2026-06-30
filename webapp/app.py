@@ -4182,7 +4182,7 @@ def ask_page(request: Request, q: str = ""):
         return _login_redirect(request)
     authed = _is_authed(request)   # admin flag (e.g. for any admin-only affordances)
 
-    from linklib.agent import EFFORT_SETTINGS, COST_ESTIMATES, MODEL_ALIASES
+    from linklib.agent import COST_ESTIMATES
 
     # Build model radio rows
     models = [
@@ -6114,7 +6114,6 @@ def _enrich_job(force: bool, model: str, limit: int) -> None:
     lib = _lib()
     try:
         from linklib import pipeline as _pl
-        from linklib import enrich as _enrich_mod
 
         rows = lib.all_articles(limit=limit) if force else lib.unenriched(limit=limit)
         total = len(rows)
@@ -6381,7 +6380,6 @@ def admin_backfill(request: Request):
     finally:
         lib.close()
 
-    from linklib.enrich import DEFAULT_MODEL
     from linklib.queue import QUEUE_ENRICH_MODEL
 
     default_since = (last_saved or "2024-06-01")[:10]

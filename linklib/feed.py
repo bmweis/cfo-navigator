@@ -9,7 +9,7 @@ import time
 import threading
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Optional
@@ -131,7 +131,6 @@ def _fetch_feed(meta: FeedMeta) -> list[dict]:
     except ET.ParseError:
         return []
 
-    ns = {"atom": "http://www.w3.org/2005/Atom"}
     items: list[dict] = []
 
     # Atom feed
