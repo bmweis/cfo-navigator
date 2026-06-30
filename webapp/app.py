@@ -620,15 +620,15 @@ def homepage(request: Request):
   <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);">This is where I share the writing, tools, and hard-won lessons that help finance leaders at high-growth tech companies step into that role: GTM efficiency, headcount and org design, mentorship, and the cross-functional calls finance gets pulled into as a company scales.</p>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:34px 0 8px;">{cards}</div>
-{suggest}
-
-<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:26px;">
+<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;">
   {_avatar(64)}
   <div style="flex:1;min-width:240px;">
-    <p style="margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">I'm <strong>Brian Weisberg</strong>, VP of Business Operations and Strategic Finance at <a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>. Fifteen-plus years scaling B2B SaaS finance, from the founder's corner. <a href="/about">More about me &rarr;</a></p>
+    <p style="margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">I'm <strong>Brian Weisberg</strong>, a repeat tech CFO. Seven years as CFO of <a href="https://tidelift.com" target="_blank" rel="noopener">Tidelift</a>, growing it through $73.5M in funding to an acquisition, plus an interim CFO turn at <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>. Today I run business operations and strategic finance at <a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>. Fifteen-plus years in B2B SaaS finance, from the founder's corner. <a href="/about">More about me &rarr;</a></p>
   </div>
 </div>
+
+<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:30px 0 8px;">{cards}</div>
+{suggest}
 
 <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
   <a href="/contact" class="btn">Get in Touch</a>
@@ -6332,18 +6332,8 @@ def admin_enrich(request: Request):
     try:
         total = lib.count()
         unenriched = len(lib.unenriched(limit=100000))
-        cleanup_on = lib.get_setting("scope_cleanup", "on") != "off"
     finally:
         lib.close()
-
-    cleanup_state = ("on" if cleanup_on else "off")
-    cleanup_toggle = f"""<div style="background:{'var(--seafoam-wash)' if cleanup_on else 'var(--surface)'};border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-  <div style="font-size:13.5px;color:var(--ink-soft);max-width:520px;line-height:1.5;">
-    <strong>First-time cleanup exclusions: {cleanup_state.upper()}.</strong>
-    {'Podcasts/webinars, slide decks, annual predictions, and fund/LP content are flagged out of scope. Turn this off once the cleanup is done — ongoing queue review is the gate from then on.' if cleanup_on else 'Only the standard audience rules apply (off-audience + career-in-VC). Turn back on for another cleanup pass.'}
-  </div>
-  <form method="post" action="/admin/enrich/cleanup-toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;white-space:nowrap;">Turn {'off' if cleanup_on else 'on'}</button></form>
-</div>"""
 
     from linklib.enrich import DEFAULT_MODEL, ENRICH_RULES_VERSION
 
@@ -6413,7 +6403,6 @@ def admin_enrich(request: Request):
     </div>
   </div>
   <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Current rules version: <strong>{ENRICH_RULES_VERSION}</strong></p>
-  {cleanup_toggle}
 
   <form id="enrich-form" method="post" action="/admin/enrich/start" style="display:grid;gap:18px;">
     <div>
@@ -6476,19 +6465,6 @@ def admin_enrich(request: Request):
 }})();
 </script>"""
     return HTMLResponse(_page("Re-enrich archive — Admin", "Admin", body, authed=True))
-
-
-@app.post("/admin/enrich/cleanup-toggle")
-def admin_enrich_cleanup_toggle(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        on = lib.get_setting("scope_cleanup", "on") != "off"
-        lib.set_setting("scope_cleanup", "off" if on else "on")
-    finally:
-        lib.close()
-    return RedirectResponse("/admin/enrich", status_code=303)
 
 
 @app.post("/admin/enrich/start")
