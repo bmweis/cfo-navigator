@@ -4698,7 +4698,8 @@ def admin_checks(request: Request):
             return ('<span style="color:var(--good);font-weight:600;">&#10003; Passing</span>', "var(--good)")
         if r["ok"] is False:
             return ('<span style="color:var(--alert);font-weight:600;">&#10007; Failing</span>', "var(--alert)")
-        return ('<span style="color:var(--muted);font-weight:600;">Runs in CI</span>', "var(--line-strong)")
+        return (f'<a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" '
+                f'style="color:var(--accent);font-weight:600;">Latest run &rarr;</a>', "var(--line-strong)")
 
     rows = ""
     for r in results:
@@ -4718,7 +4719,7 @@ def admin_checks(request: Request):
     body = f"""<div class="page" style="max-width:820px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Checks</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. The in-app checks run live on this page; the heavier ones run in CI on every push. They&rsquo;re the same checks the <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">GitHub QA workflow</a> enforces before anything ships.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. <strong>Every check here runs on each commit</strong> in the <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">GitHub QA workflow</a>; the deterministic ones (<em>Live + CI</em>) also run live on this page so you get an instant read.</p>
 {summary}
 {rows}
 <p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>

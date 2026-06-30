@@ -166,15 +166,24 @@ uvicorn webapp.app:app --reload    # http://localhost:8000
   (note: `/api/search` already accepts a `token` for programmatic auth)
 - bmweis.com custom domain pointed at Railway
 
+## Contributing — pull requests
+
+**All changes ship via pull request. Never push or merge directly to `main`.**
+Work on a feature branch, push it, and open a PR into `main`; let the QA workflow
+(`tests` + `secret-scan`) run, then merge the PR. This keeps every change reviewable
+and traceable, and the **Checks** admin page (`/admin/checks`) mirrors what the PR
+must pass. (Enforced server-side by a branch-protection rule on `main` that requires
+a PR and passing checks — the convention here so tooling/agents follow it regardless.)
+
 ## Deployment
 
 - **Host:** Railway, building from the `Dockerfile` (`python:3.11-slim`, runs
   `uvicorn webapp.app:app`). `Procfile` and `railway.toml` are also present;
   `railway.toml` sets the healthcheck to `/health`.
 - **Deploy flow:** Railway auto-deploys from the **`main`** branch. Feature work happens on
-  a branch, then merges to `main` to ship. **If it isn't on `main`, it isn't live** — a
-  common gotcha (e.g. a change that looks done but "doesn't show up" is usually still on a
-  feature branch).
+  a branch and ships by **merging a PR** into `main` (see *Contributing* above).
+  **If it isn't on `main`, it isn't live** — a common gotcha (e.g. a change that looks done
+  but "doesn't show up" is usually still on a feature branch / unmerged PR).
 - Set `LINKLIB_SAVE_TOKEN` (and ideally `LINKLIB_SECRET_KEY`) in Railway's env so the
   private section is protected and logins persist across deploys. `library.db` is not in
   the repo, so a hosted instance starts empty unless the DB is provisioned/persisted

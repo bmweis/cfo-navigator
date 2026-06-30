@@ -1,14 +1,15 @@
 name: QA
 
-# Brand-standards + repo checks. Runs on every PR and on pushes to main, so
-# off-brand content (colors/fonts outside BRAND.md) is caught before it ships.
+# Automated guards. Runs on every PR and on pushes to main, so dead code,
+# off-brand colors/fonts, off-voice copy, dependency drift, and leaked secrets
+# are all caught before anything ships. Mirrored live on /admin/checks.
 on:
   push:
     branches: [main]
   pull_request:
 
 jobs:
-  brand-standards:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +20,7 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Lint — unused imports / dead code (pyflakes)
         run: python -m pyflakes linklib webapp scripts
-      - name: Run brand-standards QA
+      - name: Run the test suite (brand, voice, open-source sync, app, …)
         run: pytest -q
 
   secret-scan:
