@@ -186,7 +186,7 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
     from . import dedupe as _dd
     guide = tagstyle.effective_tag_guidance(lib)
     cleanup = lib.get_setting("scope_cleanup", "on") != "off"
-    dedupe_srcs = {s.strip() for s in (lib.get_setting("dedupe_sources", "SaaStr") or "").split(",") if s.strip()}
+    dedupe_srcs = {s.strip() for s in (lib.get_setting("dedupe_sources", "") or "").split(",") if s.strip()}
     dup_existing: dict[str, list] = {}   # source -> existing items, built lazily
 
     def _existing_for(src: str):
@@ -377,7 +377,7 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
     from . import dedupe as _dd
     guide = tagstyle.effective_tag_guidance(lib)
     cleanup = lib.get_setting("scope_cleanup", "on") != "off"
-    dedupe_srcs = {s.strip() for s in (lib.get_setting("dedupe_sources", "SaaStr") or "").split(",") if s.strip()}
+    dedupe_srcs = {s.strip() for s in (lib.get_setting("dedupe_sources", "") or "").split(",") if s.strip()}
     report: list[dict] = []
 
     for f in feeds:

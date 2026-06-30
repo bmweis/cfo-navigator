@@ -5515,11 +5515,11 @@ async def admin_tag_style_clear(request: Request):
 # dedup misses, within a publish-date window.
 # ---------------------------------------------------------------------------
 
-_DEDUPE_PRESETS = {"aggressive": 0.55, "balanced": 0.62, "strict": 0.72}
+_DEDUPE_PRESETS = {"aggressive": 0.55, "balanced": 0.62, "conservative": 0.72}
 
 
 def _dedupe_sources(lib) -> set[str]:
-    raw = lib.get_setting("dedupe_sources", "SaaStr") or ""
+    raw = lib.get_setting("dedupe_sources", "") or ""   # off by default
     return {s.strip() for s in raw.split(",") if s.strip()}
 
 
@@ -5594,11 +5594,16 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                        f'uses your past calls to judge new ones.</p>')
     if source:
         is_auto = source in auto
-        toggle = f"""<form method="post" action="/admin/dedupe/auto" style="margin:0 0 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:{'var(--seafoam-wash)' if is_auto else 'var(--surface)'};border:1px solid var(--line);border-radius:12px;padding:12px 16px;">
-  <input type="hidden" name="source" value="{_esc(source)}">
-  <span style="font-size:13.5px;color:var(--ink-soft);">Going-forward: {'<strong>auto-skipping</strong> near-dupes from this source during sweeps.' if is_auto else 'new near-dupes from this source are <strong>not</strong> auto-skipped yet.'}</span>
-  <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">{'Stop auto-skip' if is_auto else 'Auto-skip new dupes'}</button>
-</form>"""
+        status_word = ('<span style="color:var(--seafoam-deep);">ON</span>' if is_auto
+                       else '<span style="color:var(--muted);">OFF</span>')
+        toggle = f"""<div style="margin:0 0 18px;background:{'var(--seafoam-wash)' if is_auto else 'var(--surface)'};border:1px solid var(--line);border-radius:12px;padding:14px 16px;">
+  <div style="font-weight:600;font-size:14px;color:var(--ink);margin-bottom:5px;">Auto-skip new {_esc(source)} dupes &mdash; {status_word}</div>
+  <p style="font-size:13px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">This page cleans up duplicates already <strong>in</strong> your archive. <strong>Auto-skip</strong> is the going-forward version: when new <strong>{_esc(source)}</strong> articles come in through the feed or a sweep, any that look like near-duplicates of what you already have are dropped <em>before</em> they ever reach your review queue. It applies only to <strong>{_esc(source)}</strong> (turn it on per source), and it uses just the fast title match &mdash; not the Claude verification this page runs &mdash; so it can over-skip and silently drop a genuinely new piece. Best left off unless a source floods you with reworded reruns.</p>
+  <form method="post" action="/admin/dedupe/auto" style="margin:0;">
+    <input type="hidden" name="source" value="{_esc(source)}">
+    <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">{'Stop auto-skip' if is_auto else 'Auto-skip new dupes'}</button>
+  </form>
+</div>"""
         if not clusters:
             body_inner += toggle + ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
                                     'padding:32px;text-align:center;color:var(--muted);">No near-duplicates found for '
