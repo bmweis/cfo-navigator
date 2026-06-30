@@ -252,7 +252,8 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
 To run locally: `pip install -r requirements-dev.txt && pytest -q`.
 
 When you intentionally introduce a new color (e.g. a new chart series or status state), add it to the
-relevant group in the test's `AUX_COLORS` with a comment — that's the moment the decision gets
+relevant group in `AUX_COLORS` in `linklib/brand_check.py` (the single source of truth for the rules,
+also surfaced live on the **Checks** admin page) with a comment — that's the moment the decision gets
 recorded, which is the point.
 
 ---

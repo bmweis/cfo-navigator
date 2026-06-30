@@ -4527,6 +4527,7 @@ _ADMIN_GROUPS = [
         ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
         ("/admin/contacts",     "Contact submissions", "Messages from the public contact form."),
         ("/community",          "CFO Community (parked)", "Your community idea + form — parked off the public site for now."),
+        ("/admin/checks",       "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/open-source",  "Open source",         "The open-source projects this site is built on — with gratitude."),
     ]),
     ("CFO Toolbox", "The public tools directory and the leads it brings in.", [
@@ -4669,6 +4670,60 @@ def admin_open_source(request: Request):
 {love}
 </div>"""
     return HTMLResponse(_page("Open source — Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/checks", response_class=HTMLResponse)
+def admin_checks(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    from webapp import checks as _checks
+    results = _checks.run_all()
+
+    live = [r for r in results if r["where"] == "In-app"]
+    passing = sum(1 for r in live if r["ok"])
+    failing = [r for r in live if r["ok"] is False]
+
+    if not live:
+        summary = ""
+    elif failing:
+        summary = (f'<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
+                   f'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">{len(failing)} live check'
+                   f'{"s" if len(failing) != 1 else ""} failing &mdash; details below.</p>')
+    else:
+        summary = (f'<p style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;border-radius:10px;'
+                   f'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">&#10003; All {passing} live checks passing.</p>')
+
+    def _status(r):
+        if r["ok"] is True:
+            return ('<span style="color:var(--good);font-weight:600;">&#10003; Passing</span>', "var(--good)")
+        if r["ok"] is False:
+            return ('<span style="color:var(--alert);font-weight:600;">&#10007; Failing</span>', "var(--alert)")
+        return ('<span style="color:var(--muted);font-weight:600;">Runs in CI</span>', "var(--line-strong)")
+
+    rows = ""
+    for r in results:
+        badge, bar = _status(r)
+        where = ('<span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">'
+                 f'{r["where"]}</span>')
+        rows += (
+            f'<div style="border-left:3px solid {bar};background:var(--bg);border:1px solid var(--line);'
+            f'border-left-width:3px;border-radius:10px;padding:12px 16px;margin-bottom:10px;">'
+            f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
+            f'<span style="font-weight:600;font-size:15px;color:var(--navy);">{_esc(r["name"])}</span>'
+            f'<span style="display:flex;gap:12px;align-items:baseline;">{where}{badge}</span></div>'
+            f'<p style="margin:4px 0 0;font-size:13px;color:var(--ink-soft);line-height:1.5;">{_esc(r["what"])}</p>'
+            f'<p style="margin:3px 0 0;font-size:12px;color:var(--muted);line-height:1.45;">{_esc(r["detail"])}</p>'
+            f'</div>')
+
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Checks</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. The in-app checks run live on this page; the heavier ones run in CI on every push. They&rsquo;re the same checks the <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">GitHub QA workflow</a> enforces before anything ships.</p>
+{summary}
+{rows}
+<p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
+</div>"""
+    return HTMLResponse(_page("Checks — Admin", "Admin", body, authed=True))
 
 
 def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:
