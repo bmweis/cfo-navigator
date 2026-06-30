@@ -470,7 +470,9 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(title)}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-<link rel="apple-touch-icon" href="/static/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" href="/static/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
@@ -3743,6 +3745,8 @@ _READER_TMPL = """<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>{css}</style>
 </head><body>
 <div class="reader-bar">
@@ -7459,5 +7463,16 @@ def static_file(filename: str):
         raise HTTPException(status_code=404)
     ext = filename.rsplit(".", 1)[-1].lower()
     media = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-             "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp"}.get(ext, "application/octet-stream")
+             "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp",
+             "ico": "image/x-icon"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
+
+
+@app.get("/favicon.ico")
+def favicon():
+    # Browsers auto-request /favicon.ico; serve the brand icon so no tab shows
+    # the default globe even when <link> tags are ignored.
+    path = os.path.join(_STATIC_DIR, "favicon.ico")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/x-icon")
