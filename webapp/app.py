@@ -5518,11 +5518,6 @@ async def admin_tag_style_clear(request: Request):
 _DEDUPE_PRESETS = {"aggressive": 0.55, "balanced": 0.62, "conservative": 0.72}
 
 
-def _dedupe_sources(lib) -> set[str]:
-    raw = lib.get_setting("dedupe_sources", "") or ""   # off by default
-    return {s.strip() for s in raw.split(",") if s.strip()}
-
-
 @app.get("/admin/dedupe", response_class=HTMLResponse)
 def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                  days: int = 90, msg: str = ""):
@@ -5533,7 +5528,6 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
     lib = _lib()
     try:
         sources = lib.article_sources()
-        auto = _dedupe_sources(lib)
         dup_n, distinct_n = lib.dedupe_decision_counts()
         clusters = []
         verify_status = "verified"
@@ -5593,21 +5587,10 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                        f'<strong>{dup_n}</strong> confirmed. Pairs you reject won&rsquo;t be shown again, and Claude '
                        f'uses your past calls to judge new ones.</p>')
     if source:
-        is_auto = source in auto
-        status_word = ('<span style="color:var(--seafoam-deep);">ON</span>' if is_auto
-                       else '<span style="color:var(--muted);">OFF</span>')
-        toggle = f"""<div style="margin:0 0 18px;background:{'var(--seafoam-wash)' if is_auto else 'var(--surface)'};border:1px solid var(--line);border-radius:12px;padding:14px 16px;">
-  <div style="font-weight:600;font-size:14px;color:var(--ink);margin-bottom:5px;">Auto-skip new {_esc(source)} dupes &mdash; {status_word}</div>
-  <p style="font-size:13px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">This page cleans up duplicates already <strong>in</strong> your archive. <strong>Auto-skip</strong> is the going-forward version: when new <strong>{_esc(source)}</strong> articles come in through the feed or a sweep, any that look like near-duplicates of what you already have are dropped <em>before</em> they ever reach your review queue. It applies only to <strong>{_esc(source)}</strong> (turn it on per source), and it uses just the fast title match &mdash; not the Claude verification this page runs &mdash; so it can over-skip and silently drop a genuinely new piece. Best left off unless a source floods you with reworded reruns.</p>
-  <form method="post" action="/admin/dedupe/auto" style="margin:0;">
-    <input type="hidden" name="source" value="{_esc(source)}">
-    <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">{'Stop auto-skip' if is_auto else 'Auto-skip new dupes'}</button>
-  </form>
-</div>"""
         if not clusters:
-            body_inner += toggle + ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
-                                    'padding:32px;text-align:center;color:var(--muted);">No near-duplicates found for '
-                                    f'<strong>{_esc(source)}</strong> at this strictness/window. Try a more aggressive setting if you suspect some.</div>')
+            body_inner += ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+                           'padding:32px;text-align:center;color:var(--muted);">No near-duplicates found for '
+                           f'<strong>{_esc(source)}</strong> at this strictness/window. Try a more aggressive setting if you suspect some.</div>')
         else:
             dupe_total = sum(len(c) - 1 for c in clusters)
             blocks = ""
@@ -5653,12 +5636,12 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
   <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Remove all {dupe_total} duplicate{'s' if dupe_total != 1 else ''} (keep one each)</button>
   <span style="font-size:13px;color:var(--muted);margin-left:10px;">{len(clusters)} duplicate group{'s' if len(clusters) != 1 else ''} found.</span>
 </form>"""
-            body_inner += toggle + verify_banner + bulk + blocks
+            body_inner += verify_banner + bulk + blocks
 
     body = f"""<div class="page" style="max-width:760px;">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Find duplicates</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">Catches the same piece republished under a different title within a date window &mdash; the kind exact-URL dedup misses. A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged. The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest. Turn on auto-skip to keep new dupes out going forward.</p>
+<p style="color:var(--muted);margin:-6px 0 18px;">Catches the same piece republished under a different title within a date window &mdash; the kind exact-URL dedup misses. A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged. The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest.</p>
 {banner}
 {body_inner}
 </div>"""
@@ -5750,22 +5733,6 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
     msg = f"Removed {removed} older duplicate{'s' if removed != 1 else ''} from {source}."
     return RedirectResponse(f"/admin/dedupe?source={quote(source)}&level={level}&days={days}&msg={quote(msg)}",
                             status_code=303)
-
-
-@app.post("/admin/dedupe/auto")
-async def admin_dedupe_auto(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    form = await request.form()
-    source = (form.get("source") or "").strip()
-    lib = _lib()
-    try:
-        srcs = _dedupe_sources(lib)
-        srcs.symmetric_difference_update({source})   # toggle membership
-        lib.set_setting("dedupe_sources", ", ".join(sorted(srcs)))
-    finally:
-        lib.close()
-    return RedirectResponse(f"/admin/dedupe?source={quote(source)}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -6448,11 +6415,10 @@ def admin_backfill(request: Request):
         added = r.get("added", 0)
         cands = r.get("candidates", 0)
         scope = r.get("skipped_scope", 0)
-        dup = r.get("skipped_dup", 0)
         note = r.get("note", "")
         sitemap = r.get("sitemap") or ""
         sm_link = f'<a href="{_esc(sitemap)}" style="font-size:11px;color:var(--muted);" target="_blank">{_esc(sitemap[:60])}{"…" if len(sitemap)>60 else ""}</a>' if sitemap else '<span style="font-size:11px;color:var(--muted);">—</span>'
-        extra = (f" / {scope} off-audience" if scope else "") + (f" / {dup} dup" if dup else "")
+        extra = (f" / {scope} off-audience" if scope else "")
         status = note if note else f'{added} added / {cands} candidates{extra}'
         status_color = "#b91c1c" if note else ("#16a34a" if added else "#92400e")
         return (f'<tr><td style="padding:8px 12px;font-size:13px;font-weight:500;">{_esc(r.get("source",""))}</td>'
