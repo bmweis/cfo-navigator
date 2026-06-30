@@ -600,9 +600,11 @@ def homepage(request: Request):
         _rcard("/thought-leadership", "Thought Leadership",
                "Frameworks and playbooks worth keeping: the Growth Engine Ratio for pressure-testing GTM "
                "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
-               "connecting Claude to NetSuite — plus the podcasts, writing, and press."),
+               "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press."),
         _rcard("/tools", "CFO Toolbox",
-               "A curated directory of the tools high-growth finance teams actually use."),
+               "A curated directory of the software high-growth finance teams actually use&mdash;plus the "
+               "benchmarking sources I rely on, and an honest take on where benchmarks help and where they "
+               "mislead."),
     ])
 
     # The "suggest a piece" prompt is shown only to signed-in members — submissions
@@ -618,19 +620,18 @@ def homepage(request: Request):
   <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);">This is where I share the writing, tools, and hard-won lessons that help finance leaders at high-growth tech companies step into that role: GTM efficiency, headcount and org design, mentorship, and the cross-functional calls finance gets pulled into as a company scales.</p>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:34px 0 8px;">{cards}</div>
-{suggest}
-
-<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:26px;">
+<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;">
   {_avatar(64)}
   <div style="flex:1;min-width:240px;">
-    <p style="margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">I'm <strong>Brian Weisberg</strong>, VP of Business Operations and Strategic Finance at <a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>. Fifteen-plus years scaling B2B SaaS finance, from the founder's corner. <a href="/about">More about me &rarr;</a></p>
+    <p style="margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">I'm <strong>Brian Weisberg</strong>, a repeat tech CFO. Seven years as CFO of <a href="https://tidelift.com" target="_blank" rel="noopener">Tidelift</a>, growing it through $73.5M in funding to an acquisition, plus an interim CFO turn at <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>. Today I run business operations and strategic finance at <a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>. Fifteen-plus years in B2B SaaS finance, from the founder's corner. <a href="/about">More about me &rarr;</a></p>
   </div>
 </div>
 
+<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:30px 0 8px;">{cards}</div>
+{suggest}
+
 <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
-  <a href="/thought-leadership" class="btn">Thought Leadership</a>
-  <a href="/contact" class="btn btn-ghost">Get in Touch</a>
+  <a href="/contact" class="btn">Get in Touch</a>
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
 </div>
 </div>"""
@@ -4189,16 +4190,16 @@ def ask_page(request: Request, q: str = ""):
     authed = _is_authed(request)   # admin flag (e.g. for any admin-only affordances)
 
     from linklib.agent import COST_ESTIMATES
+    from linklib.models import models_for
 
-    # Build model radio rows
-    models = [
-        ("claude-haiku-4-5-20251001", "Fast &middot; cost-effective"),
-        ("claude-sonnet-4-6",         "Balanced &middot; default"),
-        ("claude-opus-4-8",           "Best quality"),
-    ]
+    # Model rows from the shared registry (new models surface automatically).
+    models = [(m["id"], m["blurb"]) for m in models_for(allow_new=True)]
     # Logged-in (Brian) gets the balanced default; anonymous users default to
-    # the most efficient model.
+    # the most efficient model. Guard in case the default ever drops off the list.
+    ids = [mid for mid, _ in models]
     default_model = "claude-sonnet-4-6" if authed else "claude-haiku-4-5-20251001"
+    if default_model not in ids:
+        default_model = ids[0] if ids else default_model
 
     def model_row(mid, desc, checked):
         chk = " checked" if checked else ""
@@ -4512,11 +4513,11 @@ _LIBRARY_TOOLS = [
     ("/admin/backup",       "Archive backup",      "Snapshot the database before you start, so you can roll back if needed."),
     ("/admin/backfill",     "Historical sweep",    "Catch up the back catalog: queue older articles from your sources (raise the per-source limit to reach further back)."),
     ("/admin/queue",        "Archive Queue",       "Review proposed saves, fix dates, edit tags, and approve them into the archive."),
+    ("/admin/dedupe",       "Find duplicates",     "Catch near-duplicate articles (similar content within ~3 months) from a source and remove them."),
     ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
     ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
     ("/admin/enrich",       "Re-enrich archive",   "The big pass: force-refresh summaries + tags on Opus, applying your tag style and the scope rules."),
     ("/admin/review-removals", "Review removals",  "Confirm or keep what the re-enrich flagged as off-audience (podcasts, predictions, fund/LP content)."),
-    ("/admin/dedupe",       "Find duplicates",     "Catch near-duplicate articles (similar content within ~3 months) from a source and remove them."),
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
@@ -4915,12 +4916,11 @@ def admin_social(request: Request, url: str = ""):
         return _login_redirect(request)
 
     from linklib.social import DEFAULT_MODEL
+    from linklib.models import models_for
 
-    models = [
-        ("claude-haiku-4-5-20251001", "Haiku", "Fast &amp; cheap"),
-        ("claude-sonnet-4-6",         "Sonnet", "Balanced &mdash; default"),
-        ("claude-opus-4-8",           "Opus",   "Best quality"),
-    ]
+    models = [(m["id"], m["label"], m["blurb"]) for m in models_for(allow_new=True)]
+    ids = [mid for mid, _, _ in models]
+    default_model = DEFAULT_MODEL if DEFAULT_MODEL in ids else (ids[0] if ids else DEFAULT_MODEL)
     modes = [
         ("original",      "Original POV",  "Your take sparked by the article — not a summary"),
         ("amplification", "Amplify",       "Signal genuine resonance, build past the original"),
@@ -4937,7 +4937,7 @@ def admin_social(request: Request, url: str = ""):
         )
 
     model_radios = "".join(
-        _radio("model", mid, label, detail, mid == DEFAULT_MODEL)
+        _radio("model", mid, label, detail, mid == default_model)
         for mid, label, detail in models
     )
     mode_radios = "".join(
@@ -6332,18 +6332,8 @@ def admin_enrich(request: Request):
     try:
         total = lib.count()
         unenriched = len(lib.unenriched(limit=100000))
-        cleanup_on = lib.get_setting("scope_cleanup", "on") != "off"
     finally:
         lib.close()
-
-    cleanup_state = ("on" if cleanup_on else "off")
-    cleanup_toggle = f"""<div style="background:{'var(--seafoam-wash)' if cleanup_on else 'var(--surface)'};border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-  <div style="font-size:13.5px;color:var(--ink-soft);max-width:520px;line-height:1.5;">
-    <strong>First-time cleanup exclusions: {cleanup_state.upper()}.</strong>
-    {'Podcasts/webinars, slide decks, annual predictions, and fund/LP content are flagged out of scope. Turn this off once the cleanup is done — ongoing queue review is the gate from then on.' if cleanup_on else 'Only the standard audience rules apply (off-audience + career-in-VC). Turn back on for another cleanup pass.'}
-  </div>
-  <form method="post" action="/admin/enrich/cleanup-toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;white-space:nowrap;">Turn {'off' if cleanup_on else 'on'}</button></form>
-</div>"""
 
     from linklib.enrich import DEFAULT_MODEL, ENRICH_RULES_VERSION
 
@@ -6373,14 +6363,14 @@ def admin_enrich(request: Request):
     elif job_done and not running:
         status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done — {job_done} articles enriched with {_esc(job_model)}.</div>'
 
-    models = [
-        ("claude-opus-4-8",           "Opus 4.8",   "Deepest summaries. The one to standardize the archive on."),
-        ("claude-sonnet-4-6",         "Sonnet 4.6",  "Solid summaries at a lower cost."),
-        ("claude-haiku-4-5-20251001", "Haiku 4.5",   "Fast and cheap. Good for clearing a big unenriched backlog."),
-    ]
+    from linklib.models import models_for
+    # Curated (no auto-surfacing): a re-enrich runs over the whole archive, so the
+    # model set here stays deliberate. Best-first to match the page's emphasis.
+    models = [(m["id"], m["label"], m["blurb"]) for m in reversed(models_for(blurb="enrich"))]
+    enrich_default = DEFAULT_MODEL if DEFAULT_MODEL in [m[0] for m in models] else (models[0][0] if models else DEFAULT_MODEL)
 
     def _mrow(mid, label, detail):
-        chk = " checked" if mid == DEFAULT_MODEL else ""
+        chk = " checked" if mid == enrich_default else ""
         return (
             f'<label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;padding:7px 0;border-top:1px solid var(--line);">'
             f'<input type="radio" name="model" value="{mid}"{chk} style="margin-top:3px;accent-color:var(--accent);flex-shrink:0;">'
@@ -6413,7 +6403,6 @@ def admin_enrich(request: Request):
     </div>
   </div>
   <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Current rules version: <strong>{ENRICH_RULES_VERSION}</strong></p>
-  {cleanup_toggle}
 
   <form id="enrich-form" method="post" action="/admin/enrich/start" style="display:grid;gap:18px;">
     <div>
@@ -6476,19 +6465,6 @@ def admin_enrich(request: Request):
 }})();
 </script>"""
     return HTMLResponse(_page("Re-enrich archive — Admin", "Admin", body, authed=True))
-
-
-@app.post("/admin/enrich/cleanup-toggle")
-def admin_enrich_cleanup_toggle(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        on = lib.get_setting("scope_cleanup", "on") != "off"
-        lib.set_setting("scope_cleanup", "off" if on else "on")
-    finally:
-        lib.close()
-    return RedirectResponse("/admin/enrich", status_code=303)
 
 
 @app.post("/admin/enrich/start")
@@ -6573,6 +6549,13 @@ def admin_backfill(request: Request):
         lib.close()
 
     from linklib.queue import QUEUE_ENRICH_MODEL
+    from linklib.models import models_for
+    # Curated (best-first); QUEUE_ENRICH_MODEL is the selected/recommended option.
+    model_options = "".join(
+        f'<option value="{m["id"]}" {"selected" if QUEUE_ENRICH_MODEL == m["id"] else ""}>'
+        f'{m["label"]} — {m["blurb"]}{" (recommended)" if m["id"] == QUEUE_ENRICH_MODEL else ""}</option>'
+        for m in reversed(models_for(blurb="short"))
+    )
 
     default_since = (last_saved or "2024-06-01")[:10]
     job = _job_get("backfill")
@@ -6672,9 +6655,7 @@ def admin_backfill(request: Request):
     <div>
       <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Enrichment model</label>
       <select name="model" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);min-width:240px;">
-        <option value="claude-opus-4-8" {"selected" if QUEUE_ENRICH_MODEL=="claude-opus-4-8" else ""}>Opus 4.8 — best quality (recommended)</option>
-        <option value="claude-sonnet-4-6" {"selected" if QUEUE_ENRICH_MODEL=="claude-sonnet-4-6" else ""}>Sonnet 4.6 — balanced</option>
-        <option value="claude-haiku-4-5-20251001" {"selected" if QUEUE_ENRICH_MODEL=="claude-haiku-4-5-20251001" else ""}>Haiku 4.5 — fast and cheap</option>
+        {model_options}
       </select>
     </div>
     <div>
