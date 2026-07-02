@@ -228,6 +228,6 @@ PRESS: list[TLItem] = [
 SECTIONS: list[tuple[str, str, list[TLItem]]] = [
     ("Writing", "📝", WRITING),
     ("Speaking & Events", "🎤", SPEAKING),
-    ("Podcasts", "🎙️", PODCASTS),
+    ("Podcasts", "🎧", PODCASTS),
     ("Press", "📰", PRESS),
 ]
