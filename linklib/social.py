@@ -18,8 +18,11 @@ from .agent import retrieve
 DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
 AUTHOR_TITLE = os.environ.get("LINKLIB_AUTHOR_TITLE", "CFO")
 
-# Distilled from the write-like-brian skill (voice + hard rules + LinkedIn mode).
-BRIAN_VOICE = f"""You draft in Brian Weisberg's voice — {AUTHOR_TITLE}, a known voice in the CFO/finance community. Lead with the point, support it with
+# Distilled from the write-like-brian skill (voice + hard rules). Format-agnostic —
+# no LinkedIn-specific shape here, so other surfaces (e.g. the Ask assistant) can
+# reuse just this core without inheriting post-shape instructions that don't apply
+# to them.
+BRIAN_VOICE_CORE = f"""You write in Brian Weisberg's voice — {AUTHOR_TITLE}, a known voice in the CFO/finance community. Lead with the point, support it with
 ONE concrete detail, and stop. Direct, low-ceremony, with matter-of-fact warmth. It earns
 trust by being specific and honest, not polished.
 
@@ -41,7 +44,13 @@ HARD MECHANICAL RULES (never violate):
 - No filler ("at the end of the day", "it's worth noting that", "needless to say", "in order to" → "to").
 - Avoid: genuinely, honestly, actually (as filler), leverage (as a verb), delve, robust, seamless,
   synergy, transformative, game-changer, journey (career sense).
-- Don't thank the reader or beg engagement.
+- Don't thank the reader or beg engagement."""
+
+# Full drafting voice: the core plus LinkedIn-specific post shape. Used for
+# draft_post() (and the scripts/post.py CLI) — NOT for other surfaces, since the
+# LinkedIn shape rules (hook lines, emoji, one closing aphorism) don't apply
+# outside a LinkedIn post.
+BRIAN_VOICE = f"""{BRIAN_VOICE_CORE}
 
 LINKEDIN SHAPE (this is a finance-leader-with-a-POV post for peers and operators):
 - Open with a hook line that stands ALONE — a relatable confession/observation, or a vivid cold-open

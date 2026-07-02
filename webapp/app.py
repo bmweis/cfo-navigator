@@ -4062,6 +4062,13 @@ def archive(request: Request, q: str = ""):
 .tag-x-btn:hover{{color:#b91c1c;opacity:1;}}
 .postbtn{{margin-top:12px;padding:6px 12px;font-size:12px;background:transparent;color:var(--accent);border:1px solid var(--line);border-radius:8px;cursor:pointer;}}
 .postbtn:hover{{background:var(--accent-light);}}
+#answer p{{margin:0 0 12px;}}
+#answer h3,#answer h4,#answer h5,#answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:14px 0 6px;}}
+#answer h3:first-child,#answer h4:first-child{{margin-top:0;}}
+#answer ul,#answer ol{{margin:0 0 12px;padding-left:20px;}}
+#answer li{{margin-bottom:4px;}}
+#answer code{{background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:13px;font-family:ui-monospace,monospace;}}
+#answer a{{color:var(--accent);}}
 nav.site-nav a[href="/library"]{{color:var(--ink);font-weight:600;}}  /* bold the Library nav item while in the Archive */
 </style>
 <script>
@@ -4106,6 +4113,55 @@ async function quickRemoveTag(id, tag) {{
 function quickRemoveTagBtn(btn) {{
   quickRemoveTag(parseInt(btn.dataset.articleId), btn.dataset.tag);
 }}
+function escapeHtml(s) {{
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}}
+// Same small markdown renderer as /ask — kept duplicated per this codebase's
+// no-shared-JS-module, self-contained-page-script convention.
+function mdInline(s) {{
+  s = escapeHtml(s);
+  s = s.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)/g, function(_, t, u) {{
+    return '<a href="' + u + '" target="_blank" rel="noopener">' + t + '</a>';
+  }});
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+  s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1<em>$2</em>');
+  s = s.replace(/(^|[^_])_([^_\\n]+)_(?!_)/g, '$1<em>$2</em>');
+  return s;
+}}
+function mdToHtml(raw) {{
+  var lines = (raw || '').split('\\n');
+  var html = [], para = [], listType = null;
+  function closeList() {{ if (listType) {{ html.push('</' + listType + '>'); listType = null; }} }}
+  function flushPara() {{ if (para.length) {{ html.push('<p>' + para.join('<br>') + '</p>'); para = []; }} }}
+  lines.forEach(function(line) {{
+    var t = line.trim();
+    var h = t.match(/^(#{{1,4}})\\s+(.*)$/);
+    var ol = t.match(/^\\d+\\.\\s+(.*)$/);
+    var ul = t.match(/^[-*]\\s+(.*)$/);
+    if (h) {{
+      flushPara(); closeList();
+      var lvl = Math.min(h[1].length + 2, 6);
+      html.push('<h' + lvl + '>' + mdInline(h[2]) + '</h' + lvl + '>');
+    }} else if (ol) {{
+      flushPara();
+      if (listType !== 'ol') {{ closeList(); html.push('<ol>'); listType = 'ol'; }}
+      html.push('<li>' + mdInline(ol[1]) + '</li>');
+    }} else if (ul) {{
+      flushPara();
+      if (listType !== 'ul') {{ closeList(); html.push('<ul>'); listType = 'ul'; }}
+      html.push('<li>' + mdInline(ul[1]) + '</li>');
+    }} else if (t === '') {{
+      flushPara(); closeList();
+    }} else {{
+      closeList();
+      para.push(mdInline(t));
+    }}
+  }});
+  flushPara(); closeList();
+  return html.join('');
+}}
 async function ask(){{
   var q=document.getElementById('askq').value.trim();
   if(!q)return;
@@ -4117,10 +4173,10 @@ async function ask(){{
     var r=await fetch('/ask',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{question:q}})}});
     var d=await r.json();
     var idx=1;
-    var lib=(d.sources||[]).map(function(s){{return '<li><a href="'+s.url+'" target="_blank">['+(idx++)+'] '+s.title+'</a></li>';}}).join('');
-    var feed=(d.feed_sources||[]).map(function(s){{return '<li><a href="'+s.url+'" target="_blank">['+(idx++)+'] '+s.title+'</a></li>';}}).join('');
-    var web=(d.web_sources||[]).map(function(s){{return '<li><a href="'+s.url+'" target="_blank">&#127760; '+s.title+'</a></li>';}}).join('');
-    box.innerHTML='<p>'+(d.answer||'').replace(/\\n/g,'<br>')+'</p>'+((lib||feed||web)?'<ul style="padding-left:18px;font-size:13px;">'+lib+feed+web+'</ul>':'');
+    var lib=(d.sources||[]).map(function(s){{return '<li><a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">['+(idx++)+'] '+escapeHtml(s.title)+'</a></li>';}}).join('');
+    var feed=(d.feed_sources||[]).map(function(s){{return '<li><a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">['+(idx++)+'] '+escapeHtml(s.title)+'</a></li>';}}).join('');
+    var web=(d.web_sources||[]).map(function(s){{return '<li><a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">&#127760; '+escapeHtml(s.title)+'</a></li>';}}).join('');
+    box.innerHTML=mdToHtml(d.answer)+((lib||feed||web)?'<ul style="padding-left:18px;font-size:13px;">'+lib+feed+web+'</ul>':'');
   }}catch(e){{box.innerHTML='Something went wrong.';}}
 }}
 </script>"""
@@ -4302,6 +4358,12 @@ def ask_page(request: Request, q: str = ""):
 .ask-radio-desc{{font-size:12px;color:var(--muted);}}
 .ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 24px;font-size:15px;line-height:1.7;}}
 .ask-answer p{{margin:0 0 14px;}}
+.ask-answer h3,.ask-answer h4,.ask-answer h5,.ask-answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:18px 0 8px;letter-spacing:-0.01em;}}
+.ask-answer h3:first-child,.ask-answer h4:first-child{{margin-top:0;}}
+.ask-answer ul,.ask-answer ol{{margin:0 0 14px;padding-left:22px;}}
+.ask-answer li{{margin-bottom:5px;}}
+.ask-answer code{{background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:13px;font-family:ui-monospace,monospace;}}
+.ask-answer a{{color:var(--accent);}}
 .ask-q-bubble{{background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--navy);margin-bottom:8px;}}
 .ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-direction:column;gap:6px;}}
 .ask-src-list li{{font-size:13px;}}
@@ -4327,8 +4389,54 @@ var asked = false;
 function escapeHtml(s) {{
   return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }}
-function answerToHtml(text) {{
-  return '<p>' + escapeHtml(text).replace(/\\n\\n/g,'</p><p>').replace(/\\n/g,'<br>') + '</p>';
+
+// Small hand-rolled markdown renderer — covers what Claude actually produces in
+// an answer (headers, bold/italic, inline code, links, bullet/numbered lists,
+// paragraphs). Not a general-purpose markdown engine; deliberately no external
+// library, matching the rest of the site's zero-dependency inline-JS pattern.
+function mdInline(s) {{
+  s = escapeHtml(s);
+  s = s.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)/g, function(_, t, u) {{
+    return '<a href="' + u + '" target="_blank" rel="noopener">' + t + '</a>';
+  }});
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+  s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1<em>$2</em>');
+  s = s.replace(/(^|[^_])_([^_\\n]+)_(?!_)/g, '$1<em>$2</em>');
+  return s;
+}}
+function mdToHtml(raw) {{
+  var lines = (raw || '').split('\\n');
+  var html = [], para = [], listType = null;
+  function closeList() {{ if (listType) {{ html.push('</' + listType + '>'); listType = null; }} }}
+  function flushPara() {{ if (para.length) {{ html.push('<p>' + para.join('<br>') + '</p>'); para = []; }} }}
+  lines.forEach(function(line) {{
+    var t = line.trim();
+    var h = t.match(/^(#{{1,4}})\\s+(.*)$/);
+    var ol = t.match(/^\\d+\\.\\s+(.*)$/);
+    var ul = t.match(/^[-*]\\s+(.*)$/);
+    if (h) {{
+      flushPara(); closeList();
+      var lvl = Math.min(h[1].length + 2, 6);
+      html.push('<h' + lvl + '>' + mdInline(h[2]) + '</h' + lvl + '>');
+    }} else if (ol) {{
+      flushPara();
+      if (listType !== 'ol') {{ closeList(); html.push('<ol>'); listType = 'ol'; }}
+      html.push('<li>' + mdInline(ol[1]) + '</li>');
+    }} else if (ul) {{
+      flushPara();
+      if (listType !== 'ul') {{ closeList(); html.push('<ul>'); listType = 'ul'; }}
+      html.push('<li>' + mdInline(ul[1]) + '</li>');
+    }} else if (t === '') {{
+      flushPara(); closeList();
+    }} else {{
+      closeList();
+      para.push(mdInline(t));
+    }}
+  }});
+  flushPara(); closeList();
+  return html.join('');
 }}
 function srcListHtml(d) {{
   var items = [];
@@ -4391,7 +4499,7 @@ async function doAsk() {{
       return;
     }}
 
-    answerEl.innerHTML = answerToHtml(d.answer) + srcListHtml(d);
+    answerEl.innerHTML = mdToHtml(d.answer) + srcListHtml(d);
 
     if (d.capped) {{
       document.getElementById('ask-capped').style.display = 'block';
@@ -6335,8 +6443,8 @@ def admin_enrich(request: Request):
       <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Scope</div>
       <label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
         <input type="checkbox" name="force" value="1" style="margin-top:3px;accent-color:var(--accent);">
-        <span><strong>Force re-enrich all articles</strong>
-        <span style="display:block;font-size:12px;color:var(--muted);">Re-run every article, not just unenriched ones. Use this to standardize the archive on a new model or rules version. Summary is overwritten; existing tags are merged.</span></span>
+        <span><strong>Re-run the entire library, not just new articles</strong>
+        <span style="display:block;font-size:12px;color:var(--muted);"><strong>Unchecked</strong> (default): only articles that haven&rsquo;t been enriched yet get processed &mdash; fast, cheap, safe to run anytime. <strong>Checked</strong>: every article in the archive is re-run, including ones already enriched &mdash; use this to standardize the whole library on a new model or rules version. Either way, each article&rsquo;s summary is overwritten with the new one and its tags are merged (existing tags are kept, not replaced).</span></span>
       </label>
     </div>
     <div>
@@ -6877,8 +6985,8 @@ def admin_brand(request: Request):
         '<span id="voice-status" style="font-size:13px;color:var(--muted);"></span></div></div>'
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
         '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>'
-        '<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Paste any draft or page copy. Mechanical rules (banned words, filler, performative phrases) flag instantly; Review adds Claude&rsquo;s read on tone.</p>'
-        f'<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice…" style="{mono}"></textarea>'
+        '<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Paste any draft or page copy &mdash; including an Ask answer you want to spot-check. Mechanical rules (banned words, filler, performative phrases) flag instantly; Review adds Claude&rsquo;s read on tone. This is a manual, on-demand check only: Ask never calls it automatically, so answering a question never costs more than the one API call.</p>'
+        f'<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice — a draft, page copy, or an Ask answer…" style="{mono}"></textarea>'
         '<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">'
         '<button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>'
         '<span id="vr-status" style="font-size:13px;color:var(--muted);"></span></div>'
