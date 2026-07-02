@@ -447,6 +447,22 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
 }
 """
 
+# Trailing brand suffixes baked into individual page titles over time — now
+# redundant since _page() prepends a consistent "BMW CFO ·" tab-title prefix
+# instead. Stripped so a tab reads e.g. "BMW CFO · Archive" instead of the
+# doubled-up "BMW CFO · Archive — Brian Weisberg".
+_TITLE_SUFFIXES = ("—Brian Weisberg", " — Brian Weisberg",
+                   "—CFO Toolbox", " — CFO Toolbox",
+                   "—Admin", " — Admin")
+
+
+def _short_title(title: str) -> str:
+    for suffix in _TITLE_SUFFIXES:
+        if title.endswith(suffix):
+            return title[:-len(suffix)]
+    return title
+
+
 def _page(title: str, active: str, body: str, authed: bool = False,
           role: str | None = None) -> str:
     # role: "admin" | "user" | "guest". Falls back to authed for legacy callers.
@@ -488,7 +504,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{_esc(title)}</title>
+<title>{_esc(f"BMW CFO · {_short_title(title)}")}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" href="/static/favicon.ico" sizes="any">
@@ -695,7 +711,7 @@ def homepage(request: Request):
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
 </div>
 </div>"""
-    return HTMLResponse(_page("Brian Weisberg — strategic finance for high-growth tech", "Home", body, role=_role(request)))
+    return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
 
 
 @app.get("/about", response_class=HTMLResponse)
