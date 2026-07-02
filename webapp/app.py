@@ -36,7 +36,7 @@ import sys
 import threading
 import time
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -591,10 +591,50 @@ def logout():
 # Public pages
 # ---------------------------------------------------------------------------
 
+_AVATAR_MAX_BYTES = 3 * 1024 * 1024  # 3MB — a headshot has no business being bigger
+
+
+def _sniff_image_mime(data: bytes) -> str | None:
+    """Identify JPEG/PNG/WebP from magic bytes — the only formats the avatar
+    upload accepts. No Pillow dependency for this; a plain signature check is
+    enough since nothing here needs to resize or re-encode the image."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _avatar_data_url() -> str | None:
+    """Admin-uploaded avatar, if any — stored in the DB (settings table) rather
+    than webapp/static/, since that directory is baked into the Docker image
+    and wiped on every Railway redeploy. Same persistence story as everything
+    else editable through the admin UI (e.g. the voice prompt)."""
+    import json as _json
+    lib = _lib()
+    try:
+        raw = lib.get_setting("avatar_json")
+    finally:
+        lib.close()
+    if not raw:
+        return None
+    try:
+        d = _json.loads(raw)
+        return f"data:{d['mime']};base64,{d['b64']}"
+    except Exception:
+        return None
+
+
 def _avatar(size: int = 140) -> str:
-    """Headshot if present, else a clean monogram — shown the moment headshot.jpg lands."""
-    if os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg")):
-        return (f'<img src="/static/headshot.jpg" alt="Brian Weisberg" '
+    """DB-stored avatar if uploaded, else static headshot.jpg if present,
+    else a clean monogram."""
+    src = _avatar_data_url()
+    if not src and os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg")):
+        src = "/static/headshot.jpg"
+    if src:
+        return (f'<img src="{src}" alt="Brian Weisberg" '
                 f'style="width:{size}px;height:{size}px;border-radius:50%;object-fit:cover;'
                 f'object-position:center top;flex-shrink:0;border:3px solid var(--navy);">')
     return (f'<div aria-label="Brian Weisberg" '
@@ -5018,7 +5058,8 @@ _ADMIN_GROUPS = [
         ("/community",          "CFO community",           "Your community idea + sign-up form — parked off the public site for now, reachable here so the copy isn't lost."),
     ]),
     ("Site management", "Your voice, your brand, and the public site.", [
-        ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
+        ("/admin/brand",        "Brand standards",     "Visual standards and color system for the site."),
+        ("/admin/voice",        "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
         ("/admin/ask-report",   "FP&A Buddy report",   "Every question asked, across every user — settings, cost, and a CSV export."),
         ("/admin/checks",       "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/open-source",  "Open source",         "The open-source projects this site is built on — with gratitude."),
@@ -6511,56 +6552,82 @@ def admin_users(request: Request, msg: str = ""):
     banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
               f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
 
-    rows = ""
-    for u in users:
+    def _card(u: dict) -> str:
         uid = u["id"]
         active = u["active"]
-        status = ('<span style="font-size:12px;font-weight:600;color:#065f46;">active</span>' if active
-                  else '<span style="font-size:12px;font-weight:600;color:#b91c1c;">disabled</span>')
-        role_badge = (f'<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
-                      f'background:{"var(--coral-wash);color:var(--coral-deep)" if u["role"]=="admin" else "var(--seafoam-wash);color:var(--seafoam-deep)"};">{_esc(u["role"])}</span>')
+        status = ('<span class="user-badge" style="background:#d1fae5;color:#065f46;">active</span>' if active
+                  else '<span class="user-badge" style="background:#fee2e2;color:#b91c1c;">disabled</span>')
+        role_badge = (f'<span class="user-badge" style="'
+                      f'{"background:var(--coral-wash);color:var(--coral-deep);" if u["role"]=="admin" else "background:var(--seafoam-wash);color:var(--seafoam-deep);"}'
+                      f'">{_esc(u["role"])}</span>')
         last = _esc((u["last_login_at"] or "")[:10]) or "—"
         cap_override = u.get("ask_cap_usd")
         effective_cap = cap_override if cap_override is not None else default_cap
         spent = ask_spend.get(uid, 0.0)
         cap_note = "override" if cap_override is not None else "default"
-        rows += f"""<tr style="border-top:1px solid var(--line);">
-  <td style="padding:9px 12px;font-size:14px;font-weight:500;">{_esc(u["username"])}<div style="font-size:12px;color:var(--muted);font-weight:400;">{_esc(u["email"] or "")}</div></td>
-  <td style="padding:9px 12px;font-size:14px;">{_esc(u["name"] or "") or '<span style="color:var(--muted);">—</span>'}</td>
-  <td style="padding:9px 12px;">{role_badge}</td>
-  <td style="padding:9px 12px;">{status}</td>
-  <td style="padding:9px 12px;font-size:12px;color:var(--muted);">{last}</td>
-  <td style="padding:9px 12px;font-size:12px;">
-    <div>${spent:.2f} / ${effective_cap:.2f}<span style="color:var(--muted);"> ({cap_note})</span></div>
-    <form method="post" action="/admin/users/{uid}/ask-cap" style="margin:4px 0 0;display:flex;gap:4px;align-items:center;">
-      <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
-        placeholder="${default_cap:.2f}" title="FP&amp;A Buddy monthly cap override — blank inherits the site default"
-        style="padding:4px 7px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:12px;background:var(--bg);width:70px;">
-      <button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 8px;">Set</button>
-    </form>
-  </td>
-  <td style="padding:9px 12px;">
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-      <form method="post" action="/admin/users/{uid}/edit" style="margin:0;display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
-        <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" placeholder="username" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:110px;">
-        <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:120px;">
-        <input name="email" type="email" value="{_esc(u["email"] or "")}" maxlength="200" placeholder="email" title="email" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:160px;">
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
-      </form>
-      <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
-      <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">{"Disable" if active else "Enable"}</button></form>
-      <form method="post" action="/admin/users/{uid}/password" style="margin:0;display:flex;gap:4px;align-items:center;">
-        <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);width:130px;">
-        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Reset</button>
-      </form>
-      <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
+        meta_bits = [b for b in (_esc(u["name"] or ""), _esc(u["email"] or "")) if b]
+        meta_bits.append(f"Last in {last}")
+        meta_line = " &middot; ".join(meta_bits)
+        return f"""<div class="user-card" data-user-id="{uid}">
+  <div class="user-card-head">
+    <div style="min-width:0;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span class="user-name">{_esc(u["username"])}</span>{role_badge}{status}
+      </div>
+      <div class="user-meta">{meta_line}</div>
     </div>
-  </td>
-</tr>"""
-    if not users:
-        rows = '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</td></tr>'
+    <div style="display:flex;align-items:center;gap:14px;flex-shrink:0;">
+      <div style="text-align:right;font-size:12px;color:var(--muted);">
+        <div style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</div>
+        <div>{cap_note}</div>
+      </div>
+      <button type="button" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;" onclick="toggleManage({uid})">Manage</button>
+    </div>
+  </div>
+  <div class="user-manage" id="manage-{uid}" style="display:none;">
+    <div class="user-manage-row">
+      <label>Profile</label>
+      <form method="post" action="/admin/users/{uid}/edit" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <input name="username" value="{_esc(u["username"])}" required maxlength="64" pattern="[A-Za-z0-9._-]+" title="username" placeholder="username" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:120px;">
+        <input name="name" value="{_esc(u["name"] or "")}" maxlength="120" placeholder="name" title="display name" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:130px;">
+        <input name="email" type="email" value="{_esc(u["email"] or "")}" maxlength="200" placeholder="email" title="email" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:170px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Save</button>
+      </form>
+    </div>
+    <div class="user-manage-row">
+      <label>FP&amp;A Buddy cap</label>
+      <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:6px;align-items:center;">
+        <span style="font-size:13px;color:var(--muted);">$</span>
+        <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
+          placeholder="${default_cap:.2f}" title="Monthly cap override — blank inherits the site default"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+        <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
+      </form>
+    </div>
+    <div class="user-manage-row">
+      <label>Reset password</label>
+      <form method="post" action="/admin/users/{uid}/password" style="display:flex;gap:6px;align-items:center;">
+        <input type="password" name="password" required placeholder="new password" minlength="8" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:150px;">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Reset</button>
+      </form>
+    </div>
+    <div class="user-manage-row">
+      <label>Account</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <form method="post" action="/admin/users/{uid}/role" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Make member" if u["role"]=="admin" else "Make admin"}</button></form>
+        <form method="post" action="/admin/users/{uid}/toggle" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">{"Disable" if active else "Enable"}</button></form>
+        <form method="post" action="/admin/users/{uid}/delete" style="margin:0;" onsubmit="return confirm('Delete this account?');"><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;color:#b91c1c;border-color:#fca5a5;">Delete</button></form>
+      </div>
+    </div>
+  </div>
+</div>"""
 
-    body = f"""<div class="page" style="max-width:960px;">
+    cards = "".join(_card(u) for u in users) or (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+        'padding:32px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</div>')
+
+    body = f"""<div class="page" style="max-width:820px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Users</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Member accounts for the gated sections. You create accounts here (no public sign-up yet). You always keep admin access via the host password, so you can&rsquo;t lock yourself out.</p>
@@ -6570,22 +6637,9 @@ def admin_users(request: Request, msg: str = ""):
   <span style="font-size:13px;">$</span>
   <input type="number" name="cap" step="0.01" min="0" value="{default_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
   <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
-  <span style="font-size:12px;color:var(--muted);">Per-user overrides in the table below take priority over this.</span>
+  <span style="font-size:12px;color:var(--muted);">Per-user overrides below take priority over this.</span>
 </form>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:26px;">
-  <table style="width:100%;border-collapse:collapse;">
-    <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">User</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Role</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Status</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last in</th>
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">FP&amp;A Buddy this month</th>
-      <th style="padding:9px 12px;"></th>
-    </tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-</div>
+<div style="display:grid;gap:10px;margin-bottom:26px;">{cards}</div>
 
 <h2 style="font-size:18px;">Add a member</h2>
 <form method="post" action="/admin/users/create" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
@@ -6604,7 +6658,26 @@ def admin_users(request: Request, msg: str = ""):
     </select></div>
   <div style="display:flex;align-items:flex-end;"><button type="submit" class="btn" style="font-size:14px;padding:9px 22px;">Create account</button></div>
 </form>
-</div>"""
+</div>
+
+<style>
+.user-card{{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}}
+.user-card-head{{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}}
+.user-name{{font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);}}
+.user-badge{{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;}}
+.user-meta{{font-size:12px;color:var(--muted);margin-top:3px;}}
+.user-manage{{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:grid;gap:10px;}}
+.user-manage-row{{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:center;}}
+.user-manage-row label{{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}}
+@media (max-width:600px){{.user-manage-row{{grid-template-columns:1fr;}}}}
+</style>
+
+<script>
+function toggleManage(uid) {{
+  var panel = document.getElementById('manage-' + uid);
+  if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}}
+</script>"""
     return HTMLResponse(_page("Users — Admin", "Admin", body, authed=True))
 
 
@@ -6829,11 +6902,17 @@ def admin_review_removals(request: Request):
         url = _esc(a["url"])
         title = _esc(a.get("title") or a["url"])
         source = _esc(a.get("source") or "")
+        date = _esc((a.get("published_at") or a.get("saved_at") or "")[:10])
+        meta_bits = [b for b in (source, date) if b]
+        meta_line = " &middot; ".join(meta_bits)
         reason = _esc(a.get("scope_reason") or "flagged off-audience")
         summary = _esc((a.get("summary") or "")[:300])
-        return f"""<div data-card data-id="{aid}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
-  <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
-  <div style="font-size:12px;color:var(--muted);margin:3px 0 6px;">{source}</div>
+        return f"""<div data-card data-id="{aid}" data-url="{url}" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+    <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
+    <span data-link-status style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap;flex-shrink:0;"></span>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin:3px 0 6px;">{meta_line}</div>
   <div style="font-size:12px;color:var(--muted);font-style:italic;margin-bottom:8px;">Flagged: {reason}</div>
   <p style="font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{summary}</p>
   <div style="display:flex;gap:9px;">
@@ -6887,8 +6966,71 @@ async function removeAll(){{
   const cards = Array.from(document.querySelectorAll('[data-card]'));
   for (const c of cards) {{ await removeOne(c.querySelector('button:last-child')); }}
 }}
+
+// Dead-link check: fires after render, one small request per card, a few at
+// a time so a big flagged list doesn't open dozens of requests at once.
+async function checkLink(card){{
+  const span = card.querySelector('[data-link-status]');
+  if (!span) return;
+  try {{
+    const r = await fetch('/admin/review-removals/check-link?url=' + encodeURIComponent(card.dataset.url));
+    const d = await r.json();
+    if (d.ok) {{
+      span.textContent = '';  // live link — no badge needed
+    }} else {{
+      span.textContent = d.status ? ('dead · ' + d.status) : 'dead';
+      span.style.background = '#fee2e2';
+      span.style.color = '#b91c1c';
+    }}
+  }} catch (e) {{ /* network hiccup on our end — don't flag the article for it */ }}
+}}
+(async function checkAllLinks(){{
+  const cards = Array.from(document.querySelectorAll('[data-card]'));
+  const concurrency = 4;
+  let i = 0;
+  async function worker(){{
+    while (i < cards.length) {{ await checkLink(cards[i++]); }}
+  }}
+  await Promise.all(Array.from({{length: concurrency}}, worker));
+}})();
 </script>"""
     return HTMLResponse(_page("Remove content — Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/review-removals/check-link")
+def admin_review_check_link(request: Request, url: str):
+    """On-demand dead-link probe for one flagged article, called client-side
+    per card so a slow/dead site never blocks the page itself. Restricted to
+    URLs actually in the flagged set (not an arbitrary open prober) and to
+    http/https, with a short timeout — a slow site should read as "can't
+    tell", not hang the request."""
+    _require_api(request)
+    scheme = urlsplit(url).scheme
+    if scheme not in ("http", "https"):
+        return JSONResponse({"ok": None, "status": None})
+    lib = _lib()
+    try:
+        known = lib.conn.execute(
+            "SELECT 1 FROM articles WHERE url=? AND in_scope=0", (url,)
+        ).fetchone()
+    finally:
+        lib.close()
+    if not known:
+        raise HTTPException(status_code=404, detail="not a flagged article")
+    import requests
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; cfo-navigator-linkcheck/1.0)"}
+    try:
+        r = requests.head(url, headers=headers, timeout=6, allow_redirects=True)
+        if r.status_code >= 400 and r.status_code != 405:
+            return JSONResponse({"ok": False, "status": r.status_code})
+        if r.status_code == 405:  # HEAD not allowed — fall back to a light GET
+            r = requests.get(url, headers=headers, timeout=6, stream=True)
+            r.close()
+            if r.status_code >= 400:
+                return JSONResponse({"ok": False, "status": r.status_code})
+        return JSONResponse({"ok": True, "status": r.status_code})
+    except requests.RequestException:
+        return JSONResponse({"ok": False, "status": None})
 
 
 @app.post("/admin/review-removals/keep")
@@ -7413,29 +7555,37 @@ def admin_backup(request: Request, uploaded: str = ""):
 @app.get("/admin/brand", response_class=HTMLResponse)
 def admin_brand(request: Request):
     """A living style guide — the brand standards rendered with the real tokens.
-    The written reference lives in BRAND.md; this page is the visual companion."""
+    The written reference lives in BRAND.md; this page is the visual companion.
+    The writing-voice guide is its own page — see /admin/voice."""
     if not _is_authed(request):
         return _login_redirect(request)
 
-    # Verbal identity: the voice guide (editable) lives here too — it's part of the brand.
-    lib = _lib()
-    try:
-        custom_voice = lib.get_setting("voice_prompt")
-    finally:
-        lib.close()
-    from linklib.social import BRIAN_VOICE
-    current_voice = custom_voice or BRIAN_VOICE
-    is_customized = bool(custom_voice)
-    if is_customized:
-        voice_badge = ('<span id="voice-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
-                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
-    else:
-        voice_badge = ('<span id="voice-badge" style="font-size:12px;color:var(--muted);'
-                       'margin-left:10px;vertical-align:middle;">Built-in default</span>')
-    reset_btn = (
-        '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
-        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
-        f'{"" if is_customized else "display:none;"}">Reset to default</button>'
+    avatar_src = _avatar_data_url()
+    avatar_source_note = (
+        "Custom upload, stored in the database." if avatar_src
+        else ("Static file (webapp/static/headshot.jpg)."
+              if os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg"))
+              else "None set — showing the initials monogram.")
+    )
+    avatar_section = (
+        '<h2 style="margin-top:0;">Avatar</h2>'
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;'
+        'padding:20px 22px;margin-bottom:30px;display:flex;align-items:center;gap:22px;flex-wrap:wrap;">'
+        f'{_avatar(84)}'
+        '<div style="flex:1;min-width:240px;">'
+        f'<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">{avatar_source_note} '
+        'Stored in the database (not the filesystem) so it survives a redeploy &mdash; the static file above is only a fallback.</p>'
+        '<form method="post" action="/admin/brand/avatar" enctype="multipart/form-data" '
+        'style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
+        '<input type="file" name="file" accept="image/jpeg,image/png,image/webp" required '
+        'style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">'
+        '<button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Upload</button>'
+        '</form>'
+        + (('<form method="post" action="/admin/brand/avatar/remove" style="margin-top:8px;" '
+            'onsubmit="return confirm(\'Remove the uploaded avatar? Falls back to the static file or monogram.\');">'
+            '<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Remove uploaded avatar</button>'
+            '</form>') if avatar_src else '')
+        + '</div></div>'
     )
 
     # Brand palette (literal hexes mirror the _CSS :root tokens; see BRAND.md §7).
@@ -7568,30 +7718,6 @@ def admin_brand(request: Request):
         '</div>'
     )
 
-    mono = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
-            "font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;")
-    verbal = (
-        '<div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">'
-        '<span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Voice guide</span>'
-        f'{voice_badge}</div>'
-        '<p style="color:var(--muted);margin:0 0 14px;font-size:14px;">The guide Claude uses to draft in your voice, and the rubric the voice check holds new writing to.</p>'
-        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
-        f'<textarea id="voice-prompt" rows="16" style="{mono}">{_esc(current_voice)}</textarea>'
-        '<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">'
-        '<button id="voice-save-btn" onclick="saveVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Save voice</button>'
-        f'{reset_btn}'
-        '<span id="voice-status" style="font-size:13px;color:var(--muted);"></span></div></div>'
-        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>'
-        '<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Paste any draft or page copy &mdash; including an FP&amp;A Buddy answer you want to spot-check. Mechanical rules (banned words, filler, performative phrases) flag instantly; Review adds Claude&rsquo;s read on tone. This is a manual, on-demand check only: FP&amp;A Buddy never calls it automatically, so answering a question never costs more than the one API call.</p>'
-        f'<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice — a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>'
-        '<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">'
-        '<button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>'
-        '<span id="vr-status" style="font-size:13px;color:var(--muted);"></span></div>'
-        '<div id="vr-result" style="display:none;margin-top:16px;border-top:1px solid var(--line);padding-top:14px;font-size:14px;line-height:1.6;"></div>'
-        '</div>'
-    )
-
     rules = callout(
         "var(--surface)", "var(--line)",
         '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin-bottom:10px;">Usage rules</div>'
@@ -7639,7 +7765,9 @@ def admin_brand(request: Request):
 The full written reference is <code>BRAND.md</code> in the repo; an automated check
 (<code>tests/test_brand_standards.py</code>) keeps new content on-palette.</p>
 
-<h2 style="margin-top:0;">Brand colors</h2>
+{avatar_section}
+
+<h2>Brand colors</h2>
 <p style="color:var(--muted);margin:-6px 0 18px;font-size:14px;">Three families, each with a working ramp.
 Deep shades are text-capable; base/mid are for graphics and large display; light/wash are fills only.</p>
 {navy_ramp}
@@ -7667,8 +7795,103 @@ Deep shades are text-capable; base/mid are for graphics and large display; light
 <h2>How the checks run</h2>
 {checks_doc}
 
-<h2>Verbal identity — your voice</h2>
-{verbal}
+<p style="margin-top:8px;"><a href="/admin/voice" class="btn btn-ghost" style="font-size:14px;">Verbal identity — your voice guide &rarr;</a></p>
+</div>"""
+    return HTMLResponse(_page("Brand standards — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/brand/avatar")
+async def admin_brand_avatar_upload(request: Request, file: UploadFile = File(...)):
+    """Store an uploaded avatar in the DB (settings table), not webapp/static/
+    — that directory is baked into the Docker image and wiped on every
+    Railway redeploy, so a filesystem-only upload would vanish on next deploy."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    data = await file.read()
+    if len(data) > _AVATAR_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Image is too large (max 3MB).")
+    mime = _sniff_image_mime(data)
+    if not mime:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, or WebP images are accepted.")
+    import base64
+    import json as _json
+    lib = _lib()
+    try:
+        lib.set_setting("avatar_json", _json.dumps({"mime": mime, "b64": base64.b64encode(data).decode("ascii")}))
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/brand", status_code=303)
+
+
+@app.post("/admin/brand/avatar/remove")
+def admin_brand_avatar_remove(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.set_setting("avatar_json", "")
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/brand", status_code=303)
+
+
+@app.get("/admin/voice", response_class=HTMLResponse)
+def admin_voice_page(request: Request):
+    """Verbal identity: the editable voice guide Claude drafts in, plus an
+    on-demand check for whether a piece of copy sounds like Brian. Split out
+    of /admin/brand (which stays the visual/color system) since the two are
+    edited and read independently."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    lib = _lib()
+    try:
+        custom_voice = lib.get_setting("voice_prompt")
+    finally:
+        lib.close()
+    from linklib.social import BRIAN_VOICE
+    current_voice = custom_voice or BRIAN_VOICE
+    is_customized = bool(custom_voice)
+    if is_customized:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
+                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
+    else:
+        voice_badge = ('<span id="voice-badge" style="font-size:12px;color:var(--muted);'
+                       'margin-left:10px;vertical-align:middle;">Built-in default</span>')
+    reset_btn = (
+        '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
+        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
+        f'{"" if is_customized else "display:none;"}">Reset to default</button>'
+    )
+
+    mono = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
+            "font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;")
+
+    body = f"""<div class="page" style="max-width:900px;">
+<p style="margin:0 0 4px;"><a href="/admin/brand" style="font-size:13px;color:var(--muted);">&larr; Brand standards</a></p>
+<h1>Verbal identity</h1>
+<p style="color:var(--muted);margin:4px 0 26px;">Your writing voice &mdash; the guide Claude drafts from, and an on-demand check for whether new copy sounds like you.</p>
+
+<div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">
+<span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Voice guide</span>
+{voice_badge}</div>
+<p style="color:var(--muted);margin:0 0 14px;font-size:14px;">The guide Claude uses to draft in your voice, and the rubric the voice check holds new writing to.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<textarea id="voice-prompt" rows="16" style="{mono}">{_esc(current_voice)}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="voice-save-btn" onclick="saveVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Save voice</button>
+{reset_btn}
+<span id="voice-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Paste any draft or page copy &mdash; including an FP&amp;A Buddy answer you want to spot-check. Mechanical rules (banned words, filler, performative phrases) flag instantly; Review adds Claude&rsquo;s read on tone. This is a manual, on-demand check only: FP&amp;A Buddy never calls it automatically, so answering a question never costs more than the one API call.</p>
+<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice — a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>
+<span id="vr-status" style="font-size:13px;color:var(--muted);"></span></div>
+<div id="vr-result" style="display:none;margin-top:16px;border-top:1px solid var(--line);padding-top:14px;font-size:14px;line-height:1.6;"></div>
+</div>
 </div>
 
 <script>
@@ -7727,7 +7950,7 @@ async function reviewVoice() {{
   finally {{ btn.disabled = false; btn.textContent = 'Review against my voice'; }}
 }}
 </script>"""
-    return HTMLResponse(_page("Brand standards — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Verbal identity — Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/voice")
