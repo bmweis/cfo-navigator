@@ -183,6 +183,37 @@ CREATE TABLE IF NOT EXISTS dedupe_decisions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dedupe_verdict ON dedupe_decisions(verdict);
+
+-- Single shared table backing all three Ask/FP&A Buddy surfaces: the admin
+-- report, a user's own history, and the public community Q&A browse view.
+-- One row per API call (one per turn in a follow-up conversation), grouped by
+-- conversation_id. Real cost is computed from actual token usage at call
+-- time (see linklib.pricing) — never an estimate.
+CREATE TABLE IF NOT EXISTS ask_questions (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id       TEXT NOT NULL DEFAULT '',   -- groups follow-up turns; = str(id) of the first turn
+    turn_index            INTEGER NOT NULL DEFAULT 0,
+    user_id               INTEGER NOT NULL,
+    question              TEXT NOT NULL DEFAULT '',
+    answer                TEXT NOT NULL DEFAULT '',
+    model                 TEXT NOT NULL DEFAULT '',
+    effort                TEXT NOT NULL DEFAULT '',
+    use_library           INTEGER NOT NULL DEFAULT 1,
+    use_feed              INTEGER NOT NULL DEFAULT 0,
+    use_web               INTEGER NOT NULL DEFAULT 1,
+    input_tokens          INTEGER NOT NULL DEFAULT 0,
+    output_tokens         INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+    cost_usd              REAL NOT NULL DEFAULT 0,
+    hidden_public         INTEGER NOT NULL DEFAULT 0,  -- admin removed from the community view only
+    anonymized            INTEGER NOT NULL DEFAULT 0,  -- asker name hidden on the community view only
+    created_at            TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ask_questions_user ON ask_questions(user_id);
+CREATE INDEX IF NOT EXISTS idx_ask_questions_created ON ask_questions(created_at);
+CREATE INDEX IF NOT EXISTS idx_ask_questions_conversation ON ask_questions(conversation_id);
 """
 
 
@@ -285,6 +316,9 @@ class Library:
             # Audience-scope review — flag off-audience rows (e.g. how-to-get-into-VC).
             "ALTER TABLE articles ADD COLUMN in_scope INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE articles ADD COLUMN scope_reason TEXT NOT NULL DEFAULT ''",
+            # Per-user Ask dollar-cap override. NULL = inherit the global default
+            # (settings['ask_default_cap_usd']) rather than a hardcoded per-user value.
+            "ALTER TABLE users ADD COLUMN ask_cap_usd REAL",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -645,14 +679,14 @@ class Library:
 
     def list_users(self) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT id, username, role, active, name, email, created_at, last_login_at "
+            "SELECT id, username, role, active, name, email, created_at, last_login_at, ask_cap_usd "
             "FROM users ORDER BY role DESC, username"
         ).fetchall()
         return [dict(r) for r in rows]
 
     def get_user(self, username: str) -> Optional[dict]:
         row = self.conn.execute(
-            "SELECT id, username, role, active, name, email, created_at, last_login_at "
+            "SELECT id, username, role, active, name, email, created_at, last_login_at, ask_cap_usd "
             "FROM users WHERE username=?", ((username or "").strip().lower(),)
         ).fetchone()
         return dict(row) if row else None
@@ -956,6 +990,79 @@ class Library:
             "SELECT tool_id, COUNT(*) as n FROM tool_leads GROUP BY tool_id"
         ).fetchall()
         return {r["tool_id"]: r["n"] for r in rows}
+
+    # -- Ask / FP&A Buddy — shared question archive + dollar-cap tracking ------
+
+    _DEFAULT_ASK_CAP_USD = 5.00  # coffee-money default; overridable via settings, never hardcoded elsewhere
+
+    def record_ask_question(self, user_id: int, question: str, answer: str,
+                            model: str, effort: str, use_library: bool, use_feed: bool,
+                            use_web: bool, conversation_id: str = "", turn_index: int = 0,
+                            input_tokens: int = 0, output_tokens: int = 0,
+                            cache_creation_tokens: int = 0, cache_read_tokens: int = 0,
+                            cost_usd: float = 0.0) -> int:
+        """Record one Ask API call. Backs all three surfaces (admin report, a
+        user's own history, and the public community view) from one row.
+        `conversation_id` groups follow-up turns; pass "" on the first turn of
+        a conversation and the caller fills it in with str(id) after insert."""
+        now = _now()
+        cur = self.conn.execute(
+            """INSERT INTO ask_questions
+               (conversation_id, turn_index, user_id, question, answer, model, effort,
+                use_library, use_feed, use_web, input_tokens, output_tokens,
+                cache_creation_tokens, cache_read_tokens, cost_usd, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (conversation_id, turn_index, user_id, question.strip(), answer,
+             model, effort, int(use_library), int(use_feed), int(use_web),
+             input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+             cost_usd, now),
+        )
+        row_id = cur.lastrowid
+        if not conversation_id:
+            self.conn.execute(
+                "UPDATE ask_questions SET conversation_id=? WHERE id=?", (str(row_id), row_id)
+            )
+        self.conn.commit()
+        return row_id
+
+    def ask_cost_all_time(self, user_id: int) -> float:
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) FROM ask_questions WHERE user_id=?", (user_id,)
+        ).fetchone()
+        return float(row[0])
+
+    def ask_cost_this_month(self, user_id: int) -> float:
+        month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) FROM ask_questions WHERE user_id=? AND created_at >= ?",
+            (user_id, month_start),
+        ).fetchone()
+        return float(row[0])
+
+    def get_default_ask_cap(self) -> float:
+        raw = self.get_setting("ask_default_cap_usd")
+        try:
+            return float(raw) if raw else self._DEFAULT_ASK_CAP_USD
+        except ValueError:
+            return self._DEFAULT_ASK_CAP_USD
+
+    def set_default_ask_cap(self, cap_usd: float) -> None:
+        self.set_setting("ask_default_cap_usd", str(cap_usd))
+
+    def get_effective_ask_cap(self, user_id: int) -> float:
+        """The dollar cap that actually applies to this user this month —
+        their per-user override if set, else the global default. Kept as data
+        (settings + a per-user column) rather than logic, so a future paid
+        tier is just a different row, not a code branch."""
+        row = self.conn.execute("SELECT ask_cap_usd FROM users WHERE id=?", (user_id,)).fetchone()
+        if row and row["ask_cap_usd"] is not None:
+            return float(row["ask_cap_usd"])
+        return self.get_default_ask_cap()
+
+    def set_user_ask_cap(self, user_id: int, cap_usd: float | None) -> None:
+        """Set a per-user override, or pass None to clear it (inherit the default)."""
+        self.conn.execute("UPDATE users SET ask_cap_usd=? WHERE id=?", (cap_usd, user_id))
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
