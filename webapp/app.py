@@ -1227,6 +1227,13 @@ with The F Suite.</p>
 </a>
 <p style="font-size:13px;color:var(--muted);margin-top:8px;">(Full link coming soon—check back or <a href="/contact">reach out</a> and I'll send it directly.)</p>
 
+<h2>Bonus: The Growth Engine Ratio, the Song</h2>
+<p style="color:var(--muted);font-size:14px;margin:0 0 14px;">I couldn't resist. AI-generated, obviously.</p>
+<iframe src="https://suno.com/embed/608201fd-d2b9-4774-af56-b65d477f3528" width="100%" height="240" style="border:none;border-radius:12px;max-width:760px;display:block;"
+  allow="autoplay; encrypted-media; fullscreen" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"
+  title="The Growth Engine Ratio (song)"></iframe>
+<p style="font-size:13px;color:var(--muted);margin-top:8px;">Player not loading? <a href="/static/growth-engine-ratio.mp3" download>Download the MP3</a> or <a href="https://suno.com/song/608201fd-d2b9-4774-af56-b65d477f3528" target="_blank" rel="noopener">listen on Suno</a>.</p>
+
 </div>
 
 <script>
@@ -8202,7 +8209,7 @@ def static_file(filename: str):
     ext = filename.rsplit(".", 1)[-1].lower()
     media = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
              "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp",
-             "ico": "image/x-icon"}.get(ext, "application/octet-stream")
+             "ico": "image/x-icon", "mp3": "audio/mpeg"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
 
 
