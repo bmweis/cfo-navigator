@@ -65,7 +65,14 @@ _STOP = {
 
 
 def _build_system(use_library: bool, use_feed: bool, use_web: bool) -> str:
-    """Build the advisor system prompt, describing only the active source types."""
+    """Build the advisor system prompt, describing only the active source types.
+
+    Voice: appends BRIAN_VOICE_CORE (the same voice + hard mechanical rules used
+    for LinkedIn drafts, minus the LinkedIn-specific post-shape section, which
+    doesn't apply here) so answers sound like the user, not a generic assistant.
+    """
+    from .social import BRIAN_VOICE_CORE
+
     sources = []
     if use_library:
         sources.append("SAVED LIBRARY: the user's hand-curated archive of qualified "
@@ -103,7 +110,9 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool) -> str:
         "- If the question is missing key inputs (company stage, business model, the "
         "relevant numbers), ask one focused clarifying question alongside your "
         "best-effort answer.\n"
-        "- End with a one-line \"Worth reading:\" pointer to the 1–2 most useful sources."
+        "- End with a one-line \"Worth reading:\" pointer to the 1–2 most useful sources.\n\n"
+        "Voice — write every answer this way:\n"
+        f"{BRIAN_VOICE_CORE}"
     )
 
 
