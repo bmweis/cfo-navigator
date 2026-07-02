@@ -455,7 +455,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     nav = links(public) + '<span class="sep"></span>' + links(member)
     if role == "admin":
         # Admin sees exactly what a member sees, plus the Admin hub (which holds
-        # the admin-only tools like Draft). Keeps the top nav uncluttered.
+        # the admin-only tools). Keeps the top nav uncluttered.
         nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin</a>'
         nav += '<a href="/logout">Log out</a>'
     elif role == "user":
@@ -2972,8 +2972,8 @@ def admin_tools(request: Request):
         lead_badge = (f'<a href="/admin/tools/leads?tool_id={t["id"]}" '
                       f'style="display:inline-block;background:var(--coral);color:#fff;border-radius:5px;'
                       f'padding:2px 8px;font-size:11px;font-weight:700;text-decoration:none;white-space:nowrap;">'
-                      f'{n_leads} lead{"s" if n_leads != 1 else ""}</a>') if n_leads else \
-                     '<span style="font-size:12px;color:var(--muted);">0 leads</span>'
+                      f'{n_leads} intro{"s" if n_leads != 1 else ""}</a>') if n_leads else \
+                     '<span style="font-size:12px;color:var(--muted);">0 intros</span>'
         featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if t.get("promoted") else ""
         return f"""<tr>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(t['name'])}{featured_badge}</td>
@@ -2999,7 +2999,7 @@ def admin_tools(request: Request):
 <p style="margin:0 0 24px;">
   <a href="/tools" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
-  <a href="/admin/tools/leads" style="font-size:13px;color:var(--muted);">View all leads ({total_leads}) →</a>
+  <a href="/admin/tools/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
 </p>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
@@ -3024,7 +3024,7 @@ def admin_tools(request: Request):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Leads</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
 <tbody>{approved_rows}</tbody>
@@ -3060,9 +3060,9 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
     ) or '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No leads yet.</td></tr>'
     title_suffix = f" — {_esc(tool_name_filter)}" if tool_name_filter else ""
     body = f"""<div class="page" style="max-width:1000px;">
-<p style="margin:0 0 4px;"><a href="/admin/tools" style="font-size:13px;color:var(--muted);">&larr; Tools Admin</a></p>
-<h1>Warm Intro Leads{title_suffix}</h1>
-<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">{len(leads)} lead{"s" if len(leads) != 1 else ""} total</p>
+<p style="margin:0 0 4px;"><a href="/admin/tools" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox Admin</a></p>
+<h1>CFO Toolbox Intros{title_suffix}</h1>
+<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm Intro requests from readers &mdash; {len(leads)} total.</p>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -3077,7 +3077,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 </table>
 </div>
 </div>"""
-    return HTMLResponse(_page("Tool Leads—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("CFO Toolbox Intros—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/tools/new", response_class=HTMLResponse)
@@ -4511,29 +4511,27 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 # uncluttered. Ordered as the recommended workflow — top to bottom.
 _LIBRARY_TOOLS = [
     ("/admin/backup",       "Archive backup",      "Snapshot the database before you start, so you can roll back if needed."),
-    ("/admin/backfill",     "Historical sweep",    "Catch up the back catalog: queue older articles from your sources (raise the per-source limit to reach further back)."),
-    ("/admin/queue",        "Archive Queue",       "Review proposed saves, fix dates, edit tags, and approve them into the archive."),
-    ("/admin/dedupe",       "Find duplicates",     "Catch near-duplicate articles (similar content within ~3 months) from a source and remove them."),
+    ("/admin/backfill",     "Historical sweep",    "One-time catch-up: crawl each source's sitemap for older articles you saved before this tool existed, and queue them for review. Run once per source; new candidates land in Archive Queue below."),
+    ("/admin/queue",        "Archive Queue",       "Review every proposed save — from the historical sweep or an ongoing feed scan — fix dates, edit tags, and approve into the archive or dismiss."),
+    ("/admin/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
     ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
     ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
-    ("/admin/enrich",       "Re-enrich archive",   "The big pass: force-refresh summaries + tags on Opus, applying your tag style and the scope rules."),
-    ("/admin/review-removals", "Review removals",  "Confirm or keep what the re-enrich flagged as off-audience (podcasts, predictions, fund/LP content)."),
+    ("/admin/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content — this is the material FP&A Buddy reads from, so depth here pays off there."),
+    ("/admin/review-removals", "Remove content",   "Filter for content the enricher flagged as potentially off-target for this archive (e.g. podcasts, annual predictions, fund/LP content) and confirm or keep each one."),
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
 _ADMIN_GROUPS = [
-    ("Site", "Your voice, your brand, and the public site.", [
-        ("/admin/social",       "Social",              "Draft LinkedIn posts in your voice."),
-        ("/draft",              "Draft",               "Draft and refine a post in a conversation."),
+    ("Inbox", "New submissions and messages waiting on you.", [
+        ("/admin/tools",        "CFO Toolbox submissions", "Tools readers have submitted for the directory — approve, reject, or edit before they go live."),
+        ("/admin/tools/leads",  "CFO Toolbox intros",      "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
+        ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
+        ("/community",          "CFO community",           "Your community idea + sign-up form — parked off the public site for now, reachable here so the copy isn't lost."),
+    ]),
+    ("Site management", "Your voice, your brand, and the public site.", [
         ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
-        ("/admin/contacts",     "Contact submissions", "Messages from the public contact form."),
-        ("/community",          "CFO Community (parked)", "Your community idea + form — parked off the public site for now."),
         ("/admin/checks",       "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/open-source",  "Open source",         "The open-source projects this site is built on — with gratitude."),
-    ]),
-    ("CFO Toolbox", "The public tools directory and the leads it brings in.", [
-        ("/admin/tools",        "Tool submissions",    "Review the CFO Toolbox approval queue and manage featured/vendor settings."),
-        ("/admin/tools/leads",  "Tool leads",          "Warm Intro requests — name, email, company, and size for each tool."),
     ]),
     ("Access", "Member accounts and who can see what.", [
         ("/admin/users",        "Users",               "Create and manage member accounts for the gated sections."),
@@ -4542,6 +4540,45 @@ _ADMIN_GROUPS = [
 
 # Flat view kept for any code/tests that iterate every section.
 _ADMIN_SECTIONS = _LIBRARY_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
+
+
+def _content_flow_diagram(highlight: str = "") -> str:
+    """Shared visual for the Historical sweep and Archive Queue pages: two
+    producers (a one-time sitemap sweep, an ongoing feed scan) both land
+    candidates in one queue, which you review before anything joins the
+    Archive. Exists because those two pages read as redundant without it —
+    they're producer and consumer of the same table, not duplicate tools.
+    `highlight` outlines one stage ('sweep' | 'feed' | 'queue' | 'archive')
+    to orient the reader on the page they're currently viewing.
+    """
+    def _box(bg: str, border: str, label_color: str, title: str, sub: str, key: str) -> str:
+        ring = f"box-shadow:0 0 0 2px {border};" if key == highlight else ""
+        return (f'<div style="background:{bg};border:1px solid {border};border-radius:10px;'
+                f'padding:10px 14px;font-size:13px;line-height:1.5;{ring}">'
+                f'<strong style="color:{label_color};">{title}</strong><br>'
+                f'<span style="color:var(--muted);">{sub}</span></div>')
+
+    arrow = '<div style="padding:0 14px;color:var(--navy);font-size:20px;flex-shrink:0;">&rarr;</div>'
+    sources = (
+        '<div style="display:flex;flex-direction:column;gap:8px;">'
+        + _box("var(--seafoam-wash)", "var(--seafoam)", "var(--seafoam-deep)",
+               "Historical sweep", "one-time &middot; sitemap crawl &middot; reaches back in time", "sweep")
+        + _box("var(--seafoam-wash)", "var(--seafoam)", "var(--seafoam-deep)",
+               "Scan feed", "ongoing &middot; RSS &middot; keeps you current", "feed")
+        + '</div>'
+    )
+    queue = _box("var(--navy-wash)", "var(--navy-light)", "var(--navy)",
+                "Archive Queue", "you review, edit tags, approve or dismiss", "queue")
+    archive = _box("#fff", "var(--line)", "var(--ink)",
+                   "Archive", "searchable &middot; FP&amp;A Buddy reads from it", "archive")
+    return (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;'
+        'padding:18px 22px;margin:0 0 22px;overflow-x:auto;">'
+        '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
+        'letter-spacing:.07em;margin-bottom:14px;">How new content reaches the archive</div>'
+        f'<div style="display:flex;align-items:center;gap:0;min-width:640px;">{sources}{arrow}{queue}{arrow}{archive}</div>'
+        '</div>'
+    )
 
 
 # Open-source the site is built on — celebrated on /admin/open-source.
@@ -4815,7 +4852,7 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
     groups_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
     for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
         cards = "".join(_card(*s) for s in items)
-        open_attr = ""   # all groups start collapsed — click to expand
+        open_attr = " open" if gname == "Inbox" else ""   # Inbox starts expanded — everything else is click-to-expand
         groups_html += (
             f'<details class="admin-group"{open_attr} style="margin-bottom:14px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
             f'<summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">'
@@ -4879,7 +4916,9 @@ def admin_library(request: Request):
     body = f"""<div class="page" style="max-width:720px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Archive</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Build, curate, enrich, and back up your archive. For a first-time cleanup, work top to bottom &mdash; each step sets up the next. You can also jump to any tool directly anytime.</p>
+<p style="color:var(--muted);margin:4px 0 18px;">Full management of the digital archive &mdash; the eight tools below cover backing it up, bringing in new content (past and present), keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from. For a first-time cleanup, work top to bottom &mdash; each step sets up the next. Once set up, jump to any tool directly anytime.</p>
+{_content_flow_diagram()}
+<p style="color:var(--muted);font-size:14px;margin:-8px 0 22px;line-height:1.6;">New content always enters through the queue (step&nbsp;2 or&nbsp;3) for your review before it's saved. Once saved, it's ready for de-duping and enrichment (steps&nbsp;4&ndash;5), and the Ask corpus stays clean by periodically filtering out anything off-target (step&nbsp;6) and tidying tags (steps&nbsp;7&ndash;8).</p>
 <div style="display:grid;gap:12px;">{cards}</div>
 </div>"""
     return HTMLResponse(_page("Archive — Admin", "Admin", body, authed=True))
@@ -4908,123 +4947,6 @@ def admin_auth_recheck(request: Request):
     finally:
         lib.close()
     return RedirectResponse("/admin", status_code=303)
-
-
-@app.get("/admin/social", response_class=HTMLResponse)
-def admin_social(request: Request, url: str = ""):
-    if not _is_authed(request):
-        return _login_redirect(request)
-
-    from linklib.social import DEFAULT_MODEL
-    from linklib.models import models_for
-
-    models = [(m["id"], m["label"], m["blurb"]) for m in models_for(allow_new=True)]
-    ids = [mid for mid, _, _ in models]
-    default_model = DEFAULT_MODEL if DEFAULT_MODEL in ids else (ids[0] if ids else DEFAULT_MODEL)
-    modes = [
-        ("original",      "Original POV",  "Your take sparked by the article — not a summary"),
-        ("amplification", "Amplify",       "Signal genuine resonance, build past the original"),
-        ("self_promo",    "Self-promote",  "Promote your own work: lean, single-analogy"),
-    ]
-
-    def _radio(name, value, label, detail, checked):
-        chk = " checked" if checked else ""
-        return (
-            f'<label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;padding:6px 0;border-top:1px solid var(--line);">'
-            f'<input type="radio" name="{name}" value="{value}"{chk} style="margin-top:3px;accent-color:var(--accent);flex-shrink:0;">'
-            f'<span><strong>{label}</strong><span style="display:block;font-size:12px;color:var(--muted);">{detail}</span></span>'
-            f'</label>'
-        )
-
-    model_radios = "".join(
-        _radio("model", mid, label, detail, mid == default_model)
-        for mid, label, detail in models
-    )
-    mode_radios = "".join(
-        _radio("post-mode", val, label, detail, val == "original")
-        for val, label, detail in modes
-    )
-
-    pre_url = _esc(url)
-
-    body = f"""<div class="page" style="max-width:820px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Social</h1>
-
-<h2 style="margin-top:0;">LinkedIn post generator</h2>
-<p style="color:var(--muted);margin:-6px 0 20px;">Draft a post in your voice from any URL or topic.</p>
-
-<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:16px;">
-  <div style="display:grid;gap:16px;">
-    <div>
-      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Article URL</label>
-      <input id="post-url" type="url" value="{pre_url}" placeholder="https://…"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
-    </div>
-    <div>
-      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">Or topic <span style="font-weight:400;text-transform:none;letter-spacing:0;">(used when URL is blank; pulls from your archive)</span></label>
-      <input id="post-topic" type="text" placeholder="e.g. headcount planning in uncertain environments"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);">
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
-      <div>
-        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:0;">Mode</div>
-        <div style="display:flex;flex-direction:column;">{mode_radios}</div>
-      </div>
-      <div>
-        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:0;">Model</div>
-        <div style="display:flex;flex-direction:column;">{model_radios}</div>
-      </div>
-    </div>
-    <div>
-      <button id="draft-btn" onclick="doDraft()" class="btn" style="padding:11px 28px;font-size:15px;">Draft post</button>
-      <span style="font-size:13px;color:var(--muted);margin-left:14px;">&#8984;&#9166; to draft</span>
-    </div>
-  </div>
-</div>
-
-<div id="draft-result" style="display:none;background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:40px;">
-  <div id="draft-output" style="white-space:pre-wrap;line-height:1.75;font-size:15px;color:var(--ink);"></div>
-  <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:10px;">
-    <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(document.getElementById('draft-output').innerText)" style="font-size:13px;">Copy</button>
-    <button class="btn btn-ghost" onclick="doDraft()" style="font-size:13px;">Redraft</button>
-  </div>
-</div>
-
-</div>
-
-<script>
-async function doDraft() {{
-  var url = document.getElementById('post-url').value.trim();
-  var topic = document.getElementById('post-topic').value.trim();
-  var mode = document.querySelector('input[name="post-mode"]:checked')?.value || 'original';
-  var model = document.querySelector('input[name="model"]:checked')?.value || '{_esc(DEFAULT_MODEL)}';
-  if (!url && !topic) {{ document.getElementById('post-url').focus(); return; }}
-  var btn = document.getElementById('draft-btn');
-  var result = document.getElementById('draft-result');
-  var output = document.getElementById('draft-output');
-  btn.disabled = true; btn.textContent = 'Drafting…';
-  result.style.display = 'block';
-  output.textContent = 'Drafting in your voice…';
-  result.scrollIntoView({{behavior:'smooth', block:'nearest'}});
-  try {{
-    var payload = {{mode: mode, model: model}};
-    if (url) payload.url = url; else payload.topic = topic;
-    var r = await fetch('/post', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(payload)}});
-    var d = await r.json();
-    output.textContent = d.post || '(no output)';
-  }} catch(e) {{
-    output.textContent = 'Something went wrong: ' + e;
-  }} finally {{
-    btn.disabled = false; btn.textContent = 'Draft post';
-  }}
-}}
-
-document.addEventListener('keydown', function(e) {{
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doDraft();
-}});
-</script>"""
-    return HTMLResponse(_page("Social — Admin", "Admin", body, authed=True))
 
 
 # ---------------------------------------------------------------------------
@@ -5254,7 +5176,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Archive Queue</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Proposed saves waiting for your review. Approve them into the archive&nbsp;&mdash;&nbsp;edit the tags first if you like&nbsp;&mdash;&nbsp;or dismiss what you don&rsquo;t want.</p>
+<p style="color:var(--muted);margin:4px 0 22px;">Proposed saves waiting for your review, whether they came from &ldquo;Scan feed&rdquo; below (ongoing) or from a <a href="/admin/backfill">Historical sweep</a> (one-time back-catalog catch-up). Approve into the archive&nbsp;&mdash;&nbsp;edit the tags first if you like&nbsp;&mdash;&nbsp;or dismiss what you don&rsquo;t want.</p>
 {scan_notice}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
   <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note} &nbsp; {expand_controls}</div>
@@ -5832,12 +5754,12 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
 
     body = f"""<div class="page" style="max-width:760px;">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
-<h1>Find duplicates</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">Catches the same piece republished under a different title within a date window &mdash; the kind exact-URL dedup misses. A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged. The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest.</p>
+<h1>Content de-dupe</h1>
+<p style="color:var(--muted);margin:-6px 0 18px;">Scans one source for articles that are likely duplicates or near-duplicates &mdash; most often the same piece republished under a different title, which exact-URL dedup misses. A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged. The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest.</p>
 {banner}
 {body_inner}
 </div>"""
-    return HTMLResponse(_page("Find duplicates — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Content de-dupe — Admin", "Admin", body, authed=True))
 
 
 def _dedupe_pair(form) -> tuple[dict, dict, str]:
@@ -6224,8 +6146,8 @@ def admin_review_removals(request: Request):
 
     body = f"""<div class="page" style="max-width:820px;">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
-<h1>Review removals</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as off-audience for this archive &mdash; most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so. Keep the false positives; remove the rest.</p>
+<h1>Remove content</h1>
+<p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as potentially off-target for this archive &mdash; most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so: keep the false positives, remove the rest.</p>
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px;">
   <div><span id="flagged-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{n}</span> <span style="color:var(--muted);">flagged</span></div>
   <button class="btn btn-ghost" onclick="removeAll()" style="font-size:12px;padding:6px 14px;color:var(--alert);border-color:var(--alert);">Remove all</button>
@@ -6260,7 +6182,7 @@ async function removeAll(){{
   for (const c of cards) {{ await removeOne(c.querySelector('button:last-child')); }}
 }}
 </script>"""
-    return HTMLResponse(_page("Review removals — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Remove content — Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/review-removals/keep")
@@ -6621,10 +6543,10 @@ def admin_backfill(request: Request):
     body = f"""<div class="page" style="max-width:820px;">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Historical sweep</h1>
-<p style="color:var(--muted);margin:-6px 0 20px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review. A one-time catch-up on your back catalog.</p>
+<p style="color:var(--muted);margin:-6px 0 20px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review. A one-time catch-up on your back catalog &mdash; it doesn&rsquo;t save anything by itself, it just fills the queue below for you to approve.</p>
 
 <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:22px;font-size:13.5px;color:#92400e;line-height:1.6;">
-  <strong>Run this once.</strong> It catches up your back catalog; after that, the <a href="/admin/queue">Archive Queue</a> feed scan keeps you current.
+  <strong>Run this once per source.</strong> Results land in the <a href="/admin/queue">Archive Queue</a> for you to review &mdash; nothing is saved to the archive automatically. After the first sweep, the Archive Queue&rsquo;s own &ldquo;Scan feed&rdquo; button is what keeps you current going forward.
   Start with a <strong>dry run</strong> to see the reach before any sweep spends API calls.
 </div>
 
@@ -7224,279 +7146,6 @@ def bookmarklet(request: Request):
         "})();"
     )
     return js
-
-
-@app.post("/post")
-async def post_draft(request: Request):
-    _require_api(request)
-    from linklib.social import draft_post, DEFAULT_MODEL
-    payload = await request.json()
-    model = (payload.get("model") or "").strip() or DEFAULT_MODEL
-    lib = _lib()
-    try:
-        custom_voice = lib.get_setting("voice_prompt")
-        d = draft_post(lib, article_id=payload.get("id"), url=payload.get("url"),
-                       topic=payload.get("topic"), mode=payload.get("mode", "original"),
-                       model=model,
-                       system_prompt=custom_voice or None)
-        return {"post": d.post}
-    finally:
-        lib.close()
-
-
-# ---------------------------------------------------------------------------
-# LinkedIn ghostwriter — multi-turn chat with screenshot + URL context
-# ---------------------------------------------------------------------------
-
-_DRAFT_BODY = """<div class="chat-wrap">
-  <div class="chat-head">
-    <div>
-      <h1 style="margin:0 0 4px;">LinkedIn ghostwriter</h1>
-      <p style="color:var(--muted);margin:0;font-size:15px;">Hand me a topic, a link, or a screenshot of a post. I'll take a swing in your voice, then we iterate.</p>
-    </div>
-    <button id="clear-btn" class="btn btn-ghost" onclick="clearChat()" style="white-space:nowrap;">New draft</button>
-  </div>
-
-  <div id="chat" class="chat-log"></div>
-
-  <div id="dropzone" class="composer">
-    <div id="thumbs" class="thumbs"></div>
-    <input id="url-in" type="url" class="url-in" placeholder="Optional: paste a URL for context (best-effort — LinkedIn usually can't be fetched)…">
-    <div class="compose-row">
-      <textarea id="msg-in" rows="2" placeholder="Topic, notes, or feedback…  (Enter to send · Shift+Enter for a newline)"></textarea>
-      <div class="compose-actions">
-        <label class="attach-btn" title="Attach screenshot">&#128206;<input id="file-in" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden></label>
-        <button id="send-btn" class="btn" onclick="send()">Send</button>
-      </div>
-    </div>
-    <div class="hint">Drag, paste, or attach a screenshot of a LinkedIn post to reshare it.</div>
-  </div>
-</div>
-
-<style>
-.chat-wrap{max-width:780px;margin:0 auto;padding:32px 24px 48px;}
-.chat-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;}
-.chat-log{display:flex;flex-direction:column;gap:14px;min-height:180px;margin-bottom:20px;}
-.empty{color:var(--muted);font-size:15px;text-align:center;padding:40px 0;}
-.msg{max-width:88%;border-radius:14px;padding:13px 16px;font-size:15px;line-height:1.6;}
-.msg-user{align-self:flex-end;background:var(--accent-light);border:1px solid var(--line);}
-.msg-assistant{align-self:flex-start;background:#fff;border:1px solid var(--line);position:relative;}
-.msg-text{white-space:pre-wrap;word-wrap:break-word;}
-.msg-text + .msg-text{margin-top:8px;}
-.msg-img{max-width:220px;border-radius:10px;border:1px solid var(--line);margin:4px 0;display:block;}
-.copy{margin-top:10px;font-size:12px;color:var(--accent);background:transparent;border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer;}
-.copy:hover{background:var(--accent-light);}
-.composer{border:1px solid var(--line);border-radius:16px;background:#fff;padding:14px 16px;transition:border-color .12s,background .12s;}
-.composer.drag{border-color:var(--accent);background:var(--accent-light);}
-.thumbs{display:flex;flex-wrap:wrap;gap:8px;}
-.thumbs:not(:empty){margin-bottom:10px;}
-.thumb-wrap{position:relative;}
-.thumb-wrap img{width:60px;height:60px;object-fit:cover;border-radius:8px;border:1px solid var(--line);}
-.thumb-wrap button{position:absolute;top:-7px;right:-7px;width:20px;height:20px;border-radius:50%;border:none;background:var(--ink);color:#fff;font-size:13px;line-height:1;cursor:pointer;}
-.url-in{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:var(--bg);margin-bottom:10px;}
-.compose-row{display:flex;gap:10px;align-items:flex-end;}
-.compose-row textarea{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;min-height:46px;}
-.compose-actions{display:flex;gap:8px;align-items:center;}
-.attach-btn{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-size:18px;background:var(--bg);}
-.attach-btn:hover{background:var(--accent-light);}
-.hint{font-size:12px;color:var(--muted);margin-top:8px;}
-nav.site-nav a[href="/draft"]{color:var(--ink);font-weight:600;}
-</style>
-
-<script>
-var KEY='cfo_draft_history_v1';
-var ALLOWED=['image/png','image/jpeg','image/webp','image/gif'];
-var history=loadHistory();
-var pending=[];   // {media_type, data(base64), dataUrl}
-
-function loadHistory(){try{return JSON.parse(localStorage.getItem(KEY))||[];}catch(e){return [];}}
-function persist(){try{localStorage.setItem(KEY,JSON.stringify(history));}catch(e){/* quota — session memory still holds it */}}
-function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-
-function render(){
-  var c=document.getElementById('chat');
-  if(!history.length){c.innerHTML='<div class="empty">No draft yet. Give me something to work with.</div>';return;}
-  c.innerHTML=history.map(function(m){
-    var inner='';
-    if(typeof m.content==='string'){inner=textBlock(m.content);}
-    else{m.content.forEach(function(b){
-      if(b.type==='text'){inner+=textBlock(b.text);}
-      else if(b.type==='image'){inner+='<img class="msg-img" src="data:'+b.source.media_type+';base64,'+b.source.data+'">';}
-    });}
-    var copy=m.role==='assistant'?'<button class="copy" onclick="copyText(this)">Copy</button>':'';
-    return '<div class="msg msg-'+m.role+'">'+inner+copy+'</div>';
-  }).join('');
-  c.scrollTop=c.scrollHeight;
-}
-function textBlock(t){return '<div class="msg-text">'+esc(t).replace(/\\n/g,'<br>')+'</div>';}
-
-function copyText(btn){
-  var node=btn.parentNode.querySelector('.msg-text');
-  navigator.clipboard.writeText(node?node.innerText:'');
-  btn.textContent='Copied';setTimeout(function(){btn.textContent='Copy';},1500);
-}
-
-function renderThumbs(){
-  var t=document.getElementById('thumbs');
-  t.innerHTML=pending.map(function(p,i){
-    return '<div class="thumb-wrap"><img src="'+p.dataUrl+'"><button onclick="rmThumb('+i+')" title="Remove">&times;</button></div>';
-  }).join('');
-}
-function rmThumb(i){pending.splice(i,1);renderThumbs();}
-
-function addFile(file){
-  if(ALLOWED.indexOf(file.type)<0){alert('Only PNG, JPEG, WebP, or GIF images.');return;}
-  if(file.size>5*1024*1024){alert('That image is over 5MB — please shrink it first.');return;}
-  var reader=new FileReader();
-  reader.onload=function(){
-    var dataUrl=reader.result;
-    pending.push({media_type:file.type,data:dataUrl.split(',')[1],dataUrl:dataUrl});
-    renderThumbs();
-  };
-  reader.readAsDataURL(file);
-}
-
-function showThinking(){
-  var c=document.getElementById('chat');
-  if(!history.length){c.innerHTML='';}
-  var d=document.createElement('div');
-  d.id='pending';d.className='msg msg-assistant';
-  d.innerHTML='<div class="msg-text"><em style="color:var(--muted);">Drafting in your voice…</em></div>';
-  c.appendChild(d);c.scrollTop=c.scrollHeight;
-}
-function clearThinking(){var p=document.getElementById('pending');if(p)p.remove();}
-
-async function send(){
-  var ta=document.getElementById('msg-in');
-  var urlEl=document.getElementById('url-in');
-  var text=ta.value.trim();
-  var url=urlEl.value.trim();
-  if(!text && !pending.length && !url){return;}
-  if(!text){text='Draft a LinkedIn post based on this.';}
-  if(url){text=text+'\\n\\n[URL: '+url+']';}
-
-  var content=[];
-  pending.forEach(function(p){content.push({type:'image',source:{type:'base64',media_type:p.media_type,data:p.data}});});
-  content.push({type:'text',text:text});
-
-  history.push({role:'user',content:content});
-  persist();
-  pending=[];renderThumbs();ta.value='';urlEl.value='';
-  render();
-
-  var btn=document.getElementById('send-btn');
-  btn.disabled=true;btn.textContent='…';
-  showThinking();
-
-  try{
-    var r=await fetch('/draft/message',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:history,url:url})});
-    var d=await r.json();
-    clearThinking();
-    if(!r.ok){history.push({role:'assistant',content:'\\u26a0\\ufe0f '+(d.detail||'Something went wrong.')});}
-    else{
-      var reply=d.reply||'';
-      if(d.fetch_note){reply='('+d.fetch_note+')\\n\\n'+reply;}
-      history.push({role:'assistant',content:reply});
-    }
-    persist();render();
-  }catch(e){
-    clearThinking();
-    history.push({role:'assistant',content:'\\u26a0\\ufe0f Network error — try again.'});
-    render();
-  }finally{btn.disabled=false;btn.textContent='Send';}
-}
-
-function clearChat(){
-  if(history.length && !confirm('Clear this conversation and start a new draft?')){return;}
-  history=[];pending=[];persist();renderThumbs();render();
-}
-
-document.getElementById('file-in').addEventListener('change',function(e){
-  Array.prototype.forEach.call(e.target.files,addFile);e.target.value='';
-});
-document.getElementById('msg-in').addEventListener('keydown',function(e){
-  if(e.key==='Enter' && !e.shiftKey){e.preventDefault();send();}
-});
-var dz=document.getElementById('dropzone');
-['dragover','dragenter'].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.add('drag');});});
-['dragleave','dragend'].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.remove('drag');});});
-dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');if(e.dataTransfer&&e.dataTransfer.files){Array.prototype.forEach.call(e.dataTransfer.files,addFile);}});
-document.addEventListener('paste',function(e){
-  if(!e.clipboardData)return;
-  Array.prototype.forEach.call(e.clipboardData.items,function(it){
-    if(it.type.indexOf('image')===0){var f=it.getAsFile();if(f)addFile(f);}
-  });
-});
-
-render();renderThumbs();
-</script>"""
-
-
-@app.get("/draft", response_class=HTMLResponse)
-def draft_page(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    return HTMLResponse(_page("LinkedIn ghostwriter — Brian Weisberg", "Draft", _DRAFT_BODY, authed=True))
-
-
-def _append_context_to_last_user(messages: list, note: str) -> None:
-    """Append a text block carrying fetched URL context to the latest user turn."""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            content = m.get("content")
-            if isinstance(content, str):
-                m["content"] = content + note
-            elif isinstance(content, list):
-                content.append({"type": "text", "text": note})
-            return
-
-
-@app.post("/draft/message")
-async def draft_message(request: Request):
-    _require_api(request)
-    from linklib.social import chat_draft, CHAT_IMAGE_MEDIA_TYPES
-    payload = await request.json()
-    messages = payload.get("messages") or []
-    url = (payload.get("url") or "").strip()
-    if not messages:
-        raise HTTPException(status_code=400, detail="messages required")
-
-    # Defensively validate any image blocks before forwarding to the API.
-    for m in messages:
-        content = m.get("content")
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "image":
-                    mt = (block.get("source") or {}).get("media_type")
-                    if mt not in CHAT_IMAGE_MEDIA_TYPES:
-                        raise HTTPException(status_code=400, detail=f"unsupported image type: {mt}")
-
-    # Best-effort URL fetch — inject as context, or tell the model to ask for a
-    # screenshot rather than invent the contents.
-    fetch_note = ""
-    if url:
-        from linklib.extract import fetch_page
-        page = fetch_page(url)
-        if page.content:
-            _append_context_to_last_user(
-                messages,
-                f"\n\n[Fetched context from {url}"
-                + (f" — title: {page.title}" if page.title else "")
-                + f"]\n{page.content[:6000]}",
-            )
-            fetch_note = f"Fetched “{page.title or url}” for context."
-        else:
-            _append_context_to_last_user(
-                messages,
-                f"\n\n[Note: the URL {url} could not be fetched server-side "
-                "(likely blocked or login-walled). Do not invent its contents — "
-                "ask for a screenshot instead.]",
-            )
-            fetch_note = "Couldn't fetch that URL — paste a screenshot and I'll read it."
-
-    reply = chat_draft(messages)
-    return {"reply": reply, "fetch_note": fetch_note}
 
 
 @app.post("/feed/save")
