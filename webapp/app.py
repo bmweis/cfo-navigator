@@ -5081,14 +5081,12 @@ _ADMIN_GROUPS = [
         ("/community",          "CFO community",           "Your community idea + sign-up form — parked off the public site for now, reachable here so the copy isn't lost."),
     ]),
     ("Site management", "Your voice, your brand, and the public site.", [
+        ("/admin/users",        "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/brand",        "Brand standards",     "Visual standards and color system for the site."),
         ("/admin/voice",        "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
         ("/admin/ask-report",   "FP&A Buddy report",   "Every question asked, across every user — settings, cost, and a CSV export."),
         ("/admin/checks",       "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/open-source",  "Open source",         "The open-source projects this site is built on — with gratitude."),
-    ]),
-    ("Access", "Member accounts and who can see what.", [
-        ("/admin/users",        "Users",               "Create and manage member accounts for the gated sections."),
     ]),
 ]
 
