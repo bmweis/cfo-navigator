@@ -455,8 +455,8 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
               ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
     # Account-only section — one nav entry ("Library") that opens a hub linking to
-    # Archive, Feed, and Ask. Shown to everyone so the gated area is discoverable;
-    # clicking it when signed out lands on the login screen.
+    # Archive, Feed, and FP&A Buddy. Shown to everyone so the gated area is
+    # discoverable; clicking it when signed out lands on the login screen.
     member = [("/library", "Library")]
 
     def links(items):
@@ -4354,7 +4354,7 @@ async function ask(){{
 
 @app.get("/library", response_class=HTMLResponse)
 def library(request: Request):
-    """Account hub: a landing page linking to the Archive, Feed, and Ask."""
+    """Account hub: a landing page linking to the Archive, Feed, and FP&A Buddy."""
     if not _is_member(request):
         return _login_redirect(request)
     lib = _lib()
@@ -4376,7 +4376,7 @@ def library(request: Request):
     cards = "".join([
         _hcard("/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag &mdash; your curated reading history."),
         _hcard("/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive."),
-        _hcard("/ask", "Ask", "Put an FP&amp;A question to your archive &mdash; a cited answer drawn from the Archive plus trusted web sources."),
+        _hcard("/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive &mdash; a cited answer drawn from the Archive plus trusted web sources."),
         _hcard("/questions", "Community Q&amp;A", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
     ])
 
@@ -4580,7 +4580,7 @@ def ask_page(request: Request, q: str = ""):
     pre_q = _esc(q)
 
     body = f"""<div class="page" style="max-width:820px;">
-<h1 style="margin-bottom:6px;">Ask a question</h1>
+<h1 style="margin-bottom:6px;">Ask FP&amp;A Buddy</h1>
 <p style="color:var(--muted);margin:0 0 28px;">Query your saved archive, RSS feed, and trusted web sources. Tune cost vs. depth before each query.</p>
 {usage_html}
 
@@ -4821,7 +4821,7 @@ document.addEventListener('keydown', function(e) {{
 updateEstimate();
 </script>"""
 
-    return HTMLResponse(_page("Ask—Brian Weisberg", "Library", body, role=_role(request)))
+    return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "Library", body, role=_role(request)))
 
 
 @app.post("/ask")
@@ -4958,10 +4958,10 @@ def ask_history(request: Request):
     rows_html = "".join(_row(r) for r in rows) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
-         '<a href="/ask">Ask a question &rarr;</a></div>')
+         '<a href="/ask">Ask FP&amp;A Buddy a question &rarr;</a></div>')
 
     body = f"""<div class="page" style="max-width:760px;">
-<p style="margin:0 0 4px;"><a href="/ask" style="font-size:13px;color:var(--muted);">&larr; Ask</a></p>
+<p style="margin:0 0 4px;"><a href="/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage &mdash; it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/questions">community Q&amp;A page</a> for other members to browse.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:22px;font-size:14px;">
@@ -5102,9 +5102,9 @@ _OPEN_SOURCE = [
         ("lxml", "lxml", "BSD-3-Clause", "https://lxml.de",
          "The fast C-backed parser the extractors lean on."),
     ]),
-    ("Intelligence", "The AI behind enrichment, Ask, drafting, and dedupe verification.", [
+    ("Intelligence", "The AI behind enrichment, FP&A Buddy, drafting, and dedupe verification.", [
         ("Anthropic SDK", "anthropic", "MIT", "https://github.com/anthropics/anthropic-sdk-python",
-         "The Python client for Claude — summaries, auto-tags, cited Ask answers, post drafts, and duplicate checks."),
+         "The Python client for Claude — summaries, auto-tags, cited FP&A Buddy answers, post drafts, and duplicate checks."),
     ]),
     ("Built & kept tidy", "The tools that make and maintain the site — including a couple we leaned on right here.", [
         ("pytest", "pytest", "MIT", "https://pytest.org",
@@ -5408,7 +5408,7 @@ def admin_library(request: Request):
 <h1>Archive</h1>
 <p style="color:var(--muted);margin:4px 0 18px;">Full management of the digital archive &mdash; the eight tools below cover backing it up, bringing in new content (past and present), keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from. For a first-time cleanup, work top to bottom &mdash; each step sets up the next. Once set up, jump to any tool directly anytime.</p>
 {_content_flow_diagram()}
-<p style="color:var(--muted);font-size:14px;margin:-8px 0 22px;line-height:1.6;">New content always enters through the queue (step&nbsp;2 or&nbsp;3) for your review before it's saved. Once saved, it's ready for de-duping and enrichment (steps&nbsp;4&ndash;5), and the Ask corpus stays clean by periodically filtering out anything off-target (step&nbsp;6) and tidying tags (steps&nbsp;7&ndash;8).</p>
+<p style="color:var(--muted);font-size:14px;margin:-8px 0 22px;line-height:1.6;">New content always enters through the queue (step&nbsp;2 or&nbsp;3) for your review before it's saved. Once saved, it's ready for de-duping and enrichment (steps&nbsp;4&ndash;5), and the FP&amp;A Buddy corpus stays clean by periodically filtering out anything off-target (step&nbsp;6) and tidying tags (steps&nbsp;7&ndash;8).</p>
 <div style="display:grid;gap:12px;">{cards}</div>
 </div>"""
     return HTMLResponse(_page("Archive — Admin", "Admin", body, authed=True))
@@ -7011,7 +7011,7 @@ def admin_enrich(request: Request):
     body = f"""<div class="page" style="max-width:720px;">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Re-enrich archive</h1>
-<p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what the Ask feature reasons from, so depth here pays off there.</p>
+<p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what FP&A Buddy reasons from, so depth here pays off there.</p>
 
 <div id="poll-container">{status_html}</div>
 
@@ -7583,8 +7583,8 @@ def admin_brand(request: Request):
         '<span id="voice-status" style="font-size:13px;color:var(--muted);"></span></div></div>'
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">'
         '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>'
-        '<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Paste any draft or page copy &mdash; including an Ask answer you want to spot-check. Mechanical rules (banned words, filler, performative phrases) flag instantly; Review adds Claude&rsquo;s read on tone. This is a manual, on-demand check only: Ask never calls it automatically, so answering a question never costs more than the one API call.</p>'
-        f'<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice — a draft, page copy, or an Ask answer…" style="{mono}"></textarea>'
+        '<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Paste any draft or page copy &mdash; including an FP&amp;A Buddy answer you want to spot-check. Mechanical rules (banned words, filler, performative phrases) flag instantly; Review adds Claude&rsquo;s read on tone. This is a manual, on-demand check only: FP&amp;A Buddy never calls it automatically, so answering a question never costs more than the one API call.</p>'
+        f'<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice — a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>'
         '<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">'
         '<button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>'
         '<span id="vr-status" style="font-size:13px;color:var(--muted);"></span></div>'
