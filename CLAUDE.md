@@ -40,6 +40,7 @@ scripts/           # CLI entry points
   enrich_backfill.py  # backfill Claude summaries/tags over imported rows
   ask.py              # FP&A Q&A from the terminal
   post.py             # draft a LinkedIn post from the terminal
+  mcp_server.py       # stdio MCP server wrapping GET /api/search for Claude Desktop/Code
 
 webapp/
   app.py           # FastAPI: public site (/, /thought-leadership, /growth-engine-ratio,
@@ -145,6 +146,10 @@ python -m scripts.enrich_backfill --db library.db
 
 # Web app
 uvicorn webapp.app:app --reload    # http://localhost:8000
+
+# MCP server (optional — lets Claude Desktop/Code search the library)
+pip install mcp
+python -m scripts.mcp_server
 ```
 
 ## What's built vs. what's next
@@ -162,12 +167,15 @@ uvicorn webapp.app:app --reload    # http://localhost:8000
 - CFO Feed RSS reader (`/feed`) with category tabs, per-source filter, save-to-library
 - Article reader, Instapaper-style (`/read`)
 - Hosting/deployment on Railway (see Deployment below)
+- MCP server (`scripts/mcp_server.py`) wrapping `/api/search` for Claude Desktop/Code
 
 **Not yet built (from the migration plan):**
 - iOS Share Sheet shortcut
-- MCP server wrapper over `/api/search` for Claude chat access
-  (note: `/api/search` already accepts a `token` for programmatic auth)
 - bmweis.com custom domain pointed at Railway
+
+Note: the file this section's header refers to, `MIGRATION_AND_BUILD_PLAN.md`, isn't
+actually in the repo (lost or never committed) — these two items are tracked here as
+the only record of it.
 
 ## Contributing — pull requests
 
