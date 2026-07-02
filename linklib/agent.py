@@ -136,6 +136,11 @@ class Answer:
     sources: list[dict] = field(default_factory=list)       # saved-library hits
     feed_sources: list[dict] = field(default_factory=list)  # RSS feed hits
     web_sources: list[dict] = field(default_factory=list)   # fresh web results
+    # The resolved canonical model ID actually used (after MODEL_ALIASES /
+    # DEFAULT_MODEL resolution) — callers that log/record this answer should
+    # use this, not the raw `model` argument they passed in, which may have
+    # been an alias or empty (e.g. a caller that never sends a model field).
+    model: str = ""
     # Real usage from the API response (0 when the call never ran, e.g. no key).
     # cost_usd is computed by linklib.pricing from these — the authoritative
     # per-question dollar figure, as opposed to the pre-call COST_ESTIMATES.
@@ -325,10 +330,10 @@ def answer_question(
     import importlib.util
     if importlib.util.find_spec("anthropic") is None:
         return Answer(text="(Install `anthropic` to enable answers.)",
-                      sources=lib_hits, feed_sources=feed_items)
+                      sources=lib_hits, feed_sources=feed_items, model=model)
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return Answer(text="(Set ANTHROPIC_API_KEY to enable answers.)",
-                      sources=lib_hits, feed_sources=feed_items)
+                      sources=lib_hits, feed_sources=feed_items, model=model)
 
     sources_block = _format_all_sources(
         lib_hits, feed_items,
@@ -377,8 +382,8 @@ def answer_question(
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
         return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=web,
-                     input_tokens=in_tok, output_tokens=out_tok,
+                     model=model, input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r, cost_usd=cost)
     except Exception as e:
         return Answer(text=f"(Answer call failed: {e})",
-                      sources=lib_hits, feed_sources=feed_items)
+                      sources=lib_hits, feed_sources=feed_items, model=model)

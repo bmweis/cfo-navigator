@@ -520,7 +520,14 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/library", error: str = ""):
     if _is_member(request):   # already signed in (member or admin) — go on in
-        return RedirectResponse(next or "/library", status_code=303)
+        # A signed-in member only ever reaches this page at all when `next`
+        # required admin specifically — a member-only route would never have
+        # redirected an already-valid member here in the first place. So for
+        # a non-admin member, bouncing back to `next` would loop forever
+        # (next redirects to /login, which redirects back to next, ...).
+        # Send them to /library instead, which any member can always reach.
+        safe_next = (next or "/library") if _is_authed(request) else "/library"
+        return RedirectResponse(safe_next, status_code=303)
     err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That didn&rsquo;t work — check your details and try again.</p>'
            if error else "")
     body = f"""<div class="page" style="max-width:420px;">
@@ -4739,7 +4746,10 @@ async def ask(request: Request):
         usage_line = None
         if user_id is not None:
             row_id = lib.record_ask_question(
-                user_id, question, ans.text, model or "", effort,
+                # ans.model is the resolved canonical model actually used —
+                # not the raw request field, which can be an alias or blank
+                # (the /archive quick-ask widget never sends one).
+                user_id, question, ans.text, ans.model, effort,
                 use_library, use_feed, use_web,
                 conversation_id=conversation_id, turn_index=prior_questions,
                 input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
@@ -6215,9 +6225,12 @@ def admin_ask_report(request: Request, user: str = ""):
         from datetime import timezone as _tz
         rows = lib.list_ask_questions(user_id=filter_user_id, limit=500)
         total_n = lib.count_ask_questions(user_id=filter_user_id)
-        total_cost = sum(r["cost_usd"] for r in lib.list_ask_questions(user_id=filter_user_id, limit=100000))
+        # Direct SQL aggregates, not a Python-side sum over a page of rows —
+        # correct regardless of total volume, and doesn't pull every answer's
+        # full text into memory just to add up a number.
+        total_cost = lib.ask_cost_total(user_id=filter_user_id)
         month_start = datetime.now(_tz.utc).strftime("%Y-%m-01")
-        month_cost = sum(r["cost_usd"] for r in rows if r["created_at"] >= month_start)
+        month_cost = lib.ask_cost_total(user_id=filter_user_id, since=month_start)
         users = lib.list_users()
     finally:
         lib.close()
@@ -6257,7 +6270,7 @@ def admin_ask_report(request: Request, user: str = ""):
   </div>
   <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
     <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${month_cost:.2f}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">This calendar month (last 500 shown)</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">This calendar month</div>
   </div>
 </div>
 
@@ -6304,6 +6317,16 @@ def admin_ask_report_export(request: Request, user: str = ""):
     finally:
         lib.close()
 
+    def _csv_safe(val) -> str:
+        """Defuse CSV formula injection: a cell that starts with =, +, -, @,
+        tab, or CR is a live formula to Excel/Sheets on open. The question and
+        answer text here is asker-supplied (question) or model-generated
+        (answer) — either could start with one of those characters, by
+        accident or not. Prefix with a straight quote to force text
+        interpretation, same as GitHub/Google's CSV export mitigation."""
+        s = str(val)
+        return "'" + s if s and s[0] in ("=", "+", "-", "@", "\t", "\r") else s
+
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["date", "asker", "conversation_id", "turn", "question", "answer", "model", "effort",
@@ -6312,7 +6335,8 @@ def admin_ask_report_export(request: Request, user: str = ""):
     for r in rows:
         asker = r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
         writer.writerow([
-            r["created_at"], asker, r["conversation_id"], r["turn_index"], r["question"], r["answer"],
+            r["created_at"], _csv_safe(asker), r["conversation_id"], r["turn_index"],
+            _csv_safe(r["question"]), _csv_safe(r["answer"]),
             r["model"], r["effort"], bool(r["use_library"]), bool(r["use_feed"]), bool(r["use_web"]),
             r["input_tokens"], r["output_tokens"], r["cache_creation_tokens"], r["cache_read_tokens"],
             f'{r["cost_usd"]:.6f}',

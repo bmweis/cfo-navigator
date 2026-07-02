@@ -1039,6 +1039,25 @@ class Library:
         ).fetchone()
         return float(row[0])
 
+    def ask_cost_total(self, user_id: int | None = None, since: str | None = None) -> float:
+        """Aggregate cost across all users (or one), optionally since an ISO
+        date/datetime prefix — a direct SQL SUM rather than fetching rows into
+        Python, so it's correct regardless of how many rows exist (unlike
+        summing a size-limited `list_ask_questions()` page) and doesn't load
+        full answer text into memory just to add up a number."""
+        where, params = [], []
+        if user_id is not None:
+            where.append("user_id=?")
+            params.append(user_id)
+        if since:
+            where.append("created_at>=?")
+            params.append(since)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        row = self.conn.execute(
+            f"SELECT COALESCE(SUM(cost_usd),0) FROM ask_questions {clause}", params
+        ).fetchone()
+        return float(row[0])
+
     def get_default_ask_cap(self) -> float:
         raw = self.get_setting("ask_default_cap_usd")
         try:
