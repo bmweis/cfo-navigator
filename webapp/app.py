@@ -41,7 +41,7 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 from linklib.db import Library
 from linklib.pipeline import ingest_url
@@ -520,7 +520,14 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/library", error: str = ""):
     if _is_member(request):   # already signed in (member or admin) — go on in
-        return RedirectResponse(next or "/library", status_code=303)
+        # A signed-in member only ever reaches this page at all when `next`
+        # required admin specifically — a member-only route would never have
+        # redirected an already-valid member here in the first place. So for
+        # a non-admin member, bouncing back to `next` would loop forever
+        # (next redirects to /login, which redirects back to next, ...).
+        # Send them to /library instead, which any member can always reach.
+        safe_next = (next or "/library") if _is_authed(request) else "/library"
+        return RedirectResponse(safe_next, status_code=303)
     err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That didn&rsquo;t work — check your details and try again.</p>'
            if error else "")
     body = f"""<div class="page" style="max-width:420px;">
@@ -4222,6 +4229,7 @@ def library(request: Request):
         _hcard("/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag &mdash; your curated reading history."),
         _hcard("/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive."),
         _hcard("/ask", "Ask", "Put an FP&amp;A question to your archive &mdash; a cited answer drawn from the Archive plus trusted web sources."),
+        _hcard("/questions", "Community Q&amp;A", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
     ])
 
     body = f"""<div class="page" style="max-width:680px;">
@@ -4230,6 +4238,93 @@ def library(request: Request):
 <div style="display:grid;gap:14px;">{cards}</div>
 </div>"""
     return HTMLResponse(_page("Library—Brian Weisberg", "Library", body, role=_role(request)))
+
+
+@app.get("/questions", response_class=HTMLResponse)
+def community_questions(request: Request, q: str = ""):
+    """Public (to members) community Q&A browse — questions other members
+    already asked FP&A Buddy, so a member can check before spending a query
+    on something already answered. Reads from the same ask_questions table
+    as the admin report and /ask/history; admin-only inline controls here
+    only affect this view (see hide/anonymize below)."""
+    if not _is_member(request):
+        return _login_redirect(request)
+    is_admin = _is_authed(request)
+    lib = _lib()
+    try:
+        rows = lib.list_public_ask_questions(query=q, limit=200)
+    finally:
+        lib.close()
+
+    def _row(r: dict) -> str:
+        anonymized = bool(r.get("anonymized"))
+        asker = "A member" if anonymized else (r.get("asker_name") or r.get("asker_username") or "A member")
+        admin_controls = ""
+        if is_admin:
+            admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">Remove from this view</button></form>
+      <form method="post" action="/questions/{r["id"]}/anonymize" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">{"Un-anonymize" if anonymized else "Anonymize asker"}</button></form>
+    </div>"""
+        q_txt = _esc(r.get("question") or "")
+        a_txt = _esc((r.get("answer") or "")[:600])
+        return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+    <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q_txt}</div>
+    <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(asker)} &middot; {_esc((r["created_at"] or "")[:10])}</div>
+  </div>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.55;">{a_txt}{'&hellip;' if len(r.get("answer") or "") > 600 else ''}</p>
+  {admin_controls}
+</div>"""
+
+    rows_html = "".join(_row(r) for r in rows) or \
+        ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+         'padding:32px;text-align:center;color:var(--muted);">'
+         + ('No questions match your search.' if q else
+            'No community questions yet. Answers show up here after members ask FP&amp;A Buddy something.')
+         + '</div>')
+
+    body = f"""<div class="page" style="max-width:760px;">
+<p style="margin:0 0 4px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<h1>Community Q&amp;A</h1>
+<p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy &mdash; check here before spending a query re-asking one. <a href="/ask">Ask your own &rarr;</a></p>
+<form method="get" action="/questions" style="display:flex;gap:8px;margin-bottom:22px;">
+  <input type="search" name="q" value="{_esc(q)}" placeholder="Search past questions&hellip;"
+    style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <button type="submit" class="btn">Search</button>
+</form>
+{rows_html}
+</div>"""
+    return HTMLResponse(_page("Community Q&A—Brian Weisberg", "Library", body, role=_role(request)))
+
+
+@app.post("/questions/{question_id}/hide")
+async def community_question_hide(request: Request, question_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        row = lib.conn.execute("SELECT hidden_public FROM ask_questions WHERE id=?", (question_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="not found")
+        lib.set_ask_question_hidden(question_id, not bool(row["hidden_public"]))
+    finally:
+        lib.close()
+    return RedirectResponse("/questions", status_code=303)
+
+
+@app.post("/questions/{question_id}/anonymize")
+async def community_question_anonymize(request: Request, question_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        row = lib.conn.execute("SELECT anonymized FROM ask_questions WHERE id=?", (question_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="not found")
+        lib.set_ask_question_anonymized(question_id, not bool(row["anonymized"]))
+    finally:
+        lib.close()
+    return RedirectResponse("/questions", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -4330,6 +4425,7 @@ def ask_page(request: Request, q: str = ""):
         usage_html = (
             f'<div id="ask-usage" style="font-size:13px;color:var(--muted);margin:-18px 0 22px;">'
             f'<span id="ask-usage-text">${usage_today["spent"]:.2f} of ${usage_today["cap"]:.2f} used this month</span>'
+            f' &middot; <a href="/ask/history" style="color:var(--accent);">Your usage &amp; past questions &rarr;</a>'
             f'</div>'
         )
 
@@ -4650,7 +4746,10 @@ async def ask(request: Request):
         usage_line = None
         if user_id is not None:
             row_id = lib.record_ask_question(
-                user_id, question, ans.text, model or "", effort,
+                # ans.model is the resolved canonical model actually used —
+                # not the raw request field, which can be an alias or blank
+                # (the /archive quick-ask widget never sends one).
+                user_id, question, ans.text, ans.model, effort,
                 use_library, use_feed, use_web,
                 conversation_id=conversation_id, turn_index=prior_questions,
                 input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
@@ -4674,6 +4773,55 @@ async def ask(request: Request):
         }
     finally:
         lib.close()
+
+
+@app.get("/ask/history", response_class=HTMLResponse)
+def ask_history(request: Request):
+    """The signed-in user's own FP&A Buddy questions — same shape as the admin
+    report (Section G.1) but scoped to just this user, so a member can see
+    what they've asked and how their usage-to-date adds up."""
+    if not _is_member(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        if user_id is None:
+            rows, spent, cap = [], 0.0, lib.get_default_ask_cap()
+        else:
+            rows = lib.list_ask_questions(user_id=user_id, limit=200)
+            spent = lib.ask_cost_this_month(user_id)
+            cap = lib.get_effective_ask_cap(user_id)
+        all_time = sum(r["cost_usd"] for r in rows)
+    finally:
+        lib.close()
+
+    def _row(r: dict) -> str:
+        q = _esc(r.get("question") or "")
+        a = _esc((r.get("answer") or "")[:500])
+        return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+    <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q}</div>
+    <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:0;line-height:1.55;">{a}{'&hellip;' if len(r.get("answer") or "") > 500 else ''}</p>
+</div>"""
+
+    rows_html = "".join(_row(r) for r in rows) or \
+        ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+         'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
+         '<a href="/ask">Ask a question &rarr;</a></div>')
+
+    body = f"""<div class="page" style="max-width:760px;">
+<p style="margin:0 0 4px;"><a href="/ask" style="font-size:13px;color:var(--muted);">&larr; Ask</a></p>
+<h1>Your FP&amp;A Buddy history</h1>
+<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage &mdash; it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/questions">community Q&amp;A page</a> for other members to browse.</p>
+<div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:22px;font-size:14px;">
+  <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
+</div>
+{rows_html}
+</div>"""
+    return HTMLResponse(_page("Your FP&A Buddy history—Brian Weisberg", "Library", body, role=_role(request)))
 
 
 @app.post("/save")
@@ -4723,6 +4871,7 @@ _ADMIN_GROUPS = [
     ]),
     ("Site management", "Your voice, your brand, and the public site.", [
         ("/admin/brand",        "Brand standards",     "Visual standards, color system, and your writing voice."),
+        ("/admin/ask-report",   "FP&A Buddy report",   "Every question asked, across every user — settings, cost, and a CSV export."),
         ("/admin/checks",       "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/open-source",  "Open source",         "The open-source projects this site is built on — with gratitude."),
     ]),
@@ -6045,6 +6194,159 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
 # ---------------------------------------------------------------------------
 # User accounts (admin-provisioned). The gated member tier is layered on these.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# FP&A Buddy report — admin archive of every question asked, one shared
+# table backing this view, the asker's own history (/ask/history), and the
+# public community browse page (/questions).
+# ---------------------------------------------------------------------------
+
+_ASK_SOURCE_ICONS = {"library": "&#128218;", "feed": "&#128240;", "web": "&#127760;"}
+
+
+def _ask_settings_badge(row: dict) -> str:
+    srcs = "".join(_ASK_SOURCE_ICONS[k] for k, key in
+                   (("library", "use_library"), ("feed", "use_feed"), ("web", "use_web"))
+                   if row.get(key))
+    model_short = (row.get("model") or "").replace("claude-", "")
+    return f'{srcs} <span style="color:var(--muted);">{_esc(model_short)} &middot; {_esc(row.get("effort") or "")}</span>'
+
+
+@app.get("/admin/ask-report", response_class=HTMLResponse)
+def admin_ask_report(request: Request, user: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        filter_user_id = None
+        if user:
+            u = lib.get_user(user)
+            filter_user_id = u["id"] if u else -1  # -1 = no match, empty result
+        from datetime import timezone as _tz
+        rows = lib.list_ask_questions(user_id=filter_user_id, limit=500)
+        total_n = lib.count_ask_questions(user_id=filter_user_id)
+        # Direct SQL aggregates, not a Python-side sum over a page of rows —
+        # correct regardless of total volume, and doesn't pull every answer's
+        # full text into memory just to add up a number.
+        total_cost = lib.ask_cost_total(user_id=filter_user_id)
+        month_start = datetime.now(_tz.utc).strftime("%Y-%m-01")
+        month_cost = lib.ask_cost_total(user_id=filter_user_id, since=month_start)
+        users = lib.list_users()
+    finally:
+        lib.close()
+
+    def _row(r: dict) -> str:
+        asker = r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
+        q = (r.get("question") or "")[:160]
+        return f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])}</td>
+  <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(asker)}</td>
+  <td style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}</td>
+  <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
+  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}</td>
+</tr>"""
+
+    table_rows = "".join(_row(r) for r in rows) or \
+        '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--muted);">No questions asked yet.</td></tr>'
+
+    user_options = "".join(
+        f'<option value="{_esc(u["username"])}"{" selected" if user == u["username"] else ""}>{_esc(u["name"] or u["username"])}</option>'
+        for u in users
+    )
+
+    body = f"""<div class="page" style="max-width:1100px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>FP&amp;A Buddy report</h1>
+<p style="color:var(--muted);margin:-6px 0 20px;">Every question asked, across every user &mdash; question, asker, settings used, and cost per question. The full answer text is left out of this view on purpose, so you can scan cost and volume without reading every answer; it&rsquo;s included in the CSV export.</p>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
+  <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{total_n:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Questions{' (filtered)' if user else ''}</div>
+  </div>
+  <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${total_cost:.2f}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Total cost, all time</div>
+  </div>
+  <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${month_cost:.2f}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">This calendar month</div>
+  </div>
+</div>
+
+<form method="get" action="/admin/ask-report" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+  <label style="font-size:13px;color:var(--muted);">Filter by user:</label>
+  <select name="user" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
+    <option value="">All users</option>
+    {user_options}
+  </select>
+  <a href="/admin/ask-report/export.csv{('?user=' + quote(user)) if user else ''}" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;margin-left:auto;">Download CSV &darr;</a>
+</form>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:760px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Date</th>
+      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Asker</th>
+      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Question</th>
+      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Settings</th>
+      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Cost</th>
+    </tr></thead>
+    <tbody>{table_rows}</tbody>
+  </table>
+</div>
+<p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 500{' matching' if user else ''} questions. Download the CSV for the full archive.</p>
+</div>"""
+    return HTMLResponse(_page("FP&A Buddy report — Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/ask-report/export.csv")
+def admin_ask_report_export(request: Request, user: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    import csv
+    import io
+
+    lib = _lib()
+    try:
+        filter_user_id = None
+        if user:
+            u = lib.get_user(user)
+            filter_user_id = u["id"] if u else -1
+        rows = lib.list_ask_questions(user_id=filter_user_id, limit=1_000_000)
+    finally:
+        lib.close()
+
+    def _csv_safe(val) -> str:
+        """Defuse CSV formula injection: a cell that starts with =, +, -, @,
+        tab, or CR is a live formula to Excel/Sheets on open. The question and
+        answer text here is asker-supplied (question) or model-generated
+        (answer) — either could start with one of those characters, by
+        accident or not. Prefix with a straight quote to force text
+        interpretation, same as GitHub/Google's CSV export mitigation."""
+        s = str(val)
+        return "'" + s if s and s[0] in ("=", "+", "-", "@", "\t", "\r") else s
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["date", "asker", "conversation_id", "turn", "question", "answer", "model", "effort",
+                     "use_library", "use_feed", "use_web", "input_tokens", "output_tokens",
+                     "cache_creation_tokens", "cache_read_tokens", "cost_usd"])
+    for r in rows:
+        asker = r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
+        writer.writerow([
+            r["created_at"], _csv_safe(asker), r["conversation_id"], r["turn_index"],
+            _csv_safe(r["question"]), _csv_safe(r["answer"]),
+            r["model"], r["effort"], bool(r["use_library"]), bool(r["use_feed"]), bool(r["use_web"]),
+            r["input_tokens"], r["output_tokens"], r["cache_creation_tokens"], r["cache_read_tokens"],
+            f'{r["cost_usd"]:.6f}',
+        ])
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="ask-report-{stamp}.csv"'},
+    )
+
 
 @app.get("/admin/users", response_class=HTMLResponse)
 def admin_users(request: Request, msg: str = ""):
