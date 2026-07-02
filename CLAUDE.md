@@ -3,14 +3,18 @@
 ## What this is
 
 A personal finance research tool for Brian Weisberg (brian.weisberg@gmail.com).
-Three capabilities, all backed by a single SQLite database (`library.db`):
+Two capabilities, both backed by a single SQLite database (`library.db`):
 
 1. **CFO Library** — searchable archive of saved articles (imported from Feedly or
    captured going forward). SQLite + FTS5 full-text search is the spine.
 2. **CFO Navigator** — FP&A Q&A chatbot. Retrieval-augmented: pulls the most relevant
    saved articles + fresh web results from trusted sites, then synthesizes a cited answer
    via Claude.
-3. **Social** — drafts LinkedIn posts in Brian's voice from any saved article or topic.
+
+(A third capability, LinkedIn post drafting, had a web UI at `/admin/social` and `/draft`
+— both were removed. `linklib/social.py` still holds `BRIAN_VOICE` (reused for
+voice-matching elsewhere, e.g. the Q&A chatbot) and `draft_post()` (still backs the
+`scripts/post.py` CLI), but there's no web UI for drafting posts anymore.)
 
 The longer-term plan (see `MIGRATION_AND_BUILD_PLAN.md`) is to grow this into a public
 site at bmweis.com, with a public-facing bio/thought-leadership section and a
@@ -151,7 +155,6 @@ uvicorn webapp.app:app --reload    # http://localhost:8000
 - FTS5 search and web UI
 - Enrichment backfill
 - FP&A Q&A (library + web search)
-- LinkedIn post drafting
 - Bookmarklet
 - Public site: bio homepage (`/`), thought leadership (`/thought-leadership`),
   Growth Engine Ratio page + calculator (`/growth-engine-ratio`), contact (`/contact`)
@@ -174,6 +177,12 @@ Work on a feature branch, push it, and open a PR into `main`; let the QA workflo
 and traceable, and the **Checks** admin page (`/admin/checks`) mirrors what the PR
 must pass. (Enforced server-side by a branch-protection rule on `main` that requires
 a PR and passing checks — the convention here so tooling/agents follow it regardless.)
+
+**Open the PR as soon as there's a reviewable chunk — don't wait until a multi-phase
+task is fully done.** For work that's naturally sequenced into phases (e.g. a phased
+build with sign-off between phases), open a PR per phase as it's completed, not one
+PR at the very end. Small, incremental PRs are easier to review and catch problems
+before they compound across phases.
 
 ## Deployment
 
