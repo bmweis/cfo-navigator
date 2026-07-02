@@ -2462,11 +2462,19 @@ def tools_directory(request: Request):
             "categories": t["categories"],
             "advisor": bool(t.get("advisor")),
             "promoted": bool(t.get("promoted")),
+            # Only a computed boolean goes to every visitor — never the raw
+            # vendor contact info, which is admin-only below. Gates the Warm
+            # Intro button: needs the checkbox on AND a contact email, or no
+            # button at all.
+            "has_warm_intro": bool(t.get("warm_intro_enabled") and t.get("vendor_email")),
         }
         if authed:
             entry["submitted_by"] = t.get("submitted_by") or ""
             entry["created_at"] = (t.get("created_at") or "")[:10]
             entry["updated_at"] = (t.get("updated_at") or "")[:10]
+            entry["warm_intro_enabled"] = bool(t.get("warm_intro_enabled"))
+            entry["vendor_name"] = t.get("vendor_name") or ""
+            entry["vendor_email"] = t.get("vendor_email") or ""
         return entry
 
     tools_json = _json.dumps([_tool_entry(t) for t in tools])
@@ -2578,6 +2586,18 @@ def tools_directory(request: Request):
 .tool-intro-btn:hover{{background:var(--navy-wash);}}
 .tool-intro-btn:disabled{{color:var(--muted);border-color:var(--line);cursor:not-allowed;}}
 .tool-intro-btn:disabled:hover{{background:none;}}
+.tool-quickedit{{margin-top:14px;padding:14px 16px;background:var(--bg);border:1px solid var(--line);
+  border-radius:10px;display:grid;gap:10px;}}
+.tool-quickedit label{{font-size:12px;font-weight:600;color:var(--navy);display:block;margin-bottom:4px;}}
+.tool-quickedit textarea,.tool-quickedit input{{width:100%;padding:8px 11px;border:1px solid var(--line);
+  border-radius:8px;font:inherit;font-size:13px;background:#fff;box-sizing:border-box;}}
+.qe-checkbox{{display:flex!important;align-items:center;gap:8px;font-size:13px!important;
+  font-weight:500!important;color:var(--ink)!important;}}
+.qe-checkbox input{{width:auto!important;}}
+.qe-row{{display:grid;grid-template-columns:1fr 1fr;gap:12px;}}
+.qe-hint{{font-size:12px;color:var(--muted);margin:0;}}
+.qe-actions{{display:flex;align-items:center;gap:10px;}}
+.qe-status{{font-size:12px;color:var(--muted);}}
 /* Intro modal */
 .intro-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;
   align-items:center;justify-content:center;padding:20px;}}
@@ -2639,14 +2659,34 @@ function renderTools(tools) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
     }}).join('');
     var adminControls = '';
+    var quickEditPanel = '';
     if (AUTHED) {{
       adminControls = '<div class="tool-admin">'
-        + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Edit</a>'
+        + '<button type="button" class="tool-admin-btn" onclick="toggleQuickEdit(' + t.id + ')">Quick edit</button>'
+        + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Full edit</a>'
         + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:inline;"'
         + ' data-toolname="' + esc(t.name) + '"'
         + ' onsubmit="return confirmDelete(this)">'
         + '<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button>'
         + '</form></div>';
+      // Inline quick-edit: the four fields called out for fast, no-navigation
+      // editing — description and the three Warm Intro fields. Everything
+      // else (name, URL, categories, advisor/featured) stays on the full
+      // edit page, since those change far less often.
+      quickEditPanel = '<div class="tool-quickedit" id="qe-' + t.id + '" style="display:none;">'
+        + '<label>Description</label>'
+        + '<textarea id="qe-desc-' + t.id + '" rows="2">' + esc(t.description) + '</textarea>'
+        + '<label class="qe-checkbox"><input type="checkbox" id="qe-warm-' + t.id + '"' + (t.warm_intro_enabled ? ' checked' : '') + '> Offer a Warm Intro button</label>'
+        + '<div class="qe-row">'
+        + '<div><label>Vendor contact name</label><input id="qe-vname-' + t.id + '" value="' + esc(t.vendor_name || '') + '" placeholder="Jane Smith"></div>'
+        + '<div><label>Vendor contact email</label><input id="qe-vemail-' + t.id + '" type="email" value="' + esc(t.vendor_email || '') + '" placeholder="contact@vendor.com"></div>'
+        + '</div>'
+        + '<p class="qe-hint">The Warm Intro button only shows once this is checked <strong>and</strong> an email is filled in.</p>'
+        + '<div class="qe-actions">'
+        + '<button type="button" class="btn" style="font-size:13px;padding:7px 16px;" onclick="saveQuickEdit(' + t.id + ')">Save</button>'
+        + '<button type="button" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;" onclick="toggleQuickEdit(' + t.id + ')">Cancel</button>'
+        + '<span id="qe-status-' + t.id + '" class="qe-status"></span>'
+        + '</div></div>';
     }}
     var metaParts = [];
     if (AUTHED) {{
@@ -2655,24 +2695,61 @@ function renderTools(tools) {{
       if (t.updated_at && t.updated_at !== t.created_at) metaParts.push('Edited ' + t.updated_at);
     }}
     var adminMeta = metaParts.length ? '<div class="tool-meta">' + metaParts.join(' &middot; ') + '</div>' : '';
-    var introBtn = MEMBER
-      ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ',\'' + esc(t.name).replace(/'/g,"\\'") + '\')">'
-        + '&#10024; Warm Intro</button>'
-      : '<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">&#10024; Warm Intro</button>';
-    return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '">'
+    var introBtn = '';
+    if (t.has_warm_intro) {{
+      introBtn = MEMBER
+        ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ',\'' + esc(t.name).replace(/'/g,"\\'") + '\')">'
+          + '&#10024; Warm Intro</button>'
+        : '<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">&#10024; Warm Intro</button>';
+    }}
+    return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '" data-tool-id="' + t.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
       + promotedBadge + star
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
       + '</div>'
       + adminControls + '</div>'
-      + '<p class="tool-desc">' + esc(t.description) + '</p>'
+      + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.description) + '</p>'
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
       + '<div class="tool-cats">' + cats + '</div>'
       + introBtn
       + '</div>'
-      + adminMeta + '</article>';
+      + adminMeta + quickEditPanel + '</article>';
   }}).join('');
+}}
+
+function toggleQuickEdit(id) {{
+  var panel = document.getElementById('qe-' + id);
+  if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}}
+
+async function saveQuickEdit(id) {{
+  var status = document.getElementById('qe-status-' + id);
+  var payload = {{
+    description: document.getElementById('qe-desc-' + id).value.trim(),
+    warm_intro_enabled: document.getElementById('qe-warm-' + id).checked,
+    vendor_name: document.getElementById('qe-vname-' + id).value.trim(),
+    vendor_email: document.getElementById('qe-vemail-' + id).value.trim(),
+  }};
+  status.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/tools/' + id + '/quick-edit', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify(payload)
+    }});
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Save failed');
+    var t = ALL_TOOLS.find(function(x) {{ return x.id === id; }});
+    if (t) {{
+      t.description = d.tool.description;
+      t.warm_intro_enabled = d.tool.warm_intro_enabled;
+      t.vendor_name = d.tool.vendor_name;
+      t.vendor_email = d.tool.vendor_email;
+      t.has_warm_intro = d.tool.has_warm_intro;
+    }}
+    renderTools(filtered());
+  }} catch (e) {{
+    status.textContent = 'Save failed — try again.';
+  }}
 }}
 
 function filtered() {{
@@ -3143,11 +3220,25 @@ def admin_tools_new(request: Request):
       <span>&#10024; Featured — pin to top of directory with coral badge</span>
     </label>
   </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor email <span style="font-weight:400;color:var(--muted);">(for Warm Intro lead notifications)</span></label>
-    <input name="vendor_email" type="email" maxlength="200"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-      placeholder="contact@vendor.com">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
+    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;">Warm Intro</div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="warm_intro_enabled" value="1">
+      <span>&#10024; Offer a Warm Intro button for this tool</span>
+    </label>
+    <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below — either alone isn&rsquo;t enough.</p>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
+      <input name="vendor_name" maxlength="200"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="Jane Smith">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
+      <input name="vendor_email" type="email" maxlength="200"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="contact@vendor.com">
+    </div>
   </div>
   <div>
     <button type="submit" class="btn">Add to directory</button>
@@ -3170,12 +3261,15 @@ async def admin_tools_new_submit(request: Request):
     advisor = 1 if form.get("advisor") == "1" else 0
     promoted = 1 if form.get("promoted") == "1" else 0
     vendor_email = (form.get("vendor_email") or "").strip()
+    warm_intro_enabled = 1 if form.get("warm_intro_enabled") == "1" else 0
+    vendor_name = (form.get("vendor_name") or "").strip()
     if not (name and url and description and categories):
         raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
     lib = _lib()
     try:
         lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
-                     promoted=promoted, vendor_email=vendor_email)
+                     promoted=promoted, vendor_email=vendor_email,
+                     warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
     finally:
         lib.close()
     return RedirectResponse("/tools", status_code=303)
@@ -3262,11 +3356,25 @@ def admin_tools_edit(request: Request, tool_id: int):
       <span>&#10024; Featured — pin to top of directory with coral badge</span>
     </label>
   </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor email <span style="font-weight:400;color:var(--muted);">(for Warm Intro lead notifications)</span></label>
-    <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-      placeholder="contact@vendor.com">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
+    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;">Warm Intro</div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="warm_intro_enabled" value="1"{'checked' if tool.get('warm_intro_enabled') else ''}>
+      <span>&#10024; Offer a Warm Intro button for this tool</span>
+    </label>
+    <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below — either alone isn&rsquo;t enough.</p>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
+      <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="Jane Smith">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
+      <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="contact@vendor.com">
+    </div>
   </div>
   <div>
     <button type="submit" class="btn">Save changes</button>
@@ -3289,12 +3397,15 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     advisor = 1 if form.get("advisor") == "1" else 0
     promoted = 1 if form.get("promoted") == "1" else 0
     vendor_email = (form.get("vendor_email") or "").strip()
+    warm_intro_enabled = 1 if form.get("warm_intro_enabled") == "1" else 0
+    vendor_name = (form.get("vendor_name") or "").strip()
     if not (name and url and description and categories):
         raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
     lib = _lib()
     try:
         lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
-                        promoted=promoted, vendor_email=vendor_email)
+                        promoted=promoted, vendor_email=vendor_email,
+                        warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
     finally:
         lib.close()
     return RedirectResponse("/tools", status_code=303)
@@ -3310,6 +3421,36 @@ def admin_tools_delete(request: Request, tool_id: int):
     finally:
         lib.close()
     return RedirectResponse("/tools", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/quick-edit")
+async def admin_tools_quick_edit(request: Request, tool_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    description = (body.get("description") or "").strip()
+    warm_intro_enabled = 1 if body.get("warm_intro_enabled") else 0
+    vendor_name = (body.get("vendor_name") or "").strip()
+    vendor_email = (body.get("vendor_email") or "").strip()
+    if not description:
+        return JSONResponse({"ok": False, "error": "Description is required"}, status_code=400)
+    lib = _lib()
+    try:
+        if not lib.get_tool(tool_id):
+            return JSONResponse({"ok": False, "error": "Tool not found"}, status_code=404)
+        lib.quick_update_tool(tool_id, description, warm_intro_enabled, vendor_name, vendor_email)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "tool": {
+        "description": description,
+        "warm_intro_enabled": bool(warm_intro_enabled),
+        "vendor_name": vendor_name,
+        "vendor_email": vendor_email,
+        "has_warm_intro": bool(warm_intro_enabled and vendor_email),
+    }})
 
 
 @app.post("/tools/{tool_id}/interest")
@@ -3331,24 +3472,31 @@ async def tools_interest(tool_id: int, request: Request):
         tool = next((t for t in tools if t["id"] == tool_id), None)
         if not tool:
             return JSONResponse({"ok": False, "error": "Tool not found"}, status_code=404)
-        tool_name = tool["name"]
+        # Same eligibility check the UI uses to decide whether to show the
+        # button at all — enforced here too, not just client-side, since
+        # nothing stops a direct POST to this endpoint.
         vendor_email = tool.get("vendor_email") or ""
+        if not (tool.get("warm_intro_enabled") and vendor_email):
+            return JSONResponse({"ok": False, "error": "Warm intro isn't available for this tool"}, status_code=400)
+        tool_name = tool["name"]
+        vendor_name = tool.get("vendor_name") or ""
         lib.save_tool_lead(tool_id, tool_name, name, email, company, company_size)
     finally:
         lib.close()
-    if vendor_email:
-        try:
-            from linklib.email_utils import send_lead_email
-            send_lead_email(
-                to=vendor_email,
-                tool_name=tool_name,
-                name=name,
-                email=email,
-                company=company,
-                company_size=company_size,
-            )
-        except Exception:
-            pass
+    try:
+        from linklib.email_utils import send_warm_intro_email
+        send_warm_intro_email(
+            to=vendor_email,
+            vendor_contact_name=vendor_name,
+            cc=email,
+            tool_name=tool_name,
+            requester_name=name,
+            requester_email=email,
+            requester_company=company,
+            requester_company_size=company_size,
+        )
+    except Exception:
+        pass
     return JSONResponse({"ok": True})
 
 

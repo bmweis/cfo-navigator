@@ -319,6 +319,11 @@ class Library:
             # Per-user Ask dollar-cap override. NULL = inherit the global default
             # (settings['ask_default_cap_usd']) rather than a hardcoded per-user value.
             "ALTER TABLE users ADD COLUMN ask_cap_usd REAL",
+            # Warm Intro: a distinct opt-in from `advisor` (which just marks Brian as
+            # a formal advisor to the company) — the intro button only shows when
+            # this is on AND a vendor contact email exists.
+            "ALTER TABLE tools ADD COLUMN warm_intro_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tools ADD COLUMN vendor_name TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -756,7 +761,8 @@ class Library:
     def add_tool(self, name: str, description: str, url: str,
                  categories: list[str], submitted_by: str = "",
                  approved: int = 0, advisor: int = 0,
-                 promoted: int = 0, vendor_email: str = "") -> int:
+                 promoted: int = 0, vendor_email: str = "",
+                 warm_intro_enabled: int = 0, vendor_name: str = "") -> int:
         base = _slugify(name)
         slug = base
         suffix = 2
@@ -766,11 +772,12 @@ class Library:
         now = _now()
         cur = self.conn.execute(
             """INSERT INTO tools (name, slug, description, url, categories_json,
-               approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+               approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email,
+               warm_intro_enabled, vendor_name)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, description.strip(), url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
-             promoted, vendor_email.strip()),
+             promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -792,12 +799,29 @@ class Library:
 
     def update_tool(self, tool_id: int, name: str, description: str,
                     url: str, categories: list[str], advisor: int = 0,
-                    promoted: int = 0, vendor_email: str = "") -> None:
+                    promoted: int = 0, vendor_email: str = "",
+                    warm_intro_enabled: int = 0, vendor_name: str = "") -> None:
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
-               advisor=?, promoted=?, vendor_email=?, updated_at=? WHERE id=?""",
+               advisor=?, promoted=?, vendor_email=?, warm_intro_enabled=?, vendor_name=?,
+               updated_at=? WHERE id=?""",
             (name.strip(), description.strip(), url.strip(),
-             json.dumps(categories), advisor, promoted, vendor_email.strip(), _now(), tool_id),
+             json.dumps(categories), advisor, promoted, vendor_email.strip(),
+             warm_intro_enabled, vendor_name.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def quick_update_tool(self, tool_id: int, description: str,
+                          warm_intro_enabled: int, vendor_name: str,
+                          vendor_email: str) -> None:
+        """Partial update for the /tools inline "Quick edit" panel — touches
+        only description and warm-intro fields, leaving name/url/categories/
+        advisor/promoted untouched (those still require the full edit form)."""
+        self.conn.execute(
+            """UPDATE tools SET description=?, warm_intro_enabled=?, vendor_name=?,
+               vendor_email=?, updated_at=? WHERE id=?""",
+            (description.strip(), warm_intro_enabled, vendor_name.strip(),
+             vendor_email.strip(), _now(), tool_id),
         )
         self.conn.commit()
 
