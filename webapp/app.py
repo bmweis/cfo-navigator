@@ -46,6 +46,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from linklib.db import Library
 from linklib.pipeline import ingest_url
 from linklib import backup
+from webapp.thought_leadership_data import SECTIONS as TL_SECTIONS, TLItem
 
 DB_PATH = os.environ.get("LINKLIB_DB", "library.db")
 SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
@@ -778,23 +779,34 @@ the early-to-growth leap. Based in Boston.</p>
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
 def thought_leadership(request: Request):
-    def section(title: str, items: list[tuple[str, str, str]]) -> str:
-        # items: (label, url, sort_key) — sort_key is "YYYY-MM" or "" to pin to top.
-        # Editorial rows separated by warm hairlines, under a small-caps navy label.
-        # The trailing "· Mon YYYY" is stripped from the label (it isn't shown as a
-        # column in this layout). An empty url renders the label as plain (unlinked)
-        # text — e.g. invite-only events with no public page.
-        sorted_items = sorted(items, key=lambda x: x[2], reverse=True)
-        link_style = "font:500 16px var(--font-body);color:var(--ink);line-height:1.4;"
-        rows = []
-        for label, url, _sort_key in sorted_items:
-            clean = re.sub(r"\s*·\s*[A-Za-z]+\s+20\d{2}\s*$", "", label)
-            inner = (f'<a href="{url}" target="_blank" rel="noopener" style="{link_style}">{_esc(clean)}</a>'
-                     if url else f'<span style="{link_style}">{_esc(clean)}</span>')
-            rows.append(f'<div style="border-top:1px solid var(--line);padding:13px 0;">{inner}</div>')
-        return (f'<div style="font:600 12px var(--font-body);letter-spacing:.12em;'
-                f'text-transform:uppercase;color:var(--navy);margin:30px 0 2px;">{_esc(title)}</div>'
-                f'{"".join(rows)}')
+    def row(it: TLItem) -> str:
+        title_html = (f'<a href="{_esc(it.url)}" target="_blank" rel="noopener" class="tl-row-title">{_esc(it.title)}</a>'
+                       if it.url else f'<span class="tl-row-title tl-row-title-plain">{_esc(it.title)}</span>')
+        meta_bits = [b for b in (it.venue, it.date_label) if b]
+        meta_html = f'<span class="tl-row-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</span>' if meta_bits else ''
+
+        if it.description:
+            desc_html = f'<p class="tl-row-desc">{_esc(it.description)}</p>'
+        elif it.needs_synopsis:
+            desc_html = '<p class="tl-row-desc"><span class="tl-row-pending">Synopsis pending</span></p>'
+        else:
+            desc_html = ''
+
+        photos_html = ''
+        if it.photos:
+            imgs = "".join(f'<img src="{_esc(p.src)}" alt="{_esc(p.alt)}">' for p in it.photos)
+            cap = f'<p class="tl-row-photo-cap">{_esc(it.photo_caption)}</p>' if it.photo_caption else ''
+            photos_html = f'<div class="tl-row-photos">{imgs}</div>{cap}'
+
+        return f'<div class="tl-row"><div class="tl-row-top">{title_html}{meta_html}</div>{desc_html}{photos_html}</div>'
+
+    def section(title: str, emoji: str, items: list[TLItem]) -> str:
+        # Undated items (sort_key == "") float to the top of their section — a
+        # standing "full feed" link or similar; everything else sorts newest first.
+        dated = sorted((it for it in items if it.sort_key), key=lambda it: it.sort_key, reverse=True)
+        undated = [it for it in items if not it.sort_key]
+        rows = "".join(row(it) for it in undated + dated)
+        return f'<h2 class="tl-section-head">{emoji} {_esc(title)}</h2>{rows}'
 
     # Featured: three flagship pieces, one consistent card treatment. The only
     # per-card variation is the small category tag colour — no full-colour floods,
@@ -835,101 +847,32 @@ def thought_leadership(request: Request):
         '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
         '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
         '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
-        '.tl-photos{display:grid;grid-template-columns:2fr 3fr;gap:10px;margin:8px 0 6px;}'
-        '.tl-photos img{width:100%;height:200px;object-fit:cover;border-radius:10px;display:block;}'
-        '@media(max-width:560px){.tl-photos{grid-template-columns:1fr;}.tl-photos img{height:170px;}}'
+        '.tl-section-head{font:700 13px var(--font-body);letter-spacing:.1em;text-transform:uppercase;'
+        'color:var(--navy);margin:38px 0 2px;display:flex;align-items:center;gap:8px;}'
+        '.tl-section-head:first-of-type{margin-top:30px;}'
+        '.tl-row{border-top:1px solid var(--line);padding:15px 10px;margin:0 -10px;border-radius:8px;transition:background-color .15s;}'
+        '.tl-row:hover{background:var(--navy-wash);}'
+        '.tl-row-top{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;}'
+        '.tl-row-title{font:600 16px var(--font-body);color:var(--ink);line-height:1.4;text-decoration:none;}'
+        '.tl-row-title:hover{color:var(--navy);text-decoration:underline;}'
+        '.tl-row-title-plain{color:var(--ink-soft);}'
+        '.tl-row-meta{font:500 12px var(--font-body);color:var(--muted);white-space:nowrap;letter-spacing:.02em;}'
+        '.tl-row-desc{font-size:14px;color:var(--ink-soft);line-height:1.5;margin:6px 0 0;}'
+        '.tl-row-pending{font-style:italic;color:var(--muted);border:1px dashed var(--line-strong);'
+        'border-radius:6px;padding:3px 10px;display:inline-block;background:var(--bg);font-size:13px;}'
+        '.tl-row-photos{display:grid;grid-template-columns:2fr 3fr;gap:10px;margin:12px 0 6px;}'
+        '.tl-row-photos img{width:100%;height:200px;object-fit:cover;border-radius:10px;display:block;}'
+        '.tl-row-photo-cap{font-size:12px;color:var(--muted);margin:0;font-style:italic;}'
+        '@media(max-width:560px){.tl-row-photos{grid-template-columns:1fr;}.tl-row-photos img{height:170px;}'
+        '.tl-row-top{flex-direction:column;gap:2px;}}'
         '</style>'
         '<h1>Thought Leadership</h1>'
         '<p style="color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press &mdash; from a tech CFO working in the thick of the business.</p>'
         + featured
     )
 
-    body += section("Writing", [
-        ("The Growth Engine Ratio: Accounting for the Missing Half of Your Efficiency Equation · The F Suite · Jun 2026",
-         "/growth-engine-ratio", "2026-06"),
-        ("Sail, Don't Row: A Playbook for Running an AI Hackathon With Your Finance Team · Jun 2026",
-         "/finops-ai-hackathon", "2026-06"),
-        ("Connecting Claude to NetSuite: A Setup Guide for Finance Teams · Jun 2026",
-         "/netsuite-mcp", "2026-06"),
-        ("The F Suite — Exit Readiness for CFOs · The F Suite · Mar 2026",
-         "https://www.fsuite.co/blog/exit-readiness-cfos", "2026-03"),
-        ("OnlyCFO — Building Dashboards That Matter · OnlyCFO · Apr 2024",
-         "https://www.onlycfo.io/p/building-dashboards-that-matter", "2024-04"),
-    ])
-
-    # On-stage photos lead the Speaking section, where they have context.
-    body += """<div class="tl-photos">
-  <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking at the Abacum AI Summit, April 2026">
-  <img src="/static/speaking-wide.jpg" alt="Panel discussion at the Abacum AI Summit, April 2026">
-</div>
-<p style="font-size:12px;color:var(--muted);margin:0 0 4px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>"""
-
-    body += section("Speaking & Events", [
-        ("Abacum AI Summit — Recording · Abacum · Apr 2026",
-         "https://www.youtube.com/watch?v=MDBz0OpR1II", "2026-04"),
-        ("Abacum — Beyond the Spreadsheet: What FP&A Platforms Need to Deliver in an AI-First Era (Webinar Panel) · Abacum · Jun 2026",
-         "https://www.abacum.ai/webinars/beyond-the-spreadsheet-what-fp-a-platforms-need-to-deliver-in-an-ai-first-era", "2026-06"),
-        ("Claude in Action for Finance — The F Suite Virtual Panel · The F Suite · Apr 2026",
-         "https://fsuitevirtualpanel430.splashthat.com", "2026-04"),
-        ("The F Suite Boston — Growth CFO Salon · The F Suite · Nov 2025",
-         "", "2025-11"),
-        ("The F Suite Cash Cycle Demo Day — Opening & Closing Remarks · The F Suite · Oct 2025",
-         "https://cashcycledemoday.splashthat.com/", "2025-10"),
-        ("The F Suite Boston — CFO Supper Club · The F Suite · Aug 2025",
-         "", "2025-08"),
-        ("Fidelity CFO Roundtable — M&A and Managing Uncertainty · Fidelity · Mar 2025",
-         "https://luma.com/7fwtr2n8", "2025-03"),
-        ("Numeric — Lean Accounting Team (Webinar Host) · Numeric · Mar 2024",
-         "https://numeric.lpages.co/lean-accounting-team-webinar/", "2024-03"),
-        ("The F Suite Boston — Private Dinner & Guided Discussion · The F Suite · Apr 2024",
-         "", "2024-04"),
-        ("The F Suite Boston — CFO Dinner · The F Suite · Dec 2023",
-         "", "2023-12"),
-        ("The F Suite — NC Launch Dinner · The F Suite · Jun 2023",
-         "", "2023-06"),
-        ("Teampay Agile Finance Summit · Teampay · Oct 2021",
-         "https://www.accelevents.com/e/agile-finance-summit-2021", "2021-10"),
-    ])
-
-    body += section("Podcasts", [
-        ("The Cash Flow Show — Conversations about how tech companies make money (host · full episode feed) · OnlyCFO",
-         "https://www.onlycfo.io/podcast", ""),
-        ("Adopting AI in Finance & Accounting — with Sowmya Ranganathan (former Controller, OpenAI) · The Cash Flow Show · Aug 2025",
-         "https://open.spotify.com/episode/6uXkeypUPX5g5yB8lHGq2V", "2025-08"),
-        ("State of Fundraising / Equity Market · The Cash Flow Show · Jun 2025",
-         "https://open.spotify.com/episode/0rSm42OSNRzjiG3cYye3tX", "2025-06"),
-        ("Is ARR Dead? · The Cash Flow Show · Jun 2025",
-         "https://open.spotify.com/episode/5G0GUaRrOeGXxJwFh9WsPw", "2025-06"),
-        ("Commission Plan Strategies in 2025 — with Meir Rotenberg & David Ma · The Cash Flow Show · Mar 2025",
-         "https://open.spotify.com/episode/64DsKmsDgOshd3LQdM4Cte", "2025-03"),
-        ("The M&A Playbook · The Cash Flow Show · Mar 2025",
-         "https://open.spotify.com/episode/5kMa3kkutDhsoc4SBoOBZ1", "2025-03"),
-        ("Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks (guest) · Monetizely · Sep 2023",
-         "https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn",
-         "2023-09"),
-        ("OpexEngine — SaaS Conversations: Dynamic Planning for SaaS Finance Leaders (guest) · OpexEngine · May 2023",
-         "https://www.opexengine.com/webinar/opexengine-saas-conversations-dynamic-planning-for-saas-finance-leaders",
-         "2023-05"),
-        ("Role Forward Podcast — The Heuristics of Forecasting (guest) · Mosaic Tech · Dec 2022",
-         "https://www.youtube.com/watch?v=mqVvcVVTSrk", "2022-12"),
-        ("Role Forward Podcast — Collaborative Budgeting (guest) · Mosaic Tech · Apr 2022",
-         "https://www.youtube.com/watch?v=GPdRstJ_sKw", "2022-04"),
-    ])
-
-    body += section("Press", [
-        ("Sequence — From $1M to $100M: 6 Finance Lessons from the Frontline · Sequence · Jul 2025",
-         "https://www.sequencehq.com/blog/from-1m-to-100m-6-finance-lessons-from-the-frontline", "2025-07"),
-        ("LegalDive — GC/CFO Collaboration · LegalDive · Mar 2023",
-         "https://www.legaldive.com/news/gc-cfo-collaboration-svb-techgc-the-f-suite-silicon-valley-bank/646561/",
-         "2023-03"),
-        ("Numeric — When and How to Scale Your Accounting Department · Numeric · Nov 2023",
-         "https://www.numeric.io/blog/when-and-how-to-scale-your-accounting-department", "2023-11"),
-        ("Numeric — Startup CFO Primer · Numeric · Jun 2024",
-         "https://www.numeric.io/blog/startup-cfo-primer", "2024-06"),
-        ("CFO Drive — Innovative Cost-Saving Measures Q&A · CFO Drive · Jul 2024",
-         "https://cfodrive.com/qa/what-innovative-cost-saving-measures-can-significantly-impact-a-companys-bottom-line/",
-         "2024-07"),
-    ])
+    for section_title, emoji, items in TL_SECTIONS:
+        body += section(section_title, emoji, items)
 
     body += "</div>"
     return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
