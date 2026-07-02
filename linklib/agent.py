@@ -136,6 +136,14 @@ class Answer:
     sources: list[dict] = field(default_factory=list)       # saved-library hits
     feed_sources: list[dict] = field(default_factory=list)  # RSS feed hits
     web_sources: list[dict] = field(default_factory=list)   # fresh web results
+    # Real usage from the API response (0 when the call never ran, e.g. no key).
+    # cost_usd is computed by linklib.pricing from these — the authoritative
+    # per-question dollar figure, as opposed to the pre-call COST_ESTIMATES.
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    cost_usd: float = 0.0
 
 
 # Reuse one client across requests so its httpx connection pool stays warm —
@@ -359,7 +367,18 @@ def answer_question(
             b.text for b in resp.content if getattr(b, "type", None) == "text"
         ).strip()
         web = _collect_web_sources(resp.content) if use_web else []
-        return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=web)
+
+        from .pricing import compute_cost
+        usage = resp.usage
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
+        return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=web,
+                     input_tokens=in_tok, output_tokens=out_tok,
+                     cache_creation_tokens=cache_w, cache_read_tokens=cache_r, cost_usd=cost)
     except Exception as e:
         return Answer(text=f"(Answer call failed: {e})",
                       sources=lib_hits, feed_sources=feed_items)

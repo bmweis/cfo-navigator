@@ -278,6 +278,19 @@ def _current_claims(request: Request) -> dict | None:
     return _session_claims(request.cookies.get(COOKIE_NAME))
 
 
+def _current_user_id(lib: Library, request: Request) -> int | None:
+    """The signed-in user's row id, or None for token-only access or the
+    break-glass admin login when no matching `users` row exists (local dev,
+    or before Brian creates his own account). Callers that need a user_id
+    (Ask cost tracking) should skip recording/capping when this is None,
+    matching today's unrestricted behavior for those edge cases."""
+    claims = _current_claims(request)
+    if not claims or not claims.get("username"):
+        return None
+    user = lib.get_user(claims["username"])
+    return user["id"] if user else None
+
+
 def _is_authed(request: Request) -> bool:
     """True for an admin session (or when no password is configured — local dev).
     Admin is the gate for every currently-private route; user-tier gating is layered
@@ -4248,6 +4261,22 @@ def ask_page(request: Request, q: str = ""):
     from linklib.agent import COST_ESTIMATES
     from linklib.models import models_for
 
+    # This month's usage-to-date vs. the user's effective dollar cap (their
+    # override, else the global default). None for token-only access or the
+    # break-glass admin login with no matching `users` row — those aren't
+    # capped, so there's nothing to show.
+    usage_lib = _lib()
+    try:
+        usage_user_id = _current_user_id(usage_lib, request)
+        usage_today = None
+        if usage_user_id is not None:
+            usage_today = {
+                "spent": round(usage_lib.ask_cost_this_month(usage_user_id), 2),
+                "cap": round(usage_lib.get_effective_ask_cap(usage_user_id), 2),
+            }
+    finally:
+        usage_lib.close()
+
     # Model rows from the shared registry (new models surface automatically).
     models = [(m["id"], m["blurb"]) for m in models_for(allow_new=True)]
     # Logged-in (Brian) gets the balanced default; anonymous users default to
@@ -4296,11 +4325,20 @@ def ask_page(request: Request, q: str = ""):
     cost_span = ('<span id="cost-est" style="font-size:13px;color:var(--muted);"></span>'
                  if authed else "")
 
+    usage_html = ""
+    if usage_today is not None:
+        usage_html = (
+            f'<div id="ask-usage" style="font-size:13px;color:var(--muted);margin:-18px 0 22px;">'
+            f'<span id="ask-usage-text">${usage_today["spent"]:.2f} of ${usage_today["cap"]:.2f} used this month</span>'
+            f'</div>'
+        )
+
     pre_q = _esc(q)
 
     body = f"""<div class="page" style="max-width:820px;">
 <h1 style="margin-bottom:6px;">Ask a question</h1>
 <p style="color:var(--muted);margin:0 0 28px;">Query your saved archive, RSS feed, and trusted web sources. Tune cost vs. depth before each query.</p>
+{usage_html}
 
 <div class="ask-card">
   <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
@@ -4385,6 +4423,13 @@ function updateEstimate() {{
 
 var convo = [];        // [{{role, content}}] prior turns, sent as history
 var asked = false;
+var convoId = null;    // groups this conversation's turns server-side; set from the first response
+
+function updateUsage(usage) {{
+  if (!usage) return;
+  var el = document.getElementById('ask-usage-text');
+  if (el) el.textContent = '$' + usage.spent.toFixed(2) + ' of $' + usage.cap.toFixed(2) + ' used this month';
+}}
 
 function escapeHtml(s) {{
   return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -4453,7 +4498,7 @@ function srcListHtml(d) {{
   return items.length ? '<ul class="ask-src-list">' + items.join('') + '</ul>' : '';
 }}
 function resetConvo() {{
-  convo = []; asked = false;
+  convo = []; asked = false; convoId = null;
   document.getElementById('ask-thread').innerHTML = '';
   document.getElementById('ask-capped').style.display = 'none';
   var btn = document.getElementById('ask-btn'); btn.disabled = false; btn.textContent = 'Ask';
@@ -4490,7 +4535,7 @@ async function doAsk() {{
     var resp = await fetch('/ask', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{ question: q, model: model, effort: effort, sources: sources, history: convo }})
+      body: JSON.stringify({{ question: q, model: model, effort: effort, sources: sources, history: convo, conversation_id: convoId }})
     }});
     var d = await resp.json();
     if (!resp.ok) {{
@@ -4500,6 +4545,7 @@ async function doAsk() {{
     }}
 
     answerEl.innerHTML = mdToHtml(d.answer) + srcListHtml(d);
+    updateUsage(d.usage);
 
     if (d.capped) {{
       document.getElementById('ask-capped').style.display = 'block';
@@ -4507,6 +4553,7 @@ async function doAsk() {{
       return;
     }}
 
+    convoId = d.conversation_id || convoId;
     convo.push({{role:'user', content:q}});
     convo.push({{role:'assistant', content:d.answer}});
     asked = true;
@@ -4544,6 +4591,7 @@ async def ask(request: Request):
 
     model = (payload.get("model") or "")
     effort = (payload.get("effort") or "standard")
+    conversation_id = (payload.get("conversation_id") or "").strip()
 
     # Conversation history for follow-ups: [{role, content}, ...]. The follow-up
     # cap is enforced here (invisible cost guard) — a capped conversation never
@@ -4569,6 +4617,24 @@ async def ask(request: Request):
 
     lib = _lib()
     try:
+        user_id = _current_user_id(lib, request)
+
+        # Dollar-based rate limit — real spend this calendar month vs. the
+        # user's effective cap (per-user override, else the global default).
+        # Skipped for token-only access and the break-glass admin login with
+        # no matching `users` row (no user_id to attribute cost to), matching
+        # today's unrestricted behavior for those cases.
+        if user_id is not None:
+            cap = lib.get_effective_ask_cap(user_id)
+            spent = lib.ask_cost_this_month(user_id)
+            if spent >= cap:
+                return {
+                    "capped": True,
+                    "answer": (f"You've used ${spent:.2f} of your ${cap:.2f} FP&A Buddy budget "
+                               "for this month. It resets at the start of next month."),
+                    "sources": [], "feed_sources": [], "web_sources": [],
+                }
+
         ans = answer_question(
             lib, question,
             model=model,
@@ -4579,6 +4645,23 @@ async def ask(request: Request):
             opml_path=OPML_PATH if (use_feed or use_web) else None,
             history=history,
         )
+
+        new_conversation_id = conversation_id
+        usage_line = None
+        if user_id is not None:
+            row_id = lib.record_ask_question(
+                user_id, question, ans.text, model or "", effort,
+                use_library, use_feed, use_web,
+                conversation_id=conversation_id, turn_index=prior_questions,
+                input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
+                cache_creation_tokens=ans.cache_creation_tokens,
+                cache_read_tokens=ans.cache_read_tokens, cost_usd=ans.cost_usd,
+            )
+            new_conversation_id = conversation_id or str(row_id)
+            cap = lib.get_effective_ask_cap(user_id)
+            spent = lib.ask_cost_this_month(user_id)
+            usage_line = {"spent": round(spent, 2), "cap": round(cap, 2)}
+
         followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
         return {
             "answer": ans.text,
@@ -4586,6 +4669,8 @@ async def ask(request: Request):
             "feed_sources": [{"title": s["title"], "url": s["url"]} for s in ans.feed_sources],
             "web_sources":  ans.web_sources,
             "followups_left": followups_left,
+            "conversation_id": new_conversation_id,
+            "usage": usage_line,
         }
     finally:
         lib.close()
@@ -5968,6 +6053,8 @@ def admin_users(request: Request, msg: str = ""):
     lib = _lib()
     try:
         users = lib.list_users()
+        default_cap = lib.get_default_ask_cap()
+        ask_spend = {u["id"]: lib.ask_cost_this_month(u["id"]) for u in users}
     finally:
         lib.close()
 
@@ -5983,12 +6070,25 @@ def admin_users(request: Request, msg: str = ""):
         role_badge = (f'<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
                       f'background:{"var(--coral-wash);color:var(--coral-deep)" if u["role"]=="admin" else "var(--seafoam-wash);color:var(--seafoam-deep)"};">{_esc(u["role"])}</span>')
         last = _esc((u["last_login_at"] or "")[:10]) or "—"
+        cap_override = u.get("ask_cap_usd")
+        effective_cap = cap_override if cap_override is not None else default_cap
+        spent = ask_spend.get(uid, 0.0)
+        cap_note = "override" if cap_override is not None else "default"
         rows += f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:9px 12px;font-size:14px;font-weight:500;">{_esc(u["username"])}<div style="font-size:12px;color:var(--muted);font-weight:400;">{_esc(u["email"] or "")}</div></td>
   <td style="padding:9px 12px;font-size:14px;">{_esc(u["name"] or "") or '<span style="color:var(--muted);">—</span>'}</td>
   <td style="padding:9px 12px;">{role_badge}</td>
   <td style="padding:9px 12px;">{status}</td>
   <td style="padding:9px 12px;font-size:12px;color:var(--muted);">{last}</td>
+  <td style="padding:9px 12px;font-size:12px;">
+    <div>${spent:.2f} / ${effective_cap:.2f}<span style="color:var(--muted);"> ({cap_note})</span></div>
+    <form method="post" action="/admin/users/{uid}/ask-cap" style="margin:4px 0 0;display:flex;gap:4px;align-items:center;">
+      <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
+        placeholder="${default_cap:.2f}" title="FP&amp;A Buddy monthly cap override — blank inherits the site default"
+        style="padding:4px 7px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:12px;background:var(--bg);width:70px;">
+      <button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 8px;">Set</button>
+    </form>
+  </td>
   <td style="padding:9px 12px;">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
       <form method="post" action="/admin/users/{uid}/edit" style="margin:0;display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
@@ -6008,13 +6108,20 @@ def admin_users(request: Request, msg: str = ""):
   </td>
 </tr>"""
     if not users:
-        rows = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</td></tr>'
+        rows = '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</td></tr>'
 
-    body = f"""<div class="page" style="max-width:880px;">
+    body = f"""<div class="page" style="max-width:960px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Users</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Member accounts for the gated sections. You create accounts here (no public sign-up yet). You always keep admin access via the host password, so you can&rsquo;t lock yourself out.</p>
 {banner}
+<form method="post" action="/admin/users/ask-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+  <span style="font-size:13px;color:var(--muted);">FP&amp;A Buddy default monthly cap, per user:</span>
+  <span style="font-size:13px;">$</span>
+  <input type="number" name="cap" step="0.01" min="0" value="{default_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
+  <span style="font-size:12px;color:var(--muted);">Per-user overrides in the table below take priority over this.</span>
+</form>
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:26px;">
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr style="background:var(--bg);">
@@ -6023,6 +6130,7 @@ def admin_users(request: Request, msg: str = ""):
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Role</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Status</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last in</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">FP&amp;A Buddy this month</th>
       <th style="padding:9px 12px;"></th>
     </tr></thead>
     <tbody>{rows}</tbody>
@@ -6075,6 +6183,23 @@ async def admin_users_create(request: Request):
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
+@app.post("/admin/users/ask-cap-default")
+async def admin_users_ask_cap_default(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    try:
+        cap = float(form.get("cap") or "5")
+    except ValueError:
+        return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
+    lib = _lib()
+    try:
+        lib.set_default_ask_cap(max(0.0, cap))
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/users?msg={quote(f'Default FP&A Buddy cap set to ${cap:.2f}/month.')}", status_code=303)
+
+
 @app.post("/admin/users/{user_id}/edit")
 async def admin_users_edit(request: Request, user_id: int):
     if not _is_authed(request):
@@ -6093,6 +6218,29 @@ async def admin_users_edit(request: Request, user_id: int):
             msg = f'Updated “{username.lower()}”.'
         except _sql.IntegrityError:
             msg = f'Username “{username.lower()}” is already taken.'
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/ask-cap")
+async def admin_users_ask_cap(request: Request, user_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    raw = (form.get("cap") or "").strip()
+    lib = _lib()
+    try:
+        if raw:
+            try:
+                cap = max(0.0, float(raw))
+            except ValueError:
+                return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
+            lib.set_user_ask_cap(user_id, cap)
+            msg = f'FP&A Buddy cap override set to ${cap:.2f}/month.'
+        else:
+            lib.set_user_ask_cap(user_id, None)
+            msg = 'FP&A Buddy cap override cleared — this user now follows the site default.'
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
