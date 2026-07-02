@@ -1064,6 +1064,67 @@ class Library:
         self.conn.execute("UPDATE users SET ask_cap_usd=? WHERE id=?", (cap_usd, user_id))
         self.conn.commit()
 
+    # -- Ask / FP&A Buddy — the three reporting surfaces (admin, user, public) --
+
+    def list_ask_questions(self, user_id: int | None = None,
+                           limit: int = 500, offset: int = 0) -> list[dict]:
+        """Newest-first Q&A rows, joined with the asker's identity. Pass
+        `user_id` to scope to one user's own history; omit for the full
+        admin archive."""
+        where = "WHERE aq.user_id=?" if user_id is not None else ""
+        params: list = [user_id] if user_id is not None else []
+        rows = self.conn.execute(
+            f"""SELECT aq.*, u.username AS asker_username, u.name AS asker_name
+                FROM ask_questions aq LEFT JOIN users u ON u.id = aq.user_id
+                {where}
+                ORDER BY aq.created_at DESC LIMIT ? OFFSET ?""",
+            params + [limit, offset],
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_ask_questions(self, user_id: int | None = None) -> int:
+        if user_id is not None:
+            return self.conn.execute(
+                "SELECT COUNT(*) FROM ask_questions WHERE user_id=?", (user_id,)
+            ).fetchone()[0]
+        return self.conn.execute("SELECT COUNT(*) FROM ask_questions").fetchone()[0]
+
+    def list_public_ask_questions(self, query: str = "", limit: int = 200) -> list[dict]:
+        """Non-hidden Q&A for the community browse view, newest first, optionally
+        text-filtered on question/answer. Callers render `asker_name`/
+        `asker_username` unless `anonymized` is set, in which case show a
+        generic label instead — anonymizing here never affects the admin or
+        the asker's own history view, both of which always show the real name."""
+        base = """SELECT aq.*, u.username AS asker_username, u.name AS asker_name
+                  FROM ask_questions aq LEFT JOIN users u ON u.id = aq.user_id
+                  WHERE aq.hidden_public=0"""
+        params: list = []
+        q = query.strip()
+        if q:
+            base += " AND (aq.question LIKE ? OR aq.answer LIKE ?)"
+            like = f"%{q}%"
+            params += [like, like]
+        base += " ORDER BY aq.created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self.conn.execute(base, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_ask_question_hidden(self, question_id: int, hidden: bool) -> None:
+        """Remove (or restore) a Q&A from the public community view only —
+        never deletes it from the admin archive or the asker's own history."""
+        self.conn.execute(
+            "UPDATE ask_questions SET hidden_public=? WHERE id=?", (int(hidden), question_id)
+        )
+        self.conn.commit()
+
+    def set_ask_question_anonymized(self, question_id: int, anonymized: bool) -> None:
+        """Hide the asker's name on the public community view only — the
+        admin archive always shows who actually asked."""
+        self.conn.execute(
+            "UPDATE ask_questions SET anonymized=? WHERE id=?", (int(anonymized), question_id)
+        )
+        self.conn.commit()
+
     def close(self) -> None:
         self.conn.close()
 
