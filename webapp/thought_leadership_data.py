@@ -103,7 +103,8 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="Growth CFO Salon (Boston)",
         url="", venue="The F Suite", date_label="Nov 2025", sort_key="2025-11",
-        type="speaking", needs_synopsis=True,
+        type="speaking",
+        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
     ),
     TLItem(
         title="Cash Cycle Demo Day — Opening & Closing Remarks",
@@ -113,7 +114,8 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="CFO Supper Club (Boston)",
         url="", venue="The F Suite", date_label="Aug 2025", sort_key="2025-08",
-        type="speaking", needs_synopsis=True,
+        type="speaking",
+        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
     ),
     TLItem(
         title="CFO Roundtable — M&A and Managing Uncertainty",
@@ -129,17 +131,20 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="Private Dinner & Guided Discussion (Boston)",
         url="", venue="The F Suite", date_label="Apr 2024", sort_key="2024-04",
-        type="speaking", needs_synopsis=True,
+        type="speaking",
+        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
     ),
     TLItem(
         title="CFO Dinner (Boston)",
         url="", venue="The F Suite", date_label="Dec 2023", sort_key="2023-12",
-        type="speaking", needs_synopsis=True,
+        type="speaking",
+        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
     ),
     TLItem(
         title="NC Launch Dinner",
         url="", venue="The F Suite", date_label="Jun 2023", sort_key="2023-06",
-        type="speaking", needs_synopsis=True,
+        type="speaking",
+        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
     ),
     TLItem(
         title="Agile Finance Summit",
