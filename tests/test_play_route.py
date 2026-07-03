@@ -1,8 +1,11 @@
-"""Sail, Don't Row — /play route (Phase 1 core engine).
+"""Sail, Don't Row — /play route (Phase 1 core engine + Phase 2 wind/rowing).
 
 Confirms the page is fully public, renders all four ranks, embeds the live
-game_rank_settings values as JSON for the client engine, and picks up admin
-edits without a redeploy.
+game_rank_settings values as JSON for the client engine, picks up admin
+edits without a redeploy, and wires up the gust-zone DOM/JS the Phase 2
+auto-sail mechanic depends on. The gust/stamina timing logic itself is
+frame-by-frame JS behavior, exercised via a live-server Playwright pass
+during development (see the PR description) rather than here.
 """
 import pathlib
 import sys
@@ -75,3 +78,22 @@ def test_play_nav_link_present(env):
     _, client = env
     body = client.get("/").text
     assert 'href="/play"' in body
+
+
+def test_play_embeds_gust_and_sail_settings(env):
+    _, client = env
+    body = client.get("/play").text
+    assert '"gust_coverage_pct": 35.0' in body   # Mate default
+    assert '"sail_speed": 40.0' in body
+    assert "buildGustZones" in body
+    assert 'id="sdrGusts"' in body
+
+
+def test_play_gust_seed_independent_of_obstacle_seed(env):
+    """Changing obstacle_density must not perturb gust placement, and vice
+    versa — they're seeded with distinct '|gust' suffixed strings precisely
+    so the two knobs can be tuned independently at /admin/game-settings."""
+    _, client = env
+    body = client.get("/play").text
+    assert "currentWeekKey() + '|' + rankKey);" in body          # obstacle seed
+    assert "currentWeekKey() + '|' + rankKey + '|gust');" in body  # gust seed

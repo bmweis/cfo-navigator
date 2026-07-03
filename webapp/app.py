@@ -2327,14 +2327,17 @@ def netsuite_mcp(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# "Sail, Don't Row" — Phase 1: core engine (public, no auth to play).
-# DOM+CSS-transform game, vanilla JS. Boat SVG/obstacle colors/skyline
-# landmarks/difficulty-pill treatment lifted from design/mockups/ per the
-# Phase 0 sign-off. Rank tuning (pace, wind, obstacle density, collision
-# rule) is admin-editable at /admin/game-settings and read live here.
-# Not yet built: wind gusts (Phase 2), the route past Boston Harbor and the
-# Nantucket finish line (Phase 3), the full outcome-stats breakdown and
-# leaderboard (Phase 4/7), rank-select visual polish (Phase 5/6).
+# "Sail, Don't Row" — Phases 1-2: core engine + wind/rowing/Stamina (public,
+# no auth to play). DOM+CSS-transform game, vanilla JS. Boat SVG/obstacle
+# colors/skyline landmarks/difficulty-pill treatment lifted from
+# design/mockups/ per the Phase 0 sign-off. Rank tuning (pace, wind,
+# obstacle density, collision rule) is admin-editable at /admin/game-settings
+# and read live here. Wind gust zones (auto-sail) are placed by their own
+# seeded PRNG, independent of the obstacle seed, so tuning one never
+# reshuffles the other.
+# Not yet built: the route past Boston Harbor and the Nantucket finish line
+# (Phase 3), the full outcome-stats breakdown and leaderboard (Phase 4/7),
+# rank-select visual polish (Phase 5/6).
 # ---------------------------------------------------------------------------
 
 _SDR_CSS = """
@@ -2390,6 +2393,23 @@ _SDR_CSS = """
 .sdr-obstacle-inner{display:inline-block;}
 .sdr-obstacle.sdr-buoy .sdr-obstacle-inner{animation:sdrBuoyBob 2.2s ease-in-out infinite;}
 @keyframes sdrBuoyBob{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
+
+/* Wind gust zone — a soft glowing band with diagonal streaks drifting through
+   it, spanning the full channel height. Width is fixed at creation (a zone's
+   world-length never changes); JS repositions it every frame via transform,
+   same as obstacles and the boat. */
+.sdr-gust{position:absolute;top:6%;bottom:6%;left:0;z-index:2;pointer-events:none;overflow:hidden;
+  background:linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.22) 15%,
+    rgba(255,255,255,0.3) 50%, rgba(255,255,255,0.22) 85%, rgba(255,255,255,0) 100%);}
+.sdr-gust::before{content:'';position:absolute;top:0;left:-40px;right:-40px;bottom:0;
+  background-image:repeating-linear-gradient(100deg, rgba(255,255,255,0.4) 0 3px, transparent 3px 34px);
+  animation:sdrGustStreak 1.1s linear infinite;}
+@keyframes sdrGustStreak{from{transform:translateX(0);}to{transform:translateX(34px);}}
+/* Sailing feedback: boat picks up a slight lift + brighten while auto-sailing
+   (in a gust, not rowing) — same "positioning transform stays on the outer
+   element" rule as the buoy fix, so this lives on the inner wrapper. */
+.sdr-boat-inner.sdr-sailing{filter:brightness(1.08);}
+.sdr-boat-inner.sdr-sailing .sdr-sail-group{animation-duration:1.3s;}
 
 .sdr-hud-top{position:absolute;top:14px;left:14px;right:14px;display:flex;justify-content:space-between;
   align-items:flex-start;z-index:6;pointer-events:none;}
@@ -2535,7 +2555,9 @@ _SDR_JS = """
   var root = document.getElementById('sdrRoot');
   var stage = document.getElementById('sdrStage');
   var boatEl = document.getElementById('sdrBoat');
+  var boatInner = boatEl.querySelector('.sdr-boat-inner');
   var obstacleContainer = document.getElementById('sdrObstacles');
+  var gustContainer = document.getElementById('sdrGusts');
   var preGame = document.getElementById('sdrPreGame');
   var gameOver = document.getElementById('sdrGameOver');
   var rowBtn = document.getElementById('sdrRowBtn');
@@ -2549,7 +2571,8 @@ _SDR_JS = """
     started: false, over: false, sunk: false,
     rank: 'mate', worldX: 0, boatY: 0.5, targetY: 0.5,
     stamina: 100, hits: 0, invincibleUntil: 0, rowing: false,
-    obstacles: [], score: 0, startTs: 0, lastTs: 0,
+    obstacles: [], gustZones: [], score: 0, startTs: 0, lastTs: 0,
+    sailTime: 0, rowTime: 0, driftTime: 0,
   };
 
   function isoWeekKey(date){
@@ -2604,6 +2627,41 @@ _SDR_JS = """
       obstacles.push({worldX:x, lane:lane, type:type, el:el, resolved:false});
     }
     state.obstacles = obstacles;
+  }
+
+  // Independent seed/PRNG from obstacles (own '|gust' suffix) so retuning
+  // gust coverage never reshuffles rock/buoy placement or vice versa.
+  function buildGustZones(rankKey){
+    var cfg = RANK_SETTINGS[rankKey];
+    var seed = fnv1a(currentWeekKey() + '|' + rankKey + '|gust');
+    var rand = mulberry32(seed);
+    var zoneCount = 5;
+    var courseStart = 200, courseSpan = COURSE_LENGTH - 400;
+    var segment = courseSpan / zoneCount;
+    var targetTotal = (cfg.gust_coverage_pct / 100) * COURSE_LENGTH;
+    var avgZoneLen = Math.max(60, targetTotal / zoneCount);
+    gustContainer.innerHTML = '';
+    var zones = [];
+    for (var i=0;i<zoneCount;i++){
+      var zoneLen = Math.min(segment, Math.max(60, avgZoneLen * (0.6 + rand()*0.8)));
+      var segStart = courseStart + i*segment;
+      var start = segStart + rand()*Math.max(0, segment - zoneLen);
+      var end = Math.min(start + zoneLen, COURSE_LENGTH - 100);
+      var el = document.createElement('div');
+      el.className = 'sdr-gust';
+      el.style.width = ((end - start) * PX_PER_UNIT) + 'px';
+      gustContainer.appendChild(el);
+      zones.push({startX:start, endX:end, el:el});
+    }
+    state.gustZones = zones;
+  }
+
+  function isInGustZone(worldX){
+    for (var i=0;i<state.gustZones.length;i++){
+      var z = state.gustZones[i];
+      if (worldX >= z.startX && worldX <= z.endX) return true;
+    }
+    return false;
   }
 
   function livesLabel(cfg){
@@ -2673,8 +2731,10 @@ _SDR_JS = """
     state.worldX = 0; state.boatY = 0.5; state.targetY = 0.5;
     state.stamina = 100; state.hits = 0; state.invincibleUntil = 0; state.rowing = false;
     state.over = false; state.sunk = false; state.score = 0;
+    state.sailTime = 0; state.rowTime = 0; state.driftTime = 0;
     state.startTs = performance.now(); state.lastTs = 0;
     buildObstacles(rankKey);
+    buildGustZones(rankKey);
     preGame.style.display = 'none';
     gameOver.classList.remove('sdr-visible');
     gameOver.style.display = 'none';
@@ -2759,10 +2819,23 @@ _SDR_JS = """
 
     var cfg = RANK_SETTINGS[state.rank];
     var effectiveRowing = state.rowing && state.stamina > 0.001;
-    var speed = effectiveRowing ? cfg.row_speed : cfg.drift_speed;
-    if (effectiveRowing) state.stamina = Math.max(0, state.stamina - cfg.stamina_drain_per_sec*dt);
-    else state.stamina = Math.min(100, state.stamina + cfg.stamina_regen_per_sec*dt);
+    var sailing = !effectiveRowing && isInGustZone(state.worldX);
+    var speed;
+    if (effectiveRowing){
+      speed = cfg.row_speed;
+      state.stamina = Math.max(0, state.stamina - cfg.stamina_drain_per_sec*dt);
+      state.rowTime += dt;
+    } else if (sailing){
+      speed = cfg.sail_speed;
+      state.stamina = Math.min(100, state.stamina + cfg.stamina_regen_per_sec*dt);
+      state.sailTime += dt;
+    } else {
+      speed = cfg.drift_speed;
+      state.stamina = Math.min(100, state.stamina + cfg.stamina_regen_per_sec*dt);
+      state.driftTime += dt;
+    }
     state.worldX = Math.min(COURSE_LENGTH, state.worldX + speed*dt);
+    boatInner.classList.toggle('sdr-sailing', sailing);
 
     for (var i=0;i<state.obstacles.length;i++) tryCollision(state.obstacles[i], cfg, ts);
 
@@ -2787,6 +2860,15 @@ _SDR_JS = """
       var sy = rect.height * (CHANNEL_TOP + ob.lane*(CHANNEL_BOTTOM-CHANNEL_TOP));
       var ow = ob.el.offsetWidth, oh = ob.el.offsetHeight;
       ob.el.style.transform = 'translate(' + (sx-ow*0.5) + 'px,' + (sy-oh*0.5) + 'px)';
+    }
+
+    for (var g=0;g<state.gustZones.length;g++){
+      var z = state.gustZones[g];
+      var gsx = boatX + (z.startX - state.worldX) * PX_PER_UNIT;
+      var gw = z.el.offsetWidth;
+      if (gsx + gw < -50 || gsx > rect.width + 50){ z.el.style.display = 'none'; continue; }
+      z.el.style.display = 'block';
+      z.el.style.transform = 'translateX(' + gsx + 'px)';
     }
 
     var cfg = RANK_SETTINGS[state.rank];
@@ -2861,6 +2943,7 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
 <div id="sdrStage" class="sdr-stage" style="display:none;">
   """ + _SDR_DEFS_SVG + _SDR_SKYLINE_SVG + _SDR_REFLECTION_SVG + """
   <div class="sdr-water"><div class="sdr-band sdr-band1"></div><div class="sdr-band sdr-band2"></div><div class="sdr-band sdr-band3"></div></div>
+  <div id="sdrGusts"></div>
   <div id="sdrObstacles"></div>
   <div id="sdrBoat" class="sdr-boat-wrap"><div class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div></div>
 
@@ -2895,8 +2978,8 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
 <template id="sdrRockTpl">""" + _SDR_ROCK_SVG + """</template>
 <template id="sdrBuoyTpl">""" + _SDR_BUOY_SVG + """</template>
 
-<p class="sdr-hint">Phase 1 preview: mechanics only &mdash; wind gusts, the full route past Boston Harbor, and the finish
-line at Nantucket land in later phases. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
+<p class="sdr-hint">Phase 2 preview: wind, rowing, and Stamina are live. The full route past Boston Harbor and the finish
+line at Nantucket land in Phase 3. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
 </div>
 <script>""" + js + """</script>"""
 
