@@ -64,12 +64,14 @@ WRITING: list[TLItem] = [
     TLItem(
         title="Exit Readiness for CFOs",
         url="https://www.fsuite.co/blog/exit-readiness-cfos", venue="The F Suite",
-        date_label="Mar 2026", sort_key="2026-03", type="writing", needs_synopsis=True,
+        date_label="Mar 2026", sort_key="2026-03", type="writing",
+        description="There's no single right exit—IPO, acquisition, sponsor sale, secondary—so the real job is building a company that's ready no matter which door opens, starting years before any process does.",
     ),
     TLItem(
         title="Building Dashboards That Matter",
         url="https://www.onlycfo.io/p/building-dashboards-that-matter", venue="OnlyCFO",
-        date_label="Apr 2024", sort_key="2024-04", type="writing", needs_synopsis=True,
+        date_label="Apr 2024", sort_key="2024-04", type="writing",
+        description="Stacking metrics isn't the same as building a dashboard that matters—the harder, more valuable work is the cross-functional alignment on what the business needs to see.",
     ),
 ]
 
@@ -77,7 +79,8 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="Abacum AI Summit — Recording",
         url="https://www.youtube.com/watch?v=MDBz0OpR1II", venue="Abacum",
-        date_label="Apr 2026", sort_key="2026-04", type="speaking", needs_synopsis=True,
+        date_label="Apr 2026", sort_key="2026-04", type="speaking",
+        description="A panel on what AI adoption changes inside a finance team once the pilot phase ends, recorded live at Abacum's invite-only summit in New York.",
         photos=[
             TLPhoto(src="/static/speaking-close.jpg",
                     alt="Brian Weisberg speaking at the Abacum AI Summit, April 2026"),
@@ -94,7 +97,8 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="Claude in Action for Finance (Virtual Panel)",
         url="https://fsuitevirtualpanel430.splashthat.com", venue="The F Suite",
-        date_label="Apr 2026", sort_key="2026-04", type="speaking", needs_synopsis=True,
+        date_label="Apr 2026", sort_key="2026-04", type="speaking",
+        description="A working session, not a demo reel: how finance teams are using Claude to run multi-step workflows end to end, including a live example completed across systems from a single prompt.",
     ),
     TLItem(
         title="Growth CFO Salon (Boston)",
@@ -119,7 +123,8 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="Lean Accounting Team (Webinar Host)",
         url="https://numeric.lpages.co/lean-accounting-team-webinar/", venue="Numeric",
-        date_label="Mar 2024", sort_key="2024-03", type="speaking", needs_synopsis=True,
+        date_label="Mar 2024", sort_key="2024-03", type="speaking",
+        description="Hosted a conversation with Crafty Apes CFO Leo Dencik and Numeric's Connor Foran on how lean teams cover both accounting and FP&A without adding headcount, and why spreading close work across the month beats cramming it into five days.",
     ),
     TLItem(
         title="Private Dinner & Guided Discussion (Boston)",
@@ -139,7 +144,8 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="Agile Finance Summit",
         url="https://www.accelevents.com/e/agile-finance-summit-2021", venue="Teampay",
-        date_label="Oct 2021", sort_key="2021-10", type="speaking", needs_synopsis=True,
+        date_label="Oct 2021", sort_key="2021-10", type="speaking",
+        description="Teampay's second annual Agile Finance Summit—two days on overseeing company money and building a durable financial strategy, alongside finance tool makers like Mosaic and Tesorio.",
     ),
 ]
 
@@ -148,12 +154,13 @@ PODCASTS: list[TLItem] = [
         title="The Cash Flow Show — Conversations About How Tech Companies Make Money (Host · Full Episode Feed)",
         url="https://www.onlycfo.io/podcast", venue="OnlyCFO", date_label="", sort_key="",
         type="podcast",
-        description="Brian's own interview series, hosted via OnlyCFO—operators on how their companies actually make money. Full episode archive.",
+        description="Brian's own interview series, hosted via OnlyCFO—operators on how their companies make money, in their own words. Full episode archive.",
     ),
     TLItem(
         title="Adopting AI in Finance & Accounting — with Sowmya Ranganathan (former Controller, OpenAI)",
         url="https://open.spotify.com/episode/6uXkeypUPX5g5yB8lHGq2V", venue="The Cash Flow Show",
-        date_label="Aug 2025", sort_key="2025-08", type="podcast", needs_synopsis=True,
+        date_label="Aug 2025", sort_key="2025-08", type="podcast",
+        description="Sowmya scaled finance at Square, Rippling, and OpenAI before founding Lumera—we get into how OpenAI rolled out AI in finance, including running internal hackathons instead of mandating tools from the top down.",
     ),
     TLItem(
         title="State of Fundraising / Equity Market",
@@ -163,7 +170,8 @@ PODCASTS: list[TLItem] = [
     TLItem(
         title="Is ARR Dead?",
         url="https://open.spotify.com/episode/5G0GUaRrOeGXxJwFh9WsPw", venue="The Cash Flow Show",
-        date_label="Jun 2025", sort_key="2025-06", type="podcast", needs_synopsis=True,
+        date_label="Jun 2025", sort_key="2025-06", type="podcast",
+        description="ARR stopped being a clean metric once companies started blending usage-based and non-traditional revenue into it—we dig into what's worth tracking instead.",
     ),
     TLItem(
         title="Commission Plan Strategies in 2025 — with Meir Rotenberg & David Ma",
@@ -183,17 +191,20 @@ PODCASTS: list[TLItem] = [
     TLItem(
         title="SaaS Conversations: Dynamic Planning for SaaS Finance Leaders (Guest)",
         url="https://www.opexengine.com/webinar/opexengine-saas-conversations-dynamic-planning-for-saas-finance-leaders",
-        venue="OpexEngine", date_label="May 2023", sort_key="2023-05", type="podcast", needs_synopsis=True,
+        venue="OpexEngine", date_label="May 2023", sort_key="2023-05", type="podcast",
+        description="A conversation with CoreWeave's Evan Meagher on dynamic planning, and how benchmarking against peers cuts risk out of the operating plan.",
     ),
     TLItem(
         title="The Heuristics of Forecasting (Guest)",
         url="https://www.youtube.com/watch?v=mqVvcVVTSrk", venue="Role Forward Podcast · Mosaic Tech",
-        date_label="Dec 2022", sort_key="2022-12", type="podcast", needs_synopsis=True,
+        date_label="Dec 2022", sort_key="2022-12", type="podcast",
+        description="Heuristics for headcount planning specifically: being realistic about what a forecast can predict, and why finance needs to invest in the function earlier than feels comfortable.",
     ),
     TLItem(
         title="Collaborative Budgeting (Guest)",
         url="https://www.youtube.com/watch?v=GPdRstJ_sKw", venue="Role Forward Podcast · Mosaic Tech",
-        date_label="Apr 2022", sort_key="2022-04", type="podcast", needs_synopsis=True,
+        date_label="Apr 2022", sort_key="2022-04", type="podcast",
+        description="Why a finance leader's real job in budgeting is less about the model and more about knitting the whole business together around it.",
     ),
 ]
 
@@ -201,22 +212,26 @@ PRESS: list[TLItem] = [
     TLItem(
         title="From $1M to $100M: 6 Finance Lessons from the Frontline",
         url="https://www.sequencehq.com/blog/from-1m-to-100m-6-finance-lessons-from-the-frontline",
-        venue="Sequence", date_label="Jul 2025", sort_key="2025-07", type="press", needs_synopsis=True,
+        venue="Sequence", date_label="Jul 2025", sort_key="2025-07", type="press",
+        description="Six lessons from 15+ years scaling tech companies through two exits—starting with the one metric worth tracking above all others early on: ARR per employee.",
     ),
     TLItem(
         title="GC/CFO Collaboration",
         url="https://www.legaldive.com/news/gc-cfo-collaboration-svb-techgc-the-f-suite-silicon-valley-bank/646561/",
-        venue="LegalDive", date_label="Mar 2023", sort_key="2023-03", type="press", needs_synopsis=True,
+        venue="LegalDive", date_label="Mar 2023", sort_key="2023-03", type="press",
+        description="How the F Suite mobilized over 200 CFOs onto a call within a day of Silicon Valley Bank's collapse, and coordinated with sister legal community TechGC to keep finance and legal leaders moving together through the crisis.",
     ),
     TLItem(
         title="When and How to Scale Your Accounting Department",
         url="https://www.numeric.io/blog/when-and-how-to-scale-your-accounting-department",
-        venue="Numeric", date_label="Nov 2023", sort_key="2023-11", type="press", needs_synopsis=True,
+        venue="Numeric", date_label="Nov 2023", sort_key="2023-11", type="press",
+        description="The case for building good documentation habits before they're painful to build, plus how to time new hires so you're neither churning your team nor over-staffing ahead of need.",
     ),
     TLItem(
         title="Startup CFO Primer",
         url="https://www.numeric.io/blog/startup-cfo-primer",
-        venue="Numeric", date_label="Jun 2024", sort_key="2024-06", type="press", needs_synopsis=True,
+        venue="Numeric", date_label="Jun 2024", sort_key="2024-06", type="press",
+        description="Why documentation is the multiplier for a lean team: Loom walkthroughs of the close process and numbered checklists that cut onboarding time without adding headcount.",
     ),
     TLItem(
         title="Innovative Cost-Saving Measures (Q&A)",
