@@ -3147,6 +3147,11 @@ def admin_tools(request: Request):
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
             <a href="/admin/tools/{t['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+            <form method="post" action="/admin/tools/{t['id']}/delete" style="display:inline;margin-left:6px;"
+                  onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
+              <input type="hidden" name="redirect_to" value="/admin/tools">
+              <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+            </form>
           </td>
         </tr>"""
 
@@ -3159,7 +3164,7 @@ def admin_tools(request: Request):
     body = f"""<div class="page" style="max-width:1100px;">
 <p style="margin:0 0 4px;"><a href="/admin/toolbox" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Toolbox submissions</h1>
+  <h1>Tools</h1>
   <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
 </div>
 <p style="margin:0 0 24px;">
@@ -3197,7 +3202,7 @@ def admin_tools(request: Request):
 </table>
 </div>
 </div>"""
-    return HTMLResponse(_page("Toolbox submissions—CFO Toolbox Admin", "", body, authed=True))
+    return HTMLResponse(_page("Tools—CFO Toolbox Admin", "", body, authed=True))
 
 
 @app.get("/admin/tools/leads", response_class=HTMLResponse)
@@ -3793,15 +3798,22 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
 
 
 @app.post("/admin/tools/{tool_id}/delete")
-def admin_tools_delete(request: Request, tool_id: int):
+async def admin_tools_delete(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    # Deleting is offered both on /tools (public directory, admin controls)
+    # and /admin/tools (Toolbox submissions) — return to whichever one asked,
+    # validated against an allowlist since it echoes into a redirect.
+    redirect_to = form.get("redirect_to") or "/tools"
+    if redirect_to not in ("/tools", "/admin/tools"):
+        redirect_to = "/tools"
     lib = _lib()
     try:
         lib.delete_tool(tool_id)
     finally:
         lib.close()
-    return RedirectResponse("/tools", status_code=303)
+    return RedirectResponse(redirect_to, status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/quick-edit")
@@ -5393,9 +5405,9 @@ _LIBRARY_TOOLS = [
 # CFO Toolbox management lives on its own page (/admin/toolbox), same pattern
 # as the Archive above — keeps the hub uncluttered.
 _TOOLBOX_TOOLS = [
-    ("/admin/tools",            "Toolbox submissions", "Tools readers have submitted for the directory — approve, reject, or edit before they go live."),
-    ("/admin/tools/leads",      "Toolbox intros",      "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
-    ("/admin/tools/categories", "Toolbox categories",  "Add, rename, or remove the category pills tools are tagged with on /tools."),
+    ("/admin/tools",            "Tools",                "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
+    ("/admin/tools/leads",      "Toolbox intros",       "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
+    ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
     ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section — name, URL, description, coverage, and pricing."),
 ]
 
