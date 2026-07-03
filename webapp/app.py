@@ -3162,7 +3162,7 @@ def admin_tools(request: Request):
     total_leads = sum(lead_counts.values())
 
     body = f"""<div class="page" style="max-width:1100px;">
-<p style="margin:0 0 4px;"><a href="/admin/toolbox" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Tools</h1>
   <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
@@ -3231,7 +3231,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
     ) or '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No leads yet.</td></tr>'
     title_suffix = f" — {_esc(tool_name_filter)}" if tool_name_filter else ""
     body = f"""<div class="page" style="max-width:1000px;">
-<p style="margin:0 0 4px;"><a href="/admin/toolbox" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox intros{title_suffix}</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm Intro requests from readers &mdash; {len(leads)} total.</p>
 <div style="overflow-x:auto;">
@@ -3291,7 +3291,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
         rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet — add one below.</td></tr>'
 
     body = f"""<div class="page" style="max-width:820px;">
-<p style="margin:0 0 4px;"><a href="/admin/toolbox" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox categories</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">These are the filter pills on <a href="/tools">/tools</a>. Renaming updates every tool tagged with the old name; deleting removes the tag from tagged tools but leaves the tools themselves in the directory — they still show under <strong>All</strong>, just not under any specific pill.</p>
 {banner}{error_banner}
@@ -3442,7 +3442,7 @@ def admin_benchmarks(request: Request):
 </tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No benchmarking resources yet.</td></tr>'
 
     body = f"""<div class="page" style="max-width:1000px;">
-<p style="margin:0 0 4px;"><a href="/admin/toolbox" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Benchmarking resources</h1>
   <a href="/admin/tools/benchmarks/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add resource</a>
@@ -5402,8 +5402,8 @@ _LIBRARY_TOOLS = [
     ("/admin/review-removals", "Remove content",   "Filter for content the enricher flagged as potentially off-target for this archive (e.g. podcasts, annual predictions, fund/LP content) and confirm or keep each one."),
 ]
 
-# CFO Toolbox management lives on its own page (/admin/toolbox), same pattern
-# as the Archive above — keeps the hub uncluttered.
+# CFO Toolbox items, used as one of the expandable groups below (same pattern
+# as Inbox/Site management — no separate hub page).
 _TOOLBOX_TOOLS = [
     ("/admin/tools",            "Tools",                "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
     ("/admin/tools/leads",      "Toolbox intros",       "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
@@ -5417,6 +5417,7 @@ _ADMIN_GROUPS = [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
         ("/community",          "CFO community",           "Your community idea + sign-up form — parked off the public site for now, reachable here so the copy isn't lost."),
     ]),
+    ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Site management", "Your voice, your brand, and the public site.", [
         ("/admin/users",        "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/brand",        "Brand standards",     "Visual standards and color system for the site."),
@@ -5428,7 +5429,7 @@ _ADMIN_GROUPS = [
 ]
 
 # Flat view kept for any code/tests that iterate every section.
-_ADMIN_SECTIONS = _LIBRARY_TOOLS + _TOOLBOX_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
+_ADMIN_SECTIONS = _LIBRARY_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
 
 
 def _content_flow_diagram(highlight: str = "") -> str:
@@ -5733,14 +5734,13 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    # Archive and CFO Toolbox each get a single prominent card linking to their
-    # own management page, so the hub stays uncluttered.
+    # Archive gets a single prominent card linking to its own management page,
+    # so the hub stays uncluttered. CFO Toolbox is an expandable group instead
+    # (like Inbox/Site management below) rather than a separate page.
     library_card = _card("/admin/library", "Archive",
                          f"Build, curate, enrich, and back up your archive &mdash; {len(_LIBRARY_TOOLS)} tools.")
-    toolbox_card = _card("/admin/toolbox", "CFO Toolbox",
-                         f"Submissions, Warm Intro leads, categories, and Benchmarking Resources &mdash; {len(_TOOLBOX_TOOLS)} tools.")
 
-    groups_html = f'<div style="margin-bottom:22px;display:grid;gap:14px;">{library_card}{toolbox_card}</div>'
+    groups_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
     for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
         cards = "".join(_card(*s) for s in items)
         open_attr = " open" if gname == "Inbox" else ""   # Inbox starts expanded — everything else is click-to-expand
@@ -5813,31 +5813,6 @@ def admin_library(request: Request):
 <div style="display:grid;gap:12px;">{cards}</div>
 </div>"""
     return HTMLResponse(_page("Archive — Admin", "Admin", body, authed=True))
-
-
-@app.get("/admin/toolbox", response_class=HTMLResponse)
-def admin_toolbox(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-
-    def _card(href, title, desc):
-        return (
-            f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
-            f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
-            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-            f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
-            f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
-        )
-
-    cards = "".join(_card(href, title, desc) for href, title, desc in _TOOLBOX_TOOLS)
-    body = f"""<div class="page" style="max-width:720px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>CFO Toolbox</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Everything behind the public <a href="/tools">/tools</a> directory &mdash; tool submissions, Warm Intro leads, the category vocabulary, and the Benchmarking Resources list.</p>
-<div style="display:grid;gap:14px;">{cards}</div>
-</div>"""
-    return HTMLResponse(_page("CFO Toolbox — Admin", "Admin", body, authed=True))
 
 
 def _auth_recheck_background() -> None:
