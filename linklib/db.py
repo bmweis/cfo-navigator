@@ -160,6 +160,19 @@ CREATE TABLE IF NOT EXISTS tool_leads (
 CREATE INDEX IF NOT EXISTS idx_tool_leads_tool_id ON tool_leads(tool_id);
 CREATE INDEX IF NOT EXISTS idx_tool_leads_created  ON tool_leads(created_at);
 
+-- Self-service "forgot password" requests, filed from /login. Brian resolves
+-- each by resetting the account's password (auto-resolves, see
+-- resolve_password_resets_for_user) or dismissing it as a false alarm.
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    username    TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    resolved_at TEXT NOT NULL DEFAULT ''    -- '' = still pending
+);
+
+CREATE INDEX IF NOT EXISTS idx_pwreset_resolved ON password_reset_requests(resolved_at);
+
 -- Staging area for proposed library additions (the "Library Queue"). Candidates
 -- — from the live feed or a one-time historical sweep — land here enriched but
 -- unsaved, so they can be reviewed before they enter the library (and the Ask
@@ -779,6 +792,13 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def count_contacts_since(self, ts: str) -> int:
+        """Contacts created after `ts` (an ISO timestamp, '' = every row —
+        string comparison against '' is true for any non-empty created_at)."""
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM contacts WHERE created_at > ?", (ts,)
+        ).fetchone()[0]
+
     # -- tools directory ---------------------------------------------------
 
     def add_tool(self, name: str, description: str, url: str,
@@ -851,6 +871,9 @@ class Library:
     def approve_tool(self, tool_id: int) -> None:
         self.conn.execute("UPDATE tools SET approved=1 WHERE id=?", (tool_id,))
         self.conn.commit()
+
+    def count_pending_tools(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM tools WHERE approved=0").fetchone()[0]
 
     def delete_tool(self, tool_id: int) -> None:
         self.conn.execute("DELETE FROM tools WHERE id=?", (tool_id,))
@@ -1180,6 +1203,54 @@ class Library:
             "SELECT tool_id, COUNT(*) as n FROM tool_leads GROUP BY tool_id"
         ).fetchall()
         return {r["tool_id"]: r["n"] for r in rows}
+
+    def count_tool_leads_since(self, ts: str) -> int:
+        """Leads created after `ts` (an ISO timestamp, '' = every row)."""
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM tool_leads WHERE created_at > ?", (ts,)
+        ).fetchone()[0]
+
+    # -- password reset requests -------------------------------------------
+
+    def create_password_reset_request(self, user_id: int, username: str) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO password_reset_requests (user_id, username, created_at) VALUES (?,?,?)",
+            (user_id, username, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_password_reset_requests(self, pending_only: bool = True) -> list[dict]:
+        if pending_only:
+            rows = self.conn.execute(
+                "SELECT * FROM password_reset_requests WHERE resolved_at='' ORDER BY created_at"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM password_reset_requests ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_pending_password_resets(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM password_reset_requests WHERE resolved_at=''"
+        ).fetchone()[0]
+
+    def resolve_password_resets_for_user(self, user_id: int) -> None:
+        """Clear pending requests for a user — called when Brian actually resets
+        their password, so fixing the problem also clears the badge."""
+        self.conn.execute(
+            "UPDATE password_reset_requests SET resolved_at=? WHERE user_id=? AND resolved_at=''",
+            (_now(), user_id),
+        )
+        self.conn.commit()
+
+    def dismiss_password_reset(self, request_id: int) -> None:
+        self.conn.execute(
+            "UPDATE password_reset_requests SET resolved_at=? WHERE id=?",
+            (_now(), request_id),
+        )
+        self.conn.commit()
 
     # -- Ask / FP&A Buddy — shared question archive + dollar-cap tracking ------
 
