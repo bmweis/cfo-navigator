@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sail, Don't Row — Full Route & Finish</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F5F4EF; --navy:#002975; --seafoam:#A3E5D4; --seafoam-deep:#6FC9AF;
+    --expense:#B5553A; --liability:#5C5A52; --line:#DEDACD;
+    --water-deep:#0E5A7A; --water-mid:#4FA8A0; --water-light:#BDEBDD;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);font-family:'DM Sans',sans-serif;color:var(--navy);padding:32px 20px 60px;}
+  .wrap{max-width:880px;margin:0 auto;}
+  .topbar{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid var(--navy);padding-bottom:14px;margin-bottom:22px;}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--liability);font-weight:700;}
+  .title{font-family:'Outfit',sans-serif;font-weight:800;font-size:30px;color:var(--navy);margin:2px 0 0;}
+  h3.section{font-family:'Outfit',sans-serif;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--liability);font-weight:700;margin:34px 0 10px;}
+
+  /* route tracker */
+  .route{display:flex;align-items:center;background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px 20px;overflow-x:auto;gap:0;}
+  .stop{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:150px;position:relative;}
+  .stop-dot{width:16px;height:16px;border-radius:50%;background:var(--navy);border:3px solid #fff;box-shadow:0 0 0 2px var(--navy);z-index:2;}
+  .stop.finish .stop-dot{background:var(--expense);box-shadow:0 0 0 2px var(--expense);}
+  .stop-line{position:absolute;top:8px;left:50%;width:100%;height:2px;background:var(--line);z-index:1;}
+  .stop:last-child .stop-line{display:none;}
+  .stop-label{font-family:'Outfit',sans-serif;font-weight:700;font-size:12px;color:var(--navy);margin-top:10px;text-align:center;}
+  .stop-sub{font-size:10px;color:var(--liability);margin-top:2px;text-align:center;}
+
+  .canvas{position:relative;width:100%;height:260px;border-radius:16px;overflow:hidden;
+    background:linear-gradient(180deg,#F7F6F1 0%, #EAF6F1 42%, var(--water-light) 62%);}
+  .water{position:absolute;left:0;right:0;bottom:0;top:58%;overflow:hidden;}
+  .band{position:absolute;left:0;right:-100%;height:100%;}
+  .band1{background:var(--water-light);top:0;}
+  .band2{background:linear-gradient(180deg,transparent,var(--water-mid) 100%);opacity:.32;top:18%;
+    -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);
+    mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);
+    animation:driftwater 14s linear infinite;}
+  .band3{background:var(--water-deep);opacity:.15;top:46%;
+    -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);
+    mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);
+    animation:driftwater 9s linear infinite reverse;}
+  @keyframes driftwater{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+
+  /* Nantucket — lighthouse + prize */
+  .dune{position:absolute;left:0;right:0;bottom:58%;height:14px;background:#D9CBA3;opacity:.7;border-radius:0 0 40% 40%/0 0 100% 100%;}
+  .lighthouse{position:absolute;bottom:calc(58% + 2px);left:26%;width:16px;height:70px;}
+  .lh-body{position:absolute;bottom:0;left:2px;width:12px;height:56px;background:repeating-linear-gradient(0deg,var(--expense) 0 8px,#fff 8px 16px);border-radius:2px 2px 0 0;}
+  .lh-top{position:absolute;bottom:56px;left:0;width:16px;height:10px;background:var(--navy);border-radius:2px;}
+  .lh-light{position:absolute;bottom:60px;left:6px;width:4px;height:4px;border-radius:50%;background:#FFE9A8;box-shadow:0 0 10px 4px rgba(255,233,168,0.7);animation:beam 2s ease-in-out infinite;}
+  @keyframes beam{0%,100%{opacity:.5;}50%{opacity:1;}}
+
+  .prize{position:absolute;bottom:calc(58% + 4px);left:56%;width:34px;height:34px;z-index:4;animation:bobPrize 2.4s ease-in-out infinite;}
+  @keyframes bobPrize{0%,100%{transform:translateY(0);}50%{transform:translateY(-6px);}}
+  .prize-chest{position:absolute;bottom:0;width:34px;height:20px;background:var(--expense);border-radius:3px;}
+  .prize-lid{position:absolute;bottom:16px;width:34px;height:10px;background:var(--navy);border-radius:6px 6px 0 0;}
+  .prize-glow{position:absolute;bottom:14px;left:12px;width:10px;height:10px;border-radius:50%;background:#FFE9A8;box-shadow:0 0 16px 6px rgba(255,233,168,0.8);}
+
+  .finish-caption{position:absolute;top:16px;left:0;right:0;text-align:center;font-family:'Outfit',sans-serif;font-weight:800;font-size:16px;color:var(--navy);z-index:5;}
+  .finish-sub{position:absolute;top:44px;left:0;right:0;text-align:center;font-size:11px;color:var(--liability);z-index:5;}
+
+  .stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px;}
+  .stat-box{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;}
+  .stat-box.primary{border-color:var(--expense);}
+  .stat-box .k{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--liability);font-weight:700;}
+  .stat-box .v{font-family:'Outfit',sans-serif;font-weight:700;font-size:19px;color:var(--navy);margin-top:2px;}
+  .stat-box.primary .v{color:var(--expense);}
+
+  .leaderboard{margin-top:16px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;}
+  .lb-head{font-family:'Outfit',sans-serif;font-weight:700;font-size:13px;color:var(--navy);margin-bottom:2px;}
+  .lb-sub{font-size:11px;color:var(--liability);margin-bottom:10px;}
+  .lb-row{display:flex;align-items:center;justify-content:space-between;font-size:14px;padding:8px 0;border-bottom:1px solid var(--line);}
+  .lb-row:last-child{border-bottom:none;}
+  .lb-row.you{background:rgba(163,229,212,0.3);margin:0 -18px;padding:8px 18px;border-radius:8px;border-bottom:none;}
+  .lb-rank{color:var(--liability);width:22px;font-weight:600;}
+  .lb-name{flex:1;font-weight:500;}
+  .lb-eff{color:var(--expense);font-weight:700;font-family:'Outfit',sans-serif;width:70px;text-align:right;}
+  .lb-ev{color:var(--liability);font-size:12px;width:60px;text-align:right;}
+
+  footer.note{max-width:880px;margin:34px auto 0;font-size:12px;color:var(--liability);line-height:1.6;border-top:1px solid var(--line);padding-top:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div><div class="eyebrow">CFO Navigator Arcade</div><div class="title">Sail, Don't Row</div></div>
+  </div>
+
+  <h3 class="section">Full Route</h3>
+  <div class="route">
+    <div class="stop"><div class="stop-line"></div><div class="stop-dot"></div><div class="stop-label">Charles River</div><div class="stop-sub">Start — Longfellow Bridge</div></div>
+    <div class="stop"><div class="stop-line"></div><div class="stop-dot"></div><div class="stop-label">Boston Harbor</div><div class="stop-sub">Zakim Bridge · whale bonus</div></div>
+    <div class="stop"><div class="stop-line"></div><div class="stop-dot"></div><div class="stop-label">Cape Cod</div><div class="stop-sub">Checkpoint</div></div>
+    <div class="stop"><div class="stop-line"></div><div class="stop-dot"></div><div class="stop-label">Martha's Vineyard</div><div class="stop-sub">Checkpoint</div></div>
+    <div class="stop finish"><div class="stop-dot"></div><div class="stop-label">Nantucket</div><div class="stop-sub">Finish — the prize</div></div>
+  </div>
+
+  <h3 class="section">Nantucket — Finish</h3>
+  <div class="canvas">
+    <div class="finish-caption">You made it to Nantucket 🏆</div>
+    <div class="finish-sub">Enterprise Value $9.2M · 84% under sail</div>
+    <div class="water"><div class="band band1"></div><div class="band band2"></div><div class="band band3"></div></div>
+    <div class="dune"></div>
+    <div class="lighthouse"><div class="lh-body"></div><div class="lh-top"></div><div class="lh-light"></div></div>
+    <div class="prize"><div class="prize-glow"></div><div class="prize-chest"></div><div class="prize-lid"></div></div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-box primary"><div class="k">Sailed vs. Rowed</div><div class="v">84% / 16%</div></div>
+    <div class="stat-box"><div class="k">Enterprise Value</div><div class="v">$9.2M</div></div>
+    <div class="stat-box"><div class="k">Time to Nantucket</div><div class="v">6:42</div></div>
+  </div>
+
+  <div class="leaderboard">
+    <div class="lb-head">Top Closers — Nantucket Finishers</div>
+    <div class="lb-sub">Ranked by % sailed (least rowing), not raw Enterprise Value</div>
+    <div class="lb-row"><span class="lb-rank">1</span><span class="lb-name">jrodriguez</span><span class="lb-eff">96% sailed</span><span class="lb-ev">$8.1M</span></div>
+    <div class="lb-row"><span class="lb-rank">2</span><span class="lb-name">runway_ray</span><span class="lb-eff">91% sailed</span><span class="lb-ev">$7.4M</span></div>
+    <div class="lb-row"><span class="lb-rank">3</span><span class="lb-name">cfo_kelly</span><span class="lb-eff">88% sailed</span><span class="lb-ev">$9.9M</span></div>
+    <div class="lb-row you"><span class="lb-rank">4</span><span class="lb-name">bweisberg (you)</span><span class="lb-eff">84% sailed</span><span class="lb-ev">$9.2M</span></div>
+    <div class="lb-row"><span class="lb-rank">5</span><span class="lb-name">amort_amy</span><span class="lb-eff">79% sailed</span><span class="lb-ev">$6.2M</span></div>
+  </div>
+
+  <footer class="note">
+    Note the leaderboard sort: rank 3 (cfo_kelly) has a higher Enterprise Value than rank 1, but ranks lower — because the primary sort is % sailed, per "who gets there rowing least." EV is now a secondary stat, not the ranking metric. Worth double-checking that's actually what you want to optimize for once real players are comparing scores — flagged in the build prompt below rather than assumed silently.
+  </footer>
+</div>
+</body>
+</html>
