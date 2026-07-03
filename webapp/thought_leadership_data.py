@@ -68,6 +68,12 @@ WRITING: list[TLItem] = [
         description="There's no single right exit—IPO, acquisition, sponsor sale, secondary—so the real job is building a company that's ready no matter which door opens, starting years before any process does.",
     ),
     TLItem(
+        title="Building a Modern Finance Team: How Two Leaders Are Rethinking the Process",
+        url="https://www.fsuite.co/blog/building-a-modern-finance-team", venue="The F Suite",
+        date_label="Apr 2026", sort_key="2026-04", type="writing",
+        description="Co-authored with Mux CFO Jaime Ortiz on why the old revenue-banded hiring ladder for finance teams breaks down, and the three principles that replace it: prioritize whichever leg of the stool—accounting, FP&A, or business ops—is weakest, default to generalists over narrow specialists, and scale through systems and data before headcount.",
+    ),
+    TLItem(
         title="Building Dashboards That Matter",
         url="https://www.onlycfo.io/p/building-dashboards-that-matter", venue="OnlyCFO",
         date_label="Apr 2024", sort_key="2024-04", type="writing",
