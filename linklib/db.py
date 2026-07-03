@@ -113,6 +113,29 @@ CREATE TABLE IF NOT EXISTS tools (
 
 CREATE INDEX IF NOT EXISTS idx_tools_approved ON tools(approved);
 
+-- The controlled vocabulary of category pills shown on /tools. Independent of
+-- which tools currently use them, so a category can be created empty and
+-- tagged onto tools afterward — unlike article tags (all_tags()), which are
+-- purely derived from usage. sort_order controls pill/checkbox display order.
+CREATE TABLE IF NOT EXISTS tool_categories (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    sort_order  INTEGER NOT NULL DEFAULT 0
+);
+
+-- Benchmarking Resources section on /tools. coverage: 'Private'|'Public'|'Both'.
+-- pricing: 'free'|'paid'|'freemium' (only 'paid'/'freemium' render a $ badge).
+CREATE TABLE IF NOT EXISTS benchmarks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    coverage    TEXT NOT NULL DEFAULT 'Private',
+    pricing     TEXT NOT NULL DEFAULT 'free',
+    sort_order  INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS read_later (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     url         TEXT NOT NULL UNIQUE,
@@ -838,6 +861,149 @@ class Library:
         d = dict(r)
         d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
         return d
+
+    # -- tool categories (the /tools filter pills) --------------------------
+    # Unlike article tags, this is a curated vocabulary independent of usage —
+    # a category can exist with zero tools tagged to it, ready to assign.
+
+    def list_tool_categories(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, name, description, sort_order FROM tool_categories ORDER BY sort_order, name"
+        ).fetchall()
+        counts: dict[str, int] = {}
+        for (cj,) in self.conn.execute("SELECT categories_json FROM tools"):
+            for c in json.loads(cj) or []:
+                counts[c] = counts.get(c, 0) + 1
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["tool_count"] = counts.get(d["name"], 0)
+            result.append(d)
+        return result
+
+    def add_tool_category(self, name: str, description: str = "") -> int:
+        name, description = name.strip(), description.strip()
+        if not name:
+            raise ValueError("Category name is required.")
+        existing = self.conn.execute(
+            "SELECT 1 FROM tool_categories WHERE name = ? COLLATE NOCASE", (name,)
+        ).fetchone()
+        if existing:
+            raise ValueError(f'A category named "{name}" already exists.')
+        next_order = self.conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tool_categories"
+        ).fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO tool_categories (name, description, sort_order) VALUES (?,?,?)",
+            (name, description, next_order),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def rename_tool_category(self, category_id: int, new_name: str, description: str = "") -> int:
+        """Rename/re-describe a category, cascading the name change onto every
+        tool that has it. Returns the number of tools whose categories_json
+        changed. Raises ValueError if the new name collides with a different
+        existing category."""
+        new_name, description = new_name.strip(), description.strip()
+        if not new_name:
+            raise ValueError("Category name is required.")
+        row = self.conn.execute(
+            "SELECT name FROM tool_categories WHERE id = ?", (category_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Category not found.")
+        old_name = row["name"]
+        if new_name.lower() != old_name.lower():
+            collision = self.conn.execute(
+                "SELECT 1 FROM tool_categories WHERE name = ? COLLATE NOCASE AND id != ?",
+                (new_name, category_id),
+            ).fetchone()
+            if collision:
+                raise ValueError(f'A category named "{new_name}" already exists.')
+        self.conn.execute(
+            "UPDATE tool_categories SET name=?, description=? WHERE id=?",
+            (new_name, description, category_id),
+        )
+        changed = 0
+        if new_name != old_name:
+            for t in self.conn.execute(
+                "SELECT id, categories_json FROM tools WHERE categories_json LIKE ?", (f'%"{old_name}"%',)
+            ).fetchall():
+                cats = json.loads(t["categories_json"]) or []
+                if old_name not in cats:
+                    continue
+                updated = sorted(set(new_name if c == old_name else c for c in cats))
+                self.conn.execute(
+                    "UPDATE tools SET categories_json=? WHERE id=?",
+                    (json.dumps(updated), t["id"]),
+                )
+                changed += 1
+        self.conn.commit()
+        return changed
+
+    def delete_tool_category(self, category_id: int) -> int:
+        """Delete a category and strip it from every tool that has it. Tools
+        left with no categories still show under "All" on /tools, just not
+        under any specific filter. Returns the number of tools changed."""
+        row = self.conn.execute(
+            "SELECT name FROM tool_categories WHERE id = ?", (category_id,)
+        ).fetchone()
+        if not row:
+            return 0
+        name = row["name"]
+        self.conn.execute("DELETE FROM tool_categories WHERE id = ?", (category_id,))
+        changed = 0
+        for t in self.conn.execute(
+            "SELECT id, categories_json FROM tools WHERE categories_json LIKE ?", (f'%"{name}"%',)
+        ).fetchall():
+            cats = json.loads(t["categories_json"]) or []
+            if name not in cats:
+                continue
+            kept = [c for c in cats if c != name]
+            self.conn.execute(
+                "UPDATE tools SET categories_json=? WHERE id=?",
+                (json.dumps(kept), t["id"]),
+            )
+            changed += 1
+        self.conn.commit()
+        return changed
+
+    # -- benchmarking resources (the /tools "Benchmarking Resources" section) --
+
+    def list_benchmarks(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM benchmarks ORDER BY sort_order, name"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_benchmark(self, benchmark_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM benchmarks WHERE id = ?", (benchmark_id,)).fetchone()
+        return dict(row) if row else None
+
+    def add_benchmark(self, name: str, url: str, description: str,
+                      coverage: str = "Private", pricing: str = "free") -> int:
+        next_order = self.conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM benchmarks"
+        ).fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO benchmarks (name, url, description, coverage, pricing, sort_order) VALUES (?,?,?,?,?,?)",
+            (name.strip(), url.strip(), description.strip(), coverage, pricing, next_order),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_benchmark(self, benchmark_id: int, name: str, url: str, description: str,
+                         coverage: str, pricing: str) -> None:
+        self.conn.execute(
+            "UPDATE benchmarks SET name=?, url=?, description=?, coverage=?, pricing=? WHERE id=?",
+            (name.strip(), url.strip(), description.strip(), coverage, pricing, benchmark_id),
+        )
+        self.conn.commit()
+
+    def delete_benchmark(self, benchmark_id: int) -> None:
+        self.conn.execute("DELETE FROM benchmarks WHERE id = ?", (benchmark_id,))
+        self.conn.commit()
 
     # -- read later ------------------------------------------------------------
 
