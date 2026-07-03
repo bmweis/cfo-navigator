@@ -2327,17 +2327,18 @@ def netsuite_mcp(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# "Sail, Don't Row" — Phases 1-3: core engine, wind/rowing/Stamina, and the
-# five-checkpoint route to a Nantucket finish (public, no auth to play).
-# DOM+CSS-transform game, vanilla JS. Boat SVG/obstacle colors/skyline
-# landmarks/difficulty-pill treatment lifted from design/mockups/ per the
-# Phase 0 sign-off; the Boston Harbor/Cape Cod/Martha's Vineyard/Nantucket
-# backdrops extend that same visual language (no mockup existed for those
-# four, so they're an original fill using the established technique).
-# Rank tuning (pace, wind, obstacle density, collision rule) is
-# admin-editable at /admin/game-settings and read live here. Wind gust zones
-# (auto-sail) are placed by their own seeded PRNG, independent of the
-# obstacle seed, so tuning one never reshuffles the other.
+# "Sail, Don't Row" — Phases 1-4: core engine, wind/rowing/Stamina, the
+# five-checkpoint route to a Nantucket finish, and full finish/game-over
+# outcome screens (public, no auth to play). DOM+CSS-transform game, vanilla
+# JS. Boat SVG/obstacle colors/skyline landmarks/difficulty-pill treatment
+# lifted from design/mockups/ per the Phase 0 sign-off; the Boston Harbor/
+# Cape Cod/Martha's Vineyard/Nantucket backdrops extend that same visual
+# language (no mockup existed for those four, so they're an original fill
+# using the established technique). Rank tuning (pace, wind, obstacle
+# density, collision rule) is admin-editable at /admin/game-settings and
+# read live here. Wind gust zones (auto-sail) are placed by their own
+# seeded PRNG, independent of the obstacle seed, so tuning one never
+# reshuffles the other.
 #
 # Stamina design note: the Concept spec says rowing drains Stamina and
 # resting is free; Phase 3's recap line ("Stamina depletes over the whole
@@ -2348,8 +2349,14 @@ def netsuite_mcp(request: Request):
 # rowing simply stops working until it recovers, it doesn't end the run.
 # Flagged for Brian to confirm; easy to change if a hard fail is wanted.
 #
-# Not yet built: the full outcome-stats breakdown and leaderboard
-# (Phase 4/7), rank-select visual polish (Phase 5/6).
+# Leaderboard note: the outcome screens are login-aware (a real "sign in"
+# link for signed-out players) but don't fabricate a submission — the
+# leaderboard table/write path is Phase 7, not built yet. Signed-in players
+# see an honest "opens in a later update" note rather than a fake
+# confirmation.
+#
+# Not yet built: the leaderboard itself (Phase 7), rank-select visual
+# polish (Phase 5/6).
 # ---------------------------------------------------------------------------
 
 _SDR_CSS = """
@@ -2489,17 +2496,32 @@ _SDR_CSS = """
   color:var(--navy);background:rgba(255,255,255,0.8);border-radius:6px;padding:4px 10px;z-index:6;
   pointer-events:none;display:none;}
 
+/* backdrop-filter isn't universal — the semi-opaque background-color is a
+   plain scrim fallback that works even where blur doesn't; blur is a
+   progressive enhancement layered on top, never load-bearing. */
 .sdr-outcome-scrim{position:absolute;inset:0;background:rgba(247,246,241,0.6);backdrop-filter:blur(5px);
   -webkit-backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;z-index:9;
-  border-radius:16px;opacity:0;transition:opacity .25s ease;}
+  border-radius:16px;opacity:0;transition:opacity .25s ease;padding:16px;}
 .sdr-outcome-scrim.sdr-visible{opacity:1;}
-.sdr-outcome-card{background:#fff;border-radius:14px;padding:24px 30px;text-align:center;
-  box-shadow:0 12px 28px rgba(0,41,117,0.18);transform:scale(0.92);transition:transform .25s ease;max-width:80%;
-  border-top:3px solid transparent;}
+.sdr-outcome-card{background:#fff;border-radius:14px;padding:24px 28px;text-align:center;
+  box-shadow:0 12px 28px rgba(0,41,117,0.18);transform:scale(0.92);transition:transform .25s ease;
+  max-width:340px;width:100%;border-top:3px solid transparent;}
 .sdr-outcome-scrim.sdr-visible .sdr-outcome-card{transform:scale(1);}
 .sdr-outcome-scrim.sdr-finish .sdr-outcome-card{border-top-color:var(--sdr-gold);}
 .sdr-outcome-title{font-family:var(--font-head);font-weight:800;font-size:17px;color:var(--navy);}
-.sdr-outcome-sub{font-size:12px;color:var(--muted);margin-top:8px;}
+.sdr-outcome-sub{font-size:12px;color:var(--muted);margin-top:6px;}
+
+.sdr-outcome-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px;}
+@media (max-width:480px){ .sdr-outcome-stats{grid-template-columns:1fr;} }
+.sdr-stat-box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 4px;}
+.sdr-stat-k{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;}
+.sdr-stat-v{font-family:var(--font-head);font-weight:700;font-size:15px;color:var(--navy);margin-top:2px;}
+.sdr-outcome-furthest{font-size:12px;color:var(--muted);margin-top:10px;}
+.sdr-outcome-furthest strong{color:var(--navy);}
+.sdr-pace-breakdown{font-size:11px;color:var(--muted);margin-top:8px;}
+.sdr-leaderboard-note{font-size:12px;color:var(--muted);margin-top:14px;padding-top:12px;border-top:1px solid var(--line);}
+.sdr-leaderboard-note a{font-weight:600;}
+
 .sdr-hint{margin-top:16px;font-size:12px;color:var(--muted);}
 
 .sdr-stage.sdr-flash::after{content:'';position:absolute;inset:0;background:rgba(181,85,58,0.35);
@@ -2888,15 +2910,50 @@ _SDR_JS = """
   function hiKeyFor(rank){ return 'sdr_hi_' + rank; }
   function storedHi(rank){ return parseInt(localStorage.getItem(hiKeyFor(rank)) || '0', 10); }
 
+  function formatTime(sec){
+    sec = Math.max(0, Math.round(sec));
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
   function endRun(reason){
     state.over = true;
     state.outcome = reason;  // 'finish' | 'sunk'
     var prevHi = storedHi(state.rank);
     if (state.score > prevHi) localStorage.setItem(hiKeyFor(state.rank), String(state.score));
+
+    var distanceFraction = state.worldX / COURSE_LENGTH;
+    var elapsedSec = (performance.now() - state.startTs) / 1000;
+
     var title = reason === 'finish' ? "You made it to Nantucket 🏆" : 'Sunk';
     document.getElementById('sdrOutcomeTitle').textContent = title;
     document.getElementById('sdrOutcomeSub').textContent =
-      Math.round(state.worldX/COURSE_LENGTH*100) + '% of the course \\u00b7 Score ' + state.score;
+      Math.round(distanceFraction * 100) + '% of the course \\u00b7 Score ' + state.score;
+
+    document.getElementById('sdrStatScore').textContent = state.score;
+    document.getElementById('sdrStatDistance').textContent = Math.round(distanceFraction * 100) + '%';
+    document.getElementById('sdrStatTime').textContent = formatTime(elapsedSec);
+    document.getElementById('sdrStatEfficiency').textContent = Math.round(state.stamina) + '%';
+
+    var furthestRow = document.getElementById('sdrOutcomeFurthest');
+    if (reason === 'finish') {
+      furthestRow.style.display = 'none';
+    } else {
+      furthestRow.style.display = 'block';
+      document.getElementById('sdrStatFurthest').textContent = currentCheckpointLabel();
+    }
+
+    var activeTime = state.sailTime + state.rowTime + state.driftTime;
+    var pace = document.getElementById('sdrPaceBreakdown');
+    if (activeTime > 0.5) {
+      var sailPct = Math.round(state.sailTime / activeTime * 100);
+      var rowPct = Math.round(state.rowTime / activeTime * 100);
+      var driftPct = Math.max(0, 100 - sailPct - rowPct);
+      pace.textContent = sailPct + '% sailed \\u00b7 ' + rowPct + '% rowed \\u00b7 ' + driftPct + '% drifted';
+    } else {
+      pace.textContent = '';
+    }
+
     gameOver.classList.toggle('sdr-finish', reason === 'finish');
     gameOver.style.display = 'flex';
     requestAnimationFrame(function(){ gameOver.classList.add('sdr-visible'); });
@@ -3105,7 +3162,17 @@ _SDR_CHECKPOINT_SVGS = [
 ]
 
 
-def _sdr_build_body(ranks):
+def _sdr_build_body(ranks, signed_in):
+    # The leaderboard table/write path is Phase 7 — not built yet. This note
+    # is intentionally honest about that: signed-out players get a real,
+    # working invitation to log in (useful today); signed-in players get a
+    # "coming soon" note rather than a fabricated "score saved" claim.
+    if signed_in:
+        leaderboard_note = ('<p class="sdr-leaderboard-note">Leaderboard opens in a later update &mdash; '
+                             'your Score is shown above.</p>')
+    else:
+        leaderboard_note = ('<p class="sdr-leaderboard-note">Sign in to save runs to the leaderboard once it '
+                             'opens. <a href="/login?next=%2Fplay">Sign in &rarr;</a></p>')
     pills_html = "".join(_sdr_rank_pill_html(r, r["rank"] == "mate") for r in ranks)
     skyline_layers = "".join(
         f'<div class="sdr-skyline-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">{svg}</div>'
@@ -3180,6 +3247,15 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
   <div class="sdr-outcome-card">
     <div class="sdr-outcome-title" id="sdrOutcomeTitle">Sunk</div>
     <div class="sdr-outcome-sub" id="sdrOutcomeSub"></div>
+    <div class="sdr-outcome-stats">
+      <div class="sdr-stat-box"><div class="sdr-stat-k">Score</div><div class="sdr-stat-v" id="sdrStatScore">0</div></div>
+      <div class="sdr-stat-box"><div class="sdr-stat-k">Distance</div><div class="sdr-stat-v" id="sdrStatDistance">0%</div></div>
+      <div class="sdr-stat-box"><div class="sdr-stat-k">Time</div><div class="sdr-stat-v" id="sdrStatTime">0:00</div></div>
+      <div class="sdr-stat-box"><div class="sdr-stat-k">Efficiency</div><div class="sdr-stat-v" id="sdrStatEfficiency">0%</div></div>
+    </div>
+    <div class="sdr-outcome-furthest" id="sdrOutcomeFurthest">Furthest checkpoint: <strong id="sdrStatFurthest"></strong></div>
+    <div class="sdr-pace-breakdown" id="sdrPaceBreakdown"></div>
+    """ + leaderboard_note + """
     <div>
       <button type="button" id="sdrRetryBtn" class="btn" style="margin-top:16px;">Try Again</button>
       <button type="button" id="sdrChangeRankBtn" class="btn btn-ghost" style="margin-top:16px;margin-left:8px;">Change Rank</button>
@@ -3190,9 +3266,8 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
 <template id="sdrRockTpl">""" + _SDR_ROCK_SVG + """</template>
 <template id="sdrBuoyTpl">""" + _SDR_BUOY_SVG + """</template>
 
-<p class="sdr-hint">Phase 3 preview: the full route to Nantucket is live &mdash; wind, rowing, Stamina, checkpoints, and the finish
-line. Detailed outcome stats and the leaderboard land in a later phase. Rank pace/difficulty is tunable at
-<code>/admin/game-settings</code>.</p>
+<p class="sdr-hint">Phase 4 preview: full outcome stats on finish and game over. The public leaderboard lands in a later
+phase. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
 </div>
 <script>""" + js + """</script>"""
 
@@ -3204,7 +3279,7 @@ def play_sail_dont_row(request: Request):
         ranks = lib.list_game_rank_settings()
     finally:
         lib.close()
-    body = _sdr_build_body(ranks)
+    body = _sdr_build_body(ranks, signed_in=_is_member(request))
     return HTMLResponse(_page("Sail, Don't Row—Brian Weisberg", "Sail, Don't Row", body, role=_role(request)))
 
 
