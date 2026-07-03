@@ -1,16 +1,18 @@
 """Sail, Don't Row — /play route (Phase 1 core engine, Phase 2 wind/rowing,
-Phase 3 checkpoint route + Nantucket finish, Phase 4 outcome-screen stats).
+Phase 3 checkpoint route + Nantucket finish, Phase 4 outcome-screen stats,
+Phase 5 rank-select polish).
 
 Confirms the page is fully public, renders all four ranks, embeds the live
 game_rank_settings values as JSON for the client engine, picks up admin
 edits without a redeploy, wires up the gust-zone DOM/JS the Phase 2
 auto-sail mechanic depends on, wires up the five checkpoint backdrop
-layers + whale + prize elements Phase 3 depends on, and renders the full
-outcome-stats grid + login-aware leaderboard note Phase 4 adds. The
-frame-by-frame JS behavior (gust/stamina timing, checkpoint crossfade,
-whale trigger, finish condition, stat computation) is exercised via a
-live-server Playwright pass during development (see the PR description)
-rather than here.
+layers + whale + prize elements Phase 3 depends on, renders the full
+outcome-stats grid + login-aware leaderboard note Phase 4 adds, and
+confirms each rank pill's collision-rule line (Phase 5) is derived live
+from game_rank_settings rather than hardcoded. The frame-by-frame JS
+behavior (gust/stamina timing, checkpoint crossfade, whale trigger, finish
+condition, stat computation) is exercised via a live-server Playwright
+pass during development (see the PR description) rather than here.
 """
 import pathlib
 import sys
@@ -48,6 +50,33 @@ def test_play_renders_all_ranks(env):
     assert "Deckhand" in body and "Mate" in body and "First Mate" in body and "Skipper" in body
     for rank_id in ["deckhand", "mate", "first_mate", "skipper"]:
         assert f'data-rank="{rank_id}"' in body
+
+
+def test_collision_description_matches_mockup_defaults():
+    """Default seed values must reproduce the four exact strings from
+    design/mockups/sail-dont-row-final-rendering.html's rank selector."""
+    from webapp.app import _sdr_collision_description
+    assert _sdr_collision_description({"collision_limit": 0, "grace_window": 1}) == "No penalty on hit"
+    assert _sdr_collision_description({"collision_limit": 3, "grace_window": 1}) == "3 hits and you’re sunk"
+    assert _sdr_collision_description({"collision_limit": 1, "grace_window": 1}) == "1 hit and you’re sunk"
+    assert _sdr_collision_description({"collision_limit": 1, "grace_window": 0}) == "Any hit ends it instantly"
+
+
+def test_collision_description_tracks_admin_retuning():
+    """If Brian raises a rank's collision_limit at /admin/game-settings, the
+    pill text must follow — it's derived, not a hardcoded string that could
+    silently drift out of sync."""
+    from webapp.app import _sdr_collision_description
+    assert _sdr_collision_description({"collision_limit": 5, "grace_window": 1}) == "5 hits and you’re sunk"
+
+
+def test_play_rank_pills_show_collision_rule(env):
+    _, client = env
+    body = client.get("/play").text
+    assert '<span class="sdr-rank-collision">No penalty on hit</span>' in body
+    assert '<span class="sdr-rank-collision">3 hits and you’re sunk</span>' in body
+    assert '<span class="sdr-rank-collision">1 hit and you’re sunk</span>' in body
+    assert '<span class="sdr-rank-collision">Any hit ends it instantly</span>' in body
 
 
 def test_play_embeds_rank_settings_json(env):
