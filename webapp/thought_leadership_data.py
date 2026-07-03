@@ -191,7 +191,8 @@ PODCASTS: list[TLItem] = [
     TLItem(
         title="The M&A Playbook",
         url="https://open.spotify.com/episode/5kMa3kkutDhsoc4SBoOBZ1", venue="The Cash Flow Show",
-        date_label="Mar 2025", sort_key="2025-03", type="podcast", needs_synopsis=True,
+        date_label="Mar 2025", sort_key="2025-03", type="podcast",
+        description="With Spiff's former exec on how a years-long relationship with an investor—Salesforce backed two rounds before acquiring—became an exit, plus a banker's take on when to engage advisors, what drags out diligence, and how strategics and PE firms value a target differently.",
     ),
     TLItem(
         title="Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks (Guest)",
