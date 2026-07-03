@@ -185,7 +185,8 @@ PODCASTS: list[TLItem] = [
     TLItem(
         title="Commission Plan Strategies in 2025 — with Meir Rotenberg & David Ma",
         url="https://open.spotify.com/episode/64DsKmsDgOshd3LQdM4Cte", venue="The Cash Flow Show",
-        date_label="Mar 2025", sort_key="2025-03", type="podcast", needs_synopsis=True,
+        date_label="Mar 2025", sort_key="2025-03", type="podcast",
+        description="With Meir Rotenberg and David Ma on quota setting, scaling a GTM team without breaking it, and comp plan design—including why misaligned incentives across sales, deal desk, and implementation cause most of the pain, plus whether AI SDRs are earning their keep or just hype.",
     ),
     TLItem(
         title="The M&A Playbook",
