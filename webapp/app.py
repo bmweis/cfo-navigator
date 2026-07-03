@@ -2704,8 +2704,7 @@ function renderTools(tools) {{
     var introBtn = '';
     if (t.has_warm_intro) {{
       introBtn = MEMBER
-        ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ',\'' + esc(t.name).replace(/'/g,"\\'") + '\')">'
-          + '&#10024; Warm Intro</button>'
+        ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ')">&#10024; Warm Intro</button>'
         : '<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">&#10024; Warm Intro</button>';
     }}
     return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '" data-tool-id="' + t.id + '">'
@@ -2853,9 +2852,10 @@ renderTools(ALL_TOOLS);
 </div>
 <script>
 var _introToolId = null;
-function openIntroModal(toolId, toolName) {
+function openIntroModal(toolId) {
   _introToolId = toolId;
-  document.getElementById('intro-tool-name').textContent = toolName;
+  var tool = ALL_TOOLS.find(function(x) { return x.id === toolId; });
+  document.getElementById('intro-tool-name').textContent = tool ? tool.name : '';
   document.getElementById('intro-name').value = '';
   document.getElementById('intro-email').value = '';
   document.getElementById('intro-company').value = '';
