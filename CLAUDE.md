@@ -192,6 +192,10 @@ build with sign-off between phases), open a PR per phase as it's completed, not 
 PR at the very end. Small, incremental PRs are easier to review and catch problems
 before they compound across phases.
 
+**Brian merges PRs himself — don't call the merge tool unless he explicitly asks
+for it in that moment.** Open the PR, make sure checks are green, then hand him the
+link.
+
 ## Deployment
 
 - **Host:** Railway, building from the `Dockerfile` (`python:3.11-slim`, runs
