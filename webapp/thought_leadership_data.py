@@ -1,7 +1,7 @@
 """Structured content for the /thought-leadership page's four editorial lists
 (Writing, Speaking & Events, Podcasts, Press).
 
-Deliberately plain Python data, not a DB table: this is small (~35 items),
+Deliberately plain Python data, not a DB table: this is small (~30 items),
 hand-curated by Brian/Claude Code, and changes a few times a quarter at most
 — the same category as the three featured cards in webapp/app.py, which stay
 untouched. Keeping it here (rather than in library.db, which isn't in git and
@@ -102,22 +102,10 @@ SPEAKING: list[TLItem] = [
         description="A working session, not a demo reel: how finance teams are using Claude to run multi-step workflows end to end, including a live example completed across systems from a single prompt.",
     ),
     TLItem(
-        title="Growth CFO Salon (Boston)",
-        url="", venue="The F Suite", date_label="Nov 2025", sort_key="2025-11",
-        type="speaking",
-        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
-    ),
-    TLItem(
         title="Cash Cycle Demo Day — Opening & Closing Remarks",
         url="https://cashcycledemoday.splashthat.com/", venue="The F Suite",
         date_label="Oct 2025", sort_key="2025-10", type="speaking",
         description="Hosted The F Suite's virtual Cash Cycle Demo Day—five vendors (RightRev, Routable, Sequence, Tabs, Vayu) walked through billing, collections, and revenue-rec tooling, followed by a closed-door, vendor-free Q&A with peer CFOs.",
-    ),
-    TLItem(
-        title="CFO Supper Club (Boston)",
-        url="", venue="The F Suite", date_label="Aug 2025", sort_key="2025-08",
-        type="speaking",
-        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
     ),
     TLItem(
         title="CFO Roundtable — M&A and Managing Uncertainty",
@@ -130,24 +118,6 @@ SPEAKING: list[TLItem] = [
         url="https://numeric.lpages.co/lean-accounting-team-webinar/", venue="Numeric",
         date_label="Mar 2024", sort_key="2024-03", type="speaking",
         description="Hosted a conversation with Crafty Apes CFO Leo Dencik and Numeric's Connor Foran on how lean teams cover both accounting and FP&A without adding headcount, and why spreading close work across the month beats cramming it into five days.",
-    ),
-    TLItem(
-        title="Private Dinner & Guided Discussion (Boston)",
-        url="", venue="The F Suite", date_label="Apr 2024", sort_key="2024-04",
-        type="speaking",
-        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
-    ),
-    TLItem(
-        title="CFO Dinner (Boston)",
-        url="", venue="The F Suite", date_label="Dec 2023", sort_key="2023-12",
-        type="speaking",
-        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
-    ),
-    TLItem(
-        title="NC Launch Dinner",
-        url="", venue="The F Suite", date_label="Jun 2023", sort_key="2023-06",
-        type="speaking",
-        description="An invite-only F Suite small-group dinner, curated by industry, stage, and geography for candid, peer-to-peer conversation among CFOs. No public recap—F Suite dinners are off the record by design.",
     ),
     TLItem(
         title="Agile Finance Summit",
