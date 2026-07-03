@@ -51,7 +51,10 @@ from webapp.thought_leadership_data import SECTIONS as TL_SECTIONS, TLItem
 DB_PATH = os.environ.get("LINKLIB_DB", "library.db")
 SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
 
-TOOL_CATEGORIES = [
+# One-time seed data for the `tool_categories` table (see _seed_toolbox).
+# Not read directly anywhere else — once seeded, the DB is the source of
+# truth and categories are managed at /admin/tools/categories.
+_DEFAULT_TOOL_CATEGORIES = [
     "FP&A",
     "Headcount Planning",
     "Treasury",
@@ -75,7 +78,7 @@ TOOL_CATEGORIES = [
     "BI & Analytics",
 ]
 
-CATEGORY_DESCRIPTIONS = {
+_DEFAULT_CATEGORY_DESCRIPTIONS = {
     "FP&A": "Business-wide financial planning, budgeting, forecasting, and management reporting.",
     "Headcount Planning": "Standalone tools for planning and tracking headcount—open reqs, budget vs. actuals on people costs, and the finance–HR handoff.",
     "Treasury": "Treasury management systems, FX risk, global payments infrastructure, and corporate cash investment platforms.",
@@ -101,7 +104,10 @@ CATEGORY_DESCRIPTIONS = {
 
 # coverage: "Private" | "Public" | "Both"
 # pricing:  "free" (default) | "paid" | "freemium"  -> shows a $ badge
-BENCHMARKS = [
+# One-time seed data for the `benchmarks` table (see _seed_toolbox). Not read
+# directly anywhere else — the DB is the source of truth once seeded, managed
+# at /admin/tools/benchmarks.
+_DEFAULT_BENCHMARKS = [
     {
         "name": "ICONIQ Growth",
         "url": "https://iconiqcapital.com/growth/",
@@ -194,11 +200,21 @@ app = FastAPI(title="bmweis.com")
 
 @app.on_event("startup")
 def _seed_toolbox():
-    """Seed tools and keep categories/advisor in sync with the seed list."""
-    import json as _j
+    """Seed tools + the tool_categories vocabulary on first run, and keep the
+    advisor flag in sync with the seed list. categories_json is NOT re-synced
+    from the seed list for tools that already exist — once seeded, categories
+    are owned by the DB and edited at /admin/tools/categories, so this must
+    not clobber changes made there on every restart/deploy."""
     from scripts.seed_tools import TOOLS
     lib = _lib()
     try:
+        if not lib.list_tool_categories():
+            for name in _DEFAULT_TOOL_CATEGORIES:
+                lib.add_tool_category(name, _DEFAULT_CATEGORY_DESCRIPTIONS.get(name, ""))
+        if not lib.list_benchmarks():
+            for b in _DEFAULT_BENCHMARKS:
+                lib.add_benchmark(b["name"], b["url"], b["description"],
+                                  b.get("coverage", "Private"), b.get("pricing", "free"))
         for t in TOOLS:
             row = lib.conn.execute(
                 "SELECT id, advisor, categories_json FROM tools WHERE url = ?", (t["url"],)
@@ -207,12 +223,11 @@ def _seed_toolbox():
                 lib.add_tool(t["name"], t["description"], t["url"], t["categories"],
                              approved=1, advisor=int(t.get("advisor", False)))
             else:
-                new_cats = _j.dumps(t["categories"])
                 new_adv = int(t.get("advisor", False))
-                if row["categories_json"] != new_cats or row["advisor"] != new_adv:
+                if row["advisor"] != new_adv:
                     lib.conn.execute(
-                        "UPDATE tools SET categories_json=?, advisor=? WHERE id=?",
-                        (new_cats, new_adv, row["id"]),
+                        "UPDATE tools SET advisor=? WHERE id=?",
+                        (new_adv, row["id"]),
                     )
                     lib.conn.commit()
     finally:
@@ -2454,6 +2469,8 @@ def tools_directory(request: Request):
     lib = _lib()
     try:
         tools = lib.list_tools(approved_only=True)
+        categories = lib.list_tool_categories()
+        benchmarks = lib.list_benchmarks()
     finally:
         lib.close()
 
@@ -2486,9 +2503,9 @@ def tools_directory(request: Request):
     tools_json = _json.dumps([_tool_entry(t) for t in tools])
 
     cat_buttons = "".join(
-        f'<button class="tcat-btn" data-cat="{_esc(c)}" onclick="filterCat(this)"'
-        f' title="{_esc(CATEGORY_DESCRIPTIONS.get(c, ""))}">{_esc(c)}</button>'
-        for c in TOOL_CATEGORIES
+        f'<button class="tcat-btn" data-cat="{_esc(c["name"])}" onclick="filterCat(this)"'
+        f' title="{_esc(c["description"])}">{_esc(c["name"])}</button>'
+        for c in categories
     )
 
     def _bench_badge_style(cov: str) -> str:
@@ -2520,7 +2537,7 @@ def tools_directory(request: Request):
         f'</div>'
         f'<p class="bench-desc">{_esc(b["description"])}</p>'
         f'</a>'
-        for b in BENCHMARKS
+        for b in benchmarks
     )
 
     body = f"""<div class="page" style="max-width:860px;">
@@ -2529,7 +2546,8 @@ def tools_directory(request: Request):
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
-{'<a href="/tools/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Submit a tool</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to submit a tool</a>'}</p>
+{'<a href="/tools/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Submit a tool</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to submit a tool</a>'}
+{'<a href="/admin/tools/categories" style="margin-left:12px;font-size:14px;font-weight:500;">Manage categories →</a>' if authed else ''}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
   <input id="tool-search" type="search" placeholder="Search tools…"
@@ -2556,7 +2574,10 @@ def tools_directory(request: Request):
 </div>
 
 <div style="margin-top:48px;padding-top:40px;border-top:1px solid var(--line);">
-  <h2 style="font-size:20px;font-weight:700;margin:0 0 6px;">Benchmarking Resources</h2>
+  <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+    <h2 style="font-size:20px;font-weight:700;margin:0 0 6px;">Benchmarking Resources</h2>
+    {'<a href="/admin/tools/benchmarks" style="font-size:14px;font-weight:500;">Manage →</a>' if authed else ''}
+  </div>
   <p style="color:var(--muted);font-size:14px;margin:0 0 12px;">The benchmarking sources I actually use.</p>
   <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a>&mdash;it&rsquo;s not always what you think it is.</p>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
@@ -2949,14 +2970,15 @@ function submitIntroForm() {
     return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
-def _tool_category_checkboxes(selected: list[str] | None = None) -> str:
+def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None = None) -> str:
     selected = selected or []
     return "".join(
         f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">'
-        f'<input type="checkbox" name="categories" value="{_esc(c)}"'
-        f'{" checked" if c in selected else ""}> {_esc(c)}</label>'
-        for c in TOOL_CATEGORIES
-    )
+        f'<input type="checkbox" name="categories" value="{_esc(c["name"])}"'
+        f'{" checked" if c["name"] in selected else ""}> {_esc(c["name"])}</label>'
+        for c in categories
+    ) or '<p style="grid-column:1/-1;font-size:13px;color:var(--muted);margin:0;">' \
+         'No categories yet — <a href="/admin/tools/categories">add one</a> first.</p>'
 
 
 @app.get("/tools/submit", response_class=HTMLResponse)
@@ -2970,6 +2992,12 @@ def tools_submit_page(request: Request, submitted: str = ""):
 <a href="/tools" class="btn btn-ghost" style="margin-top:8px;">Back to CFO Toolbox</a>
 </div>"""
         return HTMLResponse(_page("Submission received—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+    lib = _lib()
+    try:
+        categories = lib.list_tool_categories()
+    finally:
+        lib.close()
 
     body = f"""<div class="page" style="max-width:560px;">
 <h1>Submit a Tool</h1>
@@ -2994,9 +3022,9 @@ def tools_submit_page(request: Request, submitted: str = ""):
       placeholder="What does it do? 1–2 sentences."></textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional — select any that apply)</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-      {_tool_category_checkboxes()}
+      {_tool_category_checkboxes(categories)}
     </div>
   </div>
   <div>
@@ -3023,8 +3051,8 @@ async def tools_submit(request: Request):
     description = (form.get("description") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
     submitted_by = (form.get("submitted_by") or "").strip()
-    if not (name and url and description and categories and submitted_by):
-        raise HTTPException(status_code=400, detail="All fields including email are required.")
+    if not (name and url and description and submitted_by):
+        raise HTTPException(status_code=400, detail="Name, URL, description, and email are required.")
     lib = _lib()
     try:
         lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0)
@@ -3119,6 +3147,11 @@ def admin_tools(request: Request):
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
             <a href="/admin/tools/{t['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+            <form method="post" action="/admin/tools/{t['id']}/delete" style="display:inline;margin-left:6px;"
+                  onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
+              <input type="hidden" name="redirect_to" value="/admin/tools">
+              <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+            </form>
           </td>
         </tr>"""
 
@@ -3129,9 +3162,9 @@ def admin_tools(request: Request):
     total_leads = sum(lead_counts.values())
 
     body = f"""<div class="page" style="max-width:1100px;">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/toolbox" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>CFO Toolbox—Admin</h1>
+  <h1>Tools</h1>
   <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
 </div>
 <p style="margin:0 0 24px;">
@@ -3169,7 +3202,7 @@ def admin_tools(request: Request):
 </table>
 </div>
 </div>"""
-    return HTMLResponse(_page("Tools Admin—CFO Toolbox", "", body, authed=True))
+    return HTMLResponse(_page("Tools—CFO Toolbox Admin", "", body, authed=True))
 
 
 @app.get("/admin/tools/leads", response_class=HTMLResponse)
@@ -3198,8 +3231,8 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
     ) or '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No leads yet.</td></tr>'
     title_suffix = f" — {_esc(tool_name_filter)}" if tool_name_filter else ""
     body = f"""<div class="page" style="max-width:1000px;">
-<p style="margin:0 0 4px;"><a href="/admin/tools" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox Admin</a></p>
-<h1>CFO Toolbox Intros{title_suffix}</h1>
+<p style="margin:0 0 4px;"><a href="/admin/toolbox" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox</a></p>
+<h1>Toolbox intros{title_suffix}</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm Intro requests from readers &mdash; {len(leads)} total.</p>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
@@ -3215,13 +3248,324 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 </table>
 </div>
 </div>"""
-    return HTMLResponse(_page("CFO Toolbox Intros—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Toolbox intros—CFO Toolbox Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/tools/categories", response_class=HTMLResponse)
+def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        categories = lib.list_tool_categories()
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--coral-deep);border-radius:10px;padding:10px 16px;'
+                     f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
+
+    rows = ""
+    for c in categories:
+        cid = c["id"]
+        rows += f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:9px 12px;">
+    <form method="post" action="/admin/tools/categories/{cid}/edit" style="display:grid;gap:6px;margin:0;max-width:420px;">
+      <input type="text" name="name" value="{_esc(c['name'])}" required maxlength="80"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:var(--bg);">
+      <input type="text" name="description" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);">
+      <div><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button></div>
+    </form>
+  </td>
+  <td style="padding:9px 12px;font-size:13px;color:var(--muted);vertical-align:top;">{c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}</td>
+  <td style="padding:9px 12px;vertical-align:top;">
+    <form method="post" action="/admin/tools/categories/{cid}/delete" style="margin:0;"
+          onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''} — they stay in the directory under All, just untagged for this category.');">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+    if not categories:
+        rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet — add one below.</td></tr>'
+
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin/toolbox" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox</a></p>
+<h1>Toolbox categories</h1>
+<p style="color:var(--muted);margin:-6px 0 18px;">These are the filter pills on <a href="/tools">/tools</a>. Renaming updates every tool tagged with the old name; deleting removes the tag from tagged tools but leaves the tools themselves in the directory — they still show under <strong>All</strong>, just not under any specific pill.</p>
+{banner}{error_banner}
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:28px;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name &amp; description</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tools</th>
+      <th style="padding:9px 12px;"></th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;">
+  <h2 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a category</h2>
+  <form method="post" action="/admin/tools/categories/new" style="display:grid;gap:12px;">
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
+      <input type="text" name="name" required maxlength="80" placeholder="e.g. Payroll"
+        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+    </div>
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description <span style="font-weight:400;color:var(--muted);">(tooltip on the pill, optional)</span></label>
+      <input type="text" name="description" maxlength="300"
+        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+    </div>
+    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add category</button></div>
+  </form>
+</div>
+</div>"""
+    return HTMLResponse(_page("Toolbox categories—CFO Toolbox Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/tools/categories/new")
+async def admin_tools_categories_new(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    description = (form.get("description") or "").strip()
+    lib = _lib()
+    try:
+        lib.add_tool_category(name, description)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/tools/categories?error={quote(str(e))}", status_code=303)
+    finally:
+        lib.close()
+    msg = f'Added "{name}".'
+    return RedirectResponse(f"/admin/tools/categories?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/tools/categories/{category_id}/edit")
+async def admin_tools_categories_edit(request: Request, category_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    description = (form.get("description") or "").strip()
+    lib = _lib()
+    try:
+        n = lib.rename_tool_category(category_id, name, description)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/tools/categories?error={quote(str(e))}", status_code=303)
+    finally:
+        lib.close()
+    msg = f'Saved "{name}"' + (f' — updated on {n} tool{"s" if n != 1 else ""}.' if n else '.')
+    return RedirectResponse(f"/admin/tools/categories?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/tools/categories/{category_id}/delete")
+def admin_tools_categories_delete(request: Request, category_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        n = lib.delete_tool_category(category_id)
+    finally:
+        lib.close()
+    msg = f'Deleted — removed from {n} tool{"s" if n != 1 else ""}.' if n else 'Deleted.'
+    return RedirectResponse(f"/admin/tools/categories?msg={quote(msg)}", status_code=303)
+
+
+def _benchmark_form_fields(b: dict | None = None) -> str:
+    b = b or {}
+    coverage_opts = "".join(
+        f'<option value="{c}"{" selected" if b.get("coverage", "Private") == c else ""}>{c}</option>'
+        for c in ("Private", "Public", "Both")
+    )
+    pricing_opts = "".join(
+        f'<option value="{p}"{" selected" if b.get("pricing", "free") == p else ""}>{label}</option>'
+        for p, label in (("free", "Free"), ("paid", "Paid"), ("freemium", "Free + paid"))
+    )
+    return f"""  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
+    <input name="name" required maxlength="200" value="{_esc(b.get('name', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
+    <input name="url" type="url" required maxlength="500" value="{_esc(b.get('url', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description *</label>
+    <textarea name="description" required maxlength="500" rows="3"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(b.get('description', ''))}</textarea>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Coverage</label>
+      <select name="coverage" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {coverage_opts}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Pricing</label>
+      <select name="pricing" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {pricing_opts}
+      </select>
+    </div>
+  </div>"""
+
+
+@app.get("/admin/tools/benchmarks", response_class=HTMLResponse)
+def admin_benchmarks(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        benchmarks = lib.list_benchmarks()
+    finally:
+        lib.close()
+
+    rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:10px 12px;font-weight:600;">{_esc(b['name'])}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);"><a href="{_esc(b['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(b['url'][:50])}{'…' if len(b['url']) > 50 else ''}</a></td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(b['coverage'])}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(b['pricing'])}</td>
+  <td style="padding:10px 12px;white-space:nowrap;">
+    <a href="/admin/tools/benchmarks/{b['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <form method="post" action="/admin/tools/benchmarks/{b['id']}/delete" style="display:inline;"
+          onsubmit="return confirm('Delete &quot;{_esc(b['name'])}&quot; from Benchmarking Resources?');">
+      <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
+    </form>
+  </td>
+</tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No benchmarking resources yet.</td></tr>'
+
+    body = f"""<div class="page" style="max-width:1000px;">
+<p style="margin:0 0 4px;"><a href="/admin/toolbox" style="font-size:13px;color:var(--muted);">&larr; CFO Toolbox</a></p>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+  <h1>Benchmarking resources</h1>
+  <a href="/admin/tools/benchmarks/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add resource</a>
+</div>
+<p style="margin:0 0 24px;"><a href="/tools#Benchmarking%20Resources" style="font-size:13px;color:var(--muted);">View on public directory →</a></p>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Coverage</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Pricing</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>
+</div>"""
+    return HTMLResponse(_page("Benchmarking resources—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.get("/admin/tools/benchmarks/new", response_class=HTMLResponse)
+def admin_benchmarks_new(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    body = f"""<div class="page" style="max-width:560px;">
+<h1>Add a benchmarking resource</h1>
+<form method="post" action="/admin/tools/benchmarks/new" style="display:grid;gap:20px;">
+{_benchmark_form_fields()}
+  <div>
+    <button type="submit" class="btn">Add resource</button>
+    <a href="/admin/tools/benchmarks" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Add benchmarking resource—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.post("/admin/tools/benchmarks/new")
+async def admin_benchmarks_new_submit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    url = (form.get("url") or "").strip()
+    description = (form.get("description") or "").strip()
+    coverage = (form.get("coverage") or "Private").strip()
+    pricing = (form.get("pricing") or "free").strip()
+    if not (name and url and description):
+        raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
+    lib = _lib()
+    try:
+        lib.add_benchmark(name, url, description, coverage, pricing)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools/benchmarks", status_code=303)
+
+
+@app.get("/admin/tools/benchmarks/{benchmark_id}/edit", response_class=HTMLResponse)
+def admin_benchmarks_edit(request: Request, benchmark_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        b = lib.get_benchmark(benchmark_id)
+    finally:
+        lib.close()
+    if not b:
+        raise HTTPException(status_code=404, detail="Benchmark not found")
+    body = f"""<div class="page" style="max-width:560px;">
+<h1>Edit benchmarking resource</h1>
+<form method="post" action="/admin/tools/benchmarks/{benchmark_id}/edit" style="display:grid;gap:20px;">
+{_benchmark_form_fields(b)}
+  <div>
+    <button type="submit" class="btn">Save changes</button>
+    <a href="/admin/tools/benchmarks" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page(f"Edit {_esc(b['name'])}—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.post("/admin/tools/benchmarks/{benchmark_id}/edit")
+async def admin_benchmarks_edit_submit(request: Request, benchmark_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    url = (form.get("url") or "").strip()
+    description = (form.get("description") or "").strip()
+    coverage = (form.get("coverage") or "Private").strip()
+    pricing = (form.get("pricing") or "free").strip()
+    if not (name and url and description):
+        raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
+    lib = _lib()
+    try:
+        lib.update_benchmark(benchmark_id, name, url, description, coverage, pricing)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools/benchmarks", status_code=303)
+
+
+@app.post("/admin/tools/benchmarks/{benchmark_id}/delete")
+def admin_benchmarks_delete(request: Request, benchmark_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_benchmark(benchmark_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools/benchmarks", status_code=303)
 
 
 @app.get("/admin/tools/new", response_class=HTMLResponse)
 def admin_tools_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
+    lib = _lib()
+    try:
+        categories = lib.list_tool_categories()
+    finally:
+        lib.close()
     body = f"""<div class="page" style="max-width:560px;">
 <h1>Add a tool</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
@@ -3244,9 +3588,9 @@ def admin_tools_new(request: Request):
       placeholder="What does it do? 1–2 sentences."></textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional — select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-      {_tool_category_checkboxes()}
+      {_tool_category_checkboxes(categories)}
     </div>
   </div>
   <div>
@@ -3304,8 +3648,8 @@ async def admin_tools_new_submit(request: Request):
     vendor_email = (form.get("vendor_email") or "").strip()
     warm_intro_enabled = 1 if form.get("warm_intro_enabled") == "1" else 0
     vendor_name = (form.get("vendor_name") or "").strip()
-    if not (name and url and description and categories):
-        raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
+    if not (name and url and description):
+        raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
     try:
         lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
@@ -3347,6 +3691,7 @@ def admin_tools_edit(request: Request, tool_id: int):
     lib = _lib()
     try:
         tool = lib.get_tool(tool_id)
+        categories = lib.list_tool_categories()
     finally:
         lib.close()
     if not tool:
@@ -3380,9 +3725,9 @@ def admin_tools_edit(request: Request, tool_id: int):
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(tool['description'])}</textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories * <span style="font-weight:400;color:var(--muted);">(select all that apply)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional — select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-      {_tool_category_checkboxes(tool['categories'])}
+      {_tool_category_checkboxes(categories, tool['categories'])}
     </div>
   </div>
   <div>
@@ -3440,8 +3785,8 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     vendor_email = (form.get("vendor_email") or "").strip()
     warm_intro_enabled = 1 if form.get("warm_intro_enabled") == "1" else 0
     vendor_name = (form.get("vendor_name") or "").strip()
-    if not (name and url and description and categories):
-        raise HTTPException(status_code=400, detail="Name, URL, description, and at least one category are required.")
+    if not (name and url and description):
+        raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
     try:
         lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
@@ -3453,15 +3798,22 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
 
 
 @app.post("/admin/tools/{tool_id}/delete")
-def admin_tools_delete(request: Request, tool_id: int):
+async def admin_tools_delete(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    # Deleting is offered both on /tools (public directory, admin controls)
+    # and /admin/tools (Toolbox submissions) — return to whichever one asked,
+    # validated against an allowlist since it echoes into a redirect.
+    redirect_to = form.get("redirect_to") or "/tools"
+    if redirect_to not in ("/tools", "/admin/tools"):
+        redirect_to = "/tools"
     lib = _lib()
     try:
         lib.delete_tool(tool_id)
     finally:
         lib.close()
-    return RedirectResponse("/tools", status_code=303)
+    return RedirectResponse(redirect_to, status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/quick-edit")
@@ -5050,11 +5402,18 @@ _LIBRARY_TOOLS = [
     ("/admin/review-removals", "Remove content",   "Filter for content the enricher flagged as potentially off-target for this archive (e.g. podcasts, annual predictions, fund/LP content) and confirm or keep each one."),
 ]
 
+# CFO Toolbox management lives on its own page (/admin/toolbox), same pattern
+# as the Archive above — keeps the hub uncluttered.
+_TOOLBOX_TOOLS = [
+    ("/admin/tools",            "Tools",                "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
+    ("/admin/tools/leads",      "Toolbox intros",       "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
+    ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
+    ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section — name, URL, description, coverage, and pricing."),
+]
+
 # Admin sections — grouped on the hub; each links to its own page.
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
-        ("/admin/tools",        "CFO Toolbox submissions", "Tools readers have submitted for the directory — approve, reject, or edit before they go live."),
-        ("/admin/tools/leads",  "CFO Toolbox intros",      "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
         ("/community",          "CFO community",           "Your community idea + sign-up form — parked off the public site for now, reachable here so the copy isn't lost."),
     ]),
@@ -5069,7 +5428,7 @@ _ADMIN_GROUPS = [
 ]
 
 # Flat view kept for any code/tests that iterate every section.
-_ADMIN_SECTIONS = _LIBRARY_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
+_ADMIN_SECTIONS = _LIBRARY_TOOLS + _TOOLBOX_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
 
 
 def _content_flow_diagram(highlight: str = "") -> str:
@@ -5374,12 +5733,14 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    # Archive gets a single prominent card linking to its own management page,
-    # so the hub stays uncluttered.
+    # Archive and CFO Toolbox each get a single prominent card linking to their
+    # own management page, so the hub stays uncluttered.
     library_card = _card("/admin/library", "Archive",
                          f"Build, curate, enrich, and back up your archive &mdash; {len(_LIBRARY_TOOLS)} tools.")
+    toolbox_card = _card("/admin/toolbox", "CFO Toolbox",
+                         f"Submissions, Warm Intro leads, categories, and Benchmarking Resources &mdash; {len(_TOOLBOX_TOOLS)} tools.")
 
-    groups_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
+    groups_html = f'<div style="margin-bottom:22px;display:grid;gap:14px;">{library_card}{toolbox_card}</div>'
     for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
         cards = "".join(_card(*s) for s in items)
         open_attr = " open" if gname == "Inbox" else ""   # Inbox starts expanded — everything else is click-to-expand
@@ -5452,6 +5813,31 @@ def admin_library(request: Request):
 <div style="display:grid;gap:12px;">{cards}</div>
 </div>"""
     return HTMLResponse(_page("Archive — Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/toolbox", response_class=HTMLResponse)
+def admin_toolbox(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    def _card(href, title, desc):
+        return (
+            f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
+            f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+            f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
+        )
+
+    cards = "".join(_card(href, title, desc) for href, title, desc in _TOOLBOX_TOOLS)
+    body = f"""<div class="page" style="max-width:720px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>CFO Toolbox</h1>
+<p style="color:var(--muted);margin:4px 0 22px;">Everything behind the public <a href="/tools">/tools</a> directory &mdash; tool submissions, Warm Intro leads, the category vocabulary, and the Benchmarking Resources list.</p>
+<div style="display:grid;gap:14px;">{cards}</div>
+</div>"""
+    return HTMLResponse(_page("CFO Toolbox — Admin", "Admin", body, authed=True))
 
 
 def _auth_recheck_background() -> None:
