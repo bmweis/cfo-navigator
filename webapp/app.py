@@ -35,7 +35,7 @@ import re
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import quote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -421,10 +421,16 @@ a:hover{text-decoration:underline;}
 .site-header{padding:18px 28px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:relative;}
 .site-header .logo{font-family:var(--font-head);font-size:19px;font-weight:600;letter-spacing:-0.01em;color:var(--navy);}
 .site-nav{display:flex;align-items:center;gap:22px;font-size:14px;}
-.site-nav a{color:var(--muted);}
+.site-nav a{color:var(--muted);position:relative;}
 .site-nav a:hover{color:var(--ink);text-decoration:none;}
 .site-nav a.active{color:var(--ink);font-weight:600;border-bottom:2px solid var(--seafoam);padding-bottom:3px;}
 .site-nav .sep{width:1px;height:15px;background:var(--line-strong);}
+/* iOS-style presence dot — no count, just "something needs you" */
+.task-dot{position:absolute;top:-3px;right:-9px;width:8px;height:8px;border-radius:50%;background:var(--coral);border:1.5px solid var(--bg);}
+
+/* Admin hub: coral count badges, white text on coral fill */
+.task-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;
+  padding:0 5px;border-radius:9px;background:var(--coral);color:#fff;font-size:11px;font-weight:700;line-height:1;}
 .nav-toggle{display:none;background:none;border:1px solid var(--line-strong);border-radius:9px;width:40px;height:40px;color:var(--navy);font-size:18px;cursor:pointer;align-items:center;justify-content:center;}
 
 /* Headings */
@@ -479,6 +485,19 @@ def _short_title(title: str) -> str:
     return title
 
 
+def _task_badge(n: int) -> str:
+    return f'<span class="task-badge">{n}</span>' if n else ""
+
+
+def _has_open_admin_tasks() -> bool:
+    from webapp import tasks as _tasks
+    lib = _lib()
+    try:
+        return _tasks.has_open_tasks(lib)
+    finally:
+        lib.close()
+
+
 def _page(title: str, active: str, body: str, authed: bool = False,
           role: str | None = None) -> str:
     # role: "admin" | "user" | "guest". Falls back to authed for legacy callers.
@@ -501,7 +520,8 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     if role == "admin":
         # Admin sees exactly what a member sees, plus the Admin hub (which holds
         # the admin-only tools). Keeps the top nav uncluttered.
-        nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin</a>'
+        dot = '<span class="task-dot" aria-label="Open admin tasks"></span>' if _has_open_admin_tasks() else ""
+        nav += f'<a href="/admin" class="{"active" if active == "Admin" else ""}">Admin{dot}</a>'
         nav += '<a href="/logout">Log out</a>'
     elif role == "user":
         nav += '<a href="/logout">Log out</a>'
@@ -574,8 +594,50 @@ def login_page(request: Request, next: str = "/library", error: str = ""):
          style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   <button type="submit" class="btn">Sign in</button>
 </form>
+<p style="margin:18px 0 0;"><a href="/forgot-password" style="font-size:13px;color:var(--muted);">Forgot your password?</a></p>
 </div>"""
     return HTMLResponse(_page("Sign in—Brian Weisberg", "", body))
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+def forgot_password_page(request: Request, sent: str = ""):
+    if _is_member(request):
+        return RedirectResponse("/library", status_code=303)
+    if sent:
+        body = """<div class="page" style="max-width:420px;">
+<h1>Check with Brian</h1>
+<p style="color:var(--muted);margin:4px 0 20px;">If that username has an account, Brian&rsquo;s been notified and
+will reset your password directly &mdash; there&rsquo;s no public sign-up flow here.</p>
+<p><a href="/login" style="font-size:14px;">&larr; Back to sign in</a></p>
+</div>"""
+        return HTMLResponse(_page("Forgot password—Brian Weisberg", "", body))
+    body = """<div class="page" style="max-width:420px;">
+<h1>Forgot your password?</h1>
+<p style="color:var(--muted);margin:4px 0 28px;">Enter your username and Brian will reset your password for you.</p>
+<form method="post" action="/forgot-password" style="display:grid;gap:16px;">
+  <input name="username" type="text" required autofocus autocomplete="username" placeholder="Username"
+         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <button type="submit" class="btn">Request reset</button>
+</form>
+<p style="margin:18px 0 0;"><a href="/login" style="font-size:13px;color:var(--muted);">&larr; Back to sign in</a></p>
+</div>"""
+    return HTMLResponse(_page("Forgot password—Brian Weisberg", "", body))
+
+
+@app.post("/forgot-password")
+async def forgot_password_submit(request: Request):
+    form = await request.form()
+    username = (form.get("username") or "").strip()
+    if username:
+        lib = _lib()
+        try:
+            user = lib.get_user(username)
+            if user:
+                lib.create_password_reset_request(user["id"], user["username"])
+        finally:
+            lib.close()
+    # Same confirmation whether or not the username matched — no account enumeration.
+    return RedirectResponse("/forgot-password?sent=1", status_code=303)
 
 
 @app.post("/login")
@@ -3068,6 +3130,9 @@ def admin_contacts(request: Request):
     lib = _lib()
     try:
         contacts = lib.list_contacts()
+        # Viewing the page clears the Inbox badge — the next badge count is
+        # only submissions newer than this visit.
+        lib.set_setting("admin_viewed_contacts", datetime.now(timezone.utc).isoformat())
     finally:
         lib.close()
     rows = "".join(
@@ -3216,6 +3281,10 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
         if tool_id:
             t = lib.get_tool(tool_id)
             tool_name_filter = t["name"] if t else f"Tool #{tool_id}"
+        else:
+            # Only the unfiltered "all leads" view counts as having seen everything —
+            # a single tool's filtered view shouldn't silently clear the whole badge.
+            lib.set_setting("admin_viewed_tool_leads", datetime.now(timezone.utc).isoformat())
     finally:
         lib.close()
     rows = "".join(
@@ -5724,31 +5793,46 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 
     auth_banner = _auth_cookie_banner(request, background_tasks)
 
-    def _card(href, title, desc):
+    from webapp import tasks as _tasks
+    lib = _lib()
+    try:
+        task_counts = _tasks.open_task_counts(lib)
+    finally:
+        lib.close()
+
+    def _card(href, title, desc, badge=0):
         return (
             f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
             f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
             f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="display:flex;align-items:center;gap:8px;">'
             f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+            f'{_task_badge(badge)}</span>'
             f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
     # Archive gets a single prominent card linking to its own management page,
     # so the hub stays uncluttered. CFO Toolbox is an expandable group instead
-    # (like Inbox/Site management below) rather than a separate page.
+    # (like Inbox/Site management below) rather than a separate page. It's
+    # never inline-collapsible, so it always shows its aggregate badge here —
+    # the per-step breakdown lives on /admin/library itself.
+    library_total = sum(task_counts.get(href, 0) for href, _, _ in _LIBRARY_TOOLS)
     library_card = _card("/admin/library", "Archive",
-                         f"Build, curate, enrich, and back up your archive &mdash; {len(_LIBRARY_TOOLS)} tools.")
+                         f"Build, curate, enrich, and back up your archive &mdash; {len(_LIBRARY_TOOLS)} tools.",
+                         library_total)
 
     groups_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
     for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
-        cards = "".join(_card(*s) for s in items)
+        cards = "".join(_card(href, title, desc, task_counts.get(href, 0)) for href, title, desc in items)
+        group_total = sum(task_counts.get(href, 0) for href, _, _ in items)
         open_attr = " open" if gname == "Inbox" else ""   # Inbox starts expanded — everything else is click-to-expand
         groups_html += (
             f'<details class="admin-group"{open_attr} style="margin-bottom:14px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
             f'<summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
             f'<span style="font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{gname}</span>'
+            f'<span class="group-badge">{_task_badge(group_total)}</span>'
             f'<span style="font-size:12px;color:var(--muted);">{len(items)} {"tool" if len(items)==1 else "tools"}</span>'
             f'</span>'
             f'<span class="admin-chevron" style="color:var(--navy);font-size:13px;line-height:1;transition:transform .15s;">&#9660;</span>'
@@ -5765,6 +5849,7 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 .admin-group summary::-webkit-details-marker{{display:none;}}
 .admin-group[open] .admin-chevron{{transform:rotate(180deg);}}
 .admin-group summary:hover{{background:var(--surface);}}
+.admin-group[open] .group-badge{{display:none;}}
 </style>
 <h1>Admin</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
@@ -5788,7 +5873,14 @@ def admin_library(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
 
-    def _step(n, href, title, desc):
+    from webapp import tasks as _tasks
+    lib = _lib()
+    try:
+        task_counts = _tasks.open_task_counts(lib)
+    finally:
+        lib.close()
+
+    def _step(n, href, title, desc, badge=0):
         return (
             f'<a href="{href}" style="display:flex;gap:16px;align-items:flex-start;background:var(--surface);'
             f'border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;">'
@@ -5796,13 +5888,15 @@ def admin_library(request: Request):
             f'display:flex;align-items:center;justify-content:center;font-family:var(--font-head);font-weight:600;font-size:15px;">{n}</span>'
             f'<span style="flex:1;">'
             f'<span style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="display:flex;align-items:center;gap:8px;">'
             f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+            f'{_task_badge(badge)}</span>'
             f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></span>'
             f'<span style="display:block;margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</span>'
             f'</span></a>'
         )
 
-    cards = "".join(_step(i + 1, href, title, desc)
+    cards = "".join(_step(i + 1, href, title, desc, task_counts.get(href, 0))
                     for i, (href, title, desc) in enumerate(_LIBRARY_TOOLS))
     body = f"""<div class="page" style="max-width:720px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -6906,8 +7000,13 @@ def admin_users(request: Request, msg: str = ""):
         users = lib.list_users()
         default_cap = lib.get_default_ask_cap()
         ask_spend = {u["id"]: lib.ask_cost_this_month(u["id"]) for u in users}
+        pending_resets = lib.list_password_reset_requests(pending_only=True)
     finally:
         lib.close()
+
+    resets_by_user: dict[int, list[dict]] = {}
+    for r in pending_resets:
+        resets_by_user.setdefault(r["user_id"], []).append(r)
 
     banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
               f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
@@ -6928,6 +7027,19 @@ def admin_users(request: Request, msg: str = ""):
         meta_bits = [b for b in (_esc(u["name"] or ""), _esc(u["email"] or "")) if b]
         meta_bits.append(f"Last in {last}")
         meta_line = " &middot; ".join(meta_bits)
+        resets = resets_by_user.get(uid)
+        reset_notice = ""
+        if resets:
+            when = _esc(resets[0]["created_at"][:10])
+            reset_notice = (
+                f'<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:9px;'
+                f'padding:8px 12px;margin:8px 0 0;display:flex;align-items:center;justify-content:space-between;'
+                f'gap:10px;font-size:13px;color:var(--coral-deep);">'
+                f'<span>Requested a password reset &mdash; {when}</span>'
+                f'<form method="post" action="/admin/users/{uid}/password-reset/dismiss" style="margin:0;">'
+                f'<button type="submit" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;'
+                f'color:var(--coral-deep);border-color:var(--coral);">Dismiss</button></form></div>'
+            )
         return f"""<div class="user-card" data-user-id="{uid}">
   <div class="user-card-head">
     <div style="min-width:0;">
@@ -6935,6 +7047,7 @@ def admin_users(request: Request, msg: str = ""):
         <span class="user-name">{_esc(u["username"])}</span>{role_badge}{status}
       </div>
       <div class="user-meta">{meta_line}</div>
+      {reset_notice}
     </div>
     <div style="display:flex;align-items:center;gap:14px;flex-shrink:0;">
       <div style="text-align:right;font-size:12px;color:var(--muted);">
@@ -7185,9 +7298,22 @@ async def admin_users_password(request: Request, user_id: int):
         lib = _lib()
         try:
             lib.set_user_password(user_id, password)
+            lib.resolve_password_resets_for_user(user_id)
         finally:
             lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/password-reset/dismiss")
+def admin_users_password_reset_dismiss(request: Request, user_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.resolve_password_resets_for_user(user_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/users", status_code=303)
 
 
 @app.post("/admin/users/{user_id}/delete")
