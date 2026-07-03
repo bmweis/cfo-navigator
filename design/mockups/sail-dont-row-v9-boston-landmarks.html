@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sail, Don't Row — v9: Recognizable Boston Landmarks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F5F4EF; --navy:#002975; --seafoam:#A3E5D4; --line:#DEDACD;
+    --water-deep:#0E5A7A; --water-mid:#4FA8A0; --water-light:#BDEBDD;
+    --gold:#C9A24B;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);font-family:'DM Sans',sans-serif;color:var(--navy);padding:32px 20px 60px;}
+  .wrap{max-width:900px;margin:0 auto;}
+  .topbar{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid var(--navy);padding-bottom:14px;margin-bottom:22px;}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--liability,#5C5A52);font-weight:700;}
+  .title{font-family:'Outfit',sans-serif;font-weight:800;font-size:30px;color:var(--navy);margin:2px 0 0;}
+  h3.section{font-family:'Outfit',sans-serif;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#5C5A52;font-weight:700;margin:30px 0 8px;}
+  p.section-note{font-size:12px;color:#5C5A52;margin:0 0 10px;}
+
+  .canvas{position:relative;width:100%;height:290px;border-radius:16px;overflow:hidden;
+    background:linear-gradient(180deg,#EAF0F5 0%, #DCEEEA 45%, var(--water-light) 60%);}
+  .label{position:absolute;font-size:9px;font-weight:700;color:#5C5A52;background:rgba(255,255,255,0.75);padding:1px 4px;border-radius:3px;}
+
+  .water{position:absolute;left:0;right:0;bottom:0;top:58%;overflow:hidden;}
+  .band{position:absolute;left:0;right:-100%;height:100%;}
+  .band1{background:var(--water-light);top:0;}
+  .band2{background:linear-gradient(180deg,transparent,var(--water-mid) 100%);opacity:.32;top:18%;
+    -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);
+    mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);animation:driftwater 14s linear infinite;}
+  .band3{background:var(--water-deep);opacity:.15;top:46%;
+    -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);
+    mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);animation:driftwater 9s linear infinite reverse;}
+  @keyframes driftwater{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+  .reflection{position:absolute;left:0;right:0;top:58%;height:42%;opacity:.2;filter:blur(1.5px);transform:scaleY(-1);overflow:hidden;}
+
+  footer.note{max-width:900px;margin:30px auto 0;font-size:12px;color:#5C5A52;line-height:1.6;border-top:1px solid var(--line);padding-top:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div><div class="eyebrow">CFO Navigator Arcade</div><div class="title">Sail, Don't Row</div></div>
+  </div>
+
+  <h3 class="section">Charles River Basin — Landmark Pass</h3>
+  <p class="section-note">Added: Mass. State House gold dome (color pop, unmistakably Boston), a taller/slimmer Hancock Tower with its signature beveled top, a stepped-crown Prudential, and the Weeks Footbridge—recognizable to anyone who's actually rowed or sailed this river.</p>
+  <div class="canvas">
+    <svg viewBox="0 0 700 168" width="100%" height="60%" preserveAspectRatio="none" style="position:absolute;top:0;left:0;">
+      <!-- far atmospheric layer -->
+      <g opacity="0.3" fill="#7C93B8">
+        <rect x="20" y="95" width="16" height="55"/>
+        <rect x="470" y="100" width="14" height="50"/>
+        <rect x="490" y="85" width="18" height="65"/>
+      </g>
+
+      <!-- Mass State House — gold dome -->
+      <g>
+        <rect x="230" y="118" width="36" height="32" fill="#3E5FA8"/>
+        <rect x="240" y="104" width="16" height="14" fill="#3E5FA8"/>
+        <ellipse cx="248" cy="104" rx="10" ry="9" fill="var(--gold)"/>
+        <rect x="246" y="92" width="4" height="12" fill="var(--gold)"/>
+        <circle cx="248" cy="90" r="2.5" fill="var(--gold)"/>
+      </g>
+
+      <!-- John Hancock Tower — tall slim, beveled top -->
+      <path d="M598,150 L598,44 L610,38 L618,44 L618,150 Z" fill="#2A4A82"/>
+      <path d="M600,150 L600,50 L608,46 L616,50 L616,150 Z" fill="#3E5FA8" opacity="0.6"/>
+
+      <!-- Prudential Tower — stepped crown -->
+      <rect x="630" y="70" width="26" height="80" fill="#274E96"/>
+      <rect x="636" y="56" width="14" height="14" fill="#274E96"/>
+      <rect x="641" y="48" width="4" height="8" fill="#274E96"/>
+
+      <!-- generic downtown texture -->
+      <g fill="#3E5FA8" opacity="0.55">
+        <rect x="660" y="90" width="12" height="60"/>
+        <rect x="676" y="105" width="16" height="45"/>
+      </g>
+
+      <!-- MIT Great Dome, Cambridge side -->
+      <g fill="#3E5FA8">
+        <rect x="60" y="128" width="30" height="22"/>
+        <path d="M60,128 A15,15 0 0 1 90,128 Z"/>
+        <rect x="66" y="118" width="2" height="10"/>
+        <rect x="74" y="115" width="2" height="13"/>
+        <rect x="82" y="118" width="2" height="10"/>
+      </g>
+
+      <!-- Longfellow Bridge -->
+      <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="3" opacity="0.5"/>
+      <g fill="#0A2A6B" opacity="0.5">
+        <rect x="140" y="88" width="10" height="16" rx="2"/><circle cx="145" cy="86" r="5"/>
+        <rect x="330" y="88" width="10" height="16" rx="2"/><circle cx="335" cy="86" r="5"/>
+        <rect x="520" y="88" width="10" height="16" rx="2"/><circle cx="525" cy="86" r="5"/>
+      </g>
+
+      <!-- Weeks Footbridge — smaller, further downriver, arched -->
+      <path d="M340,110 Q380,94 420,110" stroke="#274E96" stroke-width="3" fill="none" opacity="0.4"/>
+      <g stroke="#274E96" stroke-width="1.5" opacity="0.35">
+        <line x1="350" y1="107" x2="350" y2="112"/><line x1="365" y1="99" x2="365" y2="112"/>
+        <line x1="380" y1="96" x2="380" y2="112"/><line x1="395" y1="99" x2="395" y2="112"/>
+        <line x1="410" y1="107" x2="410" y2="112"/>
+      </g>
+    </svg>
+
+    <div class="label" style="top:14px;left:230px;">Mass. State House</div>
+    <div class="label" style="top:24px;left:590px;">Hancock Tower</div>
+    <div class="label" style="top:36px;left:625px;">Prudential</div>
+    <div class="label" style="top:100px;left:55px;">MIT Dome</div>
+    <div class="label" style="top:62px;left:120px;">Longfellow Bridge</div>
+    <div class="label" style="top:78px;left:355px;">Weeks Footbridge</div>
+
+    <div class="reflection">
+      <svg viewBox="0 0 700 168" width="100%" height="100%" preserveAspectRatio="none">
+        <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="3" opacity="0.5"/>
+        <rect x="598" y="44" width="20" height="106" fill="#2A4A82"/>
+        <rect x="630" y="70" width="26" height="80" fill="#274E96"/>
+        <ellipse cx="248" cy="104" rx="10" ry="9" fill="var(--gold)"/>
+      </svg>
+    </div>
+
+    <div class="water"><div class="band band1"></div><div class="band band2"></div><div class="band band3"></div></div>
+  </div>
+
+  <footer class="note">
+    Skipped: literal Citgo logo (trademark risk, noted previously). Kept: real architecture only—dome, towers, bridges. This single frame is meant to be recognizable to anyone who's actually been on the Charles, not just "a skyline." Labels are for this review only, not shown in the real game.
+  </footer>
+</div>
+</body>
+</html>

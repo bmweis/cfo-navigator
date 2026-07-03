@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sail, Don't Row — v12: Natural Obstacle Colors</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F5F4EF; --navy:#002975; --seafoam:#A3E5D4; --line:#DEDACD;
+    --water-deep:#0E5A7A; --water-mid:#4FA8A0; --water-light:#BDEBDD;
+    --rock-lt:#A8A69C; --rock-dk:#5C5A52;
+    --buoy-lt:#9C7A54; --buoy-dk:#5A4128;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);font-family:'DM Sans',sans-serif;color:var(--navy);padding:32px 20px 60px;}
+  .wrap{max-width:900px;margin:0 auto;}
+  .topbar{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid var(--navy);padding-bottom:14px;margin-bottom:22px;}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#5C5A52;font-weight:700;}
+  .title{font-family:'Outfit',sans-serif;font-weight:800;font-size:30px;color:var(--navy);margin:2px 0 0;}
+  h3.section{font-family:'Outfit',sans-serif;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#5C5A52;font-weight:700;margin:32px 0 10px;}
+  p.section-note{font-size:12px;color:#5C5A52;margin:0 0 12px;}
+
+  .canvas{position:relative;width:100%;height:270px;border-radius:16px;overflow:hidden;
+    background:linear-gradient(180deg,#EAF0F5 0%, #DCEEEA 45%, var(--water-light) 60%);}
+  .water{position:absolute;left:0;right:0;bottom:0;top:58%;overflow:hidden;}
+  .band{position:absolute;left:0;right:-100%;height:100%;}
+  .band1{background:var(--water-light);top:0;}
+  .band2{background:linear-gradient(180deg,transparent,var(--water-mid) 100%);opacity:.32;top:18%;
+    -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);
+    mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);animation:driftwater 14s linear infinite;}
+  .band3{background:var(--water-deep);opacity:.15;top:46%;
+    -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);
+    mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);animation:driftwater 9s linear infinite reverse;}
+  @keyframes driftwater{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+
+  .score-hud{position:absolute;top:16px;right:18px;text-align:right;z-index:6;}
+  .score-hi{font-size:10px;color:#5C5A52;font-weight:600;opacity:.8;}
+  .score-amount{font-family:'Outfit',sans-serif;font-weight:800;font-size:22px;color:var(--navy);}
+  .runway-hud{position:absolute;top:18px;left:18px;width:120px;z-index:6;}
+  .runway-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#5C5A52;font-weight:700;margin-bottom:4px;}
+  .runway-track{height:7px;border-radius:8px;background:rgba(0,41,117,0.1);overflow:hidden;}
+  .runway-fill{height:100%;width:58%;border-radius:8px;background:#5FB89E;}
+
+  .boat-wrap{position:absolute;bottom:64px;left:140px;width:110px;height:120px;z-index:4;animation:bob 2.8s ease-in-out infinite;transform-origin:55px 108px;}
+  @keyframes bob{0%,100%{transform:translateY(0) rotate(-4deg);}50%{transform:translateY(-6px) rotate(-7deg);}}
+  .boat-shadow{position:absolute;bottom:2px;left:14px;width:70px;height:10px;border-radius:50%;background:rgba(0,41,117,0.18);filter:blur(2px);}
+  .sail-group{animation:flutter 2.2s ease-in-out infinite;transform-origin:55px 100px;}
+  @keyframes flutter{0%,100%{transform:skewX(0deg);}50%{transform:skewX(-1.4deg);}}
+
+  .gust{position:absolute;height:5px;border-radius:6px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.85) 45%,transparent);opacity:0;animation:gustmove 3.4s ease-in-out infinite;z-index:3;}
+  @keyframes gustmove{0%{opacity:0;transform:translateX(0);}15%{opacity:.9;}80%{opacity:.4;}100%{opacity:0;transform:translateX(120px);}}
+
+  /* rock — grey stone, no label */
+  .rock-wrap{position:absolute;top:64px;left:340px;z-index:4;}
+  .buoy-wrap{position:absolute;bottom:64px;left:480px;z-index:4;animation:buoybob 2.2s ease-in-out infinite;}
+  @keyframes buoybob{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:#5C5A52;}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .swatch{width:12px;height:12px;border-radius:3px;display:inline-block;}
+
+  footer.note{max-width:900px;margin:34px auto 0;font-size:12px;color:#5C5A52;line-height:1.6;border-top:1px solid var(--line);padding-top:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div><div class="eyebrow">CFO Navigator Arcade</div><div class="title">Sail, Don't Row</div></div>
+  </div>
+
+  <h3 class="section">Natural Obstacle Colors, No Finance Labels</h3>
+  <p class="section-note">Rocks are grey stone, buoy is weathered brown wood—no "EXPENSE"/"LIABILITY" tags anymore, just hazards on the water. Coral sail from last round carried over; no more color overlap with the rocks now that they're stone-grey instead of rust.</p>
+
+  <div class="canvas">
+    <div class="water"><div class="band band1"></div><div class="band band2"></div><div class="band band3"></div></div>
+
+    <div class="gust" style="top:90px;left:20px;width:60px;"></div>
+    <div class="gust" style="top:110px;left:20px;width:50px;animation-delay:.8s;"></div>
+
+    <div class="runway-hud"><div class="runway-label">Runway</div><div class="runway-track"><div class="runway-fill"></div></div></div>
+    <div class="score-hud"><div class="score-hi">HI 96</div><div class="score-amount">Score 71</div></div>
+
+    <div class="boat-wrap">
+      <div class="boat-shadow"></div>
+      <svg viewBox="0 0 110 120" width="110" height="120">
+        <line x1="55" y1="26" x2="24" y2="98" stroke="#002975" stroke-width="1" opacity="0.4"/>
+        <line x1="55" y1="26" x2="86" y2="98" stroke="#002975" stroke-width="1" opacity="0.4"/>
+        <path d="M14,96 C14,88 30,84 55,84 C80,84 96,88 96,96 C90,104 74,110 55,110 C36,110 20,104 14,96 Z" fill="url(#hullGrad)"/>
+        <path d="M18,98 C30,103 80,103 92,98" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.7"/>
+        <ellipse cx="55" cy="85" rx="30" ry="4" fill="#16418F"/>
+        <rect x="47" y="80" width="16" height="6" rx="2" fill="#123a86"/>
+        <g class="sail-group">
+          <line x1="55" y1="14" x2="55" y2="86" stroke="#002975" stroke-width="2.5"/>
+          <path d="M56,16 C82,32 84,58 58,82 C64,58 62,36 56,16 Z" fill="url(#sailGrad)" stroke="#002975" stroke-width="1.1"/>
+          <path d="M54,30 C40,44 34,62 46,80 C42,60 46,42 54,30 Z" fill="url(#jibGrad)" stroke="#002975" stroke-width="1"/>
+          <line x1="55" y1="82" x2="60" y2="83" stroke="#002975" stroke-width="2"/>
+        </g>
+        <defs>
+          <linearGradient id="hullGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#274E96"/><stop offset="100%" stop-color="#061A45"/></linearGradient>
+          <linearGradient id="sailGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E0917A"/><stop offset="100%" stop-color="#B5553A"/></linearGradient>
+          <linearGradient id="jibGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#D8987C"/><stop offset="100%" stop-color="#96432C"/></linearGradient>
+        </defs>
+      </svg>
+    </div>
+
+    <div class="rock-wrap">
+      <svg viewBox="0 0 40 32" width="40" height="32">
+        <path d="M2,30 C0,20 6,8 16,4 C26,0 38,6 38,18 C38,26 30,30 20,31 C12,32 4,30 2,30 Z" fill="url(#rockGrad)"/>
+        <path d="M8,10 C14,6 22,6 28,10" stroke="#7A7869" stroke-width="1" opacity="0.4" fill="none"/>
+      </svg>
+    </div>
+
+    <div class="buoy-wrap">
+      <svg viewBox="0 0 26 34" width="26" height="34">
+        <ellipse cx="13" cy="28" rx="11" ry="5" fill="#3A2C18" opacity="0.3"/>
+        <path d="M4,26 C2,16 4,6 13,3 C22,6 24,16 22,26 C22,30 4,30 4,26 Z" fill="url(#buoyGrad)"/>
+        <rect x="4" y="14" width="18" height="4" fill="#5A4128" opacity="0.5"/>
+      </svg>
+    </div>
+
+    <defs style="display:none;">
+      <linearGradient id="rockGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--rock-lt)"/><stop offset="100%" stop-color="var(--rock-dk)"/></linearGradient>
+      <linearGradient id="buoyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--buoy-lt)"/><stop offset="100%" stop-color="var(--buoy-dk)"/></linearGradient>
+    </defs>
+  </div>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--seafoam);"></span>Wind gust</span>
+    <span><span class="swatch" style="background:linear-gradient(135deg,var(--rock-lt),var(--rock-dk));"></span>Rock</span>
+    <span><span class="swatch" style="background:linear-gradient(135deg,var(--buoy-lt),var(--buoy-dk));"></span>Buoy</span>
+  </div>
+
+  <footer class="note">
+    No in-game text labels on obstacles at all now—matches the minimal-HUD approach already locked in elsewhere (Score/Runway/checkpoint only). "Rock" and "Buoy" above are just this review doc's legend, not something shown during play. Left Runway untouched since it's the core resource mechanic tied to the whole site's identity, not a stray finance label on an obstacle—say so if you want that reconsidered too.
+  </footer>
+</div>
+</body>
+</html>

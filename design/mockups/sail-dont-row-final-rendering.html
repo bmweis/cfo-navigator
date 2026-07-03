@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sail, Don't Row — Full Build Rendering</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F5F4EF; --navy:#002975; --seafoam:#A3E5D4; --seafoam-deep:#5FB89E;
+    --expense:#B5553A; --liability:#5C5A52; --line:#DEDACD; --gold:#C9A24B;
+    --water-deep:#0E5A7A; --water-mid:#4FA8A0; --water-light:#BDEBDD;
+    --diff-fair:#A3E5D4; --diff-choppy:#C9A24B; --diff-rough:#C97A4A; --diff-storm:#3A4A5C;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);font-family:'DM Sans',sans-serif;color:var(--navy);padding:32px 20px 70px;}
+  .wrap{max-width:920px;margin:0 auto;}
+  .topbar{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid var(--navy);padding-bottom:14px;margin-bottom:6px;}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--liability);font-weight:700;}
+  .title{font-family:'Outfit',sans-serif;font-weight:800;font-size:30px;color:var(--navy);margin:2px 0 0;}
+  .rev-note{font-size:11px;color:var(--liability);margin:8px 0 0;}
+  h3.section{font-family:'Outfit',sans-serif;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--liability);font-weight:700;margin:32px 0 8px;}
+  p.section-note{font-size:12px;color:var(--liability);margin:0 0 10px;}
+
+  .rank-row{display:flex;gap:10px;flex-wrap:wrap;}
+  .rank-pill{padding:10px 16px;border-radius:12px;border:1.5px solid var(--line);background:#fff;min-width:150px;}
+  .rank-pill.active{border-color:var(--navy);background:var(--navy);}
+  .rank-pill.active .rank-name,.rank-pill.active .rank-sub,.rank-pill.active .rank-collision{color:#fff;}
+  .rank-top{display:flex;align-items:center;gap:8px;}
+  .rank-stripes{display:flex;flex-direction:column;gap:2px;width:18px;}
+  .rank-stripes span{height:3px;border-radius:1px;background:var(--navy);}
+  .rank-pill.active .rank-stripes span{background:#FFE9A8;}
+  .rank-name{font-family:'Outfit',sans-serif;font-weight:700;font-size:13px;color:var(--navy);}
+  .rank-sub{font-size:10px;color:var(--liability);}
+  .rank-collision{font-size:10px;color:var(--liability);margin-top:6px;border-top:1px solid rgba(0,0,0,0.08);padding-top:6px;}
+  .rank-pill.active .rank-collision{border-top-color:rgba(255,255,255,0.2);}
+
+  .canvas{position:relative;width:100%;height:280px;border-radius:16px;overflow:hidden;
+    background:linear-gradient(180deg,#EAF0F5 0%, #DCEEEA 45%, var(--water-light) 60%);}
+  .water{position:absolute;left:0;right:0;bottom:0;top:58%;overflow:hidden;}
+  .band{position:absolute;left:0;right:-100%;height:100%;}
+  .band1{background:var(--water-light);top:0;}
+  .band2{background:linear-gradient(180deg,transparent,var(--water-mid) 100%);opacity:.32;top:18%;
+    -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);
+    mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);animation:driftwater 14s linear infinite;}
+  .band3{background:var(--water-deep);opacity:.15;top:46%;
+    -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);
+    mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);animation:driftwater 9s linear infinite reverse;}
+  @keyframes driftwater{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+  .glint{position:absolute;background:#fff;border-radius:50%;opacity:0;animation:twinkle 3.2s ease-in-out infinite;}
+  @keyframes twinkle{0%,100%{opacity:0;transform:scale(.6);}50%{opacity:.9;transform:scale(1);}}
+  .reflection{position:absolute;left:0;right:0;top:58%;height:42%;opacity:.2;filter:blur(1.5px);transform:scaleY(-1);overflow:hidden;}
+
+  .score-hud{position:absolute;top:16px;right:18px;text-align:right;z-index:6;}
+  .score-hi{font-size:10px;color:var(--liability);font-weight:600;opacity:.8;}
+  .score-amount{font-family:'Outfit',sans-serif;font-weight:800;font-size:22px;color:var(--navy);}
+  .runway-hud{position:absolute;top:18px;left:18px;width:120px;z-index:6;}
+  .runway-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--liability);font-weight:700;margin-bottom:4px;}
+  .runway-track{height:7px;border-radius:8px;background:rgba(0,41,117,0.1);overflow:hidden;}
+  .runway-fill{height:100%;width:58%;border-radius:8px;background:var(--seafoam-deep);}
+  .progress-hud{position:absolute;bottom:10px;left:18px;right:18px;z-index:6;font-size:10px;color:var(--liability);display:flex;justify-content:space-between;font-weight:600;}
+
+  .boat-wrap{position:absolute;bottom:70px;left:150px;width:110px;height:120px;z-index:4;animation:bob 2.8s ease-in-out infinite;transform-origin:60px 108px;}
+  @keyframes bob{0%,100%{transform:translateY(0) rotate(-4deg);}50%{transform:translateY(-6px) rotate(-7deg);}}
+  .boat-shadow{position:absolute;bottom:2px;left:14px;width:70px;height:10px;border-radius:50%;background:rgba(0,41,117,0.18);filter:blur(2px);}
+  .sail-group{animation:flutter 2.2s ease-in-out infinite;transform-origin:60px 100px;}
+  @keyframes flutter{0%,100%{transform:skewX(0deg);}50%{transform:skewX(-1.6deg);}}
+
+  .gust{position:absolute;height:5px;border-radius:6px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.85) 45%,transparent);opacity:0;animation:gustmove 3.4s ease-in-out infinite;z-index:3;}
+  @keyframes gustmove{0%{opacity:0;transform:translateX(0);}15%{opacity:.9;}80%{opacity:.4;}100%{opacity:0;transform:translateX(120px);}}
+  .rock{position:absolute;top:60px;left:340px;width:30px;height:24px;background:var(--expense);clip-path:polygon(0% 100%,10% 30%,45% 0%,78% 22%,100% 60%,88% 100%);z-index:4;box-shadow:0 6px 10px rgba(181,85,58,0.25);}
+  .buoy{position:absolute;bottom:66px;left:480px;width:20px;height:26px;background:var(--liability);border-radius:50% 50% 40% 40%;animation:buoybob 2.2s ease-in-out infinite;z-index:4;box-shadow:0 6px 10px rgba(92,90,82,0.25);}
+  @keyframes buoybob{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--liability);}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .swatch{width:10px;height:10px;border-radius:50%;display:inline-block;}
+
+  .route{display:flex;align-items:center;background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 18px;overflow-x:auto;}
+  .stop{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:140px;position:relative;}
+  .stop-dot{width:14px;height:14px;border-radius:50%;background:var(--navy);border:3px solid #fff;box-shadow:0 0 0 2px var(--navy);z-index:2;}
+  .stop.finish .stop-dot{background:var(--expense);box-shadow:0 0 0 2px var(--expense);}
+  .stop-line{position:absolute;top:7px;left:50%;width:100%;height:2px;background:var(--line);z-index:1;}
+  .stop:last-child .stop-line{display:none;}
+  .stop-label{font-family:'Outfit',sans-serif;font-weight:700;font-size:11px;color:var(--navy);margin-top:8px;text-align:center;}
+  .stop-sub{font-size:9px;color:var(--liability);margin-top:2px;text-align:center;}
+
+  .outcomes{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .oc-canvas{position:relative;height:220px;border-radius:14px;overflow:hidden;background:linear-gradient(180deg,#EAF0F5 0%, #DCEEEA 45%, var(--water-light) 60%);}
+  .oc-scrim{position:absolute;inset:0;background:rgba(247,246,241,0.55);backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;}
+  .oc-card{background:#fff;border-radius:14px;padding:18px 22px;text-align:center;box-shadow:0 12px 28px rgba(0,41,117,0.14);}
+  .oc-title{font-family:'Outfit',sans-serif;font-weight:800;font-size:15px;color:var(--navy);}
+  .oc-title.partial{color:var(--liability);}
+  .oc-score-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--liability);font-weight:700;margin-top:8px;}
+  .oc-score{font-family:'Outfit',sans-serif;font-weight:800;font-size:26px;color:var(--navy);}
+  .oc-sub{font-size:10px;color:var(--liability);margin-top:6px;}
+  .oc-caption{position:absolute;bottom:26px;left:0;right:0;text-align:center;font-size:10px;color:var(--liability);}
+
+  .lighthouse{position:absolute;bottom:58%;left:22%;width:14px;height:60px;}
+  .lh-body{position:absolute;bottom:0;left:2px;width:10px;height:48px;background:repeating-linear-gradient(0deg,var(--expense) 0 7px,#fff 7px 14px);border-radius:2px 2px 0 0;}
+  .lh-top{position:absolute;bottom:48px;left:0;width:14px;height:9px;background:var(--navy);border-radius:2px;}
+  .prize{position:absolute;bottom:58%;left:56%;width:28px;height:28px;}
+  .prize-chest{position:absolute;bottom:0;width:28px;height:16px;background:var(--expense);border-radius:3px;}
+  .prize-lid{position:absolute;bottom:13px;width:28px;height:8px;background:var(--navy);border-radius:6px 6px 0 0;}
+  .prize-glow{position:absolute;bottom:11px;left:9px;width:8px;height:8px;border-radius:50%;background:#FFE9A8;box-shadow:0 0 14px 5px rgba(255,233,168,0.75);}
+  .rock-oc{position:absolute;bottom:56%;left:50%;width:26px;height:20px;background:var(--expense);clip-path:polygon(0% 100%,10% 30%,45% 0%,78% 22%,100% 60%,88% 100%);}
+
+  .stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px;}
+  .stat-box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;}
+  .stat-box.primary{border-color:var(--expense);}
+  .stat-box .k{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--liability);font-weight:700;}
+  .stat-box .v{font-family:'Outfit',sans-serif;font-weight:700;font-size:16px;color:var(--navy);margin-top:2px;}
+  .stat-box.primary .v{color:var(--expense);}
+
+  .lb-tabs{display:flex;gap:8px;margin-bottom:12px;}
+  .lb-tab{font-family:'Outfit',sans-serif;font-weight:700;font-size:11px;padding:7px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--liability);}
+  .lb-tab.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+  .leaderboard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;}
+  .lb-row{display:flex;align-items:center;gap:10px;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line);}
+  .lb-row:last-child{border-bottom:none;}
+  .lb-row.you{background:rgba(163,229,212,0.3);margin:0 -18px;padding:9px 18px;border-radius:8px;border-bottom:none;}
+  .lb-rank{color:var(--liability);width:18px;font-weight:600;}
+  .lb-name{flex:1;font-weight:500;}
+  .lb-badges{display:flex;gap:6px;align-items:center;}
+  .lb-diff{font-size:9px;font-weight:700;color:#fff;padding:3px 8px;border-radius:20px;white-space:nowrap;}
+  .lb-rankplayed{font-size:9px;font-weight:700;color:var(--navy);background:rgba(0,41,117,0.08);padding:3px 8px;border-radius:20px;white-space:nowrap;}
+  .lb-score{color:var(--navy);font-weight:700;font-family:'Outfit',sans-serif;width:36px;text-align:right;}
+
+  footer.note{max-width:920px;margin:34px auto 0;font-size:12px;color:var(--liability);line-height:1.6;border-top:1px solid var(--line);padding-top:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div><div class="eyebrow">CFO Navigator Arcade</div><div class="title">Sail, Don't Row</div></div>
+  </div>
+  <div class="rev-note">Consolidated rendering of every decision locked so far—review before this goes to Claude Code.</div>
+
+  <h3 class="section">1. Rank & Collision Rule</h3>
+  <div class="rank-row">
+    <div class="rank-pill">
+      <div class="rank-top"><div class="rank-stripes"><span></span></div><div><div class="rank-name">Deckhand</div><div class="rank-sub">Easy</div></div></div>
+      <div class="rank-collision">No penalty on hit</div>
+    </div>
+    <div class="rank-pill active">
+      <div class="rank-top"><div class="rank-stripes"><span></span><span></span></div><div><div class="rank-name">Mate</div><div class="rank-sub">Medium</div></div></div>
+      <div class="rank-collision">3 hits and you're sunk</div>
+    </div>
+    <div class="rank-pill">
+      <div class="rank-top"><div class="rank-stripes"><span></span><span></span><span></span></div><div><div class="rank-name">First Mate</div><div class="rank-sub">Hard</div></div></div>
+      <div class="rank-collision">1 hit and you're sunk</div>
+    </div>
+    <div class="rank-pill">
+      <div class="rank-top"><div class="rank-stripes"><span></span><span></span><span></span><span></span></div><div><div class="rank-name">Skipper</div><div class="rank-sub">Expert</div></div></div>
+      <div class="rank-collision">Any hit ends it instantly</div>
+    </div>
+  </div>
+
+  <h3 class="section">2. Live Play — Charles River</h3>
+  <p class="section-note">Target: 2–3 minutes to Nantucket at Mate. Score + Runway + checkpoint progress only—no other HUD clutter.</p>
+  <div class="canvas">
+    <svg viewBox="0 0 700 168" width="100%" height="60%" preserveAspectRatio="none" style="position:absolute;top:0;left:0;">
+      <g opacity="0.3" fill="#7C93B8"><rect x="20" y="95" width="16" height="55"/><rect x="490" y="85" width="18" height="65"/></g>
+      <g>
+        <rect x="230" y="118" width="34" height="32" fill="#3E5FA8"/>
+        <rect x="239" y="104" width="16" height="14" fill="#3E5FA8"/>
+        <ellipse cx="247" cy="104" rx="10" ry="9" fill="var(--gold)"/>
+        <rect x="245" y="92" width="4" height="12" fill="var(--gold)"/>
+      </g>
+      <path d="M598,150 L598,44 L610,38 L618,44 L618,150 Z" fill="#2A4A82"/>
+      <rect x="630" y="70" width="26" height="80" fill="#274E96"/><rect x="636" y="56" width="14" height="14" fill="#274E96"/>
+      <g fill="#3E5FA8"><rect x="60" y="128" width="30" height="22"/><path d="M60,128 A15,15 0 0 1 90,128 Z"/></g>
+      <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="3" opacity="0.5"/>
+      <g fill="#0A2A6B" opacity="0.5">
+        <rect x="140" y="88" width="10" height="16" rx="2"/><circle cx="145" cy="86" r="5"/>
+        <rect x="380" y="88" width="10" height="16" rx="2"/><circle cx="385" cy="86" r="5"/>
+        <rect x="560" y="88" width="10" height="16" rx="2"/><circle cx="565" cy="86" r="5"/>
+      </g>
+    </svg>
+
+    <div class="reflection"><svg viewBox="0 0 700 168" width="100%" height="100%" preserveAspectRatio="none">
+      <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="3" opacity="0.5"/>
+      <rect x="598" y="44" width="20" height="106" fill="#2A4A82"/><ellipse cx="247" cy="104" rx="10" ry="9" fill="var(--gold)"/>
+    </svg></div>
+
+    <div class="water">
+      <div class="band band1"></div><div class="band band2"></div><div class="band band3"></div>
+      <div class="glint" style="width:3px;height:3px;bottom:40%;left:30%;"></div>
+      <div class="glint" style="width:2px;height:2px;bottom:30%;left:50%;animation-delay:.7s;"></div>
+    </div>
+
+    <div class="gust" style="top:90px;left:20px;width:60px;"></div>
+    <div class="gust" style="top:110px;left:20px;width:50px;animation-delay:.8s;"></div>
+
+    <div class="runway-hud"><div class="runway-label">Runway</div><div class="runway-track"><div class="runway-fill"></div></div></div>
+    <div class="score-hud"><div class="score-hi">HI 96</div><div class="score-amount">Score 71</div></div>
+    <div class="progress-hud"><span>Charles River</span><span>2 lives left · → Boston Harbor</span></div>
+
+    <div class="boat-wrap">
+      <div class="boat-shadow"></div>
+      <svg viewBox="0 0 110 120" width="110" height="120">
+        <path d="M14,96 C14,88 30,84 55,84 C80,84 96,88 96,96 C90,104 74,110 55,110 C36,110 20,104 14,96 Z" fill="#0A2A6B"/>
+        <path d="M18,98 C30,103 80,103 92,98" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.7"/>
+        <ellipse cx="55" cy="85" rx="30" ry="4" fill="#123a86"/>
+        <g class="sail-group">
+          <line x1="55" y1="14" x2="55" y2="86" stroke="#002975" stroke-width="2.5"/>
+          <path d="M56,16 C82,32 84,58 58,82 C64,58 62,36 56,16 Z" fill="url(#sailGrad)"/>
+          <path d="M54,30 C40,44 34,62 46,80 C42,60 46,42 54,30 Z" fill="url(#jibGrad)"/>
+          <path d="M56,14 L68,17 L56,20 Z" fill="#B5553A"/>
+        </g>
+        <defs>
+          <linearGradient id="sailGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#D8F5EC"/><stop offset="100%" stop-color="#A3E5D4"/></linearGradient>
+          <linearGradient id="jibGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#A3E5D4"/><stop offset="100%" stop-color="#7FD1BA"/></linearGradient>
+        </defs>
+      </svg>
+    </div>
+
+    <div class="rock"></div>
+    <div class="buoy"></div>
+  </div>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--seafoam);"></span>Wind gust</span>
+    <span><span class="swatch" style="background:var(--expense);"></span>Rock</span>
+    <span><span class="swatch" style="background:var(--liability);"></span>Buoy</span>
+    <span>↑/↓ steer · hold space to row</span>
+  </div>
+
+  <h3 class="section">3. Route</h3>
+  <div class="route">
+    <div class="stop"><div class="stop-line"></div><div class="stop-dot"></div><div class="stop-label">Charles River</div><div class="stop-sub">Start</div></div>
+    <div class="stop"><div class="stop-line"></div><div class="stop-dot"></div><div class="stop-label">Boston Harbor</div><div class="stop-sub">Whale bonus</div></div>
+    <div class="stop"><div class="stop-line"></div><div class="stop-dot"></div><div class="stop-label">Cape Cod</div><div class="stop-sub">Checkpoint</div></div>
+    <div class="stop"><div class="stop-line"></div><div class="stop-dot"></div><div class="stop-label">Martha's Vineyard</div><div class="stop-sub">Checkpoint</div></div>
+    <div class="stop finish"><div class="stop-dot"></div><div class="stop-label">Nantucket</div><div class="stop-sub">Finish</div></div>
+  </div>
+
+  <h3 class="section">4. Two Outcomes — Both Score</h3>
+  <p class="section-note">Partial credit is the point: dying at Cape Cod still lands you on the board.</p>
+  <div class="outcomes">
+    <div class="oc-canvas">
+      <div class="water"><div class="band band1"></div><div class="band band2"></div><div class="band band3"></div></div>
+      <div class="lighthouse"><div class="lh-body"></div><div class="lh-top"></div></div>
+      <div class="prize"><div class="prize-glow"></div><div class="prize-chest"></div><div class="prize-lid"></div></div>
+      <div class="oc-scrim"><div class="oc-card">
+        <div class="oc-title">Nantucket 🏆</div>
+        <div class="oc-score-label">Score</div>
+        <div class="oc-score">94</div>
+        <div class="oc-sub">100% distance · 91% efficiency</div>
+      </div></div>
+      <div class="oc-caption">Finish</div>
+    </div>
+    <div class="oc-canvas">
+      <div class="water"><div class="band band1"></div><div class="band band2"></div><div class="band band3"></div></div>
+      <div class="rock-oc"></div>
+      <div class="oc-scrim"><div class="oc-card">
+        <div class="oc-title partial">Sunk near Cape Cod</div>
+        <div class="oc-score-label">Score (partial)</div>
+        <div class="oc-score">41</div>
+        <div class="oc-sub">58% distance · 3 hits, Mate rank</div>
+      </div></div>
+      <div class="oc-caption">Game over—still on the board</div>
+    </div>
+  </div>
+  <div class="stats-row">
+    <div class="stat-box primary"><div class="k">Score</div><div class="v">94</div></div>
+    <div class="stat-box"><div class="k">Time</div><div class="v">2:38</div></div>
+    <div class="stat-box"><div class="k">Efficiency</div><div class="v">91%</div></div>
+  </div>
+
+  <h3 class="section">5. Leaderboard</h3>
+  <p class="section-note">Every entry shows rank played and that week's difficulty rating—so a 94 on a Storm Warning week reads differently from a 94 on Fair Winds.</p>
+  <div class="lb-tabs">
+    <div class="lb-tab active">This Week</div>
+    <div class="lb-tab">All Time</div>
+  </div>
+  <div class="leaderboard">
+    <div class="lb-row">
+      <span class="lb-rank">1</span><span class="lb-name">jrodriguez</span>
+      <div class="lb-badges"><span class="lb-rankplayed">Skipper</span><span class="lb-diff" style="background:var(--diff-storm);">Storm Warning</span></div>
+      <span class="lb-score">97</span>
+    </div>
+    <div class="lb-row">
+      <span class="lb-rank">2</span><span class="lb-name">runway_ray</span>
+      <div class="lb-badges"><span class="lb-rankplayed">First Mate</span><span class="lb-diff" style="background:var(--diff-rough);">Rough Seas</span></div>
+      <span class="lb-score">95</span>
+    </div>
+    <div class="lb-row">
+      <span class="lb-rank">3</span><span class="lb-name">cfo_kelly</span>
+      <div class="lb-badges"><span class="lb-rankplayed">Mate</span><span class="lb-diff" style="background:var(--diff-fair);color:var(--navy);">Fair Winds</span></div>
+      <span class="lb-score">94</span>
+    </div>
+    <div class="lb-row you">
+      <span class="lb-rank">4</span><span class="lb-name">bweisberg (you)</span>
+      <div class="lb-badges"><span class="lb-rankplayed">Mate</span><span class="lb-diff" style="background:var(--diff-choppy);color:var(--navy);">Choppy Waters</span></div>
+      <span class="lb-score">88</span>
+    </div>
+    <div class="lb-row">
+      <span class="lb-rank">5</span><span class="lb-name">amort_amy</span>
+      <div class="lb-badges"><span class="lb-rankplayed">Deckhand</span><span class="lb-diff" style="background:var(--diff-fair);color:var(--navy);">Fair Winds</span></div>
+      <span class="lb-score">81</span>
+    </div>
+  </div>
+
+  <footer class="note">
+    Not shown here (data-only, no visual): weekly seeded obstacle/gust generation, the exact Score/Efficiency/PaceMultiplier formula, and the full Phase 0–7 build sequence—those live in the build prompt doc, not this rendering. This file is the visual layer only. Flag anything here you want changed before it goes to Claude Code.
+  </footer>
+</div>
+</body>
+</html>

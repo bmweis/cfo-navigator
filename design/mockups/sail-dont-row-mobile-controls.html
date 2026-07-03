@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sail, Don't Row — Mobile Controls & Responsive Layout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F5F4EF; --navy:#002975; --seafoam:#A3E5D4; --line:#DEDACD;
+    --water-light:#BDEBDD; --water-mid:#4FA8A0;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);font-family:'DM Sans',sans-serif;color:var(--navy);padding:32px 20px 60px;}
+  .wrap{max-width:920px;margin:0 auto;}
+  .topbar{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid var(--navy);padding-bottom:14px;margin-bottom:22px;}
+  .title{font-family:'Outfit',sans-serif;font-weight:800;font-size:28px;color:var(--navy);margin:0;}
+  h3.section{font-family:'Outfit',sans-serif;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#5C5A52;font-weight:700;margin:30px 0 8px;}
+  p.section-note{font-size:12px;color:#5C5A52;margin:0 0 12px;}
+
+  .row-2{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;}
+
+  .device{position:relative;background:linear-gradient(180deg,#EAF0F5 0%, #DCEEEA 45%, var(--water-light) 60%);
+    border-radius:14px;overflow:hidden;border:3px solid var(--navy);}
+  .device.landscape{width:420px;height:200px;}
+  .device.portrait{width:200px;height:380px;}
+  .dev-label{position:absolute;top:8px;left:0;right:0;text-align:center;font-family:'Outfit',sans-serif;font-weight:700;font-size:11px;color:var(--navy);z-index:9;background:rgba(255,255,255,0.7);padding:2px 0;}
+
+  .zone{position:absolute;border-radius:6px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:9px;font-weight:700;color:var(--navy);}
+  .zone-steer{border:2px dashed #274E96;background:rgba(39,78,150,0.08);}
+  .zone-row{border:2px dashed #B5553A;background:rgba(181,85,58,0.1);}
+
+  .hud-mini{position:absolute;top:24px;left:8px;right:8px;display:flex;justify-content:space-between;font-size:8px;font-weight:700;color:var(--navy);z-index:8;}
+  .stam-mini{position:absolute;top:38px;left:8px;width:70px;height:5px;border-radius:6px;background:rgba(0,41,117,0.12);z-index:8;}
+  .stam-fill-mini{width:60%;height:100%;border-radius:6px;background:#5FB89E;}
+
+  footer.note{max-width:920px;margin:30px auto 0;font-size:12px;color:#5C5A52;line-height:1.6;border-top:1px solid var(--line);padding-top:14px;}
+
+  .stack-demo{display:flex;gap:10px;flex-wrap:wrap;}
+  .stack-demo.narrow{flex-direction:column;width:180px;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:11px;font-weight:700;color:var(--navy);text-align:center;flex:1;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar"><div class="title">Sail, Don't Row — Mobile</div></div>
+
+  <h3 class="section">Touch Controls, Both Orientations</h3>
+  <p class="section-note">Steer = drag anywhere in the left zone, boat's vertical position follows your thumb (not discrete up/down taps—continuous, more precise). Row = press-and-hold the dedicated button, doesn't overlap the steer zone so both can be used at once with two thumbs.</p>
+  <div class="row-2">
+    <div class="device landscape">
+      <div class="dev-label">Landscape</div>
+      <div class="hud-mini"><span>HI 96</span><span>Score 71</span></div>
+      <div class="stam-mini"><div class="stam-fill-mini"></div></div>
+      <div class="zone zone-steer" style="top:36px;left:8px;width:280px;height:150px;">drag to steer</div>
+      <div class="zone zone-row" style="bottom:10px;right:10px;width:70px;height:70px;border-radius:50%;">hold to row</div>
+    </div>
+    <div class="device portrait">
+      <div class="dev-label">Portrait</div>
+      <div class="hud-mini"><span>HI 96</span><span>71</span></div>
+      <div class="stam-mini" style="width:120px;"><div class="stam-fill-mini"></div></div>
+      <div class="zone zone-steer" style="top:36px;left:8px;right:8px;height:260px;">drag to steer</div>
+      <div class="zone zone-row" style="bottom:10px;right:10px;width:60px;height:60px;border-radius:50%;">hold to row</div>
+    </div>
+  </div>
+
+  <h3 class="section">The Real Trade-off: Lookahead</h3>
+  <p class="section-note">Landscape shows more of the channel ahead—more reaction time to obstacles. Portrait is narrower, so there's inherently less warning. That's not a bug to fix, it's a real difference between orientations. Recommending obstacle/gust timing be generated in time-until-reach rather than fixed pixel distance, so a portrait player isn't unfairly punished by a compressed view—reaction window stays roughly consistent even though what's visible differs.</p>
+
+  <h3 class="section">UI Chrome — Stacks on Narrow Screens</h3>
+  <p class="section-note">Rank selector, stats grid, leaderboard rows—anything currently laid out in columns needs a breakpoint to stack vertically below ~480px width.</p>
+  <div class="row-2">
+    <div>
+      <div style="font-size:10px;color:#5C5A52;margin-bottom:6px;font-weight:700;">Wide (current desktop layout)</div>
+      <div class="stack-demo"><div class="card">Deckhand</div><div class="card">Mate</div><div class="card">First Mate</div><div class="card">Skipper</div></div>
+    </div>
+    <div>
+      <div style="font-size:10px;color:#5C5A52;margin-bottom:6px;font-weight:700;">Narrow (needs breakpoint)</div>
+      <div class="stack-demo narrow"><div class="card">Deckhand</div><div class="card">Mate</div><div class="card">First Mate</div><div class="card">Skipper</div></div>
+    </div>
+  </div>
+
+  <footer class="note">
+    Feature-detect touch capability rather than just checking screen width—some laptops have touchscreens too, and both input modes (keyboard + touch) should work simultaneously without one disabling the other. Keyboard controls stay exactly as already specified; touch is additive, not a replacement.
+  </footer>
+</div>
+</body>
+</html>

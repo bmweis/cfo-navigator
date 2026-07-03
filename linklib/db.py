@@ -250,6 +250,29 @@ CREATE TABLE IF NOT EXISTS ask_questions (
 CREATE INDEX IF NOT EXISTS idx_ask_questions_user ON ask_questions(user_id);
 CREATE INDEX IF NOT EXISTS idx_ask_questions_created ON ask_questions(created_at);
 CREATE INDEX IF NOT EXISTS idx_ask_questions_conversation ON ask_questions(conversation_id);
+
+-- "Sail, Don't Row" — one row per rank (Deckhand/Mate/First Mate/Skipper), the
+-- tunable knobs the game engine reads instead of hardcoded constants, so Brian
+-- can rebalance pacing/difficulty from /admin without a redeploy. Seeded with
+-- the Phase 0 proposal on first run (see _seed_game_settings); the DB is the
+-- source of truth after that.
+CREATE TABLE IF NOT EXISTS game_rank_settings (
+    rank                   TEXT PRIMARY KEY,       -- 'deckhand' | 'mate' | 'first_mate' | 'skipper'
+    label                  TEXT NOT NULL,           -- 'Deckhand', 'Mate', ...
+    difficulty_label       TEXT NOT NULL,           -- 'Easy', 'Medium', 'Hard', 'Expert'
+    collision_limit        INTEGER NOT NULL,        -- hits before sunk; 0 = no penalty (practice mode)
+    grace_window           INTEGER NOT NULL DEFAULT 1, -- 1 = brief invincibility after a hit; 0 = none (Skipper)
+    par_time_seconds       INTEGER NOT NULL,        -- target full-course finish time
+    gust_coverage_pct      REAL NOT NULL,           -- % of course length covered by wind gusts
+    obstacle_density       REAL NOT NULL,           -- obstacles per 1000 world-units of channel
+    drift_speed            REAL NOT NULL,           -- world-units/sec, no input & no gust
+    row_speed              REAL NOT NULL,           -- world-units/sec, Space held
+    sail_speed             REAL NOT NULL,           -- world-units/sec, auto-sail in a gust
+    stamina_drain_per_sec  REAL NOT NULL,           -- while rowing
+    stamina_regen_per_sec  REAL NOT NULL,           -- while not rowing
+    sort_order             INTEGER NOT NULL DEFAULT 0,
+    updated_at             TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -1402,6 +1425,72 @@ class Library:
         admin archive always shows who actually asked."""
         self.conn.execute(
             "UPDATE ask_questions SET anonymized=? WHERE id=?", (int(anonymized), question_id)
+        )
+        self.conn.commit()
+
+    # -- "Sail, Don't Row" — rank/mode tuning ----------------------------------
+
+    # rank, label, difficulty_label, collision_limit, grace_window, par_time_seconds,
+    # gust_coverage_pct, obstacle_density, drift_speed, row_speed, sail_speed,
+    # stamina_drain_per_sec, stamina_regen_per_sec, sort_order
+    _GAME_RANK_DEFAULTS = [
+        ("deckhand",   "Deckhand",   "Easy",   0, 1, 130, 45.0, 3.0, 10.0, 30.0, 40.0, 15.0, 4.0, 0),
+        ("mate",       "Mate",       "Medium", 3, 1, 150, 35.0, 5.0, 10.0, 30.0, 40.0, 15.0, 4.0, 1),
+        ("first_mate", "First Mate", "Hard",   1, 1, 165, 28.0, 7.0, 10.0, 30.0, 40.0, 15.0, 4.0, 2),
+        ("skipper",    "Skipper",    "Expert", 1, 0, 180, 20.0, 9.0, 10.0, 30.0, 40.0, 15.0, 4.0, 3),
+    ]
+
+    def seed_game_rank_settings(self) -> None:
+        """Insert the four ranks with the Phase 0 defaults if the table is
+        empty. Never overwrites existing rows — once seeded, /admin/game-settings
+        owns the values."""
+        if self.conn.execute("SELECT 1 FROM game_rank_settings LIMIT 1").fetchone():
+            return
+        now = _now()
+        for row in self._GAME_RANK_DEFAULTS:
+            self.conn.execute(
+                """INSERT INTO game_rank_settings
+                   (rank, label, difficulty_label, collision_limit, grace_window,
+                    par_time_seconds, gust_coverage_pct, obstacle_density,
+                    drift_speed, row_speed, sail_speed,
+                    stamina_drain_per_sec, stamina_regen_per_sec, sort_order, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                row + (now,),
+            )
+        self.conn.commit()
+
+    def list_game_rank_settings(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM game_rank_settings ORDER BY sort_order"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_game_rank_settings(self, rank: str) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM game_rank_settings WHERE rank=?", (rank,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_game_rank_settings(self, rank: str, **fields) -> None:
+        """Update any subset of the tuning columns for one rank. Raises
+        ValueError for an unknown rank or an unknown field name."""
+        if not self.get_game_rank_settings(rank):
+            raise ValueError(f'Unknown rank "{rank}".')
+        allowed = {
+            "label", "difficulty_label", "collision_limit", "grace_window",
+            "par_time_seconds", "gust_coverage_pct", "obstacle_density",
+            "drift_speed", "row_speed", "sail_speed",
+            "stamina_drain_per_sec", "stamina_regen_per_sec",
+        }
+        bad = set(fields) - allowed
+        if bad:
+            raise ValueError(f"Unknown setting(s): {', '.join(sorted(bad))}")
+        if not fields:
+            return
+        set_clause = ", ".join(f"{k}=?" for k in fields)
+        self.conn.execute(
+            f"UPDATE game_rank_settings SET {set_clause}, updated_at=? WHERE rank=?",
+            list(fields.values()) + [_now(), rank],
         )
         self.conn.commit()
 

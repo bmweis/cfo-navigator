@@ -215,6 +215,7 @@ def _seed_toolbox():
             for b in _DEFAULT_BENCHMARKS:
                 lib.add_benchmark(b["name"], b["url"], b["description"],
                                   b.get("coverage", "Private"), b.get("pricing", "free"))
+        lib.seed_game_rank_settings()
         for t in TOOLS:
             row = lib.conn.execute(
                 "SELECT id, advisor, categories_json FROM tools WHERE url = ?", (t["url"],)
@@ -5488,12 +5489,13 @@ _ADMIN_GROUPS = [
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Site management", "Your voice, your brand, and the public site.", [
-        ("/admin/users",        "Users",               "Create and manage member accounts for the gated sections."),
-        ("/admin/brand",        "Brand standards",     "Visual standards and color system for the site."),
-        ("/admin/voice",        "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
-        ("/admin/ask-report",   "FP&A Buddy report",   "Every question asked, across every user — settings, cost, and a CSV export."),
-        ("/admin/checks",       "Checks",              "Live status of the automated checks that guard the site."),
-        ("/admin/open-source",  "Open source",         "The open-source projects this site is built on — with gratitude."),
+        ("/admin/users",         "Users",               "Create and manage member accounts for the gated sections."),
+        ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
+        ("/admin/voice",         "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
+        ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user — settings, cost, and a CSV export."),
+        ("/admin/game-settings", "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
+        ("/admin/checks",        "Checks",              "Live status of the automated checks that guard the site."),
+        ("/admin/open-source",   "Open source",         "The open-source projects this site is built on — with gratitude."),
     ]),
 ]
 
@@ -6607,6 +6609,125 @@ async def admin_tag_style_clear(request: Request):
     finally:
         lib.close()
     return RedirectResponse("/admin/tag-style", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# "Sail, Don't Row" — rank/mode tuning. The game engine (/play) reads these
+# live, so rebalancing pace/difficulty never needs a redeploy.
+# ---------------------------------------------------------------------------
+
+def _game_settings_num_field(label: str, name: str, value, step: str = "1", suffix: str = "") -> str:
+    hint = f' <span style="text-transform:none;font-weight:400;">({_esc(suffix)})</span>' if suffix else ""
+    return f"""<div>
+      <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;">{_esc(label)}{hint}</label>
+      <input type="number" name="{name}" value="{value}" step="{step}" min="0"
+        style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+    </div>"""
+
+
+@app.get("/admin/game-settings", response_class=HTMLResponse)
+def admin_game_settings(request: Request, msg: str = "", error: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        ranks = lib.list_game_rank_settings()
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--coral-deep);border-radius:10px;padding:10px 16px;'
+                     f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
+
+    cards = ""
+    for r in ranks:
+        stripes = "".join(
+            '<span style="height:3px;border-radius:1px;background:var(--navy);"></span>'
+            for _ in range(int(r["sort_order"]) + 1)
+        )
+        grace_checked = "checked" if r["grace_window"] else ""
+        fields = "".join([
+            _game_settings_num_field("Collision limit", "collision_limit", r["collision_limit"], suffix="hits, 0=no penalty"),
+            _game_settings_num_field("Par time", "par_time_seconds", r["par_time_seconds"], suffix="seconds, full course"),
+            _game_settings_num_field("Gust coverage", "gust_coverage_pct", r["gust_coverage_pct"], suffix="% of course"),
+            _game_settings_num_field("Obstacle density", "obstacle_density", r["obstacle_density"], step="0.5", suffix="per 1000u"),
+            _game_settings_num_field("Drift speed", "drift_speed", r["drift_speed"], suffix="u/sec"),
+            _game_settings_num_field("Row speed", "row_speed", r["row_speed"], suffix="u/sec"),
+            _game_settings_num_field("Sail speed", "sail_speed", r["sail_speed"], suffix="u/sec"),
+            _game_settings_num_field("Stamina drain", "stamina_drain_per_sec", r["stamina_drain_per_sec"], step="0.5", suffix="/sec rowing"),
+            _game_settings_num_field("Stamina regen", "stamina_regen_per_sec", r["stamina_regen_per_sec"], step="0.5", suffix="/sec resting"),
+        ])
+        cards += f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:16px;">
+  <form method="post" action="/admin/game-settings/{r['rank']}/edit">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
+      <div style="display:flex;flex-direction:column;gap:2px;width:16px;flex-shrink:0;">{stripes}</div>
+      <input type="text" name="label" value="{_esc(r['label'])}" required maxlength="40"
+        style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);border:1px solid var(--line);border-radius:8px;padding:6px 10px;width:140px;">
+      <input type="text" name="difficulty_label" value="{_esc(r['difficulty_label'])}" required maxlength="20"
+        style="font-size:13px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px;width:100px;">
+      <span style="font-size:11px;color:var(--muted);margin-left:auto;">rank id: {_esc(r['rank'])}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">{fields}</div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);margin-top:14px;">
+      <input type="checkbox" name="grace_window" value="1" {grace_checked}>
+      Brief invincibility window after a hit
+    </label>
+    <div style="margin-top:16px;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Save {_esc(r['label'])}</button></div>
+  </form>
+</div>"""
+
+    body = f"""<div class="page" style="max-width:820px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Sail, Don&rsquo;t Row &mdash; rank settings</h1>
+<p style="color:var(--muted);margin:-6px 0 20px;">Tune pace, wind, obstacle density, and the collision rule per rank. The
+game reads these live — changes apply to the next run, no redeploy needed. Course length is a fixed 4300 world-units;
+par time is what a full finish at that rank is calibrated against for the pace score.</p>
+{banner}{error_banner}
+{cards}
+</div>"""
+    return HTMLResponse(_page("Sail, Don't Row settings—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/game-settings/{rank}/edit")
+async def admin_game_settings_edit(request: Request, rank: str):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+
+    def _num(name, cast, default):
+        try:
+            return cast(form.get(name))
+        except (TypeError, ValueError):
+            return default
+
+    lib = _lib()
+    try:
+        current = lib.get_game_rank_settings(rank)
+        if not current:
+            raise HTTPException(status_code=404, detail="Unknown rank")
+        label = (form.get("label") or "").strip()[:40] or current["label"]
+        try:
+            lib.update_game_rank_settings(
+                rank,
+                label=label,
+                difficulty_label=(form.get("difficulty_label") or "").strip()[:20] or current["difficulty_label"],
+                collision_limit=max(0, _num("collision_limit", int, current["collision_limit"])),
+                grace_window=1 if form.get("grace_window") else 0,
+                par_time_seconds=max(1, _num("par_time_seconds", int, current["par_time_seconds"])),
+                gust_coverage_pct=min(100.0, max(0.0, _num("gust_coverage_pct", float, current["gust_coverage_pct"]))),
+                obstacle_density=max(0.0, _num("obstacle_density", float, current["obstacle_density"])),
+                drift_speed=max(0.0, _num("drift_speed", float, current["drift_speed"])),
+                row_speed=max(0.0, _num("row_speed", float, current["row_speed"])),
+                sail_speed=max(0.0, _num("sail_speed", float, current["sail_speed"])),
+                stamina_drain_per_sec=max(0.0, _num("stamina_drain_per_sec", float, current["stamina_drain_per_sec"])),
+                stamina_regen_per_sec=max(0.0, _num("stamina_regen_per_sec", float, current["stamina_regen_per_sec"])),
+            )
+        except ValueError as e:
+            return RedirectResponse(f"/admin/game-settings?error={quote(str(e))}", status_code=303)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/game-settings?msg={quote(f'Saved {label}.')}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
