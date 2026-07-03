@@ -197,7 +197,8 @@ PODCASTS: list[TLItem] = [
     TLItem(
         title="Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks (Guest)",
         url="https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn",
-        venue="Monetizely", date_label="Sep 2023", sort_key="2023-09", type="podcast", needs_synopsis=True,
+        venue="Monetizely", date_label="Sep 2023", sort_key="2023-09", type="podcast",
+        description="With Monetizely's Ajit Ghuman on treating pricing as a system, not a single number—choosing metrics that track real customer value, and building the pricebooks and discount guardrails that make a pricing change stick.",
     ),
     TLItem(
         title="SaaS Conversations: Dynamic Planning for SaaS Finance Leaders (Guest)",
