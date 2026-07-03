@@ -57,6 +57,22 @@ AUX_COLORS = {
     "#fefce8", "#fde68a",  # amber warning banner bg / border (yellow-50 / yellow-200)
     # Misc
     "#b8860b",  # advisor gold-star marker
+    # "Sail, Don't Row" (/play) — deliberately realistic sky/water/skyline/boat/
+    # obstacle palette, not brand tokens. Per the design spec (design/mockups/),
+    # the game reads as an actual landscape, muted except for the gold State
+    # House dome and the coral sail — same rationale as the GER chart tints above.
+    "#000000",  # CSS mask-image gradient stop (alpha mask, never a visible color)
+    "#eaf0f5", "#dceeea", "#bdebdd",           # sky-to-water gradient
+    "#0e5a7a", "#4fa8a0",                       # water mid/deep teal bands
+    "#7c93b8", "#3e5fa8",                       # atmospheric skyline / building fill
+    "#c9a24b",                                  # State House gold dome (the one color pop)
+    "#2a4a82", "#0a2a6b",                       # Hancock Tower / bridge line navy-blue
+    "#274e96", "#061a45", "#16418f", "#123a86", "#5fb89e",  # boat hull/waterline/cabin
+    "#e0917a", "#b5553a", "#f5e4da", "#8b3f28",             # mainsail coral + fold shading
+    "#d8987c", "#96432c",                                    # jib gradient
+    "#a8a69c", "#5c5a52", "#7a7869",           # rock (grey stone)
+    "#9c7a54", "#5a4128", "#3a2c18",           # buoy (weathered brown wood)
+    "#ffe9a8",                                  # active rank-pill sleeve-stripe highlight
 }
 
 # Colors purged in the visual refresh — must never reappear.

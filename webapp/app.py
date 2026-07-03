@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import re
 import sys
@@ -505,7 +506,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     if role is None:
         role = "admin" if authed else "guest"
     public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
-              ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
+              ("/tools", "CFO Toolbox"), ("/play", "Sail, Don't Row"), ("/contact", "Contact")]
     # Account-only section — one nav entry ("Library") that opens a hub linking to
     # Archive, Feed, and FP&A Buddy. Shown to everyone so the gated area is
     # discoverable; clicking it when signed out lands on the login screen.
@@ -2323,6 +2324,592 @@ def netsuite_mcp(request: Request):
 
 </div>"""
     return HTMLResponse(_page("Connecting Claude to NetSuite—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
+
+
+# ---------------------------------------------------------------------------
+# "Sail, Don't Row" — Phase 1: core engine (public, no auth to play).
+# DOM+CSS-transform game, vanilla JS. Boat SVG/obstacle colors/skyline
+# landmarks/difficulty-pill treatment lifted from design/mockups/ per the
+# Phase 0 sign-off. Rank tuning (pace, wind, obstacle density, collision
+# rule) is admin-editable at /admin/game-settings and read live here.
+# Not yet built: wind gusts (Phase 2), the route past Boston Harbor and the
+# Nantucket finish line (Phase 3), the full outcome-stats breakdown and
+# leaderboard (Phase 4/7), rank-select visual polish (Phase 5/6).
+# ---------------------------------------------------------------------------
+
+_SDR_CSS = """
+#sdrRoot{
+  --sdr-water-deep:#0E5A7A; --sdr-water-mid:#4FA8A0; --sdr-water-light:#BDEBDD;
+  --sdr-rock-lt:#A8A69C; --sdr-rock-dk:#5C5A52;
+  --sdr-buoy-lt:#9C7A54; --sdr-buoy-dk:#5A4128;
+  --sdr-gold:#C9A24B;
+}
+.sdr-sub{color:var(--muted);font-size:15px;margin:0 0 22px;max-width:520px;}
+.sdr-pregame{max-width:560px;}
+.sdr-rank-row{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 24px;}
+.sdr-rank-pill{display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:12px;
+  border:1.5px solid var(--line);background:#fff;cursor:pointer;font:inherit;text-align:left;}
+.sdr-rank-pill.sdr-active{border-color:var(--navy);background:var(--navy);}
+.sdr-rank-pill.sdr-active .sdr-rank-name,.sdr-rank-pill.sdr-active .sdr-rank-sub{color:#fff;}
+.sdr-rank-stripes{display:flex;flex-direction:column;gap:2px;width:16px;flex-shrink:0;}
+.sdr-rank-stripes span{height:3px;border-radius:1px;background:var(--navy);}
+.sdr-rank-pill.sdr-active .sdr-rank-stripes span{background:#FFE9A8;}
+.sdr-rank-name{font-family:var(--font-head);font-weight:600;font-size:13px;color:var(--navy);}
+.sdr-rank-sub{font-size:10px;color:var(--muted);}
+@media (max-width:480px){ .sdr-rank-row{flex-direction:column;} .sdr-rank-pill{width:100%;} }
+
+.sdr-stage{position:relative;width:100%;max-width:900px;aspect-ratio:16/9;border-radius:16px;overflow:hidden;
+  background:linear-gradient(180deg,#EAF0F5 0%, #DCEEEA 45%, var(--sdr-water-light) 60%);
+  touch-action:none;user-select:none;-webkit-user-select:none;}
+@media (max-width:480px){ .sdr-stage{aspect-ratio:3/4;} }
+.sdr-skyline{position:absolute;left:0;right:0;top:0;height:60%;}
+.sdr-reflection{position:absolute;left:0;right:0;top:58%;height:42%;opacity:.2;filter:blur(1.5px);transform:scaleY(-1);overflow:hidden;}
+.sdr-water{position:absolute;left:0;right:0;bottom:0;top:58%;overflow:hidden;}
+.sdr-band{position:absolute;left:0;right:-100%;height:100%;}
+.sdr-band1{background:var(--sdr-water-light);top:0;}
+.sdr-band2{background:linear-gradient(180deg,transparent,var(--sdr-water-mid) 100%);opacity:.32;top:18%;
+  -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);
+  mask-image:repeating-linear-gradient(100deg,#000 0 30px,transparent 30px 62px);animation:sdrDrift 14s linear infinite;}
+.sdr-band3{background:var(--sdr-water-deep);opacity:.15;top:46%;
+  -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);
+  mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);animation:sdrDrift 9s linear infinite reverse;}
+@keyframes sdrDrift{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+
+.sdr-boat-wrap{position:absolute;width:78px;z-index:4;filter:drop-shadow(0 4px 6px rgba(0,41,117,0.15));}
+.sdr-boat-wrap svg{width:100%;height:auto;display:block;}
+.sdr-boat-inner{animation:sdrBob 2.8s ease-in-out infinite;}
+@keyframes sdrBob{0%,100%{transform:translateY(0) rotate(-2deg);}50%{transform:translateY(-5px) rotate(-3.5deg);}}
+.sdr-boat-shadow{position:absolute;bottom:-4px;left:16%;width:64%;height:9px;border-radius:50%;background:rgba(0,41,117,0.18);filter:blur(2px);}
+.sdr-sail-group{transform-origin:50px 60px;animation:sdrFlutter 2.2s ease-in-out infinite;}
+@keyframes sdrFlutter{0%,100%{transform:skewX(0deg);}50%{transform:skewX(-1.4deg);}}
+/* Positioning transform is set by JS on .sdr-obstacle itself every frame — the
+   bob animation must live on an inner wrapper, never on the same element/property
+   JS positions, or the CSS animation silently wins the cascade and the obstacle
+   never moves from its default static position. */
+.sdr-obstacle{position:absolute;z-index:3;}
+.sdr-obstacle-inner{display:inline-block;}
+.sdr-obstacle.sdr-buoy .sdr-obstacle-inner{animation:sdrBuoyBob 2.2s ease-in-out infinite;}
+@keyframes sdrBuoyBob{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
+
+.sdr-hud-top{position:absolute;top:14px;left:14px;right:14px;display:flex;justify-content:space-between;
+  align-items:flex-start;z-index:6;pointer-events:none;}
+.sdr-stamina-hud{width:120px;}
+.sdr-stamina-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;
+  margin-bottom:4px;background:rgba(255,255,255,0.6);display:inline-block;padding:1px 4px;border-radius:3px;}
+.sdr-stamina-track{height:7px;border-radius:8px;background:rgba(0,41,117,0.15);overflow:hidden;}
+.sdr-stamina-fill{height:100%;width:100%;border-radius:8px;background:#5FB89E;transition:width .12s linear;}
+.sdr-score-hud{text-align:right;}
+.sdr-score-hi{font-size:10px;color:var(--muted);font-weight:600;background:rgba(255,255,255,0.6);
+  display:inline-block;padding:1px 4px;border-radius:3px;}
+.sdr-score-amount{font-family:var(--font-head);font-weight:800;font-size:20px;color:var(--navy);
+  text-shadow:0 1px 2px rgba(255,255,255,0.6);}
+.sdr-progress-hud{position:absolute;bottom:10px;left:14px;right:14px;z-index:6;font-size:11px;color:var(--navy);
+  font-weight:600;display:flex;justify-content:space-between;pointer-events:none;
+  text-shadow:0 1px 2px rgba(255,255,255,0.7);}
+
+.sdr-steer-zone{position:absolute;top:0;left:0;width:60%;height:100%;z-index:5;cursor:grab;}
+.sdr-row-btn{position:absolute;bottom:14px;right:14px;width:64px;height:64px;border-radius:50%;
+  background:rgba(181,85,58,0.85);color:#fff;border:2px solid #fff;font:700 11px var(--font-head);
+  letter-spacing:.05em;z-index:7;display:none;align-items:center;justify-content:center;}
+.sdr-row-btn.sdr-pressed{background:rgba(181,85,58,1);transform:scale(0.94);}
+.sdr-touch #sdrRowBtn{display:flex;}
+.sdr-touch .sdr-progress-hud{bottom:82px;}
+.sdr-portrait-note{position:absolute;top:47%;left:8%;right:8%;text-align:center;font-size:11px;
+  color:var(--navy);background:rgba(255,255,255,0.8);border-radius:6px;padding:4px 10px;z-index:6;
+  pointer-events:none;display:none;}
+
+.sdr-outcome-scrim{position:absolute;inset:0;background:rgba(247,246,241,0.6);backdrop-filter:blur(5px);
+  -webkit-backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;z-index:9;
+  border-radius:16px;opacity:0;transition:opacity .25s ease;}
+.sdr-outcome-scrim.sdr-visible{opacity:1;}
+.sdr-outcome-card{background:#fff;border-radius:14px;padding:24px 30px;text-align:center;
+  box-shadow:0 12px 28px rgba(0,41,117,0.18);transform:scale(0.92);transition:transform .25s ease;max-width:80%;}
+.sdr-outcome-scrim.sdr-visible .sdr-outcome-card{transform:scale(1);}
+.sdr-outcome-title{font-family:var(--font-head);font-weight:800;font-size:17px;color:var(--navy);}
+.sdr-outcome-sub{font-size:12px;color:var(--muted);margin-top:8px;}
+.sdr-hint{margin-top:16px;font-size:12px;color:var(--muted);}
+
+.sdr-stage.sdr-flash::after{content:'';position:absolute;inset:0;background:rgba(181,85,58,0.35);
+  z-index:8;pointer-events:none;animation:sdrFlashOut .4s ease forwards;}
+@keyframes sdrFlashOut{from{opacity:1;}to{opacity:0;}}
+"""
+
+_SDR_DEFS_SVG = """<svg width="0" height="0" style="position:absolute;">
+  <defs>
+    <linearGradient id="sdrHullGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#274E96"/><stop offset="100%" stop-color="#061A45"/></linearGradient>
+    <linearGradient id="sdrSailGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E0917A"/><stop offset="100%" stop-color="#B5553A"/></linearGradient>
+    <linearGradient id="sdrJibGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#D8987C"/><stop offset="100%" stop-color="#96432C"/></linearGradient>
+    <linearGradient id="sdrRockGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#A8A69C"/><stop offset="100%" stop-color="#5C5A52"/></linearGradient>
+    <linearGradient id="sdrBuoyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#9C7A54"/><stop offset="100%" stop-color="#5A4128"/></linearGradient>
+  </defs>
+</svg>"""
+
+_SDR_BOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
+  <line x1="65" y1="26" x2="28" y2="108" stroke="#002975" stroke-width="1" opacity="0.4"/>
+  <line x1="65" y1="26" x2="102" y2="108" stroke="#002975" stroke-width="1" opacity="0.4"/>
+  <line x1="24" y1="108" x2="8" y2="104" stroke="#0A2A6B" stroke-width="2"/>
+  <path d="M24,110 C24,102 42,98 65,98 C88,98 106,102 106,110 C100,118 82,124 65,124 C48,124 30,118 24,110 Z" fill="url(#sdrHullGrad)"/>
+  <path d="M28,112 C42,117 88,117 102,112" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
+  <ellipse cx="65" cy="99" rx="34" ry="4.5" fill="#16418F"/>
+  <rect x="56" y="93" width="18" height="7" rx="2" fill="#123a86"/>
+  <circle cx="65" cy="96.5" r="1.6" fill="#A3E5D4"/>
+  <g class="sdr-sail-group">
+    <line x1="65" y1="24" x2="65" y2="100" stroke="#002975" stroke-width="2.5"/>
+    <path d="M66,26 C92,42 94,68 68,96 C74,68 72,46 66,26 Z" fill="url(#sdrSailGrad)" stroke="#002975" stroke-width="1.2"/>
+    <path d="M69,34 C82,46 83,62 70,88" fill="none" stroke="#F5E4DA" stroke-width="1" opacity="0.6"/>
+    <path d="M67,30 C78,42 79,60 68,92" fill="none" stroke="#8B3F28" stroke-width="1.2" opacity="0.45"/>
+    <path d="M63,38 C48,50 42,66 54,86 C50,68 54,50 63,38 Z" fill="url(#sdrJibGrad)" stroke="#002975" stroke-width="1"/>
+    <line x1="65" y1="96" x2="72" y2="98" stroke="#002975" stroke-width="2.2"/>
+  </g>
+</svg>"""
+
+_SDR_ROCK_SVG = """<svg viewBox="0 0 40 32" width="40" height="32">
+  <path d="M2,30 C0,20 6,8 16,4 C26,0 38,6 38,18 C38,26 30,30 20,31 C12,32 4,30 2,30 Z" fill="url(#sdrRockGrad)"/>
+  <path d="M8,10 C14,6 22,6 28,10" stroke="#7A7869" stroke-width="1" opacity="0.4" fill="none"/>
+</svg>"""
+
+_SDR_BUOY_SVG = """<svg viewBox="0 0 26 34" width="26" height="34">
+  <ellipse cx="13" cy="28" rx="11" ry="5" fill="#3A2C18" opacity="0.3"/>
+  <path d="M4,26 C2,16 4,6 13,3 C22,6 24,16 22,26 C22,30 4,30 4,26 Z" fill="url(#sdrBuoyGrad)"/>
+  <rect x="4" y="14" width="18" height="4" fill="#5A4128" opacity="0.5"/>
+</svg>"""
+
+_SDR_SKYLINE_SVG = """<svg class="sdr-skyline" viewBox="0 0 700 168" preserveAspectRatio="none">
+  <g opacity="0.3" fill="#7C93B8">
+    <rect x="20" y="95" width="16" height="55"/><rect x="470" y="100" width="14" height="50"/><rect x="490" y="85" width="18" height="65"/>
+  </g>
+  <g>
+    <rect x="230" y="118" width="36" height="32" fill="#3E5FA8"/>
+    <rect x="240" y="104" width="16" height="14" fill="#3E5FA8"/>
+    <ellipse cx="248" cy="104" rx="10" ry="9" fill="var(--sdr-gold)"/>
+    <rect x="246" y="92" width="4" height="12" fill="var(--sdr-gold)"/>
+    <circle cx="248" cy="90" r="2.5" fill="var(--sdr-gold)"/>
+  </g>
+  <path d="M598,150 L598,44 L610,38 L618,44 L618,150 Z" fill="#2A4A82"/>
+  <path d="M600,150 L600,50 L608,46 L616,50 L616,150 Z" fill="#3E5FA8" opacity="0.6"/>
+  <rect x="630" y="70" width="26" height="80" fill="#274E96"/>
+  <rect x="636" y="56" width="14" height="14" fill="#274E96"/>
+  <rect x="641" y="48" width="4" height="8" fill="#274E96"/>
+  <g fill="#3E5FA8" opacity="0.55"><rect x="660" y="90" width="12" height="60"/><rect x="676" y="105" width="16" height="45"/></g>
+  <g fill="#3E5FA8">
+    <rect x="60" y="128" width="30" height="22"/>
+    <path d="M60,128 A15,15 0 0 1 90,128 Z"/>
+    <rect x="66" y="118" width="2" height="10"/><rect x="74" y="115" width="2" height="13"/><rect x="82" y="118" width="2" height="10"/>
+  </g>
+  <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="3" opacity="0.5"/>
+  <g fill="#0A2A6B" opacity="0.5">
+    <rect x="140" y="88" width="10" height="16" rx="2"/><circle cx="145" cy="86" r="5"/>
+    <rect x="330" y="88" width="10" height="16" rx="2"/><circle cx="335" cy="86" r="5"/>
+    <rect x="520" y="88" width="10" height="16" rx="2"/><circle cx="525" cy="86" r="5"/>
+  </g>
+  <path d="M340,110 Q380,94 420,110" stroke="#274E96" stroke-width="3" fill="none" opacity="0.4"/>
+  <g stroke="#274E96" stroke-width="1.5" opacity="0.35">
+    <line x1="350" y1="107" x2="350" y2="112"/><line x1="365" y1="99" x2="365" y2="112"/>
+    <line x1="380" y1="96" x2="380" y2="112"/><line x1="395" y1="99" x2="395" y2="112"/><line x1="410" y1="107" x2="410" y2="112"/>
+  </g>
+</svg>"""
+
+_SDR_REFLECTION_SVG = """<div class="sdr-reflection"><svg viewBox="0 0 700 168" preserveAspectRatio="none">
+  <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="3" opacity="0.5"/>
+  <rect x="598" y="44" width="20" height="106" fill="#2A4A82"/>
+  <rect x="630" y="70" width="26" height="80" fill="#274E96"/>
+  <ellipse cx="248" cy="104" rx="10" ry="9" fill="var(--sdr-gold)"/>
+</svg></div>"""
+
+_SDR_JS = """
+(function(){
+  var RANK_SETTINGS = __RANK_JSON__;
+  var COURSE_LENGTH = __COURSE_LENGTH__;
+  var PX_PER_UNIT = 1.1;
+  var CHANNEL_TOP = 0.60, CHANNEL_BOTTOM = 0.93;
+  var BOAT_X_FRAC = 0.24;
+  var HITBOX_X_UNITS = 15, HITBOX_LANE_FRAC = 0.085;
+  var GRACE_MS = 1200;
+  var STEER_KEY_RATE = 1.0;
+  var BOAT_LERP = 8;
+  var CHECKPOINTS = [[0.0,"Charles River"],[0.20,"Boston Harbor"],[0.45,"Cape Cod"],[0.70,"Martha's Vineyard"],[1.0,"Nantucket"]];
+
+  var ROCK_SVG = document.getElementById('sdrRockTpl').innerHTML;
+  var BUOY_SVG = document.getElementById('sdrBuoyTpl').innerHTML;
+
+  var root = document.getElementById('sdrRoot');
+  var stage = document.getElementById('sdrStage');
+  var boatEl = document.getElementById('sdrBoat');
+  var obstacleContainer = document.getElementById('sdrObstacles');
+  var preGame = document.getElementById('sdrPreGame');
+  var gameOver = document.getElementById('sdrGameOver');
+  var rowBtn = document.getElementById('sdrRowBtn');
+  var steerZone = document.getElementById('sdrSteerZone');
+
+  var touchCapable = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  if (touchCapable) root.classList.add('sdr-touch');
+
+  var selectedRank = 'mate';
+  var state = {
+    started: false, over: false, sunk: false,
+    rank: 'mate', worldX: 0, boatY: 0.5, targetY: 0.5,
+    stamina: 100, hits: 0, invincibleUntil: 0, rowing: false,
+    obstacles: [], score: 0, startTs: 0, lastTs: 0,
+  };
+
+  function isoWeekKey(date){
+    var d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    var dayNum = (d.getUTCDay() + 6) % 7;
+    d.setUTCDate(d.getUTCDate() - dayNum + 3);
+    var firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+    var firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+    firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+    var week = 1 + Math.round((d - firstThursday) / (7*86400000));
+    return d.getUTCFullYear() + '-W' + String(week).padStart(2,'0');
+  }
+
+  function fnv1a(str){
+    var h = 0x811c9dc5;
+    for (var i=0;i<str.length;i++){
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+
+  function mulberry32(seed){
+    return function(){
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function currentWeekKey(){ return isoWeekKey(new Date()); }
+
+  function buildObstacles(rankKey){
+    var cfg = RANK_SETTINGS[rankKey];
+    var seed = fnv1a(currentWeekKey() + '|' + rankKey);
+    var rand = mulberry32(seed);
+    var count = Math.max(1, Math.round(cfg.obstacle_density * COURSE_LENGTH / 1000));
+    obstacleContainer.innerHTML = '';
+    var obstacles = [];
+    var avgGap = (COURSE_LENGTH - 500) / (count + 1);
+    var x = 350;
+    for (var i=0;i<count;i++){
+      x += avgGap*0.55 + rand()*avgGap*0.9;
+      if (x > COURSE_LENGTH - 150) break;
+      var type = rand() < 0.5 ? 'rock' : 'buoy';
+      var lane = 0.08 + rand()*0.84;
+      var el = document.createElement('div');
+      el.className = 'sdr-obstacle sdr-' + type;
+      el.innerHTML = '<div class="sdr-obstacle-inner">' + (type === 'rock' ? ROCK_SVG : BUOY_SVG) + '</div>';
+      obstacleContainer.appendChild(el);
+      obstacles.push({worldX:x, lane:lane, type:type, el:el, resolved:false});
+    }
+    state.obstacles = obstacles;
+  }
+
+  function livesLabel(cfg){
+    if (cfg.collision_limit <= 0) return 'Practice mode';
+    var remaining = cfg.collision_limit - state.hits;
+    return remaining + (remaining === 1 ? ' life left' : ' lives left');
+  }
+
+  function currentCheckpointLabel(){
+    var frac = state.worldX / COURSE_LENGTH;
+    var label = CHECKPOINTS[0][1];
+    for (var i=0;i<CHECKPOINTS.length;i++){ if (frac >= CHECKPOINTS[i][0]) label = CHECKPOINTS[i][1]; }
+    return label;
+  }
+
+  function computeScore(cfg, distanceFraction, elapsedSec, staminaRemaining){
+    var efficiency = staminaRemaining / 100;
+    var paceMult = elapsedSec > 0 ? (cfg.par_time_seconds * distanceFraction) / elapsedSec : 1;
+    paceMult = Math.min(1.3, Math.max(0.7, paceMult));
+    return Math.min(100, Math.round(100 * distanceFraction * efficiency * paceMult));
+  }
+
+  function bumpFlash(){
+    stage.classList.remove('sdr-flash');
+    void stage.offsetWidth;
+    stage.classList.add('sdr-flash');
+  }
+
+  function registerHit(cfg, now){
+    bumpFlash();
+    if (cfg.collision_limit <= 0) return;
+    if (now < state.invincibleUntil) return;
+    state.hits += 1;
+    if (cfg.grace_window) state.invincibleUntil = now + GRACE_MS;
+    if (state.hits >= cfg.collision_limit) endRun('sunk');
+  }
+
+  function tryCollision(ob, cfg, now){
+    if (ob.resolved) return;
+    var dx = ob.worldX - state.worldX;
+    if (Math.abs(dx) > HITBOX_X_UNITS){
+      if (dx < -HITBOX_X_UNITS) ob.resolved = true;
+      return;
+    }
+    if (Math.abs(ob.lane - state.boatY) > HITBOX_LANE_FRAC) return;
+    ob.resolved = true;
+    registerHit(cfg, now);
+  }
+
+  function hiKeyFor(rank){ return 'sdr_hi_' + rank; }
+  function storedHi(rank){ return parseInt(localStorage.getItem(hiKeyFor(rank)) || '0', 10); }
+
+  function endRun(reason){
+    state.over = true;
+    state.sunk = reason === 'sunk';
+    var prevHi = storedHi(state.rank);
+    if (state.score > prevHi) localStorage.setItem(hiKeyFor(state.rank), String(state.score));
+    document.getElementById('sdrOutcomeTitle').textContent = state.sunk ? 'Sunk' : 'Run ended';
+    document.getElementById('sdrOutcomeSub').textContent =
+      Math.round(state.worldX/COURSE_LENGTH*100) + '% of the course \\u00b7 Score ' + state.score;
+    gameOver.style.display = 'flex';
+    requestAnimationFrame(function(){ gameOver.classList.add('sdr-visible'); });
+  }
+
+  function startRun(rankKey){
+    state.rank = rankKey;
+    state.worldX = 0; state.boatY = 0.5; state.targetY = 0.5;
+    state.stamina = 100; state.hits = 0; state.invincibleUntil = 0; state.rowing = false;
+    state.over = false; state.sunk = false; state.score = 0;
+    state.startTs = performance.now(); state.lastTs = 0;
+    buildObstacles(rankKey);
+    preGame.style.display = 'none';
+    gameOver.classList.remove('sdr-visible');
+    gameOver.style.display = 'none';
+    stage.style.display = 'block';
+    state.started = true;
+  }
+
+  function backToRankSelect(){
+    state.started = false;
+    gameOver.classList.remove('sdr-visible');
+    gameOver.style.display = 'none';
+    stage.style.display = 'none';
+    preGame.style.display = 'block';
+  }
+
+  // -- Pre-game rank selector --
+  var pills = root.querySelectorAll('.sdr-rank-pill');
+  pills.forEach(function(pill){
+    pill.addEventListener('click', function(){
+      pills.forEach(function(p){ p.classList.remove('sdr-active'); });
+      pill.classList.add('sdr-active');
+      selectedRank = pill.getAttribute('data-rank');
+      document.getElementById('sdrPreHi').textContent = storedHi(selectedRank);
+    });
+  });
+  document.getElementById('sdrPreHi').textContent = storedHi(selectedRank);
+  document.getElementById('sdrStartBtn').addEventListener('click', function(){ startRun(selectedRank); });
+  document.getElementById('sdrRetryBtn').addEventListener('click', function(){ startRun(state.rank); });
+  document.getElementById('sdrChangeRankBtn').addEventListener('click', backToRankSelect);
+
+  // -- Keyboard --
+  var keyUp = false, keyDown = false;
+  window.addEventListener('keydown', function(e){
+    if (!state.started || state.over) return;
+    if (e.code === 'ArrowUp'){ keyUp = true; e.preventDefault(); }
+    if (e.code === 'ArrowDown'){ keyDown = true; e.preventDefault(); }
+    if (e.code === 'Space'){ state.rowing = true; e.preventDefault(); }
+  });
+  window.addEventListener('keyup', function(e){
+    if (e.code === 'ArrowUp') keyUp = false;
+    if (e.code === 'ArrowDown') keyDown = false;
+    if (e.code === 'Space') state.rowing = false;
+  });
+
+  // -- Touch/pointer steer-drag --
+  var dragging = false;
+  function setTargetFromClientY(clientY){
+    var rect = stage.getBoundingClientRect();
+    var frac = (clientY - rect.top - rect.height*CHANNEL_TOP) / (rect.height*(CHANNEL_BOTTOM-CHANNEL_TOP));
+    state.targetY = Math.min(1, Math.max(0, frac));
+  }
+  steerZone.addEventListener('pointerdown', function(e){
+    dragging = true; setTargetFromClientY(e.clientY);
+    try { steerZone.setPointerCapture(e.pointerId); } catch(err){}
+  });
+  steerZone.addEventListener('pointermove', function(e){ if (dragging) setTargetFromClientY(e.clientY); });
+  steerZone.addEventListener('pointerup', function(){ dragging = false; });
+  steerZone.addEventListener('pointercancel', function(){ dragging = false; });
+
+  // -- Touch row button --
+  function rowStart(e){ state.rowing = true; rowBtn.classList.add('sdr-pressed'); e.preventDefault(); }
+  function rowEnd(){ state.rowing = false; rowBtn.classList.remove('sdr-pressed'); }
+  rowBtn.addEventListener('pointerdown', rowStart);
+  rowBtn.addEventListener('pointerup', rowEnd);
+  rowBtn.addEventListener('pointercancel', rowEnd);
+  rowBtn.addEventListener('pointerleave', rowEnd);
+
+  // -- Portrait footnote --
+  function updateOrientationNote(){
+    var note = document.getElementById('sdrPortraitNote');
+    note.style.display = (touchCapable && window.matchMedia('(orientation: portrait)').matches) ? 'block' : 'none';
+  }
+  window.addEventListener('resize', updateOrientationNote);
+  window.addEventListener('orientationchange', updateOrientationNote);
+  updateOrientationNote();
+
+  // -- Update / render --
+  function update(dt, ts){
+    if (keyUp) state.targetY = Math.max(0, state.targetY - STEER_KEY_RATE*dt);
+    if (keyDown) state.targetY = Math.min(1, state.targetY + STEER_KEY_RATE*dt);
+    state.boatY += (state.targetY - state.boatY) * Math.min(1, dt*BOAT_LERP);
+
+    var cfg = RANK_SETTINGS[state.rank];
+    var effectiveRowing = state.rowing && state.stamina > 0.001;
+    var speed = effectiveRowing ? cfg.row_speed : cfg.drift_speed;
+    if (effectiveRowing) state.stamina = Math.max(0, state.stamina - cfg.stamina_drain_per_sec*dt);
+    else state.stamina = Math.min(100, state.stamina + cfg.stamina_regen_per_sec*dt);
+    state.worldX = Math.min(COURSE_LENGTH, state.worldX + speed*dt);
+
+    for (var i=0;i<state.obstacles.length;i++) tryCollision(state.obstacles[i], cfg, ts);
+
+    var distanceFraction = state.worldX / COURSE_LENGTH;
+    var elapsedSec = (ts - state.startTs) / 1000;
+    state.score = computeScore(cfg, distanceFraction, elapsedSec, state.stamina);
+  }
+
+  function render(){
+    if (!state.started) return;
+    var rect = stage.getBoundingClientRect();
+    var boatX = rect.width * BOAT_X_FRAC;
+    var boatY = rect.height * (CHANNEL_TOP + state.boatY*(CHANNEL_BOTTOM-CHANNEL_TOP));
+    var bw = boatEl.offsetWidth, bh = boatEl.offsetHeight;
+    boatEl.style.transform = 'translate(' + (boatX-bw*0.5) + 'px,' + (boatY-bh*0.78) + 'px)';
+
+    for (var i=0;i<state.obstacles.length;i++){
+      var ob = state.obstacles[i];
+      var sx = boatX + (ob.worldX - state.worldX) * PX_PER_UNIT;
+      if (sx < -60 || sx > rect.width + 60){ ob.el.style.display = 'none'; continue; }
+      ob.el.style.display = 'block';
+      var sy = rect.height * (CHANNEL_TOP + ob.lane*(CHANNEL_BOTTOM-CHANNEL_TOP));
+      var ow = ob.el.offsetWidth, oh = ob.el.offsetHeight;
+      ob.el.style.transform = 'translate(' + (sx-ow*0.5) + 'px,' + (sy-oh*0.5) + 'px)';
+    }
+
+    var cfg = RANK_SETTINGS[state.rank];
+    document.getElementById('sdrStaminaFill').style.width = state.stamina + '%';
+    document.getElementById('sdrScore').textContent = state.score;
+    document.getElementById('sdrHi').textContent = Math.max(state.score, storedHi(state.rank));
+    document.getElementById('sdrCheckpoint').textContent = currentCheckpointLabel();
+    document.getElementById('sdrLives').textContent = livesLabel(cfg);
+  }
+
+  function loop(ts){
+    if (!state.lastTs) state.lastTs = ts;
+    var dt = Math.min((ts - state.lastTs) / 1000, 0.05);
+    state.lastTs = ts;
+    if (state.started && !state.over) update(dt, ts);
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+"""
+
+_SDR_COURSE_LENGTH = 4300
+
+
+def _sdr_rank_pill_html(r, active):
+    stripes = "".join('<span></span>' for _ in range(int(r["sort_order"]) + 1))
+    active_cls = " sdr-active" if active else ""
+    return (
+        f'<button type="button" class="sdr-rank-pill{active_cls}" data-rank="{r["rank"]}">'
+        f'<span class="sdr-rank-stripes">{stripes}</span>'
+        f'<span><span class="sdr-rank-name">{r["label"]}</span>'
+        f'<span class="sdr-rank-sub">{r["difficulty_label"]}</span></span>'
+        f'</button>'
+    )
+
+
+def _sdr_build_body(ranks):
+    pills_html = "".join(_sdr_rank_pill_html(r, r["rank"] == "mate") for r in ranks)
+    rank_json = {
+        r["rank"]: {
+            "collision_limit": r["collision_limit"],
+            "grace_window": r["grace_window"],
+            "par_time_seconds": r["par_time_seconds"],
+            "gust_coverage_pct": r["gust_coverage_pct"],
+            "obstacle_density": r["obstacle_density"],
+            "drift_speed": r["drift_speed"],
+            "row_speed": r["row_speed"],
+            "sail_speed": r["sail_speed"],
+            "stamina_drain_per_sec": r["stamina_drain_per_sec"],
+            "stamina_regen_per_sec": r["stamina_regen_per_sec"],
+        }
+        for r in ranks
+    }
+    rank_json_str = json.dumps(rank_json).replace("</", "<\\/")
+    js = (_SDR_JS
+          .replace("__RANK_JSON__", rank_json_str)
+          .replace("__COURSE_LENGTH__", str(_SDR_COURSE_LENGTH)))
+
+    return """<div class="page" id="sdrRoot" style="max-width:960px;">
+<style>""" + _SDR_CSS + """</style>
+<h1 style="margin:0 0 6px;">Sail, Don&rsquo;t Row</h1>
+<p class="sdr-sub">Steer with &uarr;/&darr; (or drag the water on touch). Hold Space &mdash; or the row button &mdash; to row.
+Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and buoys; reach Nantucket.</p>
+
+<div id="sdrPreGame" class="sdr-pregame">
+  <div class="sdr-rank-row" id="sdrRankRow">""" + pills_html + """</div>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Best this session (selected rank): <strong id="sdrPreHi">0</strong></p>
+  <button type="button" id="sdrStartBtn" class="btn">Cast Off</button>
+</div>
+
+<div id="sdrStage" class="sdr-stage" style="display:none;">
+  """ + _SDR_DEFS_SVG + _SDR_SKYLINE_SVG + _SDR_REFLECTION_SVG + """
+  <div class="sdr-water"><div class="sdr-band sdr-band1"></div><div class="sdr-band sdr-band2"></div><div class="sdr-band sdr-band3"></div></div>
+  <div id="sdrObstacles"></div>
+  <div id="sdrBoat" class="sdr-boat-wrap"><div class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div></div>
+
+  <div class="sdr-hud-top">
+    <div class="sdr-stamina-hud">
+      <div class="sdr-stamina-label">Stamina</div>
+      <div class="sdr-stamina-track"><div id="sdrStaminaFill" class="sdr-stamina-fill"></div></div>
+    </div>
+    <div class="sdr-score-hud">
+      <div class="sdr-score-hi">HI <span id="sdrHi">0</span></div>
+      <div class="sdr-score-amount">Score <span id="sdrScore">0</span></div>
+    </div>
+  </div>
+  <div class="sdr-progress-hud"><span id="sdrCheckpoint">Charles River</span><span id="sdrLives"></span></div>
+  <div id="sdrPortraitNote" class="sdr-portrait-note">Playable in portrait, but landscape gives more reaction time.</div>
+
+  <div id="sdrSteerZone" class="sdr-steer-zone"></div>
+  <button type="button" id="sdrRowBtn" class="sdr-row-btn">ROW</button>
+</div>
+
+<div id="sdrGameOver" class="sdr-outcome-scrim" style="display:none;">
+  <div class="sdr-outcome-card">
+    <div class="sdr-outcome-title" id="sdrOutcomeTitle">Sunk</div>
+    <div class="sdr-outcome-sub" id="sdrOutcomeSub"></div>
+    <div>
+      <button type="button" id="sdrRetryBtn" class="btn" style="margin-top:16px;">Try Again</button>
+      <button type="button" id="sdrChangeRankBtn" class="btn btn-ghost" style="margin-top:16px;margin-left:8px;">Change Rank</button>
+    </div>
+  </div>
+</div>
+
+<template id="sdrRockTpl">""" + _SDR_ROCK_SVG + """</template>
+<template id="sdrBuoyTpl">""" + _SDR_BUOY_SVG + """</template>
+
+<p class="sdr-hint">Phase 1 preview: mechanics only &mdash; wind gusts, the full route past Boston Harbor, and the finish
+line at Nantucket land in later phases. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
+</div>
+<script>""" + js + """</script>"""
+
+
+@app.get("/play", response_class=HTMLResponse)
+def play_sail_dont_row(request: Request):
+    lib = _lib()
+    try:
+        ranks = lib.list_game_rank_settings()
+    finally:
+        lib.close()
+    body = _sdr_build_body(ranks)
+    return HTMLResponse(_page("Sail, Don't Row—Brian Weisberg", "Sail, Don't Row", body, role=_role(request)))
 
 
 @app.get("/contact", response_class=HTMLResponse)
