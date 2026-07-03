@@ -244,7 +244,8 @@ PRESS: list[TLItem] = [
     TLItem(
         title="Innovative Cost-Saving Measures (Q&A)",
         url="https://cfodrive.com/qa/what-innovative-cost-saving-measures-can-significantly-impact-a-companys-bottom-line/",
-        venue="CFO Drive", date_label="Jul 2024", sort_key="2024-07", type="press", needs_synopsis=True,
+        venue="CFO Drive", date_label="Jul 2024", sort_key="2024-07", type="press",
+        description="Brian's answer in a CFO Drive roundup on cost-saving measures: size headcount to expected ROI, function by function—sales and customer success scale with revenue targets, but R&D should be sized to where the business will be in a year or two, not where it is today.",
     ),
 ]
 
