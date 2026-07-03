@@ -2327,16 +2327,19 @@ def netsuite_mcp(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# "Sail, Don't Row" — Phases 1-4: core engine, wind/rowing/Stamina, the
-# five-checkpoint route to a Nantucket finish, and full finish/game-over
-# outcome screens (public, no auth to play). DOM+CSS-transform game, vanilla
-# JS. Boat SVG/obstacle colors/skyline landmarks/difficulty-pill treatment
-# lifted from design/mockups/ per the Phase 0 sign-off; the Boston Harbor/
-# Cape Cod/Martha's Vineyard/Nantucket backdrops extend that same visual
-# language (no mockup existed for those four, so they're an original fill
-# using the established technique). Rank tuning (pace, wind, obstacle
-# density, collision rule) is admin-editable at /admin/game-settings and
-# read live here. Wind gust zones (auto-sail) are placed by their own
+# "Sail, Don't Row" — Phases 1-5: core engine, wind/rowing/Stamina, the
+# five-checkpoint route to a Nantucket finish, full finish/game-over outcome
+# screens, and rank-select polish (public, no auth to play). DOM+CSS-
+# transform game, vanilla JS. Boat SVG/obstacle colors/skyline landmarks/
+# difficulty-pill treatment lifted from design/mockups/ per the Phase 0
+# sign-off; the Boston Harbor/Cape Cod/Martha's Vineyard/Nantucket
+# backdrops extend that same visual language (no mockup existed for those
+# four, so they're an original fill using the established technique). Rank
+# tuning (pace, wind, obstacle density, collision rule) is admin-editable
+# at /admin/game-settings and read live here — the rank-select pills'
+# collision-rule line (_sdr_collision_description) is derived from those
+# same live values, not hardcoded text, so it can't drift out of sync with
+# an admin retune. Wind gust zones (auto-sail) are placed by their own
 # seeded PRNG, independent of the obstacle seed, so tuning one never
 # reshuffles the other.
 #
@@ -2355,8 +2358,10 @@ def netsuite_mcp(request: Request):
 # see an honest "opens in a later update" note rather than a fake
 # confirmation.
 #
-# Not yet built: the leaderboard itself (Phase 7), rank-select visual
-# polish (Phase 5/6).
+# Not yet built: the leaderboard itself (Phase 7) — its rank-split question
+# (combined w/ badge vs. per-rank tables vs. rank folded into Score) is an
+# open question in the build prompt, asked of Brian rather than guessed —
+# and general site-chrome/animation polish (Phase 6).
 # ---------------------------------------------------------------------------
 
 _SDR_CSS = """
@@ -2368,16 +2373,21 @@ _SDR_CSS = """
 }
 .sdr-sub{color:var(--muted);font-size:15px;margin:0 0 22px;max-width:520px;}
 .sdr-pregame{max-width:560px;}
-.sdr-rank-row{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 24px;}
-.sdr-rank-pill{display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:12px;
-  border:1.5px solid var(--line);background:#fff;cursor:pointer;font:inherit;text-align:left;}
+.sdr-rank-row{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 24px;align-items:stretch;}
+.sdr-rank-pill{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:10px 16px;
+  border-radius:12px;border:1.5px solid var(--line);background:#fff;cursor:pointer;font:inherit;
+  text-align:left;min-width:150px;}
 .sdr-rank-pill.sdr-active{border-color:var(--navy);background:var(--navy);}
 .sdr-rank-pill.sdr-active .sdr-rank-name,.sdr-rank-pill.sdr-active .sdr-rank-sub{color:#fff;}
+.sdr-rank-top{display:flex;align-items:center;gap:10px;}
 .sdr-rank-stripes{display:flex;flex-direction:column;gap:2px;width:16px;flex-shrink:0;}
 .sdr-rank-stripes span{height:3px;border-radius:1px;background:var(--navy);}
 .sdr-rank-pill.sdr-active .sdr-rank-stripes span{background:#FFE9A8;}
 .sdr-rank-name{font-family:var(--font-head);font-weight:600;font-size:13px;color:var(--navy);}
 .sdr-rank-sub{font-size:10px;color:var(--muted);}
+.sdr-rank-collision{font-size:10px;color:var(--muted);border-top:1px solid rgba(0,0,0,0.08);
+  padding-top:6px;width:100%;}
+.sdr-rank-pill.sdr-active .sdr-rank-collision{color:rgba(255,255,255,0.75);border-top-color:rgba(255,255,255,0.2);}
 @media (max-width:480px){ .sdr-rank-row{flex-direction:column;} .sdr-rank-pill{width:100%;} }
 
 .sdr-stage{position:relative;width:100%;max-width:900px;aspect-ratio:16/9;border-radius:16px;overflow:hidden;
@@ -3137,14 +3147,32 @@ _SDR_JS = """
 _SDR_COURSE_LENGTH = 4300
 
 
+def _sdr_collision_description(r):
+    """Human-readable collision rule, derived from the same admin-tunable
+    fields the game engine reads — stays accurate if Brian retunes a rank's
+    collision_limit/grace_window rather than drifting out of sync with four
+    hardcoded strings."""
+    limit = int(r["collision_limit"])
+    grace = int(r["grace_window"])
+    if limit <= 0:
+        return "No penalty on hit"
+    if limit == 1:
+        return "Any hit ends it instantly" if not grace else "1 hit and you’re sunk"
+    return f"{limit} hits and you’re sunk"
+
+
 def _sdr_rank_pill_html(r, active):
     stripes = "".join('<span></span>' for _ in range(int(r["sort_order"]) + 1))
     active_cls = " sdr-active" if active else ""
+    collision_desc = _sdr_collision_description(r)
     return (
         f'<button type="button" class="sdr-rank-pill{active_cls}" data-rank="{r["rank"]}">'
+        f'<span class="sdr-rank-top">'
         f'<span class="sdr-rank-stripes">{stripes}</span>'
         f'<span><span class="sdr-rank-name">{r["label"]}</span>'
         f'<span class="sdr-rank-sub">{r["difficulty_label"]}</span></span>'
+        f'</span>'
+        f'<span class="sdr-rank-collision">{collision_desc}</span>'
         f'</button>'
     )
 
@@ -3266,8 +3294,8 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
 <template id="sdrRockTpl">""" + _SDR_ROCK_SVG + """</template>
 <template id="sdrBuoyTpl">""" + _SDR_BUOY_SVG + """</template>
 
-<p class="sdr-hint">Phase 4 preview: full outcome stats on finish and game over. The public leaderboard lands in a later
-phase. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
+<p class="sdr-hint">Phase 5 preview: each rank now shows its collision rule up front. The public leaderboard lands in a
+later phase. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
 </div>
 <script>""" + js + """</script>"""
 
