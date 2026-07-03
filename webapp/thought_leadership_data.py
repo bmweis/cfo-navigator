@@ -92,7 +92,8 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="Beyond the Spreadsheet: What FP&A Platforms Need to Deliver in an AI-First Era (Webinar Panel)",
         url="https://www.abacum.ai/webinars/beyond-the-spreadsheet-what-fp-a-platforms-need-to-deliver-in-an-ai-first-era",
-        venue="Abacum", date_label="Jun 2026", sort_key="2026-06", type="speaking", needs_synopsis=True,
+        venue="Abacum", date_label="Jun 2026", sort_key="2026-06", type="speaking",
+        description="A panel with CJ Gustafson (Mostly Metrics) and Danny Prohaska (EPM Solutions) on why spreadsheets still run FP&A despite years of planning-software investment, and where AI creates real value for finance teams versus where it's just noise.",
     ),
     TLItem(
         title="Claude in Action for Finance (Virtual Panel)",
