@@ -1,14 +1,16 @@
 """Sail, Don't Row — /play route (Phase 1 core engine, Phase 2 wind/rowing,
-Phase 3 checkpoint route + Nantucket finish).
+Phase 3 checkpoint route + Nantucket finish, Phase 4 outcome-screen stats).
 
 Confirms the page is fully public, renders all four ranks, embeds the live
 game_rank_settings values as JSON for the client engine, picks up admin
 edits without a redeploy, wires up the gust-zone DOM/JS the Phase 2
-auto-sail mechanic depends on, and wires up the five checkpoint backdrop
-layers + whale + prize elements Phase 3 depends on. The frame-by-frame JS
-behavior (gust/stamina timing, checkpoint crossfade, whale trigger, finish
-condition) is exercised via a live-server Playwright pass during
-development (see the PR description) rather than here.
+auto-sail mechanic depends on, wires up the five checkpoint backdrop
+layers + whale + prize elements Phase 3 depends on, and renders the full
+outcome-stats grid + login-aware leaderboard note Phase 4 adds. The
+frame-by-frame JS behavior (gust/stamina timing, checkpoint crossfade,
+whale trigger, finish condition, stat computation) is exercised via a
+live-server Playwright pass during development (see the PR description)
+rather than here.
 """
 import pathlib
 import sys
@@ -139,7 +141,63 @@ def test_play_finish_condition_reaches_nantucket(env):
 
 def test_play_no_leftover_debug_hook(env):
     """A dev-only window.__sdrDebug hook was used to test checkpoint/whale/
-    finish logic during Phase 3 development — must not ship."""
+    finish logic during Phase 3/4 development — must not ship."""
     _, client = env
     body = client.get("/play").text
     assert "__sdrDebug" not in body
+
+
+def test_play_renders_outcome_stats_grid(env):
+    _, client = env
+    body = client.get("/play").text
+    for stat_id in ["sdrStatScore", "sdrStatDistance", "sdrStatTime", "sdrStatEfficiency"]:
+        assert f'id="{stat_id}"' in body
+    assert 'id="sdrOutcomeFurthest"' in body
+    assert 'id="sdrStatFurthest"' in body
+    assert 'id="sdrPaceBreakdown"' in body
+
+
+def test_play_scrim_has_plain_fallback_background(env):
+    """backdrop-filter isn't universal — the scrim must have a real
+    background-color so it still reads as an overlay without blur support."""
+    _, client = env
+    body = client.get("/play").text
+    assert ".sdr-outcome-scrim{position:absolute;inset:0;background:rgba(247,246,241,0.6);backdrop-filter:blur(5px);" in body
+
+
+def test_play_leaderboard_note_signed_out_links_to_login(appmod_with_auth):
+    """With auth actually enabled (LINKLIB_PASSWORD set) and no session
+    cookie, the visitor is a true guest — must see the sign-in prompt, not
+    the local-dev "everyone's a member" fallback the default env fixture
+    would otherwise mask this behind."""
+    _, client = appmod_with_auth
+    body = client.get("/play").text
+    assert 'href="/login?next=%2Fplay"' in body
+    assert "Sign in to save runs" in body
+    assert "Leaderboard opens in a later update" not in body
+
+
+def test_play_leaderboard_note_signed_in_no_fake_submission(appmod_with_auth):
+    """A signed-in member must see an honest 'not built yet' note, never a
+    fabricated 'score saved' claim — the leaderboard table is Phase 7."""
+    appmod, client = appmod_with_auth
+    client.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    body = client.get("/play").text
+    assert "Leaderboard opens in a later update" in body
+    assert "Sign in to save runs" not in body
+
+
+@pytest.fixture
+def appmod_with_auth(monkeypatch, tmp_path):
+    db = str(tmp_path / "t.db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    from linklib.db import Library
+    lib = Library(db)
+    lib.seed_game_rank_settings()
+    lib.close()
+    yield appmod, TestClient(appmod.app)
