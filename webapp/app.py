@@ -2327,17 +2327,29 @@ def netsuite_mcp(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# "Sail, Don't Row" — Phases 1-2: core engine + wind/rowing/Stamina (public,
-# no auth to play). DOM+CSS-transform game, vanilla JS. Boat SVG/obstacle
-# colors/skyline landmarks/difficulty-pill treatment lifted from
-# design/mockups/ per the Phase 0 sign-off. Rank tuning (pace, wind,
-# obstacle density, collision rule) is admin-editable at /admin/game-settings
-# and read live here. Wind gust zones (auto-sail) are placed by their own
-# seeded PRNG, independent of the obstacle seed, so tuning one never
-# reshuffles the other.
-# Not yet built: the route past Boston Harbor and the Nantucket finish line
-# (Phase 3), the full outcome-stats breakdown and leaderboard (Phase 4/7),
-# rank-select visual polish (Phase 5/6).
+# "Sail, Don't Row" — Phases 1-3: core engine, wind/rowing/Stamina, and the
+# five-checkpoint route to a Nantucket finish (public, no auth to play).
+# DOM+CSS-transform game, vanilla JS. Boat SVG/obstacle colors/skyline
+# landmarks/difficulty-pill treatment lifted from design/mockups/ per the
+# Phase 0 sign-off; the Boston Harbor/Cape Cod/Martha's Vineyard/Nantucket
+# backdrops extend that same visual language (no mockup existed for those
+# four, so they're an original fill using the established technique).
+# Rank tuning (pace, wind, obstacle density, collision rule) is
+# admin-editable at /admin/game-settings and read live here. Wind gust zones
+# (auto-sail) are placed by their own seeded PRNG, independent of the
+# obstacle seed, so tuning one never reshuffles the other.
+#
+# Stamina design note: the Concept spec says rowing drains Stamina and
+# resting is free; Phase 3's recap line ("Stamina depletes over the whole
+# run... hitting zero ends the run") reads as a stricter, harder-fail
+# variant. Built to the Concept spec (drain-while-rowing / regen-while-
+# resting, already shipped and admin-tunable in Phase 1/2) rather than
+# adding a second, conflicting always-draining mechanic — at 0 Stamina,
+# rowing simply stops working until it recovers, it doesn't end the run.
+# Flagged for Brian to confirm; easy to change if a hard fail is wanted.
+#
+# Not yet built: the full outcome-stats breakdown and leaderboard
+# (Phase 4/7), rank-select visual polish (Phase 5/6).
 # ---------------------------------------------------------------------------
 
 _SDR_CSS = """
@@ -2365,8 +2377,21 @@ _SDR_CSS = """
   background:linear-gradient(180deg,#EAF0F5 0%, #DCEEEA 45%, var(--sdr-water-light) 60%);
   touch-action:none;user-select:none;-webkit-user-select:none;}
 @media (max-width:480px){ .sdr-stage{aspect-ratio:3/4;} }
-.sdr-skyline{position:absolute;left:0;right:0;top:0;height:60%;}
-.sdr-reflection{position:absolute;left:0;right:0;top:58%;height:42%;opacity:.2;filter:blur(1.5px);transform:scaleY(-1);overflow:hidden;}
+/* Five checkpoint backdrops, stacked and crossfaded by data-cp index as
+   DistanceFraction crosses each segment boundary — the water/obstacles/gusts
+   keep scrolling continuously underneath; only this distant backdrop layer
+   changes. The reflection wrap mirrors whichever backdrop is active by
+   reusing the identical SVG markup (flipped + blurred + dimmed), rather than
+   hand-authoring a second reflection art asset per checkpoint. */
+.sdr-skyline-wrap{position:absolute;left:0;right:0;top:0;height:60%;overflow:hidden;}
+.sdr-skyline-layer{position:absolute;inset:0;opacity:0;transition:opacity 1.4s ease;}
+.sdr-skyline-layer.sdr-active{opacity:1;}
+.sdr-skyline-layer svg{width:100%;height:100%;display:block;}
+.sdr-reflection-wrap{position:absolute;left:0;right:0;top:58%;height:60%;opacity:.22;filter:blur(1.5px);
+  transform:scaleY(-1);transform-origin:top;overflow:hidden;}
+.sdr-reflection-layer{position:absolute;top:0;left:0;right:0;height:100%;opacity:0;transition:opacity 1.4s ease;}
+.sdr-reflection-layer.sdr-active{opacity:1;}
+.sdr-reflection-layer svg{width:100%;height:100%;display:block;}
 .sdr-water{position:absolute;left:0;right:0;bottom:0;top:58%;overflow:hidden;}
 .sdr-band{position:absolute;left:0;right:-100%;height:100%;}
 .sdr-band1{background:var(--sdr-water-light);top:0;}
@@ -2411,6 +2436,32 @@ _SDR_CSS = """
 .sdr-boat-inner.sdr-sailing{filter:brightness(1.08);}
 .sdr-boat-inner.sdr-sailing .sdr-sail-group{animation-duration:1.3s;}
 
+/* Boston Harbor whale breach — a one-time bonus payoff, not a scoring
+   mechanic. Fixed screen position (not world-scrolled): the animation plays
+   out in ~3s, far faster than the boat crosses the harbor, so anchoring it
+   to a screen point rather than tracking worldX reads just as well and is
+   much simpler. */
+.sdr-whale{position:absolute;left:62%;bottom:30%;width:110px;z-index:3;opacity:0;pointer-events:none;
+  transform:translateY(50px) scale(0.75);}
+.sdr-whale svg{width:100%;height:auto;display:block;}
+.sdr-whale.sdr-breach{animation:sdrWhaleBreach 3s ease-out forwards;}
+@keyframes sdrWhaleBreach{
+  0%{opacity:0;transform:translateY(60px) scale(0.7) rotate(0deg);}
+  15%{opacity:1;}
+  45%{transform:translateY(-38px) scale(1) rotate(-8deg);}
+  70%{transform:translateY(-26px) scale(1) rotate(4deg);}
+  100%{opacity:0;transform:translateY(55px) scale(0.8) rotate(10deg);}
+}
+
+/* Nantucket prize — only shown once the finish checkpoint is active. */
+.sdr-prize{position:absolute;left:68%;bottom:38%;width:30px;height:30px;z-index:3;display:none;
+  animation:sdrPrizeBob 2.4s ease-in-out infinite;}
+@keyframes sdrPrizeBob{0%,100%{transform:translateY(0);}50%{transform:translateY(-6px);}}
+.sdr-prize-glow{position:absolute;bottom:12px;left:10px;width:10px;height:10px;border-radius:50%;
+  background:var(--sdr-gold);box-shadow:0 0 16px 6px rgba(201,162,75,0.75);}
+.sdr-prize-chest{position:absolute;bottom:0;width:30px;height:17px;background:#B5553A;border-radius:3px;}
+.sdr-prize-lid{position:absolute;bottom:14px;width:30px;height:9px;background:#274E96;border-radius:6px 6px 0 0;}
+
 .sdr-hud-top{position:absolute;top:14px;left:14px;right:14px;display:flex;justify-content:space-between;
   align-items:flex-start;z-index:6;pointer-events:none;}
 .sdr-stamina-hud{width:120px;}
@@ -2443,8 +2494,10 @@ _SDR_CSS = """
   border-radius:16px;opacity:0;transition:opacity .25s ease;}
 .sdr-outcome-scrim.sdr-visible{opacity:1;}
 .sdr-outcome-card{background:#fff;border-radius:14px;padding:24px 30px;text-align:center;
-  box-shadow:0 12px 28px rgba(0,41,117,0.18);transform:scale(0.92);transition:transform .25s ease;max-width:80%;}
+  box-shadow:0 12px 28px rgba(0,41,117,0.18);transform:scale(0.92);transition:transform .25s ease;max-width:80%;
+  border-top:3px solid transparent;}
 .sdr-outcome-scrim.sdr-visible .sdr-outcome-card{transform:scale(1);}
+.sdr-outcome-scrim.sdr-finish .sdr-outcome-card{border-top-color:var(--sdr-gold);}
 .sdr-outcome-title{font-family:var(--font-head);font-weight:800;font-size:17px;color:var(--navy);}
 .sdr-outcome-sub{font-size:12px;color:var(--muted);margin-top:8px;}
 .sdr-hint{margin-top:16px;font-size:12px;color:var(--muted);}
@@ -2461,6 +2514,7 @@ _SDR_DEFS_SVG = """<svg width="0" height="0" style="position:absolute;">
     <linearGradient id="sdrJibGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#D8987C"/><stop offset="100%" stop-color="#96432C"/></linearGradient>
     <linearGradient id="sdrRockGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#A8A69C"/><stop offset="100%" stop-color="#5C5A52"/></linearGradient>
     <linearGradient id="sdrBuoyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#9C7A54"/><stop offset="100%" stop-color="#5A4128"/></linearGradient>
+    <linearGradient id="sdrWhaleGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3E5FA8"/><stop offset="100%" stop-color="#16418F"/></linearGradient>
   </defs>
 </svg>"""
 
@@ -2494,7 +2548,7 @@ _SDR_BUOY_SVG = """<svg viewBox="0 0 26 34" width="26" height="34">
   <rect x="4" y="14" width="18" height="4" fill="#5A4128" opacity="0.5"/>
 </svg>"""
 
-_SDR_SKYLINE_SVG = """<svg class="sdr-skyline" viewBox="0 0 700 168" preserveAspectRatio="none">
+_SDR_SKYLINE_CHARLES_SVG = """<svg viewBox="0 0 700 168" preserveAspectRatio="none">
   <g opacity="0.3" fill="#7C93B8">
     <rect x="20" y="95" width="16" height="55"/><rect x="470" y="100" width="14" height="50"/><rect x="490" y="85" width="18" height="65"/>
   </g>
@@ -2529,12 +2583,97 @@ _SDR_SKYLINE_SVG = """<svg class="sdr-skyline" viewBox="0 0 700 168" preserveAsp
   </g>
 </svg>"""
 
-_SDR_REFLECTION_SVG = """<div class="sdr-reflection"><svg viewBox="0 0 700 168" preserveAspectRatio="none">
+# Boston Harbor — Zakim Bridge (real cable-stayed public infrastructure, same
+# treatment as Longfellow/Hancock — no corporate signage), open harbor water,
+# a couple of distant sailboats. The whale breach bonus (state.whaleTriggered)
+# is a separate fixed-screen-position element, not part of this backdrop.
+_SDR_SKYLINE_HARBOR_SVG = """<svg viewBox="0 0 700 168" preserveAspectRatio="none">
+  <g opacity="0.25" fill="#7C93B8">
+    <rect x="70" y="112" width="14" height="38"/><rect x="90" y="102" width="16" height="48"/><rect x="112" y="116" width="12" height="34"/>
+  </g>
+  <g fill="#274E96">
+    <path d="M330,150 L336,60 L344,60 L344,150 Z"/>
+    <path d="M344,150 L344,60 L352,50 L360,60 L360,150 Z"/>
+    <path d="M360,150 L360,60 L368,60 L368,150 Z"/>
+  </g>
+  <g stroke="#3E5FA8" stroke-width="1" opacity="0.6">
+    <line x1="352" y1="52" x2="300" y2="102"/><line x1="352" y1="52" x2="320" y2="102"/>
+    <line x1="352" y1="52" x2="384" y2="102"/><line x1="352" y1="52" x2="404" y2="102"/>
+  </g>
   <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="3" opacity="0.5"/>
-  <rect x="598" y="44" width="20" height="106" fill="#2A4A82"/>
-  <rect x="630" y="70" width="26" height="80" fill="#274E96"/>
-  <ellipse cx="248" cy="104" rx="10" ry="9" fill="var(--sdr-gold)"/>
-</svg></div>"""
+  <g fill="#3E5FA8" opacity="0.4">
+    <path d="M520,102 L520,86 L534,102 Z"/><path d="M560,102 L560,92 L570,102 Z"/>
+  </g>
+</svg>"""
+
+# Cape Cod — dune silhouettes, beach grass, a small white lighthouse with a
+# red band (generic Cape-style, not a specific real lighthouse).
+_SDR_SKYLINE_CAPECOD_SVG = """<svg viewBox="0 0 700 168" preserveAspectRatio="none">
+  <g fill="#D9CBA3" opacity="0.85">
+    <ellipse cx="60" cy="106" rx="90" ry="16"/><ellipse cx="220" cy="110" rx="110" ry="13"/>
+    <ellipse cx="520" cy="107" rx="100" ry="15"/><ellipse cx="660" cy="111" rx="80" ry="11"/>
+  </g>
+  <g>
+    <rect x="150" y="50" width="14" height="52" fill="#EDE8DD"/>
+    <rect x="150" y="50" width="14" height="9" fill="#B5553A"/>
+    <rect x="150" y="69" width="14" height="9" fill="#B5553A"/>
+    <path d="M146,50 L168,50 L162,38 L152,38 Z" fill="#0A2A6B"/>
+    <circle cx="157" cy="44" r="2.5" fill="var(--sdr-gold)"/>
+  </g>
+  <g stroke="#8A9B6E" stroke-width="1.4" opacity="0.55" fill="none">
+    <path d="M40,102 Q42,90 38,80"/><path d="M46,102 Q50,88 48,76"/><path d="M52,102 Q54,92 58,82"/>
+    <path d="M600,102 Q604,90 600,80"/><path d="M608,102 Q612,86 616,76"/>
+  </g>
+  <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="2" opacity="0.35"/>
+</svg>"""
+
+# Martha's Vineyard — a grassy bluff and a small row of gingerbread-style
+# cottages (generic pastel-roofed silhouettes, not a specific real building).
+_SDR_SKYLINE_MV_SVG = """<svg viewBox="0 0 700 168" preserveAspectRatio="none">
+  <g fill="#C9B896" opacity="0.85"><ellipse cx="580" cy="112" rx="140" ry="22"/></g>
+  <g>
+    <rect x="150" y="92" width="14" height="10" fill="#A3B8D8"/>
+    <path d="M148,92 L157,84 L166,92 Z" fill="#96432C"/>
+    <rect x="180" y="86" width="20" height="16" fill="#3E5FA8"/>
+    <path d="M178,86 L190,74 L202,86 Z" fill="#B5553A"/>
+    <rect x="206" y="90" width="16" height="12" fill="#7FA3C9"/>
+    <path d="M204,90 L214,80 L224,90 Z" fill="#5C5A52"/>
+  </g>
+  <g stroke="#8A9B6E" stroke-width="1.3" opacity="0.5" fill="none">
+    <path d="M100,102 Q102,92 98,84"/><path d="M106,102 Q110,90 108,80"/>
+  </g>
+  <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="2" opacity="0.35"/>
+</svg>"""
+
+# Nantucket — the finish backdrop: dunes + a red-and-white lighthouse. The
+# glowing prize chest is a separate fixed-position element (only shown once
+# this checkpoint is active), not part of this backdrop SVG.
+_SDR_SKYLINE_NANTUCKET_SVG = """<svg viewBox="0 0 700 168" preserveAspectRatio="none">
+  <g fill="#D9CBA3" opacity="0.8"><ellipse cx="150" cy="107" rx="130" ry="15"/><ellipse cx="600" cy="109" rx="110" ry="13"/></g>
+  <g>
+    <rect x="330" y="40" width="16" height="62" fill="#EDE8DD"/>
+    <rect x="330" y="40" width="16" height="9" fill="#B5553A"/>
+    <rect x="330" y="59" width="16" height="9" fill="#B5553A"/>
+    <rect x="330" y="78" width="16" height="9" fill="#B5553A"/>
+    <path d="M326,40 L350,40 L343,26 L333,26 Z" fill="#0A2A6B"/>
+    <circle cx="338" cy="33" r="3" fill="var(--sdr-gold)"/>
+  </g>
+  <path d="M0,102 L700,102" stroke="#0A2A6B" stroke-width="2" opacity="0.35"/>
+</svg>"""
+
+# Built from simple attached primitives (body ellipse + V-shaped fluke +
+# rounded dorsal hump), not one hand-fit bezier blob — much more reliable to
+# get reading clearly as "whale" at this size. A chunkier revision (rounder
+# head, rotated-ellipse fluke, pectoral fin, rostrum bumps) added detail but
+# actually read worse in practice — reverted to this simpler silhouette.
+_SDR_WHALE_SVG = """<svg viewBox="0 0 120 70">
+  <path d="M84,50 L112,28 L96,48 Z" fill="url(#sdrWhaleGrad)"/>
+  <path d="M84,50 L112,70 L96,50 Z" fill="url(#sdrWhaleGrad)"/>
+  <ellipse cx="48" cy="50" rx="38" ry="14" fill="url(#sdrWhaleGrad)"/>
+  <path d="M44,38 C44,29 49,25 54,25 C51,30 50,35 51,40 Z" fill="url(#sdrWhaleGrad)"/>
+  <ellipse cx="20" cy="46" rx="2.2" ry="1.8" fill="#0A2A6B"/>
+  <path d="M20,56 C34,62 56,62 72,54" stroke="#A3E5D4" stroke-width="1.6" opacity="0.4" fill="none" stroke-linecap="round"/>
+</svg>"""
 
 _SDR_JS = """
 (function(){
@@ -2547,7 +2686,13 @@ _SDR_JS = """
   var GRACE_MS = 1200;
   var STEER_KEY_RATE = 1.0;
   var BOAT_LERP = 8;
-  var CHECKPOINTS = [[0.0,"Charles River"],[0.20,"Boston Harbor"],[0.45,"Cape Cod"],[0.70,"Martha's Vineyard"],[1.0,"Nantucket"]];
+  // Nantucket's own threshold is 0.90, not 1.0 — the actual finish still
+  // triggers at worldX >= COURSE_LENGTH (frac 1.0), but the backdrop/HUD
+  // switch to Nantucket for a final-approach stretch beforehand, so the
+  // lighthouse and prize chest are visible before the last frame rather
+  // than popping in right as the run ends.
+  var CHECKPOINTS = [[0.0,"Charles River"],[0.20,"Boston Harbor"],[0.45,"Cape Cod"],[0.70,"Martha's Vineyard"],[0.90,"Nantucket"]];
+  var WHALE_TRIGGER_FRAC = 0.325;  // midpoint of the Boston Harbor segment
 
   var ROCK_SVG = document.getElementById('sdrRockTpl').innerHTML;
   var BUOY_SVG = document.getElementById('sdrBuoyTpl').innerHTML;
@@ -2562,17 +2707,22 @@ _SDR_JS = """
   var gameOver = document.getElementById('sdrGameOver');
   var rowBtn = document.getElementById('sdrRowBtn');
   var steerZone = document.getElementById('sdrSteerZone');
+  var whaleEl = document.getElementById('sdrWhale');
+  var prizeEl = document.getElementById('sdrPrize');
+  var skylineLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-skyline-layer'));
+  var reflectionLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-reflection-layer'));
 
   var touchCapable = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   if (touchCapable) root.classList.add('sdr-touch');
 
   var selectedRank = 'mate';
   var state = {
-    started: false, over: false, sunk: false,
+    started: false, over: false, outcome: '',
     rank: 'mate', worldX: 0, boatY: 0.5, targetY: 0.5,
     stamina: 100, hits: 0, invincibleUntil: 0, rowing: false,
     obstacles: [], gustZones: [], score: 0, startTs: 0, lastTs: 0,
     sailTime: 0, rowTime: 0, driftTime: 0,
+    whaleTriggered: false, checkpointIdx: 0,
   };
 
   function isoWeekKey(date){
@@ -2670,11 +2820,35 @@ _SDR_JS = """
     return remaining + (remaining === 1 ? ' life left' : ' lives left');
   }
 
+  function checkpointIndexFor(frac){
+    var idx = 0;
+    for (var i=0;i<CHECKPOINTS.length;i++){ if (frac >= CHECKPOINTS[i][0]) idx = i; }
+    return idx;
+  }
+
   function currentCheckpointLabel(){
-    var frac = state.worldX / COURSE_LENGTH;
-    var label = CHECKPOINTS[0][1];
-    for (var i=0;i<CHECKPOINTS.length;i++){ if (frac >= CHECKPOINTS[i][0]) label = CHECKPOINTS[i][1]; }
-    return label;
+    return CHECKPOINTS[checkpointIndexFor(state.worldX / COURSE_LENGTH)][1];
+  }
+
+  // Crossfades the distant skyline/reflection backdrop as the boat crosses
+  // into a new checkpoint segment; the water/obstacles/gusts keep scrolling
+  // underneath unaffected. Only touches the DOM on an actual index change.
+  function updateCheckpointLayer(frac){
+    var idx = checkpointIndexFor(frac);
+    if (idx === state.checkpointIdx) return;
+    state.checkpointIdx = idx;
+    var idxStr = String(idx);
+    skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === idxStr); });
+    reflectionLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === idxStr); });
+    prizeEl.style.display = idx === 4 ? 'block' : 'none';
+  }
+
+  function maybeTriggerWhale(frac){
+    if (state.whaleTriggered || frac < WHALE_TRIGGER_FRAC) return;
+    state.whaleTriggered = true;
+    whaleEl.classList.remove('sdr-breach');
+    void whaleEl.offsetWidth;
+    whaleEl.classList.add('sdr-breach');
   }
 
   function computeScore(cfg, distanceFraction, elapsedSec, staminaRemaining){
@@ -2716,12 +2890,14 @@ _SDR_JS = """
 
   function endRun(reason){
     state.over = true;
-    state.sunk = reason === 'sunk';
+    state.outcome = reason;  // 'finish' | 'sunk'
     var prevHi = storedHi(state.rank);
     if (state.score > prevHi) localStorage.setItem(hiKeyFor(state.rank), String(state.score));
-    document.getElementById('sdrOutcomeTitle').textContent = state.sunk ? 'Sunk' : 'Run ended';
+    var title = reason === 'finish' ? "You made it to Nantucket 🏆" : 'Sunk';
+    document.getElementById('sdrOutcomeTitle').textContent = title;
     document.getElementById('sdrOutcomeSub').textContent =
       Math.round(state.worldX/COURSE_LENGTH*100) + '% of the course \\u00b7 Score ' + state.score;
+    gameOver.classList.toggle('sdr-finish', reason === 'finish');
     gameOver.style.display = 'flex';
     requestAnimationFrame(function(){ gameOver.classList.add('sdr-visible'); });
   }
@@ -2730,13 +2906,18 @@ _SDR_JS = """
     state.rank = rankKey;
     state.worldX = 0; state.boatY = 0.5; state.targetY = 0.5;
     state.stamina = 100; state.hits = 0; state.invincibleUntil = 0; state.rowing = false;
-    state.over = false; state.sunk = false; state.score = 0;
+    state.over = false; state.outcome = ''; state.score = 0;
     state.sailTime = 0; state.rowTime = 0; state.driftTime = 0;
+    state.whaleTriggered = false; state.checkpointIdx = 0;
     state.startTs = performance.now(); state.lastTs = 0;
     buildObstacles(rankKey);
     buildGustZones(rankKey);
+    whaleEl.classList.remove('sdr-breach');
+    skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
+    reflectionLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
+    prizeEl.style.display = 'none';
     preGame.style.display = 'none';
-    gameOver.classList.remove('sdr-visible');
+    gameOver.classList.remove('sdr-visible', 'sdr-finish');
     gameOver.style.display = 'none';
     stage.style.display = 'block';
     state.started = true;
@@ -2837,11 +3018,16 @@ _SDR_JS = """
     state.worldX = Math.min(COURSE_LENGTH, state.worldX + speed*dt);
     boatInner.classList.toggle('sdr-sailing', sailing);
 
-    for (var i=0;i<state.obstacles.length;i++) tryCollision(state.obstacles[i], cfg, ts);
-
     var distanceFraction = state.worldX / COURSE_LENGTH;
     var elapsedSec = (ts - state.startTs) / 1000;
     state.score = computeScore(cfg, distanceFraction, elapsedSec, state.stamina);
+
+    updateCheckpointLayer(distanceFraction);
+    maybeTriggerWhale(distanceFraction);
+
+    if (state.worldX >= COURSE_LENGTH){ endRun('finish'); return; }
+
+    for (var i=0;i<state.obstacles.length;i++) tryCollision(state.obstacles[i], cfg, ts);
   }
 
   function render(){
@@ -2906,8 +3092,29 @@ def _sdr_rank_pill_html(r, active):
     )
 
 
+# One SVG per checkpoint, index-aligned with the JS CHECKPOINTS array
+# (0=Charles River ... 4=Nantucket). Reused verbatim for both the skyline
+# layer and its mirrored reflection layer — see the CSS comment on
+# .sdr-skyline-wrap for why there's no separate hand-authored reflection art.
+_SDR_CHECKPOINT_SVGS = [
+    _SDR_SKYLINE_CHARLES_SVG,
+    _SDR_SKYLINE_HARBOR_SVG,
+    _SDR_SKYLINE_CAPECOD_SVG,
+    _SDR_SKYLINE_MV_SVG,
+    _SDR_SKYLINE_NANTUCKET_SVG,
+]
+
+
 def _sdr_build_body(ranks):
     pills_html = "".join(_sdr_rank_pill_html(r, r["rank"] == "mate") for r in ranks)
+    skyline_layers = "".join(
+        f'<div class="sdr-skyline-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">{svg}</div>'
+        for i, svg in enumerate(_SDR_CHECKPOINT_SVGS)
+    )
+    reflection_layers = "".join(
+        f'<div class="sdr-reflection-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">{svg}</div>'
+        for i, svg in enumerate(_SDR_CHECKPOINT_SVGS)
+    )
     rank_json = {
         r["rank"]: {
             "collision_limit": r["collision_limit"],
@@ -2941,10 +3148,15 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
 </div>
 
 <div id="sdrStage" class="sdr-stage" style="display:none;">
-  """ + _SDR_DEFS_SVG + _SDR_SKYLINE_SVG + _SDR_REFLECTION_SVG + """
+  """ + _SDR_DEFS_SVG + f"""
+  <div class="sdr-skyline-wrap">{skyline_layers}</div>
+  <div class="sdr-reflection-wrap">{reflection_layers}</div>
+  """ + """
   <div class="sdr-water"><div class="sdr-band sdr-band1"></div><div class="sdr-band sdr-band2"></div><div class="sdr-band sdr-band3"></div></div>
   <div id="sdrGusts"></div>
   <div id="sdrObstacles"></div>
+  <div id="sdrWhale" class="sdr-whale">""" + _SDR_WHALE_SVG + """</div>
+  <div id="sdrPrize" class="sdr-prize"><div class="sdr-prize-glow"></div><div class="sdr-prize-chest"></div><div class="sdr-prize-lid"></div></div>
   <div id="sdrBoat" class="sdr-boat-wrap"><div class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div></div>
 
   <div class="sdr-hud-top">
@@ -2978,8 +3190,9 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
 <template id="sdrRockTpl">""" + _SDR_ROCK_SVG + """</template>
 <template id="sdrBuoyTpl">""" + _SDR_BUOY_SVG + """</template>
 
-<p class="sdr-hint">Phase 2 preview: wind, rowing, and Stamina are live. The full route past Boston Harbor and the finish
-line at Nantucket land in Phase 3. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
+<p class="sdr-hint">Phase 3 preview: the full route to Nantucket is live &mdash; wind, rowing, Stamina, checkpoints, and the finish
+line. Detailed outcome stats and the leaderboard land in a later phase. Rank pace/difficulty is tunable at
+<code>/admin/game-settings</code>.</p>
 </div>
 <script>""" + js + """</script>"""
 

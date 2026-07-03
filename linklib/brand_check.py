@@ -73,6 +73,12 @@ AUX_COLORS = {
     "#a8a69c", "#5c5a52", "#7a7869",           # rock (grey stone)
     "#9c7a54", "#5a4128", "#3a2c18",           # buoy (weathered brown wood)
     "#ffe9a8",                                  # active rank-pill sleeve-stripe highlight
+    # Phase 3 checkpoint backdrops (Boston Harbor / Cape Cod / Martha's
+    # Vineyard / Nantucket) — dunes, lighthouses, cottages, bluffs.
+    "#d9cba3", "#c9b896",                       # dune / bluff sand tones
+    "#ede8dd",                                  # lighthouse tower white
+    "#8a9b6e",                                  # beach grass
+    "#a3b8d8", "#7fa3c9",                       # cottage wall / roof pale blues
 }
 
 # Colors purged in the visual refresh — must never reappear.

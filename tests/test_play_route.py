@@ -1,11 +1,14 @@
-"""Sail, Don't Row — /play route (Phase 1 core engine + Phase 2 wind/rowing).
+"""Sail, Don't Row — /play route (Phase 1 core engine, Phase 2 wind/rowing,
+Phase 3 checkpoint route + Nantucket finish).
 
 Confirms the page is fully public, renders all four ranks, embeds the live
 game_rank_settings values as JSON for the client engine, picks up admin
-edits without a redeploy, and wires up the gust-zone DOM/JS the Phase 2
-auto-sail mechanic depends on. The gust/stamina timing logic itself is
-frame-by-frame JS behavior, exercised via a live-server Playwright pass
-during development (see the PR description) rather than here.
+edits without a redeploy, wires up the gust-zone DOM/JS the Phase 2
+auto-sail mechanic depends on, and wires up the five checkpoint backdrop
+layers + whale + prize elements Phase 3 depends on. The frame-by-frame JS
+behavior (gust/stamina timing, checkpoint crossfade, whale trigger, finish
+condition) is exercised via a live-server Playwright pass during
+development (see the PR description) rather than here.
 """
 import pathlib
 import sys
@@ -97,3 +100,46 @@ def test_play_gust_seed_independent_of_obstacle_seed(env):
     body = client.get("/play").text
     assert "currentWeekKey() + '|' + rankKey);" in body          # obstacle seed
     assert "currentWeekKey() + '|' + rankKey + '|gust');" in body  # gust seed
+
+
+def test_play_renders_five_checkpoint_layers(env):
+    _, client = env
+    body = client.get("/play").text
+    for i in range(5):
+        assert f'<div class="sdr-skyline-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">' in body
+        assert f'<div class="sdr-reflection-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">' in body
+
+
+def test_play_checkpoint_labels_and_thresholds(env):
+    _, client = env
+    body = client.get("/play").text
+    assert 'CHECKPOINTS = [[0.0,"Charles River"],[0.20,"Boston Harbor"],' \
+           '[0.45,"Cape Cod"],[0.70,"Martha\'s Vineyard"],[0.90,"Nantucket"]];' in body
+
+
+def test_play_wires_up_whale_and_prize(env):
+    _, client = env
+    body = client.get("/play").text
+    assert 'id="sdrWhale"' in body
+    assert 'id="sdrPrize"' in body
+    assert "maybeTriggerWhale" in body
+    assert "WHALE_TRIGGER_FRAC = 0.325" in body
+
+
+def test_play_finish_condition_reaches_nantucket(env):
+    """Reaching COURSE_LENGTH must call endRun('finish'), distinct from a
+    collision-based 'sunk' ending — both are wired through the same endRun,
+    but only 'finish' gets the "You made it to Nantucket" title/gold accent."""
+    _, client = env
+    body = client.get("/play").text
+    assert "if (state.worldX >= COURSE_LENGTH){ endRun('finish'); return; }" in body
+    assert "You made it to Nantucket" in body
+    assert "sdr-finish" in body
+
+
+def test_play_no_leftover_debug_hook(env):
+    """A dev-only window.__sdrDebug hook was used to test checkpoint/whale/
+    finish logic during Phase 3 development — must not ship."""
+    _, client = env
+    body = client.get("/play").text
+    assert "__sdrDebug" not in body
