@@ -122,7 +122,8 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="CFO Roundtable — M&A and Managing Uncertainty",
         url="https://luma.com/7fwtr2n8", venue="Fidelity",
-        date_label="Mar 2025", sort_key="2025-03", type="speaking", needs_synopsis=True,
+        date_label="Mar 2025", sort_key="2025-03", type="speaking",
+        description="A Fidelity Private Shares and York IE gathering in Boston for CFOs and heads of finance—one panel on M&A prep from both sides of the table, another on planning through uncertainty, with roundtable discussion after each.",
     ),
     TLItem(
         title="Lean Accounting Team (Webinar Host)",
