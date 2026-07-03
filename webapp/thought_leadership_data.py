@@ -110,7 +110,8 @@ SPEAKING: list[TLItem] = [
     TLItem(
         title="Cash Cycle Demo Day — Opening & Closing Remarks",
         url="https://cashcycledemoday.splashthat.com/", venue="The F Suite",
-        date_label="Oct 2025", sort_key="2025-10", type="speaking", needs_synopsis=True,
+        date_label="Oct 2025", sort_key="2025-10", type="speaking",
+        description="Hosted The F Suite's virtual Cash Cycle Demo Day—five vendors (RightRev, Routable, Sequence, Tabs, Vayu) walked through billing, collections, and revenue-rec tooling, followed by a closed-door, vendor-free Q&A with peer CFOs.",
     ),
     TLItem(
         title="CFO Supper Club (Boston)",
