@@ -173,7 +173,8 @@ PODCASTS: list[TLItem] = [
     TLItem(
         title="State of Fundraising / Equity Market",
         url="https://open.spotify.com/episode/0rSm42OSNRzjiG3cYye3tX", venue="The Cash Flow Show",
-        date_label="Jun 2025", sort_key="2025-06", type="podcast", needs_synopsis=True,
+        date_label="Jun 2025", sort_key="2025-06", type="podcast",
+        description="The venture market has split in two—'golden child' companies raising at premium valuations with leaner teams, and everyone else stuck extending via bridge rounds, which succeed at raising a real Series A far less often than a properly priced round does.",
     ),
     TLItem(
         title="Is ARR Dead?",
