@@ -2545,6 +2545,8 @@ def tools_directory(request: Request):
 <div id="tool-grid" style="display:grid;gap:14px;">
 </div>
 
+<div id="tool-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
+
 <p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
 
 <div style="margin-top:40px;padding-top:28px;border-top:1px solid var(--line);">
@@ -2568,6 +2570,9 @@ def tools_directory(request: Request):
   background:none;color:var(--muted);cursor:pointer;white-space:nowrap;}}
 .tcat-btn:hover{{background:var(--accent-light);color:var(--ink);}}
 .tcat-active{{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;}}
+#tool-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
+#tool-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
+#tool-pagination-label{{font-size:13px;color:var(--muted);}}
 .tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
 .tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
 .tool-name:hover{{color:var(--accent);}}
@@ -2628,6 +2633,8 @@ var AUTHED = {'true' if authed else 'false'};
 var MEMBER = {'true' if is_member else 'false'};
 var activeCats = new Set();
 var advisorOnly = false;
+var PAGE_SIZE = 10;
+var currentPage = 0;
 
 function esc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -2641,21 +2648,41 @@ function renderTools(tools) {{
   var grid = document.getElementById('tool-grid');
   var empty = document.getElementById('tool-empty');
   var count = document.getElementById('tool-count');
+  var pagination = document.getElementById('tool-pagination');
   if (tools.length === 0) {{
     grid.innerHTML = '';
     empty.style.display = 'block';
     count.textContent = '';
+    pagination.style.display = 'none';
+    pagination.innerHTML = '';
     return;
   }}
   empty.style.display = 'none';
-  count.textContent = tools.length + ' tool' + (tools.length === 1 ? '' : 's');
   // Promoted tools first, then alphabetical within each group
   var sorted = tools.slice().sort(function(a, b) {{
     if (a.promoted && !b.promoted) return -1;
     if (!a.promoted && b.promoted) return 1;
     return esc(a.name).localeCompare(esc(b.name));
   }});
-  grid.innerHTML = sorted.map(function(t) {{
+  var totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+  if (currentPage >= totalPages) currentPage = totalPages - 1;
+  if (currentPage < 0) currentPage = 0;
+  var pageStart = currentPage * PAGE_SIZE;
+  var pageItems = sorted.slice(pageStart, pageStart + PAGE_SIZE);
+  count.textContent = sorted.length + ' tool' + (sorted.length === 1 ? '' : 's')
+    + (totalPages > 1 ? ' · showing ' + (pageStart + 1) + '–' + (pageStart + pageItems.length) : '');
+  if (totalPages > 1) {{
+    pagination.style.display = 'flex';
+    pagination.innerHTML = '<button type="button" class="btn btn-ghost" onclick="goToPage(currentPage - 1)"'
+      + (currentPage === 0 ? ' disabled' : '') + '>&larr; Back</button>'
+      + '<span id="tool-pagination-label">Page ' + (currentPage + 1) + ' of ' + totalPages + '</span>'
+      + '<button type="button" class="btn btn-ghost" onclick="goToPage(currentPage + 1)"'
+      + (currentPage >= totalPages - 1 ? ' disabled' : '') + '>Next &rarr;</button>';
+  }} else {{
+    pagination.style.display = 'none';
+    pagination.innerHTML = '';
+  }}
+  grid.innerHTML = pageItems.map(function(t) {{
     var promotedBadge = t.promoted
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
@@ -2794,17 +2821,25 @@ function filterCat(btn) {{
   }} else {{
     activeCats.add(cat);
   }}
+  currentPage = 0;
   syncButtons();
   renderTools(filtered());
 }}
 
 function toggleAdvisor() {{
   advisorOnly = !advisorOnly;
+  currentPage = 0;
   syncButtons();
   renderTools(filtered());
 }}
 
-function filterTools() {{ renderTools(filtered()); }}
+function filterTools() {{ currentPage = 0; renderTools(filtered()); }}
+
+function goToPage(page) {{
+  currentPage = page;
+  renderTools(filtered());
+  document.getElementById('tool-grid').scrollIntoView({{behavior: 'smooth', block: 'start'}});
+}}
 
 renderTools(ALL_TOOLS);
 </script>"""
