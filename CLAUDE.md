@@ -29,24 +29,46 @@ linklib/           # core library (the only thing that matters long-term)
   extract.py       # best-effort full-text fetch (trafilatura preferred, BS4 fallback)
   enrich.py        # Claude API: generates summary + auto-tags for each article
   pipeline.py      # shared ingest used by CLI and web app
-  agent.py         # FP&A Q&A: library retrieval + web search, cited answer
+  agent.py         # FP&A Buddy Q&A: library retrieval + web search, cited answer
   social.py        # LinkedIn post generator in Brian's voice (self-contained)
   sources.py       # parses preferred_sites.opml → domain allowlist for web search
   feed.py          # RSS/Atom reader over the OPML list: concurrent fetch, 30-min cache
+  models.py        # curated Claude model registry, reconciled with the live Models API
+  pricing.py       # per-call USD cost table → per-user FP&A Buddy budget caps
+  queue.py         # fills the Archive Queue from RSS (ongoing) + sitemaps (backfill)
+  suggest.py       # Claude-predicted keep/skip for queue candidates (advisory only)
+  dedupe.py        # near-duplicate detection (similarity + Claude verification)
+  tagstyle.py      # learns Brian's tagging style; feeds the enrichment prompt
+  passwords.py     # scrypt password hashing (stdlib only)
+  authcheck.py     # probes subscriber-auth cookies so a stale paywall cookie surfaces
+  backup.py        # weekly off-site snapshot to Google Drive (OAuth refresh token, no SDK)
+  email_utils.py   # outbound email via the Gmail REST API (NOT SMTP — Railway Hobby
+                   #   blocks SMTP ports; same OAuth client as backup.py)
+  brand_check.py   # deterministic scanner for BRAND.md palette/font rules
+  voice_review.py  # mechanical + Claude voice-drift checks against BRAND.md
 
 scripts/           # CLI entry points
   import_archive.py   # one-time Feedly archive import
   add_link.py         # save a single URL
   enrich_backfill.py  # backfill Claude summaries/tags over imported rows
   enrich_compare.py   # manual QA: compare enrichment quality across models on one article
-  ask.py              # FP&A Q&A from the terminal
+  backfill_queue.py   # one-time sitemap sweep to queue historical articles
+  seed_tools.py       # seed/refresh the CFO Toolbox vendor list (TOOLS is also
+                      #   imported live by webapp/app.py)
+  ask.py              # FP&A Buddy from the terminal
   post.py             # draft a LinkedIn post from the terminal
+  voice_review.py     # check a file/stdin against the voice standards
   mcp_server.py       # stdio MCP server wrapping GET /api/search for Claude Desktop/Code
 
 webapp/
-  app.py           # FastAPI: public site (/, /thought-leadership, /growth-engine-ratio,
-                   #   /contact) + private tools (/library, /feed, /read, /ask, /post,
-                   #   /save, /api/search, /bookmarklet) + auth (/login, /logout)
+  app.py           # FastAPI, ~110 routes, all HTML/CSS/JS inline: public site
+                   #   (/, /thought-leadership, /growth-engine-ratio, /tools, /contact,
+                   #   /finops-ai-hackathon, /netsuite-mcp, /play) + private tools
+                   #   (/library, /feed, /read, /ask, /save, /api/search, /bookmarklet)
+                   #   + auth (/login, /logout) + the /admin back office (~40 pages)
+  checks.py        # aggregates the automated checks for /admin/checks (mirrors CI)
+  tasks.py         # open-task badge counts for the admin hub
+  thought_leadership_data.py  # curated content for /thought-leadership's lists
   static/          # served assets (e.g. headshot.jpg) via GET /static/{filename}
 
 preferred_sites.opml  # subscription list: web-search allowlist AND the /feed reader source
@@ -115,8 +137,9 @@ tables, no third-party dependency.
 ## `library.db` is intentionally not in the repo
 
 It's Brian's personal reading history (~1,500+ articles). It lives beside the code
-locally and should never be committed. A `.gitignore` entry is needed — see the gap
-list below.
+locally (on a Railway volume in production) and should never be committed —
+`.gitignore` covers it (`library.db` + `*.db`). Off-site weekly backups go to
+Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 
 ## Environment variables
 
