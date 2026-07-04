@@ -201,21 +201,25 @@ def test_play_leaderboard_note_signed_out_links_to_login(appmod_with_auth):
     """With auth actually enabled (LINKLIB_PASSWORD set) and no session
     cookie, the visitor is a true guest — must see the sign-in prompt, not
     the local-dev "everyone's a member" fallback the default env fixture
-    would otherwise mask this behind."""
+    would otherwise mask this behind. Guests can still view the (now real)
+    leaderboard without signing in."""
     _, client = appmod_with_auth
     body = client.get("/play").text
     assert 'href="/login?next=%2Fplay"' in body
     assert "Sign in to save runs" in body
-    assert "Leaderboard opens in a later update" not in body
+    assert 'href="/play/leaderboard"' in body
+    assert 'id="sdrSubmitStatus"' not in body
 
 
-def test_play_leaderboard_note_signed_in_no_fake_submission(appmod_with_auth):
-    """A signed-in member must see an honest 'not built yet' note, never a
-    fabricated 'score saved' claim — the leaderboard table is Phase 7."""
+def test_play_leaderboard_note_signed_in_shows_submit_status(appmod_with_auth):
+    """A signed-in member sees the real submit-status placeholder (updated
+    by JS after the /play/submit fetch resolves) and a leaderboard link,
+    not the signed-out sign-in prompt."""
     appmod, client = appmod_with_auth
     client.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
     body = client.get("/play").text
-    assert "Leaderboard opens in a later update" in body
+    assert 'id="sdrSubmitStatus"' in body
+    assert 'href="/play/leaderboard"' in body
     assert "Sign in to save runs" not in body
 
 

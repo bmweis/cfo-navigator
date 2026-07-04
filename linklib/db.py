@@ -273,6 +273,33 @@ CREATE TABLE IF NOT EXISTS game_rank_settings (
     sort_order             INTEGER NOT NULL DEFAULT 0,
     updated_at             TEXT NOT NULL DEFAULT ''
 );
+
+-- "Sail, Don't Row" — one row per submitted run, backing the per-rank public
+-- leaderboards (Brian confirmed per-rank tables, not one combined board with
+-- badges). difficulty_index/difficulty_label are computed once at write time
+-- from that week's rank settings and frozen on the row — display never
+-- recomputes them from current settings, so a later admin retune can't
+-- retroactively relabel a past week's runs. Score/distance/time/efficiency
+-- are client-reported (this is a client-authoritative DOM+CSS game with no
+-- server-side simulation, same trust model as obstacle placement) — bounds-
+-- checked at write time, but not defended against a determined cheater.
+CREATE TABLE IF NOT EXISTS game_runs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           INTEGER NOT NULL,
+    rank              TEXT NOT NULL,             -- 'deckhand' | 'mate' | 'first_mate' | 'skipper'
+    score             INTEGER NOT NULL,          -- 0-100, primary leaderboard sort key
+    distance_fraction REAL NOT NULL,             -- 0.0-1.0
+    finished          INTEGER NOT NULL DEFAULT 0,-- 1 = reached Nantucket, 0 = sunk/partial
+    time_seconds      REAL NOT NULL,
+    efficiency_pct    REAL NOT NULL,             -- Stamina remaining at end, 0-100
+    course_week       TEXT NOT NULL,             -- ISO week, e.g. '2026-W27'
+    difficulty_index  INTEGER NOT NULL,          -- 0-100, frozen at write time
+    difficulty_label  TEXT NOT NULL,             -- 'Fair Winds' | 'Choppy Waters' | 'Rough Seas' | 'Storm Warning'
+    created_at        TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_runs_leaderboard ON game_runs(rank, course_week, score DESC);
+CREATE INDEX IF NOT EXISTS idx_game_runs_user ON game_runs(user_id);
 """
 
 
@@ -1493,6 +1520,50 @@ class Library:
             list(fields.values()) + [_now(), rank],
         )
         self.conn.commit()
+
+    # -- "Sail, Don't Row" — leaderboard (per-rank tables) -----------------
+
+    def record_game_run(self, user_id: int, rank: str, score: int, distance_fraction: float,
+                        finished: bool, time_seconds: float, efficiency_pct: float,
+                        course_week: str, difficulty_index: int, difficulty_label: str) -> int:
+        cur = self.conn.execute(
+            """INSERT INTO game_runs
+               (user_id, rank, score, distance_fraction, finished, time_seconds,
+                efficiency_pct, course_week, difficulty_index, difficulty_label, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (user_id, rank, score, distance_fraction, int(finished), time_seconds,
+             efficiency_pct, course_week, difficulty_index, difficulty_label, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_game_leaderboard(self, rank: str, course_week: str | None = None,
+                              limit: int = 50) -> list[dict]:
+        """Top runs for one rank (per-rank tables, not a combined board),
+        best Score first, one row per player — their single best run, not
+        every attempt. Pass course_week for the 'this week' view; omit for
+        all-time."""
+        where = "WHERE gr.rank = ?"
+        params: list = [rank]
+        if course_week:
+            where += " AND gr.course_week = ?"
+            params.append(course_week)
+        rows = self.conn.execute(
+            f"""SELECT * FROM (
+                   SELECT gr.*, u.username, u.name,
+                          ROW_NUMBER() OVER (
+                            PARTITION BY gr.user_id
+                            ORDER BY gr.score DESC, gr.created_at ASC
+                          ) AS rn
+                   FROM game_runs gr LEFT JOIN users u ON u.id = gr.user_id
+                   {where}
+                 )
+                 WHERE rn = 1
+                 ORDER BY score DESC, created_at ASC
+                 LIMIT ?""",
+            params + [limit],
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def close(self) -> None:
         self.conn.close()

@@ -52,9 +52,10 @@ PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           # CFO Toolbox browsing and everything linked from the thought-leadership
           # page are fully public; only the account tools below stay gated.
           "/tools", "/growth-engine-ratio", "/netsuite-mcp", "/finops-ai-hackathon",
-          # Sail, Don't Row is fully playable signed-out; only saving a run to the
-          # leaderboard will require an account (Phase 7, not yet built).
-          "/play"]
+          # Sail, Don't Row is fully playable signed-out, and the per-rank
+          # leaderboards are publicly viewable — only submitting a run
+          # (POST /play/submit) requires an account.
+          "/play", "/play/leaderboard"]
 # Submitting a tool / a piece, or requesting a warm intro, is account-only (spam
 # control) even though the directory and home page are public.
 MEMBER = ["/library", "/archive", "/feed", "/ask", "/tools/submit", "/library/submit"]

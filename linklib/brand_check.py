@@ -79,6 +79,14 @@ AUX_COLORS = {
     "#ede8dd",                                  # lighthouse tower white
     "#8a9b6e",                                  # beach grass
     "#a3b8d8", "#7fa3c9",                       # cottage wall / roof pale blues
+    # Phase 7 difficulty pills (gradient-fill, design/mockups/
+    # sail-dont-row-v10-boat-and-pills.html) — Choppy/Rough/Storm tiers.
+    # Fair Winds reuses existing seafoam-family tokens/aux colors already
+    # listed above (#a3e5d4 is a token; #c9a24b already listed).
+    "#e4f8f0",                                  # Fair Winds pill light stop
+    "#e9d19e",                                  # Choppy Waters pill light stop
+    "#e0a57d", "#c97a4a",                       # Rough Seas pill gradient
+    "#5a6b7e", "#2c3a48",                       # Storm Warning pill gradient
 }
 
 # Colors purged in the visual refresh — must never reappear.
