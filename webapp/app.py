@@ -2327,51 +2327,48 @@ def netsuite_mcp(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# "Sail, Don't Row" — Phases 1-6: core engine, wind/rowing/Stamina, the
-# five-checkpoint route to a Nantucket finish, full finish/game-over outcome
-# screens, rank-select polish, and visual/responsive polish (public, no
-# auth to play). DOM+CSS-transform game, vanilla JS. Boat SVG/obstacle
-# colors/skyline landmarks/difficulty-pill treatment lifted from
-# design/mockups/ per the Phase 0 sign-off; the Boston Harbor/Cape Cod/
-# Martha's Vineyard/Nantucket backdrops extend that same visual language
-# (no mockup existed for those four, so they're an original fill using the
-# established technique). Rank tuning (pace, wind, obstacle density,
-# collision rule) is admin-editable at /admin/game-settings and read live
-# here — the rank-select pills' collision-rule line
-# (_sdr_collision_description) is derived from those same live values, not
-# hardcoded text, so it can't drift out of sync with an admin retune. Wind
-# gust zones (auto-sail) are placed by their own seeded PRNG, independent
-# of the obstacle seed, so tuning one never reshuffles the other.
+# "Sail, Don't Row" — Phases 1-7, complete: core engine, wind/rowing/
+# Stamina, the five-checkpoint route to a Nantucket finish, full finish/
+# game-over outcome screens, rank-select polish, visual/responsive polish,
+# and the public per-rank leaderboard (public, no auth to play — an account
+# is needed only to save a run). DOM+CSS-transform game, vanilla JS. Boat
+# SVG/obstacle colors/skyline landmarks/difficulty-pill treatment lifted
+# from design/mockups/ per the Phase 0 sign-off; the Boston Harbor/Cape
+# Cod/Martha's Vineyard/Nantucket backdrops extend that same visual
+# language (no mockup existed for those four, so they're an original fill
+# using the established technique). Rank tuning (pace, wind, obstacle
+# density, collision rule) is admin-editable at /admin/game-settings and
+# read live here — the rank-select pills' collision-rule line
+# (_sdr_collision_description) and the leaderboard's Difficulty Index
+# (_sdr_difficulty_index) are both derived from those same live values, not
+# hardcoded, so an admin retune can't leave either display out of sync
+# with actual behavior. Wind gust zones (auto-sail) are placed by their own
+# seeded PRNG, independent of the obstacle seed, so tuning one never
+# reshuffles the other.
 #
-# Phase 6 confirmed the mockups' full animation set is present (flowing
-# water bands, bobbing boat, fluttering sail, drifting gust streaks,
-# skyline reflection crossfade) and added the one that wasn't yet built —
-# a shimmer sweep on the Stamina fill — then re-verified every screen
-# (rank select, live play, both outcome cards) across desktop, tablet, and
-# mobile in both orientations. That pass also caught the rank pill's name/
-# difficulty-label spans rendering with zero gap between them ("MateMedium")
-# since there was no source whitespace between the two <span> tags — fixed
-# by stacking them in a flex column instead of relying on inline spacing.
+# Leaderboard (Phase 7): one table per rank (Brian's call on the open
+# question — not a combined board with badges, not rank folded into
+# Score), each scoped to "this week" (by course_week) or all-time, best
+# run per player. A signed-in player's run auto-submits to POST
+# /play/submit on finish/game-over; the outcome card's status line updates
+# from "Saving your run…" to "Saved to the leaderboard." once the request
+# resolves. Score/distance/time/efficiency are client-reported — this is a
+# client-authoritative DOM+CSS game with no server-side simulation, same
+# trust model as obstacle placement throughout — but rank/course-week/
+# Difficulty Index are always computed server-side from current admin
+# settings, never trusted from the client, and bounds-checked on write.
+# Difficulty Index/label are frozen on each row at write time rather than
+# recomputed on read, so a later admin retune can't retroactively relabel
+# a past week's runs.
 #
 # Stamina design note: the Concept spec says rowing drains Stamina and
 # resting is free; Phase 3's recap line ("Stamina depletes over the whole
 # run... hitting zero ends the run") reads as a stricter, harder-fail
 # variant. Built to the Concept spec (drain-while-rowing / regen-while-
-# resting, already shipped and admin-tunable in Phase 1/2) rather than
-# adding a second, conflicting always-draining mechanic — at 0 Stamina,
-# rowing simply stops working until it recovers, it doesn't end the run.
-# Flagged for Brian to confirm; easy to change if a hard fail is wanted.
-#
-# Leaderboard note: the outcome screens are login-aware (a real "sign in"
-# link for signed-out players) but don't fabricate a submission — the
-# leaderboard table/write path is Phase 7, not built yet. Signed-in players
-# see an honest "opens in a later update" note rather than a fake
-# confirmation.
-#
-# Not yet built: the leaderboard itself (Phase 7). Its rank-split question
-# was resolved with Brian rather than guessed: per-rank tables, not one
-# combined board — so /admin/game-settings' four ranks each get their own
-# leaderboard once Phase 7 builds it.
+# resting, admin-tunable) rather than adding a second, conflicting always-
+# draining mechanic — at 0 Stamina, rowing simply stops working until it
+# recovers, it doesn't end the run. Flagged for Brian to confirm; easy to
+# change if a hard fail is wanted.
 # ---------------------------------------------------------------------------
 
 _SDR_CSS = """
@@ -2727,6 +2724,7 @@ _SDR_JS = """
 (function(){
   var RANK_SETTINGS = __RANK_JSON__;
   var COURSE_LENGTH = __COURSE_LENGTH__;
+  var SIGNED_IN = __SIGNED_IN__;
   var PX_PER_UNIT = 1.1;
   var CHANNEL_TOP = 0.60, CHANNEL_BOTTOM = 0.93;
   var BOAT_X_FRAC = 0.24;
@@ -2983,6 +2981,24 @@ _SDR_JS = """
     gameOver.classList.toggle('sdr-finish', reason === 'finish');
     gameOver.style.display = 'flex';
     requestAnimationFrame(function(){ gameOver.classList.add('sdr-visible'); });
+
+    if (SIGNED_IN) submitScore(state.rank, state.score, distanceFraction, reason === 'finish', elapsedSec, state.stamina);
+  }
+
+  function submitScore(rank, score, distanceFraction, finished, timeSeconds, efficiencyPct){
+    var statusEl = document.getElementById('sdrSubmitStatus');
+    fetch('/play/submit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        rank: rank, score: score, distance_fraction: distanceFraction,
+        finished: finished, time_seconds: timeSeconds, efficiency_pct: efficiencyPct,
+      }),
+    }).then(function(r){ return r.json(); }).then(function(data){
+      if (statusEl) statusEl.textContent = data.ok ? 'Saved to the leaderboard.' : 'Could not save this run.';
+    }).catch(function(){
+      if (statusEl) statusEl.textContent = 'Could not save this run.';
+    });
   }
 
   function startRun(rankKey){
@@ -3161,6 +3177,71 @@ _SDR_JS = """
 """
 
 _SDR_COURSE_LENGTH = 4300
+_SDR_RANKS = {"deckhand", "mate", "first_mate", "skipper"}
+
+
+def _sdr_course_week(dt=None) -> str:
+    """ISO week string ('2026-W27') tagging a run to a course-week, computed
+    server-side (never trust a client-supplied value). The client's own
+    isoWeekKey() derives the same string from the *player's local* calendar
+    date rather than true UTC, so a player right at a week boundary in an
+    extreme timezone could rarely see a course generated for a different
+    week than the one their run gets tagged with here — a cosmetic label
+    mismatch, not a gameplay bug, and not worth the complexity of threading
+    timezone through the client/server boundary for a personal leaderboard."""
+    dt = dt or datetime.now(timezone.utc)
+    iso_year, iso_week, _ = dt.isocalendar()
+    return f"{iso_year}-W{iso_week:02d}"
+
+
+def _sdr_difficulty_index(gust_coverage_pct: float, obstacle_density: float) -> int:
+    """0-100. Mirrors the Phase 0 formula and the client's own obstacle-count/
+    avg-gap derivation (buildObstacles' avgGap is a deterministic function of
+    obstacle_density and course length, not of the random seed — so this is
+    computable server-side without re-running the client's PRNG)."""
+    count = max(1, round(obstacle_density * _SDR_COURSE_LENGTH / 1000))
+    avg_gap = (_SDR_COURSE_LENGTH - 500) / (count + 1)
+    gap_norm = min(1.0, avg_gap / 400.0)
+    gust_frac = gust_coverage_pct / 100.0
+    density_norm = min(1.0, obstacle_density / 9.0)  # 9 = Skipper's default, the reference "max"
+    raw = 0.4 * (1 - gust_frac) + 0.4 * density_norm + 0.2 * (1 - gap_norm)
+    return round(100 * max(0.0, min(1.0, raw)))
+
+
+def _sdr_difficulty_label(index: int) -> str:
+    if index <= 30:
+        return "Fair Winds"
+    if index <= 55:
+        return "Choppy Waters"
+    if index <= 80:
+        return "Rough Seas"
+    return "Storm Warning"
+
+
+_SDR_DIFFICULTY_PILL_CLASS = {
+    "Fair Winds": "sdr-pill-fair",
+    "Choppy Waters": "sdr-pill-choppy",
+    "Rough Seas": "sdr-pill-rough",
+    "Storm Warning": "sdr-pill-storm",
+}
+
+# Gradient-fill difficulty pill, exact treatment from
+# design/mockups/sail-dont-row-v10-boat-and-pills.html — shared by the
+# leaderboard page (and available to the game page) rather than duplicated.
+_SDR_PILL_CSS = """
+.sdr-diff-pill{position:relative;overflow:hidden;display:inline-block;padding:5px 14px;
+  border-radius:999px;font-family:var(--font-head);font-weight:700;font-size:11px;
+  box-shadow:0 3px 8px rgba(0,0,0,0.12);white-space:nowrap;}
+.sdr-diff-pill::before{content:'';position:absolute;top:0;left:0;right:0;height:50%;
+  background:linear-gradient(180deg,rgba(255,255,255,0.45),rgba(255,255,255,0));}
+.sdr-diff-pill span{position:relative;z-index:1;}
+.sdr-pill-fair{background:linear-gradient(135deg,#E4F8F0,#A3E5D4);color:var(--navy);}
+.sdr-pill-choppy{background:linear-gradient(135deg,#E9D19E,#C9A24B);color:var(--navy);}
+.sdr-pill-rough{background:linear-gradient(135deg,#E0A57D,#C97A4A);color:#fff;}
+.sdr-pill-storm{background:linear-gradient(135deg,#5A6B7E,#2C3A48);color:#fff;}
+.sdr-rank-badge{display:inline-block;padding:5px 12px;border-radius:999px;font:700 11px var(--font-head);
+  color:var(--navy);background:rgba(0,41,117,0.08);white-space:nowrap;}
+"""
 
 
 def _sdr_collision_description(r):
@@ -3209,16 +3290,13 @@ _SDR_CHECKPOINT_SVGS = [
 
 
 def _sdr_build_body(ranks, signed_in):
-    # The leaderboard table/write path is Phase 7 — not built yet. This note
-    # is intentionally honest about that: signed-out players get a real,
-    # working invitation to log in (useful today); signed-in players get a
-    # "coming soon" note rather than a fabricated "score saved" claim.
     if signed_in:
-        leaderboard_note = ('<p class="sdr-leaderboard-note">Leaderboard opens in a later update &mdash; '
-                             'your Score is shown above.</p>')
+        leaderboard_note = ('<p class="sdr-leaderboard-note"><span id="sdrSubmitStatus">Saving your run&hellip;</span> '
+                             '<a href="/play/leaderboard">View leaderboard &rarr;</a></p>')
     else:
-        leaderboard_note = ('<p class="sdr-leaderboard-note">Sign in to save runs to the leaderboard once it '
-                             'opens. <a href="/login?next=%2Fplay">Sign in &rarr;</a></p>')
+        leaderboard_note = ('<p class="sdr-leaderboard-note">Sign in to save runs to the leaderboard. '
+                             '<a href="/login?next=%2Fplay">Sign in &rarr;</a> &middot; '
+                             '<a href="/play/leaderboard">View leaderboard &rarr;</a></p>')
     pills_html = "".join(_sdr_rank_pill_html(r, r["rank"] == "mate") for r in ranks)
     skyline_layers = "".join(
         f'<div class="sdr-skyline-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">{svg}</div>'
@@ -3246,7 +3324,8 @@ def _sdr_build_body(ranks, signed_in):
     rank_json_str = json.dumps(rank_json).replace("</", "<\\/")
     js = (_SDR_JS
           .replace("__RANK_JSON__", rank_json_str)
-          .replace("__COURSE_LENGTH__", str(_SDR_COURSE_LENGTH)))
+          .replace("__COURSE_LENGTH__", str(_SDR_COURSE_LENGTH))
+          .replace("__SIGNED_IN__", "true" if signed_in else "false"))
 
     return """<div class="page" id="sdrRoot" style="max-width:960px;">
 <style>""" + _SDR_CSS + """</style>
@@ -3312,8 +3391,8 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
 <template id="sdrRockTpl">""" + _SDR_ROCK_SVG + """</template>
 <template id="sdrBuoyTpl">""" + _SDR_BUOY_SVG + """</template>
 
-<p class="sdr-hint">Phase 6 preview: visual and responsive polish across desktop, tablet, and mobile. Per-rank leaderboards
-land in Phase 7. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
+<p class="sdr-hint">Signed-in runs save automatically to the <a href="/play/leaderboard">per-rank leaderboard</a>. Rank
+pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
 </div>
 <script>""" + js + """</script>"""
 
@@ -3327,6 +3406,138 @@ def play_sail_dont_row(request: Request):
         lib.close()
     body = _sdr_build_body(ranks, signed_in=_is_member(request))
     return HTMLResponse(_page("Sail, Don't Row—Brian Weisberg", "Sail, Don't Row", body, role=_role(request)))
+
+
+@app.post("/play/submit")
+async def play_submit_score(request: Request):
+    """Member-tier write: a signed-in player's run is saved automatically on
+    finish/game-over (see submitScore() in the game JS). Score/distance/time/
+    efficiency are client-reported — this is a client-authoritative DOM+CSS
+    game with no server-side simulation, same trust model used throughout —
+    but rank/course-week/difficulty are always computed server-side, never
+    trusted from the client."""
+    _require_member(request)
+    payload = await request.json()
+    rank = str(payload.get("rank") or "")
+    if rank not in _SDR_RANKS:
+        raise HTTPException(status_code=400, detail="Unknown rank")
+
+    def _clamp(value, lo, hi, default=0.0):
+        try:
+            return max(lo, min(hi, float(value)))
+        except (TypeError, ValueError):
+            return default
+
+    score = int(_clamp(payload.get("score"), 0, 100))
+    distance_fraction = _clamp(payload.get("distance_fraction"), 0.0, 1.0)
+    finished = bool(payload.get("finished"))
+    time_seconds = _clamp(payload.get("time_seconds"), 0.0, 3600.0)
+    efficiency_pct = _clamp(payload.get("efficiency_pct"), 0.0, 100.0)
+
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        if user_id is None:
+            # Break-glass admin login with no matching `users` row — same
+            # "skip recording" edge case documented on _current_user_id.
+            return JSONResponse({"ok": False, "reason": "no_user_row"})
+        rank_settings = lib.get_game_rank_settings(rank)
+        difficulty_index = _sdr_difficulty_index(
+            rank_settings["gust_coverage_pct"], rank_settings["obstacle_density"]
+        )
+        difficulty_label = _sdr_difficulty_label(difficulty_index)
+        course_week = _sdr_course_week()
+        run_id = lib.record_game_run(
+            user_id, rank, score, distance_fraction, finished, time_seconds,
+            efficiency_pct, course_week, difficulty_index, difficulty_label,
+        )
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "id": run_id})
+
+
+_SDR_RANK_ORDER = ["deckhand", "mate", "first_mate", "skipper"]
+
+
+@app.get("/play/leaderboard", response_class=HTMLResponse)
+def play_leaderboard(request: Request, rank: str = "mate", scope: str = "week"):
+    if rank not in _SDR_RANKS:
+        rank = "mate"
+    if scope not in ("week", "all"):
+        scope = "week"
+
+    lib = _lib()
+    try:
+        rank_rows = {r["rank"]: r for r in lib.list_game_rank_settings()}
+        course_week = _sdr_course_week()
+        board = lib.list_game_leaderboard(
+            rank, course_week=course_week if scope == "week" else None, limit=50
+        )
+    finally:
+        lib.close()
+
+    def _rank_tab(rk):
+        label = rank_rows.get(rk, {}).get("label", rk)
+        active = " active" if rk == rank else ""
+        return f'<a class="sdr-lb-tab{active}" href="/play/leaderboard?rank={rk}&scope={scope}">{_esc(label)}</a>'
+
+    def _scope_tab(sc, label):
+        active = " active" if sc == scope else ""
+        return f'<a class="sdr-lb-tab{active}" href="/play/leaderboard?rank={rank}&scope={sc}">{label}</a>'
+
+    rank_tabs = "".join(_rank_tab(rk) for rk in _SDR_RANK_ORDER)
+    scope_tabs = _scope_tab("week", "This Week") + _scope_tab("all", "All Time")
+
+    if board:
+        rows_html = ""
+        for i, row in enumerate(board):
+            name = row["name"] or row["username"] or "Anonymous"
+            pill_cls = _SDR_DIFFICULTY_PILL_CLASS.get(row["difficulty_label"], "sdr-pill-fair")
+            finished_tag = "Finished" if row["finished"] else f"{round(row['distance_fraction']*100)}%"
+            rows_html += f"""<div class="sdr-lb-row">
+  <span class="sdr-lb-pos">{i+1}</span>
+  <span class="sdr-lb-name">{_esc(name)}</span>
+  <span class="sdr-lb-badges">
+    <span class="sdr-diff-pill {pill_cls}"><span>{_esc(row['difficulty_label'])}</span></span>
+    <span class="sdr-rank-badge">{finished_tag}</span>
+  </span>
+  <span class="sdr-lb-score">{row['score']}</span>
+</div>"""
+    else:
+        rows_html = ('<p style="padding:24px;text-align:center;color:var(--muted);">'
+                     'No runs yet — be the first to set a Score.</p>')
+
+    body = """<div class="page" style="max-width:720px;">
+<style>""" + _SDR_PILL_CSS + """
+.sdr-lb-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+.sdr-lb-tab{font:700 12px var(--font-head);padding:7px 14px;border-radius:8px;border:1px solid var(--line);
+  background:#fff;color:var(--muted);}
+.sdr-lb-tab:hover{text-decoration:none;background:var(--navy-wash);}
+.sdr-lb-tab.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+.sdr-lb-tabs-row{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px;}
+.sdr-leaderboard{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+.sdr-lb-row{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);font-size:14px;}
+.sdr-lb-row:last-child{border-bottom:none;}
+.sdr-lb-pos{width:22px;color:var(--muted);font-weight:600;flex-shrink:0;}
+.sdr-lb-name{flex:1;font-weight:500;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sdr-lb-badges{display:flex;gap:6px;align-items:center;flex-shrink:0;}
+.sdr-lb-score{width:36px;text-align:right;font-family:var(--font-head);font-weight:700;color:var(--navy);flex-shrink:0;}
+@media (max-width:480px){
+  .sdr-lb-badges{display:none;}
+  .sdr-lb-tabs-row{flex-direction:column;}
+}
+</style>
+<p style="margin:0 0 4px;"><a href="/play" style="font-size:13px;color:var(--muted);">&larr; Sail, Don&rsquo;t Row</a></p>
+<h1 style="margin:0 0 6px;">Leaderboard</h1>
+<p style="color:var(--muted);margin:0 0 22px;">One board per rank &mdash; a Fair-Winds Deckhand run and a
+Storm-Warning Skipper run aren&rsquo;t the same feat, so they&rsquo;re not on the same table.</p>
+<div class="sdr-lb-tabs-row">
+  <div class="sdr-lb-tabs">""" + rank_tabs + """</div>
+  <div class="sdr-lb-tabs">""" + scope_tabs + """</div>
+</div>
+<div class="sdr-leaderboard">""" + rows_html + """</div>
+</div>"""
+    return HTMLResponse(_page("Leaderboard—Sail, Don't Row", "Sail, Don't Row", body, role=_role(request)))
 
 
 @app.get("/contact", response_class=HTMLResponse)
