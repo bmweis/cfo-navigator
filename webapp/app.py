@@ -7184,6 +7184,44 @@ def admin_library(request: Request):
 {_content_flow_diagram()}
 <p style="color:var(--muted);font-size:14px;margin:-8px 0 22px;line-height:1.6;">New content always enters through the queue (step&nbsp;2 or&nbsp;3) for your review before it's saved. Once saved, it's ready for de-duping and enrichment (steps&nbsp;4&ndash;5), and the FP&amp;A Buddy corpus stays clean by periodically filtering out anything off-target (step&nbsp;6) and tidying tags (steps&nbsp;7&ndash;8).</p>
 <div style="display:grid;gap:12px;">{cards}</div>
+
+<h2 style="margin:40px 0 6px;">Saving articles from anywhere</h2>
+<p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in. <strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working and must be set up again from this page's instructions</strong> &mdash; the old copies embed the old values.</p>
+
+<details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);">Desktop &mdash; the bookmarklet</summary>
+<div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
+<p style="margin:0 0 10px;">A bookmarklet is an ordinary browser bookmark whose &ldquo;URL&rdquo; is a tiny program instead of a web address. Clicking it runs the program on whatever page you're reading &mdash; it grabs that page's address and saves it to the archive.</p>
+<ol style="margin:0 0 10px;padding-left:20px;">
+  <li>Open <a href="/bookmarklet">/bookmarklet</a> (login-gated) and copy the <em>entire</em> snippet &mdash; click the text, <strong>Cmd+A</strong>, <strong>Cmd+C</strong>.</li>
+  <li>Show the bookmarks bar (<strong>Cmd+Shift+B</strong> in Chrome), right-click an empty spot on it &rarr; <strong>Add page&hellip;</strong></li>
+  <li>Name: <code>Save to CFO Library</code>. URL: <strong>paste the snippet</strong>. Save.</li>
+  <li>On any article page, click it like a button &rarr; optional tags prompt &rarr; &ldquo;Saved to archive.&rdquo;</li>
+</ol>
+<p style="margin:0;color:var(--muted);font-size:13px;">It won't fire on browser-internal pages (new tab, chrome:// pages) &mdash; that's a browser rule. The snippet contains the save token in plaintext, so don't paste it anywhere public.</p>
+</div>
+</details>
+
+<details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);">iPhone / iPad &mdash; Share-Sheet shortcut</summary>
+<div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
+<p style="margin:0 0 10px;">One-time setup in the <strong>Shortcuts</strong> app (~5 minutes); afterwards &ldquo;Save to CFO Library&rdquo; appears in Safari's share sheet.</p>
+<ol style="margin:0 0 10px;padding-left:20px;">
+  <li>Shortcuts app &rarr; <strong>+</strong> to create a new shortcut &rarr; rename it <code>Save to CFO Library</code>.</li>
+  <li>Tap the shortcut's <strong>info (&#9432;)</strong> panel &rarr; turn on <strong>Show in Share Sheet</strong>. Under the accepted types, keep <strong>URLs</strong> and <strong>Safari web pages</strong>.</li>
+  <li>Add action <strong>&ldquo;Get URLs from Input&rdquo;</strong> (its input should be <em>Shortcut Input</em>).</li>
+  <li>Add action <strong>&ldquo;Get Contents of URL&rdquo;</strong> and expand its options:
+    <ul style="margin:4px 0;padding-left:18px;">
+      <li>URL: <code>{_esc(PUBLIC_BASE)}/save{'?token=' + _esc(SAVE_TOKEN) if SAVE_TOKEN else ''}</code></li>
+      <li>Method: <strong>POST</strong></li>
+      <li>Request Body: <strong>JSON</strong> &rarr; add a text field named <code>url</code> whose value is the <em>URLs</em> variable from step 3.</li>
+    </ul></li>
+  <li>Optional: add <strong>&ldquo;Show Notification&rdquo;</strong> saying &ldquo;Saved to archive&rdquo; so you get visible confirmation.</li>
+  <li>Use it: in Safari, tap <strong>Share &rarr; Save to CFO Library</strong>. The article lands in the queue-free save path, same as the bookmarklet.</li>
+</ol>
+<p style="margin:0;color:var(--muted);font-size:13px;">Articles saved this way arrive untagged &mdash; tag them later in the Library, or add a second JSON text field named <code>tags</code> with a comma-separated list if you want a fixed default.</p>
+</div>
+</details>
 </div>"""
     return HTMLResponse(_page("Archive — Admin", "Admin", body, authed=True))
 
