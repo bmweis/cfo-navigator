@@ -3710,10 +3710,10 @@ async def library_submit(request: Request):
 # Community
 # ---------------------------------------------------------------------------
 
-# TODO: Replace this placeholder with the real Google Form URL once created in
-# Google Workspace. Create the form with: Name, Email, Current/past communities,
-# Gaps in community experiences, What you'd look for in an ideal community (multi-select).
-_COMMUNITY_FORM_URL = "#community-form-coming-soon"
+# The community sign-up Google Form lives in Brian's Workspace. Response
+# notifications are configured inside the Form itself (Responses tab > get
+# email notifications), not through this app.
+_COMMUNITY_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfEyvK77VKnICPzrqLBRfsm0WvnEYmB7ZWFVCj7qffVNX5m8Q/viewform"
 _COMMUNITY_FORM_CONFIGURED = _COMMUNITY_FORM_URL != "#community-form-coming-soon"
 
 
