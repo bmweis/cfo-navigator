@@ -16,9 +16,9 @@ Two capabilities, both backed by a single SQLite database (`library.db`):
 voice-matching elsewhere, e.g. the Q&A chatbot) and `draft_post()` (still backs the
 `scripts/post.py` CLI), but there's no web UI for drafting posts anymore.)
 
-The longer-term plan (see `MIGRATION_AND_BUILD_PLAN.md`) is to grow this into a public
-site at bmweis.com, with a public-facing bio/thought-leadership section and a
-login-gated private section for the library, chatbot, and feed.
+The site is live at **bmweis.com** (custom domain on Railway, July 2026): a
+public-facing bio/thought-leadership section and a login-gated private section for
+the library, chatbot, and feed.
 
 ## Project layout
 
@@ -191,15 +191,14 @@ python -m scripts.mcp_server
 - CFO Feed RSS reader (`/feed`) with category tabs, per-source filter, save-to-library
 - Article reader, Instapaper-style (`/read`)
 - Hosting/deployment on Railway (see Deployment below)
+- bmweis.com custom domain pointed at Railway (July 2026)
 - MCP server (`scripts/mcp_server.py`) wrapping `/api/search` for Claude Desktop/Code
 
 **Not yet built (from the migration plan):**
 - iOS Share Sheet shortcut
-- bmweis.com custom domain pointed at Railway
 
-Note: the file this section's header refers to, `MIGRATION_AND_BUILD_PLAN.md`, isn't
-actually in the repo (lost or never committed) — these two items are tracked here as
-the only record of it.
+Note: the migration plan document (`MIGRATION_AND_BUILD_PLAN.md`) was never
+committed to the repo — this item is tracked here as the only record of it.
 
 ## Contributing — pull requests
 
@@ -229,6 +228,10 @@ link.
   a branch and ships by **merging a PR** into `main` (see *Contributing* above).
   **If it isn't on `main`, it isn't live** — a common gotcha (e.g. a change that looks done
   but "doesn't show up" is usually still on a feature branch / unmerged PR).
+- **Domain:** bmweis.com (and www) point at the Railway service; the
+  `*.up.railway.app` hostname still serves too. `LINKLIB_PUBLIC_BASE` should be
+  `https://bmweis.com` in Railway's env — it's the base URL baked into the
+  bookmarklet, so **re-grab the bookmarklet from `/bookmarklet` after changing it**.
 - Set `LINKLIB_SAVE_TOKEN` (and ideally `LINKLIB_SECRET_KEY`) in Railway's env so the
   private section is protected and logins persist across deploys. `library.db` is not in
   the repo, so a hosted instance starts empty unless the DB is provisioned/persisted

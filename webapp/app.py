@@ -198,6 +198,33 @@ SESSION_TTL = 30 * 24 * 3600  # 30 days
 
 app = FastAPI(title="bmweis.com")
 
+# Hostnames that should permanently redirect to the canonical domain
+# (PUBLIC_BASE): the pre-custom-domain Railway hostname and the www variant.
+# bmweis.com (apex) is canonical — decided at domain migration, July 2026.
+_LEGACY_HOSTS = {"www.bmweis.com", "cfo-navigator-production.up.railway.app"}
+
+
+@app.middleware("http")
+async def _canonical_host_redirect(request: Request, call_next):
+    """301 legacy hostnames to the canonical domain, preserving path + query.
+
+    Guarded three ways so it can never misfire: only the two known legacy
+    hosts redirect (localhost/dev and the canonical host pass through
+    untouched), only when PUBLIC_BASE is a real https base (so a dev
+    instance with the default localhost base never redirects anywhere), and
+    never for /health (Railway's healthcheck must always see a 200).
+    """
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    if (host in _LEGACY_HOSTS
+            and PUBLIC_BASE.startswith("https://")
+            and host != PUBLIC_BASE.removeprefix("https://").split("/")[0]
+            and request.url.path != "/health"):
+        target = PUBLIC_BASE.rstrip("/") + request.url.path
+        if request.url.query:
+            target += "?" + request.url.query
+        return RedirectResponse(target, status_code=301)
+    return await call_next(request)
+
 
 @app.on_event("startup")
 def _seed_toolbox():
