@@ -505,8 +505,10 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     # role: "admin" | "user" | "guest". Falls back to authed for legacy callers.
     if role is None:
         role = "admin" if authed else "guest"
+    # "Sail, Don't Row" (/play) is deliberately not in the nav — it's an
+    # easter egg linked only from the bottom of /finops-ai-hackathon.
     public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
-              ("/tools", "CFO Toolbox"), ("/play", "Sail, Don't Row"), ("/contact", "Contact")]
+              ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
     # Account-only section — one nav entry ("Library") that opens a hub linking to
     # Archive, Feed, and FP&A Buddy. Shown to everyone so the gated area is
     # discoverable; clicking it when signed out lands on the login screen.
@@ -2027,6 +2029,7 @@ def finops_ai_hackathon(request: Request):
 
 <div style="border-top:1px solid var(--line-strong);margin-top:48px;padding-top:24px;">
   <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
+  <p style="font-size:12px;color:var(--muted);margin:14px 0 0;">&#9973; Made it this far? <a href="/play">Sail, Don&rsquo;t Row</a> is also a game.</p>
 </div>
 
 </div>"""

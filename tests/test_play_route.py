@@ -111,10 +111,23 @@ def test_play_links_to_admin_game_settings(env):
     assert "/admin/game-settings" in body
 
 
-def test_play_nav_link_present(env):
+def test_play_not_in_site_nav(env):
+    """Sail, Don't Row is an easter egg, not a nav item — it must not appear
+    in the top nav on the home page (or anywhere else site-wide)."""
     _, client = env
     body = client.get("/").text
+    nav = body.split("<nav")[1].split("</nav>")[0]
+    assert 'href="/play"' not in nav
+
+
+def test_play_easter_egg_link_on_hackathon_page(env):
+    """The only place Sail, Don't Row is linked from is the bottom of the
+    finops-ai-hackathon article — a quiet easter egg for readers who scroll
+    all the way down, not a promoted CTA."""
+    _, client = env
+    body = client.get("/finops-ai-hackathon").text
     assert 'href="/play"' in body
+    assert "Sail, Don&rsquo;t Row" in body or "Sail, Don't Row" in body
 
 
 def test_play_embeds_gust_and_sail_settings(env):
