@@ -69,6 +69,18 @@ python -m scripts.enrich_backfill --db library.db
 Defaults to Haiku (cheapest capable model) since you'll process a few thousand
 articles. Override with `LINKLIB_ENRICH_MODEL`.
 
+To decide whether a pricier model is worth it before committing to a full
+re-enrichment, compare models side by side on one article:
+
+```bash
+python -m scripts.enrich_compare --url https://example.com/some-article
+python -m scripts.enrich_compare --db library.db --id 42
+```
+
+Runs the real production enrichment prompt through each model (default: Opus
+vs. Sonnet) and prints summaries + tags side by side. Makes real API calls
+(a few cents).
+
 ---
 
 ## Ask your library (FP&A Q&A)
@@ -117,6 +129,7 @@ scripts/
   import_archive.py   Job 1 — import the data-export archive
   add_link.py         Job 2 — save a link (CLI)
   enrich_backfill.py  add Claude summaries/tags over imported rows  <- run this next
+  enrich_compare.py   compare enrichment quality across models on one article
   ask.py              FP&A Q&A from the command line
   post.py             draft a LinkedIn post from the command line
 webapp/
