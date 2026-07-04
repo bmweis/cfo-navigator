@@ -1,33 +1,112 @@
-"""Lightweight email helper for outbound notifications (warm intros, etc.).
+"""Lightweight email helper for outbound notifications (contact form, warm
+intros, etc.), sent via the Gmail REST API.
 
-Reads configuration from environment variables — all optional. If SMTP is not
-configured, send_warm_intro_email() returns False and the lead is still
-stored in the DB (no error raised) — callers should always save the lead
-first and treat email as best-effort on top of that.
+Why the Gmail API and not SMTP: Railway's Hobby plan blocks outbound SMTP
+ports (25/465/587) — unblocking them is a Pro-plan feature. The Gmail API
+sends over HTTPS (port 443), which is unrestricted on every plan, and it
+reuses the exact same Google Cloud OAuth client + refresh token as the Drive
+backup (linklib/backup.py) — just with the ``gmail.send`` scope granted
+alongside ``drive.file`` when the refresh token is minted.
 
-Required env vars to enable sending:
-    LINKLIB_SMTP_HOST   e.g. smtp.gmail.com
-    LINKLIB_SMTP_PORT   e.g. 587
-    LINKLIB_SMTP_USER   e.g. hello@yourdomain.com
-    LINKLIB_SMTP_PASS   Gmail app password or SMTP password
-    LINKLIB_FROM_EMAIL  Display sender address (defaults to SMTP_USER)
+Reads configuration from environment variables — all optional. If Google
+OAuth is not configured, send_notification_email()/send_warm_intro_email()
+return False and the record is still stored in the DB (no error raised) —
+callers should always save the record first and treat email as best-effort
+on top of that.
+
+Required env vars to enable sending (same three as the Drive backup):
+    GOOGLE_OAUTH_CLIENT_ID       Google Cloud OAuth client ID
+    GOOGLE_OAUTH_CLIENT_SECRET   Google Cloud OAuth client secret
+    GOOGLE_OAUTH_REFRESH_TOKEN   OAuth refresh token minted with the
+                                 gmail.send (+ drive.file) scopes
+
+Recommended:
+    LINKLIB_FROM_EMAIL     Sender address for the From header. Must be the
+                           Workspace mailbox that authorized the refresh
+                           token (or one of its configured send-as aliases) —
+                           Gmail rewrites the From address to the
+                           authenticated account otherwise, though it keeps
+                           the display name either way.
+
+Optional:
+    LINKLIB_CONTACT_EMAIL  Where contact-form submissions are emailed
+                           (defaults to LINKLIB_FROM_EMAIL)
 """
 from __future__ import annotations
 
+import base64
 import os
-import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-_SMTP_HOST  = os.environ.get("LINKLIB_SMTP_HOST", "")
-_SMTP_PORT  = int(os.environ.get("LINKLIB_SMTP_PORT", "587"))
-_SMTP_USER  = os.environ.get("LINKLIB_SMTP_USER", "")
-_SMTP_PASS  = os.environ.get("LINKLIB_SMTP_PASS", "")
-_FROM_EMAIL = os.environ.get("LINKLIB_FROM_EMAIL", "") or _SMTP_USER
+import requests
+
+_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+
+_FROM_EMAIL = os.environ.get("LINKLIB_FROM_EMAIL", "")
 
 
 def is_configured() -> bool:
-    return bool(_SMTP_HOST and _SMTP_USER and _SMTP_PASS)
+    return bool(
+        os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
+        and os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET")
+        and os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN")
+    )
+
+
+def default_notify_email() -> str:
+    """Where to send notifications when no more specific address is set."""
+    return _FROM_EMAIL
+
+
+def _access_token() -> str:
+    # Same refresh-token exchange as linklib/backup.py — kept local so each
+    # module stays self-contained (the repo's convention for this plumbing).
+    r = requests.post(
+        _TOKEN_URL,
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": os.environ["GOOGLE_OAUTH_REFRESH_TOKEN"],
+            "client_id": os.environ["GOOGLE_OAUTH_CLIENT_ID"],
+            "client_secret": os.environ["GOOGLE_OAUTH_CLIENT_SECRET"],
+        },
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+def _send(msg: MIMEMultipart) -> None:
+    """Send a fully-built MIME message via the Gmail API. Recipients are
+    taken from the message's To/Cc headers. Raises on HTTP errors."""
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+    r = requests.post(
+        _SEND_URL,
+        headers={"Authorization": f"Bearer {_access_token()}"},
+        json={"raw": raw},
+        timeout=30,
+    )
+    r.raise_for_status()
+
+
+def send_notification_email(to: str, subject: str, body: str) -> bool:
+    """Send a plain-text notification to Brian (e.g. a new contact-form
+    submission). Returns True if sent, False if Google OAuth is not
+    configured (graceful no-op) — callers should always save the record
+    first and treat this as best-effort on top of that. Raises on API errors.
+    """
+    if not is_configured():
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    if _FROM_EMAIL:
+        msg["From"] = _FROM_EMAIL
+    msg["To"] = to
+    msg.attach(MIMEText(body, "plain"))
+    _send(msg)
+    return True
 
 
 def send_warm_intro_email(
@@ -44,16 +123,14 @@ def send_warm_intro_email(
     vendor contact — an actual introduction (addressed to the vendor contact
     by name, naming the requester), not a lead-notification form dump.
 
-    Sent from a no-reply address with the requesting member cc'd, so the
-    intro lands as a real three-way thread the two of them can take from
-    there. Reply-To points at the requester, so a vendor hitting "reply"
-    (not "reply all") still reaches a real person instead of the no-reply
-    sender. TODO: once a secured domain is set up for outbound mail (see
-    CLAUDE.md), move this off LINKLIB_FROM_EMAIL to it — same note as the
-    Contact and Community flows.
+    Sent with the requesting member cc'd, so the intro lands as a real
+    three-way thread the two of them can take from there. Reply-To points at
+    the requester, so a vendor hitting "reply" (not "reply all") still
+    reaches a real person. Set LINKLIB_FROM_EMAIL to the sending mailbox on
+    the secured domain (e.g. hello@bmweis.com).
 
-    Returns True if sent, False if SMTP is not configured (graceful no-op).
-    Raises on SMTP errors so the caller can log or alert.
+    Returns True if sent, False if Google OAuth is not configured (graceful
+    no-op). Raises on API errors so the caller can log or alert.
     """
     if not is_configured():
         return False
@@ -81,16 +158,11 @@ bmweis.com / CFO Toolbox
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"]    = f"CFO Toolbox (no-reply) <{_FROM_EMAIL}>"
+    if _FROM_EMAIL:
+        msg["From"] = f"CFO Toolbox (no-reply) <{_FROM_EMAIL}>"
     msg["To"]      = to
     msg["Cc"]      = cc
     msg["Reply-To"] = requester_email
     msg.attach(MIMEText(body, "plain"))
-
-    with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as s:
-        s.ehlo()
-        s.starttls()
-        s.login(_SMTP_USER, _SMTP_PASS)
-        s.sendmail(_FROM_EMAIL, [to, cc], msg.as_string())
-
+    _send(msg)
     return True

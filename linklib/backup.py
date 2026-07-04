@@ -1,4 +1,4 @@
-"""Off-site backup of the SQLite library to Dropbox.
+"""Off-site backup of the SQLite library to Google Drive (Workspace account).
 
 Design notes
 ------------
@@ -6,24 +6,26 @@ Design notes
   may be mid-write, and the WAL sidecar holds uncommitted pages). Instead we
   use SQLite's online backup API to produce a clean, self-contained copy, then
   upload that.
-- **No new dependency.** Talks to the Dropbox HTTP API with ``requests``
-  (already required) — no Dropbox SDK.
-- **Never-expiring auth.** Uses an OAuth *refresh token* (+ app key/secret) to
-  mint a short-lived access token on each run, so backups keep working
-  indefinitely without re-authorising.
+- **No new dependency.** Talks to the Drive v3 REST API with ``requests``
+  (already required) — no Google API client library.
+- **Never-expiring auth.** Uses an OAuth *refresh token* (+ client id/secret)
+  to mint a short-lived access token on each run, so backups keep working
+  indefinitely without re-authorizing. The same OAuth client and refresh
+  token also power outbound email (linklib/email_utils.py) — mint the token
+  once with BOTH scopes, ``drive.file`` and ``gmail.send``, authorizing with
+  the Workspace account that should own backups and send mail. Setup steps
+  live in .env.example.
 - **Debounced.** ``maybe_backup`` only uploads if it's been longer than
-  ``min_interval_hours`` since the last successful backup (tracked by a marker
-  file beside the database, so it survives restarts).
+  ``min_interval_hours`` (default one week) since the last successful backup
+  (tracked by a marker file beside the database, so it survives restarts).
 
 Configuration (environment variables — all three required to enable backups):
-    DROPBOX_APP_KEY        Dropbox app key
-    DROPBOX_APP_SECRET     Dropbox app secret
-    DROPBOX_REFRESH_TOKEN  OAuth refresh token (offline access)
+    GOOGLE_OAUTH_CLIENT_ID       Google Cloud OAuth client ID
+    GOOGLE_OAUTH_CLIENT_SECRET   Google Cloud OAuth client secret
+    GOOGLE_OAUTH_REFRESH_TOKEN   OAuth refresh token (drive.file + gmail.send scopes)
 
 Optional:
-    DROPBOX_BACKUP_DIR     Dropbox folder for snapshots (default "/").
-                           For an "App folder" Dropbox app this is relative to
-                           that app's folder.
+    GOOGLE_DRIVE_FOLDER_ID       Drive folder ID for snapshots (default: My Drive root)
 
 If the variables aren't set, every function here is a safe no-op — the app runs
 exactly as before.
@@ -36,19 +38,20 @@ import os
 import sqlite3
 import tempfile
 import time
+import uuid
 from datetime import datetime, timezone
 
 import requests
 
-_TOKEN_URL = "https://api.dropbox.com/oauth2/token"
-_UPLOAD_URL = "https://content.dropboxapi.com/2/files/upload"
+_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
 
 
 def is_configured() -> bool:
     return bool(
-        os.environ.get("DROPBOX_APP_KEY")
-        and os.environ.get("DROPBOX_APP_SECRET")
-        and os.environ.get("DROPBOX_REFRESH_TOKEN")
+        os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
+        and os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET")
+        and os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN")
     )
 
 
@@ -88,9 +91,10 @@ def _access_token() -> str:
         _TOKEN_URL,
         data={
             "grant_type": "refresh_token",
-            "refresh_token": os.environ["DROPBOX_REFRESH_TOKEN"],
+            "refresh_token": os.environ["GOOGLE_OAUTH_REFRESH_TOKEN"],
+            "client_id": os.environ["GOOGLE_OAUTH_CLIENT_ID"],
+            "client_secret": os.environ["GOOGLE_OAUTH_CLIENT_SECRET"],
         },
-        auth=(os.environ["DROPBOX_APP_KEY"], os.environ["DROPBOX_APP_SECRET"]),
         timeout=30,
     )
     r.raise_for_status()
@@ -98,12 +102,12 @@ def _access_token() -> str:
 
 
 def backup_now(db_path: str) -> dict:
-    """Take a snapshot and upload it to Dropbox. Returns {name, bytes}.
+    """Take a snapshot and upload it to Google Drive. Returns {name, bytes}.
 
-    Raises if Dropbox isn't configured or the upload fails.
+    Raises if Drive isn't configured or the upload fails.
     """
     if not is_configured():
-        raise RuntimeError("Dropbox backup is not configured")
+        raise RuntimeError("Google Drive backup is not configured")
 
     tmp = snapshot_to_file(db_path)
     try:
@@ -112,28 +116,41 @@ def backup_now(db_path: str) -> dict:
     finally:
         os.remove(tmp)
 
-    folder = os.environ.get("DROPBOX_BACKUP_DIR", "/").rstrip("/")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    name = f"{folder}/library-{stamp}.db"
+    name = f"library-{stamp}.db"
+    metadata = {"name": name}
+    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+    if folder_id:
+        metadata["parents"] = [folder_id]
+
+    # Drive's multipart upload wants a metadata JSON part + a media part,
+    # joined by a boundary — there's no `requests` helper for this shape
+    # (it's multipart/related, not the multipart/form-data used elsewhere).
+    boundary = uuid.uuid4().hex
+    body = (
+        f"--{boundary}\r\n"
+        f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        f"{json.dumps(metadata)}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Type: application/octet-stream\r\n\r\n"
+    ).encode("utf-8") + data + f"\r\n--{boundary}--".encode("utf-8")
 
     token = _access_token()
     headers = {
         "Authorization": f"Bearer {token}",
-        "Dropbox-API-Arg": json.dumps(
-            {"path": name, "mode": "add", "autorename": True, "mute": True}
-        ),
-        "Content-Type": "application/octet-stream",
+        "Content-Type": f"multipart/related; boundary={boundary}",
     }
-    r = requests.post(_UPLOAD_URL, headers=headers, data=data, timeout=120)
+    r = requests.post(_UPLOAD_URL, headers=headers, data=body, timeout=120)
     r.raise_for_status()
     return {"name": name, "bytes": len(data)}
 
 
-def maybe_backup(db_path: str, min_interval_hours: float = 24.0) -> None:
+def maybe_backup(db_path: str, min_interval_hours: float = 168.0) -> None:
     """Back up only if enough time has passed since the last success.
 
-    Safe to call from a request path / background task: never raises — failures
-    are logged and swallowed so they can't break a user action.
+    Defaults to once a week. Safe to call from a request path / background
+    task: never raises — failures are logged and swallowed so they can't
+    break a user action.
     """
     if not is_configured():
         return
@@ -148,6 +165,6 @@ def maybe_backup(db_path: str, min_interval_hours: float = 24.0) -> None:
         result = backup_now(db_path)
         with open(marker, "w") as f:
             f.write(str(time.time()))
-        print(f"[backup] uploaded {result['name']} ({result['bytes']} bytes)")
+        print(f"[backup] uploaded {result['name']} ({result['bytes']} bytes) to Google Drive")
     except Exception as e:  # pragma: no cover - network/credential issues
         print(f"[backup] failed: {e}")
