@@ -2402,6 +2402,12 @@ _SDR_CSS = """
   background:linear-gradient(180deg,#EAF0F5 0%, #DCEEEA 45%, var(--sdr-water-light) 60%);
   touch-action:none;user-select:none;-webkit-user-select:none;}
 @media (max-width:480px){ .sdr-stage{aspect-ratio:3/4;} }
+/* Phones in landscape are often wider-but-shorter than a 16:9 box scaled to
+   full width (e.g. iPhone 14 landscape), so the stage can end up taller than
+   the viewport and cut off the Stamina/Score HUD or the row button. Capping
+   max-height (aspect-ratio still governs width->height until this clamps
+   it) keeps the whole play area on one screen without a mid-run scroll. */
+@media (orientation:landscape) and (max-height:500px){ .sdr-stage{max-height:80vh;} }
 /* Five checkpoint backdrops, stacked and crossfaded by data-cp index as
    DistanceFraction crosses each segment boundary — the water/obstacles/gusts
    keep scrolling continuously underneath; only this distant backdrop layer
@@ -2750,6 +2756,7 @@ _SDR_JS = """
   var obstacleContainer = document.getElementById('sdrObstacles');
   var gustContainer = document.getElementById('sdrGusts');
   var preGame = document.getElementById('sdrPreGame');
+  var introEl = document.getElementById('sdrIntro');
   var gameOver = document.getElementById('sdrGameOver');
   var rowBtn = document.getElementById('sdrRowBtn');
   var steerZone = document.getElementById('sdrSteerZone');
@@ -3016,6 +3023,7 @@ _SDR_JS = """
     reflectionLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
     prizeEl.style.display = 'none';
     preGame.style.display = 'none';
+    introEl.style.display = 'none';
     gameOver.classList.remove('sdr-visible', 'sdr-finish');
     gameOver.style.display = 'none';
     stage.style.display = 'block';
@@ -3028,6 +3036,7 @@ _SDR_JS = """
     gameOver.style.display = 'none';
     stage.style.display = 'none';
     preGame.style.display = 'block';
+    introEl.style.display = '';
   }
 
   // -- Pre-game rank selector --
@@ -3329,9 +3338,11 @@ def _sdr_build_body(ranks, signed_in):
 
     return """<div class="page" id="sdrRoot" style="max-width:960px;">
 <style>""" + _SDR_CSS + """</style>
+<div id="sdrIntro">
 <h1 style="margin:0 0 6px;">Sail, Don&rsquo;t Row</h1>
 <p class="sdr-sub">Steer with &uarr;/&darr; (or drag the water on touch). Hold Space &mdash; or the row button &mdash; to row.
 Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and buoys; reach Nantucket.</p>
+</div>
 
 <div id="sdrPreGame" class="sdr-pregame">
   <div class="sdr-rank-row" id="sdrRankRow">""" + pills_html + """</div>
