@@ -38,6 +38,7 @@ scripts/           # CLI entry points
   import_archive.py   # one-time Feedly archive import
   add_link.py         # save a single URL
   enrich_backfill.py  # backfill Claude summaries/tags over imported rows
+  enrich_compare.py   # manual QA: compare enrichment quality across models on one article
   ask.py              # FP&A Q&A from the terminal
   post.py             # draft a LinkedIn post from the terminal
   mcp_server.py       # stdio MCP server wrapping GET /api/search for Claude Desktop/Code
