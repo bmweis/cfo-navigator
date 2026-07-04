@@ -6715,7 +6715,7 @@ _LIBRARY_TOOLS = [
 ]
 
 # CFO Toolbox items, used as one of the expandable groups below (same pattern
-# as Inbox/Site management — no separate hub page).
+# as the other groups — no separate hub page).
 _TOOLBOX_TOOLS = [
     ("/admin/tools",            "Tools",                "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
     ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
@@ -6723,19 +6723,27 @@ _TOOLBOX_TOOLS = [
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
+# Grouping logic (per the July 2026 IA review): Inbox holds only things that
+# actually arrive and wait on Brian; Features holds per-feature settings and
+# reporting (including parked feature ideas); Brand & voice is the design
+# system; System is accounts, health, and plumbing.
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
         ("/admin/tools/leads",  "Toolbox intros",          "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
-        ("/community",          "CFO community",           "Your community idea + sign-up form — parked off the public site for now, reachable here so the copy isn't lost."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
-    ("Site management", "Your voice, your brand, and the public site.", [
-        ("/admin/users",         "Users",               "Create and manage member accounts for the gated sections."),
-        ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
-        ("/admin/voice",         "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
+    ("Features", "Per-feature settings and reporting.", [
         ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user — settings, cost, and a CSV export."),
         ("/admin/game-settings", "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
+        ("/community",           "CFO community",       "Your community idea page — parked off the public site; sign-ups flow through the Google Form."),
+    ]),
+    ("Brand & voice", "How the site looks and sounds.", [
+        ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
+        ("/admin/voice",         "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
+    ]),
+    ("System", "Accounts, health, and plumbing.", [
+        ("/admin/users",         "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",        "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/open-source",   "Open source",         "The open-source projects this site is built on — with gratitude."),
     ]),
@@ -7057,9 +7065,9 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
         )
 
     # Archive gets a single prominent card linking to its own management page,
-    # so the hub stays uncluttered. CFO Toolbox is an expandable group instead
-    # (like Inbox/Site management below) rather than a separate page. It's
-    # never inline-collapsible, so it always shows its aggregate badge here —
+    # so the hub stays uncluttered; everything else renders as the expandable
+    # groups defined in _ADMIN_GROUPS. The Archive card is never
+    # inline-collapsible, so it always shows its aggregate badge here —
     # the per-step breakdown lives on /admin/library itself.
     library_total = sum(task_counts.get(href, 0) for href, _, _ in _LIBRARY_TOOLS)
     library_card = _card("/admin/library", "Archive",
@@ -7075,7 +7083,7 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'<details class="admin-group"{open_attr} style="margin-bottom:14px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
             f'<summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
-            f'<span style="font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{gname}</span>'
+            f'<span style="font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(gname)}</span>'
             f'<span class="group-badge">{_task_badge(group_total)}</span>'
             f'<span style="font-size:12px;color:var(--muted);">{len(items)} {"tool" if len(items)==1 else "tools"}</span>'
             f'</span>'
