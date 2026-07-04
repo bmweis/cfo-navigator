@@ -1,18 +1,21 @@
 """Sail, Don't Row — /play route (Phase 1 core engine, Phase 2 wind/rowing,
 Phase 3 checkpoint route + Nantucket finish, Phase 4 outcome-screen stats,
-Phase 5 rank-select polish).
+Phase 5 rank-select polish, Phase 6 visual/responsive polish).
 
 Confirms the page is fully public, renders all four ranks, embeds the live
 game_rank_settings values as JSON for the client engine, picks up admin
 edits without a redeploy, wires up the gust-zone DOM/JS the Phase 2
 auto-sail mechanic depends on, wires up the five checkpoint backdrop
 layers + whale + prize elements Phase 3 depends on, renders the full
-outcome-stats grid + login-aware leaderboard note Phase 4 adds, and
-confirms each rank pill's collision-rule line (Phase 5) is derived live
-from game_rank_settings rather than hardcoded. The frame-by-frame JS
-behavior (gust/stamina timing, checkpoint crossfade, whale trigger, finish
-condition, stat computation) is exercised via a live-server Playwright
-pass during development (see the PR description) rather than here.
+outcome-stats grid + login-aware leaderboard note Phase 4 adds, confirms
+each rank pill's collision-rule line (Phase 5) is derived live from
+game_rank_settings rather than hardcoded, and confirms the Phase 6
+Stamina-shimmer CSS and the rank pill name/sub-label layout fix are
+present. The frame-by-frame JS behavior (gust/stamina timing, checkpoint
+crossfade, whale trigger, finish condition, stat computation) and the
+cross-viewport responsive layout are exercised via a live-server
+Playwright pass during development (see the PR description) rather than
+here.
 """
 import pathlib
 import sys
@@ -230,3 +233,23 @@ def appmod_with_auth(monkeypatch, tmp_path):
     lib.seed_game_rank_settings()
     lib.close()
     yield appmod, TestClient(appmod.app)
+
+
+def test_play_stamina_bar_has_shimmer_animation(env):
+    _, client = env
+    body = client.get("/play").text
+    assert "sdrStaminaShimmer" in body
+    assert ".sdr-stamina-fill::after{" in body
+
+
+def test_play_rank_pill_name_and_sub_dont_run_together(env):
+    """Regression: the name/difficulty-label spans used to have zero
+    whitespace between their tags in the generated HTML ("MateMedium"),
+    since adjacent Python string literals don't insert a separator. They
+    must now be wrapped in a dedicated flex-column container instead of
+    relying on source whitespace between inline spans."""
+    _, client = env
+    body = client.get("/play").text
+    assert '<span class="sdr-rank-namesub"><span class="sdr-rank-name">Mate</span>' \
+           '<span class="sdr-rank-sub">Medium</span></span>' in body
+    assert ".sdr-rank-namesub{display:flex;flex-direction:column" in body

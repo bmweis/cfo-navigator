@@ -2327,21 +2327,31 @@ def netsuite_mcp(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# "Sail, Don't Row" — Phases 1-5: core engine, wind/rowing/Stamina, the
+# "Sail, Don't Row" — Phases 1-6: core engine, wind/rowing/Stamina, the
 # five-checkpoint route to a Nantucket finish, full finish/game-over outcome
-# screens, and rank-select polish (public, no auth to play). DOM+CSS-
-# transform game, vanilla JS. Boat SVG/obstacle colors/skyline landmarks/
-# difficulty-pill treatment lifted from design/mockups/ per the Phase 0
-# sign-off; the Boston Harbor/Cape Cod/Martha's Vineyard/Nantucket
-# backdrops extend that same visual language (no mockup existed for those
-# four, so they're an original fill using the established technique). Rank
-# tuning (pace, wind, obstacle density, collision rule) is admin-editable
-# at /admin/game-settings and read live here — the rank-select pills'
-# collision-rule line (_sdr_collision_description) is derived from those
-# same live values, not hardcoded text, so it can't drift out of sync with
-# an admin retune. Wind gust zones (auto-sail) are placed by their own
-# seeded PRNG, independent of the obstacle seed, so tuning one never
-# reshuffles the other.
+# screens, rank-select polish, and visual/responsive polish (public, no
+# auth to play). DOM+CSS-transform game, vanilla JS. Boat SVG/obstacle
+# colors/skyline landmarks/difficulty-pill treatment lifted from
+# design/mockups/ per the Phase 0 sign-off; the Boston Harbor/Cape Cod/
+# Martha's Vineyard/Nantucket backdrops extend that same visual language
+# (no mockup existed for those four, so they're an original fill using the
+# established technique). Rank tuning (pace, wind, obstacle density,
+# collision rule) is admin-editable at /admin/game-settings and read live
+# here — the rank-select pills' collision-rule line
+# (_sdr_collision_description) is derived from those same live values, not
+# hardcoded text, so it can't drift out of sync with an admin retune. Wind
+# gust zones (auto-sail) are placed by their own seeded PRNG, independent
+# of the obstacle seed, so tuning one never reshuffles the other.
+#
+# Phase 6 confirmed the mockups' full animation set is present (flowing
+# water bands, bobbing boat, fluttering sail, drifting gust streaks,
+# skyline reflection crossfade) and added the one that wasn't yet built —
+# a shimmer sweep on the Stamina fill — then re-verified every screen
+# (rank select, live play, both outcome cards) across desktop, tablet, and
+# mobile in both orientations. That pass also caught the rank pill's name/
+# difficulty-label spans rendering with zero gap between them ("MateMedium")
+# since there was no source whitespace between the two <span> tags — fixed
+# by stacking them in a flex column instead of relying on inline spacing.
 #
 # Stamina design note: the Concept spec says rowing drains Stamina and
 # resting is free; Phase 3's recap line ("Stamina depletes over the whole
@@ -2358,10 +2368,10 @@ def netsuite_mcp(request: Request):
 # see an honest "opens in a later update" note rather than a fake
 # confirmation.
 #
-# Not yet built: the leaderboard itself (Phase 7) — its rank-split question
-# (combined w/ badge vs. per-rank tables vs. rank folded into Score) is an
-# open question in the build prompt, asked of Brian rather than guessed —
-# and general site-chrome/animation polish (Phase 6).
+# Not yet built: the leaderboard itself (Phase 7). Its rank-split question
+# was resolved with Brian rather than guessed: per-rank tables, not one
+# combined board — so /admin/game-settings' four ranks each get their own
+# leaderboard once Phase 7 builds it.
 # ---------------------------------------------------------------------------
 
 _SDR_CSS = """
@@ -2383,6 +2393,7 @@ _SDR_CSS = """
 .sdr-rank-stripes{display:flex;flex-direction:column;gap:2px;width:16px;flex-shrink:0;}
 .sdr-rank-stripes span{height:3px;border-radius:1px;background:var(--navy);}
 .sdr-rank-pill.sdr-active .sdr-rank-stripes span{background:#FFE9A8;}
+.sdr-rank-namesub{display:flex;flex-direction:column;gap:1px;}
 .sdr-rank-name{font-family:var(--font-head);font-weight:600;font-size:13px;color:var(--navy);}
 .sdr-rank-sub{font-size:10px;color:var(--muted);}
 .sdr-rank-collision{font-size:10px;color:var(--muted);border-top:1px solid rgba(0,0,0,0.08);
@@ -2485,7 +2496,12 @@ _SDR_CSS = """
 .sdr-stamina-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;
   margin-bottom:4px;background:rgba(255,255,255,0.6);display:inline-block;padding:1px 4px;border-radius:3px;}
 .sdr-stamina-track{height:7px;border-radius:8px;background:rgba(0,41,117,0.15);overflow:hidden;}
-.sdr-stamina-fill{height:100%;width:100%;border-radius:8px;background:#5FB89E;transition:width .12s linear;}
+.sdr-stamina-fill{height:100%;width:100%;border-radius:8px;background:#5FB89E;transition:width .12s linear;
+  position:relative;overflow:hidden;}
+.sdr-stamina-fill::after{content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.55) 45%,transparent 90%);
+  background-size:250% 100%;animation:sdrStaminaShimmer 2.4s linear infinite;}
+@keyframes sdrStaminaShimmer{from{background-position:250% 0;}to{background-position:-60% 0;}}
 .sdr-score-hud{text-align:right;}
 .sdr-score-hi{font-size:10px;color:var(--muted);font-weight:600;background:rgba(255,255,255,0.6);
   display:inline-block;padding:1px 4px;border-radius:3px;}
@@ -3169,8 +3185,10 @@ def _sdr_rank_pill_html(r, active):
         f'<button type="button" class="sdr-rank-pill{active_cls}" data-rank="{r["rank"]}">'
         f'<span class="sdr-rank-top">'
         f'<span class="sdr-rank-stripes">{stripes}</span>'
-        f'<span><span class="sdr-rank-name">{r["label"]}</span>'
-        f'<span class="sdr-rank-sub">{r["difficulty_label"]}</span></span>'
+        f'<span class="sdr-rank-namesub">'
+        f'<span class="sdr-rank-name">{r["label"]}</span>'
+        f'<span class="sdr-rank-sub">{r["difficulty_label"]}</span>'
+        f'</span>'
         f'</span>'
         f'<span class="sdr-rank-collision">{collision_desc}</span>'
         f'</button>'
@@ -3294,8 +3312,8 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
 <template id="sdrRockTpl">""" + _SDR_ROCK_SVG + """</template>
 <template id="sdrBuoyTpl">""" + _SDR_BUOY_SVG + """</template>
 
-<p class="sdr-hint">Phase 5 preview: each rank now shows its collision rule up front. The public leaderboard lands in a
-later phase. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
+<p class="sdr-hint">Phase 6 preview: visual and responsive polish across desktop, tablet, and mobile. Per-rank leaderboards
+land in Phase 7. Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
 </div>
 <script>""" + js + """</script>"""
 
