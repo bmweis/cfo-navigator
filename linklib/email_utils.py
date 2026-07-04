@@ -1,16 +1,21 @@
-"""Lightweight email helper for outbound notifications (warm intros, etc.).
+"""Lightweight email helper for outbound notifications (contact form, warm
+intros, etc.).
 
 Reads configuration from environment variables — all optional. If SMTP is not
-configured, send_warm_intro_email() returns False and the lead is still
-stored in the DB (no error raised) — callers should always save the lead
-first and treat email as best-effort on top of that.
+configured, send_notification_email()/send_warm_intro_email() return False
+and the record is still stored in the DB (no error raised) — callers should
+always save the record first and treat email as best-effort on top of that.
 
 Required env vars to enable sending:
-    LINKLIB_SMTP_HOST   e.g. smtp.gmail.com
-    LINKLIB_SMTP_PORT   e.g. 587
-    LINKLIB_SMTP_USER   e.g. hello@yourdomain.com
-    LINKLIB_SMTP_PASS   Gmail app password or SMTP password
-    LINKLIB_FROM_EMAIL  Display sender address (defaults to SMTP_USER)
+    LINKLIB_SMTP_HOST     e.g. smtp.gmail.com
+    LINKLIB_SMTP_PORT     e.g. 587
+    LINKLIB_SMTP_USER     e.g. hello@bmweis.com
+    LINKLIB_SMTP_PASS     Gmail app password or SMTP password
+    LINKLIB_FROM_EMAIL    Display sender address (defaults to SMTP_USER)
+
+Optional:
+    LINKLIB_CONTACT_EMAIL  Where contact-form submissions are emailed
+                           (defaults to LINKLIB_FROM_EMAIL)
 """
 from __future__ import annotations
 
@@ -28,6 +33,35 @@ _FROM_EMAIL = os.environ.get("LINKLIB_FROM_EMAIL", "") or _SMTP_USER
 
 def is_configured() -> bool:
     return bool(_SMTP_HOST and _SMTP_USER and _SMTP_PASS)
+
+
+def default_notify_email() -> str:
+    """Where to send notifications when no more specific address is set."""
+    return _FROM_EMAIL
+
+
+def send_notification_email(to: str, subject: str, body: str) -> bool:
+    """Send a plain-text notification to Brian (e.g. a new contact-form
+    submission). Returns True if sent, False if SMTP is not configured
+    (graceful no-op) — callers should always save the record first and treat
+    this as best-effort on top of that. Raises on SMTP errors.
+    """
+    if not is_configured():
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = _FROM_EMAIL
+    msg["To"] = to
+    msg.attach(MIMEText(body, "plain"))
+
+    with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as s:
+        s.ehlo()
+        s.starttls()
+        s.login(_SMTP_USER, _SMTP_PASS)
+        s.sendmail(_FROM_EMAIL, [to], msg.as_string())
+
+    return True
 
 
 def send_warm_intro_email(
@@ -48,9 +82,8 @@ def send_warm_intro_email(
     intro lands as a real three-way thread the two of them can take from
     there. Reply-To points at the requester, so a vendor hitting "reply"
     (not "reply all") still reaches a real person instead of the no-reply
-    sender. TODO: once a secured domain is set up for outbound mail (see
-    CLAUDE.md), move this off LINKLIB_FROM_EMAIL to it — same note as the
-    Contact and Community flows.
+    sender. Set LINKLIB_FROM_EMAIL to an address on the secured domain
+    (e.g. hello@bmweis.com) once Workspace SMTP is configured.
 
     Returns True if sent, False if SMTP is not configured (graceful no-op).
     Raises on SMTP errors so the caller can log or alert.

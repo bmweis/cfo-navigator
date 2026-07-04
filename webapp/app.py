@@ -3601,12 +3601,18 @@ async def contact_submit(request: Request):
         lib.save_contact(name, email, message)
     finally:
         lib.close()
+    from linklib.email_utils import send_notification_email, default_notify_email
+    notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
+    if notify_to:
+        try:
+            send_notification_email(
+                notify_to,
+                subject=f"Contact form: {name}",
+                body=f"From: {name} <{email}>\n\n{message}",
+            )
+        except Exception as e:
+            print(f"[contact] notification email failed: {e}")
     return RedirectResponse("/contact?submitted=1", status_code=303)
-
-
-# TODO: Once hello@[domain].com is set up in Google Workspace, wire the contact
-# form to also email submissions there. Set LINKLIB_CONTACT_EMAIL in Railway and
-# call _send_email() here. The DB record will keep existing as a backup.
 
 
 # ---------------------------------------------------------------------------
@@ -4374,14 +4380,21 @@ def admin_contacts(request: Request):
         </tr>"""
         for c in contacts
     ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No submissions yet.</td></tr>'
+    from linklib.email_utils import is_configured as _email_configured, default_notify_email
+    notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
+    email_status = (
+        f'<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">'
+        f'Email notifications are <strong>on</strong> &mdash; new submissions are emailed to <code>{_esc(notify_to)}</code>.</div>'
+        if _email_configured() else
+        '<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">'
+        'Email notifications are <strong>off</strong> &mdash; set <code>LINKLIB_SMTP_HOST/USER/PASS</code> + '
+        '<code>LINKLIB_FROM_EMAIL</code> (and optionally <code>LINKLIB_CONTACT_EMAIL</code>) to enable them. '
+        'Until then, check this page manually.</div>'
+    )
     body = f"""<div class="page" style="max-width:960px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Contact submissions</h1>
-<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">
-  <strong>TODO:</strong> Set up <code>hello@[yourdomain].com</code> in Google Workspace once the domain is purchased,
-  then set <code>LINKLIB_SMTP_HOST/USER/PASS</code> + <code>LINKLIB_FROM_EMAIL</code> in Railway so contact
-  form submissions are emailed to you automatically. Until then, check this page manually.
-</div>
+{email_status}
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:24px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
@@ -4547,7 +4560,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 </table>
 </div>
 </div>"""
-    return HTMLResponse(_page("Toolbox intros—CFO Toolbox Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Toolbox intros—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/tools/categories", response_class=HTMLResponse)
@@ -6705,7 +6718,6 @@ _LIBRARY_TOOLS = [
 # as Inbox/Site management — no separate hub page).
 _TOOLBOX_TOOLS = [
     ("/admin/tools",            "Tools",                "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
-    ("/admin/tools/leads",      "Toolbox intros",       "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
     ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
     ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section — name, URL, description, coverage, and pricing."),
 ]
@@ -6714,6 +6726,7 @@ _TOOLBOX_TOOLS = [
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
+        ("/admin/tools/leads",  "Toolbox intros",          "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
         ("/community",          "CFO community",           "Your community idea + sign-up form — parked off the public site for now, reachable here so the copy isn't lost."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
@@ -9883,12 +9896,12 @@ def backup_now_route(request: Request, token: str | None = None):
     _require_api(request, token)
     if not backup.is_configured():
         body = """<div class="page"><h1>Backup not configured</h1>
-  <p class="muted">Set <code>DROPBOX_APP_KEY</code>, <code>DROPBOX_APP_SECRET</code>,
-  and <code>DROPBOX_REFRESH_TOKEN</code> to enable Dropbox backups.</p></div>"""
+  <p class="muted">Set <code>GOOGLE_OAUTH_CLIENT_ID</code>, <code>GOOGLE_OAUTH_CLIENT_SECRET</code>,
+  and <code>GOOGLE_OAUTH_REFRESH_TOKEN</code> to enable Google Drive backups.</p></div>"""
         return HTMLResponse(_page("Backup", "", body, authed=True))
     try:
         result = backup.backup_now(DB_PATH)
-        msg = f"Uploaded <strong>{result['name']}</strong> ({result['bytes']:,} bytes) to Dropbox."
+        msg = f"Uploaded <strong>{result['name']}</strong> ({result['bytes']:,} bytes) to Google Drive."
     except Exception as e:
         msg = f"Backup failed: {e}"
     body = f"""<div class="page"><h1>Backup</h1><p>{msg}</p>
