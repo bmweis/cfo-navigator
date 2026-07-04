@@ -10,11 +10,11 @@ Design notes
   (already required) — no Google API client library.
 - **Never-expiring auth.** Uses an OAuth *refresh token* (+ client id/secret)
   to mint a short-lived access token on each run, so backups keep working
-  indefinitely without re-authorizing. To set up: create an OAuth client in
-  Google Cloud Console (APIs & Services > Credentials > OAuth client ID >
-  Desktop app), enable the Drive API for the project, then run an
-  installed-app OAuth flow once with scope ``drive.file`` to mint the refresh
-  token — authorize with the Workspace account the backups should land in.
+  indefinitely without re-authorizing. The same OAuth client and refresh
+  token also power outbound email (linklib/email_utils.py) — mint the token
+  once with BOTH scopes, ``drive.file`` and ``gmail.send``, authorizing with
+  the Workspace account that should own backups and send mail. Setup steps
+  live in .env.example.
 - **Debounced.** ``maybe_backup`` only uploads if it's been longer than
   ``min_interval_hours`` (default one week) since the last successful backup
   (tracked by a marker file beside the database, so it survives restarts).
@@ -22,7 +22,7 @@ Design notes
 Configuration (environment variables — all three required to enable backups):
     GOOGLE_OAUTH_CLIENT_ID       Google Cloud OAuth client ID
     GOOGLE_OAUTH_CLIENT_SECRET   Google Cloud OAuth client secret
-    GOOGLE_OAUTH_REFRESH_TOKEN   OAuth refresh token (drive.file scope, offline access)
+    GOOGLE_OAUTH_REFRESH_TOKEN   OAuth refresh token (drive.file + gmail.send scopes)
 
 Optional:
     GOOGLE_DRIVE_FOLDER_ID       Drive folder ID for snapshots (default: My Drive root)

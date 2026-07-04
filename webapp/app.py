@@ -4387,9 +4387,9 @@ def admin_contacts(request: Request):
         f'Email notifications are <strong>on</strong> &mdash; new submissions are emailed to <code>{_esc(notify_to)}</code>.</div>'
         if _email_configured() else
         '<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">'
-        'Email notifications are <strong>off</strong> &mdash; set <code>LINKLIB_SMTP_HOST/USER/PASS</code> + '
-        '<code>LINKLIB_FROM_EMAIL</code> (and optionally <code>LINKLIB_CONTACT_EMAIL</code>) to enable them. '
-        'Until then, check this page manually.</div>'
+        'Email notifications are <strong>off</strong> &mdash; set the <code>GOOGLE_OAUTH_*</code> vars '
+        '(shared with the Drive backup) + <code>LINKLIB_FROM_EMAIL</code> (and optionally '
+        '<code>LINKLIB_CONTACT_EMAIL</code>) to enable them. Until then, check this page manually.</div>'
     )
     body = f"""<div class="page" style="max-width:960px;">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
