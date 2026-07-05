@@ -768,8 +768,40 @@ def _avatar(size: int = 140) -> str:
             f'font-size:{round(size/3)}px;font-weight:700;letter-spacing:-0.02em;">BW</div>')
 
 
+# Default site copy for the homepage teaser/expanded blurb and the About page
+# bio — admin-editable at /admin/copy (settings keys below); these are the
+# fallback used when no override has been saved.
+_HOMEPAGE_TEASER_DEFAULT = "Brian Weisberg — CFO who builds finance functions from scratch, not inherits them."
+_HOMEPAGE_EXPANDED_DEFAULT = """I'm wrapping up my time at Mux over the next couple of weeks and actively exploring what's next—early stage, growth stage, or something I haven't done yet.
+
+If you're building something and think I could help, let's talk."""
+_ABOUT_COPY_DEFAULT = """I've spent 15 years doing one thing well: building.
+
+Finance functions from scratch. Trust with boards, teams, and the room outside the room. Systems that let people sail instead of row.
+
+Right now that shows up in three places at once. Building it inside Mux. Advising early-stage companies selling into the office of the CFO, who need someone who's sat in that seat. And showing up for the finance community itself, as a voice—or shoulder—on where AI earns its keep in finance versus where it's just hype.
+
+Different rooms, same instinct: see around corners, take action early, think a few steps ahead, bring the people around me into it. I was AI-native before AI-native was a thing, and I still read more from other finance and AI thinkers than I write myself.
+
+None of that's abstract. I led finance through two acquisitions—Ansible to Red Hat, Tidelift to Sonar—both LOI to close in under 45 days. At Tidelift I took the company from under a dozen people to 70-plus, raised $73.5M through Series B and C, and built the payment infrastructure behind it. I'm a founding member of The F Suite, a network of 1,000-plus CFOs, and I host The Cash Flow Show with OnlyCFO. Earned secrets—the kind you only get from being in the room—are the throughline in all of it.
+
+I'm looking for the next place to put that to work. Could be early stage. Could be growth. Could be something I haven't done yet."""
+
+
+def _copy_paragraphs_html(text: str) -> str:
+    """Render admin-edited plain-text copy (blank-line-separated paragraphs) as escaped <p> tags."""
+    paras = [p.strip() for p in text.strip().split("\n\n") if p.strip()]
+    return "".join(f"<p>{_esc(p)}</p>" for p in paras)
+
+
 @app.get("/", response_class=HTMLResponse)
 def homepage(request: Request):
+    lib = _lib()
+    try:
+        homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
+        homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
+    finally:
+        lib.close()
     def _rcard(href, title, desc, external=False):
         attrs = ' target="_blank" rel="noopener"' if external else ''
         return (
@@ -808,7 +840,8 @@ def homepage(request: Request):
 <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;">
   {_avatar(64)}
   <div style="flex:1;min-width:240px;">
-    <p style="margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">I'm <strong>Brian Weisberg</strong>, a repeat tech CFO. Seven years as CFO of <a href="https://tidelift.com" target="_blank" rel="noopener">Tidelift</a>, growing it through $73.5M in funding to an acquisition, plus an interim CFO turn at <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>. Today I run business operations and strategic finance at <a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>. Fifteen-plus years in B2B SaaS finance, from the founder's corner. <a href="/about">More about me &rarr;</a></p>
+    <p id="home-bio-teaser" style="margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_esc(homepage_teaser)} <a href="#" onclick="document.getElementById('home-bio-expanded').style.display='block';document.getElementById('home-bio-teaser').style.display='none';return false;">Read more &darr;</a></p>
+    <div id="home-bio-expanded" style="display:none;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
   </div>
 </div>
 
@@ -825,6 +858,11 @@ def homepage(request: Request):
 
 @app.get("/about", response_class=HTMLResponse)
 def about_page(request: Request):
+    lib = _lib()
+    try:
+        about_copy = lib.get_setting("about_page_copy") or _ABOUT_COPY_DEFAULT
+    finally:
+        lib.close()
     body = f"""<div class="page">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
   {_avatar(140)}
@@ -834,39 +872,7 @@ def about_page(request: Request):
   </div>
 </div>
 
-<p>I'm a tech CFO. That's not my title today—I'm VP of Business Operations and Strategic Finance at
-<a href="https://www.mux.com" target="_blank" rel="noopener">Mux</a>—but it's how I think, how I
-operate, and the lens I bring to every business I help build. Fifteen-plus years in finance,
-accounting, and operations for B2B SaaS and IT infrastructure companies will do that to you. At Mux
-I get to do the part I love most: working in the thick of the business, where finance and strategy
-actually meet the day-to-day work.</p>
-
-<p>Before Mux, I stepped in as interim CFO of The Suite, Inc. and GM of
-<a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>—the invite-only
-network of 1,000+ growth- and late-stage CFOs. I'd been a founding member of that community, so when
-they needed someone to run both the parent company and the network, I raised my hand. It was always
-meant to be a chapter, not a destination; when the right operating role came along at Mux, we parted
-ways as friends. Before all of that, I spent seven years as CFO of
-<a href="https://tidelift.com" target="_blank" rel="noopener">Tidelift</a>, helping grow the company
-from a handful of people through $73.5M in funding to an acquisition by Sonar.</p>
-
-<p>Scaling startups is the work I care about most. I'm not a founder myself, but I've built my career
-in the founder's corner—turning their conviction and momentum into something a business can actually
-stand on: a clear financial picture, a sound operational backbone, and decisions that hold up when
-the numbers get hard.</p>
-
-<p>I'm also not a behind-the-desk CFO. The best part of the job is getting out into the business—
-mentoring and learning from peers in product, engineering, sales, and marketing. That's where trust
-gets built, where you pick up the earned secrets of how a company really works, and where finance
-stops being a scorecard and becomes something a leadership team genuinely leans on.</p>
-
-<p>In 2025, at the invitation of my friend <a href="https://www.onlycfo.io" target="_blank" rel="noopener">OnlyCFO</a>,
-I tried my hand at hosting a podcast—and it turned out to be one of the more fun things I've done
-professionally. On <a href="https://www.onlycfo.io/podcast" target="_blank" rel="noopener">The Cash Flow Show</a>
-I bring friends and fellow finance leaders on to dig into the topics I care about most: how tech
-companies make money, how finance teams earn their seat at the table, and what it really takes to
-scale a business with discipline. I also write on startup finance and advise finance leaders making
-the early-to-growth leap. Based in Boston.</p>
+{_copy_paragraphs_html(about_copy)}
 
 <div style="display:grid;grid-template-columns:2fr 3fr;gap:10px;margin-top:32px;">
   <img src="/static/speaking-close.jpg" alt="Brian Weisberg speaking on stage"
@@ -6869,6 +6875,7 @@ _ADMIN_GROUPS = [
     ("Brand & voice", "How the site looks and sounds.", [
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
         ("/admin/voice",         "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
+        ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy — changes go live immediately, no redeploy."),
     ]),
     ("System", "Accounts, health, and plumbing.", [
         ("/admin/users",         "Users",               "Create and manage member accounts for the gated sections."),
@@ -10016,6 +10023,124 @@ async def admin_voice_review(request: Request):
     finally:
         lib.close()
     return JSONResponse(review_text(text, voice_prompt=custom_voice or None))
+
+
+@app.get("/admin/copy", response_class=HTMLResponse)
+def admin_copy_page(request: Request):
+    """Site copy: the homepage teaser/expanded blurb and the About page bio,
+    editable here so a copy change doesn't need a code deploy. Persisted to
+    the same `settings` table as /admin/voice; each field falls back to its
+    hardcoded default when no override has been saved."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    lib = _lib()
+    try:
+        about_copy = lib.get_setting("about_page_copy") or _ABOUT_COPY_DEFAULT
+        homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
+        homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
+    finally:
+        lib.close()
+
+    prose = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
+             "font:14px/1.6 var(--font-body);background:var(--bg);resize:vertical;")
+
+    body = f"""<div class="page" style="max-width:900px;">
+<p style="margin:0 0 4px;"><a href="/admin/brand" style="font-size:13px;color:var(--muted);">&larr; Brand standards</a></p>
+<h1>Site copy</h1>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site &mdash; no redeploy.</p>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">About page copy</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on <a href="/about">/about</a>. Separate paragraphs with a blank line.</p>
+<textarea id="about-copy" rows="14" style="{prose}">{_esc(about_copy)}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="about-save-btn" onclick="saveAbout()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<span id="about-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage copy</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on the homepage: a short teaser, plus text revealed inline when a visitor clicks &ldquo;Read more.&rdquo;</p>
+<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Teaser (always visible)</label>
+<textarea id="home-teaser" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_teaser)}</textarea>
+<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Expanded (revealed on click)</label>
+<textarea id="home-expanded" rows="8" style="{prose}">{_esc(homepage_expanded)}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="home-save-btn" onclick="saveHomepage()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<span id="home-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+</div>
+
+<script>
+async function saveAbout() {{
+  var text = document.getElementById('about-copy').value.trim();
+  var btn = document.getElementById('about-save-btn'), status = document.getElementById('about-status');
+  if (!text) {{ status.textContent = "Can't save empty copy."; status.style.color = '#b91c1c'; return; }}
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/copy/about', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{about_page_copy: text}})}});
+    if (!r.ok) throw new Error();
+    status.textContent = 'Saved.'; status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+  }} catch(e) {{
+    status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
+}}
+
+async function saveHomepage() {{
+  var teaser = document.getElementById('home-teaser').value.trim();
+  var expanded = document.getElementById('home-expanded').value.trim();
+  var btn = document.getElementById('home-save-btn'), status = document.getElementById('home-status');
+  if (!teaser || !expanded) {{ status.textContent = "Can't save empty copy."; status.style.color = '#b91c1c'; return; }}
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/copy/homepage', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{homepage_teaser_copy: teaser, homepage_expanded_copy: expanded}})}});
+    if (!r.ok) throw new Error();
+    status.textContent = 'Saved.'; status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+  }} catch(e) {{
+    status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
+}}
+</script>"""
+    return HTMLResponse(_page("Site copy — Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/copy/about")
+async def admin_copy_save_about(request: Request):
+    """Save the About page bio copy. Rejects blank content so a mistaken
+    empty save can't wipe out existing copy."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    text = (payload.get("about_page_copy") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="about_page_copy required")
+    lib = _lib()
+    try:
+        lib.set_setting("about_page_copy", text)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/admin/copy/homepage")
+async def admin_copy_save_homepage(request: Request):
+    """Save the homepage teaser/expanded copy. Rejects blank content so a
+    mistaken empty save can't wipe out existing copy."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    teaser = (payload.get("homepage_teaser_copy") or "").strip()
+    expanded = (payload.get("homepage_expanded_copy") or "").strip()
+    if not teaser or not expanded:
+        raise HTTPException(status_code=400, detail="homepage_teaser_copy and homepage_expanded_copy required")
+    lib = _lib()
+    try:
+        lib.set_setting("homepage_teaser_copy", teaser)
+        lib.set_setting("homepage_expanded_copy", expanded)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
 
 
 @app.post("/admin/upload-db", response_class=HTMLResponse)
