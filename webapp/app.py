@@ -798,7 +798,7 @@ def _fpa_buddy_announcement(margin: str = "20px 0") -> str:
     return (
         f'<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;'
         f'padding:16px 18px;margin:{margin};">'
-        '<div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--coral-deep);margin-bottom:6px;">'
+        '<div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);margin-bottom:6px;">'
         'Coming soon: FP&amp;A Buddy</div>'
         '<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">Ask a real '
         'finance-leadership question and FP&amp;A Buddy searches a curated archive of trusted sources to '
