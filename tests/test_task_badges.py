@@ -109,3 +109,26 @@ def test_open_task_counts_reflects_pending_password_reset(lib):
     lib.create_password_reset_request(uid, "jane")
     counts = tasks.open_task_counts(lib)
     assert counts["/admin/users"] == 1
+
+
+# --- email delivery failures -------------------------------------------------
+
+def test_email_failure_lifecycle(lib):
+    assert lib.count_pending_email_failures() == 0
+    fid = lib.log_email_failure("contact", "401 Unauthorized")
+    assert lib.count_pending_email_failures() == 1
+    pending = lib.list_email_failures(pending_only=True)
+    assert len(pending) == 1 and pending[0]["id"] == fid and pending[0]["context"] == "contact"
+
+    lib.dismiss_email_failure(fid)
+    assert lib.count_pending_email_failures() == 0
+    # Dismissed failures stay in the full history, just not the pending view.
+    assert len(lib.list_email_failures(pending_only=False)) == 1
+    assert len(lib.list_email_failures(pending_only=True)) == 0
+
+
+def test_open_task_counts_reflects_email_failure(lib):
+    from webapp import tasks
+    lib.log_email_failure("tool_submission", "boom")
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/email-failures"] == 1

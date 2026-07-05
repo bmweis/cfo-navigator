@@ -31,6 +31,7 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/tools/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
         "/admin/checks": _failing_checks_count(),
         "/admin/users": lib.count_pending_password_resets(),
+        "/admin/email-failures": lib.count_pending_email_failures(),
     }
     return {href: n for href, n in counts.items() if n}
 

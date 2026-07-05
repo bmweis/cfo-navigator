@@ -160,18 +160,41 @@ CREATE TABLE IF NOT EXISTS tool_leads (
 CREATE INDEX IF NOT EXISTS idx_tool_leads_tool_id ON tool_leads(tool_id);
 CREATE INDEX IF NOT EXISTS idx_tool_leads_created  ON tool_leads(created_at);
 
--- Self-service "forgot password" requests, filed from /login. Brian resolves
--- each by resetting the account's password (auto-resolves, see
--- resolve_password_resets_for_user) or dismissing it as a false alarm.
+-- Self-service "forgot password" requests, filed from /login. When the account
+-- has an email on file, token_hash (sha256 of the emailed token — never the
+-- raw token, so a DB leak alone can't be used to reset a password) +
+-- expires_at power a real self-service reset link (see /reset-password).
+-- Either way the request also shows up for Brian on /admin/users, so he can
+-- reset it by hand — auto-resolves, see resolve_password_resets_for_user —
+-- or dismiss it as a false alarm.
 CREATE TABLE IF NOT EXISTS password_reset_requests (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER NOT NULL,
     username    TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
-    resolved_at TEXT NOT NULL DEFAULT ''    -- '' = still pending
+    resolved_at TEXT NOT NULL DEFAULT '',   -- '' = still pending
+    token_hash  TEXT NOT NULL DEFAULT '',   -- '' = no self-service link (e.g. no email on file)
+    expires_at  TEXT NOT NULL DEFAULT ''    -- '' = no expiry (legacy rows / no token)
 );
 
 CREATE INDEX IF NOT EXISTS idx_pwreset_resolved ON password_reset_requests(resolved_at);
+CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_reset_requests(token_hash);
+
+-- Durable record of failed outbound-email attempts (contact form, tool
+-- submissions, welcome emails, password resets, warm intros). Every send
+-- path is best-effort (a broken mailer must never block the underlying DB
+-- write), but "best-effort" must not mean "silent" — this table plus the
+-- /admin/email-failures badge is how a broken send actually surfaces instead
+-- of only ever appearing in a Railway log line nobody's watching.
+CREATE TABLE IF NOT EXISTS email_failures (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    context     TEXT NOT NULL DEFAULT '',   -- e.g. 'contact', 'tool_submission', 'welcome', 'password_reset'
+    detail      TEXT NOT NULL DEFAULT '',   -- str(exception)
+    created_at  TEXT NOT NULL,
+    resolved_at TEXT NOT NULL DEFAULT ''    -- '' = still pending
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_failures_resolved ON email_failures(resolved_at);
 
 -- Staging area for proposed library additions (the "Library Queue"). Candidates
 -- — from the live feed or a one-time historical sweep — land here enriched but
@@ -436,6 +459,10 @@ class Library:
             "ALTER TABLE game_rank_settings ADD COLUMN shark_lunge_interval_sec REAL NOT NULL DEFAULT 0",
             "ALTER TABLE game_rank_settings ADD COLUMN shark_lunge_speed REAL NOT NULL DEFAULT 0",
             "ALTER TABLE game_rank_settings ADD COLUMN shark_lunge_duration_sec REAL NOT NULL DEFAULT 0",
+            # Self-service password reset link — added after the request/notify-Brian
+            # flow shipped, so existing pending requests just get '' (no link).
+            "ALTER TABLE password_reset_requests ADD COLUMN token_hash TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE password_reset_requests ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1288,13 +1315,27 @@ class Library:
 
     # -- password reset requests -------------------------------------------
 
-    def create_password_reset_request(self, user_id: int, username: str) -> int:
+    def create_password_reset_request(self, user_id: int, username: str,
+                                       token_hash: str = "", expires_at: str = "") -> int:
         cur = self.conn.execute(
-            "INSERT INTO password_reset_requests (user_id, username, created_at) VALUES (?,?,?)",
-            (user_id, username, _now()),
+            "INSERT INTO password_reset_requests (user_id, username, created_at, token_hash, expires_at) "
+            "VALUES (?,?,?,?,?)",
+            (user_id, username, _now(), token_hash, expires_at),
         )
         self.conn.commit()
         return cur.lastrowid
+
+    def get_password_reset_by_token_hash(self, token_hash: str) -> Optional[dict]:
+        """The still-pending, unexpired reset request matching this token's
+        hash, or None if it doesn't exist, was already used, or expired."""
+        if not token_hash:
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM password_reset_requests "
+            "WHERE token_hash=? AND resolved_at='' AND expires_at > ?",
+            (token_hash, _now()),
+        ).fetchone()
+        return dict(row) if row else None
 
     def list_password_reset_requests(self, pending_only: bool = True) -> list[dict]:
         if pending_only:
@@ -1325,6 +1366,39 @@ class Library:
         self.conn.execute(
             "UPDATE password_reset_requests SET resolved_at=? WHERE id=?",
             (_now(), request_id),
+        )
+        self.conn.commit()
+
+    # -- email delivery failures ---------------------------------------------
+
+    def log_email_failure(self, context: str, detail: str) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO email_failures (context, detail, created_at) VALUES (?,?,?)",
+            (context, detail, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_email_failures(self, pending_only: bool = True) -> list[dict]:
+        if pending_only:
+            rows = self.conn.execute(
+                "SELECT * FROM email_failures WHERE resolved_at='' ORDER BY created_at DESC"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM email_failures ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_pending_email_failures(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM email_failures WHERE resolved_at=''"
+        ).fetchone()[0]
+
+    def dismiss_email_failure(self, failure_id: int) -> None:
+        self.conn.execute(
+            "UPDATE email_failures SET resolved_at=? WHERE id=?",
+            (_now(), failure_id),
         )
         self.conn.commit()
 

@@ -10,6 +10,8 @@ Public routes (no auth):
     GET  /contact              Contact form
     POST /contact              Submit contact form
     GET  /login / POST /login  Password sign-in (sets a signed session cookie)
+    GET  /forgot-password / POST /forgot-password  Request a reset link by username
+    GET  /reset-password / POST /reset-password    Set a new password from an emailed token
     GET  /logout               Clear the session
     GET  /static/{file}        Static assets (e.g. headshot)
     GET  /health               Health check
@@ -33,10 +35,11 @@ import hmac
 import json
 import os
 import re
+import secrets
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -398,6 +401,22 @@ def _esc(s) -> str:
     return (str(s) or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
+def _send_email_safely(lib: Library, context: str, fn, *args, **kwargs) -> bool:
+    """Best-effort email send that never raises and never fails silently.
+    Every outbound-email call site (contact, tool submissions, welcome
+    emails, password resets, warm intros) should go through this instead of
+    a bare try/except — on error it logs to stdout (for local/Railway log
+    tailing) AND persists to the email_failures table, so a broken send
+    surfaces as an admin task badge (/admin/email-failures) rather than only
+    ever showing up in a log nobody's watching."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        print(f"[email:{context}] failed: {e}")
+        lib.log_email_failure(context, str(e))
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Shared layout helpers
 # ---------------------------------------------------------------------------
@@ -601,7 +620,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 # ---------------------------------------------------------------------------
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = "/library", error: str = ""):
+def login_page(request: Request, next: str = "/library", error: str = "", reset: str = ""):
     if _is_member(request):   # already signed in (member or admin) — go on in
         # A signed-in member only ever reaches this page at all when `next`
         # required admin specifically — a member-only route would never have
@@ -613,9 +632,13 @@ def login_page(request: Request, next: str = "/library", error: str = ""):
         return RedirectResponse(safe_next, status_code=303)
     err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That didn&rsquo;t work — check your details and try again.</p>'
            if error else "")
+    reset_notice = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+                     'font-size:14px;margin:0 0 16px;">Password updated — sign in with your new password.</p>'
+                     if reset else "")
     body = f"""<div class="page" style="max-width:420px;">
 <h1>Sign in</h1>
 <p style="color:var(--muted);margin:4px 0 28px;">Sign in with your username and password.</p>
+{reset_notice}
 {err}
 <form method="post" action="/login" style="display:grid;gap:16px;">
   <input type="hidden" name="next" value="{_esc(next or '/library')}">
@@ -636,15 +659,16 @@ def forgot_password_page(request: Request, sent: str = ""):
         return RedirectResponse("/library", status_code=303)
     if sent:
         body = """<div class="page" style="max-width:420px;">
-<h1>Check with Brian</h1>
-<p style="color:var(--muted);margin:4px 0 20px;">If that username has an account, Brian&rsquo;s been notified and
-will reset your password directly &mdash; there&rsquo;s no public sign-up flow here.</p>
+<h1>Check your email</h1>
+<p style="color:var(--muted);margin:4px 0 20px;">If that username has an account with an email on file, a password
+reset link is on its way — it expires in 1 hour. If we don&rsquo;t have an email for that account, Brian&rsquo;s been
+notified and will reset it for you directly.</p>
 <p><a href="/login" style="font-size:14px;">&larr; Back to sign in</a></p>
 </div>"""
         return HTMLResponse(_page("Forgot password—Brian Weisberg", "", body))
     body = """<div class="page" style="max-width:420px;">
 <h1>Forgot your password?</h1>
-<p style="color:var(--muted);margin:4px 0 28px;">Enter your username and Brian will reset your password for you.</p>
+<p style="color:var(--muted);margin:4px 0 28px;">Enter your username and we&rsquo;ll email you a reset link.</p>
 <form method="post" action="/forgot-password" style="display:grid;gap:16px;">
   <input name="username" type="text" required autofocus autocomplete="username" placeholder="Username"
          style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
@@ -660,15 +684,92 @@ async def forgot_password_submit(request: Request):
     form = await request.form()
     username = (form.get("username") or "").strip()
     if username:
+        from linklib.email_utils import send_password_reset_email, send_notification_email, default_notify_email
         lib = _lib()
         try:
             user = lib.get_user(username)
             if user:
-                lib.create_password_reset_request(user["id"], user["username"])
+                if user.get("email"):
+                    token = secrets.token_urlsafe(32)
+                    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+                    expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                    lib.create_password_reset_request(user["id"], user["username"],
+                                                       token_hash=token_hash, expires_at=expires_at)
+                    reset_url = f"{PUBLIC_BASE.rstrip('/')}/reset-password?token={token}"
+                    _send_email_safely(lib, "password_reset", send_password_reset_email,
+                                        user["email"], username=user["username"], reset_url=reset_url)
+                else:
+                    # No email on file — there's no one to send a self-service link to.
+                    # The request still shows up on /admin/users, but that's easy to
+                    # miss, so also actually notify Brian instead of just claiming to.
+                    lib.create_password_reset_request(user["id"], user["username"])
+                    notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
+                    if notify_to:
+                        _send_email_safely(
+                            lib, "password_reset_no_email", send_notification_email,
+                            notify_to,
+                            subject=f"Password reset requested: {user['username']}",
+                            body=(f"{user['username']} requested a password reset but has no "
+                                  f"email on file, so there's no self-service link to send them. "
+                                  f"Reset it by hand at /admin/users."),
+                        )
         finally:
             lib.close()
-    # Same confirmation whether or not the username matched — no account enumeration.
+    # Same confirmation whether or not the username matched, and regardless of
+    # which branch above ran — no account enumeration.
     return RedirectResponse("/forgot-password?sent=1", status_code=303)
+
+
+@app.get("/reset-password", response_class=HTMLResponse)
+def reset_password_page(request: Request, token: str = "", error: str = ""):
+    if _is_member(request):
+        return RedirectResponse("/library", status_code=303)
+    lib = _lib()
+    try:
+        req = lib.get_password_reset_by_token_hash(hashlib.sha256(token.encode("utf-8")).hexdigest()) if token else None
+    finally:
+        lib.close()
+    if not req:
+        body = """<div class="page" style="max-width:420px;">
+<h1>This link has expired</h1>
+<p style="color:var(--muted);margin:4px 0 20px;">Reset links are only valid for 1 hour, and only work once.
+Request a new one below.</p>
+<p><a href="/forgot-password" class="btn" style="display:inline-block;">Request a new link</a></p>
+</div>"""
+        return HTMLResponse(_page("Link expired—Brian Weisberg", "", body))
+    err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">Password must be at least 8 characters.</p>'
+           if error else "")
+    body = f"""<div class="page" style="max-width:420px;">
+<h1>Set a new password</h1>
+<p style="color:var(--muted);margin:4px 0 28px;">Choose a new password for &ldquo;{_esc(req['username'])}&rdquo;.</p>
+{err}
+<form method="post" action="/reset-password" style="display:grid;gap:16px;">
+  <input type="hidden" name="token" value="{_esc(token)}">
+  <input name="password" type="password" required minlength="8" autofocus autocomplete="new-password" placeholder="New password"
+         style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <button type="submit" class="btn">Set new password</button>
+</form>
+</div>"""
+    return HTMLResponse(_page("Reset password—Brian Weisberg", "", body))
+
+
+@app.post("/reset-password")
+async def reset_password_submit(request: Request):
+    form = await request.form()
+    token = form.get("token") or ""
+    password = form.get("password") or ""
+    lib = _lib()
+    try:
+        req = lib.get_password_reset_by_token_hash(hashlib.sha256(token.encode("utf-8")).hexdigest()) if token else None
+        if not req:
+            return RedirectResponse(f"/reset-password?token={quote(token)}", status_code=303)
+        if len(password) < 8:
+            return RedirectResponse(f"/reset-password?token={quote(token)}&error=1", status_code=303)
+        lib.set_user_password(req["user_id"], password)
+        lib.resolve_password_resets_for_user(req["user_id"])
+    finally:
+        lib.close()
+    return RedirectResponse("/login?reset=1", status_code=303)
 
 
 @app.post("/login")
@@ -3730,22 +3831,20 @@ async def contact_submit(request: Request):
     message = (form.get("message") or "").strip()
     if not (name and email and message):
         raise HTTPException(status_code=400, detail="All fields required")
+    from linklib.email_utils import send_notification_email, default_notify_email
     lib = _lib()
     try:
         lib.save_contact(name, email, message)
-    finally:
-        lib.close()
-    from linklib.email_utils import send_notification_email, default_notify_email
-    notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
-    if notify_to:
-        try:
-            send_notification_email(
+        notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
+        if notify_to:
+            _send_email_safely(
+                lib, "contact", send_notification_email,
                 notify_to,
                 subject=f"Contact form: {name}",
                 body=f"From: {name} <{email}>\n\n{message}",
             )
-        except Exception as e:
-            print(f"[contact] notification email failed: {e}")
+    finally:
+        lib.close()
     return RedirectResponse("/contact?submitted=1", status_code=303)
 
 
@@ -4485,9 +4584,19 @@ async def tools_submit(request: Request):
     submitted_by = (form.get("submitted_by") or "").strip()
     if not (name and url and description and submitted_by):
         raise HTTPException(status_code=400, detail="Name, URL, description, and email are required.")
+    from linklib.email_utils import send_notification_email, default_notify_email
     lib = _lib()
     try:
         lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0)
+        notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
+        if notify_to:
+            _send_email_safely(
+                lib, "tool_submission", send_notification_email,
+                notify_to,
+                subject=f"Tool submission: {name}",
+                body=(f"Submitted by: {submitted_by}\n\n{name}\n{url}\n\n{description}\n\n"
+                      f"Review at /admin/tools."),
+            )
     finally:
         lib.close()
     return RedirectResponse("/tools/submit?submitted=1", status_code=303)
@@ -4540,6 +4649,59 @@ def admin_contacts(request: Request):
 </table>
 </div>"""
     return HTMLResponse(_page("Contacts—Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/email-failures", response_class=HTMLResponse)
+def admin_email_failures(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        failures = lib.list_email_failures(pending_only=False)
+    finally:
+        lib.close()
+    rows = "".join(
+        f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(f['created_at'][:16].replace('T',' '))}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(f['context'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:pre-wrap;">{_esc(f['detail'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
+            {'<span style="color:var(--muted);">dismissed</span>' if f['resolved_at'] else
+             f'<form method="post" action="/admin/email-failures/{f["id"]}/dismiss" style="margin:0;">'
+             f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;">Dismiss</button></form>'}
+          </td>
+        </tr>"""
+        for f in failures
+    ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No failed sends recorded.</td></tr>'
+    body = f"""<div class="page" style="max-width:960px;">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Email delivery failures</h1>
+<p style="color:var(--muted);margin:-6px 0 18px;">Every outbound email (contact form, tool submissions, welcome emails,
+password resets, warm intros) is best-effort — the underlying record always saves even if the send fails — but a
+failure lands here instead of only a server log, so it never goes unnoticed.</p>
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">When</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Flow</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Error</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>"""
+    return HTMLResponse(_page("Email failures—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/email-failures/{failure_id}/dismiss")
+def admin_email_failure_dismiss(request: Request, failure_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.dismiss_email_failure(failure_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/email-failures", status_code=303)
 
 
 @app.get("/admin/tools", response_class=HTMLResponse)
@@ -6865,6 +7027,7 @@ _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
         ("/admin/tools/leads",  "Toolbox intros",          "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
+        ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets — so a broken send never goes unnoticed."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Features", "Per-feature settings and reporting.", [
@@ -8719,12 +8882,25 @@ async def admin_users_create(request: Request):
     email = (form.get("email") or "").strip()
     if not username or len(password) < 8:
         return RedirectResponse(f"/admin/users?msg={quote('Username and an 8+ char password are required.')}", status_code=303)
+    from linklib.email_utils import send_welcome_email
     lib = _lib()
     try:
         import sqlite3 as _sql
         try:
             lib.create_user(username, password, role=role, name=name, email=email)
             msg = f'Created account “{username.lower()}” ({role}).'
+            if email:
+                login_url = f"{PUBLIC_BASE.rstrip('/')}/login"
+                sent = _send_email_safely(
+                    lib, "welcome", send_welcome_email,
+                    email, username=username.lower(), temp_password=password, login_url=login_url,
+                )
+                if sent:
+                    msg += f" Welcome email sent to {email}."
+                else:
+                    msg += f" Couldn't email {email} — share the temporary password with them directly."
+            else:
+                msg += " No email on file — share the temporary password with them directly."
         except _sql.IntegrityError:
             msg = f'Username “{username.lower()}” already exists.'
     finally:
