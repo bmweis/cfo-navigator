@@ -1,5 +1,6 @@
-"""Lightweight email helper for outbound notifications (contact form, warm
-intros, etc.), sent via the Gmail REST API.
+"""Lightweight email helper for outbound notifications (contact form, tool
+submissions, welcome emails, password resets, warm intros), sent via the
+Gmail REST API.
 
 Why the Gmail API and not SMTP: Railway's Hobby plan blocks outbound SMTP
 ports (25/465/587) — unblocking them is a Pro-plan feature. The Gmail API
@@ -9,10 +10,13 @@ backup (linklib/backup.py) — just with the ``gmail.send`` scope granted
 alongside ``drive.file`` when the refresh token is minted.
 
 Reads configuration from environment variables — all optional. If Google
-OAuth is not configured, send_notification_email()/send_warm_intro_email()
-return False and the record is still stored in the DB (no error raised) —
-callers should always save the record first and treat email as best-effort
-on top of that.
+OAuth is not configured, every send_*() function here returns False and the
+record is still stored in the DB (no error raised) — callers should always
+save the record first and treat email as best-effort on top of that. Errors
+from a configured-but-failing send propagate as exceptions — callers should
+route those through webapp.app._send_email_safely rather than a bare
+try/except, so a failure lands in the email_failures table (surfaced on
+/admin/email-failures) and not just a stdout print nobody's watching.
 
 Required env vars to enable sending (same three as the Drive backup):
     GOOGLE_OAUTH_CLIENT_ID       Google Cloud OAuth client ID
@@ -98,6 +102,77 @@ def send_notification_email(to: str, subject: str, body: str) -> bool:
     """
     if not is_configured():
         return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    if _FROM_EMAIL:
+        msg["From"] = _FROM_EMAIL
+    msg["To"] = to
+    msg.attach(MIMEText(body, "plain"))
+    _send(msg)
+    return True
+
+
+def send_welcome_email(to: str, username: str, temp_password: str, login_url: str) -> bool:
+    """Send a new member their temporary password and a link to sign in.
+    Returns True if sent, False if Google OAuth is not configured (graceful
+    no-op) — the account still exists either way, so callers should tell
+    the admin plainly when this comes back False (share the password
+    another way). Raises on API errors.
+    """
+    if not is_configured():
+        return False
+
+    subject = "Your bmweis.com account"
+    body = f"""\
+Hi {username},
+
+An account has been created for you at bmweis.com.
+
+Username: {username}
+Temporary password: {temp_password}
+
+Sign in here, then use "Forgot your password?" on that page any time you'd \
+like to set your own password:
+{login_url}
+
+Best,
+Brian Weisberg
+"""
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    if _FROM_EMAIL:
+        msg["From"] = _FROM_EMAIL
+    msg["To"] = to
+    msg.attach(MIMEText(body, "plain"))
+    _send(msg)
+    return True
+
+
+def send_password_reset_email(to: str, username: str, reset_url: str) -> bool:
+    """Send a self-service password reset link. Returns True if sent, False
+    if Google OAuth is not configured (graceful no-op) — the reset request
+    is still recorded either way, so Brian can reset it by hand from
+    /admin/users if the email never arrives. Raises on API errors.
+    """
+    if not is_configured():
+        return False
+
+    subject = "Reset your bmweis.com password"
+    body = f"""\
+Hi {username},
+
+Someone (hopefully you) requested a password reset for your bmweis.com account.
+
+Reset your password here — this link expires in 1 hour:
+{reset_url}
+
+If you didn't request this, you can ignore this email; your password won't change.
+
+Best,
+Brian Weisberg
+"""
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
