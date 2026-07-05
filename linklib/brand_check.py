@@ -87,6 +87,10 @@ AUX_COLORS = {
     "#e9d19e",                                  # Choppy Waters pill light stop
     "#e0a57d", "#c97a4a",                       # Rough Seas pill gradient
     "#5a6b7e", "#2c3a48",                       # Storm Warning pill gradient
+    # Shark pursuit hazard (Mate+, Martha's Vineyard leg onward) — dark
+    # navy-grey body, restrained/realistic like the other wildlife (whale).
+    "#3d4650", "#1c2126",                       # shark body gradient
+    "#0a0e14",                                   # shark eye
 }
 
 # Colors purged in the visual refresh — must never reappear.

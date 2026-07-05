@@ -171,6 +171,61 @@ def test_play_wires_up_whale_and_prize(env):
     assert "WHALE_TRIGGER_FRAC = 0.325" in body
 
 
+def test_play_wires_up_shark_hazard(env):
+    """Shark pursuit hazard: rank-tunable params embedded in RANK_SETTINGS,
+    the tracking state machine present in the JS, active only from the
+    Martha's Vineyard leg onward, and a distinct 'Caught!' outcome title
+    separate from the normal 'Sunk' collision/lives ending."""
+    _, client = env
+    body = client.get("/play").text
+    assert 'id="sdrShark"' in body
+    assert "updateShark" in body
+    assert "SHARK_ACTIVE_FRAC = 0.70" in body
+    assert '"shark_cruise_distance": 60.0' in body   # Mate default
+    assert '"shark_lunge_speed": 50.0' in body        # Mate default
+    assert "Caught!" in body
+    # Rank-independent: catching the boat calls endRun('eaten') with no
+    # collision_limit/lives check, unlike the rock/buoy registerHit path.
+    assert "endRun('eaten')" in body
+
+
+def test_play_shark_gated_off_for_deckhand(env):
+    """Deckhand's row_settings carry 0/inert shark params — the game loop
+    also explicitly skips Deckhand (belt and suspenders), but the embedded
+    JSON should reflect the inert tuning too."""
+    _, client = env
+    body = client.get("/play").text
+    assert '"deckhand": {"collision_limit": 0' in body
+    # Deckhand's shark_cruise_distance is 0.0 in the same JSON object as its
+    # other 0/false Easy-mode defaults — confirm via the DB layer directly
+    # since asserting exact JSON key order/spacing in the page body is brittle.
+    from linklib.db import Library
+    import os
+    lib = Library(os.environ["LINKLIB_DB"])
+    deckhand = lib.get_game_rank_settings("deckhand")
+    lib.close()
+    assert deckhand["shark_cruise_distance"] == 0.0
+
+
+def test_admin_game_settings_shark_fields_hidden_for_deckhand(env):
+    """Shark tuning fields are omitted entirely from Deckhand's admin card
+    (not just editable-to-0) since the hazard never spawns there."""
+    from fastapi.testclient import TestClient
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    client = TestClient(appmod.app)
+    from linklib.db import Library
+    import os
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.seed_game_rank_settings()
+    lib.close()
+    body = client.get("/admin/game-settings").text
+    deckhand_card = body.split('rank id: deckhand')[1].split('rank id: mate')[0]
+    mate_card = body.split('rank id: mate')[1].split('rank id: first_mate')[0]
+    assert "Shark cruise distance" not in deckhand_card
+    assert "Shark cruise distance" in mate_card
+
+
 def test_play_finish_condition_reaches_nantucket(env):
     """Reaching COURSE_LENGTH must call endRun('finish'), distinct from a
     collision-based 'sunk' ending — both are wired through the same endRun,

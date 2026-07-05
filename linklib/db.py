@@ -429,6 +429,13 @@ class Library:
             # Round 2: collisions now directly affect score, so the leaderboard
             # (and the outcome screen's new Hits stat) needs the count on the row.
             "ALTER TABLE game_runs ADD COLUMN hits INTEGER NOT NULL DEFAULT 0",
+            # Shark pursuit hazard (Mate+ only, Martha's Vineyard leg onward) —
+            # rank-tunable cruise/lunge behavior. Deckhand's row gets 0s since
+            # the shark never spawns there; harmless, never read for that rank.
+            "ALTER TABLE game_rank_settings ADD COLUMN shark_cruise_distance REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE game_rank_settings ADD COLUMN shark_lunge_interval_sec REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE game_rank_settings ADD COLUMN shark_lunge_speed REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE game_rank_settings ADD COLUMN shark_lunge_duration_sec REAL NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1480,7 +1487,11 @@ class Library:
     # gust_coverage_pct, obstacle_density, drift_speed (base speed @ t=0),
     # row_speed (unused), sail_speed (gust boost, additive),
     # stamina_drain_per_sec (unused), stamina_regen_per_sec (unused), sort_order,
-    # speed_ramp_per_sec (u/sec base speed gains per elapsed second)
+    # speed_ramp_per_sec (u/sec base speed gains per elapsed second),
+    # shark_cruise_distance (u behind the boat while cruising),
+    # shark_lunge_interval_sec (seconds between lunges),
+    # shark_lunge_speed (u/sec the gap closes at during a lunge),
+    # shark_lunge_duration_sec (how long a lunge burst lasts before resetting)
     #
     # Round 2 tuning proposal, calibrated so an average run (accounting for
     # each rank's own gust_coverage_pct) lands close to par_time_seconds over
@@ -1489,11 +1500,20 @@ class Library:
     # base_start + ramp*par_time/2 = avgBase. All four ranks land within ~1.3%
     # of their par time at this math; /admin/game-settings can retune from
     # actual playtesting.
+    #
+    # Shark params: Deckhand is 0/inert (the shark never spawns there — gated
+    # on rank in the game loop, not just tuned to be harmless). Mate/First
+    # Mate/Skipper escalate on all three axes — closer cruise distance, more
+    # frequent lunges, faster lunges. Chosen so lunge_speed*lunge_duration
+    # comfortably exceeds (cruise_distance - catch_gap=12): an unopposed
+    # lunge must actually reach catching range, or the hazard can never
+    # succeed regardless of tuning knobs elsewhere. A first proposal to
+    # retune from actual playtesting, same as everything else here.
     _GAME_RANK_DEFAULTS = [
-        ("deckhand",   "Deckhand",   "Easy",   0, 1, 130, 45.0, 3.0, 20.0, 30.0, 8.0, 15.0, 4.0, 0, 0.15),
-        ("mate",       "Mate",       "Medium", 3, 1, 150, 35.0, 5.0, 15.0, 30.0, 8.0, 15.0, 4.0, 1, 0.15),
-        ("first_mate", "First Mate", "Hard",   1, 1, 165, 28.0, 7.0, 12.0, 30.0, 8.0, 15.0, 4.0, 2, 0.14),
-        ("skipper",    "Skipper",    "Expert", 1, 0, 180, 20.0, 9.0, 10.0, 30.0, 8.0, 15.0, 4.0, 3, 0.14),
+        ("deckhand",   "Deckhand",   "Easy",   0, 1, 130, 45.0, 3.0, 20.0, 30.0, 8.0, 15.0, 4.0, 0, 0.15, 0.0, 0.0, 0.0, 0.0),
+        ("mate",       "Mate",       "Medium", 3, 1, 150, 35.0, 5.0, 15.0, 30.0, 8.0, 15.0, 4.0, 1, 0.15, 60.0, 6.0, 50.0, 1.3),
+        ("first_mate", "First Mate", "Hard",   1, 1, 165, 28.0, 7.0, 12.0, 30.0, 8.0, 15.0, 4.0, 2, 0.14, 50.0, 5.0, 58.0, 1.3),
+        ("skipper",    "Skipper",    "Expert", 1, 0, 180, 20.0, 9.0, 10.0, 30.0, 8.0, 15.0, 4.0, 3, 0.14, 40.0, 4.0, 68.0, 1.3),
     ]
 
     def seed_game_rank_settings(self) -> None:
@@ -1510,8 +1530,10 @@ class Library:
                     par_time_seconds, gust_coverage_pct, obstacle_density,
                     drift_speed, row_speed, sail_speed,
                     stamina_drain_per_sec, stamina_regen_per_sec, sort_order,
-                    speed_ramp_per_sec, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    speed_ramp_per_sec, shark_cruise_distance,
+                    shark_lunge_interval_sec, shark_lunge_speed,
+                    shark_lunge_duration_sec, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 row + (now,),
             )
         self.conn.commit()
@@ -1537,6 +1559,8 @@ class Library:
             "label", "difficulty_label", "collision_limit", "grace_window",
             "par_time_seconds", "gust_coverage_pct", "obstacle_density",
             "drift_speed", "sail_speed", "speed_ramp_per_sec",
+            "shark_cruise_distance", "shark_lunge_interval_sec",
+            "shark_lunge_speed", "shark_lunge_duration_sec",
         }
         bad = set(fields) - allowed
         if bad:

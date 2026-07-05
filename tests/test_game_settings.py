@@ -70,3 +70,26 @@ def test_update_with_no_fields_is_noop(lib):
     lib.update_game_rank_settings("mate")
     after = lib.get_game_rank_settings("mate")
     assert before == after
+
+
+def test_shark_params_inert_for_deckhand_tuned_for_others(lib):
+    """The shark hazard never spawns on Deckhand (gated on rank in the game
+    loop) — its seed values are 0/inert, distinct from Mate/First
+    Mate/Skipper, which escalate cruise distance down and lunge
+    speed/frequency up as rank hardens."""
+    lib.seed_game_rank_settings()
+    ranks = {r["rank"]: r for r in lib.list_game_rank_settings()}
+    assert ranks["deckhand"]["shark_cruise_distance"] == 0.0
+    assert ranks["deckhand"]["shark_lunge_speed"] == 0.0
+    assert ranks["mate"]["shark_cruise_distance"] > 0
+    assert ranks["skipper"]["shark_cruise_distance"] < ranks["mate"]["shark_cruise_distance"]
+    assert ranks["skipper"]["shark_lunge_speed"] > ranks["mate"]["shark_lunge_speed"]
+    assert ranks["skipper"]["shark_lunge_interval_sec"] < ranks["mate"]["shark_lunge_interval_sec"]
+
+
+def test_update_shark_fields_persists(lib):
+    lib.seed_game_rank_settings()
+    lib.update_game_rank_settings("mate", shark_cruise_distance=200.0, shark_lunge_speed=70.0)
+    r = lib.get_game_rank_settings("mate")
+    assert r["shark_cruise_distance"] == 200.0
+    assert r["shark_lunge_speed"] == 70.0
