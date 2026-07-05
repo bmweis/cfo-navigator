@@ -171,6 +171,24 @@ def test_play_wires_up_whale_and_prize(env):
     assert "WHALE_TRIGGER_FRAC = 0.325" in body
 
 
+def test_play_wires_up_whale_hazard(env):
+    """Whale hazard: rises once per run at a randomized lane (own seeded
+    PRNG via buildWhale), and striking it mid-breach is a distinct
+    'Capsized!' outcome — an instant, rank-independent game over (including
+    Deckhand, unlike the shark) that bypasses the rock/buoy collision_limit/
+    lives system entirely."""
+    _, client = env
+    body = client.get("/play").text
+    assert "function buildWhale" in body
+    assert "function updateWhale" in body
+    assert "WHALE_DANGER_START_SEC = 0.45, WHALE_DANGER_END_SEC = 2.3" in body
+    assert "Capsized!" in body
+    assert "endRun('breached')" in body
+    # Not gated off for any rank the way updateShark gates off Deckhand.
+    whale_fn_body = body.split("function updateWhale")[1].split("\n  function ")[0]
+    assert "if (state.rank === 'deckhand') return;" not in whale_fn_body
+
+
 def test_play_wires_up_shark_hazard(env):
     """Shark pursuit hazard: rank-tunable params embedded in RANK_SETTINGS,
     the tracking state machine present in the JS, active only from the
