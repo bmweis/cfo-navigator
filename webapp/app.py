@@ -2642,15 +2642,20 @@ _SDR_CSS = """
 .sdr-boat-inner.sdr-sailing{filter:brightness(1.08);}
 .sdr-boat-inner.sdr-sailing .sdr-sail-group{animation-duration:1.3s;}
 
-/* Boston Harbor whale breach — a one-time bonus payoff, not a scoring
-   mechanic. Fixed screen position (not world-scrolled): the animation plays
-   out in ~3s, far faster than the boat crosses the harbor, so anchoring it
-   to a screen point rather than tracking worldX reads just as well and is
-   much simpler. */
-.sdr-whale{position:absolute;left:62%;bottom:30%;width:110px;z-index:3;opacity:0;pointer-events:none;
-  transform:translateY(50px) scale(0.75);}
-.sdr-whale svg{width:100%;height:auto;display:block;}
-.sdr-whale.sdr-breach{animation:sdrWhaleBreach 3s ease-out forwards;}
+/* Boston Harbor whale — a one-time hazard, not the rock/buoy lives system:
+   rises from the depths once per run at a randomized lane (own seeded PRNG,
+   see buildWhale) and striking it mid-breach is an instant, rank-independent
+   game over, same as the shark. Screen-anchored on X (JS only ever sets a
+   translateY for lane on the outer wrapper, same as the boat/shark/
+   obstacles) since the encounter plays out far faster than the boat crosses
+   the harbor. The breach motion itself (rise/scale/rotate/fade) lives on
+   the inner element per the "positioning transform stays on the outer
+   element" rule used for the buoy bob and sailing-lift animations, so the
+   two transforms don't fight each other. */
+.sdr-whale{position:absolute;width:110px;z-index:3;pointer-events:none;display:none;}
+.sdr-whale-inner{opacity:0;transform:translateY(50px) scale(0.75);}
+.sdr-whale-inner svg{width:100%;height:auto;display:block;}
+.sdr-whale.sdr-breach .sdr-whale-inner{animation:sdrWhaleBreach 3s ease-out forwards;}
 @keyframes sdrWhaleBreach{
   0%{opacity:0;transform:translateY(60px) scale(0.7) rotate(0deg);}
   15%{opacity:1;}
@@ -2661,9 +2666,10 @@ _SDR_CSS = """
 
 /* Shark pursuit hazard (Mate+, Martha's Vineyard leg onward) — positioned
    dynamically like the boat/obstacles (JS sets .style.transform every
-   frame from its tracked worldX-gap/lane), not a fixed CSS animation like
-   the whale bonus above. z-index:3, same layer as obstacles and behind the
-   boat, so it reads as trailing rather than sitting on top of the player. */
+   frame from its tracked worldX-gap/lane); unlike the whale above, it has
+   no scripted breach animation of its own to layer on top of. z-index:3,
+   same layer as obstacles and behind the boat, so it reads as trailing
+   rather than sitting on top of the player. */
 .sdr-shark{position:absolute;width:100px;z-index:3;display:none;pointer-events:none;
   filter:drop-shadow(0 3px 5px rgba(0,0,0,0.25));}
 .sdr-shark svg{width:100%;height:auto;display:block;}
@@ -2825,8 +2831,8 @@ _SDR_SKYLINE_CHARLES_SVG = """<svg viewBox="0 0 700 168" preserveAspectRatio="no
 
 # Boston Harbor — Zakim Bridge (real cable-stayed public infrastructure, same
 # treatment as Longfellow/Hancock — no corporate signage), open harbor water,
-# a couple of distant sailboats. The whale breach bonus (state.whaleTriggered)
-# is a separate fixed-screen-position element, not part of this backdrop.
+# a couple of distant sailboats. The whale hazard (state.whaleTriggered) is a
+# separate element positioned by JS, not part of this backdrop.
 _SDR_SKYLINE_HARBOR_SVG = """<svg viewBox="0 0 700 168" preserveAspectRatio="none">
   <g opacity="0.25" fill="#7C93B8">
     <rect x="70" y="112" width="14" height="38"/><rect x="90" y="102" width="16" height="48"/><rect x="112" y="116" width="12" height="34"/>
@@ -2943,6 +2949,7 @@ _SDR_JS = """
   var PX_PER_UNIT = 1.1;
   var CHANNEL_TOP = 0.60, CHANNEL_BOTTOM = 0.93;
   var BOAT_X_FRAC = 0.24;
+  var WHALE_X_FRAC = 0.62;  // fixed screen point (was CSS left:62%; JS now positions Y too)
   var HITBOX_X_UNITS = 15, HITBOX_LANE_FRAC = 0.085;
   var GRACE_MS = 1200;
   var STEER_KEY_RATE = 1.0;
@@ -2954,6 +2961,16 @@ _SDR_JS = """
   // than popping in right as the run ends.
   var CHECKPOINTS = [[0.0,"Charles River"],[0.20,"Boston Harbor"],[0.45,"Cape Cod"],[0.70,"Martha's Vineyard"],[0.90,"Nantucket"]];
   var WHALE_TRIGGER_FRAC = 0.325;  // midpoint of the Boston Harbor segment
+  // Whale hazard — every rank including Deckhand (unlike the shark). The
+  // danger window (start/end, seconds since trigger) brackets the visible
+  // high-opacity/full-size portion of the 3s sdrWhaleBreach animation
+  // (opacity hits 1 at the 15% keyframe = 0.45s, starts shrinking back down
+  // after the 70% keyframe = 2.1s) so a hit only registers while the whale
+  // actually reads as "there." ANIM_DURATION_SEC must track the CSS
+  // animation's 3s length so the hazard clears exactly when the whale does.
+  var WHALE_DANGER_START_SEC = 0.45, WHALE_DANGER_END_SEC = 2.3;
+  var WHALE_HIT_LANE_FRAC = 0.14;
+  var WHALE_ANIM_DURATION_SEC = 3;
   // Shark pursuit hazard — Mate+ only (never Deckhand), active from the
   // Martha's Vineyard leg onward (same 0.70 threshold as that checkpoint).
   // Catching the boat is an instant, rank-independent game over, separate
@@ -2993,7 +3010,8 @@ _SDR_JS = """
     rank: 'mate', worldX: 0, boatY: 0.5, targetY: 0.5,
     hits: 0, invincibleUntil: 0,
     obstacles: [], gustZones: [], score: 0, startTs: 0, lastTs: 0,
-    whaleTriggered: false, checkpointIdx: 0,
+    whaleTriggered: false, whaleActive: false, whaleLane: 0.5, whaleTriggerTs: 0,
+    checkpointIdx: 0,
     sharkActive: false, sharkLane: 0.5, sharkGap: 0,
     sharkLunging: false, sharkLungeElapsed: 0, sharkNextLungeAt: 0,
   };
@@ -3079,6 +3097,15 @@ _SDR_JS = """
     state.gustZones = zones;
   }
 
+  // Own seeded PRNG (own '|whale' suffix) so retuning obstacle/gust
+  // placement never reshuffles which lane the whale rises in, or vice versa.
+  // Same lane range as rocks/buoys (0.08-0.92) so it reads as one course.
+  function buildWhale(rankKey){
+    var seed = fnv1a(currentWeekKey() + '|' + rankKey + '|whale');
+    var rand = mulberry32(seed);
+    state.whaleLane = 0.08 + rand()*0.84;
+  }
+
   function isInGustZone(worldX){
     for (var i=0;i<state.gustZones.length;i++){
       var z = state.gustZones[i];
@@ -3118,12 +3145,31 @@ _SDR_JS = """
     prizeEl.style.display = idx === 4 ? 'block' : 'none';
   }
 
-  function maybeTriggerWhale(frac){
+  function maybeTriggerWhale(frac, elapsedSec){
     if (state.whaleTriggered || frac < WHALE_TRIGGER_FRAC) return;
     state.whaleTriggered = true;
+    state.whaleActive = true;
+    state.whaleTriggerTs = elapsedSec;
     whaleEl.classList.remove('sdr-breach');
     void whaleEl.offsetWidth;
     whaleEl.classList.add('sdr-breach');
+  }
+
+  // Every rank including Deckhand (unlike the shark, which skips it) — a
+  // hit is instant, rank-independent game over, same as the shark, not
+  // routed through registerHit/collision_limit. Only live while
+  // state.whaleActive (the danger + visible window); clears itself once the
+  // breach animation has fully played out so the whale can't linger as a
+  // hazard after it's already faded from view.
+  function updateWhale(elapsedSec){
+    if (!state.whaleActive) return;
+    var t = elapsedSec - state.whaleTriggerTs;
+    if (t >= WHALE_DANGER_START_SEC && t <= WHALE_DANGER_END_SEC &&
+        Math.abs(state.boatY - state.whaleLane) <= WHALE_HIT_LANE_FRAC){
+      endRun('breached');
+      return;
+    }
+    if (t >= WHALE_ANIM_DURATION_SEC) state.whaleActive = false;
   }
 
   // Shark pursuit: Mate+ only, spawns once the boat crosses into the
@@ -3221,7 +3267,7 @@ _SDR_JS = """
   function endRun(reason){
     if (state.over) return;  // guards against a same-frame finish+shark-catch race
     state.over = true;
-    state.outcome = reason;  // 'finish' | 'sunk' | 'eaten'
+    state.outcome = reason;  // 'finish' | 'sunk' | 'eaten' | 'breached'
     var prevHi = storedHi(state.rank);
     if (state.score > prevHi) localStorage.setItem(hiKeyFor(state.rank), String(state.score));
 
@@ -3229,7 +3275,8 @@ _SDR_JS = """
     var elapsedSec = (performance.now() - state.startTs) / 1000;
 
     var title = reason === 'finish' ? "You made it to Nantucket 🏆" :
-                reason === 'eaten' ? "Caught!" : 'Sunk';
+                reason === 'eaten' ? "Caught!" :
+                reason === 'breached' ? "Capsized!" : 'Sunk';
     document.getElementById('sdrOutcomeTitle').textContent = title;
     document.getElementById('sdrOutcomeSub').textContent =
       Math.round(distanceFraction * 100) + '% of the course \\u00b7 Score ' + state.score;
@@ -3275,12 +3322,15 @@ _SDR_JS = """
     state.worldX = 0; state.boatY = 0.5; state.targetY = 0.5;
     state.hits = 0; state.invincibleUntil = 0;
     state.over = false; state.outcome = ''; state.score = 0;
-    state.whaleTriggered = false; state.checkpointIdx = 0;
+    state.whaleTriggered = false; state.whaleActive = false; state.whaleTriggerTs = 0;
+    state.checkpointIdx = 0;
     state.sharkActive = false; state.sharkLunging = false;
     state.startTs = performance.now(); state.lastTs = 0;
     buildObstacles(rankKey);
     buildGustZones(rankKey);
+    buildWhale(rankKey);
     whaleEl.classList.remove('sdr-breach');
+    whaleEl.style.display = 'none';
     sharkEl.classList.remove('sdr-lunging');
     sharkEl.style.display = 'none';
     skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
@@ -3384,7 +3434,9 @@ _SDR_JS = """
     state.score = computeScore(cfg, distanceFraction, elapsedSec, state.hits, state.rank);
 
     updateCheckpointLayer(distanceFraction);
-    maybeTriggerWhale(distanceFraction);
+    maybeTriggerWhale(distanceFraction, elapsedSec);
+    updateWhale(elapsedSec);
+    if (state.over) return;  // updateWhale may have ended the run (breached)
     updateShark(dt, cfg, distanceFraction, elapsedSec);
     if (state.over) return;  // updateShark may have ended the run (caught)
 
@@ -3418,6 +3470,16 @@ _SDR_JS = """
       if (gsx + gw < -50 || gsx > rect.width + 50){ z.el.style.display = 'none'; continue; }
       z.el.style.display = 'block';
       z.el.style.transform = 'translateX(' + gsx + 'px)';
+    }
+
+    if (state.whaleActive){
+      whaleEl.style.display = 'block';
+      var wlX = rect.width * WHALE_X_FRAC;
+      var wlY = rect.height * (CHANNEL_TOP + state.whaleLane*(CHANNEL_BOTTOM-CHANNEL_TOP));
+      var wlW = whaleEl.offsetWidth, wlH = whaleEl.offsetHeight;
+      whaleEl.style.transform = 'translate(' + (wlX-wlW*0.5) + 'px,' + (wlY-wlH*0.5) + 'px)';
+    } else {
+      whaleEl.style.display = 'none';
     }
 
     if (state.sharkActive){
@@ -3607,8 +3669,10 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
 <h1 style="margin:0 0 6px;">Sail, Don&rsquo;t Row</h1>
-<p class="sdr-sub">Steer with &uarr;/&darr; (or drag the water on touch) &mdash; that&rsquo;s the only input.
-Drift into a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and buoys; reach Nantucket.</p>
+<p class="sdr-sub">Make it all the way from Boston to the Cape, past Martha&rsquo;s Vineyard, and all the way to Nantucket&mdash;safely.</p>
+<p class="sdr-sub">Watch out for the rocks, steer clear of Wally the Whale, and outrun Susan the Shark.</p>
+<p class="sdr-sub">Controls are simple&mdash;&uarr;/&darr; (or drag the water on touch).</p>
+<p class="sdr-sub">Track your best score on the leaderboard&mdash;brag rights only, no budget attached.</p>
 </div>
 
 <div id="sdrPreGame" class="sdr-pregame">
@@ -3626,7 +3690,7 @@ Drift into a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and 
   <div class="sdr-water"><div class="sdr-band sdr-band1"></div><div class="sdr-band sdr-band2"></div><div class="sdr-band sdr-band3"></div></div>
   <div id="sdrGusts"></div>
   <div id="sdrObstacles"></div>
-  <div id="sdrWhale" class="sdr-whale">""" + _SDR_WHALE_SVG + """</div>
+  <div id="sdrWhale" class="sdr-whale"><div class="sdr-whale-inner">""" + _SDR_WHALE_SVG + """</div></div>
   <div id="sdrPrize" class="sdr-prize"><div class="sdr-prize-glow"></div><div class="sdr-prize-chest"></div><div class="sdr-prize-lid"></div></div>
   <div id="sdrShark" class="sdr-shark">""" + _SDR_SHARK_SVG + """</div>
   <div id="sdrBoat" class="sdr-boat-wrap"><div class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div></div>
