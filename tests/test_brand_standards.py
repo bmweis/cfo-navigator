@@ -45,3 +45,22 @@ def test_palette_ramp_present(family):
     tokens = bc.brand_token_colors(APP_SRC)
     missing = [c for c in bc.RAMPS[family] if c not in tokens]
     assert not missing, f"{family} ramp missing shades: {missing}"
+
+
+def test_small_coral_text_flagged():
+    """BRAND.md §2.3: coral/coral-deep text under 18px is never sanctioned."""
+    bad = '<div style="font-size:14px;color:var(--coral-deep);">too small</div>'
+    assert bc.small_coral_text_spans(bad)
+
+
+def test_small_coral_text_allows_navy_on_coral_wash():
+    """The sanctioned callout pattern — coral-wash background, navy text — must
+    not be flagged, regardless of size."""
+    ok = '<div style="background:var(--coral-wash);font-size:14px;color:var(--navy);">fine</div>'
+    assert not bc.small_coral_text_spans(ok)
+
+
+def test_small_coral_text_allows_large_coral():
+    """Large coral display text (>=18px) is a sanctioned use (stat call-outs)."""
+    ok = '<div style="font-size:24px;color:var(--coral);">42%</div>'
+    assert not bc.small_coral_text_spans(ok)

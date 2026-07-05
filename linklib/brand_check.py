@@ -1,12 +1,20 @@
 """Deterministic brand-standards rules + scanner (BRAND.md §8).
 
-Single source of truth for the *visual* rules — palette and fonts — used by both
-the QA test (``tests/test_brand_standards.py``) and the live checks dashboard
+Single source of truth for the *visual* rules — palette, fonts, and one placement
+rule (coral text under 18px, BRAND.md §2.3) — used by both the QA test
+(``tests/test_brand_standards.py``) and the live checks dashboard
 (``/admin/checks``). Pure-Python (only ``re``), so it runs anywhere.
 
 The site is rendered from inline strings in ``webapp/app.py`` (CSS, per-page
 styles, inline SVG, JS that builds markup), so the check scans that source and
 flags anything off-brand.
+
+Most of BRAND.md §2.3 ("where coral goes") is a judgment call — "unavoidable",
+"one coral element per viewport" — and doesn't reduce to regex without false
+positives, so it isn't automated here. The one sub-rule that *is* mechanical and
+unambiguous — coral/coral-deep as a `color:` value inside a `style="..."`
+attribute that also sets `font-size` under 18px — is checked, since it's a plain
+text-color-vs-size fact, not a design judgment.
 """
 from __future__ import annotations
 
@@ -17,6 +25,14 @@ _HEX_RE = re.compile(r"(?<!&)#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
 # A font-family / font-shorthand value (CSS or SVG attribute), up to a terminator.
 _FONT_RE = re.compile(r"font(?:-family)?\s*[:=]\s*([^;\"}<]+)", re.IGNORECASE)
 _QUOTED_RE = re.compile(r"['\"]([A-Za-z0-9 ]+)['\"]")
+# style="..." attributes, to scope the coral-text-size check to one element's own
+# declarations (not just proximity in the source).
+_STYLE_ATTR_RE = re.compile(r'style="([^"]*)"')
+# The `color:` property specifically — not `border-color:`/`background-color:`,
+# which also contain the substring "color:".
+_TEXT_COLOR_CORAL_RE = re.compile(r"(?:^|;)\s*color\s*:\s*var\(--coral(-deep)?\)")
+_FONT_SIZE_PX_RE = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)px")
+_CORAL_TEXT_MIN_PX = 18
 
 # --- Documented non-token colors that are allowed to appear -------------------
 # Each must be sanctioned and commented. Adding one here is a deliberate act.
@@ -158,6 +174,21 @@ def banned_fonts_used(src: str) -> list[str]:
                   if f"'{f}'".lower() in low or f'"{f}"'.lower() in low)
 
 
+def small_coral_text_spans(src: str) -> list[str]:
+    """`style="..."` attributes that set coral/coral-deep text color alongside a
+    font-size under 18px — BRAND.md §2.3's "never coral" case for small text.
+    Returns a short excerpt of each offending style attribute."""
+    hits: list[str] = []
+    for m in _STYLE_ATTR_RE.finditer(src):
+        style = m.group(1)
+        if not _TEXT_COLOR_CORAL_RE.search(style):
+            continue
+        size_m = _FONT_SIZE_PX_RE.search(style)
+        if size_m and float(size_m.group(1)) < _CORAL_TEXT_MIN_PX:
+            hits.append(style[:80])
+    return hits
+
+
 def findings(src: str) -> list[str]:
     """All brand-standards violations in `src`, as human-readable strings. Empty = clean."""
     problems: list[str] = []
@@ -176,6 +207,12 @@ def findings(src: str) -> list[str]:
     off_fonts = sorted(quoted_fonts_used(src) - ALLOWED_FONTS)
     if off_fonts:
         problems.append("Non-brand font name(s): " + ", ".join(off_fonts))
+    small_coral = small_coral_text_spans(src)
+    if small_coral:
+        problems.append(
+            "Coral text under 18px (BRAND.md §2.3 — use --navy or --alert instead): "
+            + "; ".join(small_coral)
+        )
     missing_tokens = [t for t in EXPECTED_TOKENS if f"{t}:" not in src]
     if missing_tokens:
         problems.append("Missing brand token(s): " + ", ".join(missing_tokens))

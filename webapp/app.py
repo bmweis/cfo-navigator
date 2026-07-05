@@ -3879,7 +3879,7 @@ def community_page(request: Request):
         if _COMMUNITY_FORM_CONFIGURED else
         '<div style="background:var(--coral-wash);border:1px solid #F3D3C6;border-radius:12px;'
         'padding:16px 20px;margin-top:8px;">'
-        '<p style="margin:0;font-size:14px;color:var(--coral-deep);font-weight:500;">'
+        '<p style="margin:0;font-size:14px;color:var(--navy);font-weight:500;">'
         '&#9888; Google Form not yet configured. Create the form in Google Workspace '
         'and update <code>_COMMUNITY_FORM_URL</code> in <code>webapp/app.py</code>.</p></div>'
     )
@@ -4727,7 +4727,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 
     banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
               f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
-    error_banner = (f'<p style="background:var(--coral-wash);color:var(--coral-deep);border-radius:10px;padding:10px 16px;'
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
                      f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
 
     rows = ""
@@ -7260,7 +7260,7 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 <p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
 {auth_banner}
 <div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 28px;">
-  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--coral-deep);margin-bottom:6px;">Before opening the archive to paid subscribers &mdash; read this</div>
+  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);margin-bottom:6px;">Before opening the archive to paid subscribers &mdash; read this</div>
   <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">The archive stores the full text of other people&rsquo;s articles. That&rsquo;s fine for your own research, but charging readers for access to it would mean redistributing content you don&rsquo;t own. Settle licensing with the authors you can, and before any paid access goes live:</p>
   <ul style="font-size:13.5px;color:var(--ink-soft);margin:0;padding-left:18px;line-height:1.6;">
     <li>Make subscriber-facing feed items <strong>link out</strong> to the original source; keep the in-app reader (<code>/read</code>) private to you.</li>
@@ -7491,7 +7491,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
             for t in tags_list
         ) or '<span style="font-size:12px;color:var(--muted);">auto-tagged on enrich</span>'
         sub_badge = ('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;'
-                     'background:var(--coral-wash);color:var(--coral-deep);margin-right:6px;">Reader suggestion</span>'
+                     'background:var(--coral-wash);color:var(--navy);margin-right:6px;">Reader suggestion</span>'
                      if (c.get("origin") or "").startswith("submission:") else "")
         meta = f"{sub_badge}{date}" if date else sub_badge
         # Approval prediction (advisory) from the suggestion engine.
@@ -7506,7 +7506,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
                 suggest_badge = (f'<div style="font-size:12px;color:var(--seafoam-deep);margin:0 0 8px;">'
                                  f'&#10003; <strong>Likely keep</strong>{(" &mdash; " + reason) if reason else ""}</div>')
             else:
-                suggest_badge = (f'<div style="font-size:12px;color:var(--coral-deep);margin:0 0 8px;">'
+                suggest_badge = (f'<div style="font-size:12px;color:var(--navy);margin:0 0 8px;">'
                                  f'&#8855; <strong>Likely skip</strong>{(" &mdash; " + reason) if reason else ""}</div>')
         return f"""<div data-card data-url="{url}"{suggest_attr} style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
@@ -7536,7 +7536,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
         suggest_bar = ""
         if keeps or skips:
             kb = (f'<button class="btn btn-ghost" onclick="approveKeeps(this)" style="font-size:12px;padding:6px 14px;color:var(--seafoam-deep);">Approve {keeps} likely keep{"s" if keeps != 1 else ""}</button>' if keeps else "")
-            sb = (f'<button class="btn btn-ghost" onclick="dismissSkips(this)" style="font-size:12px;padding:6px 14px;color:var(--coral-deep);">Dismiss {skips} likely skip{"s" if skips != 1 else ""}</button>' if skips else "")
+            sb = (f'<button class="btn btn-ghost" onclick="dismissSkips(this)" style="font-size:12px;padding:6px 14px;color:var(--navy);">Dismiss {skips} likely skip{"s" if skips != 1 else ""}</button>' if skips else "")
             suggest_bar = (f'<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 12px;font-size:13px;color:var(--muted);">'
                            f'<span>Predicted from your past picks:</span>{kb}{sb}</div>')
         group_blocks += f"""<details data-group class="q-group" style="margin-bottom:12px;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
@@ -7757,7 +7757,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
                       'Looking for tags to consolidate &mdash; reload in a few seconds to see proposed merges.</div>')
     elif merge_status == "unavailable":
         merge_html = ('<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:10px;'
-                      'padding:12px 16px;margin-bottom:16px;font-size:14px;color:var(--coral-deep);">'
+                      'padding:12px 16px;margin-bottom:16px;font-size:14px;color:var(--navy);">'
                       'Couldn&rsquo;t generate merge suggestions (AI unavailable). You can still rename/merge by hand below.</div>')
     else:
         # only show groups whose tags still exist
@@ -8078,7 +8078,7 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
 
     banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
               f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
-    error_banner = (f'<p style="background:var(--coral-wash);color:var(--coral-deep);border-radius:10px;padding:10px 16px;'
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
                      f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
 
     cards = ""
@@ -8289,7 +8289,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                                   f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:var(--ink-soft);">Not a dupe</button></form>')
                         tag = f'<div style="display:flex;gap:6px;flex-shrink:0;">{reject}{accept}</div>'
                         pct = round(a.get("_dup_score", 0) * 100)
-                        match = (f'<div style="font-size:12px;color:var(--coral-deep);margin-top:2px;">'
+                        match = (f'<div style="font-size:12px;color:var(--navy);margin-top:2px;">'
                                  f'&#8627; duplicate of &ldquo;{keep_title}&rdquo; &middot; {pct}% match</div>')
                     rows += (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);">'
                              f'<div style="min-width:0;"><a href="{_esc(a["url"])}" target="_blank" rel="noopener" style="font-size:14px;color:var(--navy);font-weight:500;">{_esc(a.get("title") or a["url"])}</a>'
@@ -8605,7 +8605,7 @@ def admin_users(request: Request, msg: str = ""):
             reset_notice = (
                 f'<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:9px;'
                 f'padding:8px 12px;margin:8px 0 0;display:flex;align-items:center;justify-content:space-between;'
-                f'gap:10px;font-size:13px;color:var(--coral-deep);">'
+                f'gap:10px;font-size:13px;color:var(--navy);">'
                 f'<span>Requested a password reset &mdash; {when}</span>'
                 f'<form method="post" action="/admin/users/{uid}/password-reset/dismiss" style="margin:0;">'
                 f'<button type="submit" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;'
