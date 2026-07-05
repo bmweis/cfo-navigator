@@ -2558,12 +2558,13 @@ _SDR_CSS = """
   text-shadow:0 1px 2px rgba(255,255,255,0.7);}
 
 .sdr-steer-zone{position:absolute;top:0;left:0;width:60%;height:100%;z-index:5;cursor:grab;}
-/* Portrait footnote is a toast now, not a persistent overlay (it used to sit
-   on top of active gameplay) — shown once per run start, then fades via
-   opacity/pointer-events (not display) so no timing coordination is needed
-   between the fade and a later display:none. */
-.sdr-portrait-note{position:absolute;top:47%;left:8%;right:8%;text-align:center;font-size:11px;
-  color:var(--navy);background:rgba(255,255,255,0.8);border-radius:6px;padding:4px 10px;z-index:6;
+/* Portrait footnote lives in normal page flow above the stage, not
+   absolutely positioned on top of it — it must never overlap active
+   gameplay, even briefly while fading. It's still a toast (shown once per
+   run start, then fades via opacity/pointer-events, not display) so it
+   doesn't linger, but its home is page chrome outside the canvas. */
+.sdr-portrait-note{text-align:center;font-size:11px;color:var(--navy);
+  background:rgba(255,255,255,0.8);border-radius:6px;padding:4px 10px;margin:0 0 8px;
   pointer-events:none;display:none;opacity:1;transition:opacity .6s ease;}
 .sdr-portrait-note.sdr-toast-out{opacity:0;}
 
@@ -3371,6 +3372,7 @@ Drift into a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and 
   <button type="button" id="sdrStartBtn" class="btn">Cast Off</button>
 </div>
 
+<div id="sdrPortraitNote" class="sdr-portrait-note">Playable in portrait, but landscape gives more reaction time.</div>
 <div id="sdrStage" class="sdr-stage" style="display:none;">
   """ + _SDR_DEFS_SVG + f"""
   <div class="sdr-skyline-wrap">{skyline_layers}</div>
@@ -3401,7 +3403,6 @@ Drift into a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and 
     </div>
   </div>
   <div class="sdr-progress-hud"><span id="sdrLives"></span></div>
-  <div id="sdrPortraitNote" class="sdr-portrait-note">Playable in portrait, but landscape gives more reaction time.</div>
 
   <div id="sdrSteerZone" class="sdr-steer-zone"></div>
 </div>
