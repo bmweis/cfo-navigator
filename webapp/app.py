@@ -978,7 +978,6 @@ def homepage(request: Request):
 
 <div style="display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;">{cards}</div>
 
-{_fpa_buddy_announcement("16px 0 0")}
 {suggest}
 
 <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
