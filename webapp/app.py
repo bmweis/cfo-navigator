@@ -967,9 +967,9 @@ def homepage(request: Request):
   </div>
 </div>
 
-{_fpa_buddy_announcement("28px 0 0")}
+<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;">{cards}</div>
 
-<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:20px 0 8px;">{cards}</div>
+{_fpa_buddy_announcement("16px 0 0")}
 {suggest}
 
 <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
@@ -10254,14 +10254,6 @@ def admin_copy_page(request: Request):
 <p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site &mdash; no redeploy.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">About page copy</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on <a href="/about">/about</a>. Separate paragraphs with a blank line.</p>
-<textarea id="about-copy" rows="14" style="{prose}">{_esc(about_copy)}</textarea>
-<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
-<button id="about-save-btn" onclick="saveAbout()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
-<span id="about-status" style="font-size:13px;color:var(--muted);"></span></div></div>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage headline</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The big headline and subhead at the top of the homepage.</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Headline</label>
@@ -10282,6 +10274,14 @@ def admin_copy_page(request: Request):
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="home-save-btn" onclick="saveHomepage()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
 <span id="home-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">About page copy</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on <a href="/about">/about</a>. Separate paragraphs with a blank line.</p>
+<textarea id="about-copy" rows="14" style="{prose}">{_esc(about_copy)}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="about-save-btn" onclick="saveAbout()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<span id="about-status" style="font-size:13px;color:var(--muted);"></span></div></div>
 </div>
 
 <script>
