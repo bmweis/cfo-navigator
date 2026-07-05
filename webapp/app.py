@@ -2357,32 +2357,50 @@ def netsuite_mcp(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# "Sail, Don't Row" — Phases 1-7, complete: core engine, wind/rowing/
-# Stamina, the five-checkpoint route to a Nantucket finish, full finish/
-# game-over outcome screens, rank-select polish, visual/responsive polish,
-# and the public per-rank leaderboard (public, no auth to play — an account
-# is needed only to save a run). DOM+CSS-transform game, vanilla JS. Boat
-# SVG/obstacle colors/skyline landmarks/difficulty-pill treatment lifted
-# from design/mockups/ per the Phase 0 sign-off; the Boston Harbor/Cape
-# Cod/Martha's Vineyard/Nantucket backdrops extend that same visual
-# language (no mockup existed for those four, so they're an original fill
-# using the established technique). Rank tuning (pace, wind, obstacle
-# density, collision rule) is admin-editable at /admin/game-settings and
-# read live here — the rank-select pills' collision-rule line
-# (_sdr_collision_description) and the leaderboard's Difficulty Index
-# (_sdr_difficulty_index) are both derived from those same live values, not
-# hardcoded, so an admin retune can't leave either display out of sync
-# with actual behavior. Wind gust zones (auto-sail) are placed by their own
-# seeded PRNG, independent of the obstacle seed, so tuning one never
-# reshuffles the other.
+# "Sail, Don't Row" — Phases 1-7, complete: core engine, the five-checkpoint
+# route to a Nantucket finish, full finish/game-over outcome screens,
+# rank-select polish, visual/responsive polish, and the public leaderboard
+# (public, no auth to play — an account is needed only to save a run).
+# DOM+CSS-transform game, vanilla JS. Boat SVG/obstacle colors/skyline
+# landmarks/difficulty-pill treatment lifted from design/mockups/ per the
+# Phase 0 sign-off; the Boston Harbor/Cape Cod/Martha's Vineyard/Nantucket
+# backdrops extend that same visual language (no mockup existed for those
+# four, so they're an original fill using the established technique). Rank
+# tuning (pace, wind, obstacle density, collision rule) is admin-editable at
+# /admin/game-settings and read live here — the rank-select pills'
+# collision-rule line (_sdr_collision_description) and the leaderboard's
+# Difficulty Index (_sdr_difficulty_index) are both derived from those same
+# live values, not hardcoded, so an admin retune can't leave either display
+# out of sync with actual behavior. Wind gust zones (auto-sail) are placed
+# by their own seeded PRNG, independent of the obstacle seed, so tuning one
+# never reshuffles the other.
 #
-# Leaderboard (Phase 7): one table per rank (Brian's call on the open
-# question — not a combined board with badges, not rank folded into
-# Score), each scoped to "this week" (by course_week) or all-time, best
-# run per player. A signed-in player's run auto-submits to POST
+# Round 2 (post-playtesting, superseding some of the above): manual rowing
+# and the Stamina resource were removed entirely — steering (keyboard
+# arrows or touch-drag) is the only input. Difficulty now comes from a
+# speed ramp instead (base forward speed rises over elapsed run time, per
+# rank), plus the same automatic, purely positional gust boost as before.
+# Scoring dropped the Efficiency/Stamina term and instead applies a direct
+# CollisionPenalty (0 for Deckhand regardless of hits — true no-penalty
+# practice mode; 10/hit for Mate/First Mate/Skipper) on top of the
+# Score = round(100*DistanceFraction*PaceMultiplier) base, capped at 100
+# before the penalty, floored at 0 after. The top-left HUD is now a
+# Mario-Kart-style mini-map (5 checkpoint dots + a fill bar) replacing both
+# the Stamina bar and the old floating checkpoint-name text. The leaderboard
+# flipped from per-rank tables to one combined board (each row tagged with
+# a rank badge) — list_game_leaderboard's `rank` param is now an optional
+# filter rather than required. The portrait footnote became an
+# auto-dismissing toast (was a persistent overlay sitting on top of active
+# gameplay) and the "/admin/game-settings is tunable" footer line is now
+# admin-gated (the "runs save to the leaderboard" sentence next to it stays
+# public).
+#
+# Leaderboard: one combined board, scoped to "this week" (by course_week)
+# or all-time, best run per player across every rank they've played — not
+# per-rank tables. A signed-in player's run auto-submits to POST
 # /play/submit on finish/game-over; the outcome card's status line updates
 # from "Saving your run…" to "Saved to the leaderboard." once the request
-# resolves. Score/distance/time/efficiency are client-reported — this is a
+# resolves. Score/distance/time/hits are client-reported — this is a
 # client-authoritative DOM+CSS game with no server-side simulation, same
 # trust model as obstacle placement throughout — but rank/course-week/
 # Difficulty Index are always computed server-side from current admin
@@ -2390,15 +2408,6 @@ def netsuite_mcp(request: Request):
 # Difficulty Index/label are frozen on each row at write time rather than
 # recomputed on read, so a later admin retune can't retroactively relabel
 # a past week's runs.
-#
-# Stamina design note: the Concept spec says rowing drains Stamina and
-# resting is free; Phase 3's recap line ("Stamina depletes over the whole
-# run... hitting zero ends the run") reads as a stricter, harder-fail
-# variant. Built to the Concept spec (drain-while-rowing / regen-while-
-# resting, admin-tunable) rather than adding a second, conflicting always-
-# draining mechanic — at 0 Stamina, rowing simply stops working until it
-# recovers, it doesn't end the run. Flagged for Brian to confirm; easy to
-# change if a hard fail is wanted.
 # ---------------------------------------------------------------------------
 
 _SDR_CSS = """
@@ -2525,35 +2534,38 @@ _SDR_CSS = """
 
 .sdr-hud-top{position:absolute;top:14px;left:14px;right:14px;display:flex;justify-content:space-between;
   align-items:flex-start;z-index:6;pointer-events:none;}
-.sdr-stamina-hud{width:120px;}
-.sdr-stamina-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;
-  margin-bottom:4px;background:rgba(255,255,255,0.6);display:inline-block;padding:1px 4px;border-radius:3px;}
-.sdr-stamina-track{height:7px;border-radius:8px;background:rgba(0,41,117,0.15);overflow:hidden;}
-.sdr-stamina-fill{height:100%;width:100%;border-radius:8px;background:#5FB89E;transition:width .12s linear;
-  position:relative;overflow:hidden;}
-.sdr-stamina-fill::after{content:'';position:absolute;inset:0;
-  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.55) 45%,transparent 90%);
-  background-size:250% 100%;animation:sdrStaminaShimmer 2.4s linear infinite;}
-@keyframes sdrStaminaShimmer{from{background-position:250% 0;}to{background-position:-60% 0;}}
+/* Mini-map — Mario Kart style: a fixed 5-node route strip (fraction positions
+   mirror the JS CHECKPOINTS array) with a fill bar tracking DistanceFraction
+   and the current checkpoint's name below. Replaces both the old Stamina bar
+   (removed along with rowing — see Round 2 notes) and the floating
+   bottom-HUD checkpoint label. */
+.sdr-minimap{width:150px;}
+.sdr-minimap-track{position:relative;height:6px;border-radius:6px;background:rgba(0,41,117,0.15);margin-bottom:5px;}
+.sdr-minimap-fill{position:absolute;top:0;left:0;height:100%;border-radius:6px;background:#5FB89E;
+  transition:width .15s linear;}
+.sdr-minimap-dot{position:absolute;top:50%;width:8px;height:8px;border-radius:50%;background:#fff;
+  border:2px solid var(--navy);transform:translate(-50%,-50%);}
+.sdr-minimap-dot.sdr-active{background:#5FB89E;border-color:#5FB89E;}
+.sdr-minimap-label{font-size:10px;font-weight:700;letter-spacing:.03em;color:var(--navy);
+  background:rgba(255,255,255,0.6);display:inline-block;padding:1px 4px;border-radius:3px;}
 .sdr-score-hud{text-align:right;}
 .sdr-score-hi{font-size:10px;color:var(--muted);font-weight:600;background:rgba(255,255,255,0.6);
   display:inline-block;padding:1px 4px;border-radius:3px;}
 .sdr-score-amount{font-family:var(--font-head);font-weight:800;font-size:20px;color:var(--navy);
   text-shadow:0 1px 2px rgba(255,255,255,0.6);}
 .sdr-progress-hud{position:absolute;bottom:10px;left:14px;right:14px;z-index:6;font-size:11px;color:var(--navy);
-  font-weight:600;display:flex;justify-content:space-between;pointer-events:none;
+  font-weight:600;display:flex;justify-content:flex-end;pointer-events:none;
   text-shadow:0 1px 2px rgba(255,255,255,0.7);}
 
 .sdr-steer-zone{position:absolute;top:0;left:0;width:60%;height:100%;z-index:5;cursor:grab;}
-.sdr-row-btn{position:absolute;bottom:14px;right:14px;width:64px;height:64px;border-radius:50%;
-  background:rgba(181,85,58,0.85);color:#fff;border:2px solid #fff;font:700 11px var(--font-head);
-  letter-spacing:.05em;z-index:7;display:none;align-items:center;justify-content:center;}
-.sdr-row-btn.sdr-pressed{background:rgba(181,85,58,1);transform:scale(0.94);}
-.sdr-touch #sdrRowBtn{display:flex;}
-.sdr-touch .sdr-progress-hud{bottom:82px;}
+/* Portrait footnote is a toast now, not a persistent overlay (it used to sit
+   on top of active gameplay) — shown once per run start, then fades via
+   opacity/pointer-events (not display) so no timing coordination is needed
+   between the fade and a later display:none. */
 .sdr-portrait-note{position:absolute;top:47%;left:8%;right:8%;text-align:center;font-size:11px;
   color:var(--navy);background:rgba(255,255,255,0.8);border-radius:6px;padding:4px 10px;z-index:6;
-  pointer-events:none;display:none;}
+  pointer-events:none;display:none;opacity:1;transition:opacity .6s ease;}
+.sdr-portrait-note.sdr-toast-out{opacity:0;}
 
 /* backdrop-filter isn't universal — the semi-opaque background-color is a
    plain scrim fallback that works even where blur doesn't; blur is a
@@ -2577,7 +2589,6 @@ _SDR_CSS = """
 .sdr-stat-v{font-family:var(--font-head);font-weight:700;font-size:15px;color:var(--navy);margin-top:2px;}
 .sdr-outcome-furthest{font-size:12px;color:var(--muted);margin-top:10px;}
 .sdr-outcome-furthest strong{color:var(--navy);}
-.sdr-pace-breakdown{font-size:11px;color:var(--muted);margin-top:8px;}
 .sdr-leaderboard-note{font-size:12px;color:var(--muted);margin-top:14px;padding-top:12px;border-top:1px solid var(--line);}
 .sdr-leaderboard-note a{font-weight:600;}
 
@@ -2788,12 +2799,12 @@ _SDR_JS = """
   var preGame = document.getElementById('sdrPreGame');
   var introEl = document.getElementById('sdrIntro');
   var gameOver = document.getElementById('sdrGameOver');
-  var rowBtn = document.getElementById('sdrRowBtn');
   var steerZone = document.getElementById('sdrSteerZone');
   var whaleEl = document.getElementById('sdrWhale');
   var prizeEl = document.getElementById('sdrPrize');
   var skylineLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-skyline-layer'));
   var reflectionLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-reflection-layer'));
+  var minimapDots = Array.prototype.slice.call(document.querySelectorAll('.sdr-minimap-dot'));
 
   var touchCapable = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   if (touchCapable) root.classList.add('sdr-touch');
@@ -2802,9 +2813,8 @@ _SDR_JS = """
   var state = {
     started: false, over: false, outcome: '',
     rank: 'mate', worldX: 0, boatY: 0.5, targetY: 0.5,
-    stamina: 100, hits: 0, invincibleUntil: 0, rowing: false,
+    hits: 0, invincibleUntil: 0,
     obstacles: [], gustZones: [], score: 0, startTs: 0, lastTs: 0,
-    sailTime: 0, rowTime: 0, driftTime: 0,
     whaleTriggered: false, checkpointIdx: 0,
   };
 
@@ -2923,6 +2933,8 @@ _SDR_JS = """
     var idxStr = String(idx);
     skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === idxStr); });
     reflectionLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === idxStr); });
+    minimapDots.forEach(function(el){ el.classList.toggle('sdr-active', parseInt(el.getAttribute('data-cp'), 10) <= idx); });
+    document.getElementById('sdrMinimapLabel').textContent = CHECKPOINTS[idx][1];
     prizeEl.style.display = idx === 4 ? 'block' : 'none';
   }
 
@@ -2934,11 +2946,16 @@ _SDR_JS = """
     whaleEl.classList.add('sdr-breach');
   }
 
-  function computeScore(cfg, distanceFraction, elapsedSec, staminaRemaining){
-    var efficiency = staminaRemaining / 100;
+  // Score = round(100 * DistanceFraction * PaceMultiplier), capped at 100,
+  // minus a CollisionPenalty (0 for Deckhand regardless of hits — true
+  // no-penalty practice mode; 10/hit for Mate/First Mate/Skipper), floored
+  // at 0. No Efficiency/Stamina term — removed along with rowing.
+  function computeScore(cfg, distanceFraction, elapsedSec, hits, rank){
     var paceMult = elapsedSec > 0 ? (cfg.par_time_seconds * distanceFraction) / elapsedSec : 1;
     paceMult = Math.min(1.3, Math.max(0.7, paceMult));
-    return Math.min(100, Math.round(100 * distanceFraction * efficiency * paceMult));
+    var raw = Math.min(100, Math.round(100 * distanceFraction * paceMult));
+    var collisionPenalty = (rank === 'deckhand') ? 0 : hits * 10;
+    return Math.max(0, raw - collisionPenalty);
   }
 
   function bumpFlash(){
@@ -2994,7 +3011,7 @@ _SDR_JS = """
     document.getElementById('sdrStatScore').textContent = state.score;
     document.getElementById('sdrStatDistance').textContent = Math.round(distanceFraction * 100) + '%';
     document.getElementById('sdrStatTime').textContent = formatTime(elapsedSec);
-    document.getElementById('sdrStatEfficiency').textContent = Math.round(state.stamina) + '%';
+    document.getElementById('sdrStatHits').textContent = state.hits;
 
     var furthestRow = document.getElementById('sdrOutcomeFurthest');
     if (reason === 'finish') {
@@ -3004,32 +3021,21 @@ _SDR_JS = """
       document.getElementById('sdrStatFurthest').textContent = currentCheckpointLabel();
     }
 
-    var activeTime = state.sailTime + state.rowTime + state.driftTime;
-    var pace = document.getElementById('sdrPaceBreakdown');
-    if (activeTime > 0.5) {
-      var sailPct = Math.round(state.sailTime / activeTime * 100);
-      var rowPct = Math.round(state.rowTime / activeTime * 100);
-      var driftPct = Math.max(0, 100 - sailPct - rowPct);
-      pace.textContent = sailPct + '% sailed \\u00b7 ' + rowPct + '% rowed \\u00b7 ' + driftPct + '% drifted';
-    } else {
-      pace.textContent = '';
-    }
-
     gameOver.classList.toggle('sdr-finish', reason === 'finish');
     gameOver.style.display = 'flex';
     requestAnimationFrame(function(){ gameOver.classList.add('sdr-visible'); });
 
-    if (SIGNED_IN) submitScore(state.rank, state.score, distanceFraction, reason === 'finish', elapsedSec, state.stamina);
+    if (SIGNED_IN) submitScore(state.rank, state.score, distanceFraction, reason === 'finish', elapsedSec, state.hits);
   }
 
-  function submitScore(rank, score, distanceFraction, finished, timeSeconds, efficiencyPct){
+  function submitScore(rank, score, distanceFraction, finished, timeSeconds, hits){
     var statusEl = document.getElementById('sdrSubmitStatus');
     fetch('/play/submit', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         rank: rank, score: score, distance_fraction: distanceFraction,
-        finished: finished, time_seconds: timeSeconds, efficiency_pct: efficiencyPct,
+        finished: finished, time_seconds: timeSeconds, hits: hits,
       }),
     }).then(function(r){ return r.json(); }).then(function(data){
       if (statusEl) statusEl.textContent = data.ok ? 'Saved to the leaderboard.' : 'Could not save this run.';
@@ -3041,9 +3047,8 @@ _SDR_JS = """
   function startRun(rankKey){
     state.rank = rankKey;
     state.worldX = 0; state.boatY = 0.5; state.targetY = 0.5;
-    state.stamina = 100; state.hits = 0; state.invincibleUntil = 0; state.rowing = false;
+    state.hits = 0; state.invincibleUntil = 0;
     state.over = false; state.outcome = ''; state.score = 0;
-    state.sailTime = 0; state.rowTime = 0; state.driftTime = 0;
     state.whaleTriggered = false; state.checkpointIdx = 0;
     state.startTs = performance.now(); state.lastTs = 0;
     buildObstacles(rankKey);
@@ -3051,6 +3056,8 @@ _SDR_JS = """
     whaleEl.classList.remove('sdr-breach');
     skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
     reflectionLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
+    minimapDots.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
+    document.getElementById('sdrMinimapLabel').textContent = CHECKPOINTS[0][1];
     prizeEl.style.display = 'none';
     preGame.style.display = 'none';
     introEl.style.display = 'none';
@@ -3058,6 +3065,7 @@ _SDR_JS = """
     gameOver.style.display = 'none';
     stage.style.display = 'block';
     state.started = true;
+    showPortraitToastIfNeeded();
   }
 
   function backToRankSelect(){
@@ -3084,21 +3092,19 @@ _SDR_JS = """
   document.getElementById('sdrRetryBtn').addEventListener('click', function(){ startRun(state.rank); });
   document.getElementById('sdrChangeRankBtn').addEventListener('click', backToRankSelect);
 
-  // -- Keyboard --
+  // -- Keyboard (steering only — no row/Space input) --
   var keyUp = false, keyDown = false;
   window.addEventListener('keydown', function(e){
     if (!state.started || state.over) return;
     if (e.code === 'ArrowUp'){ keyUp = true; e.preventDefault(); }
     if (e.code === 'ArrowDown'){ keyDown = true; e.preventDefault(); }
-    if (e.code === 'Space'){ state.rowing = true; e.preventDefault(); }
   });
   window.addEventListener('keyup', function(e){
     if (e.code === 'ArrowUp') keyUp = false;
     if (e.code === 'ArrowDown') keyDown = false;
-    if (e.code === 'Space') state.rowing = false;
   });
 
-  // -- Touch/pointer steer-drag --
+  // -- Touch/pointer steer-drag (the only touch input — no row button) --
   var dragging = false;
   function setTargetFromClientY(clientY){
     var rect = stage.getBoundingClientRect();
@@ -3113,22 +3119,20 @@ _SDR_JS = """
   steerZone.addEventListener('pointerup', function(){ dragging = false; });
   steerZone.addEventListener('pointercancel', function(){ dragging = false; });
 
-  // -- Touch row button --
-  function rowStart(e){ state.rowing = true; rowBtn.classList.add('sdr-pressed'); e.preventDefault(); }
-  function rowEnd(){ state.rowing = false; rowBtn.classList.remove('sdr-pressed'); }
-  rowBtn.addEventListener('pointerdown', rowStart);
-  rowBtn.addEventListener('pointerup', rowEnd);
-  rowBtn.addEventListener('pointercancel', rowEnd);
-  rowBtn.addEventListener('pointerleave', rowEnd);
-
-  // -- Portrait footnote --
-  function updateOrientationNote(){
+  // -- Portrait footnote: an auto-dismissing toast shown once per run start,
+  // not a persistent element (it used to sit on top of active gameplay).
+  var portraitToastTimer = null;
+  function showPortraitToastIfNeeded(){
     var note = document.getElementById('sdrPortraitNote');
-    note.style.display = (touchCapable && window.matchMedia('(orientation: portrait)').matches) ? 'block' : 'none';
+    if (touchCapable && window.matchMedia('(orientation: portrait)').matches){
+      note.classList.remove('sdr-toast-out');
+      note.style.display = 'block';
+      clearTimeout(portraitToastTimer);
+      portraitToastTimer = setTimeout(function(){ note.classList.add('sdr-toast-out'); }, 2500);
+    } else {
+      note.style.display = 'none';
+    }
   }
-  window.addEventListener('resize', updateOrientationNote);
-  window.addEventListener('orientationchange', updateOrientationNote);
-  updateOrientationNote();
 
   // -- Update / render --
   function update(dt, ts){
@@ -3137,28 +3141,18 @@ _SDR_JS = """
     state.boatY += (state.targetY - state.boatY) * Math.min(1, dt*BOAT_LERP);
 
     var cfg = RANK_SETTINGS[state.rank];
-    var effectiveRowing = state.rowing && state.stamina > 0.001;
-    var sailing = !effectiveRowing && isInGustZone(state.worldX);
-    var speed;
-    if (effectiveRowing){
-      speed = cfg.row_speed;
-      state.stamina = Math.max(0, state.stamina - cfg.stamina_drain_per_sec*dt);
-      state.rowTime += dt;
-    } else if (sailing){
-      speed = cfg.sail_speed;
-      state.stamina = Math.min(100, state.stamina + cfg.stamina_regen_per_sec*dt);
-      state.sailTime += dt;
-    } else {
-      speed = cfg.drift_speed;
-      state.stamina = Math.min(100, state.stamina + cfg.stamina_regen_per_sec*dt);
-      state.driftTime += dt;
-    }
+    var elapsedSec = (ts - state.startTs) / 1000;
+    // No manual rowing — forward speed is a base that ramps up over elapsed
+    // run time (the difficulty lever, replacing the old row mechanic), plus
+    // an automatic, purely positional boost while inside a gust zone.
+    var sailing = isInGustZone(state.worldX);
+    var baseSpeed = cfg.drift_speed + cfg.speed_ramp_per_sec * elapsedSec;
+    var speed = baseSpeed + (sailing ? cfg.sail_speed : 0);
     state.worldX = Math.min(COURSE_LENGTH, state.worldX + speed*dt);
     boatInner.classList.toggle('sdr-sailing', sailing);
 
     var distanceFraction = state.worldX / COURSE_LENGTH;
-    var elapsedSec = (ts - state.startTs) / 1000;
-    state.score = computeScore(cfg, distanceFraction, elapsedSec, state.stamina);
+    state.score = computeScore(cfg, distanceFraction, elapsedSec, state.hits, state.rank);
 
     updateCheckpointLayer(distanceFraction);
     maybeTriggerWhale(distanceFraction);
@@ -3196,10 +3190,9 @@ _SDR_JS = """
     }
 
     var cfg = RANK_SETTINGS[state.rank];
-    document.getElementById('sdrStaminaFill').style.width = state.stamina + '%';
+    document.getElementById('sdrMinimapFill').style.width = (Math.min(1, state.worldX / COURSE_LENGTH) * 100) + '%';
     document.getElementById('sdrScore').textContent = state.score;
     document.getElementById('sdrHi').textContent = Math.max(state.score, storedHi(state.rank));
-    document.getElementById('sdrCheckpoint').textContent = currentCheckpointLabel();
     document.getElementById('sdrLives').textContent = livesLabel(cfg);
   }
 
@@ -3328,7 +3321,7 @@ _SDR_CHECKPOINT_SVGS = [
 ]
 
 
-def _sdr_build_body(ranks, signed_in):
+def _sdr_build_body(ranks, signed_in, is_admin=False):
     if signed_in:
         leaderboard_note = ('<p class="sdr-leaderboard-note"><span id="sdrSubmitStatus">Saving your run&hellip;</span> '
                              '<a href="/play/leaderboard">View leaderboard &rarr;</a></p>')
@@ -3353,10 +3346,8 @@ def _sdr_build_body(ranks, signed_in):
             "gust_coverage_pct": r["gust_coverage_pct"],
             "obstacle_density": r["obstacle_density"],
             "drift_speed": r["drift_speed"],
-            "row_speed": r["row_speed"],
+            "speed_ramp_per_sec": r["speed_ramp_per_sec"],
             "sail_speed": r["sail_speed"],
-            "stamina_drain_per_sec": r["stamina_drain_per_sec"],
-            "stamina_regen_per_sec": r["stamina_regen_per_sec"],
         }
         for r in ranks
     }
@@ -3370,8 +3361,8 @@ def _sdr_build_body(ranks, signed_in):
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
 <h1 style="margin:0 0 6px;">Sail, Don&rsquo;t Row</h1>
-<p class="sdr-sub">Steer with &uarr;/&darr; (or drag the water on touch). Hold Space &mdash; or the row button &mdash; to row.
-Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and buoys; reach Nantucket.</p>
+<p class="sdr-sub">Steer with &uarr;/&darr; (or drag the water on touch) &mdash; that&rsquo;s the only input.
+Drift into a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and buoys; reach Nantucket.</p>
 </div>
 
 <div id="sdrPreGame" class="sdr-pregame">
@@ -3393,20 +3384,26 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
   <div id="sdrBoat" class="sdr-boat-wrap"><div class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div></div>
 
   <div class="sdr-hud-top">
-    <div class="sdr-stamina-hud">
-      <div class="sdr-stamina-label">Stamina</div>
-      <div class="sdr-stamina-track"><div id="sdrStaminaFill" class="sdr-stamina-fill"></div></div>
+    <div class="sdr-minimap" id="sdrMinimap">
+      <div class="sdr-minimap-track">
+        <div class="sdr-minimap-fill" id="sdrMinimapFill"></div>
+        <span class="sdr-minimap-dot sdr-active" data-cp="0" style="left:0%;"></span>
+        <span class="sdr-minimap-dot" data-cp="1" style="left:20%;"></span>
+        <span class="sdr-minimap-dot" data-cp="2" style="left:45%;"></span>
+        <span class="sdr-minimap-dot" data-cp="3" style="left:70%;"></span>
+        <span class="sdr-minimap-dot" data-cp="4" style="left:90%;"></span>
+      </div>
+      <div class="sdr-minimap-label" id="sdrMinimapLabel">Charles River</div>
     </div>
     <div class="sdr-score-hud">
       <div class="sdr-score-hi">HI <span id="sdrHi">0</span></div>
       <div class="sdr-score-amount">Score <span id="sdrScore">0</span></div>
     </div>
   </div>
-  <div class="sdr-progress-hud"><span id="sdrCheckpoint">Charles River</span><span id="sdrLives"></span></div>
+  <div class="sdr-progress-hud"><span id="sdrLives"></span></div>
   <div id="sdrPortraitNote" class="sdr-portrait-note">Playable in portrait, but landscape gives more reaction time.</div>
 
   <div id="sdrSteerZone" class="sdr-steer-zone"></div>
-  <button type="button" id="sdrRowBtn" class="sdr-row-btn">ROW</button>
 </div>
 
 <div id="sdrGameOver" class="sdr-outcome-scrim" style="display:none;">
@@ -3417,10 +3414,9 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
       <div class="sdr-stat-box"><div class="sdr-stat-k">Score</div><div class="sdr-stat-v" id="sdrStatScore">0</div></div>
       <div class="sdr-stat-box"><div class="sdr-stat-k">Distance</div><div class="sdr-stat-v" id="sdrStatDistance">0%</div></div>
       <div class="sdr-stat-box"><div class="sdr-stat-k">Time</div><div class="sdr-stat-v" id="sdrStatTime">0:00</div></div>
-      <div class="sdr-stat-box"><div class="sdr-stat-k">Efficiency</div><div class="sdr-stat-v" id="sdrStatEfficiency">0%</div></div>
+      <div class="sdr-stat-box"><div class="sdr-stat-k">Hits</div><div class="sdr-stat-v" id="sdrStatHits">0</div></div>
     </div>
     <div class="sdr-outcome-furthest" id="sdrOutcomeFurthest">Furthest checkpoint: <strong id="sdrStatFurthest"></strong></div>
-    <div class="sdr-pace-breakdown" id="sdrPaceBreakdown"></div>
     """ + leaderboard_note + """
     <div>
       <button type="button" id="sdrRetryBtn" class="btn" style="margin-top:16px;">Try Again</button>
@@ -3432,8 +3428,9 @@ Let go near a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and
 <template id="sdrRockTpl">""" + _SDR_ROCK_SVG + """</template>
 <template id="sdrBuoyTpl">""" + _SDR_BUOY_SVG + """</template>
 
-<p class="sdr-hint">Signed-in runs save automatically to the <a href="/play/leaderboard">per-rank leaderboard</a>. Rank
-pace/difficulty is tunable at <code>/admin/game-settings</code>.</p>
+<p class="sdr-hint">Signed-in runs save automatically to the <a href="/play/leaderboard">leaderboard</a>.""" + (
+    ' Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.' if is_admin else ''
+) + """</p>
 </div>
 <script>""" + js + """</script>"""
 
@@ -3445,7 +3442,7 @@ def play_sail_dont_row(request: Request):
         ranks = lib.list_game_rank_settings()
     finally:
         lib.close()
-    body = _sdr_build_body(ranks, signed_in=_is_member(request))
+    body = _sdr_build_body(ranks, signed_in=_is_member(request), is_admin=_role(request) == "admin")
     return HTMLResponse(_page("Sail, Don't Row—Brian Weisberg", "Sail, Don't Row", body, role=_role(request)))
 
 
@@ -3453,7 +3450,7 @@ def play_sail_dont_row(request: Request):
 async def play_submit_score(request: Request):
     """Member-tier write: a signed-in player's run is saved automatically on
     finish/game-over (see submitScore() in the game JS). Score/distance/time/
-    efficiency are client-reported — this is a client-authoritative DOM+CSS
+    hits are client-reported — this is a client-authoritative DOM+CSS
     game with no server-side simulation, same trust model used throughout —
     but rank/course-week/difficulty are always computed server-side, never
     trusted from the client."""
@@ -3473,7 +3470,7 @@ async def play_submit_score(request: Request):
     distance_fraction = _clamp(payload.get("distance_fraction"), 0.0, 1.0)
     finished = bool(payload.get("finished"))
     time_seconds = _clamp(payload.get("time_seconds"), 0.0, 3600.0)
-    efficiency_pct = _clamp(payload.get("efficiency_pct"), 0.0, 100.0)
+    hits = int(_clamp(payload.get("hits"), 0, 999))
 
     lib = _lib()
     try:
@@ -3490,20 +3487,15 @@ async def play_submit_score(request: Request):
         course_week = _sdr_course_week()
         run_id = lib.record_game_run(
             user_id, rank, score, distance_fraction, finished, time_seconds,
-            efficiency_pct, course_week, difficulty_index, difficulty_label,
+            hits, course_week, difficulty_index, difficulty_label,
         )
     finally:
         lib.close()
     return JSONResponse({"ok": True, "id": run_id})
 
 
-_SDR_RANK_ORDER = ["deckhand", "mate", "first_mate", "skipper"]
-
-
 @app.get("/play/leaderboard", response_class=HTMLResponse)
-def play_leaderboard(request: Request, rank: str = "mate", scope: str = "week"):
-    if rank not in _SDR_RANKS:
-        rank = "mate"
+def play_leaderboard(request: Request, scope: str = "week"):
     if scope not in ("week", "all"):
         scope = "week"
 
@@ -3512,33 +3504,29 @@ def play_leaderboard(request: Request, rank: str = "mate", scope: str = "week"):
         rank_rows = {r["rank"]: r for r in lib.list_game_rank_settings()}
         course_week = _sdr_course_week()
         board = lib.list_game_leaderboard(
-            rank, course_week=course_week if scope == "week" else None, limit=50
+            course_week=course_week if scope == "week" else None, limit=50
         )
     finally:
         lib.close()
 
-    def _rank_tab(rk):
-        label = rank_rows.get(rk, {}).get("label", rk)
-        active = " active" if rk == rank else ""
-        return f'<a class="sdr-lb-tab{active}" href="/play/leaderboard?rank={rk}&scope={scope}">{_esc(label)}</a>'
-
     def _scope_tab(sc, label):
         active = " active" if sc == scope else ""
-        return f'<a class="sdr-lb-tab{active}" href="/play/leaderboard?rank={rank}&scope={sc}">{label}</a>'
+        return f'<a class="sdr-lb-tab{active}" href="/play/leaderboard?scope={sc}">{label}</a>'
 
-    rank_tabs = "".join(_rank_tab(rk) for rk in _SDR_RANK_ORDER)
     scope_tabs = _scope_tab("week", "This Week") + _scope_tab("all", "All Time")
 
     if board:
         rows_html = ""
         for i, row in enumerate(board):
             name = row["name"] or row["username"] or "Anonymous"
+            rank_label = rank_rows.get(row["rank"], {}).get("label", row["rank"])
             pill_cls = _SDR_DIFFICULTY_PILL_CLASS.get(row["difficulty_label"], "sdr-pill-fair")
             finished_tag = "Finished" if row["finished"] else f"{round(row['distance_fraction']*100)}%"
             rows_html += f"""<div class="sdr-lb-row">
   <span class="sdr-lb-pos">{i+1}</span>
   <span class="sdr-lb-name">{_esc(name)}</span>
   <span class="sdr-lb-badges">
+    <span class="sdr-rank-badge">{_esc(rank_label)}</span>
     <span class="sdr-diff-pill {pill_cls}"><span>{_esc(row['difficulty_label'])}</span></span>
     <span class="sdr-rank-badge">{finished_tag}</span>
   </span>
@@ -3550,12 +3538,11 @@ def play_leaderboard(request: Request, rank: str = "mate", scope: str = "week"):
 
     body = """<div class="page" style="max-width:720px;">
 <style>""" + _SDR_PILL_CSS + """
-.sdr-lb-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+.sdr-lb-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;}
 .sdr-lb-tab{font:700 12px var(--font-head);padding:7px 14px;border-radius:8px;border:1px solid var(--line);
   background:#fff;color:var(--muted);}
 .sdr-lb-tab:hover{text-decoration:none;background:var(--navy-wash);}
 .sdr-lb-tab.active{background:var(--navy);color:#fff;border-color:var(--navy);}
-.sdr-lb-tabs-row{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px;}
 .sdr-leaderboard{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;}
 .sdr-lb-row{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);font-size:14px;}
 .sdr-lb-row:last-child{border-bottom:none;}
@@ -3565,17 +3552,14 @@ def play_leaderboard(request: Request, rank: str = "mate", scope: str = "week"):
 .sdr-lb-score{width:36px;text-align:right;font-family:var(--font-head);font-weight:700;color:var(--navy);flex-shrink:0;}
 @media (max-width:480px){
   .sdr-lb-badges{display:none;}
-  .sdr-lb-tabs-row{flex-direction:column;}
 }
 </style>
 <p style="margin:0 0 4px;"><a href="/play" style="font-size:13px;color:var(--muted);">&larr; Sail, Don&rsquo;t Row</a></p>
 <h1 style="margin:0 0 6px;">Leaderboard</h1>
-<p style="color:var(--muted);margin:0 0 22px;">One board per rank &mdash; a Fair-Winds Deckhand run and a
-Storm-Warning Skipper run aren&rsquo;t the same feat, so they&rsquo;re not on the same table.</p>
-<div class="sdr-lb-tabs-row">
-  <div class="sdr-lb-tabs">""" + rank_tabs + """</div>
-  <div class="sdr-lb-tabs">""" + scope_tabs + """</div>
-</div>
+<p style="color:var(--muted);margin:0 0 22px;">One board across every rank &mdash; each run is tagged with the
+rank and difficulty it was played on, so a Storm-Warning Skipper run and a Fair-Winds Deckhand run are both
+visible at a glance, side by side.</p>
+<div class="sdr-lb-tabs">""" + scope_tabs + """</div>
 <div class="sdr-leaderboard">""" + rows_html + """</div>
 </div>"""
     return HTMLResponse(_page("Leaderboard—Sail, Don't Row", "Sail, Don't Row", body, role=_role(request)))
@@ -7967,11 +7951,9 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
             _game_settings_num_field("Par time", "par_time_seconds", r["par_time_seconds"], suffix="seconds, full course"),
             _game_settings_num_field("Gust coverage", "gust_coverage_pct", r["gust_coverage_pct"], suffix="% of course"),
             _game_settings_num_field("Obstacle density", "obstacle_density", r["obstacle_density"], step="0.5", suffix="per 1000u"),
-            _game_settings_num_field("Drift speed", "drift_speed", r["drift_speed"], suffix="u/sec"),
-            _game_settings_num_field("Row speed", "row_speed", r["row_speed"], suffix="u/sec"),
-            _game_settings_num_field("Sail speed", "sail_speed", r["sail_speed"], suffix="u/sec"),
-            _game_settings_num_field("Stamina drain", "stamina_drain_per_sec", r["stamina_drain_per_sec"], step="0.5", suffix="/sec rowing"),
-            _game_settings_num_field("Stamina regen", "stamina_regen_per_sec", r["stamina_regen_per_sec"], step="0.5", suffix="/sec resting"),
+            _game_settings_num_field("Base speed", "drift_speed", r["drift_speed"], suffix="u/sec at start"),
+            _game_settings_num_field("Speed ramp", "speed_ramp_per_sec", r["speed_ramp_per_sec"], step="0.01", suffix="u/sec per sec elapsed"),
+            _game_settings_num_field("Gust boost", "sail_speed", r["sail_speed"], suffix="u/sec bonus in a gust"),
         ])
         cards += f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:16px;">
   <form method="post" action="/admin/game-settings/{r['rank']}/edit">
@@ -8033,10 +8015,8 @@ async def admin_game_settings_edit(request: Request, rank: str):
                 gust_coverage_pct=min(100.0, max(0.0, _num("gust_coverage_pct", float, current["gust_coverage_pct"]))),
                 obstacle_density=max(0.0, _num("obstacle_density", float, current["obstacle_density"])),
                 drift_speed=max(0.0, _num("drift_speed", float, current["drift_speed"])),
-                row_speed=max(0.0, _num("row_speed", float, current["row_speed"])),
                 sail_speed=max(0.0, _num("sail_speed", float, current["sail_speed"])),
-                stamina_drain_per_sec=max(0.0, _num("stamina_drain_per_sec", float, current["stamina_drain_per_sec"])),
-                stamina_regen_per_sec=max(0.0, _num("stamina_regen_per_sec", float, current["stamina_regen_per_sec"])),
+                speed_ramp_per_sec=max(0.0, _num("speed_ramp_per_sec", float, current["speed_ramp_per_sec"])),
             )
         except ValueError as e:
             return RedirectResponse(f"/admin/game-settings?error={quote(str(e))}", status_code=303)

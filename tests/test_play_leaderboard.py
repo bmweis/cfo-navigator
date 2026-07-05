@@ -85,7 +85,7 @@ def test_submit_requires_login(env):
     _, client = env
     r = client.post("/play/submit", json={
         "rank": "mate", "score": 80, "distance_fraction": 1.0,
-        "finished": True, "time_seconds": 100, "efficiency_pct": 70,
+        "finished": True, "time_seconds": 100, "hits": 1,
     })
     assert r.status_code == 401
 
@@ -95,7 +95,7 @@ def test_submit_rejects_unknown_rank(env):
     _login(client)
     r = client.post("/play/submit", json={
         "rank": "admiral", "score": 80, "distance_fraction": 1.0,
-        "finished": True, "time_seconds": 100, "efficiency_pct": 70,
+        "finished": True, "time_seconds": 100, "hits": 0,
     })
     assert r.status_code == 400
 
@@ -105,12 +105,12 @@ def test_submit_records_a_run(env):
     _login(client)
     r = client.post("/play/submit", json={
         "rank": "mate", "score": 82, "distance_fraction": 1.0,
-        "finished": True, "time_seconds": 145, "efficiency_pct": 68,
+        "finished": True, "time_seconds": 145, "hits": 1,
     })
     assert r.status_code == 200
     assert r.json()["ok"] is True
 
-    board = client.get("/play/leaderboard?rank=mate&scope=all").text
+    board = client.get("/play/leaderboard?scope=all").text
     assert "sailor" in board
     assert ">82<" in board
 
@@ -122,18 +122,18 @@ def test_submit_clamps_out_of_range_values(env):
     _login(client)
     r = client.post("/play/submit", json={
         "rank": "mate", "score": 9999, "distance_fraction": -5,
-        "finished": True, "time_seconds": -100, "efficiency_pct": 500,
+        "finished": True, "time_seconds": -100, "hits": -3,
     })
     assert r.status_code == 200
     from linklib.db import Library
     import os
     lib = Library(os.environ["LINKLIB_DB"])
-    row = lib.list_game_leaderboard("mate")[0]
+    row = lib.list_game_leaderboard(rank="mate")[0]
     lib.close()
     assert row["score"] == 100
     assert row["distance_fraction"] == 0.0
     assert row["time_seconds"] == 0.0
-    assert row["efficiency_pct"] == 100.0
+    assert row["hits"] == 0
 
 
 def test_submit_computes_difficulty_server_side_ignoring_client_input(env):
@@ -144,13 +144,13 @@ def test_submit_computes_difficulty_server_side_ignoring_client_input(env):
     _login(client)
     client.post("/play/submit", json={
         "rank": "skipper", "score": 90, "distance_fraction": 1.0,
-        "finished": True, "time_seconds": 100, "efficiency_pct": 90,
+        "finished": True, "time_seconds": 100, "hits": 0,
         "difficulty_label": "Fair Winds", "course_week": "1999-W01",  # ignored if sent
     })
     from linklib.db import Library
     import os
     lib = Library(os.environ["LINKLIB_DB"])
-    row = lib.list_game_leaderboard("skipper")[0]
+    row = lib.list_game_leaderboard(rank="skipper")[0]
     lib.close()
     assert row["difficulty_label"] == "Storm Warning"   # Skipper defaults -> Storm Warning
     assert row["course_week"] != "1999-W01"
@@ -162,21 +162,33 @@ def test_leaderboard_is_public(env):
     assert r.status_code == 200
 
 
-def test_leaderboard_defaults_to_mate_this_week(env):
+def test_leaderboard_defaults_to_this_week(env):
     _, client = env
     body = client.get("/play/leaderboard").text
-    assert '<a class="sdr-lb-tab active" href="/play/leaderboard?rank=mate&scope=week">' in body
-    assert '<a class="sdr-lb-tab active" href="/play/leaderboard?rank=mate&scope=week">This Week</a>' in body
+    assert '<a class="sdr-lb-tab active" href="/play/leaderboard?scope=week">This Week</a>' in body
 
 
 def test_leaderboard_empty_state(env):
     _, client = env
-    body = client.get("/play/leaderboard?rank=deckhand&scope=week").text
+    body = client.get("/play/leaderboard?scope=week").text
     assert "No runs yet" in body
 
 
-def test_leaderboard_invalid_rank_falls_back_to_mate(env):
-    _, client = env
-    r = client.get("/play/leaderboard?rank=notarank")
-    assert r.status_code == 200
-    assert 'href="/play/leaderboard?rank=mate&scope=week">Mate</a>' in r.text
+def test_leaderboard_is_combined_not_per_rank(env):
+    """Round 2: one board across all ranks, each row tagged with a rank
+    badge — no more per-rank tabs/filtering."""
+    appmod, client = env
+    _login(client)
+    client.post("/play/submit", json={
+        "rank": "deckhand", "score": 40, "distance_fraction": 0.5,
+        "finished": False, "time_seconds": 60, "hits": 0,
+    })
+    client.post("/play/submit", json={
+        "rank": "skipper", "score": 95, "distance_fraction": 1.0,
+        "finished": True, "time_seconds": 170, "hits": 0,
+    })
+    body = client.get("/play/leaderboard?scope=all").text
+    rows = body.split('<div class="sdr-leaderboard">')[1]
+    assert "Deckhand" not in rows  # only the best run per player shows (Skipper's higher score wins)
+    assert "Skipper" in rows
+    assert "?rank=" not in body   # no per-rank tab links anymore

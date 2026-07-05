@@ -1,21 +1,20 @@
-"""Sail, Don't Row — /play route (Phase 1 core engine, Phase 2 wind/rowing,
-Phase 3 checkpoint route + Nantucket finish, Phase 4 outcome-screen stats,
-Phase 5 rank-select polish, Phase 6 visual/responsive polish).
+"""Sail, Don't Row — /play route (Phases 1-7, plus Round 2's post-playtesting
+rework: rowing/Stamina removed in favor of a speed ramp, a mini-map HUD
+replaces the Stamina bar and floating checkpoint label, scoring now applies
+a direct CollisionPenalty, and the game/admin-only footer hint is gated).
 
 Confirms the page is fully public, renders all four ranks, embeds the live
 game_rank_settings values as JSON for the client engine, picks up admin
-edits without a redeploy, wires up the gust-zone DOM/JS the Phase 2
-auto-sail mechanic depends on, wires up the five checkpoint backdrop
-layers + whale + prize elements Phase 3 depends on, renders the full
-outcome-stats grid + login-aware leaderboard note Phase 4 adds, confirms
-each rank pill's collision-rule line (Phase 5) is derived live from
-game_rank_settings rather than hardcoded, and confirms the Phase 6
-Stamina-shimmer CSS and the rank pill name/sub-label layout fix are
-present. The frame-by-frame JS behavior (gust/stamina timing, checkpoint
-crossfade, whale trigger, finish condition, stat computation) and the
-cross-viewport responsive layout are exercised via a live-server
-Playwright pass during development (see the PR description) rather than
-here.
+edits without a redeploy, wires up the gust-zone DOM/JS the auto-sail
+mechanic depends on, wires up the five checkpoint backdrop layers + whale +
+prize elements, renders the full outcome-stats grid + login-aware
+leaderboard note, confirms each rank pill's collision-rule line is derived
+live from game_rank_settings rather than hardcoded, and confirms the
+mini-map and rank pill name/sub-label layout fix are present. The
+frame-by-frame JS behavior (gust/speed-ramp timing, checkpoint crossfade,
+whale trigger, finish condition, stat computation) and the cross-viewport
+responsive layout are exercised via a live-server Playwright pass during
+development (see the PR description) rather than here.
 """
 import pathlib
 import sys
@@ -96,13 +95,12 @@ def test_play_reflects_admin_edits_live(env):
         "label": "Mate", "difficulty_label": "Medium",
         "collision_limit": "3", "par_time_seconds": "222",
         "gust_coverage_pct": "35", "obstacle_density": "5",
-        "drift_speed": "10", "row_speed": "99", "sail_speed": "40",
-        "stamina_drain_per_sec": "15", "stamina_regen_per_sec": "4",
+        "drift_speed": "17", "sail_speed": "9", "speed_ramp_per_sec": "0.2",
         "grace_window": "1",
     })
     body = client.get("/play").text
     assert '"par_time_seconds": 222' in body
-    assert '"row_speed": 99.0' in body
+    assert '"speed_ramp_per_sec": 0.2' in body
 
 
 def test_play_links_to_admin_game_settings(env):
@@ -134,7 +132,7 @@ def test_play_embeds_gust_and_sail_settings(env):
     _, client = env
     body = client.get("/play").text
     assert '"gust_coverage_pct": 35.0' in body   # Mate default
-    assert '"sail_speed": 40.0' in body
+    assert '"sail_speed": 8.0' in body            # Mate default gust boost
     assert "buildGustZones" in body
     assert 'id="sdrGusts"' in body
 
@@ -195,11 +193,10 @@ def test_play_no_leftover_debug_hook(env):
 def test_play_renders_outcome_stats_grid(env):
     _, client = env
     body = client.get("/play").text
-    for stat_id in ["sdrStatScore", "sdrStatDistance", "sdrStatTime", "sdrStatEfficiency"]:
+    for stat_id in ["sdrStatScore", "sdrStatDistance", "sdrStatTime", "sdrStatHits"]:
         assert f'id="{stat_id}"' in body
     assert 'id="sdrOutcomeFurthest"' in body
     assert 'id="sdrStatFurthest"' in body
-    assert 'id="sdrPaceBreakdown"' in body
 
 
 def test_play_scrim_has_plain_fallback_background(env):
@@ -252,11 +249,53 @@ def appmod_with_auth(monkeypatch, tmp_path):
     yield appmod, TestClient(appmod.app)
 
 
-def test_play_stamina_bar_has_shimmer_animation(env):
+def test_play_renders_minimap_not_stamina_bar(env):
+    """Round 2: rowing and the Stamina resource are gone entirely — the
+    top-left HUD slot is now a 5-checkpoint mini-map instead."""
     _, client = env
     body = client.get("/play").text
-    assert "sdrStaminaShimmer" in body
-    assert ".sdr-stamina-fill::after{" in body
+    assert 'id="sdrMinimap"' in body
+    assert 'id="sdrMinimapFill"' in body
+    assert 'id="sdrMinimapLabel"' in body
+    assert body.count('class="sdr-minimap-dot') == 5
+    assert "sdrStaminaFill" not in body
+    assert "sdrRowBtn" not in body
+    assert ">ROW<" not in body
+
+
+def test_play_bottom_hud_no_longer_has_floating_checkpoint_text(env):
+    """The floating checkpoint-name label folded into the mini-map — the
+    bottom HUD now only shows the lives-remaining indicator."""
+    _, client = env
+    body = client.get("/play").text
+    assert 'id="sdrCheckpoint"' not in body
+    assert 'id="sdrLives"' in body
+
+
+def test_admin_game_settings_hint_is_admin_only(monkeypatch, tmp_path):
+    """The '/admin/game-settings is tunable' footer line must not leak to
+    regular players or public visitors — only admins should see it. The
+    leaderboard-save sentence stays visible to everyone."""
+    db = str(tmp_path / "admingate.db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    from linklib.db import Library
+    lib = Library(db)
+    lib.seed_game_rank_settings()
+    lib.close()
+    client = TestClient(appmod.app)
+
+    anon_body = client.get("/play").text
+    assert "/admin/game-settings" not in anon_body
+    assert "save automatically to the" in anon_body
+
+    client.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    admin_body = client.get("/play").text
+    assert "/admin/game-settings" in admin_body
 
 
 def test_play_rank_pill_name_and_sub_dont_run_together(env):
