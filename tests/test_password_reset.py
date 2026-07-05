@@ -123,7 +123,6 @@ def _extract_reset_url(env, username):
     always no-ops, but the token is generated and stored regardless."""
     lib = env._lib()
     try:
-        user = lib.get_user(username)
         row = lib.list_password_reset_requests(pending_only=True)[-1]
         assert row["username"] == username
         return row["token_hash"], row["expires_at"]

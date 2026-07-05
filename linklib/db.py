@@ -178,7 +178,14 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pwreset_resolved ON password_reset_requests(resolved_at);
-CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_reset_requests(token_hash);
+-- NOTE: no CREATE INDEX on token_hash here. This CREATE TABLE is IF NOT
+-- EXISTS — on any DB where this table already existed before token_hash was
+-- added, this whole block is a no-op and the column doesn't exist yet (it's
+-- only added below, by the ALTER TABLE migration, which runs AFTER this
+-- entire script). An index here would reference a column that isn't there
+-- yet on any pre-existing DB and crash on every boot. Any index on a column
+-- that's only ever added via the ALTER TABLE migration list below must be
+-- created in _POST_MIGRATION_INDEXES instead, never in this schema string.
 
 -- Durable record of failed outbound-email attempts (contact form, tool
 -- submissions, welcome emails, password resets, warm intros). Every send
@@ -336,6 +343,17 @@ CREATE INDEX IF NOT EXISTS idx_game_runs_leaderboard ON game_runs(rank, course_w
 CREATE INDEX IF NOT EXISTS idx_game_runs_user ON game_runs(user_id);
 """
 
+# Indexes that reference a column added via the ALTER TABLE migration list in
+# Library.__init__, rather than one present in every CREATE TABLE from day
+# one. These must run AFTER that migration loop, not inside _SCHEMA — see the
+# comment above password_reset_requests in _SCHEMA for the incident that
+# happens if one lands there instead (crashes on boot against any DB where
+# the table pre-dates the column, because CREATE TABLE IF NOT EXISTS is a
+# no-op there and the column isn't added until the migration loop runs).
+_POST_MIGRATION_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_reset_requests(token_hash)",
+]
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -469,6 +487,15 @@ class Library:
                 self.conn.commit()
             except sqlite3.OperationalError:
                 pass
+        # Indexes on any column added by the ALTER TABLE loop above must be
+        # created here, never inside _SCHEMA — see the NOTE above the
+        # password_reset_requests table in _SCHEMA for why (a real incident:
+        # an index on token_hash inside _SCHEMA broke every boot against a
+        # pre-existing DB, since _SCHEMA's CREATE TABLE IF NOT EXISTS is a
+        # no-op there and the column doesn't land until this loop runs).
+        for _idx_sql in _POST_MIGRATION_INDEXES:
+            self.conn.execute(_idx_sql)
+        self.conn.commit()
 
     # -- writes -------------------------------------------------------------
 
