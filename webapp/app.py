@@ -869,9 +869,14 @@ def _avatar(size: int = 140) -> str:
             f'font-size:{round(size/3)}px;font-weight:700;letter-spacing:-0.02em;">BW</div>')
 
 
-# Default site copy for the homepage teaser/expanded blurb and the About page
+# Default site copy for the homepage bio (lead line + rest) and the About page
 # bio — admin-editable at /admin/copy (settings keys below); these are the
 # fallback used when no override has been saved.
+_HOMEPAGE_HEADLINE_DEFAULT = "Be the strategic partner your leadership team leans on—not just the scorekeeper."
+_HOMEPAGE_SUBHEAD_DEFAULT = ("This is where I share the writing, tools, and hard-won lessons that help finance "
+                              "leaders at high-growth tech companies step into that role: GTM efficiency, "
+                              "headcount and org design, mentorship, and the cross-functional calls finance "
+                              "gets pulled into as a company scales.")
 _HOMEPAGE_TEASER_DEFAULT = "Brian Weisberg — CFO who builds finance functions from scratch, not inherits them."
 _HOMEPAGE_EXPANDED_DEFAULT = """I'm wrapping up my time at Mux over the next couple of weeks and actively exploring what's next—early stage, growth stage, or something I haven't done yet.
 
@@ -913,6 +918,8 @@ def _fpa_buddy_announcement(margin: str = "20px 0") -> str:
 def homepage(request: Request):
     lib = _lib()
     try:
+        homepage_headline = lib.get_setting("homepage_headline_copy") or _HOMEPAGE_HEADLINE_DEFAULT
+        homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
         homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
     finally:
@@ -948,21 +955,21 @@ def homepage(request: Request):
     body = f"""<div class="page">
 <div style="max-width:680px;">
   <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO for CFOs</div>
-  <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">Be the strategic partner your leadership team leans on&mdash;not just the scorekeeper.</h1>
-  <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);">This is where I share the writing, tools, and hard-won lessons that help finance leaders at high-growth tech companies step into that role: GTM efficiency, headcount and org design, mentorship, and the cross-functional calls finance gets pulled into as a company scales.</p>
+  <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">{_esc(homepage_headline)}</h1>
+  <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);">{_esc(homepage_subhead)}</p>
 </div>
 
-<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;">
+<div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;">
   {_avatar(64)}
   <div style="flex:1;min-width:240px;">
-    <p id="home-bio-teaser" style="margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_esc(homepage_teaser)} <a href="#" onclick="document.getElementById('home-bio-expanded').style.display='block';document.getElementById('home-bio-teaser').style.display='none';return false;">Read more &darr;</a></p>
-    <div id="home-bio-expanded" style="display:none;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
+    <p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_esc(homepage_teaser)}</p>
+    <div style="font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
   </div>
 </div>
 
-{_fpa_buddy_announcement("28px 0 0")}
+<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;">{cards}</div>
 
-<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:20px 0 8px;">{cards}</div>
+{_fpa_buddy_announcement("16px 0 0")}
 {suggest}
 
 <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
@@ -10221,8 +10228,8 @@ async def admin_voice_review(request: Request):
 
 @app.get("/admin/copy", response_class=HTMLResponse)
 def admin_copy_page(request: Request):
-    """Site copy: the homepage teaser/expanded blurb and the About page bio,
-    editable here so a copy change doesn't need a code deploy. Persisted to
+    """Site copy: the homepage bio and the About page bio, editable here so a
+    copy change doesn't need a code deploy. Persisted to
     the same `settings` table as /admin/voice; each field falls back to its
     hardcoded default when no override has been saved."""
     if not _is_authed(request):
@@ -10231,6 +10238,8 @@ def admin_copy_page(request: Request):
     lib = _lib()
     try:
         about_copy = lib.get_setting("about_page_copy") or _ABOUT_COPY_DEFAULT
+        homepage_headline = lib.get_setting("homepage_headline_copy") or _HOMEPAGE_HEADLINE_DEFAULT
+        homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
         homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
     finally:
@@ -10245,23 +10254,34 @@ def admin_copy_page(request: Request):
 <p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site &mdash; no redeploy.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage headline</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The big headline and subhead at the top of the homepage.</p>
+<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Headline</label>
+<textarea id="home-headline" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_headline)}</textarea>
+<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Subhead</label>
+<textarea id="home-subhead" rows="3" style="{prose}">{_esc(homepage_subhead)}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="headline-save-btn" onclick="saveHeadline()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<span id="headline-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage copy</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on the homepage: a short lead line, followed by the rest of the bio &mdash; both always visible.</p>
+<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Lead line</label>
+<textarea id="home-teaser" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_teaser)}</textarea>
+<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Rest of the bio</label>
+<textarea id="home-expanded" rows="8" style="{prose}">{_esc(homepage_expanded)}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="home-save-btn" onclick="saveHomepage()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<span id="home-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">About page copy</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on <a href="/about">/about</a>. Separate paragraphs with a blank line.</p>
 <textarea id="about-copy" rows="14" style="{prose}">{_esc(about_copy)}</textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="about-save-btn" onclick="saveAbout()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
 <span id="about-status" style="font-size:13px;color:var(--muted);"></span></div></div>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage copy</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on the homepage: a short teaser, plus text revealed inline when a visitor clicks &ldquo;Read more.&rdquo;</p>
-<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Teaser (always visible)</label>
-<textarea id="home-teaser" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_teaser)}</textarea>
-<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Expanded (revealed on click)</label>
-<textarea id="home-expanded" rows="8" style="{prose}">{_esc(homepage_expanded)}</textarea>
-<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
-<button id="home-save-btn" onclick="saveHomepage()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
-<span id="home-status" style="font-size:13px;color:var(--muted);"></span></div></div>
 </div>
 
 <script>
@@ -10272,6 +10292,22 @@ async function saveAbout() {{
   btn.disabled = true; btn.textContent = 'Saving…';
   try {{
     var r = await fetch('/admin/copy/about', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{about_page_copy: text}})}});
+    if (!r.ok) throw new Error();
+    status.textContent = 'Saved.'; status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+  }} catch(e) {{
+    status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
+}}
+
+async function saveHeadline() {{
+  var headline = document.getElementById('home-headline').value.trim();
+  var subhead = document.getElementById('home-subhead').value.trim();
+  var btn = document.getElementById('headline-save-btn'), status = document.getElementById('headline-status');
+  if (!headline || !subhead) {{ status.textContent = "Can't save empty copy."; status.style.color = '#b91c1c'; return; }}
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/copy/headline', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{homepage_headline_copy: headline, homepage_subhead_copy: subhead}})}});
     if (!r.ok) throw new Error();
     status.textContent = 'Saved.'; status.style.color = '#065f46';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
@@ -10299,6 +10335,26 @@ async function saveHomepage() {{
     return HTMLResponse(_page("Site copy — Admin", "Admin", body, authed=True))
 
 
+@app.post("/admin/copy/headline")
+async def admin_copy_save_headline(request: Request):
+    """Save the homepage headline/subhead. Rejects blank content so a
+    mistaken empty save can't wipe out existing copy."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    headline = (payload.get("homepage_headline_copy") or "").strip()
+    subhead = (payload.get("homepage_subhead_copy") or "").strip()
+    if not headline or not subhead:
+        raise HTTPException(status_code=400, detail="homepage_headline_copy and homepage_subhead_copy required")
+    lib = _lib()
+    try:
+        lib.set_setting("homepage_headline_copy", headline)
+        lib.set_setting("homepage_subhead_copy", subhead)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
+
+
 @app.post("/admin/copy/about")
 async def admin_copy_save_about(request: Request):
     """Save the About page bio copy. Rejects blank content so a mistaken
@@ -10319,8 +10375,8 @@ async def admin_copy_save_about(request: Request):
 
 @app.post("/admin/copy/homepage")
 async def admin_copy_save_homepage(request: Request):
-    """Save the homepage teaser/expanded copy. Rejects blank content so a
-    mistaken empty save can't wipe out existing copy."""
+    """Save the homepage bio copy. Rejects blank content so a mistaken empty
+    save can't wipe out existing copy."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
