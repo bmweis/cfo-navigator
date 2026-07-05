@@ -10046,7 +10046,7 @@ def admin_copy_page(request: Request):
              "font:14px/1.6 var(--font-body);background:var(--bg);resize:vertical;")
 
     body = f"""<div class="page" style="max-width:900px;">
-<p style="margin:0 0 4px;"><a href="/admin/brand" style="font-size:13px;color:var(--muted);">&larr; Brand standards</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Site copy</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site &mdash; no redeploy.</p>
 
