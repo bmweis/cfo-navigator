@@ -2787,13 +2787,22 @@ _SDR_WHALE_SVG = """<svg viewBox="0 0 120 70">
 
 # Nose points right (+x) — the shark trails behind the boat at lower worldX
 # and closes the gap forward, so it reads as swimming toward its target.
-_SDR_SHARK_SVG = """<svg viewBox="-35 -6 165 62">
-  <path d="M2,30 C10,36 22,32 30,26 L16,16 Z" fill="url(#sdrSharkGrad)"/>
-  <path d="M2,30 C10,24 22,28 30,34 L16,44 Z" fill="url(#sdrSharkGrad)"/>
-  <path d="M28,30 C28,18 46,12 70,12 C94,12 110,20 118,30 C110,40 94,48 70,48 C46,48 28,42 28,30 Z" fill="url(#sdrSharkGrad)"/>
-  <path d="M66,13 C68,2 76,-4 84,-2 C78,4 73,9 71,15 Z" fill="url(#sdrSharkGrad)"/>
-  <ellipse cx="100" cy="27" rx="1.8" ry="1.5" fill="#0A0E14"/>
-  <path d="M6,30 C-8,32 -20,35 -30,31" stroke="#7A7869" stroke-width="1.3" opacity="0.3" fill="none" stroke-linecap="round"/>
+# Heterocercal tail (larger upper lobe), a swept-back pectoral fin, and
+# gill lines are the classic shark-silhouette cues added on top of the
+# original simple ellipse-body version, per Brian's "more lifelike" request
+# — kept to those three additions rather than full texture/shading, same
+# restraint as the whale's final (reverted-from-overdetailed) design.
+_SDR_SHARK_SVG = """<svg viewBox="-40 -14 175 78">
+  <path d="M6,32 C-10,34 -24,37 -36,33" stroke="#7A7869" stroke-width="1.3" opacity="0.3" fill="none" stroke-linecap="round"/>
+  <path d="M26,32 C10,30 -4,18 -14,-2 C-2,10 14,20 27,26 Z" fill="url(#sdrSharkGrad)"/>
+  <path d="M26,33 C12,35 0,40 -10,48 C0,42 14,38 27,37 Z" fill="url(#sdrSharkGrad)"/>
+  <path d="M24,32 C24,19 43,12 68,12 C93,12 108,20 122,31 C108,42 93,50 68,50 C43,50 24,45 24,32 Z" fill="url(#sdrSharkGrad)"/>
+  <path d="M58,44 C56,53 51,61 41,65 C46,56 50,48 53,41 Z" fill="url(#sdrSharkGrad)"/>
+  <path d="M64,13 C66,1 75,-6 84,-4 C77,3 71,9 69,15 Z" fill="url(#sdrSharkGrad)"/>
+  <path d="M86,20 L83,28" stroke="#0A0E14" stroke-width="1" opacity="0.35" stroke-linecap="round"/>
+  <path d="M92,19 L89,28" stroke="#0A0E14" stroke-width="1" opacity="0.35" stroke-linecap="round"/>
+  <path d="M98,19 L95,28" stroke="#0A0E14" stroke-width="1" opacity="0.35" stroke-linecap="round"/>
+  <ellipse cx="106" cy="27" rx="1.9" ry="1.6" fill="#0A0E14"/>
 </svg>"""
 
 _SDR_JS = """
