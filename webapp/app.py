@@ -2523,6 +2523,16 @@ _SDR_CSS = """
   100%{opacity:0;transform:translateY(55px) scale(0.8) rotate(10deg);}
 }
 
+/* Shark pursuit hazard (Mate+, Martha's Vineyard leg onward) — positioned
+   dynamically like the boat/obstacles (JS sets .style.transform every
+   frame from its tracked worldX-gap/lane), not a fixed CSS animation like
+   the whale bonus above. z-index:3, same layer as obstacles and behind the
+   boat, so it reads as trailing rather than sitting on top of the player. */
+.sdr-shark{position:absolute;width:100px;z-index:3;display:none;pointer-events:none;
+  filter:drop-shadow(0 3px 5px rgba(0,0,0,0.25));}
+.sdr-shark svg{width:100%;height:auto;display:block;}
+.sdr-shark.sdr-lunging{filter:drop-shadow(0 3px 5px rgba(0,0,0,0.25)) drop-shadow(0 0 7px rgba(180,40,30,0.55));}
+
 /* Nantucket prize — only shown once the finish checkpoint is active. */
 .sdr-prize{position:absolute;left:68%;bottom:38%;width:30px;height:30px;z-index:3;display:none;
   animation:sdrPrizeBob 2.4s ease-in-out infinite;}
@@ -2608,6 +2618,7 @@ _SDR_DEFS_SVG = """<svg width="0" height="0" style="position:absolute;">
     <linearGradient id="sdrRockGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#A8A69C"/><stop offset="100%" stop-color="#5C5A52"/></linearGradient>
     <linearGradient id="sdrBuoyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#9C7A54"/><stop offset="100%" stop-color="#5A4128"/></linearGradient>
     <linearGradient id="sdrWhaleGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3E5FA8"/><stop offset="100%" stop-color="#16418F"/></linearGradient>
+    <linearGradient id="sdrSharkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3D4650"/><stop offset="100%" stop-color="#1C2126"/></linearGradient>
   </defs>
 </svg>"""
 
@@ -2768,6 +2779,17 @@ _SDR_WHALE_SVG = """<svg viewBox="0 0 120 70">
   <path d="M20,56 C34,62 56,62 72,54" stroke="#A3E5D4" stroke-width="1.6" opacity="0.4" fill="none" stroke-linecap="round"/>
 </svg>"""
 
+# Nose points right (+x) — the shark trails behind the boat at lower worldX
+# and closes the gap forward, so it reads as swimming toward its target.
+_SDR_SHARK_SVG = """<svg viewBox="-35 -6 165 62">
+  <path d="M2,30 C10,36 22,32 30,26 L16,16 Z" fill="url(#sdrSharkGrad)"/>
+  <path d="M2,30 C10,24 22,28 30,34 L16,44 Z" fill="url(#sdrSharkGrad)"/>
+  <path d="M28,30 C28,18 46,12 70,12 C94,12 110,20 118,30 C110,40 94,48 70,48 C46,48 28,42 28,30 Z" fill="url(#sdrSharkGrad)"/>
+  <path d="M66,13 C68,2 76,-4 84,-2 C78,4 73,9 71,15 Z" fill="url(#sdrSharkGrad)"/>
+  <ellipse cx="100" cy="27" rx="1.8" ry="1.5" fill="#0A0E14"/>
+  <path d="M6,30 C-8,32 -20,35 -30,31" stroke="#7A7869" stroke-width="1.3" opacity="0.3" fill="none" stroke-linecap="round"/>
+</svg>"""
+
 _SDR_JS = """
 (function(){
   var RANK_SETTINGS = __RANK_JSON__;
@@ -2787,6 +2809,15 @@ _SDR_JS = """
   // than popping in right as the run ends.
   var CHECKPOINTS = [[0.0,"Charles River"],[0.20,"Boston Harbor"],[0.45,"Cape Cod"],[0.70,"Martha's Vineyard"],[0.90,"Nantucket"]];
   var WHALE_TRIGGER_FRAC = 0.325;  // midpoint of the Boston Harbor segment
+  // Shark pursuit hazard — Mate+ only (never Deckhand), active from the
+  // Martha's Vineyard leg onward (same 0.70 threshold as that checkpoint).
+  // Catching the boat is an instant, rank-independent game over, separate
+  // from the rock/buoy lives system.
+  var SHARK_ACTIVE_FRAC = 0.70;
+  var SHARK_LANE_LERP = 1.5;       // per-second lag tracking the boat's lane
+  var SHARK_RESET_LERP = 2.0;      // per-second ease back to cruise distance
+  var SHARK_CATCH_GAP_UNITS = 12;
+  var SHARK_CATCH_LANE_FRAC = 0.09;
 
   var ROCK_SVG = document.getElementById('sdrRockTpl').innerHTML;
   var BUOY_SVG = document.getElementById('sdrBuoyTpl').innerHTML;
@@ -2803,6 +2834,7 @@ _SDR_JS = """
   var steerZone = document.getElementById('sdrSteerZone');
   var whaleEl = document.getElementById('sdrWhale');
   var prizeEl = document.getElementById('sdrPrize');
+  var sharkEl = document.getElementById('sdrShark');
   var skylineLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-skyline-layer'));
   var reflectionLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-reflection-layer'));
   var minimapDots = Array.prototype.slice.call(document.querySelectorAll('.sdr-minimap-dot'));
@@ -2817,6 +2849,8 @@ _SDR_JS = """
     hits: 0, invincibleUntil: 0,
     obstacles: [], gustZones: [], score: 0, startTs: 0, lastTs: 0,
     whaleTriggered: false, checkpointIdx: 0,
+    sharkActive: false, sharkLane: 0.5, sharkGap: 0,
+    sharkLunging: false, sharkLungeElapsed: 0, sharkNextLungeAt: 0,
   };
 
   function isoWeekKey(date){
@@ -2947,6 +2981,50 @@ _SDR_JS = """
     whaleEl.classList.add('sdr-breach');
   }
 
+  // Shark pursuit: Mate+ only, spawns once the boat crosses into the
+  // Martha's Vineyard leg and stays active through the finish. Cruise state
+  // holds a following distance and tracks the boat's lane with a lag (room
+  // to juke); Lunge state periodically closes that gap hard, then resets.
+  // Catching the boat (gap and lane both within tolerance) is an instant,
+  // rank-independent game over — separate from the rock/buoy lives system,
+  // no extra score penalty beyond whatever DistanceFraction/Pace had reached.
+  function updateShark(dt, cfg, frac, elapsedSec){
+    if (state.rank === 'deckhand') return;
+    if (frac < SHARK_ACTIVE_FRAC){
+      state.sharkActive = false;
+      return;
+    }
+    if (!state.sharkActive){
+      state.sharkActive = true;
+      state.sharkGap = cfg.shark_cruise_distance;
+      state.sharkLane = state.boatY;
+      state.sharkLunging = false;
+      state.sharkNextLungeAt = elapsedSec + cfg.shark_lunge_interval_sec;
+    }
+
+    state.sharkLane += (state.boatY - state.sharkLane) * Math.min(1, dt * SHARK_LANE_LERP);
+
+    if (!state.sharkLunging && elapsedSec >= state.sharkNextLungeAt){
+      state.sharkLunging = true;
+      state.sharkLungeElapsed = 0;
+    }
+    if (state.sharkLunging){
+      state.sharkLungeElapsed += dt;
+      state.sharkGap = Math.max(0, state.sharkGap - cfg.shark_lunge_speed * dt);
+      if (state.sharkLungeElapsed >= cfg.shark_lunge_duration_sec){
+        state.sharkLunging = false;
+        state.sharkNextLungeAt = elapsedSec + cfg.shark_lunge_interval_sec;
+      }
+    } else {
+      state.sharkGap += (cfg.shark_cruise_distance - state.sharkGap) * Math.min(1, dt * SHARK_RESET_LERP);
+    }
+
+    if (state.sharkGap <= SHARK_CATCH_GAP_UNITS &&
+        Math.abs(state.sharkLane - state.boatY) <= SHARK_CATCH_LANE_FRAC){
+      endRun('eaten');
+    }
+  }
+
   // Score = round(100 * DistanceFraction * PaceMultiplier), capped at 100,
   // minus a CollisionPenalty (0 for Deckhand regardless of hits — true
   // no-penalty practice mode; 10/hit for Mate/First Mate/Skipper), floored
@@ -2996,15 +3074,17 @@ _SDR_JS = """
   }
 
   function endRun(reason){
+    if (state.over) return;  // guards against a same-frame finish+shark-catch race
     state.over = true;
-    state.outcome = reason;  // 'finish' | 'sunk'
+    state.outcome = reason;  // 'finish' | 'sunk' | 'eaten'
     var prevHi = storedHi(state.rank);
     if (state.score > prevHi) localStorage.setItem(hiKeyFor(state.rank), String(state.score));
 
     var distanceFraction = state.worldX / COURSE_LENGTH;
     var elapsedSec = (performance.now() - state.startTs) / 1000;
 
-    var title = reason === 'finish' ? "You made it to Nantucket 🏆" : 'Sunk';
+    var title = reason === 'finish' ? "You made it to Nantucket 🏆" :
+                reason === 'eaten' ? "Caught!" : 'Sunk';
     document.getElementById('sdrOutcomeTitle').textContent = title;
     document.getElementById('sdrOutcomeSub').textContent =
       Math.round(distanceFraction * 100) + '% of the course \\u00b7 Score ' + state.score;
@@ -3051,10 +3131,13 @@ _SDR_JS = """
     state.hits = 0; state.invincibleUntil = 0;
     state.over = false; state.outcome = ''; state.score = 0;
     state.whaleTriggered = false; state.checkpointIdx = 0;
+    state.sharkActive = false; state.sharkLunging = false;
     state.startTs = performance.now(); state.lastTs = 0;
     buildObstacles(rankKey);
     buildGustZones(rankKey);
     whaleEl.classList.remove('sdr-breach');
+    sharkEl.classList.remove('sdr-lunging');
+    sharkEl.style.display = 'none';
     skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
     reflectionLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
     minimapDots.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
@@ -3157,6 +3240,8 @@ _SDR_JS = """
 
     updateCheckpointLayer(distanceFraction);
     maybeTriggerWhale(distanceFraction);
+    updateShark(dt, cfg, distanceFraction, elapsedSec);
+    if (state.over) return;  // updateShark may have ended the run (caught)
 
     if (state.worldX >= COURSE_LENGTH){ endRun('finish'); return; }
 
@@ -3188,6 +3273,17 @@ _SDR_JS = """
       if (gsx + gw < -50 || gsx > rect.width + 50){ z.el.style.display = 'none'; continue; }
       z.el.style.display = 'block';
       z.el.style.transform = 'translateX(' + gsx + 'px)';
+    }
+
+    if (state.sharkActive){
+      sharkEl.style.display = 'block';
+      sharkEl.classList.toggle('sdr-lunging', state.sharkLunging);
+      var shX = boatX - state.sharkGap * PX_PER_UNIT;
+      var shY = rect.height * (CHANNEL_TOP + state.sharkLane*(CHANNEL_BOTTOM-CHANNEL_TOP));
+      var shW = sharkEl.offsetWidth, shH = sharkEl.offsetHeight;
+      sharkEl.style.transform = 'translate(' + (shX-shW*0.5) + 'px,' + (shY-shH*0.5) + 'px)';
+    } else {
+      sharkEl.style.display = 'none';
     }
 
     var cfg = RANK_SETTINGS[state.rank];
@@ -3349,6 +3445,10 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
             "drift_speed": r["drift_speed"],
             "speed_ramp_per_sec": r["speed_ramp_per_sec"],
             "sail_speed": r["sail_speed"],
+            "shark_cruise_distance": r["shark_cruise_distance"],
+            "shark_lunge_interval_sec": r["shark_lunge_interval_sec"],
+            "shark_lunge_speed": r["shark_lunge_speed"],
+            "shark_lunge_duration_sec": r["shark_lunge_duration_sec"],
         }
         for r in ranks
     }
@@ -3383,6 +3483,7 @@ Drift into a wind gust and you&rsquo;ll auto-sail for free. Dodge the rocks and 
   <div id="sdrObstacles"></div>
   <div id="sdrWhale" class="sdr-whale">""" + _SDR_WHALE_SVG + """</div>
   <div id="sdrPrize" class="sdr-prize"><div class="sdr-prize-glow"></div><div class="sdr-prize-chest"></div><div class="sdr-prize-lid"></div></div>
+  <div id="sdrShark" class="sdr-shark">""" + _SDR_SHARK_SVG + """</div>
   <div id="sdrBoat" class="sdr-boat-wrap"><div class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div></div>
 
   <div class="sdr-hud-top">
@@ -7947,6 +8048,15 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
             for _ in range(int(r["sort_order"]) + 1)
         )
         grace_checked = "checked" if r["grace_window"] else ""
+        # Shark fields are omitted for Deckhand entirely (not just tunable to
+        # 0) — the hazard never spawns there (gated on rank in the game
+        # loop), so showing tunable-but-inert fields would just be confusing.
+        shark_fields = "" if r["rank"] == "deckhand" else "".join([
+            _game_settings_num_field("Shark cruise distance", "shark_cruise_distance", r["shark_cruise_distance"], suffix="u behind while cruising"),
+            _game_settings_num_field("Shark lunge interval", "shark_lunge_interval_sec", r["shark_lunge_interval_sec"], step="0.5", suffix="sec between lunges"),
+            _game_settings_num_field("Shark lunge speed", "shark_lunge_speed", r["shark_lunge_speed"], suffix="u/sec gap closes at"),
+            _game_settings_num_field("Shark lunge duration", "shark_lunge_duration_sec", r["shark_lunge_duration_sec"], step="0.1", suffix="sec per lunge"),
+        ])
         fields = "".join([
             _game_settings_num_field("Collision limit", "collision_limit", r["collision_limit"], suffix="hits, 0=no penalty"),
             _game_settings_num_field("Par time", "par_time_seconds", r["par_time_seconds"], suffix="seconds, full course"),
@@ -7955,7 +8065,7 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
             _game_settings_num_field("Base speed", "drift_speed", r["drift_speed"], suffix="u/sec at start"),
             _game_settings_num_field("Speed ramp", "speed_ramp_per_sec", r["speed_ramp_per_sec"], step="0.01", suffix="u/sec per sec elapsed"),
             _game_settings_num_field("Gust boost", "sail_speed", r["sail_speed"], suffix="u/sec bonus in a gust"),
-        ])
+        ]) + shark_fields
         cards += f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:16px;">
   <form method="post" action="/admin/game-settings/{r['rank']}/edit">
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
@@ -8018,6 +8128,10 @@ async def admin_game_settings_edit(request: Request, rank: str):
                 drift_speed=max(0.0, _num("drift_speed", float, current["drift_speed"])),
                 sail_speed=max(0.0, _num("sail_speed", float, current["sail_speed"])),
                 speed_ramp_per_sec=max(0.0, _num("speed_ramp_per_sec", float, current["speed_ramp_per_sec"])),
+                shark_cruise_distance=max(0.0, _num("shark_cruise_distance", float, current["shark_cruise_distance"])),
+                shark_lunge_interval_sec=max(0.0, _num("shark_lunge_interval_sec", float, current["shark_lunge_interval_sec"])),
+                shark_lunge_speed=max(0.0, _num("shark_lunge_speed", float, current["shark_lunge_speed"])),
+                shark_lunge_duration_sec=max(0.0, _num("shark_lunge_duration_sec", float, current["shark_lunge_duration_sec"])),
             )
         except ValueError as e:
             return RedirectResponse(f"/admin/game-settings?error={quote(str(e))}", status_code=303)
