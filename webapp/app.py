@@ -2457,8 +2457,14 @@ _SDR_CSS = """
 .sdr-skyline-layer{position:absolute;inset:0;opacity:0;transition:opacity 1.4s ease;}
 .sdr-skyline-layer.sdr-active{opacity:1;}
 .sdr-skyline-layer svg{width:100%;height:100%;display:block;}
-.sdr-reflection-wrap{position:absolute;left:0;right:0;top:58%;height:60%;opacity:.22;filter:blur(1.5px);
-  transform:scaleY(-1);transform-origin:top;overflow:hidden;}
+/* Fades to nothing well before the wrap's own bottom edge (mask, not just
+   low opacity) — mirroring the full skyline height at a flat opacity read
+   as a solid duplicate building rather than water; a real reflection loses
+   definition fast with depth. Blur sells "water" over "second building". */
+.sdr-reflection-wrap{position:absolute;left:0;right:0;top:58%;height:60%;opacity:.18;filter:blur(3px);
+  transform:scaleY(-1);transform-origin:top;overflow:hidden;
+  -webkit-mask-image:linear-gradient(0deg,transparent 0%,#000 30%);
+  mask-image:linear-gradient(0deg,transparent 0%,#000 30%);}
 .sdr-reflection-layer{position:absolute;top:0;left:0;right:0;height:100%;opacity:0;transition:opacity 1.4s ease;}
 .sdr-reflection-layer.sdr-active{opacity:1;}
 .sdr-reflection-layer svg{width:100%;height:100%;display:block;}
