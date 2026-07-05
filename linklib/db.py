@@ -256,6 +256,15 @@ CREATE INDEX IF NOT EXISTS idx_ask_questions_conversation ON ask_questions(conve
 -- can rebalance pacing/difficulty from /admin without a redeploy. Seeded with
 -- the Phase 0 proposal on first run (see _seed_game_settings); the DB is the
 -- source of truth after that.
+-- Round 2 (post-playtesting) removed manual rowing and the Stamina resource
+-- entirely — difficulty now comes from a speed ramp instead. drift_speed is
+-- repurposed as the base forward speed at t=0 (ramps up via the
+-- speed_ramp_per_sec column, added by migration below) and sail_speed is now
+-- an additive bonus while in a gust, on top of the current ramped base —
+-- rather than the old absolute override speed. row_speed/stamina_drain_per_sec/
+-- stamina_regen_per_sec are unused dead columns kept only because this
+-- codebase's migrations are additive-only (see the ALTER TABLE list in
+-- __init__) — no code reads or writes them anymore.
 CREATE TABLE IF NOT EXISTS game_rank_settings (
     rank                   TEXT PRIMARY KEY,       -- 'deckhand' | 'mate' | 'first_mate' | 'skipper'
     label                  TEXT NOT NULL,           -- 'Deckhand', 'Mate', ...
@@ -265,24 +274,26 @@ CREATE TABLE IF NOT EXISTS game_rank_settings (
     par_time_seconds       INTEGER NOT NULL,        -- target full-course finish time
     gust_coverage_pct      REAL NOT NULL,           -- % of course length covered by wind gusts
     obstacle_density       REAL NOT NULL,           -- obstacles per 1000 world-units of channel
-    drift_speed            REAL NOT NULL,           -- world-units/sec, no input & no gust
-    row_speed              REAL NOT NULL,           -- world-units/sec, Space held
-    sail_speed             REAL NOT NULL,           -- world-units/sec, auto-sail in a gust
-    stamina_drain_per_sec  REAL NOT NULL,           -- while rowing
-    stamina_regen_per_sec  REAL NOT NULL,           -- while not rowing
+    drift_speed            REAL NOT NULL,           -- world-units/sec, base speed at t=0 (ramps up)
+    row_speed              REAL NOT NULL,           -- unused since Round 2 (rowing removed)
+    sail_speed             REAL NOT NULL,           -- world-units/sec, additive bonus while in a gust
+    stamina_drain_per_sec  REAL NOT NULL,           -- unused since Round 2 (Stamina removed)
+    stamina_regen_per_sec  REAL NOT NULL,           -- unused since Round 2 (Stamina removed)
     sort_order             INTEGER NOT NULL DEFAULT 0,
     updated_at             TEXT NOT NULL DEFAULT ''
 );
 
--- "Sail, Don't Row" — one row per submitted run, backing the per-rank public
--- leaderboards (Brian confirmed per-rank tables, not one combined board with
--- badges). difficulty_index/difficulty_label are computed once at write time
--- from that week's rank settings and frozen on the row — display never
--- recomputes them from current settings, so a later admin retune can't
--- retroactively relabel a past week's runs. Score/distance/time/efficiency
--- are client-reported (this is a client-authoritative DOM+CSS game with no
--- server-side simulation, same trust model as obstacle placement) — bounds-
--- checked at write time, but not defended against a determined cheater.
+-- "Sail, Don't Row" — one row per submitted run, backing the public
+-- leaderboard. Round 2 flipped this from per-rank tables to a single
+-- combined list (each row tagged with the rank it was played on, shown as
+-- a badge) — see list_game_leaderboard. difficulty_index/difficulty_label
+-- are computed once at write time from that week's rank settings and frozen
+-- on the row — display never recomputes them from current settings, so a
+-- later admin retune can't retroactively relabel a past week's runs.
+-- Score/distance/time/hits are client-reported (this is a client-
+-- authoritative DOM+CSS game with no server-side simulation, same trust
+-- model as obstacle placement) — bounds-checked at write time, but not
+-- defended against a determined cheater.
 CREATE TABLE IF NOT EXISTS game_runs (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id           INTEGER NOT NULL,
@@ -291,7 +302,7 @@ CREATE TABLE IF NOT EXISTS game_runs (
     distance_fraction REAL NOT NULL,             -- 0.0-1.0
     finished          INTEGER NOT NULL DEFAULT 0,-- 1 = reached Nantucket, 0 = sunk/partial
     time_seconds      REAL NOT NULL,
-    efficiency_pct    REAL NOT NULL,             -- Stamina remaining at end, 0-100
+    efficiency_pct    REAL NOT NULL,             -- unused since Round 2 (Stamina removed); always 0
     course_week       TEXT NOT NULL,             -- ISO week, e.g. '2026-W27'
     difficulty_index  INTEGER NOT NULL,          -- 0-100, frozen at write time
     difficulty_label  TEXT NOT NULL,             -- 'Fair Winds' | 'Choppy Waters' | 'Rough Seas' | 'Storm Warning'
@@ -410,6 +421,14 @@ class Library:
             # this is on AND a vendor contact email exists.
             "ALTER TABLE tools ADD COLUMN warm_intro_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tools ADD COLUMN vendor_name TEXT NOT NULL DEFAULT ''",
+            # Round 2: rowing/Stamina removed, difficulty now comes from a speed
+            # ramp instead — drift_speed/sail_speed columns are repurposed
+            # (see the CREATE TABLE comment above), this is the one genuinely
+            # new column the ramp needs.
+            "ALTER TABLE game_rank_settings ADD COLUMN speed_ramp_per_sec REAL NOT NULL DEFAULT 0",
+            # Round 2: collisions now directly affect score, so the leaderboard
+            # (and the outcome screen's new Hits stat) needs the count on the row.
+            "ALTER TABLE game_runs ADD COLUMN hits INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1458,17 +1477,27 @@ class Library:
     # -- "Sail, Don't Row" — rank/mode tuning ----------------------------------
 
     # rank, label, difficulty_label, collision_limit, grace_window, par_time_seconds,
-    # gust_coverage_pct, obstacle_density, drift_speed, row_speed, sail_speed,
-    # stamina_drain_per_sec, stamina_regen_per_sec, sort_order
+    # gust_coverage_pct, obstacle_density, drift_speed (base speed @ t=0),
+    # row_speed (unused), sail_speed (gust boost, additive),
+    # stamina_drain_per_sec (unused), stamina_regen_per_sec (unused), sort_order,
+    # speed_ramp_per_sec (u/sec base speed gains per elapsed second)
+    #
+    # Round 2 tuning proposal, calibrated so an average run (accounting for
+    # each rank's own gust_coverage_pct) lands close to par_time_seconds over
+    # the fixed 4300-unit course: avgSpeedNeeded = COURSE_LENGTH/par_time,
+    # avgBase = avgSpeedNeeded - gust_coverage_frac*gust_boost, then
+    # base_start + ramp*par_time/2 = avgBase. All four ranks land within ~1.3%
+    # of their par time at this math; /admin/game-settings can retune from
+    # actual playtesting.
     _GAME_RANK_DEFAULTS = [
-        ("deckhand",   "Deckhand",   "Easy",   0, 1, 130, 45.0, 3.0, 10.0, 30.0, 40.0, 15.0, 4.0, 0),
-        ("mate",       "Mate",       "Medium", 3, 1, 150, 35.0, 5.0, 10.0, 30.0, 40.0, 15.0, 4.0, 1),
-        ("first_mate", "First Mate", "Hard",   1, 1, 165, 28.0, 7.0, 10.0, 30.0, 40.0, 15.0, 4.0, 2),
-        ("skipper",    "Skipper",    "Expert", 1, 0, 180, 20.0, 9.0, 10.0, 30.0, 40.0, 15.0, 4.0, 3),
+        ("deckhand",   "Deckhand",   "Easy",   0, 1, 130, 45.0, 3.0, 20.0, 30.0, 8.0, 15.0, 4.0, 0, 0.15),
+        ("mate",       "Mate",       "Medium", 3, 1, 150, 35.0, 5.0, 15.0, 30.0, 8.0, 15.0, 4.0, 1, 0.15),
+        ("first_mate", "First Mate", "Hard",   1, 1, 165, 28.0, 7.0, 12.0, 30.0, 8.0, 15.0, 4.0, 2, 0.14),
+        ("skipper",    "Skipper",    "Expert", 1, 0, 180, 20.0, 9.0, 10.0, 30.0, 8.0, 15.0, 4.0, 3, 0.14),
     ]
 
     def seed_game_rank_settings(self) -> None:
-        """Insert the four ranks with the Phase 0 defaults if the table is
+        """Insert the four ranks with the tuning defaults if the table is
         empty. Never overwrites existing rows — once seeded, /admin/game-settings
         owns the values."""
         if self.conn.execute("SELECT 1 FROM game_rank_settings LIMIT 1").fetchone():
@@ -1480,8 +1509,9 @@ class Library:
                    (rank, label, difficulty_label, collision_limit, grace_window,
                     par_time_seconds, gust_coverage_pct, obstacle_density,
                     drift_speed, row_speed, sail_speed,
-                    stamina_drain_per_sec, stamina_regen_per_sec, sort_order, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    stamina_drain_per_sec, stamina_regen_per_sec, sort_order,
+                    speed_ramp_per_sec, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 row + (now,),
             )
         self.conn.commit()
@@ -1506,8 +1536,7 @@ class Library:
         allowed = {
             "label", "difficulty_label", "collision_limit", "grace_window",
             "par_time_seconds", "gust_coverage_pct", "obstacle_density",
-            "drift_speed", "row_speed", "sail_speed",
-            "stamina_drain_per_sec", "stamina_regen_per_sec",
+            "drift_speed", "sail_speed", "speed_ramp_per_sec",
         }
         bad = set(fields) - allowed
         if bad:
@@ -1521,30 +1550,34 @@ class Library:
         )
         self.conn.commit()
 
-    # -- "Sail, Don't Row" — leaderboard (per-rank tables) -----------------
+    # -- "Sail, Don't Row" — leaderboard (one combined list) ----------------
 
     def record_game_run(self, user_id: int, rank: str, score: int, distance_fraction: float,
-                        finished: bool, time_seconds: float, efficiency_pct: float,
+                        finished: bool, time_seconds: float, hits: int,
                         course_week: str, difficulty_index: int, difficulty_label: str) -> int:
         cur = self.conn.execute(
             """INSERT INTO game_runs
                (user_id, rank, score, distance_fraction, finished, time_seconds,
-                efficiency_pct, course_week, difficulty_index, difficulty_label, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                efficiency_pct, hits, course_week, difficulty_index, difficulty_label, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, rank, score, distance_fraction, int(finished), time_seconds,
-             efficiency_pct, course_week, difficulty_index, difficulty_label, _now()),
+             0.0, hits, course_week, difficulty_index, difficulty_label, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
 
-    def list_game_leaderboard(self, rank: str, course_week: str | None = None,
+    def list_game_leaderboard(self, rank: str | None = None, course_week: str | None = None,
                               limit: int = 50) -> list[dict]:
-        """Top runs for one rank (per-rank tables, not a combined board),
-        best Score first, one row per player — their single best run, not
-        every attempt. Pass course_week for the 'this week' view; omit for
-        all-time."""
-        where = "WHERE gr.rank = ?"
-        params: list = [rank]
+        """Top runs, best Score first, one row per player — their single best
+        run, not every attempt. Combined across all ranks by default (Round 2:
+        one board, each row tagged with a rank badge, not per-rank tables) —
+        pass `rank` to filter to one rank. Pass course_week for the 'this
+        week' view; omit for all-time."""
+        where = "WHERE 1=1"
+        params: list = []
+        if rank:
+            where += " AND gr.rank = ?"
+            params.append(rank)
         if course_week:
             where += " AND gr.course_week = ?"
             params.append(course_week)
