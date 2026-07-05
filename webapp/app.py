@@ -487,7 +487,16 @@ h2{font-family:var(--font-head);font-size:21px;font-weight:600;letter-spacing:-0
 h3{font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin:0 0 4px;}
 p{margin:0 0 16px;color:var(--ink-soft);}
 
+/* Three width tiers, used consistently across every page rather than
+   ad hoc per-page pixel values: narrow for single-purpose forms (login,
+   contact, one-record admin edits), the .page default for reading-width
+   content (marketing pages, articles, most admin list/detail views), and
+   wide for data-dense grids/tables (which scroll horizontally via their own
+   overflow-x:auto wrapper, so narrowing them here never clips a column)
+   and the game stage. */
 .page{max-width:780px;margin:0 auto;padding:48px 24px 72px;}
+.page-narrow{max-width:480px;}
+.page-wide{max-width:960px;}
 
 /* Buttons — primary navy fill, ghost navy outline. Seafoam is NEVER a button. */
 .btn{display:inline-block;padding:11px 22px;background:var(--navy);color:#fff;border-radius:10px;font:600 15px var(--font-body);border:1px solid var(--navy);cursor:pointer;}
@@ -635,7 +644,7 @@ def login_page(request: Request, next: str = "/library", error: str = "", reset:
     reset_notice = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
                      'font-size:14px;margin:0 0 16px;">Password updated — sign in with your new password.</p>'
                      if reset else "")
-    body = f"""<div class="page" style="max-width:420px;">
+    body = f"""<div class="page page-narrow">
 <h1>Sign in</h1>
 <p style="color:var(--muted);margin:4px 0 28px;">Sign in with your username and password.</p>
 {reset_notice}
@@ -658,7 +667,7 @@ def forgot_password_page(request: Request, sent: str = ""):
     if _is_member(request):
         return RedirectResponse("/library", status_code=303)
     if sent:
-        body = """<div class="page" style="max-width:420px;">
+        body = """<div class="page page-narrow">
 <h1>Check your email</h1>
 <p style="color:var(--muted);margin:4px 0 20px;">If that username has an account with an email on file, a password
 reset link is on its way — it expires in 1 hour. If we don&rsquo;t have an email for that account, Brian&rsquo;s been
@@ -666,7 +675,7 @@ notified and will reset it for you directly.</p>
 <p><a href="/login" style="font-size:14px;">&larr; Back to sign in</a></p>
 </div>"""
         return HTMLResponse(_page("Forgot password—Brian Weisberg", "", body))
-    body = """<div class="page" style="max-width:420px;">
+    body = """<div class="page page-narrow">
 <h1>Forgot your password?</h1>
 <p style="color:var(--muted);margin:4px 0 28px;">Enter your username and we&rsquo;ll email you a reset link.</p>
 <form method="post" action="/forgot-password" style="display:grid;gap:16px;">
@@ -730,7 +739,7 @@ def reset_password_page(request: Request, token: str = "", error: str = ""):
     finally:
         lib.close()
     if not req:
-        body = """<div class="page" style="max-width:420px;">
+        body = """<div class="page page-narrow">
 <h1>This link has expired</h1>
 <p style="color:var(--muted);margin:4px 0 20px;">Reset links are only valid for 1 hour, and only work once.
 Request a new one below.</p>
@@ -739,7 +748,7 @@ Request a new one below.</p>
         return HTMLResponse(_page("Link expired—Brian Weisberg", "", body))
     err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">Password must be at least 8 characters.</p>'
            if error else "")
-    body = f"""<div class="page" style="max-width:420px;">
+    body = f"""<div class="page page-narrow">
 <h1>Set a new password</h1>
 <p style="color:var(--muted);margin:4px 0 28px;">Choose a new password for &ldquo;{_esc(req['username'])}&rdquo;.</p>
 {err}
@@ -969,7 +978,6 @@ def homepage(request: Request):
 
 <div style="display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;">{cards}</div>
 
-{_fpa_buddy_announcement("16px 0 0")}
 {suggest}
 
 <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
@@ -1118,7 +1126,7 @@ def thought_leadership(request: Request):
 
 @app.get("/growth-engine-ratio", response_class=HTMLResponse)
 def growth_engine_ratio(request: Request):
-    body = """<div class="page" style="max-width:820px;">
+    body = """<div class="page">
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
@@ -1836,7 +1844,7 @@ renderTL();
 
 @app.get("/finops-ai-hackathon", response_class=HTMLResponse)
 def finops_ai_hackathon(request: Request):
-    body = """<div class="page" style="max-width:820px;">
+    body = """<div class="page">
 <style>
   .fah-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
   .fah-pull p{margin:0;font-size:17px;font-style:italic;line-height:1.55;color:var(--ink);}
@@ -2195,7 +2203,7 @@ def finops_ai_hackathon(request: Request):
 
 @app.get("/netsuite-mcp", response_class=HTMLResponse)
 def netsuite_mcp(request: Request):
-    body = """<div class="page" style="max-width:820px;">
+    body = """<div class="page">
 <style>
   .ns-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
   .ns-pull p{margin:0;font-size:16px;font-style:italic;line-height:1.55;color:var(--ink);}
@@ -2547,8 +2555,8 @@ _SDR_CSS = """
   --sdr-buoy-lt:#9C7A54; --sdr-buoy-dk:#5A4128;
   --sdr-gold:#C9A24B;
 }
-.sdr-sub{color:var(--muted);font-size:15px;margin:0 0 22px;max-width:520px;}
-.sdr-pregame{max-width:560px;}
+.sdr-sub{color:var(--muted);font-size:15px;margin:0 0 22px;max-width:720px;}
+.sdr-pregame{max-width:720px;}
 .sdr-rank-row{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 24px;align-items:stretch;}
 .sdr-rank-pill{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:10px 16px;
   border-radius:12px;border:1.5px solid var(--line);background:#fff;cursor:pointer;font:inherit;
@@ -3665,7 +3673,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
           .replace("__COURSE_LENGTH__", str(_SDR_COURSE_LENGTH))
           .replace("__SIGNED_IN__", "true" if signed_in else "false"))
 
-    return """<div class="page" id="sdrRoot" style="max-width:960px;">
+    return """<div class="page page-wide" id="sdrRoot">
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
 <h1 style="margin:0 0 6px;">Sail, Don&rsquo;t Row</h1>
@@ -3847,7 +3855,7 @@ def play_leaderboard(request: Request, scope: str = "week"):
         rows_html = ('<p style="padding:24px;text-align:center;color:var(--muted);">'
                      'No runs yet — be the first to set a Score.</p>')
 
-    body = """<div class="page" style="max-width:720px;">
+    body = """<div class="page">
 <style>""" + _SDR_PILL_CSS + """
 .sdr-lb-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;}
 .sdr-lb-tab{font:700 12px var(--font-head);padding:7px 14px;border-radius:8px;border:1px solid var(--line);
@@ -3879,14 +3887,14 @@ visible at a glance, side by side.</p>
 @app.get("/contact", response_class=HTMLResponse)
 def contact_page(request: Request, submitted: str = ""):
     if submitted == "1":
-        body = """<div class="page" style="max-width:560px;">
+        body = """<div class="page page-narrow">
 <h1>Thanks for reaching out.</h1>
 <p>I'll get back to you shortly.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
         return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request)))
 
-    body = """<div class="page" style="max-width:560px;">
+    body = """<div class="page page-narrow">
 <h1>Get in Touch</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">I'm always happy to connect with finance leaders, founders, and operators.</p>
 <form method="post" action="/contact" style="display:grid;gap:16px;">
@@ -3950,14 +3958,14 @@ def library_submit_page(request: Request, submitted: str = ""):
     if not _is_member(request):   # account-only, to keep public spam out
         return _login_redirect(request)
     if submitted == "1":
-        body = """<div class="page" style="max-width:560px;">
+        body = """<div class="page page-narrow">
 <h1>Thanks&mdash;suggestion received.</h1>
 <p>I review every suggestion personally. If it's a fit for the archive, it'll join the collection.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
         return HTMLResponse(_page("Suggestion received — Brian Weisberg", "", body, role=_role(request)))
 
-    body = """<div class="page" style="max-width:560px;">
+    body = """<div class="page page-narrow">
 <h1>Suggest a piece for the archive</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Read something a finance leader should have in their back pocket? Send it my way. I review every suggestion before it joins the archive.</p>
 <form method="post" action="/library/submit" style="display:grid;gap:20px;">
@@ -4053,7 +4061,7 @@ def community_page(request: Request):
         '&#9888; Google Form not yet configured. Create the form in Google Workspace '
         'and update <code>_COMMUNITY_FORM_URL</code> in <code>webapp/app.py</code>.</p></div>'
     )
-    body = f"""<div class="page" style="max-width:660px;">
+    body = f"""<div class="page">
 <div style="font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;">CFO Community</div>
 <h1 style="margin:0 0 28px;">Building something better<br>for CFO peers.</h1>
 
@@ -4158,7 +4166,7 @@ def tools_directory(request: Request):
         for b in benchmarks
     )
 
-    body = f"""<div class="page" style="max-width:860px;">
+    body = f"""<div class="page page-wide">
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
   <h1 style="margin:0;">CFO Toolbox</h1>
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
@@ -4606,7 +4614,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
     if not _is_member(request):
         return _login_redirect(request)
     if submitted == "1":
-        body = """<div class="page" style="max-width:560px;">
+        body = """<div class="page page-narrow">
 <h1>Thanks—submission received.</h1>
 <p>Your tool has been submitted for review. If approved, it'll appear in the CFO Toolbox shortly.</p>
 <a href="/tools" class="btn btn-ghost" style="margin-top:8px;">Back to CFO Toolbox</a>
@@ -4619,7 +4627,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
     finally:
         lib.close()
 
-    body = f"""<div class="page" style="max-width:560px;">
+    body = f"""<div class="page page-narrow">
 <h1>Submit a Tool</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Know a tool that belongs in the CFO Toolbox? Submit it for review.</p>
 <form method="post" action="/tools/submit" style="display:grid;gap:20px;">
@@ -4723,7 +4731,7 @@ def admin_contacts(request: Request):
         '(shared with the Drive backup) + <code>LINKLIB_FROM_EMAIL</code> (and optionally '
         '<code>LINKLIB_CONTACT_EMAIL</code>) to enable them. Until then, check this page manually.</div>'
     )
-    body = f"""<div class="page" style="max-width:960px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Contact submissions</h1>
 {email_status}
@@ -4762,7 +4770,7 @@ def admin_email_failures(request: Request):
         </tr>"""
         for f in failures
     ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No failed sends recorded.</td></tr>'
-    body = f"""<div class="page" style="max-width:960px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Email delivery failures</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Every outbound email (contact form, tool submissions, welcome emails,
@@ -4854,7 +4862,7 @@ def admin_tools(request: Request):
         '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No approved tools yet.</td></tr>'
     total_leads = sum(lead_counts.values())
 
-    body = f"""<div class="page" style="max-width:1100px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Tools</h1>
@@ -4927,7 +4935,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
         for ld in leads
     ) or '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No leads yet.</td></tr>'
     title_suffix = f" — {_esc(tool_name_filter)}" if tool_name_filter else ""
-    body = f"""<div class="page" style="max-width:1000px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox intros{title_suffix}</h1>
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm Intro requests from readers &mdash; {len(leads)} total.</p>
@@ -4987,7 +4995,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     if not categories:
         rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet — add one below.</td></tr>'
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox categories</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">These are the filter pills on <a href="/tools">/tools</a>. Renaming updates every tool tagged with the old name; deleting removes the tag from tagged tools but leaves the tools themselves in the directory — they still show under <strong>All</strong>, just not under any specific pill.</p>
@@ -5138,7 +5146,7 @@ def admin_benchmarks(request: Request):
   </td>
 </tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No benchmarking resources yet.</td></tr>'
 
-    body = f"""<div class="page" style="max-width:1000px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Benchmarking resources</h1>
@@ -5165,7 +5173,7 @@ def admin_benchmarks(request: Request):
 def admin_benchmarks_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-    body = f"""<div class="page" style="max-width:560px;">
+    body = f"""<div class="page page-narrow">
 <h1>Add a benchmarking resource</h1>
 <form method="post" action="/admin/tools/benchmarks/new" style="display:grid;gap:20px;">
 {_benchmark_form_fields()}
@@ -5209,7 +5217,7 @@ def admin_benchmarks_edit(request: Request, benchmark_id: int):
         lib.close()
     if not b:
         raise HTTPException(status_code=404, detail="Benchmark not found")
-    body = f"""<div class="page" style="max-width:560px;">
+    body = f"""<div class="page page-narrow">
 <h1>Edit benchmarking resource</h1>
 <form method="post" action="/admin/tools/benchmarks/{benchmark_id}/edit" style="display:grid;gap:20px;">
 {_benchmark_form_fields(b)}
@@ -5263,7 +5271,7 @@ def admin_tools_new(request: Request):
         categories = lib.list_tool_categories()
     finally:
         lib.close()
-    body = f"""<div class="page" style="max-width:560px;">
+    body = f"""<div class="page page-narrow">
 <h1>Add a tool</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
 <form method="post" action="/admin/tools/new" style="display:grid;gap:20px;">
@@ -5402,7 +5410,7 @@ def admin_tools_edit(request: Request, tool_id: int):
         meta_parts.append(f"Last edited {tool['updated_at'][:10]}")
     meta_line = (" &middot; ".join(meta_parts)) if meta_parts else ""
 
-    body = f"""<div class="page" style="max-width:560px;">
+    body = f"""<div class="page page-narrow">
 <h1>Edit tool</h1>
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form method="post" action="/admin/tools/{tool_id}/edit" style="display:grid;gap:20px;">
@@ -6470,7 +6478,7 @@ def library(request: Request):
         _hcard("/questions", "Community Q&amp;A", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
     ])
 
-    body = f"""<div class="page" style="max-width:680px;">
+    body = f"""<div class="page">
 <h1 style="margin:0 0 6px;">Library</h1>
 <p style="color:var(--muted);margin:0 0 26px;">Your private workspace &mdash; the curated archive, the live feed, and the FP&amp;A assistant.</p>
 <div style="display:grid;gap:14px;">{cards}</div>
@@ -6521,7 +6529,7 @@ def community_questions(request: Request, q: str = ""):
             'No community questions yet. Answers show up here after members ask FP&amp;A Buddy something.')
          + '</div>')
 
-    body = f"""<div class="page" style="max-width:760px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Community Q&amp;A</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy &mdash; check here before spending a query re-asking one. <a href="/ask">Ask your own &rarr;</a></p>
@@ -6669,7 +6677,7 @@ def ask_page(request: Request, q: str = ""):
 
     pre_q = _esc(q)
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <h1 style="margin-bottom:6px;">Ask FP&amp;A Buddy</h1>
 <p style="color:var(--muted);margin:0 0 28px;">Query your saved archive, RSS feed, and trusted web sources. Tune cost vs. depth before each query.</p>
 {usage_html}
@@ -7050,7 +7058,7 @@ def ask_history(request: Request):
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
          '<a href="/ask">Ask FP&amp;A Buddy a question &rarr;</a></div>')
 
-    body = f"""<div class="page" style="max-width:760px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage &mdash; it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/questions">community Q&amp;A page</a> for other members to browse.</p>
@@ -7297,7 +7305,7 @@ def admin_open_source(request: Request):
             f'</div>')
 
     total = sum(len(items) for _, _, items in _OPEN_SOURCE)
-    body = f"""<div class="page" style="max-width:880px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Built with open source</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 6px;font-size:16px;line-height:1.6;">This whole site stands on the shoulders of {total}-plus open-source projects&mdash;maintained by people who gave their work away so the rest of us could build. From the framework that serves every page to the tiny tool that keeps the code tidy and the one that drew the favicon, none of it would exist without them. With gratitude. &#129518;</p>
@@ -7352,7 +7360,7 @@ def admin_checks(request: Request):
             f'<p style="margin:3px 0 0;font-size:12px;color:var(--muted);line-height:1.45;">{_esc(r["detail"])}</p>'
             f'</div>')
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Checks</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 18px;font-size:15px;line-height:1.6;">The automated guards that keep the site honest. <strong>Every check here runs on each commit</strong> in the <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">GitHub QA workflow</a>; the deterministic ones (<em>Live + CI</em>) also run live on this page so you get an instant read.</p>
@@ -7483,7 +7491,7 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'</details>'
         )
 
-    body = f"""<div class="page" style="max-width:720px;">
+    body = f"""<div class="page">
 <style>
 .admin-group summary::-webkit-details-marker{{display:none;}}
 .admin-group[open] .admin-chevron{{transform:rotate(180deg);}}
@@ -7537,7 +7545,7 @@ def admin_library(request: Request):
 
     cards = "".join(_step(i + 1, href, title, desc, task_counts.get(href, 0))
                     for i, (href, title, desc) in enumerate(_LIBRARY_TOOLS))
-    body = f"""<div class="page" style="max-width:720px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Archive</h1>
 <p style="color:var(--muted);margin:4px 0 18px;">Full management of the digital archive &mdash; the eight tools below cover backing it up, bringing in new content (past and present), keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from. For a first-time cleanup, work top to bottom &mdash; each step sets up the next. Once set up, jump to any tool directly anytime.</p>
@@ -7830,7 +7838,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
         '</span>' if pending_n else ''
     )
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <style>
 .q-group summary::-webkit-details-marker{{display:none;}}
 .q-group[open] .q-chevron{{transform:rotate(90deg);}}
@@ -8046,7 +8054,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
     if not tags:
         rows = '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--muted);">No tags yet.</td></tr>'
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Tag cleanup</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Tags are generated automatically during enrichment. Use this to tidy the vocabulary &mdash; <strong>renaming a tag to one that already exists merges them</strong>, and deleting removes it from every article. Search and the tag facets update immediately.</p>
@@ -8201,7 +8209,7 @@ def admin_tag_style(request: Request, generating: int = 0):
 
     gen_label = "Re-learn from my archive" if has_guide else "Learn from my archive"
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Tagging style{state_badge}</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Auto-tagging already reuses your vocabulary. This goes further: it studies <strong>how</strong> you tagged your {n_tags} tags &mdash; what each one means, how granular you go, what you leave untagged &mdash; and distills soft rules that get injected into enrichment so new tags match your judgment. Review and edit anything below; your edits are what the tagger follows.</p>
@@ -8359,7 +8367,7 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
   </form>
 </div>"""
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Sail, Don&rsquo;t Row &mdash; rank settings</h1>
 <p style="color:var(--muted);margin:-6px 0 20px;">Tune pace, wind, obstacle density, and the collision rule per rank. The
@@ -8542,7 +8550,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
 </form>"""
             body_inner += verify_banner + bulk + blocks
 
-    body = f"""<div class="page" style="max-width:760px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Content de-dupe</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Scans one source for articles that are likely duplicates or near-duplicates &mdash; most often the same piece republished under a different title, which exact-URL dedup misses. A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged. The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest.</p>
@@ -8702,7 +8710,7 @@ def admin_ask_report(request: Request, user: str = ""):
         for u in users
     )
 
-    body = f"""<div class="page" style="max-width:1100px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>FP&amp;A Buddy report</h1>
 <p style="color:var(--muted);margin:-6px 0 20px;">Every question asked, across every user &mdash; question, asker, settings used, and cost per question. The full answer text is left out of this view on purpose, so you can scan cost and volume without reading every answer; it&rsquo;s included in the CSV export.</p>
@@ -8905,7 +8913,7 @@ def admin_users(request: Request, msg: str = ""):
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
         'padding:32px;text-align:center;color:var(--muted);">No accounts yet. Create one below.</div>')
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Users</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Member accounts for the gated sections. You create accounts here (no public sign-up yet). You always keep admin access via the host password, so you can&rsquo;t lock yourself out.</p>
@@ -9233,7 +9241,7 @@ def admin_review_removals(request: Request):
     else:
         cards = "".join(_card(a) for a in flagged)
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Remove content</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as potentially off-target for this archive &mdash; most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so: keep the false positives, remove the rest.</p>
@@ -9454,7 +9462,7 @@ def admin_enrich(request: Request):
     model_radios = "".join(_mrow(m, l, d) for m, l, d in models)
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
 
-    body = f"""<div class="page" style="max-width:720px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Re-enrich archive</h1>
 <p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what FP&A Buddy reasons from, so depth here pays off there.</p>
@@ -9692,7 +9700,7 @@ def admin_backfill(request: Request):
 
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
 
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Historical sweep</h1>
 <p style="color:var(--muted);margin:-6px 0 20px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review. A one-time catch-up on your back catalog &mdash; it doesn&rsquo;t save anything by itself, it just fills the queue below for you to approve.</p>
@@ -9828,7 +9836,7 @@ def admin_backup(request: Request, uploaded: str = ""):
         f'font-size:14px;margin:-6px 0 16px;">Database replaced — {_esc(uploaded)} articles now live.</p>'
         if uploaded else ''
     )
-    body = f"""<div class="page" style="max-width:820px;">
+    body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Archive backup</h1>
 {uploaded_banner}
@@ -10062,7 +10070,7 @@ def admin_brand(request: Request):
         '</div>'
     )
 
-    body = f"""<div class="page" style="max-width:900px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Brand standards</h1>
 <p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com — New England nautical, restrained.
@@ -10171,7 +10179,7 @@ def admin_voice_page(request: Request):
     mono = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
             "font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;")
 
-    body = f"""<div class="page" style="max-width:900px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin/brand" style="font-size:13px;color:var(--muted);">&larr; Brand standards</a></p>
 <h1>Verbal identity</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Your writing voice &mdash; the guide Claude drafts from, and an on-demand check for whether new copy sounds like you.</p>
@@ -10312,7 +10320,7 @@ def admin_copy_page(request: Request):
     prose = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
              "font:14px/1.6 var(--font-body);background:var(--bg);resize:vertical;")
 
-    body = f"""<div class="page" style="max-width:900px;">
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Site copy</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site &mdash; no redeploy.</p>
