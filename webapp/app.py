@@ -10484,11 +10484,13 @@ def admin_emails_page(request: Request):
 
     lib = _lib()
     try:
+        wi_saved_body = lib.get_setting("warm_intro_body_template")
         wi_subject = lib.get_setting("warm_intro_subject_template") or eu.WARM_INTRO_SUBJECT_DEFAULT
-        wi_body = lib.get_setting("warm_intro_body_template") or eu.WARM_INTRO_BODY_DEFAULT
+        wi_body = wi_saved_body or eu.WARM_INTRO_BODY_DEFAULT
         wi_signoff = lib.get_setting("warm_intro_signoff") or eu.WARM_INTRO_SIGNOFF_DEFAULT
+        w_saved_body = lib.get_setting("welcome_body_template")
         w_subject = lib.get_setting("welcome_subject_template") or eu.WELCOME_SUBJECT_DEFAULT
-        w_body = lib.get_setting("welcome_body_template") or eu.WELCOME_BODY_DEFAULT
+        w_body = w_saved_body or eu.WELCOME_BODY_DEFAULT
         w_signoff = lib.get_setting("welcome_signoff") or eu.WELCOME_SIGNOFF_DEFAULT
     finally:
         lib.close()
@@ -10496,16 +10498,26 @@ def admin_emails_page(request: Request):
     prose = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
              "font:14px/1.6 var(--font-body);background:var(--bg);resize:vertical;")
 
+    def _js_str(s: str) -> str:
+        return json.dumps(s).replace("</", "<\\/")
+
     def _placeholder_hint(keys: list[str]) -> str:
         return " &middot; ".join(f"<code>{{{k}}}</code>" for k in keys)
 
     def _section(section_id: str, title: str, blurb: str, placeholders: list[str],
-                 subject: str, body_text: str, signoff: str) -> str:
+                 subject: str, body_text: str, signoff: str, has_override: bool,
+                 default_subject: str, default_body: str, default_signoff: str) -> str:
+        status_line = (
+            "Currently sending your saved override below."
+            if has_override else
+            "Currently sending the built-in default below &mdash; nothing's been saved for this email yet."
+        )
         return f"""\
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">{title}</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 6px;">{blurb}</p>
-<p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Placeholders: {_placeholder_hint(placeholders)}</p>
+<p style="font-size:12px;color:var(--muted);margin:0 0 6px;">Placeholders: {_placeholder_hint(placeholders)}</p>
+<p id="{section_id}-override-status" style="font-size:12px;color:{'var(--accent)' if has_override else 'var(--muted)'};margin:0 0 14px;font-weight:600;">{status_line}</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Subject</label>
 <input id="{section_id}-subject" type="text" value="{_esc(subject)}" style="{prose}margin-bottom:14px;">
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Body</label>
@@ -10514,19 +10526,49 @@ def admin_emails_page(request: Request):
 <textarea id="{section_id}-signoff" rows="3" style="{prose}">{_esc(signoff)}</textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="{section_id}-save-btn" onclick="saveEmailSection('{section_id}')" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
-<span id="{section_id}-status" style="font-size:13px;color:var(--muted);"></span></div></div>"""
+<span id="{section_id}-status" style="font-size:13px;color:var(--muted);"></span></div>
+
+<details style="margin-top:18px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 16px;">
+<summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--navy);">Built-in default (read-only reference)</summary>
+<div style="margin-top:12px;font-size:13px;color:var(--ink-soft);">
+<p style="margin:0 0 4px;"><strong>Subject:</strong></p>
+<pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(default_subject)}</pre>
+<p style="margin:0 0 4px;"><strong>Body:</strong></p>
+<pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(default_body)}</pre>
+<p style="margin:0 0 4px;"><strong>Sign-off:</strong></p>
+<pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(default_signoff)}</pre>
+<button type="button" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;" onclick="fillEmailDefault('{section_id}')">Copy default into the fields above</button>
+<span style="font-size:12px;color:var(--muted);margin-left:8px;">Still requires Save below to take effect.</span>
+</div>
+</details>
+</div>"""
 
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Email templates</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site &mdash; no redeploy.</p>
+<p style="color:var(--muted);margin:4px 0 12px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site &mdash; no redeploy.</p>
+<div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 26px;font-size:13px;color:var(--ink-soft);line-height:1.6;">
+<strong style="color:var(--navy);">How this works:</strong> each email has a built-in default (hardcoded in <code>linklib/email_utils.py</code>) and an optional saved override (stored here). Whichever field you save below becomes what actually sends &mdash; it replaces the default until you edit it again here. If you never save a field, the built-in default is what sends. Two things to keep in mind: <strong>unsaved edits in the boxes below don't count</strong> &mdash; only what you last clicked Save on goes out; and there's no automatic &ldquo;reset&rdquo; &mdash; if a future code update changes the built-in default, a saved override here keeps overriding it until you manually update it (each section's &ldquo;Built-in default&rdquo; box below always shows the current default so you can compare and copy it over).
+</div>
 
-{_section("warm-intro", "Warm Intro email", "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/leads). The requester is cc&rsquo;d automatically.", eu.WARM_INTRO_PLACEHOLDERS, wi_subject, wi_body, wi_signoff)}
+{_section("warm-intro", "Warm Intro email", "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/leads). The requester is cc&rsquo;d automatically.", eu.WARM_INTRO_PLACEHOLDERS, wi_subject, wi_body, wi_signoff, bool(wi_saved_body), eu.WARM_INTRO_SUBJECT_DEFAULT, eu.WARM_INTRO_BODY_DEFAULT, eu.WARM_INTRO_SIGNOFF_DEFAULT)}
 
-{_section("welcome", "Welcome email", "Sent to a new member when their account is created in /admin/users.", eu.WELCOME_PLACEHOLDERS, w_subject, w_body, w_signoff)}
+{_section("welcome", "Welcome email", "Sent to a new member when their account is created in /admin/users.", eu.WELCOME_PLACEHOLDERS, w_subject, w_body, w_signoff, bool(w_saved_body), eu.WELCOME_SUBJECT_DEFAULT, eu.WELCOME_BODY_DEFAULT, eu.WELCOME_SIGNOFF_DEFAULT)}
 
 <script>
 var EMAIL_SAVE_URL = {{"warm-intro": "/admin/emails/warm-intro", "welcome": "/admin/emails/welcome"}};
+var EMAIL_DEFAULTS = {{
+  "warm-intro": {{subject: {_js_str(eu.WARM_INTRO_SUBJECT_DEFAULT)}, body: {_js_str(eu.WARM_INTRO_BODY_DEFAULT)}, signoff: {_js_str(eu.WARM_INTRO_SIGNOFF_DEFAULT)}}},
+  "welcome": {{subject: {_js_str(eu.WELCOME_SUBJECT_DEFAULT)}, body: {_js_str(eu.WELCOME_BODY_DEFAULT)}, signoff: {_js_str(eu.WELCOME_SIGNOFF_DEFAULT)}}}
+}};
+function fillEmailDefault(id) {{
+  var d = EMAIL_DEFAULTS[id];
+  document.getElementById(id + '-subject').value = d.subject;
+  document.getElementById(id + '-body').value = d.body;
+  document.getElementById(id + '-signoff').value = d.signoff;
+  var status = document.getElementById(id + '-status');
+  status.textContent = 'Default copied in — click Save to use it.'; status.style.color = 'var(--navy)';
+}}
 async function saveEmailSection(id) {{
   var subject = document.getElementById(id + '-subject').value.trim();
   var bodyText = document.getElementById(id + '-body').value.trim();
@@ -10542,6 +10584,9 @@ async function saveEmailSection(id) {{
       throw new Error(err.detail || 'Save failed');
     }}
     status.textContent = 'Saved.'; status.style.color = '#065f46';
+    var overrideStatus = document.getElementById(id + '-override-status');
+    overrideStatus.textContent = 'Currently sending your saved override below.';
+    overrideStatus.style.color = 'var(--accent)';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
   }} catch(e) {{
     status.textContent = e.message || 'Save failed — try again.'; status.style.color = '#b91c1c';
