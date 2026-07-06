@@ -5579,11 +5579,9 @@ async def tools_interest(tool_id: int, request: Request):
         tool_name = tool["name"]
         vendor_name = tool.get("vendor_name") or ""
         lib.save_tool_lead(tool_id, tool_name, name, email, company, company_size)
-    finally:
-        lib.close()
-    try:
         from linklib.email_utils import send_warm_intro_email
-        send_warm_intro_email(
+        _send_email_safely(
+            lib, "warm_intro", send_warm_intro_email,
             to=vendor_email,
             vendor_contact_name=vendor_name,
             cc=email,
@@ -5593,8 +5591,8 @@ async def tools_interest(tool_id: int, request: Request):
             requester_company=company,
             requester_company_size=company_size,
         )
-    except Exception:
-        pass
+    finally:
+        lib.close()
     return JSONResponse({"ok": True})
 
 
