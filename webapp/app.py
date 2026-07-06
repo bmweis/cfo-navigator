@@ -2581,6 +2581,19 @@ _SDR_CSS = """
 .sdr-rank-pill.sdr-active .sdr-rank-collision{color:rgba(255,255,255,0.75);border-top-color:rgba(255,255,255,0.2);}
 @media (max-width:480px){ .sdr-rank-row{flex-direction:column;} .sdr-rank-pill{width:100%;} }
 
+.sdr-pregame-label{font-family:var(--font-head);font-weight:700;font-size:11px;color:var(--navy);
+  text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px;}
+.sdr-boat-row{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px;align-items:stretch;}
+.sdr-boat-pill{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 16px;
+  border-radius:12px;border:1.5px solid var(--line);background:#fff;cursor:pointer;font:inherit;
+  text-align:left;min-width:170px;flex:1 1 170px;}
+.sdr-boat-pill.sdr-active{border-color:var(--navy);background:var(--navy);}
+.sdr-boat-pill.sdr-active .sdr-boat-name,.sdr-boat-pill.sdr-active .sdr-boat-sub{color:#fff;}
+.sdr-boat-name{font-family:var(--font-head);font-weight:600;font-size:13px;color:var(--navy);}
+.sdr-boat-sub{font-size:10px;color:var(--muted);}
+.sdr-boat-pill.sdr-active .sdr-boat-sub{color:rgba(255,255,255,0.75);}
+@media (max-width:480px){ .sdr-boat-row{flex-direction:column;} .sdr-boat-pill{width:100%;} }
+
 .sdr-stage{position:relative;width:100%;max-width:900px;aspect-ratio:16/9;border-radius:16px;overflow:hidden;
   background:linear-gradient(180deg,#EAF0F5 0%, #DCEEEA 45%, var(--sdr-water-light) 60%);
   touch-action:none;user-select:none;-webkit-user-select:none;}
@@ -3019,9 +3032,10 @@ _SDR_JS = """
   if (touchCapable) root.classList.add('sdr-touch');
 
   var selectedRank = 'mate';
+  var selectedBoat = 'sailboat';
   var state = {
     started: false, over: false, outcome: '',
-    rank: 'mate', worldX: 0, boatY: 0.5, targetY: 0.5,
+    rank: 'mate', boat: 'sailboat', worldX: 0, boatY: 0.5, targetY: 0.5,
     hits: 0, invincibleUntil: 0,
     obstacles: [], gustZones: [], score: 0, startTs: 0, lastTs: 0,
     whaleTriggered: false, whaleActive: false, whaleLane: 0.5, whaleTriggerTs: 0,
@@ -3331,8 +3345,9 @@ _SDR_JS = """
     });
   }
 
-  function startRun(rankKey){
+  function startRun(rankKey, boatKey){
     state.rank = rankKey;
+    state.boat = boatKey || state.boat;
     state.worldX = 0; state.boatY = 0.5; state.targetY = 0.5;
     state.hits = 0; state.invincibleUntil = 0;
     state.over = false; state.outcome = ''; state.score = 0;
@@ -3381,8 +3396,19 @@ _SDR_JS = """
     });
   });
   document.getElementById('sdrPreHi').textContent = storedHi(selectedRank);
-  document.getElementById('sdrStartBtn').addEventListener('click', function(){ startRun(selectedRank); });
-  document.getElementById('sdrRetryBtn').addEventListener('click', function(){ startRun(state.rank); });
+
+  // -- Pre-game boat selector — independent axis from rank; see _SDR_BOATS. --
+  var boatPills = root.querySelectorAll('.sdr-boat-pill');
+  boatPills.forEach(function(pill){
+    pill.addEventListener('click', function(){
+      boatPills.forEach(function(p){ p.classList.remove('sdr-active'); });
+      pill.classList.add('sdr-active');
+      selectedBoat = pill.getAttribute('data-boat');
+    });
+  });
+
+  document.getElementById('sdrStartBtn').addEventListener('click', function(){ startRun(selectedRank, selectedBoat); });
+  document.getElementById('sdrRetryBtn').addEventListener('click', function(){ startRun(state.rank, state.boat); });
   document.getElementById('sdrChangeRankBtn').addEventListener('click', backToRankSelect);
 
   // -- Keyboard (steering only — no row/Space input) --
@@ -3608,6 +3634,28 @@ def _sdr_collision_description(r):
     return f"{limit} hits and you’re sunk"
 
 
+# Boat choice — a second, independent axis from rank (see _sdr_rank_pill_html
+# below). Hit-tolerance/gusts/hazards/obstacles all stay driven purely by the
+# selected rank; boat only changes how the player propels the boat forward
+# (sailboat: automatic, unchanged; rowboat: manual, see the JS engine).
+_SDR_BOATS = [
+    {"boat": "sailboat", "label": "Sailboat",
+     "sub": "Occasional free gusts. Steady pace over the long haul."},
+    {"boat": "rowboat", "label": "Rowboat",
+     "sub": "Fast off the line. More effort, and you'll fade over distance."},
+]
+
+
+def _sdr_boat_pill_html(b, active):
+    active_cls = " sdr-active" if active else ""
+    return (
+        f'<button type="button" class="sdr-boat-pill{active_cls}" data-boat="{b["boat"]}">'
+        f'<span class="sdr-boat-name">{b["label"]}</span>'
+        f'<span class="sdr-boat-sub">{b["sub"]}</span>'
+        f'</button>'
+    )
+
+
 def _sdr_rank_pill_html(r, active):
     stripes = "".join('<span></span>' for _ in range(int(r["sort_order"]) + 1))
     active_cls = " sdr-active" if active else ""
@@ -3648,6 +3696,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
                              '<a href="/login?next=%2Fplay">Sign in &rarr;</a> &middot; '
                              '<a href="/play/leaderboard">View leaderboard &rarr;</a></p>')
     pills_html = "".join(_sdr_rank_pill_html(r, r["rank"] == "mate") for r in ranks)
+    boat_pills_html = "".join(_sdr_boat_pill_html(b, b["boat"] == "sailboat") for b in _SDR_BOATS)
     skyline_layers = "".join(
         f'<div class="sdr-skyline-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">{svg}</div>'
         for i, svg in enumerate(_SDR_CHECKPOINT_SVGS)
@@ -3690,6 +3739,9 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
 </div>
 
 <div id="sdrPreGame" class="sdr-pregame">
+  <p class="sdr-pregame-label">Choose your boat</p>
+  <div class="sdr-boat-row" id="sdrBoatRow">""" + boat_pills_html + """</div>
+  <p class="sdr-pregame-label">Choose your rank</p>
   <div class="sdr-rank-row" id="sdrRankRow">""" + pills_html + """</div>
   <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Best this session (selected rank): <strong id="sdrPreHi">0</strong></p>
   <button type="button" id="sdrStartBtn" class="btn">Cast Off</button>
@@ -3745,7 +3797,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
     """ + leaderboard_note + """
     <div>
       <button type="button" id="sdrRetryBtn" class="btn" style="margin-top:16px;">Try Again</button>
-      <button type="button" id="sdrChangeRankBtn" class="btn btn-ghost" style="margin-top:16px;margin-left:8px;">Change Rank</button>
+      <button type="button" id="sdrChangeRankBtn" class="btn btn-ghost" style="margin-top:16px;margin-left:8px;">Change Boat/Rank</button>
     </div>
   </div>
 </div>
