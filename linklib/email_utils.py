@@ -42,6 +42,7 @@ import base64
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from html import escape as _h
 
 import requests
 
@@ -213,12 +214,20 @@ def send_warm_intro_email(
     vendor_greeting = vendor_contact_name.strip() or "there"
     subject = f"Introduction: {requester_name} <> {tool_name}"
 
+    # Built as adjacent string literals (not backslash-newline continuation) so
+    # the paragraph is one clean logical line regardless of how it's reflowed
+    # in an editor — no risk of an accidental hard break mid-sentence.
+    intro_line = (
+        f"I'd like to introduce you to {requester_name} at {requester_company} "
+        f"({requester_company_size} employees) — a member of the CFO Toolbox "
+        f"community I run at bmweis.com. They came across {tool_name} in the "
+        f"directory and asked for a warm intro to your team."
+    )
+
     body = f"""\
 Hi {vendor_greeting},
 
-I'd like to introduce you to {requester_name} at {requester_company} ({requester_company_size} \
-employees) — a member of the CFO Toolbox community I run at bmweis.com. They came across \
-{tool_name} in the directory and asked for a warm intro to your team.
+{intro_line}
 
 {requester_name}
 {requester_email}
@@ -226,10 +235,24 @@ employees) — a member of the CFO Toolbox community I run at bmweis.com. They c
 
 I've cc'd {requester_name} directly so the two of you can take it from here.
 
-Best,
+My best,
 Brian Weisberg
 bmweis.com / CFO Toolbox
 """
+
+    html_body = f"""\
+<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.55;color:#1a1a1a;">
+<p>Hi {_h(vendor_greeting)},</p>
+<p>I&rsquo;d like to introduce you to {_h(requester_name)} at {_h(requester_company)} \
+({_h(requester_company_size)} employees) &mdash; a member of the CFO Toolbox community I run at \
+<a href="https://bmweis.com">bmweis.com</a>. They came across {_h(tool_name)} in the directory and \
+asked for a warm intro to your team.</p>
+<p>{_h(requester_name)}<br>\
+<a href="mailto:{_h(requester_email)}">{_h(requester_email)}</a><br>\
+{_h(requester_company)} &mdash; {_h(requester_company_size)} employees</p>
+<p>I&rsquo;ve cc&rsquo;d {_h(requester_name)} directly so the two of you can take it from here.</p>
+<p>My best,<br>Brian Weisberg<br>bmweis.com / CFO Toolbox</p>
+</body></html>"""
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -238,6 +261,10 @@ bmweis.com / CFO Toolbox
     msg["To"]      = to
     msg["Cc"]      = cc
     msg["Reply-To"] = requester_email
+    # Plain-text part first, HTML second — clients that support HTML render
+    # the last part in a multipart/alternative; plain-text-only clients fall
+    # back to the first part.
     msg.attach(MIMEText(body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
     _send(msg)
     return True
