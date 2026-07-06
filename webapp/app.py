@@ -8989,6 +8989,7 @@ async def admin_users_create(request: Request):
                 sent = _send_email_safely(
                     lib, "welcome", send_welcome_email,
                     email, username=username.lower(), temp_password=password, login_url=login_url,
+                    name=name,
                 )
                 if sent:
                     msg += f" Welcome email sent to {email}."

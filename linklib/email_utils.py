@@ -114,32 +114,46 @@ def send_notification_email(to: str, subject: str, body: str) -> bool:
     return True
 
 
-def send_welcome_email(to: str, username: str, temp_password: str, login_url: str) -> bool:
-    """Send a new member their temporary password and a link to sign in.
-    Returns True if sent, False if Google OAuth is not configured (graceful
-    no-op) — the account still exists either way, so callers should tell
-    the admin plainly when this comes back False (share the password
+def send_welcome_email(to: str, username: str, temp_password: str, login_url: str, name: str = "") -> bool:
+    """Send a new member a warm welcome with their account details and a link
+    to sign in. Returns True if sent, False if Google OAuth is not configured
+    (graceful no-op) — the account still exists either way, so callers should
+    tell the admin plainly when this comes back False (share the password
     another way). Raises on API errors.
     """
     if not is_configured():
         return False
 
+    greeting_name = name.strip() or username
     subject = "Your bmweis.com account"
-    body = f"""\
-Hi {username},
 
-An account has been created for you at bmweis.com.
+    body = f"""\
+Hi {greeting_name},
+
+Welcome! Your account at bmweis.com is ready, confirmed for {to}.
 
 Username: {username}
 Temporary password: {temp_password}
 
-Sign in here, then use "Forgot your password?" on that page any time you'd \
-like to set your own password:
+Sign in here, then use "Forgot your password?" on that page to set your own \
+password — we'd suggest doing that as soon as you get a chance, since this \
+one was just generated for you:
 {login_url}
 
 Best,
 Brian Weisberg
 """
+
+    html_body = f"""\
+<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.55;color:#1a1a1a;">
+<p>Hi {_h(greeting_name)},</p>
+<p>Welcome! Your account at bmweis.com is ready, confirmed for {_h(to)}.</p>
+<p>Username: {_h(username)}<br>Temporary password: {_h(temp_password)}</p>
+<p>Sign in here, then use &ldquo;Forgot your password?&rdquo; on that page to set your own \
+password &mdash; we&rsquo;d suggest doing that as soon as you get a chance, since this one was \
+just generated for you:<br><a href="{_h(login_url)}">{_h(login_url)}</a></p>
+<p>Best,<br>Brian Weisberg</p>
+</body></html>"""
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -147,6 +161,7 @@ Brian Weisberg
         msg["From"] = _FROM_EMAIL
     msg["To"] = to
     msg.attach(MIMEText(body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
     _send(msg)
     return True
 
