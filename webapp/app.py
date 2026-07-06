@@ -2997,20 +2997,25 @@ _SDR_JS = """
   var BOAT_LERP = 8;
   // Rowboat propulsion — boat-specific, not rank-tuned (rank still governs
   // obstacle density/gust coverage/hit-tolerance identically for both
-  // boats; only forward-speed physics differ by boat). Each row() call
-  // (spacebar or the mobile row button) adds a burst to rowMomentum, which
+  // boats; only forward-speed physics differ by boat). Each completed
+  // press-and-release of Space (or the mobile row button — see row(),
+  // which fires on release, not press) adds a burst to rowMomentum, which
   // decays continuously (dm/dt = -ROW_DECAY_PER_SEC*m) rather than stepping
   // down, so it reads as "coasting to a stop" instead of an abrupt cutoff.
+  // Requiring release (not just holding the key/button down) is deliberate,
+  // per design-review feedback — it forces a distinct stroke gesture that
+  // competes for attention with steering, rather than a hold-to-win button.
   // TUNABLE — first-pass values, not yet playtested; flagged in the PR
-  // description for a balance pass. Chosen so a single press immediately
-  // exceeds every rank's sailboat drift_speed (10-20 u/s, see
-  // _GAME_RANK_DEFAULTS) — "fast off the line" — while a sustainably
-  // rowable cadence (roughly one press per 1.5s) averages out below the
-  // sailboat's typical run speed (~26-29 u/s once its ramp + gust bonus are
-  // folded in) — "fades over the long haul".
-  var ROW_BURST_ADD = 34;        // u/s added to momentum per press
-  var ROW_MAX_MOMENTUM = 110;    // cap so mashing can't run away
-  var ROW_DECAY_PER_SEC = 1.1;   // exponential decay coefficient
+  // description for a balance pass. Chosen so a single stroke immediately,
+  // dramatically exceeds every rank's sailboat drift_speed (10-20 u/s, see
+  // _GAME_RANK_DEFAULTS) — "fast off the line" — while a sustainable
+  // stroke cadence (roughly one per 1.5s, realistic given each stroke is a
+  // deliberate press-and-release, not a held button) still averages out
+  // below the sailboat's typical run speed (~26-29 u/s once its ramp + gust
+  // bonus are folded in) — "fades over the long haul".
+  var ROW_BURST_ADD = 46;        // u/s added to momentum per completed stroke
+  var ROW_MAX_MOMENTUM = 145;    // cap so mashing can't run away
+  var ROW_DECAY_PER_SEC = 1.6;   // exponential decay coefficient
   var ROW_BASE_DRIFT = 4;        // u/s floor so an idle rowboat crawls rather than fully stalls
   // Nantucket's own threshold is 0.90, not 1.0 — the actual finish still
   // triggers at worldX >= COURSE_LENGTH (frac 1.0), but the backdrop/HUD
@@ -3456,22 +3461,35 @@ _SDR_JS = """
   }
 
   // -- Keyboard (steering + spacebar-to-row on the rowboat) --
-  var keyUp = false, keyDown = false;
+  // Rowing fires on release, not press: holding Space down must not
+  // propel the boat on its own — each stroke is a deliberate press-and-
+  // release, which is harder to fit around steering than a hold-to-win
+  // button would be (see the ROW_* constants' comment above).
+  var keyUp = false, keyDown = false, spaceDown = false;
   window.addEventListener('keydown', function(e){
     if (!state.started || state.over) return;
     if (e.code === 'ArrowUp'){ keyUp = true; e.preventDefault(); }
     if (e.code === 'ArrowDown'){ keyDown = true; e.preventDefault(); }
-    if (e.code === 'Space'){ if (!e.repeat) row(); e.preventDefault(); }
+    if (e.code === 'Space'){ spaceDown = true; e.preventDefault(); }
   });
   window.addEventListener('keyup', function(e){
     if (e.code === 'ArrowUp') keyUp = false;
     if (e.code === 'ArrowDown') keyDown = false;
+    if (e.code === 'Space' && spaceDown){ spaceDown = false; row(); }
   });
 
   // -- Mobile row button (rowboat + touch only; see startRun/backToRankSelect
-  // for the display toggle). pointerdown (not click) for the same low-latency
-  // feel as the steer-drag zone. --
-  rowBtn.addEventListener('pointerdown', function(e){ e.preventDefault(); row(); });
+  // for the display toggle). Same press-and-release rule as Space: the
+  // stroke fires on pointerup, not pointerdown. setPointerCapture keeps
+  // pointerup targeting this element even if the finger drifts slightly. --
+  var rowPressed = false;
+  rowBtn.addEventListener('pointerdown', function(e){
+    e.preventDefault();
+    rowPressed = true;
+    try { rowBtn.setPointerCapture(e.pointerId); } catch(err){}
+  });
+  rowBtn.addEventListener('pointerup', function(){ if (rowPressed){ rowPressed = false; row(); } });
+  rowBtn.addEventListener('pointercancel', function(){ rowPressed = false; });
 
   // -- Touch/pointer steer-drag --
   var dragging = false;
