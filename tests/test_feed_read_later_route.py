@@ -110,3 +110,15 @@ def test_feed_save_to_archive_stays_admin_only(env):
     c = _login(appmod, "member1", "supersecret")
     r = c.post("/feed/save", data={"url": "https://ex.com/a"})
     assert r.status_code == 401
+
+
+def test_admin_only_reminder_shown_to_admin_not_members(env):
+    """The Feed buttons are still admin-gated in the UI even though the
+    backend now supports any member — an on-page reminder so that doesn't
+    get forgotten before the UI gate is flipped."""
+    appmod, _ = env
+    admin = _login(appmod, "admin", "adminpass")   # break-glass host-password admin
+    assert "admin-only for now" in admin.get("/feed").text
+
+    member = _login(appmod, "member1", "supersecret")
+    assert "admin-only for now" not in member.get("/feed").text

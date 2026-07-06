@@ -6055,6 +6055,19 @@ function saveCustomFilters() {{
 }}
 </script>"""
 
+    # Reminder for Brian only: the Save / Read Later buttons below are still
+    # gated to is_admin (see the comment above), even though the backend now
+    # supports any signed-in member — flip that gate when you're ready to
+    # launch these to non-admin users.
+    admin_note = (
+        '<div style="max-width:860px;margin:12px auto 0;background:var(--seafoam-wash);'
+        'border:1px solid var(--seafoam);border-radius:10px;padding:10px 16px;'
+        'font-size:13px;line-height:1.5;color:var(--ink);">'
+        '&#128274; <strong>Save</strong> and <strong>Read later</strong> are admin-only for now '
+        '&mdash; other signed-in members won&rsquo;t see these buttons until you turn them on.'
+        '</div>' if is_admin else ''
+    )
+
     body = f"""<div style="border-bottom:1px solid var(--line);padding:12px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
   <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
     <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1;">{tabs}</div>
@@ -6062,6 +6075,7 @@ function saveCustomFilters() {{
     <button onclick="toggleFilter()" id="filter-btn" class="filter-btn">&#9776; Sources &amp; Topics</button>
   </div>
 </div>
+{admin_note}
 {filter_panel}
 <main id="feed-main" style="max-width:860px;margin:0 auto;padding:24px 24px 80px;display:grid;gap:12px;">
 {cards}
