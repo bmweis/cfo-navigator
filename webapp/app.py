@@ -705,8 +705,13 @@ async def forgot_password_submit(request: Request):
                     lib.create_password_reset_request(user["id"], user["username"],
                                                        token_hash=token_hash, expires_at=expires_at)
                     reset_url = f"{PUBLIC_BASE.rstrip('/')}/reset-password?token={token}"
-                    _send_email_safely(lib, "password_reset", send_password_reset_email,
-                                        user["email"], username=user["username"], reset_url=reset_url)
+                    _send_email_safely(
+                        lib, "password_reset", send_password_reset_email,
+                        user["email"], username=user["username"], reset_url=reset_url,
+                        subject_template=lib.get_setting("password_reset_subject_template") or None,
+                        body_template=lib.get_setting("password_reset_body_template") or None,
+                        signoff=lib.get_setting("password_reset_signoff") or None,
+                    )
                 else:
                     # No email on file — there's no one to send a self-service link to.
                     # The request still shows up on /admin/users, but that's easy to
@@ -3926,7 +3931,7 @@ async def contact_submit(request: Request):
     message = (form.get("message") or "").strip()
     if not (name and email and message):
         raise HTTPException(status_code=400, detail="All fields required")
-    from linklib.email_utils import send_notification_email, default_notify_email
+    from linklib.email_utils import send_notification_email, send_contact_confirmation_email, default_notify_email
     lib = _lib()
     try:
         lib.save_contact(name, email, message)
@@ -3938,6 +3943,13 @@ async def contact_submit(request: Request):
                 subject=f"Contact form: {name}",
                 body=f"From: {name} <{email}>\n\n{message}",
             )
+        _send_email_safely(
+            lib, "contact_confirmation", send_contact_confirmation_email,
+            to=email, name=name, message=message,
+            subject_template=lib.get_setting("contact_confirmation_subject_template") or None,
+            body_template=lib.get_setting("contact_confirmation_body_template") or None,
+            signoff=lib.get_setting("contact_confirmation_signoff") or None,
+        )
     finally:
         lib.close()
     return RedirectResponse("/contact?submitted=1", status_code=303)
@@ -4681,7 +4693,7 @@ async def tools_submit(request: Request):
     submitted_by = (form.get("submitted_by") or "").strip()
     if not (name and url and description and submitted_by):
         raise HTTPException(status_code=400, detail="Name, URL, description, and email are required.")
-    from linklib.email_utils import send_notification_email, default_notify_email
+    from linklib.email_utils import send_notification_email, send_tool_submission_confirmation_email, default_notify_email
     lib = _lib()
     try:
         lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0)
@@ -4694,6 +4706,13 @@ async def tools_submit(request: Request):
                 body=(f"Submitted by: {submitted_by}\n\n{name}\n{url}\n\n{description}\n\n"
                       f"Review at /admin/tools."),
             )
+        _send_email_safely(
+            lib, "tool_submission_confirmation", send_tool_submission_confirmation_email,
+            to=submitted_by, tool_name=name, tool_url=url, description=description,
+            subject_template=lib.get_setting("tool_submission_subject_template") or None,
+            body_template=lib.get_setting("tool_submission_body_template") or None,
+            signoff=lib.get_setting("tool_submission_signoff") or None,
+        )
     finally:
         lib.close()
     return RedirectResponse("/tools/submit?submitted=1", status_code=303)
@@ -7137,7 +7156,7 @@ _ADMIN_GROUPS = [
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
         ("/admin/voice",         "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
         ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy — changes go live immediately, no redeploy."),
-        ("/admin/emails",        "Email templates",     "Edit the warm intro and welcome email subject, body, and sign-off — changes go live immediately, no redeploy."),
+        ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email — warm intro, welcome, password reset, and submission confirmations — changes go live immediately, no redeploy."),
     ]),
     ("System", "Accounts, health, and plumbing.", [
         ("/admin/users",         "Users",               "Create and manage member accounts for the gated sections."),
@@ -10471,27 +10490,97 @@ async def admin_copy_save_homepage(request: Request):
     return JSONResponse({"ok": True})
 
 
+def _email_template_registry() -> list[dict]:
+    """One row per admin-editable email. Single source of truth for the
+    /admin/emails sections, the index table, and the generic save route —
+    add a new outbound template here and all three pick it up."""
+    from linklib import email_utils as eu
+    return [
+        {
+            "id": "warm-intro", "prefix": "warm_intro", "title": "Warm Intro email",
+            "recipient": "Vendor contact (requester cc&rsquo;d)",
+            "trigger": "A member requests an intro on /tools",
+            "blurb": "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/leads). The requester is cc&rsquo;d automatically.",
+            "placeholders": eu.WARM_INTRO_PLACEHOLDERS,
+            "subject_default": eu.WARM_INTRO_SUBJECT_DEFAULT,
+            "body_default": eu.WARM_INTRO_BODY_DEFAULT,
+            "signoff_default": eu.WARM_INTRO_SIGNOFF_DEFAULT,
+        },
+        {
+            "id": "welcome", "prefix": "welcome", "title": "Welcome email",
+            "recipient": "New member",
+            "trigger": "Account created in /admin/users",
+            "blurb": "Sent to a new member when their account is created in /admin/users.",
+            "placeholders": eu.WELCOME_PLACEHOLDERS,
+            "subject_default": eu.WELCOME_SUBJECT_DEFAULT,
+            "body_default": eu.WELCOME_BODY_DEFAULT,
+            "signoff_default": eu.WELCOME_SIGNOFF_DEFAULT,
+        },
+        {
+            "id": "password-reset", "prefix": "password_reset", "title": "Password reset email",
+            "recipient": "Member requesting reset",
+            "trigger": "“Forgot your password?” on /login",
+            "blurb": "Sent with a one-hour self-service reset link when a member requests a password reset.",
+            "placeholders": eu.PASSWORD_RESET_PLACEHOLDERS,
+            "subject_default": eu.PASSWORD_RESET_SUBJECT_DEFAULT,
+            "body_default": eu.PASSWORD_RESET_BODY_DEFAULT,
+            "signoff_default": eu.PASSWORD_RESET_SIGNOFF_DEFAULT,
+        },
+        {
+            "id": "tool-submission", "prefix": "tool_submission", "title": "Tool submission confirmation",
+            "recipient": "Submitter",
+            "trigger": "A member submits a tool on /tools/submit",
+            "blurb": "Confirms what was submitted back to the member, and invites a reply if they have questions or need to change anything.",
+            "placeholders": eu.TOOL_SUBMISSION_PLACEHOLDERS,
+            "subject_default": eu.TOOL_SUBMISSION_SUBJECT_DEFAULT,
+            "body_default": eu.TOOL_SUBMISSION_BODY_DEFAULT,
+            "signoff_default": eu.TOOL_SUBMISSION_SIGNOFF_DEFAULT,
+        },
+        {
+            "id": "contact-confirmation", "prefix": "contact_confirmation", "title": "Contact form confirmation",
+            "recipient": "Message sender",
+            "trigger": "Someone submits /contact",
+            "blurb": "Sends the sender a copy of their own message, so they have a record of it and know it went through.",
+            "placeholders": eu.CONTACT_CONFIRMATION_PLACEHOLDERS,
+            "subject_default": eu.CONTACT_CONFIRMATION_SUBJECT_DEFAULT,
+            "body_default": eu.CONTACT_CONFIRMATION_BODY_DEFAULT,
+            "signoff_default": eu.CONTACT_CONFIRMATION_SIGNOFF_DEFAULT,
+        },
+    ]
+
+
+# Internal, Brian-facing notifications — freeform subject/body built inline
+# at each call site (not a fixed template), so there's nothing to make
+# admin-editable. Listed on /admin/emails purely for the index table, so the
+# page is a complete map of every outbound email in the system.
+_INTERNAL_EMAIL_ROWS = [
+    {"title": "Tool submission notice", "recipient": "You", "trigger": "A member submits a tool on /tools/submit"},
+    {"title": "Contact form notice", "recipient": "You", "trigger": "Someone submits /contact"},
+    {"title": "Password reset notice", "recipient": "You",
+     "trigger": "A member with no email on file requests a password reset"},
+]
+
+
 @app.get("/admin/emails", response_class=HTMLResponse)
 def admin_emails_page(request: Request):
-    """Warm intro + welcome email copy, editable here so a wording change
-    doesn't need a code deploy. Persisted to the same `settings` table as
-    /admin/copy; each field falls back to its hardcoded default in
-    linklib/email_utils.py when no override has been saved."""
+    """Every admin-editable outbound email template — subject, body, and
+    sign-off, plus a built-in default reference for each — editable here so
+    a wording change doesn't need a code deploy. Persisted to the same
+    `settings` table as /admin/copy; each field falls back to its hardcoded
+    default in linklib/email_utils.py when no override has been saved. See
+    _email_template_registry() for the list of what's covered."""
     if not _is_authed(request):
         return _login_redirect(request)
 
-    from linklib import email_utils as eu
+    registry = _email_template_registry()
 
     lib = _lib()
     try:
-        wi_saved_body = lib.get_setting("warm_intro_body_template")
-        wi_subject = lib.get_setting("warm_intro_subject_template") or eu.WARM_INTRO_SUBJECT_DEFAULT
-        wi_body = wi_saved_body or eu.WARM_INTRO_BODY_DEFAULT
-        wi_signoff = lib.get_setting("warm_intro_signoff") or eu.WARM_INTRO_SIGNOFF_DEFAULT
-        w_saved_body = lib.get_setting("welcome_body_template")
-        w_subject = lib.get_setting("welcome_subject_template") or eu.WELCOME_SUBJECT_DEFAULT
-        w_body = w_saved_body or eu.WELCOME_BODY_DEFAULT
-        w_signoff = lib.get_setting("welcome_signoff") or eu.WELCOME_SIGNOFF_DEFAULT
+        for row in registry:
+            row["saved_body"] = lib.get_setting(f"{row['prefix']}_body_template")
+            row["subject"] = lib.get_setting(f"{row['prefix']}_subject_template") or row["subject_default"]
+            row["body"] = row["saved_body"] or row["body_default"]
+            row["signoff"] = lib.get_setting(f"{row['prefix']}_signoff") or row["signoff_default"]
     finally:
         lib.close()
 
@@ -10504,26 +10593,55 @@ def admin_emails_page(request: Request):
     def _placeholder_hint(keys: list[str]) -> str:
         return " &middot; ".join(f"<code>{{{k}}}</code>" for k in keys)
 
-    def _section(section_id: str, title: str, blurb: str, placeholders: list[str],
-                 subject: str, body_text: str, signoff: str, has_override: bool,
-                 default_subject: str, default_body: str, default_signoff: str) -> str:
+    def _index_table() -> str:
+        rows = "".join(
+            f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);">'
+            f'<a href="#{row["id"]}">{row["title"]}</a></td>'
+            f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink-soft);">{row["recipient"]}</td>'
+            f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink-soft);">{row["trigger"]}</td>'
+            f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--accent);font-weight:600;">Editable</td></tr>'
+            for row in registry
+        )
+        rows += "".join(
+            f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);">{row["title"]}</td>'
+            f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink-soft);">{row["recipient"]}</td>'
+            f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink-soft);">{row["trigger"]}</td>'
+            f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);">Internal notice only</td></tr>'
+            for row in _INTERNAL_EMAIL_ROWS
+        )
+        return f"""\
+<div style="overflow-x:auto;margin:0 0 26px;">
+<table style="width:100%;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:12px;">
+<thead><tr style="text-align:left;">
+<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Email</th>
+<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Recipient</th>
+<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Sent when</th>
+<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">/admin/emails?</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>"""
+
+    def _section(row: dict) -> str:
+        section_id = row["id"]
+        has_override = bool(row["saved_body"])
         status_line = (
             "Currently sending your saved override below."
             if has_override else
             "Currently sending the built-in default below &mdash; nothing's been saved for this email yet."
         )
         return f"""\
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">{title}</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 6px;">{blurb}</p>
-<p style="font-size:12px;color:var(--muted);margin:0 0 6px;">Placeholders: {_placeholder_hint(placeholders)}</p>
+<div id="{section_id}" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;scroll-margin-top:16px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">{row["title"]}</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 6px;">{row["blurb"]}</p>
+<p style="font-size:12px;color:var(--muted);margin:0 0 6px;">Placeholders: {_placeholder_hint(row["placeholders"])}</p>
 <p id="{section_id}-override-status" style="font-size:12px;color:{'var(--accent)' if has_override else 'var(--muted)'};margin:0 0 14px;font-weight:600;">{status_line}</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Subject</label>
-<input id="{section_id}-subject" type="text" value="{_esc(subject)}" style="{prose}margin-bottom:14px;">
+<input id="{section_id}-subject" type="text" value="{_esc(row["subject"])}" style="{prose}margin-bottom:14px;">
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Body</label>
-<textarea id="{section_id}-body" rows="10" style="{prose}margin-bottom:14px;">{_esc(body_text)}</textarea>
+<textarea id="{section_id}-body" rows="10" style="{prose}margin-bottom:14px;">{_esc(row["body"])}</textarea>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Sign-off</label>
-<textarea id="{section_id}-signoff" rows="3" style="{prose}">{_esc(signoff)}</textarea>
+<textarea id="{section_id}-signoff" rows="3" style="{prose}">{_esc(row["signoff"])}</textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="{section_id}-save-btn" onclick="saveEmailSection('{section_id}')" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
 <span id="{section_id}-status" style="font-size:13px;color:var(--muted);"></span></div>
@@ -10532,35 +10650,37 @@ def admin_emails_page(request: Request):
 <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--navy);">Built-in default (read-only reference)</summary>
 <div style="margin-top:12px;font-size:13px;color:var(--ink-soft);">
 <p style="margin:0 0 4px;"><strong>Subject:</strong></p>
-<pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(default_subject)}</pre>
+<pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(row["subject_default"])}</pre>
 <p style="margin:0 0 4px;"><strong>Body:</strong></p>
-<pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(default_body)}</pre>
+<pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(row["body_default"])}</pre>
 <p style="margin:0 0 4px;"><strong>Sign-off:</strong></p>
-<pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(default_signoff)}</pre>
+<pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(row["signoff_default"])}</pre>
 <button type="button" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;" onclick="fillEmailDefault('{section_id}')">Copy default into the fields above</button>
 <span style="font-size:12px;color:var(--muted);margin-left:8px;">Still requires Save below to take effect.</span>
 </div>
 </details>
 </div>"""
 
+    sections_html = "\n\n".join(_section(row) for row in registry)
+    defaults_json = json.dumps({
+        row["id"]: {"subject": row["subject_default"], "body": row["body_default"], "signoff": row["signoff_default"]}
+        for row in registry
+    }).replace("</", "<\\/")
+
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Email templates</h1>
 <p style="color:var(--muted);margin:4px 0 12px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site &mdash; no redeploy.</p>
-<div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 26px;font-size:13px;color:var(--ink-soft);line-height:1.6;">
+<div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 20px;font-size:13px;color:var(--ink-soft);line-height:1.6;">
 <strong style="color:var(--navy);">How this works:</strong> each email has a built-in default (hardcoded in <code>linklib/email_utils.py</code>) and an optional saved override (stored here). Whichever field you save below becomes what actually sends &mdash; it replaces the default until you edit it again here. If you never save a field, the built-in default is what sends. Two things to keep in mind: <strong>unsaved edits in the boxes below don't count</strong> &mdash; only what you last clicked Save on goes out; and there's no automatic &ldquo;reset&rdquo; &mdash; if a future code update changes the built-in default, a saved override here keeps overriding it until you manually update it (each section's &ldquo;Built-in default&rdquo; box below always shows the current default so you can compare and copy it over).
 </div>
 
-{_section("warm-intro", "Warm Intro email", "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/leads). The requester is cc&rsquo;d automatically.", eu.WARM_INTRO_PLACEHOLDERS, wi_subject, wi_body, wi_signoff, bool(wi_saved_body), eu.WARM_INTRO_SUBJECT_DEFAULT, eu.WARM_INTRO_BODY_DEFAULT, eu.WARM_INTRO_SIGNOFF_DEFAULT)}
+{_index_table()}
 
-{_section("welcome", "Welcome email", "Sent to a new member when their account is created in /admin/users.", eu.WELCOME_PLACEHOLDERS, w_subject, w_body, w_signoff, bool(w_saved_body), eu.WELCOME_SUBJECT_DEFAULT, eu.WELCOME_BODY_DEFAULT, eu.WELCOME_SIGNOFF_DEFAULT)}
+{sections_html}
 
 <script>
-var EMAIL_SAVE_URL = {{"warm-intro": "/admin/emails/warm-intro", "welcome": "/admin/emails/welcome"}};
-var EMAIL_DEFAULTS = {{
-  "warm-intro": {{subject: {_js_str(eu.WARM_INTRO_SUBJECT_DEFAULT)}, body: {_js_str(eu.WARM_INTRO_BODY_DEFAULT)}, signoff: {_js_str(eu.WARM_INTRO_SIGNOFF_DEFAULT)}}},
-  "welcome": {{subject: {_js_str(eu.WELCOME_SUBJECT_DEFAULT)}, body: {_js_str(eu.WELCOME_BODY_DEFAULT)}, signoff: {_js_str(eu.WELCOME_SIGNOFF_DEFAULT)}}}
-}};
+var EMAIL_DEFAULTS = {defaults_json};
 function fillEmailDefault(id) {{
   var d = EMAIL_DEFAULTS[id];
   document.getElementById(id + '-subject').value = d.subject;
@@ -10577,7 +10697,7 @@ async function saveEmailSection(id) {{
   if (!subject || !bodyText || !signoff) {{ status.textContent = "Can't save an empty field."; status.style.color = '#b91c1c'; return; }}
   btn.disabled = true; btn.textContent = 'Saving…';
   try {{
-    var r = await fetch(EMAIL_SAVE_URL[id], {{method:'POST', headers:{{'Content-Type':'application/json'}},
+    var r = await fetch('/admin/emails/' + id, {{method:'POST', headers:{{'Content-Type':'application/json'}},
       body: JSON.stringify({{subject: subject, body: bodyText, signoff: signoff}})}});
     if (!r.ok) {{
       var err = await r.json().catch(function() {{ return {{}}; }});
@@ -10596,48 +10716,38 @@ async function saveEmailSection(id) {{
     return HTMLResponse(_page("Email templates — Admin", "Admin", body, authed=True))
 
 
-def _save_email_template(request_payload: dict, prefix: str, placeholders: list[str]) -> None:
-    """Shared validate-then-save for an /admin/emails section. Raises
-    HTTPException(400) with a human-readable detail if subject or body use
-    an unknown placeholder or have invalid .format() syntax — catches a typo
-    at save time instead of the next real send."""
+@app.post("/admin/emails/{section_id}")
+async def admin_emails_save(section_id: str, request: Request):
+    """Shared validate-then-save for any /admin/emails section (see
+    _email_template_registry()). Raises HTTPException(400) with a
+    human-readable detail if subject or body use an unknown placeholder or
+    have invalid .format() syntax — catches a typo at save time instead of
+    the next real send."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    row = next((r for r in _email_template_registry() if r["id"] == section_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown email template")
+
     from linklib.email_utils import validate_template
 
-    subject = (request_payload.get("subject") or "").strip()
-    body_text = (request_payload.get("body") or "").strip()
-    signoff = (request_payload.get("signoff") or "").strip()
+    payload = await request.json()
+    subject = (payload.get("subject") or "").strip()
+    body_text = (payload.get("body") or "").strip()
+    signoff = (payload.get("signoff") or "").strip()
     if not (subject and body_text and signoff):
         raise HTTPException(status_code=400, detail="Subject, body, and sign-off are all required.")
     for label, text in (("Subject", subject), ("Body", body_text)):
-        error = validate_template(text, placeholders)
+        error = validate_template(text, row["placeholders"])
         if error:
             raise HTTPException(status_code=400, detail=f"{label}: {error}")
     lib = _lib()
     try:
-        lib.set_setting(f"{prefix}_subject_template", subject)
-        lib.set_setting(f"{prefix}_body_template", body_text)
-        lib.set_setting(f"{prefix}_signoff", signoff)
+        lib.set_setting(f"{row['prefix']}_subject_template", subject)
+        lib.set_setting(f"{row['prefix']}_body_template", body_text)
+        lib.set_setting(f"{row['prefix']}_signoff", signoff)
     finally:
         lib.close()
-
-
-@app.post("/admin/emails/warm-intro")
-async def admin_emails_save_warm_intro(request: Request):
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    from linklib.email_utils import WARM_INTRO_PLACEHOLDERS
-    payload = await request.json()
-    _save_email_template(payload, "warm_intro", WARM_INTRO_PLACEHOLDERS)
-    return JSONResponse({"ok": True})
-
-
-@app.post("/admin/emails/welcome")
-async def admin_emails_save_welcome(request: Request):
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    from linklib.email_utils import WELCOME_PLACEHOLDERS
-    payload = await request.json()
-    _save_email_template(payload, "welcome", WELCOME_PLACEHOLDERS)
     return JSONResponse({"ok": True})
 
 
