@@ -108,16 +108,46 @@ SPEAKING: list[TLItem] = [
         description="A working session, not a demo reel: how finance teams are using Claude to run multi-step workflows end to end, including a live example completed across systems from a single prompt.",
     ),
     TLItem(
-        title="Cash Cycle Demo Day — Opening & Closing Remarks",
+        title="F Suite Demo Day (Customer Speaker)",
+        url="https://fsuitedemoday519.splashthat.com", venue="The F Suite",
+        date_label="May 2026", sort_key="2026-05", type="speaking",
+        description="Customer speaker at F Suite's virtual demo day evaluating Abacum, Aleph, and QuotaPath—live demos and a closed-door, vendor-free CFO panel on FP&A tooling.",
+    ),
+    TLItem(
+        title="Cash Cycle Demo Day — Co-Chair",
         url="https://cashcycledemoday.splashthat.com/", venue="The F Suite",
         date_label="Oct 2025", sort_key="2025-10", type="speaking",
         description="Hosted The F Suite's virtual Cash Cycle Demo Day—five vendors (RightRev, Routable, Sequence, Tabs, Vayu) walked through billing, collections, and revenue-rec tooling, followed by a closed-door, vendor-free Q&A with peer CFOs.",
+    ),
+    TLItem(
+        title="CFO Clubhouse: Staying Out of the Weeds — The Strategic CFO (Co-Chair / Discussion Lead)",
+        url="https://augustcfoclubhouse.splashthat.com", venue="The F Suite",
+        date_label="Aug 2025", sort_key="2025-08", type="speaking",
+        description="Led this Clubhouse discussion on staying strategic as a CFO scales—delegation, building operational partnerships, and structuring finance teams without getting pulled into the weeds.",
+    ),
+    TLItem(
+        title="Legal x Finance: Building a Budget Partnership That Actually Works (Speaker)",
+        url="https://events.lsuite.co/legalxfinance", venue="The L Suite",
+        date_label="Jun 2025", sort_key="2025-06", type="speaking",
+        description="A panel for in-house counsel on partnering with Finance—budgeting best practices, accrual timing, and clearer communication around legal spend and P&L realities.",
+    ),
+    TLItem(
+        title="F Suite Regional Forum: Your Moment, Your Move — Leading Through Uncertainty (Co-Chair)",
+        url="https://bostonregionalforum.splashthat.com", venue="The F Suite",
+        date_label="Jun 2025", sort_key="2025-06", type="speaking",
+        description="Co-chaired this half-day Boston forum on preparing for major company and career transitions—IPOs, M&As, and exits—alongside mainstage sessions on exit readiness and AI in finance.",
     ),
     TLItem(
         title="CFO Roundtable — M&A and Managing Uncertainty",
         url="https://luma.com/7fwtr2n8", venue="Fidelity",
         date_label="Mar 2025", sort_key="2025-03", type="speaking",
         description="A Fidelity Private Shares and York IE gathering in Boston for CFOs and heads of finance—one panel on M&A prep from both sides of the table, another on planning through uncertainty, with roundtable discussion after each.",
+    ),
+    TLItem(
+        title="Growth Stage CFO Salon: Strategic Fundraising (Member Host)",
+        url="https://bostongrowthsalon.splashthat.com", venue="The F Suite",
+        date_label="Feb 2025", sort_key="2025-02", type="speaking",
+        description="A Boston salon for CFOs on equity raises, debt structuring, and creative financing—rapid-fire peer discussions and a fireside chat on raising capital in a tight market.",
     ),
     TLItem(
         title="Lean Accounting Team (Webinar Host)",
