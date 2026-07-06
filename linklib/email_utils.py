@@ -80,11 +80,11 @@ WARM_INTRO_SUBJECT_DEFAULT = "Introduction: {requester_name} <> {tool_name}"
 WARM_INTRO_BODY_DEFAULT = """\
 Hi {vendor_name},
 
-I'd like to introduce you to {requester_name} at {requester_company} ({requester_company_size} employees) — a member of the CFO Toolbox community I run at bmweis.com. They came across {tool_name} in the directory and asked for a warm intro to your team.
+I'd like to introduce you to {requester_name} at {requester_company} ({requester_company_size} employees)—a member of the CFO Toolbox community I run at bmweis.com. They came across {tool_name} in the directory and asked for a warm intro to your team.
 
 {requester_name}
 {requester_email}
-{requester_company} — {requester_company_size} employees
+{requester_company}—{requester_company_size} employees
 
 I've cc'd {requester_name} directly so the two of you can take it from here."""
 WARM_INTRO_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg\nbmweis.com / CFO Toolbox"
@@ -94,14 +94,14 @@ WELCOME_SUBJECT_DEFAULT = "Your bmweis.com account"
 WELCOME_BODY_DEFAULT = """\
 Hi {name},
 
-Welcome! Your account at bmweis.com is ready, confirmed for {to}.
+Your account at bmweis.com is ready, confirmed for {to}.
 
 Username: {username}
 Temporary password: {temp_password}
 
-Sign in here, then use "Forgot your password?" on that page to set your own password — we'd suggest doing that as soon as you get a chance, since this one was just generated for you:
+Sign in here, then use "Forgot your password?" on that page to set your own password—worth doing soon, since this one was just generated for you:
 {login_url}"""
-WELCOME_SIGNOFF_DEFAULT = "Best,\nBrian Weisberg"
+WELCOME_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg"
 
 
 def validate_template(template: str, placeholder_keys: list[str]) -> str:
@@ -254,7 +254,7 @@ Hi {username},
 
 Someone (hopefully you) requested a password reset for your bmweis.com account.
 
-Reset your password here — this link expires in 1 hour:
+Reset your password here—this link expires in 1 hour:
 {reset_url}
 
 If you didn't request this, you can ignore this email; your password won't change.
