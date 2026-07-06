@@ -157,7 +157,7 @@ def test_reset_password_end_to_end(env, monkeypatch):
     captured = {}
     from linklib import email_utils
 
-    def _fake_send(to, username, reset_url):
+    def _fake_send(to, username, reset_url, **kw):
         captured["reset_url"] = reset_url
         return True
     monkeypatch.setattr(email_utils, "send_password_reset_email", _fake_send)
@@ -206,7 +206,7 @@ def test_reset_password_short_password_rejected(env, monkeypatch):
     captured = {}
     from linklib import email_utils
     monkeypatch.setattr(email_utils, "send_password_reset_email",
-                         lambda to, username, reset_url: captured.setdefault("reset_url", reset_url) or True)
+                         lambda to, username, reset_url, **kw: captured.setdefault("reset_url", reset_url) or True)
     monkeypatch.setattr(email_utils, "is_configured", lambda: True)
     c = _client(env)
     c.post("/forgot-password", data={"username": "amy"})
@@ -226,7 +226,7 @@ def test_forgot_password_without_email_notifies_brian(env, monkeypatch):
     monkeypatch.setenv("LINKLIB_CONTACT_EMAIL", "brian@bmweis.com")
     monkeypatch.setattr(email_utils, "is_configured", lambda: True)
     monkeypatch.setattr(email_utils, "send_notification_email",
-                         lambda to, subject, body: calls.append((to, subject, body)) or True)
+                         lambda to, subject, body, **kw: calls.append((to, subject, body)) or True)
     c = _client(env)
     c.post("/forgot-password", data={"username": "jane"})
     assert len(calls) == 1

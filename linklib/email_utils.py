@@ -66,10 +66,10 @@ def default_notify_email() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Admin-editable templates (warm intro + welcome emails). Defaults live here;
-# /admin/emails lets Brian override subject/body/sign-off per email, stored
-# as plain settings-table strings and passed in as the *_template/signoff
-# args below. A blank/missing override falls back to these defaults.
+# Admin-editable templates. Defaults live here; /admin/emails lets Brian
+# override subject/body/sign-off per email, stored as plain settings-table
+# strings and passed in as the *_template/signoff args below. A blank/missing
+# override falls back to these defaults.
 # ---------------------------------------------------------------------------
 
 WARM_INTRO_PLACEHOLDERS = [
@@ -102,6 +102,45 @@ Temporary password: {temp_password}
 Sign in here, then use "Forgot your password?" on that page to set your own password—worth doing soon, since this one was just generated for you:
 {login_url}"""
 WELCOME_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg"
+
+PASSWORD_RESET_PLACEHOLDERS = ["username", "reset_url", "to"]
+PASSWORD_RESET_SUBJECT_DEFAULT = "Reset your bmweis.com password"
+PASSWORD_RESET_BODY_DEFAULT = """\
+Hi {username},
+
+Someone (hopefully you) requested a password reset for your bmweis.com account, confirmed for {to}.
+
+Reset your password here—this link expires in 1 hour:
+{reset_url}
+
+If you didn't request this, you can ignore this email; your password won't change."""
+PASSWORD_RESET_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg"
+
+TOOL_SUBMISSION_PLACEHOLDERS = ["tool_name", "tool_url", "description", "submitted_by"]
+TOOL_SUBMISSION_SUBJECT_DEFAULT = "Got your submission: {tool_name}"
+TOOL_SUBMISSION_BODY_DEFAULT = """\
+Hi there,
+
+Thanks for submitting {tool_name} to the CFO Toolbox, confirmed from {submitted_by}.
+
+{tool_name}
+{tool_url}
+{description}
+
+I'll take a look and follow up once it's reviewed. Reply directly to this email if you have questions or need to change anything above."""
+TOOL_SUBMISSION_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg"
+
+CONTACT_CONFIRMATION_PLACEHOLDERS = ["name", "email", "message"]
+CONTACT_CONFIRMATION_SUBJECT_DEFAULT = "Got your message"
+CONTACT_CONFIRMATION_BODY_DEFAULT = """\
+Hi {name},
+
+Thanks for reaching out—here's a copy of what you sent:
+
+{message}
+
+I'll get back to you directly at {email} shortly."""
+CONTACT_CONFIRMATION_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg"
 
 
 def validate_template(template: str, placeholder_keys: list[str]) -> str:
@@ -141,6 +180,37 @@ _HTML_WRAPPER = (
 )
 
 
+def _build_templated_message(
+    subject_template: str, body_template: str, signoff: str, placeholders: dict,
+    to: str, cc: str | None = None, reply_to: str | None = None, from_header: str | None = None,
+) -> MIMEMultipart:
+    """Render a subject/body/sign-off template against placeholders and build
+    the multipart/alternative message (plain-text + HTML) shared by every
+    admin-editable email below."""
+    subject = subject_template.format(**placeholders)
+    body_rendered = body_template.format(**placeholders)
+    body = f"{body_rendered}\n\n{signoff}\n"
+    html_body = _HTML_WRAPPER.format(
+        content=_render_html_block(body_rendered) + _render_html_block(signoff)
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    if from_header or _FROM_EMAIL:
+        msg["From"] = from_header or _FROM_EMAIL
+    msg["To"] = to
+    if cc:
+        msg["Cc"] = cc
+    if reply_to:
+        msg["Reply-To"] = reply_to
+    # Plain-text part first, HTML second — clients that support HTML render
+    # the last part in a multipart/alternative; plain-text-only clients fall
+    # back to the first part.
+    msg.attach(MIMEText(body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+    return msg
+
+
 def _access_token() -> str:
     # Same refresh-token exchange as linklib/backup.py — kept local so each
     # module stays self-contained (the repo's convention for this plumbing).
@@ -171,21 +241,46 @@ def _send(msg: MIMEMultipart) -> None:
     r.raise_for_status()
 
 
-def send_notification_email(to: str, subject: str, body: str) -> bool:
-    """Send a plain-text notification to Brian (e.g. a new contact-form
+# Human-readable subject tags for the internal notifications below, keyed by
+# the same context string each call site already passes to
+# _send_email_safely (see webapp/app.py) — so a filter rule matching the
+# bracketed tag in the subject lines up with what shows on
+# /admin/email-failures too.
+NOTIFICATION_TYPE_LABELS = {
+    "contact": "Contact Form",
+    "tool_submission": "Tool Submission",
+    "password_reset_no_email": "Password Reset",
+}
+
+
+def send_notification_email(to: str, subject: str, body: str, notification_type: str = "") -> bool:
+    """Send an HTML+plain-text notification to Brian (e.g. a new contact-form
     submission). Returns True if sent, False if Google OAuth is not
     configured (graceful no-op) — callers should always save the record
     first and treat this as best-effort on top of that. Raises on API errors.
+
+    notification_type tags the message so a mail-client rule can auto-file
+    it: pass one of NOTIFICATION_TYPE_LABELS' keys to get both a bracketed
+    label prefixed onto the subject (e.g. "[Contact Form] ...") and an
+    X-CFO-Notification-Type header carrying the raw type — use whichever
+    your mail client's filters can match on (most only expose subject/body
+    text, not custom headers).
     """
     if not is_configured():
         return False
 
+    label = NOTIFICATION_TYPE_LABELS.get(notification_type, "")
+    full_subject = f"[{label}] {subject}" if label else subject
+
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
+    msg["Subject"] = full_subject
     if _FROM_EMAIL:
         msg["From"] = _FROM_EMAIL
     msg["To"] = to
+    if notification_type:
+        msg["X-CFO-Notification-Type"] = notification_type
     msg.attach(MIMEText(body, "plain"))
+    msg.attach(MIMEText(_HTML_WRAPPER.format(content=_render_html_block(body)), "html"))
     _send(msg)
     return True
 
@@ -221,54 +316,100 @@ def send_welcome_email(
         name=name.strip() or username, username=username,
         temp_password=temp_password, login_url=login_url, to=to,
     )
-    subject = subject_template.format(**placeholders)
-    body_rendered = body_template.format(**placeholders)
-    body = f"{body_rendered}\n\n{signoff}\n"
-    html_body = _HTML_WRAPPER.format(
-        content=_render_html_block(body_rendered) + _render_html_block(signoff)
-    )
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    if _FROM_EMAIL:
-        msg["From"] = _FROM_EMAIL
-    msg["To"] = to
-    msg.attach(MIMEText(body, "plain"))
-    msg.attach(MIMEText(html_body, "html"))
+    msg = _build_templated_message(subject_template, body_template, signoff, placeholders, to=to)
     _send(msg)
     return True
 
 
-def send_password_reset_email(to: str, username: str, reset_url: str) -> bool:
+def send_password_reset_email(
+    to: str,
+    username: str,
+    reset_url: str,
+    subject_template: str | None = None,
+    body_template: str | None = None,
+    signoff: str | None = None,
+) -> bool:
     """Send a self-service password reset link. Returns True if sent, False
     if Google OAuth is not configured (graceful no-op) — the reset request
     is still recorded either way, so Brian can reset it by hand from
     /admin/users if the email never arrives. Raises on API errors.
+
+    subject_template/body_template/signoff default to the PASSWORD_RESET_*
+    module constants — pass overrides from /admin/emails to customize copy
+    without a redeploy. Body/subject templates may use any of
+    PASSWORD_RESET_PLACEHOLDERS.
     """
     if not is_configured():
         return False
 
-    subject = "Reset your bmweis.com password"
-    body = f"""\
-Hi {username},
+    subject_template = subject_template or PASSWORD_RESET_SUBJECT_DEFAULT
+    body_template = body_template or PASSWORD_RESET_BODY_DEFAULT
+    signoff = PASSWORD_RESET_SIGNOFF_DEFAULT if signoff is None else signoff
 
-Someone (hopefully you) requested a password reset for your bmweis.com account.
+    placeholders = dict(username=username, reset_url=reset_url, to=to)
+    msg = _build_templated_message(subject_template, body_template, signoff, placeholders, to=to)
+    _send(msg)
+    return True
 
-Reset your password here—this link expires in 1 hour:
-{reset_url}
 
-If you didn't request this, you can ignore this email; your password won't change.
+def send_tool_submission_confirmation_email(
+    to: str,
+    tool_name: str,
+    tool_url: str,
+    description: str,
+    subject_template: str | None = None,
+    body_template: str | None = None,
+    signoff: str | None = None,
+) -> bool:
+    """Confirm a member's CFO Toolbox submission back to them — what they
+    submitted, and an invitation to reply if they have questions or need to
+    change anything. Returns True if sent, False if Google OAuth is not
+    configured (graceful no-op) — the submission is still recorded either
+    way. Raises on API errors.
 
-Best,
-Brian Weisberg
-"""
+    subject_template/body_template/signoff default to the
+    TOOL_SUBMISSION_* module constants. Body/subject templates may use any
+    of TOOL_SUBMISSION_PLACEHOLDERS.
+    """
+    if not is_configured():
+        return False
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    if _FROM_EMAIL:
-        msg["From"] = _FROM_EMAIL
-    msg["To"] = to
-    msg.attach(MIMEText(body, "plain"))
+    subject_template = subject_template or TOOL_SUBMISSION_SUBJECT_DEFAULT
+    body_template = body_template or TOOL_SUBMISSION_BODY_DEFAULT
+    signoff = TOOL_SUBMISSION_SIGNOFF_DEFAULT if signoff is None else signoff
+
+    placeholders = dict(tool_name=tool_name, tool_url=tool_url, description=description, submitted_by=to)
+    msg = _build_templated_message(subject_template, body_template, signoff, placeholders, to=to)
+    _send(msg)
+    return True
+
+
+def send_contact_confirmation_email(
+    to: str,
+    name: str,
+    message: str,
+    subject_template: str | None = None,
+    body_template: str | None = None,
+    signoff: str | None = None,
+) -> bool:
+    """Send the contact-form submitter a copy of their own message, so they
+    have a record of what they sent and know it went through. Returns True
+    if sent, False if Google OAuth is not configured (graceful no-op) — the
+    submission is still recorded either way. Raises on API errors.
+
+    subject_template/body_template/signoff default to the
+    CONTACT_CONFIRMATION_* module constants. Body/subject templates may use
+    any of CONTACT_CONFIRMATION_PLACEHOLDERS.
+    """
+    if not is_configured():
+        return False
+
+    subject_template = subject_template or CONTACT_CONFIRMATION_SUBJECT_DEFAULT
+    body_template = body_template or CONTACT_CONFIRMATION_BODY_DEFAULT
+    signoff = CONTACT_CONFIRMATION_SIGNOFF_DEFAULT if signoff is None else signoff
+
+    placeholders = dict(name=name, email=to, message=message)
+    msg = _build_templated_message(subject_template, body_template, signoff, placeholders, to=to)
     _send(msg)
     return True
 
@@ -317,24 +458,10 @@ def send_warm_intro_email(
         requester_company=requester_company, requester_company_size=requester_company_size,
         tool_name=tool_name,
     )
-    subject = subject_template.format(**placeholders)
-    body_rendered = body_template.format(**placeholders)
-    body = f"{body_rendered}\n\n{signoff}\n"
-    html_body = _HTML_WRAPPER.format(
-        content=_render_html_block(body_rendered) + _render_html_block(signoff)
+    msg = _build_templated_message(
+        subject_template, body_template, signoff, placeholders, to=to, cc=cc,
+        reply_to=requester_email,
+        from_header=f"CFO Toolbox (no-reply) <{_FROM_EMAIL}>" if _FROM_EMAIL else None,
     )
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    if _FROM_EMAIL:
-        msg["From"] = f"CFO Toolbox (no-reply) <{_FROM_EMAIL}>"
-    msg["To"]      = to
-    msg["Cc"]      = cc
-    msg["Reply-To"] = requester_email
-    # Plain-text part first, HTML second — clients that support HTML render
-    # the last part in a multipart/alternative; plain-text-only clients fall
-    # back to the first part.
-    msg.attach(MIMEText(body, "plain"))
-    msg.attach(MIMEText(html_body, "html"))
     _send(msg)
     return True

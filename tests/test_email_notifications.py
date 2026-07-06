@@ -39,7 +39,8 @@ def _admin_client(appmod):
     return c
 
 
-def _configure_email(monkeypatch, fake_notification=None, fake_welcome=None):
+def _configure_email(monkeypatch, fake_notification=None, fake_welcome=None,
+                      fake_tool_submission_confirmation=None, fake_contact_confirmation=None):
     from linklib import email_utils
     monkeypatch.setattr(email_utils, "is_configured", lambda: True)
     # notify_to falls back to LINKLIB_CONTACT_EMAIL or default_notify_email()
@@ -51,13 +52,21 @@ def _configure_email(monkeypatch, fake_notification=None, fake_welcome=None):
         monkeypatch.setattr(email_utils, "send_notification_email", fake_notification)
     if fake_welcome is not None:
         monkeypatch.setattr(email_utils, "send_welcome_email", fake_welcome)
+    # Both routes always fire a confirmation to the submitter alongside the
+    # Brian-facing notification — stub it out to a harmless no-op unless a
+    # test cares about it specifically, so existing notification-only tests
+    # don't also need to reason about the confirmation send.
+    monkeypatch.setattr(email_utils, "send_tool_submission_confirmation_email",
+                         fake_tool_submission_confirmation or (lambda *a, **k: True))
+    monkeypatch.setattr(email_utils, "send_contact_confirmation_email",
+                         fake_contact_confirmation or (lambda *a, **k: True))
 
 
 # --- contact form -------------------------------------------------------------
 
 def test_contact_form_sends_notification(env, monkeypatch):
     calls = []
-    _configure_email(monkeypatch, fake_notification=lambda to, subject, body: calls.append((to, subject, body)) or True)
+    _configure_email(monkeypatch, fake_notification=lambda to, subject, body, **kw: calls.append((to, subject, body)) or True)
     c = _client(env)
     r = c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi"}, follow_redirects=False)
     assert r.status_code == 303
@@ -65,7 +74,7 @@ def test_contact_form_sends_notification(env, monkeypatch):
 
 
 def test_contact_form_failure_is_logged_not_silent(env, monkeypatch):
-    def _boom(to, subject, body):
+    def _boom(to, subject, body, **kw):
         raise RuntimeError("401 Unauthorized")
     _configure_email(monkeypatch, fake_notification=_boom)
     c = _client(env)
@@ -78,6 +87,31 @@ def test_contact_form_failure_is_logged_not_silent(env, monkeypatch):
         assert len(failures) == 1
         assert failures[0]["context"] == "contact"
         assert "401" in failures[0]["detail"]
+    finally:
+        lib.close()
+
+
+def test_contact_form_sends_submitter_confirmation(env, monkeypatch):
+    calls = []
+    _configure_email(monkeypatch, fake_contact_confirmation=lambda to, name, message, **kw: calls.append(
+        (to, name, message)) or True)
+    c = _client(env)
+    r = c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert len(calls) == 1
+    assert calls[0] == ("jane@x.com", "Jane", "hi")
+
+
+def test_contact_confirmation_failure_is_logged_not_silent(env, monkeypatch):
+    def _boom(to, name, message, **kw):
+        raise RuntimeError("mailer down")
+    _configure_email(monkeypatch, fake_contact_confirmation=_boom)
+    c = _client(env)
+    c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi"}, follow_redirects=False)
+    lib = env._lib()
+    try:
+        failures = lib.list_email_failures()
+        assert any(f["context"] == "contact_confirmation" for f in failures)
     finally:
         lib.close()
 
@@ -98,7 +132,7 @@ def test_contact_form_not_configured_does_not_log_failure(env):
 
 def test_tool_submission_notifies_brian(env, monkeypatch):
     calls = []
-    _configure_email(monkeypatch, fake_notification=lambda to, subject, body: calls.append((to, subject, body)) or True)
+    _configure_email(monkeypatch, fake_notification=lambda to, subject, body, **kw: calls.append((to, subject, body)) or True)
     c = _admin_client(env)   # /tools/submit is member-gated (spam control)
     r = c.post("/tools/submit", data={
         "name": "Test Tool", "url": "https://example.com", "description": "desc",
@@ -115,7 +149,7 @@ def test_tool_submission_notifies_brian(env, monkeypatch):
 
 
 def test_tool_submission_failure_is_logged(env, monkeypatch):
-    def _boom(to, subject, body):
+    def _boom(to, subject, body, **kw):
         raise RuntimeError("smtp down")
     _configure_email(monkeypatch, fake_notification=_boom)
     c = _admin_client(env)
@@ -127,6 +161,36 @@ def test_tool_submission_failure_is_logged(env, monkeypatch):
     try:
         failures = lib.list_email_failures()
         assert len(failures) == 1 and failures[0]["context"] == "tool_submission"
+    finally:
+        lib.close()
+
+
+def test_tool_submission_sends_submitter_confirmation(env, monkeypatch):
+    calls = []
+    _configure_email(monkeypatch, fake_tool_submission_confirmation=lambda to, tool_name, tool_url, description, **kw:
+                      calls.append((to, tool_name, tool_url, description)) or True)
+    c = _admin_client(env)
+    c.post("/tools/submit", data={
+        "name": "Test Tool", "url": "https://example.com", "description": "desc",
+        "submitted_by": "user@example.com",
+    }, follow_redirects=False)
+    assert len(calls) == 1
+    assert calls[0] == ("user@example.com", "Test Tool", "https://example.com", "desc")
+
+
+def test_tool_submission_confirmation_failure_is_logged_not_silent(env, monkeypatch):
+    def _boom(to, tool_name, tool_url, description, **kw):
+        raise RuntimeError("mailer down")
+    _configure_email(monkeypatch, fake_tool_submission_confirmation=_boom)
+    c = _admin_client(env)
+    c.post("/tools/submit", data={
+        "name": "Test Tool", "url": "https://example.com", "description": "desc",
+        "submitted_by": "user@example.com",
+    }, follow_redirects=False)
+    lib = env._lib()
+    try:
+        failures = lib.list_email_failures()
+        assert any(f["context"] == "tool_submission_confirmation" for f in failures)
     finally:
         lib.close()
 
