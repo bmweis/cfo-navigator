@@ -2643,15 +2643,21 @@ _SDR_CSS = """
 .sdr-boat-shadow{position:absolute;bottom:-4px;left:16%;width:64%;height:9px;border-radius:50%;background:rgba(0,41,117,0.18);filter:blur(2px);}
 .sdr-sail-group{transform-origin:65px 88px;animation:sdrFlutter 2.2s ease-in-out infinite;}
 @keyframes sdrFlutter{0%,100%{transform:skewX(0deg);}50%{transform:skewX(-1.4deg);}}
-/* Rowboat oar: rests pointing right; each completed stroke (see row() /
-   bumpOarStroke()) retriggers this animation via a class remove+reflow+
-   re-add, same restart technique as .sdr-stage.sdr-flash. Sweeps a full
-   half-turn so the blade visibly travels from the right side to the left,
-   then (fill-mode defaults to "none") snaps back to the resting rightward
-   pose the instant the animation ends, ready for the next stroke. */
+/* Rowboat oar: rests pointing down-and-right; each completed stroke (see
+   row() / bumpOarStroke()) retriggers this animation via a class remove+
+   reflow+re-add, same restart technique as .sdr-stage.sdr-flash. Rest pose
+   is a steep down-right "\" diagonal (45°); the 90° rotation sweeps it
+   through straight-down at the midpoint to a mirrored down-left "/"
+   diagonal — "\" to "/", both dipping down, per design review (an
+   ~178° rotation from a shallow near-horizontal rest pose was an earlier
+   pass; a rotation that large would carry this steeper 45° pose most of
+   the way back around to its own diagonal, not to the mirrored one — the
+   two are only 90° apart for a symmetric diagonal start). fill-mode
+   defaults to "none", so it snaps back to the resting "\" pose the instant
+   the animation ends, ready for the next stroke. */
 .sdr-oar{transform-origin:65px 84px;}
 .sdr-oar.sdr-stroke{animation:sdrOarStroke 0.5s ease-out;}
-@keyframes sdrOarStroke{0%{transform:rotate(0deg);}100%{transform:rotate(-178deg);}}
+@keyframes sdrOarStroke{0%{transform:rotate(0deg);}100%{transform:rotate(90deg);}}
 /* Positioning transform is set by JS on .sdr-obstacle itself every frame — the
    bob animation must live on an inner wrapper, never on the same element/property
    JS positions, or the CSS animation silently wins the cascade and the obstacle
@@ -2840,8 +2846,8 @@ _SDR_BOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
 # staying in the same navy/seafoam family.
 _SDR_ROWBOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
   <g class="sdr-oar" id="sdrOar">
-    <line x1="65" y1="84" x2="112" y2="98" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
-    <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(114,100) rotate(15)"/>
+    <line x1="65" y1="84" x2="99" y2="118" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
+    <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(102,121) rotate(45)"/>
   </g>
   <ellipse cx="65" cy="80" rx="13" ry="15" fill="url(#sdrHullGrad)"/>
   <circle cx="65" cy="63" r="7.5" fill="#274E96"/>
