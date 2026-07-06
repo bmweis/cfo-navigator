@@ -918,14 +918,12 @@ def _copy_paragraphs_html(text: str) -> str:
 def _fpa_buddy_announcement(margin: str = "20px 0") -> str:
     return (
         f'<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;'
-        f'padding:16px 18px;margin:{margin};">'
-        '<div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);margin-bottom:6px;">'
-        'Coming soon: FP&amp;A Buddy</div>'
-        '<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">Ask a real '
-        'finance-leadership question and FP&amp;A Buddy searches a curated archive of trusted sources to '
-        'return an actionable, cited answer. Launching free to a small, invite-only group first.</p>'
-        '<a href="/contact" style="font-size:13.5px;font-weight:600;color:var(--navy);">Want early access? '
-        'Get in touch &rarr;</a></div>'
+        f'padding:14px 18px;margin:{margin};">'
+        '<p style="margin:0;font-size:14px;color:var(--ink-soft);line-height:1.55;">'
+        '<strong style="font-family:var(--font-head);font-weight:600;color:var(--navy);">&#x1F6A7; Under '
+        'development</strong>&mdash;A curated digital library that includes my personal feed of finance and '
+        'technology blogs, searchable digital archive of content, and an interactive FP&amp;A Buddy to ask all '
+        'of your pressing questions about frameworks, metrics, and more.</p></div>'
     )
 
 
@@ -983,6 +981,8 @@ def homepage(request: Request):
 </div>
 
 <div style="display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;">{cards}</div>
+
+{_fpa_buddy_announcement("16px 0 0")}
 
 {suggest}
 
@@ -4240,8 +4240,6 @@ def tools_directory(request: Request):
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
 {'<a href="/tools/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Submit a tool</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to submit a tool</a>'}
 {'<a href="/admin/tools/categories" style="margin-left:12px;font-size:14px;font-weight:500;">Manage categories →</a>' if authed else ''}</p>
-
-{_fpa_buddy_announcement("0 0 24px")}
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
   <input id="tool-search" type="search" placeholder="Search tools…"
