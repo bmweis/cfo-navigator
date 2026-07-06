@@ -3860,9 +3860,10 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
 <h1 style="margin:0 0 6px;">Sail, Don&rsquo;t Row</h1>
+<p class="sdr-sub">Pick your boat. Sail and you might catch a free gust. Row and you&rsquo;ll move fast at first&mdash;but it&rsquo;s harder work, and you&rsquo;ll fade over the long haul.</p>
 <p class="sdr-sub">Make it all the way from Boston to the Cape, past Martha&rsquo;s Vineyard, and all the way to Nantucket&mdash;safely.</p>
 <p class="sdr-sub">Watch out for the rocks, steer clear of Wally the Whale, and outrun Susan the Shark.</p>
-<p class="sdr-sub">Controls are simple&mdash;&uarr;/&darr; (or drag the water on touch).</p>
+<p class="sdr-sub">Controls are simple&mdash;&uarr;/&darr; (or drag the water on touch) to steer. Rowing? Press Space (or tap Row on mobile) for each stroke.</p>
 <p class="sdr-sub">Track your best score on the leaderboard&mdash;brag rights only, no budget attached.</p>
 </div>
 

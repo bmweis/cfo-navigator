@@ -127,6 +127,17 @@ def test_play_rowboat_gets_no_gust_boost(env):
     assert "isInGustZone" not in rowboat_branch
 
 
+def test_play_intro_copy_covers_boat_choice_and_rowing_controls(env):
+    """The intro copy (shown before Cast Off) must mention the boat trade-off
+    and both control schemes now that rowing exists — it previously only
+    described sailboat-only steering."""
+    _, client = env
+    body = client.get("/play").text
+    assert "Pick your boat" in body
+    assert "free gust" in body and "fade over the long haul" in body
+    assert "Press Space" in body and "tap Row" in body
+
+
 def test_collision_description_matches_mockup_defaults():
     """Default seed values must reproduce the four exact strings from
     design/mockups/sail-dont-row-final-rendering.html's rank selector."""
