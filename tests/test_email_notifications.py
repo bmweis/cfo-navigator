@@ -66,7 +66,7 @@ def _configure_email(monkeypatch, fake_notification=None, fake_welcome=None,
 
 def test_contact_form_sends_notification(env, monkeypatch):
     calls = []
-    _configure_email(monkeypatch, fake_notification=lambda to, subject, body: calls.append((to, subject, body)) or True)
+    _configure_email(monkeypatch, fake_notification=lambda to, subject, body, **kw: calls.append((to, subject, body)) or True)
     c = _client(env)
     r = c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi"}, follow_redirects=False)
     assert r.status_code == 303
@@ -74,7 +74,7 @@ def test_contact_form_sends_notification(env, monkeypatch):
 
 
 def test_contact_form_failure_is_logged_not_silent(env, monkeypatch):
-    def _boom(to, subject, body):
+    def _boom(to, subject, body, **kw):
         raise RuntimeError("401 Unauthorized")
     _configure_email(monkeypatch, fake_notification=_boom)
     c = _client(env)
@@ -132,7 +132,7 @@ def test_contact_form_not_configured_does_not_log_failure(env):
 
 def test_tool_submission_notifies_brian(env, monkeypatch):
     calls = []
-    _configure_email(monkeypatch, fake_notification=lambda to, subject, body: calls.append((to, subject, body)) or True)
+    _configure_email(monkeypatch, fake_notification=lambda to, subject, body, **kw: calls.append((to, subject, body)) or True)
     c = _admin_client(env)   # /tools/submit is member-gated (spam control)
     r = c.post("/tools/submit", data={
         "name": "Test Tool", "url": "https://example.com", "description": "desc",
@@ -149,7 +149,7 @@ def test_tool_submission_notifies_brian(env, monkeypatch):
 
 
 def test_tool_submission_failure_is_logged(env, monkeypatch):
-    def _boom(to, subject, body):
+    def _boom(to, subject, body, **kw):
         raise RuntimeError("smtp down")
     _configure_email(monkeypatch, fake_notification=_boom)
     c = _admin_client(env)

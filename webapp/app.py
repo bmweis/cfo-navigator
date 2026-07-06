@@ -726,6 +726,7 @@ async def forgot_password_submit(request: Request):
                             body=(f"{user['username']} requested a password reset but has no "
                                   f"email on file, so there's no self-service link to send them. "
                                   f"Reset it by hand at /admin/users."),
+                            notification_type="password_reset_no_email",
                         )
         finally:
             lib.close()
@@ -3942,6 +3943,7 @@ async def contact_submit(request: Request):
                 notify_to,
                 subject=f"Contact form: {name}",
                 body=f"From: {name} <{email}>\n\n{message}",
+                notification_type="contact",
             )
         _send_email_safely(
             lib, "contact_confirmation", send_contact_confirmation_email,
@@ -4705,6 +4707,7 @@ async def tools_submit(request: Request):
                 subject=f"Tool submission: {name}",
                 body=(f"Submitted by: {submitted_by}\n\n{name}\n{url}\n\n{description}\n\n"
                       f"Review at /admin/tools."),
+                notification_type="tool_submission",
             )
         _send_email_safely(
             lib, "tool_submission_confirmation", send_tool_submission_confirmation_email,
@@ -10552,12 +10555,17 @@ def _email_template_registry() -> list[dict]:
 # Internal, Brian-facing notifications — freeform subject/body built inline
 # at each call site (not a fixed template), so there's nothing to make
 # admin-editable. Listed on /admin/emails purely for the index table, so the
-# page is a complete map of every outbound email in the system.
+# page is a complete map of every outbound email in the system. Each is
+# tagged (subject prefix + X-CFO-Notification-Type header, set in
+# send_notification_email) so a mail-client rule can auto-file it by type.
 _INTERNAL_EMAIL_ROWS = [
-    {"title": "Tool submission notice", "recipient": "You", "trigger": "A member submits a tool on /tools/submit"},
-    {"title": "Contact form notice", "recipient": "You", "trigger": "Someone submits /contact"},
+    {"title": "Tool submission notice", "recipient": "You", "trigger": "A member submits a tool on /tools/submit",
+     "notification_type": "tool_submission"},
+    {"title": "Contact form notice", "recipient": "You", "trigger": "Someone submits /contact",
+     "notification_type": "contact"},
     {"title": "Password reset notice", "recipient": "You",
-     "trigger": "A member with no email on file requests a password reset"},
+     "trigger": "A member with no email on file requests a password reset",
+     "notification_type": "password_reset_no_email"},
 ]
 
 
@@ -10594,11 +10602,13 @@ def admin_emails_page(request: Request):
         return " &middot; ".join(f"<code>{{{k}}}</code>" for k in keys)
 
     def _index_table() -> str:
+        from linklib.email_utils import NOTIFICATION_TYPE_LABELS
         rows = "".join(
             f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);">'
             f'<a href="#{row["id"]}">{row["title"]}</a></td>'
             f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink-soft);">{row["recipient"]}</td>'
             f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink-soft);">{row["trigger"]}</td>'
+            f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);">&mdash;</td>'
             f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--accent);font-weight:600;">Editable</td></tr>'
             for row in registry
         )
@@ -10606,6 +10616,7 @@ def admin_emails_page(request: Request):
             f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);">{row["title"]}</td>'
             f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink-soft);">{row["recipient"]}</td>'
             f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink-soft);">{row["trigger"]}</td>'
+            f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);"><code>[{NOTIFICATION_TYPE_LABELS[row["notification_type"]]}]</code> in subject</td>'
             f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);">Internal notice only</td></tr>'
             for row in _INTERNAL_EMAIL_ROWS
         )
@@ -10616,10 +10627,12 @@ def admin_emails_page(request: Request):
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Email</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Recipient</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Sent when</th>
+<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Filter on</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">/admin/emails?</th>
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
+<p style="font-size:12px;color:var(--muted);margin:8px 12px 0;">The three internal notices below are also tagged with an <code>X-CFO-Notification-Type</code> header (e.g. <code>tool_submission</code>), in case your mail client's rules can match on a custom header instead of the subject &mdash; Gmail's own filter UI can't, so the subject tag is the reliable one there.</p>
 </div>"""
 
     def _section(row: dict) -> str:

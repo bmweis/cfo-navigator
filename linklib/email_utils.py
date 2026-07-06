@@ -241,21 +241,46 @@ def _send(msg: MIMEMultipart) -> None:
     r.raise_for_status()
 
 
-def send_notification_email(to: str, subject: str, body: str) -> bool:
-    """Send a plain-text notification to Brian (e.g. a new contact-form
+# Human-readable subject tags for the internal notifications below, keyed by
+# the same context string each call site already passes to
+# _send_email_safely (see webapp/app.py) — so a filter rule matching the
+# bracketed tag in the subject lines up with what shows on
+# /admin/email-failures too.
+NOTIFICATION_TYPE_LABELS = {
+    "contact": "Contact Form",
+    "tool_submission": "Tool Submission",
+    "password_reset_no_email": "Password Reset",
+}
+
+
+def send_notification_email(to: str, subject: str, body: str, notification_type: str = "") -> bool:
+    """Send an HTML+plain-text notification to Brian (e.g. a new contact-form
     submission). Returns True if sent, False if Google OAuth is not
     configured (graceful no-op) — callers should always save the record
     first and treat this as best-effort on top of that. Raises on API errors.
+
+    notification_type tags the message so a mail-client rule can auto-file
+    it: pass one of NOTIFICATION_TYPE_LABELS' keys to get both a bracketed
+    label prefixed onto the subject (e.g. "[Contact Form] ...") and an
+    X-CFO-Notification-Type header carrying the raw type — use whichever
+    your mail client's filters can match on (most only expose subject/body
+    text, not custom headers).
     """
     if not is_configured():
         return False
 
+    label = NOTIFICATION_TYPE_LABELS.get(notification_type, "")
+    full_subject = f"[{label}] {subject}" if label else subject
+
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
+    msg["Subject"] = full_subject
     if _FROM_EMAIL:
         msg["From"] = _FROM_EMAIL
     msg["To"] = to
+    if notification_type:
+        msg["X-CFO-Notification-Type"] = notification_type
     msg.attach(MIMEText(body, "plain"))
+    msg.attach(MIMEText(_HTML_WRAPPER.format(content=_render_html_block(body)), "html"))
     _send(msg)
     return True
 
