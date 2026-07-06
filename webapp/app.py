@@ -5590,6 +5590,9 @@ async def tools_interest(tool_id: int, request: Request):
             requester_email=email,
             requester_company=company,
             requester_company_size=company_size,
+            subject_template=lib.get_setting("warm_intro_subject_template") or None,
+            body_template=lib.get_setting("warm_intro_body_template") or None,
+            signoff=lib.get_setting("warm_intro_signoff") or None,
         )
     finally:
         lib.close()
@@ -7134,6 +7137,7 @@ _ADMIN_GROUPS = [
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
         ("/admin/voice",         "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
         ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy — changes go live immediately, no redeploy."),
+        ("/admin/emails",        "Email templates",     "Edit the warm intro and welcome email subject, body, and sign-off — changes go live immediately, no redeploy."),
     ]),
     ("System", "Accounts, health, and plumbing.", [
         ("/admin/users",         "Users",               "Create and manage member accounts for the gated sections."),
@@ -8989,6 +8993,10 @@ async def admin_users_create(request: Request):
                 sent = _send_email_safely(
                     lib, "welcome", send_welcome_email,
                     email, username=username.lower(), temp_password=password, login_url=login_url,
+                    name=name,
+                    subject_template=lib.get_setting("welcome_subject_template") or None,
+                    body_template=lib.get_setting("welcome_body_template") or None,
+                    signoff=lib.get_setting("welcome_signoff") or None,
                 )
                 if sent:
                     msg += f" Welcome email sent to {email}."
@@ -10460,6 +10468,131 @@ async def admin_copy_save_homepage(request: Request):
         lib.set_setting("homepage_expanded_copy", expanded)
     finally:
         lib.close()
+    return JSONResponse({"ok": True})
+
+
+@app.get("/admin/emails", response_class=HTMLResponse)
+def admin_emails_page(request: Request):
+    """Warm intro + welcome email copy, editable here so a wording change
+    doesn't need a code deploy. Persisted to the same `settings` table as
+    /admin/copy; each field falls back to its hardcoded default in
+    linklib/email_utils.py when no override has been saved."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    from linklib import email_utils as eu
+
+    lib = _lib()
+    try:
+        wi_subject = lib.get_setting("warm_intro_subject_template") or eu.WARM_INTRO_SUBJECT_DEFAULT
+        wi_body = lib.get_setting("warm_intro_body_template") or eu.WARM_INTRO_BODY_DEFAULT
+        wi_signoff = lib.get_setting("warm_intro_signoff") or eu.WARM_INTRO_SIGNOFF_DEFAULT
+        w_subject = lib.get_setting("welcome_subject_template") or eu.WELCOME_SUBJECT_DEFAULT
+        w_body = lib.get_setting("welcome_body_template") or eu.WELCOME_BODY_DEFAULT
+        w_signoff = lib.get_setting("welcome_signoff") or eu.WELCOME_SIGNOFF_DEFAULT
+    finally:
+        lib.close()
+
+    prose = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
+             "font:14px/1.6 var(--font-body);background:var(--bg);resize:vertical;")
+
+    def _placeholder_hint(keys: list[str]) -> str:
+        return " &middot; ".join(f"<code>{{{k}}}</code>" for k in keys)
+
+    def _section(section_id: str, title: str, blurb: str, placeholders: list[str],
+                 subject: str, body_text: str, signoff: str) -> str:
+        return f"""\
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">{title}</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 6px;">{blurb}</p>
+<p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Placeholders: {_placeholder_hint(placeholders)}</p>
+<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Subject</label>
+<input id="{section_id}-subject" type="text" value="{_esc(subject)}" style="{prose}margin-bottom:14px;">
+<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Body</label>
+<textarea id="{section_id}-body" rows="10" style="{prose}margin-bottom:14px;">{_esc(body_text)}</textarea>
+<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Sign-off</label>
+<textarea id="{section_id}-signoff" rows="3" style="{prose}">{_esc(signoff)}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="{section_id}-save-btn" onclick="saveEmailSection('{section_id}')" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<span id="{section_id}-status" style="font-size:13px;color:var(--muted);"></span></div></div>"""
+
+    body = f"""<div class="page page-wide">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Email templates</h1>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site &mdash; no redeploy.</p>
+
+{_section("warm-intro", "Warm Intro email", "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/leads). The requester is cc&rsquo;d automatically.", eu.WARM_INTRO_PLACEHOLDERS, wi_subject, wi_body, wi_signoff)}
+
+{_section("welcome", "Welcome email", "Sent to a new member when their account is created in /admin/users.", eu.WELCOME_PLACEHOLDERS, w_subject, w_body, w_signoff)}
+
+<script>
+var EMAIL_SAVE_URL = {{"warm-intro": "/admin/emails/warm-intro", "welcome": "/admin/emails/welcome"}};
+async function saveEmailSection(id) {{
+  var subject = document.getElementById(id + '-subject').value.trim();
+  var bodyText = document.getElementById(id + '-body').value.trim();
+  var signoff = document.getElementById(id + '-signoff').value.trim();
+  var btn = document.getElementById(id + '-save-btn'), status = document.getElementById(id + '-status');
+  if (!subject || !bodyText || !signoff) {{ status.textContent = "Can't save an empty field."; status.style.color = '#b91c1c'; return; }}
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch(EMAIL_SAVE_URL[id], {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{subject: subject, body: bodyText, signoff: signoff}})}});
+    if (!r.ok) {{
+      var err = await r.json().catch(function() {{ return {{}}; }});
+      throw new Error(err.detail || 'Save failed');
+    }}
+    status.textContent = 'Saved.'; status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+  }} catch(e) {{
+    status.textContent = e.message || 'Save failed — try again.'; status.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
+}}
+</script>"""
+    return HTMLResponse(_page("Email templates — Admin", "Admin", body, authed=True))
+
+
+def _save_email_template(request_payload: dict, prefix: str, placeholders: list[str]) -> None:
+    """Shared validate-then-save for an /admin/emails section. Raises
+    HTTPException(400) with a human-readable detail if subject or body use
+    an unknown placeholder or have invalid .format() syntax — catches a typo
+    at save time instead of the next real send."""
+    from linklib.email_utils import validate_template
+
+    subject = (request_payload.get("subject") or "").strip()
+    body_text = (request_payload.get("body") or "").strip()
+    signoff = (request_payload.get("signoff") or "").strip()
+    if not (subject and body_text and signoff):
+        raise HTTPException(status_code=400, detail="Subject, body, and sign-off are all required.")
+    for label, text in (("Subject", subject), ("Body", body_text)):
+        error = validate_template(text, placeholders)
+        if error:
+            raise HTTPException(status_code=400, detail=f"{label}: {error}")
+    lib = _lib()
+    try:
+        lib.set_setting(f"{prefix}_subject_template", subject)
+        lib.set_setting(f"{prefix}_body_template", body_text)
+        lib.set_setting(f"{prefix}_signoff", signoff)
+    finally:
+        lib.close()
+
+
+@app.post("/admin/emails/warm-intro")
+async def admin_emails_save_warm_intro(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    from linklib.email_utils import WARM_INTRO_PLACEHOLDERS
+    payload = await request.json()
+    _save_email_template(payload, "warm_intro", WARM_INTRO_PLACEHOLDERS)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/admin/emails/welcome")
+async def admin_emails_save_welcome(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    from linklib.email_utils import WELCOME_PLACEHOLDERS
+    payload = await request.json()
+    _save_email_template(payload, "welcome", WELCOME_PLACEHOLDERS)
     return JSONResponse({"ok": True})
 
 
