@@ -4810,9 +4810,8 @@ def admin_email_failures(request: Request):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Email delivery failures</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">Every outbound email (contact form, tool submissions, welcome emails,
-password resets, warm intros) is best-effort — the underlying record always saves even if the send fails — but a
-failure lands here instead of only a server log, so it never goes unnoticed.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Every outbound email is best-effort — contact form, tool submissions, welcome emails, password resets, warm intros. The underlying record always saves even if the send fails.</p>
+<p style="color:var(--muted);margin:0 0 18px;">A failure lands here instead of just a server log, so it never goes unnoticed.</p>
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">When</th>
@@ -5035,7 +5034,11 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox categories</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">These are the filter pills on <a href="/tools">/tools</a>. Renaming updates every tool tagged with the old name; deleting removes the tag from tagged tools but leaves the tools themselves in the directory — they still show under <strong>All</strong>, just not under any specific pill.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">These are the filter pills on <a href="/tools">/tools</a>.</p>
+<ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;">
+<li><strong>Renaming</strong> updates every tool tagged with the old name.</li>
+<li><strong>Deleting</strong> removes the tag from tagged tools, but leaves the tools themselves in the directory — they still show under <strong>All</strong>, just not under any specific pill.</li>
+</ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:28px;">
   <table style="width:100%;border-collapse:collapse;">
@@ -7459,7 +7462,14 @@ def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> 
 
     refresh_steps = ""
     if any_bad:
-        refresh_steps = ("""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;line-height:1.55;">To refresh an expired cookie: log into the site, open DevTools &rarr; <strong>Network</strong>, reload, click the request to the domain, copy the full <code>Cookie:</code> header, and update <code>LINKLIB_AUTH_COOKIES</code> in Railway &rarr; Variables.</p>""")
+        refresh_steps = ("""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">To refresh an expired cookie:</p>
+<ol style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">
+<li>Log into the site.</li>
+<li>Open DevTools &rarr; <strong>Network</strong>, then reload.</li>
+<li>Click the request to the domain.</li>
+<li>Copy the full <code>Cookie:</code> header.</li>
+<li>Update <code>LINKLIB_AUTH_COOKIES</code> in Railway &rarr; Variables.</li>
+</ol>""")
 
     heading = ("Subscriber cookie expired" if any_bad else "Subscriber access")
     return f"""<div style="background:{wash};border:1px solid {border};border-radius:12px;padding:16px 18px;margin:0 0 22px;">
@@ -7587,13 +7597,19 @@ def admin_library(request: Request):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Archive</h1>
-<p style="color:var(--muted);margin:4px 0 18px;">Full management of the digital archive &mdash; the eight tools below cover backing it up, bringing in new content (past and present), keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from. For a first-time cleanup, work top to bottom &mdash; each step sets up the next. Once set up, jump to any tool directly anytime.</p>
+<p style="color:var(--muted);margin:4px 0 6px;">Full management of the digital archive. The eight tools below cover backing it up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from.</p>
+<p style="color:var(--muted);margin:0 0 18px;">For a first-time cleanup, work top to bottom &mdash; each step sets up the next. Once set up, jump to any tool directly anytime.</p>
 {_content_flow_diagram()}
-<p style="color:var(--muted);font-size:14px;margin:-8px 0 22px;line-height:1.6;">New content always enters through the queue (step&nbsp;2 or&nbsp;3) for your review before it's saved. Once saved, it's ready for de-duping and enrichment (steps&nbsp;4&ndash;5), and the FP&amp;A Buddy corpus stays clean by periodically filtering out anything off-target (step&nbsp;6) and tidying tags (steps&nbsp;7&ndash;8).</p>
+<p style="color:var(--muted);font-size:14px;margin:-8px 0 6px;">New content always enters through the queue (step&nbsp;2 or&nbsp;3) for your review before it's saved. From there:</p>
+<ul style="color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px;padding-left:20px;">
+<li>De-duping and enrichment (steps&nbsp;4&ndash;5) get it ready for the FP&amp;A Buddy corpus.</li>
+<li>Filtering out anything off-target (step&nbsp;6) and tidying tags (steps&nbsp;7&ndash;8) keeps that corpus clean, on an ongoing basis.</li>
+</ul>
 <div style="display:grid;gap:12px;">{cards}</div>
 
 <h2 style="margin:40px 0 6px;">Saving articles from anywhere</h2>
-<p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in. <strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working and must be set up again from this page's instructions</strong> &mdash; the old copies embed the old values.</p>
+<p style="color:var(--muted);font-size:14px;margin:0 0 8px;line-height:1.6;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
+<p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong> &mdash; the old copies embed the old values. Set them up again from this page's instructions.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
 <summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);">Desktop &mdash; the bookmarklet</summary>
@@ -7885,7 +7901,8 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Archive Queue</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Proposed saves waiting for your review, whether they came from &ldquo;Scan feed&rdquo; below (ongoing) or from a <a href="/admin/backfill">Historical sweep</a> (one-time back-catalog catch-up). Approve into the archive&nbsp;&mdash;&nbsp;edit the tags first if you like&nbsp;&mdash;&nbsp;or dismiss what you don&rsquo;t want.</p>
+<p style="color:var(--muted);margin:4px 0 6px;">Proposed saves waiting for your review — from &ldquo;Scan feed&rdquo; below (ongoing) or a <a href="/admin/backfill">Historical sweep</a> (one-time back-catalog catch-up).</p>
+<p style="color:var(--muted);margin:0 0 22px;">Approve into the archive (edit the tags first if you like), or dismiss what you don&rsquo;t want.</p>
 {scan_notice}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
   <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note} &nbsp; {expand_controls}</div>
@@ -8096,7 +8113,12 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Tag cleanup</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">Tags are generated automatically during enrichment. Use this to tidy the vocabulary &mdash; <strong>renaming a tag to one that already exists merges them</strong>, and deleting removes it from every article. Search and the tag facets update immediately.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Tags are generated automatically during enrichment. Use this to tidy the vocabulary:</p>
+<ul style="color:var(--muted);margin:0 0 10px;padding-left:20px;">
+<li><strong>Renaming</strong> a tag to one that already exists merges them.</li>
+<li><strong>Deleting</strong> removes it from every article.</li>
+</ul>
+<p style="color:var(--muted);font-size:13px;margin:0 0 18px;">Search and the tag facets update immediately.</p>
 {banner}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap;">
   <p style="font-size:13px;color:var(--muted);margin:0;">{len(tags)} tags across the archive</p>
@@ -8251,7 +8273,14 @@ def admin_tag_style(request: Request, generating: int = 0):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Tagging style{state_badge}</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">Auto-tagging already reuses your vocabulary. This goes further: it studies <strong>how</strong> you tagged your {n_tags} tags &mdash; what each one means, how granular you go, what you leave untagged &mdash; and distills soft rules that get injected into enrichment so new tags match your judgment. Review and edit anything below; your edits are what the tagger follows.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Auto-tagging already reuses your vocabulary. This goes further — it studies <strong>how</strong> you tagged your {n_tags} tags:</p>
+<ul style="color:var(--muted);margin:0 0 8px;padding-left:20px;">
+<li>What each tag means.</li>
+<li>How granular you go.</li>
+<li>What you leave untagged.</li>
+</ul>
+<p style="color:var(--muted);margin:0 0 6px;">From that, it distills soft rules injected into enrichment, so new tags match your judgment.</p>
+<p style="color:var(--muted);margin:0 0 18px;">Review and edit anything below — your edits are what the tagger follows.</p>
 {notice}
 
 <form method="post" action="/admin/tag-style/objective" style="margin:0 0 22px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;">
@@ -8409,9 +8438,8 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Sail, Don&rsquo;t Row &mdash; rank settings</h1>
-<p style="color:var(--muted);margin:-6px 0 20px;">Tune pace, wind, obstacle density, and the collision rule per rank. The
-game reads these live — changes apply to the next run, no redeploy needed. Course length is a fixed 4300 world-units;
-par time is what a full finish at that rank is calibrated against for the pace score.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Tune pace, wind, obstacle density, and the collision rule per rank. The game reads these live — changes apply to the next run, no redeploy needed.</p>
+<p style="color:var(--muted);margin:0 0 20px;">Course length is a fixed 4300 world-units. Par time is what a full finish at that rank is calibrated against for the pace score.</p>
 {banner}{error_banner}
 {cards}
 </div>"""
@@ -8494,10 +8522,11 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
 
     verified = verify_status == "verified"
     if verify_status == "no_key":
-        verify_note = ("&#9888;&#65039; <strong>Claude verification is off</strong> — no <code>ANTHROPIC_API_KEY</code> "
-                       "is set on the host, so these are raw title matches and look-alikes (different role, "
-                       "milestone, or question) may appear. Set the key in Railway to turn on semantic verification. "
-                       "Your &ldquo;Not a dupe&rdquo; calls still stick.")
+        verify_note = ("<p style=\"margin:0 0 6px;\">&#9888;&#65039; <strong>Claude verification is off</strong> — no "
+                       "<code>ANTHROPIC_API_KEY</code> is set on the host. These are raw title matches, so "
+                       "look-alikes (different role, milestone, or question) may appear.</p>"
+                       "<p style=\"margin:0;\">Set the key in Railway to turn on semantic verification. Your "
+                       "&ldquo;Not a dupe&rdquo; calls still stick either way.</p>")
     elif verify_status == "no_sdk":
         verify_note = "&#9888;&#65039; <strong>Claude verification unavailable</strong> (anthropic SDK not installed). Showing raw title matches."
     elif verify_status.startswith("error"):
@@ -8533,10 +8562,11 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
 
     body_inner = controls
     if dup_n or distinct_n:
-        body_inner += (f'<p style="font-size:13px;color:var(--muted);margin:-8px 0 16px;">'
+        body_inner += (f'<p style="font-size:13px;color:var(--muted);margin:-8px 0 4px;">'
                        f'&#10024; Learning from your calls: <strong>{distinct_n}</strong> marked &ldquo;not a dupe&rdquo;, '
-                       f'<strong>{dup_n}</strong> confirmed. Pairs you reject won&rsquo;t be shown again, and Claude '
-                       f'uses your past calls to judge new ones.</p>')
+                       f'<strong>{dup_n}</strong> confirmed.</p>'
+                       f'<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">'
+                       f'Pairs you reject won&rsquo;t be shown again. Claude uses your past calls to judge new ones.</p>')
     if source:
         if not clusters:
             body_inner += ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
@@ -8579,8 +8609,8 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                                  else "title matches &mdash; <span style=\"color:var(--coral-deep);\">not verified</span>")
                 blocks += (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px 18px 14px;margin-bottom:14px;">'
                            f'<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:10px 0 2px;">{len(c)} {cluster_label}</div>{rows}</div>')
-            verify_banner = (f'<p style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;'
-                             f'padding:10px 14px;font-size:13px;margin:0 0 16px;line-height:1.5;">{verify_note}</p>'
+            verify_banner = (f'<div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;'
+                             f'padding:10px 14px;font-size:13px;margin:0 0 16px;line-height:1.5;">{verify_note}</div>'
                              if verify_note else '')
             bulk = f"""<form method="post" action="/admin/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} duplicate(s), keeping one per group? A backup is taken first.');">
   <input type="hidden" name="source" value="{_esc(source)}"><input type="hidden" name="level" value="{level}"><input type="hidden" name="days" value="{days}">
@@ -8592,7 +8622,9 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Content de-dupe</h1>
-<p style="color:var(--muted);margin:-6px 0 18px;">Scans one source for articles that are likely duplicates or near-duplicates &mdash; most often the same piece republished under a different title, which exact-URL dedup misses. A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged. The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Scans one source for articles that are likely duplicates or near-duplicates — most often the same piece republished under a different title, which exact-URL dedup misses.</p>
+<p style="color:var(--muted);margin:0 0 6px;">A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged.</p>
+<p style="color:var(--muted);margin:0 0 18px;">The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest.</p>
 {banner}
 {body_inner}
 </div>"""
@@ -8752,7 +8784,8 @@ def admin_ask_report(request: Request, user: str = ""):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>FP&amp;A Buddy report</h1>
-<p style="color:var(--muted);margin:-6px 0 20px;">Every question asked, across every user &mdash; question, asker, settings used, and cost per question. The full answer text is left out of this view on purpose, so you can scan cost and volume without reading every answer; it&rsquo;s included in the CSV export.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Every question asked, across every user — question, asker, settings used, and cost per question.</p>
+<p style="color:var(--muted);margin:0 0 20px;">The full answer text is left out of this view on purpose, so you can scan cost and volume without reading every answer. It&rsquo;s included in the CSV export.</p>
 
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
   <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
@@ -9539,7 +9572,11 @@ def admin_enrich(request: Request):
       <label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
         <input type="checkbox" name="force" value="1" style="margin-top:3px;accent-color:var(--accent);">
         <span><strong>Re-run the entire library, not just new articles</strong>
-        <span style="display:block;font-size:12px;color:var(--muted);"><strong>Unchecked</strong> (default): only articles that haven&rsquo;t been enriched yet get processed &mdash; fast, cheap, safe to run anytime. <strong>Checked</strong>: every article in the archive is re-run, including ones already enriched &mdash; use this to standardize the whole library on a new model or rules version. Either way, each article&rsquo;s summary is overwritten with the new one and its tags are merged (existing tags are kept, not replaced).</span></span>
+        <span style="display:block;font-size:12px;color:var(--muted);margin-top:4px;line-height:1.6;">
+          <strong>Unchecked</strong> (default) &mdash; only articles that haven&rsquo;t been enriched yet get processed. Fast, cheap, safe to run anytime.<br>
+          <strong>Checked</strong> &mdash; every article is re-run, including ones already enriched. Use this to standardize the whole library on a new model or rules version.<br>
+          Either way: each article&rsquo;s summary is overwritten, and its tags are merged (existing tags are kept, not replaced).
+        </span></span>
       </label>
     </div>
     <div>
@@ -9746,11 +9783,16 @@ def admin_backfill(request: Request):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Historical sweep</h1>
-<p style="color:var(--muted);margin:-6px 0 20px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review. A one-time catch-up on your back catalog &mdash; it doesn&rsquo;t save anything by itself, it just fills the queue below for you to approve.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review.</p>
+<p style="color:var(--muted);margin:0 0 20px;">A one-time catch-up on your back catalog — it doesn&rsquo;t save anything by itself, it just fills the queue below for you to approve.</p>
 
 <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:22px;font-size:13.5px;color:#92400e;line-height:1.6;">
-  <strong>Run this once per source.</strong> Results land in the <a href="/admin/queue">Archive Queue</a> for you to review &mdash; nothing is saved to the archive automatically. After the first sweep, the Archive Queue&rsquo;s own &ldquo;Scan feed&rdquo; button is what keeps you current going forward.
-  Start with a <strong>dry run</strong> to see the reach before any sweep spends API calls.
+  <p style="margin:0 0 8px;"><strong>Run this once per source.</strong></p>
+  <ul style="margin:0 0 8px;padding-left:20px;">
+    <li>Results land in the <a href="/admin/queue">Archive Queue</a> for you to review — nothing is saved to the archive automatically.</li>
+    <li>After the first sweep, the Archive Queue&rsquo;s own &ldquo;Scan feed&rdquo; button is what keeps you current going forward.</li>
+  </ul>
+  <p style="margin:0;">Start with a <strong>dry run</strong> to see the reach before any sweep spends API calls.</p>
 </div>
 
 <div id="poll-container">{status_html}</div>
@@ -10240,7 +10282,9 @@ def admin_voice_page(request: Request):
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Paste any draft or page copy &mdash; including an FP&amp;A Buddy answer you want to spot-check. Mechanical rules (banned words, filler, performative phrases) flag instantly; Review adds Claude&rsquo;s read on tone. This is a manual, on-demand check only: FP&amp;A Buddy never calls it automatically, so answering a question never costs more than the one API call.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 6px;">Paste any draft or page copy — including an FP&amp;A Buddy answer you want to spot-check.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 6px;">Mechanical rules (banned words, filler, performative phrases) flag instantly. Review adds Claude&rsquo;s read on tone.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">This is manual and on-demand only — FP&amp;A Buddy never calls it automatically, so answering a question never costs more than the one API call.</p>
 <textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice — a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>
