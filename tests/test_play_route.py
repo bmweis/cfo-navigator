@@ -54,6 +54,23 @@ def test_play_renders_all_ranks(env):
         assert f'data-rank="{rank_id}"' in body
 
 
+def test_play_renders_boat_choice(env):
+    """Boat choice is a second, independent axis alongside rank on the same
+    pregame screen (see webapp/app.py's _SDR_BOATS / _sdr_boat_pill_html)."""
+    _, client = env
+    body = client.get("/play").text
+    assert "Sailboat" in body and "Rowboat" in body
+    assert 'data-boat="sailboat"' in body and 'data-boat="rowboat"' in body
+    assert body.index('id="sdrBoatRow"') < body.index('id="sdrRankRow"')
+
+
+def test_play_boat_pill_wired_into_start(env):
+    _, client = env
+    body = client.get("/play").text
+    assert "selectedBoat" in body
+    assert "startRun(selectedRank, selectedBoat)" in body
+
+
 def test_collision_description_matches_mockup_defaults():
     """Default seed values must reproduce the four exact strings from
     design/mockups/sail-dont-row-final-rendering.html's rank selector."""
