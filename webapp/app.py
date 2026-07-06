@@ -4733,12 +4733,27 @@ def admin_contacts(request: Request):
         lib.set_setting("admin_viewed_contacts", datetime.now(timezone.utc).isoformat())
     finally:
         lib.close()
+    def _contact_message_cell(message: str) -> str:
+        """A long or multi-line submission otherwise dominates the row —
+        show a short single-line preview, expandable to the full message,
+        so the table stays scannable."""
+        PREVIEW_LEN = 140
+        flat = " ".join(message.split())
+        if len(flat) <= PREVIEW_LEN and "\n" not in message:
+            return f'<td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:pre-wrap;">{_esc(message)}</td>'
+        preview = flat[:PREVIEW_LEN].rstrip() + "…" if len(flat) > PREVIEW_LEN else flat
+        return (
+            f'<td style="padding:10px 12px;border-bottom:1px solid var(--line);">'
+            f'<details><summary style="cursor:pointer;color:var(--ink-soft);">{_esc(preview)}</summary>'
+            f'<div style="white-space:pre-wrap;margin-top:8px;color:var(--ink-soft);">{_esc(message)}</div></details></td>'
+        )
+
     rows = "".join(
         f"""<tr>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(c['created_at'][:10])}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{_esc(c['name'])}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{_esc(c['email'])}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:pre-wrap;">{_esc(c['message'])}</td>
+          {_contact_message_cell(c['message'])}
         </tr>"""
         for c in contacts
     ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No submissions yet.</td></tr>'
@@ -10628,11 +10643,11 @@ def admin_emails_page(request: Request):
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Recipient</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Sent when</th>
 <th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Filter on</th>
-<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">/admin/emails?</th>
+<th style="padding:8px 12px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600;">Editable?</th>
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
-<p style="font-size:12px;color:var(--muted);margin:8px 12px 0;">The three internal notices below are also tagged with an <code>X-CFO-Notification-Type</code> header (e.g. <code>tool_submission</code>), in case your mail client's rules can match on a custom header instead of the subject &mdash; Gmail's own filter UI can't, so the subject tag is the reliable one there.</p>
+<p style="font-size:12px;color:var(--muted);margin:8px 12px 0;">The three internal notices are also tagged with an <code>X-CFO-Notification-Type</code> header (e.g. <code>tool_submission</code>), for mail clients that can filter on custom headers. Gmail's filter UI can't &mdash; use the subject tag there instead.</p>
 </div>"""
 
     def _section(row: dict) -> str:
@@ -10685,7 +10700,12 @@ def admin_emails_page(request: Request):
 <h1>Email templates</h1>
 <p style="color:var(--muted);margin:4px 0 12px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site &mdash; no redeploy.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 20px;font-size:13px;color:var(--ink-soft);line-height:1.6;">
-<strong style="color:var(--navy);">How this works:</strong> each email has a built-in default (hardcoded in <code>linklib/email_utils.py</code>) and an optional saved override (stored here). Whichever field you save below becomes what actually sends &mdash; it replaces the default until you edit it again here. If you never save a field, the built-in default is what sends. Two things to keep in mind: <strong>unsaved edits in the boxes below don't count</strong> &mdash; only what you last clicked Save on goes out; and there's no automatic &ldquo;reset&rdquo; &mdash; if a future code update changes the built-in default, a saved override here keeps overriding it until you manually update it (each section's &ldquo;Built-in default&rdquo; box below always shows the current default so you can compare and copy it over).
+<p style="margin:0 0 10px;"><strong style="color:var(--navy);">How this works:</strong> each email has a built-in default. You can save your own version below &mdash; whichever is saved is what actually sends.</p>
+<ul style="margin:0 0 10px;padding-left:20px;">
+<li>Unsaved edits don't count &mdash; only your last Save takes effect.</li>
+<li>No auto-reset &mdash; if the built-in default changes later, your saved override keeps winning until you update it yourself.</li>
+</ul>
+<p style="margin:0;font-size:12px;color:var(--muted);">Each section's &ldquo;Built-in default&rdquo; box always shows the current default, so you can compare or copy it over.</p>
 </div>
 
 {_index_table()}
