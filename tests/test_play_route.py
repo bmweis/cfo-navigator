@@ -85,6 +85,22 @@ def test_play_renders_distinct_boat_sprites(env):
     assert "sdr-sail-group" not in row_sprite_markup
     assert "sdrSailGrad" not in row_sprite_markup
     assert sail_start < row_start
+    # Exactly one oar (design-review: two read as cluttered) — id="sdrOar"
+    # appears once, and there's a single <rect> paddle blade in the sprite.
+    assert row_sprite_markup.count('id="sdrOar"') == 1
+    assert row_sprite_markup.count("<rect") == 1
+
+
+def test_play_oar_stroke_animation_wired_up(env):
+    """Each row() call must retrigger the single-oar sweep animation (see
+    bumpOarStroke) via the same remove/reflow/re-add restart technique used
+    elsewhere in this file for the collision flash."""
+    _, client = env
+    body = client.get("/play").text
+    assert "function bumpOarStroke()" in body
+    assert "oarEl.classList.remove('sdr-stroke')" in body
+    assert "oarEl.classList.add('sdr-stroke')" in body
+    assert "bumpOarStroke();" in body
 
 
 def test_play_rowboat_propulsion_wired_up(env):

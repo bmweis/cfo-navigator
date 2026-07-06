@@ -2641,8 +2641,17 @@ _SDR_CSS = """
 .sdr-boat-inner{animation:sdrBob 2.8s ease-in-out infinite;}
 @keyframes sdrBob{0%,100%{transform:translateY(0) rotate(-2deg);}50%{transform:translateY(-5px) rotate(-3.5deg);}}
 .sdr-boat-shadow{position:absolute;bottom:-4px;left:16%;width:64%;height:9px;border-radius:50%;background:rgba(0,41,117,0.18);filter:blur(2px);}
-.sdr-sail-group{transform-origin:50px 60px;animation:sdrFlutter 2.2s ease-in-out infinite;}
+.sdr-sail-group{transform-origin:65px 88px;animation:sdrFlutter 2.2s ease-in-out infinite;}
 @keyframes sdrFlutter{0%,100%{transform:skewX(0deg);}50%{transform:skewX(-1.4deg);}}
+/* Rowboat oar: rests pointing right; each completed stroke (see row() /
+   bumpOarStroke()) retriggers this animation via a class remove+reflow+
+   re-add, same restart technique as .sdr-stage.sdr-flash. Sweeps a full
+   half-turn so the blade visibly travels from the right side to the left,
+   then (fill-mode defaults to "none") snaps back to the resting rightward
+   pose the instant the animation ends, ready for the next stroke. */
+.sdr-oar{transform-origin:65px 84px;}
+.sdr-oar.sdr-stroke{animation:sdrOarStroke 0.5s ease-out;}
+@keyframes sdrOarStroke{0%{transform:rotate(0deg);}100%{transform:rotate(-178deg);}}
 /* Positioning transform is set by JS on .sdr-obstacle itself every frame — the
    bob animation must live on an inner wrapper, never on the same element/property
    JS positions, or the CSS animation silently wins the cascade and the obstacle
@@ -2796,8 +2805,6 @@ _SDR_CSS = """
 _SDR_DEFS_SVG = """<svg width="0" height="0" style="position:absolute;">
   <defs>
     <linearGradient id="sdrHullGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#274E96"/><stop offset="100%" stop-color="#061A45"/></linearGradient>
-    <linearGradient id="sdrSailGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E0917A"/><stop offset="100%" stop-color="#B5553A"/></linearGradient>
-    <linearGradient id="sdrJibGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#D8987C"/><stop offset="100%" stop-color="#96432C"/></linearGradient>
     <linearGradient id="sdrRockGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#A8A69C"/><stop offset="100%" stop-color="#5C5A52"/></linearGradient>
     <linearGradient id="sdrBuoyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#9C7A54"/><stop offset="100%" stop-color="#5A4128"/></linearGradient>
     <linearGradient id="sdrWhaleGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3E5FA8"/><stop offset="100%" stop-color="#16418F"/></linearGradient>
@@ -2805,53 +2812,42 @@ _SDR_DEFS_SVG = """<svg width="0" height="0" style="position:absolute;">
   </defs>
 </svg>"""
 
+# Simplified toward the ⛵️ emoji's silhouette per design-review feedback: one
+# plain triangular sail (no jib/cabin/porthole greeble) and the same crescent
+# "bowl" hull the rowboat uses (_SDR_ROWBOAT_SVG below) — sharing the hull
+# construction is what makes the two read as one visual family now, more
+# than the shared palette alone did.
 _SDR_BOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
-  <line x1="65" y1="26" x2="28" y2="108" stroke="#002975" stroke-width="1" opacity="0.4"/>
-  <line x1="65" y1="26" x2="102" y2="108" stroke="#002975" stroke-width="1" opacity="0.4"/>
-  <line x1="24" y1="108" x2="8" y2="104" stroke="#0A2A6B" stroke-width="2"/>
-  <path d="M24,110 C24,102 42,98 65,98 C88,98 106,102 106,110 C100,118 82,124 65,124 C48,124 30,118 24,110 Z" fill="url(#sdrHullGrad)"/>
-  <path d="M28,112 C42,117 88,117 102,112" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
-  <ellipse cx="65" cy="99" rx="34" ry="4.5" fill="#16418F"/>
-  <rect x="56" y="93" width="18" height="7" rx="2" fill="#123a86"/>
-  <circle cx="65" cy="96.5" r="1.6" fill="#A3E5D4"/>
   <g class="sdr-sail-group">
-    <line x1="65" y1="24" x2="65" y2="100" stroke="#002975" stroke-width="2.5"/>
-    <path d="M66,26 C92,42 94,68 68,96 C74,68 72,46 66,26 Z" fill="url(#sdrSailGrad)" stroke="#002975" stroke-width="1.2"/>
-    <path d="M69,34 C82,46 83,62 70,88" fill="none" stroke="#F5E4DA" stroke-width="1" opacity="0.6"/>
-    <path d="M67,30 C78,42 79,60 68,92" fill="none" stroke="#8B3F28" stroke-width="1.2" opacity="0.45"/>
-    <path d="M63,38 C48,50 42,66 54,86 C50,68 54,50 63,38 Z" fill="url(#sdrJibGrad)" stroke="#002975" stroke-width="1"/>
-    <line x1="65" y1="96" x2="72" y2="98" stroke="#002975" stroke-width="2.2"/>
+    <line x1="65" y1="26" x2="65" y2="93" stroke="#002975" stroke-width="2.5"/>
+    <path d="M65,28 L65,89 L99,86 Z" fill="#FBFAF6" stroke="#002975" stroke-width="1.4"/>
+    <path d="M68,36 L94,84" stroke="#D8D3C8" stroke-width="1" opacity="0.8"/>
   </g>
-</svg>"""
-
-# Rowboat — same viewBox/scale/line-weight/palette as the sailboat above (so
-# both read as one visual family and the JS anchor math (render()'s bh*0.78)
-# needs no per-boat adjustment), but silhouette-distinct at a glance: no
-# mast/sail, a dinghy hull drawn as a side-view "bowl" (flat-ish deck line,
-# curved keel) rather than the sailboat's lens-shaped hull + gunwale-ring
-# combo — reusing that combo without a mast/sail on top of it reads as a
-# flying saucer, not a boat, so this is a different hull construction, not
-# just a recolor. Oars rise in a V from two oarlocks near the hull's
-# center (roughly where a rower would sit), not from the pointed bow/stern
-# ends — anchoring them at the ends read as poles sticking out fore-and-aft
-# rather than oars held out to the sides, per Brian's design-review note —
-# with bold rounded-rect blades (a thin-stroke ellipse blade reads as an
-# antenna at this render size, ~78px on screen). The V-from-center silhouette
-# is the same shape the 🚣 emoji reads by. Blades use the seafoam accent (the
-# sailboat's identifying color is its coral sail) so each boat reads as its
-# own thing while staying in the same navy/seafoam family — no new palette
-# introduced.
-_SDR_ROWBOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
-  <line x1="52" y1="90" x2="18" y2="58" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
-  <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(14,55) rotate(-42)"/>
-  <line x1="78" y1="90" x2="112" y2="58" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
-  <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(116,55) rotate(42)"/>
   <path d="M12,93 C34,88 96,88 118,93 C115,108 96,121 65,122 C34,121 15,108 12,93 Z" fill="url(#sdrHullGrad)"/>
   <path d="M16,95 C36,90 94,90 114,95" fill="none" stroke="#3F5C9A" stroke-width="1.4" opacity="0.6"/>
   <path d="M20,100 C36,109 94,109 110,100" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
-  <circle cx="52" cy="90" r="2.2" fill="#0A2A6B"/>
-  <circle cx="78" cy="90" r="2.2" fill="#0A2A6B"/>
-  <line x1="65" y1="90" x2="65" y2="117" stroke="#0A2A6B" stroke-width="1.4" opacity="0.3"/>
+</svg>"""
+
+# Rowboat — same viewBox/scale/line-weight and the same crescent "bowl" hull
+# as the sailboat above (see its comment), plus a rower figure. Round 2 of
+# design review: two static oars (even after moving them to a center V, see
+# git history) still read as cluttered — "almost looks like four" — so this
+# is now a single oar that sweeps right-to-left on every completed stroke
+# (see the JS's #sdrOar / sdr-stroke class, driven by row()), resting on the
+# right between strokes. Motion carries the "rowing" read instead of a
+# static twin-oar pose. The blade uses the seafoam accent (the sailboat's
+# identifying color is its sail) so each boat reads as its own thing while
+# staying in the same navy/seafoam family.
+_SDR_ROWBOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
+  <g class="sdr-oar" id="sdrOar">
+    <line x1="65" y1="84" x2="112" y2="98" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
+    <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(114,100) rotate(15)"/>
+  </g>
+  <ellipse cx="65" cy="80" rx="13" ry="15" fill="url(#sdrHullGrad)"/>
+  <circle cx="65" cy="63" r="7.5" fill="#274E96"/>
+  <path d="M12,93 C34,88 96,88 118,93 C115,108 96,121 65,122 C34,121 15,108 12,93 Z" fill="url(#sdrHullGrad)"/>
+  <path d="M16,95 C36,90 94,90 114,95" fill="none" stroke="#3F5C9A" stroke-width="1.4" opacity="0.6"/>
+  <path d="M20,100 C36,109 94,109 110,100" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
 </svg>"""
 
 _SDR_ROCK_SVG = """<svg viewBox="0 0 40 32" width="40" height="32">
@@ -3083,6 +3079,7 @@ _SDR_JS = """
   var boatSailInner = document.getElementById('sdrBoatSailSprite');
   var boatRowInner = document.getElementById('sdrBoatRowSprite');
   var boatInner = boatSailInner;  // sail-only visual state (sdr-sailing) always targets this one
+  var oarEl = document.getElementById('sdrOar');  // rowboat-only; see bumpOarStroke
   var obstacleContainer = document.getElementById('sdrObstacles');
   var gustContainer = document.getElementById('sdrGusts');
   var preGame = document.getElementById('sdrPreGame');
@@ -3331,6 +3328,12 @@ _SDR_JS = """
     stage.classList.add('sdr-flash');
   }
 
+  function bumpOarStroke(){
+    oarEl.classList.remove('sdr-stroke');
+    void oarEl.offsetWidth;
+    oarEl.classList.add('sdr-stroke');
+  }
+
   function registerHit(cfg, now){
     bumpFlash();
     if (cfg.collision_limit <= 0) return;
@@ -3489,12 +3492,14 @@ _SDR_JS = """
   document.getElementById('sdrRetryBtn').addEventListener('click', function(){ startRun(state.rank, state.boat); });
   document.getElementById('sdrChangeRankBtn').addEventListener('click', backToRankSelect);
 
-  // -- Rowing: each call adds one burst; decay happens continuously in
-  // update(). Only has any effect for the rowboat — a no-op for the
-  // sailboat, which has no manual propulsion input by design.
+  // -- Rowing: each call adds one burst and retriggers the single-oar sweep
+  // (bumpOarStroke); decay happens continuously in update(). Only has any
+  // effect for the rowboat — a no-op for the sailboat, which has no manual
+  // propulsion input by design.
   function row(){
     if (!state.started || state.over || state.boat !== 'rowboat') return;
     state.rowMomentum = Math.min(ROW_MAX_MOMENTUM, state.rowMomentum + ROW_BURST_ADD);
+    bumpOarStroke();
   }
 
   // -- Keyboard (steering + spacebar-to-row on the rowboat) --
