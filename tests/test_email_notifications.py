@@ -135,7 +135,7 @@ def test_tool_submission_failure_is_logged(env, monkeypatch):
 
 def test_new_user_with_email_gets_welcome_email(env, monkeypatch):
     calls = []
-    _configure_email(monkeypatch, fake_welcome=lambda to, username, temp_password, login_url, name="": calls.append(
+    _configure_email(monkeypatch, fake_welcome=lambda to, username, temp_password, login_url, name="", **kw: calls.append(
         (to, username, temp_password, login_url, name)) or True)
     admin = _admin_client(env)
     r = admin.post("/admin/users/create", data={
@@ -164,7 +164,7 @@ def test_new_user_without_email_no_send_attempted(env, monkeypatch):
 
 
 def test_new_user_welcome_failure_is_logged(env, monkeypatch):
-    def _boom(to, username, temp_password, login_url, name=""):
+    def _boom(to, username, temp_password, login_url, name="", **kw):
         raise RuntimeError("mailer down")
     _configure_email(monkeypatch, fake_welcome=_boom)
     admin = _admin_client(env)

@@ -65,6 +65,82 @@ def default_notify_email() -> str:
     return _FROM_EMAIL
 
 
+# ---------------------------------------------------------------------------
+# Admin-editable templates (warm intro + welcome emails). Defaults live here;
+# /admin/emails lets Brian override subject/body/sign-off per email, stored
+# as plain settings-table strings and passed in as the *_template/signoff
+# args below. A blank/missing override falls back to these defaults.
+# ---------------------------------------------------------------------------
+
+WARM_INTRO_PLACEHOLDERS = [
+    "vendor_name", "requester_name", "requester_email",
+    "requester_company", "requester_company_size", "tool_name",
+]
+WARM_INTRO_SUBJECT_DEFAULT = "Introduction: {requester_name} <> {tool_name}"
+WARM_INTRO_BODY_DEFAULT = """\
+Hi {vendor_name},
+
+I'd like to introduce you to {requester_name} at {requester_company} ({requester_company_size} employees) — a member of the CFO Toolbox community I run at bmweis.com. They came across {tool_name} in the directory and asked for a warm intro to your team.
+
+{requester_name}
+{requester_email}
+{requester_company} — {requester_company_size} employees
+
+I've cc'd {requester_name} directly so the two of you can take it from here."""
+WARM_INTRO_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg\nbmweis.com / CFO Toolbox"
+
+WELCOME_PLACEHOLDERS = ["name", "username", "temp_password", "login_url", "to"]
+WELCOME_SUBJECT_DEFAULT = "Your bmweis.com account"
+WELCOME_BODY_DEFAULT = """\
+Hi {name},
+
+Welcome! Your account at bmweis.com is ready, confirmed for {to}.
+
+Username: {username}
+Temporary password: {temp_password}
+
+Sign in here, then use "Forgot your password?" on that page to set your own password — we'd suggest doing that as soon as you get a chance, since this one was just generated for you:
+{login_url}"""
+WELCOME_SIGNOFF_DEFAULT = "Best,\nBrian Weisberg"
+
+
+def validate_template(template: str, placeholder_keys: list[str]) -> str:
+    """Try rendering a subject/body template with dummy values for every
+    known placeholder. Returns an empty string if it renders cleanly, else a
+    human-readable error describing what's wrong — used by the /admin/emails
+    save handlers so a typo'd template gets caught at save time, not send
+    time."""
+    sample = {k: f"[{k}]" for k in placeholder_keys}
+    try:
+        template.format(**sample)
+    except (KeyError, IndexError) as e:
+        allowed = ", ".join("{" + k + "}" for k in placeholder_keys)
+        return f"Unknown placeholder {{{e.args[0]}}}. Allowed placeholders: {allowed}"
+    except ValueError as e:
+        return f"Invalid template syntax: {e}"
+    return ""
+
+
+def _render_html_block(text: str) -> str:
+    """Render already-substituted plain text as escaped HTML paragraphs —
+    blank lines start a new <p>, single newlines within a paragraph become
+    <br>. Escaping happens after placeholder substitution, so both the
+    admin-authored template text and any user-supplied values (names,
+    companies, etc.) get escaped exactly once."""
+    paras = [p.strip("\n") for p in text.strip("\n").split("\n\n") if p.strip()]
+    return "".join(
+        "<p>" + "<br>".join(_h(line) for line in p.split("\n")) + "</p>"
+        for p in paras
+    )
+
+
+_HTML_WRAPPER = (
+    '<html><body style="font-family:-apple-system,BlinkMacSystemFont,'
+    "'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.55;"
+    'color:#1a1a1a;">{content}</body></html>'
+)
+
+
 def _access_token() -> str:
     # Same refresh-token exchange as linklib/backup.py — kept local so each
     # module stays self-contained (the repo's convention for this plumbing).
@@ -114,46 +190,43 @@ def send_notification_email(to: str, subject: str, body: str) -> bool:
     return True
 
 
-def send_welcome_email(to: str, username: str, temp_password: str, login_url: str, name: str = "") -> bool:
+def send_welcome_email(
+    to: str,
+    username: str,
+    temp_password: str,
+    login_url: str,
+    name: str = "",
+    subject_template: str | None = None,
+    body_template: str | None = None,
+    signoff: str | None = None,
+) -> bool:
     """Send a new member a warm welcome with their account details and a link
     to sign in. Returns True if sent, False if Google OAuth is not configured
     (graceful no-op) — the account still exists either way, so callers should
     tell the admin plainly when this comes back False (share the password
     another way). Raises on API errors.
+
+    subject_template/body_template/signoff default to the WELCOME_* module
+    constants — pass overrides from /admin/emails to customize copy without
+    a redeploy. Body/subject templates may use any of WELCOME_PLACEHOLDERS.
     """
     if not is_configured():
         return False
 
-    greeting_name = name.strip() or username
-    subject = "Your bmweis.com account"
+    subject_template = subject_template or WELCOME_SUBJECT_DEFAULT
+    body_template = body_template or WELCOME_BODY_DEFAULT
+    signoff = WELCOME_SIGNOFF_DEFAULT if signoff is None else signoff
 
-    body = f"""\
-Hi {greeting_name},
-
-Welcome! Your account at bmweis.com is ready, confirmed for {to}.
-
-Username: {username}
-Temporary password: {temp_password}
-
-Sign in here, then use "Forgot your password?" on that page to set your own \
-password — we'd suggest doing that as soon as you get a chance, since this \
-one was just generated for you:
-{login_url}
-
-Best,
-Brian Weisberg
-"""
-
-    html_body = f"""\
-<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.55;color:#1a1a1a;">
-<p>Hi {_h(greeting_name)},</p>
-<p>Welcome! Your account at bmweis.com is ready, confirmed for {_h(to)}.</p>
-<p>Username: {_h(username)}<br>Temporary password: {_h(temp_password)}</p>
-<p>Sign in here, then use &ldquo;Forgot your password?&rdquo; on that page to set your own \
-password &mdash; we&rsquo;d suggest doing that as soon as you get a chance, since this one was \
-just generated for you:<br><a href="{_h(login_url)}">{_h(login_url)}</a></p>
-<p>Best,<br>Brian Weisberg</p>
-</body></html>"""
+    placeholders = dict(
+        name=name.strip() or username, username=username,
+        temp_password=temp_password, login_url=login_url, to=to,
+    )
+    subject = subject_template.format(**placeholders)
+    body_rendered = body_template.format(**placeholders)
+    body = f"{body_rendered}\n\n{signoff}\n"
+    html_body = _HTML_WRAPPER.format(
+        content=_render_html_block(body_rendered) + _render_html_block(signoff)
+    )
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -209,6 +282,9 @@ def send_warm_intro_email(
     requester_email: str,
     requester_company: str,
     requester_company_size: str,
+    subject_template: str | None = None,
+    body_template: str | None = None,
+    signoff: str | None = None,
 ) -> bool:
     """Send a warm-intro email connecting a CFO Toolbox member with a named
     vendor contact — an actual introduction (addressed to the vendor contact
@@ -220,54 +296,33 @@ def send_warm_intro_email(
     reaches a real person. Set LINKLIB_FROM_EMAIL to the sending mailbox on
     the secured domain (e.g. hello@bmweis.com).
 
+    subject_template/body_template/signoff default to the WARM_INTRO_*
+    module constants — pass overrides from /admin/emails to customize copy
+    without a redeploy. Body/subject templates may use any of
+    WARM_INTRO_PLACEHOLDERS.
+
     Returns True if sent, False if Google OAuth is not configured (graceful
     no-op). Raises on API errors so the caller can log or alert.
     """
     if not is_configured():
         return False
 
-    vendor_greeting = vendor_contact_name.strip() or "there"
-    subject = f"Introduction: {requester_name} <> {tool_name}"
+    subject_template = subject_template or WARM_INTRO_SUBJECT_DEFAULT
+    body_template = body_template or WARM_INTRO_BODY_DEFAULT
+    signoff = WARM_INTRO_SIGNOFF_DEFAULT if signoff is None else signoff
 
-    # Built as adjacent string literals (not backslash-newline continuation) so
-    # the paragraph is one clean logical line regardless of how it's reflowed
-    # in an editor — no risk of an accidental hard break mid-sentence.
-    intro_line = (
-        f"I'd like to introduce you to {requester_name} at {requester_company} "
-        f"({requester_company_size} employees) — a member of the CFO Toolbox "
-        f"community I run at bmweis.com. They came across {tool_name} in the "
-        f"directory and asked for a warm intro to your team."
+    placeholders = dict(
+        vendor_name=vendor_contact_name.strip() or "there",
+        requester_name=requester_name, requester_email=requester_email,
+        requester_company=requester_company, requester_company_size=requester_company_size,
+        tool_name=tool_name,
     )
-
-    body = f"""\
-Hi {vendor_greeting},
-
-{intro_line}
-
-{requester_name}
-{requester_email}
-{requester_company} — {requester_company_size} employees
-
-I've cc'd {requester_name} directly so the two of you can take it from here.
-
-My best,
-Brian Weisberg
-bmweis.com / CFO Toolbox
-"""
-
-    html_body = f"""\
-<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.55;color:#1a1a1a;">
-<p>Hi {_h(vendor_greeting)},</p>
-<p>I&rsquo;d like to introduce you to {_h(requester_name)} at {_h(requester_company)} \
-({_h(requester_company_size)} employees) &mdash; a member of the CFO Toolbox community I run at \
-<a href="https://bmweis.com">bmweis.com</a>. They came across {_h(tool_name)} in the directory and \
-asked for a warm intro to your team.</p>
-<p>{_h(requester_name)}<br>\
-<a href="mailto:{_h(requester_email)}">{_h(requester_email)}</a><br>\
-{_h(requester_company)} &mdash; {_h(requester_company_size)} employees</p>
-<p>I&rsquo;ve cc&rsquo;d {_h(requester_name)} directly so the two of you can take it from here.</p>
-<p>My best,<br>Brian Weisberg<br>bmweis.com / CFO Toolbox</p>
-</body></html>"""
+    subject = subject_template.format(**placeholders)
+    body_rendered = body_template.format(**placeholders)
+    body = f"{body_rendered}\n\n{signoff}\n"
+    html_body = _HTML_WRAPPER.format(
+        content=_render_html_block(body_rendered) + _render_html_block(signoff)
+    )
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
