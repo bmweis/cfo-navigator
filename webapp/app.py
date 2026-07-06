@@ -2824,6 +2824,32 @@ _SDR_BOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
   </g>
 </svg>"""
 
+# Rowboat — same viewBox/scale/line-weight/palette as the sailboat above (so
+# both read as one visual family and the JS anchor math (render()'s bh*0.78)
+# needs no per-boat adjustment), but silhouette-distinct at a glance: no
+# mast/sail, a dinghy hull drawn as a side-view "bowl" (flat-ish deck line,
+# curved keel) rather than the sailboat's lens-shaped hull + gunwale-ring
+# combo — reusing that combo without a mast/sail on top of it reads as a
+# flying saucer, not a boat, so this is a different hull construction, not
+# just a recolor. Oars rest out to the sides at a shallow downward angle
+# with bold rounded-rect blades (a near-vertical oar with a thin-stroke
+# ellipse blade reads as an antenna at this render size, ~78px on screen).
+# Blades use the seafoam accent (the sailboat's identifying color is its
+# coral sail) so each boat reads as its own thing while staying in the same
+# navy/seafoam family — no new palette introduced.
+_SDR_ROWBOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
+  <line x1="34" y1="96" x2="4" y2="108" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
+  <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(0,110) rotate(20)"/>
+  <line x1="96" y1="96" x2="126" y2="108" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
+  <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(130,110) rotate(-20)"/>
+  <path d="M12,93 C34,88 96,88 118,93 C115,108 96,121 65,122 C34,121 15,108 12,93 Z" fill="url(#sdrHullGrad)"/>
+  <path d="M16,95 C36,90 94,90 114,95" fill="none" stroke="#3F5C9A" stroke-width="1.4" opacity="0.6"/>
+  <path d="M20,100 C36,109 94,109 110,100" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
+  <circle cx="34" cy="96" r="2.2" fill="#0A2A6B"/>
+  <circle cx="96" cy="96" r="2.2" fill="#0A2A6B"/>
+  <line x1="65" y1="90" x2="65" y2="117" stroke="#0A2A6B" stroke-width="1.4" opacity="0.3"/>
+</svg>"""
+
 _SDR_ROCK_SVG = """<svg viewBox="0 0 40 32" width="40" height="32">
   <path d="M2,30 C0,20 6,8 16,4 C26,0 38,6 38,18 C38,26 30,30 20,31 C12,32 4,30 2,30 Z" fill="url(#sdrRockGrad)"/>
   <path d="M8,10 C14,6 22,6 28,10" stroke="#7A7869" stroke-width="1" opacity="0.4" fill="none"/>
@@ -3050,7 +3076,9 @@ _SDR_JS = """
   var root = document.getElementById('sdrRoot');
   var stage = document.getElementById('sdrStage');
   var boatEl = document.getElementById('sdrBoat');
-  var boatInner = boatEl.querySelector('.sdr-boat-inner');
+  var boatSailInner = document.getElementById('sdrBoatSailSprite');
+  var boatRowInner = document.getElementById('sdrBoatRowSprite');
+  var boatInner = boatSailInner;  // sail-only visual state (sdr-sailing) always targets this one
   var obstacleContainer = document.getElementById('sdrObstacles');
   var gustContainer = document.getElementById('sdrGusts');
   var preGame = document.getElementById('sdrPreGame');
@@ -3410,6 +3438,11 @@ _SDR_JS = """
     gameOver.style.display = 'none';
     stage.style.display = 'block';
     state.started = true;
+    // Swap in the selected boat's sprite — see _SDR_ROWBOAT_SVG for why this
+    // is two pre-rendered sprites toggled by display, not one dynamically
+    // rebuilt element.
+    boatSailInner.style.display = (state.boat === 'rowboat') ? 'none' : 'block';
+    boatRowInner.style.display = (state.boat === 'rowboat') ? 'block' : 'none';
     // Mobile row button — only for the rowboat, and only on touch devices;
     // sailboat play and desktop play must never show it.
     rowBtn.style.display = (touchCapable && state.boat === 'rowboat') ? 'flex' : 'none';
@@ -3839,7 +3872,10 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
   <div id="sdrWhale" class="sdr-whale"><div class="sdr-whale-inner">""" + _SDR_WHALE_SVG + """</div></div>
   <div id="sdrPrize" class="sdr-prize"><div class="sdr-prize-glow"></div><div class="sdr-prize-chest"></div><div class="sdr-prize-lid"></div></div>
   <div id="sdrShark" class="sdr-shark">""" + _SDR_SHARK_SVG + """</div>
-  <div id="sdrBoat" class="sdr-boat-wrap"><div class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div></div>
+  <div id="sdrBoat" class="sdr-boat-wrap">
+    <div id="sdrBoatSailSprite" class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div>
+    <div id="sdrBoatRowSprite" class="sdr-boat-inner" style="display:none;"><div class="sdr-boat-shadow"></div>""" + _SDR_ROWBOAT_SVG + """</div>
+  </div>
 
   <div class="sdr-hud-top">
     <div class="sdr-minimap" id="sdrMinimap">

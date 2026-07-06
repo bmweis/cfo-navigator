@@ -71,6 +71,22 @@ def test_play_boat_pill_wired_into_start(env):
     assert "startRun(selectedRank, selectedBoat)" in body
 
 
+def test_play_renders_distinct_boat_sprites(env):
+    """Both boat sprites render (toggled by display: JS, see boatSailInner/
+    boatRowInner in startRun), and the rowboat sprite has no mast/sail — it
+    must be a genuinely different sprite, not a recolor of the sailboat's."""
+    _, client = env
+    body = client.get("/play").text
+    assert 'id="sdrBoatSailSprite"' in body
+    assert 'id="sdrBoatRowSprite"' in body
+    sail_start = body.index('id="sdrBoatSailSprite"')
+    row_start = body.index('id="sdrBoatRowSprite"')
+    row_sprite_markup = body[row_start:body.index('</div>\n  </div>', row_start)]
+    assert "sdr-sail-group" not in row_sprite_markup
+    assert "sdrSailGrad" not in row_sprite_markup
+    assert sail_start < row_start
+
+
 def test_play_rowboat_propulsion_wired_up(env):
     """Rowboat propulsion: spacebar + the mobile row button both call row(),
     which is a no-op unless state.boat === 'rowboat' (sailboat keeps its
