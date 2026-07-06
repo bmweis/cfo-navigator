@@ -339,6 +339,18 @@ def _current_user_id(lib: Library, request: Request) -> int | None:
     return user["id"] if user else None
 
 
+def _log_archive_audit(lib: Library, request: Request, action: str,
+                        item_id: int | None = None, detail: str = "") -> None:
+    """Record an admin add/edit/delete on the Archive. Skipped when there's no
+    matching `users` row (the break-glass host-password admin login, local
+    dev) since there's no real admin_id to attribute it to — same edge case
+    _current_user_id already documents."""
+    admin_id = _current_user_id(lib, request)
+    if admin_id is None:
+        return
+    lib.record_archive_audit(admin_id, action, item_id, detail)
+
+
 def _is_authed(request: Request) -> bool:
     """True for an admin session (or when no password is configured — local dev).
     Admin is the gate for every currently-private route; user-tier gating is layered
@@ -5700,15 +5712,21 @@ OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferr
 def feed_reader(request: Request, cat: str = "", rl: str = ""):
     if not _is_member(request):
         return _login_redirect(request)
-    is_admin = _is_authed(request)   # admin: in-app reader + save/read-later/curation
+    # In-app reader and "Save to Archive" stay admin-only (resale-safe / shared
+    # Archive writes). Read-later is a personal bookmark and is member-scoped
+    # end to end at the API level (/feed/read-later, read_later table) — but
+    # the buttons below are still gated on is_admin pending a UI decision on
+    # when to actually expose read-later to non-admin members.
+    is_admin = _is_authed(request)
 
     import json as _json
     lib = _lib()
     try:
         lib_tags = [t for t, _ in lib.all_tags()[:20]]
         custom_filters = _json.loads(lib.get_setting("feed_filter_tags") or "[]")
-        rl_urls = lib.read_later_urls()
-        rl_items_raw = lib.list_read_later() if rl else []
+        user_id = _current_user_id(lib, request)
+        rl_urls = lib.read_later_urls(user_id) if user_id is not None else set()
+        rl_items_raw = (lib.list_read_later(user_id) if (rl and user_id is not None) else [])
     finally:
         lib.close()
 
@@ -8210,6 +8228,8 @@ async def admin_tags_merge_group(request: Request, background_tasks: BackgroundT
     try:
         for m in merges:
             total += lib.rename_tag(m, canonical)
+        _log_archive_audit(lib, request, "edit", None,
+                           detail=f"tag merge: {merges} -> {canonical} ({total} articles)")
     finally:
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
@@ -8234,6 +8254,8 @@ def admin_tags_merge_all(request: Request, background_tasks: BackgroundTasks):
                     lib.rename_tag(m, canon)
                     applied += 1
         lib.set_setting("tag_merge_suggestions", "[]")   # consumed
+        _log_archive_audit(lib, request, "edit", None,
+                           detail=f"applied all proposed tag merges ({applied} tags folded in)")
     finally:
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
@@ -8251,6 +8273,8 @@ async def admin_tags_rename(request: Request, background_tasks: BackgroundTasks)
     lib = _lib()
     try:
         n = lib.rename_tag(old, new)
+        if n:
+            _log_archive_audit(lib, request, "edit", None, detail=f"tag rename: {old} -> {new} ({n} articles)")
     finally:
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
@@ -8267,6 +8291,8 @@ async def admin_tags_delete(request: Request, background_tasks: BackgroundTasks)
     lib = _lib()
     try:
         n = lib.delete_tag(tag)
+        if n:
+            _log_archive_audit(lib, request, "edit", None, detail=f"tag delete: {tag} ({n} articles)")
     finally:
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
@@ -8712,6 +8738,7 @@ async def admin_dedupe_remove(request: Request, background_tasks: BackgroundTask
             lib.record_dedupe_decision(keeper, dup, "dup", source)   # accept = it's a dupe
         if aid:
             lib.delete_article(aid)
+            _log_archive_audit(lib, request, "delete", aid, detail="dedupe")
     finally:
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
@@ -8760,6 +8787,7 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
             for a in c[1:]:            # keep the first (the keeper), remove the rest
                 lib.record_dedupe_decision(keeper, a, "dup", source)
                 lib.delete_article(a["id"])
+                _log_archive_audit(lib, request, "delete", a["id"], detail=f"dedupe:{source}")
                 removed += 1
     finally:
         lib.close()
@@ -9300,6 +9328,7 @@ async def admin_queue_add(request: Request, background_tasks: BackgroundTasks):
         article_id = lib.promote_queue_item(url, tags=tags)
         if not article_id:
             raise HTTPException(status_code=404, detail="not in queue")
+        _log_archive_audit(lib, request, "add", article_id, detail=url)
         background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True, "id": article_id})
     finally:
@@ -9482,6 +9511,7 @@ async def admin_review_keep(request: Request):
     lib = _lib()
     try:
         lib.keep_article(article_id)
+        _log_archive_audit(lib, request, "edit", article_id, detail="kept (cleared out-of-scope flag)")
         return JSONResponse({"ok": True})
     finally:
         lib.close()
@@ -9498,6 +9528,7 @@ async def admin_review_remove(request: Request, background_tasks: BackgroundTask
     lib = _lib()
     try:
         lib.delete_article(article_id)
+        _log_archive_audit(lib, request, "delete", article_id, detail="review-removals")
         background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True})
     finally:
@@ -10971,7 +11002,8 @@ def bookmarklet(request: Request):
 
 @app.post("/feed/save")
 async def feed_save(request: Request, background_tasks: BackgroundTasks):
-    """Server-side save proxy — authed via login cookie, no token in client HTML."""
+    """Server-side save proxy — authed via login cookie, no token in client HTML.
+    Admin-only: this writes straight into the shared Archive."""
     _require_api(request)
     form = await request.form()
     url = (form.get("url") or "").strip()
@@ -10981,7 +11013,8 @@ async def feed_save(request: Request, background_tasks: BackgroundTasks):
     tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
     lib = _lib()
     try:
-        ingest_url(lib, url, tags=tags)
+        row = ingest_url(lib, url, tags=tags)
+        _log_archive_audit(lib, request, "add", row.get("id"), detail=url)
         background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True})
     except Exception as e:
@@ -10992,8 +11025,11 @@ async def feed_save(request: Request, background_tasks: BackgroundTasks):
 
 @app.post("/feed/read-later")
 async def feed_toggle_read_later(request: Request):
-    """Add or remove a feed item from the read-later list."""
-    _require_api(request)
+    """Add or remove a feed item from the signed-in user's own read-later
+    list. Member-tier (any signed-in user, not just admin) — this is a
+    personal bookmark, fully scoped to user_id, never shared with or visible
+    to any other user."""
+    _require_member(request)
     form = await request.form()
     url = (form.get("url") or "").strip()
     if not url:
@@ -11001,10 +11037,14 @@ async def feed_toggle_read_later(request: Request):
     action = (form.get("action") or "add").strip()
     lib = _lib()
     try:
+        user_id = _current_user_id(lib, request)
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="unauthorized")
         if action == "remove":
-            lib.remove_read_later(url)
+            lib.remove_read_later(user_id, url)
         else:
             lib.add_read_later(
+                user_id=user_id,
                 url=url,
                 title=(form.get("title") or "").strip(),
                 source=(form.get("source") or "").strip(),
@@ -11050,6 +11090,7 @@ async def library_update_tags(request: Request, article_id: int):
     lib = _lib()
     try:
         lib.update_tags(article_id, tags)
+        _log_archive_audit(lib, request, "edit", article_id, detail=f"tags={sorted(set(tags))}")
         return JSONResponse({"ok": True, "tags": sorted(set(tags))})
     finally:
         lib.close()
@@ -11063,6 +11104,7 @@ def library_delete(request: Request, article_id: int):
     lib = _lib()
     try:
         lib.delete_article(article_id)
+        _log_archive_audit(lib, request, "delete", article_id)
     finally:
         lib.close()
     return RedirectResponse("/archive", status_code=303)

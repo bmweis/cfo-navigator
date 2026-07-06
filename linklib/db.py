@@ -136,9 +136,19 @@ CREATE TABLE IF NOT EXISTS benchmarks (
     sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
+-- Personal bookmark list — private per user, never shared with other users
+-- or with the admin-curated Archive. user_id has no NOT NULL/UNIQUE
+-- constraint here on purpose: on a fresh DB every row gets a real user_id at
+-- write time, but a pre-existing DB's rows predate this column (see the
+-- table-recreation migration in Library.__init__ for how those get
+-- backfilled). The per-(user_id, url) uniqueness is enforced by
+-- idx_read_later_user_url in _POST_MIGRATION_INDEXES rather than inline here
+-- — see the note above password_reset_requests for why a unique constraint
+-- on a migration-only column can't live in this script.
 CREATE TABLE IF NOT EXISTS read_later (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    url         TEXT NOT NULL UNIQUE,
+    user_id     INTEGER,
+    url         TEXT NOT NULL,
     title       TEXT NOT NULL DEFAULT '',
     source      TEXT NOT NULL DEFAULT '',
     summary     TEXT NOT NULL DEFAULT '',
@@ -341,6 +351,26 @@ CREATE TABLE IF NOT EXISTS game_runs (
 
 CREATE INDEX IF NOT EXISTS idx_game_runs_leaderboard ON game_runs(rank, course_week, score DESC);
 CREATE INDEX IF NOT EXISTS idx_game_runs_user ON game_runs(user_id);
+
+-- Audit trail for admin curation of the Archive (the `articles` table).
+-- Every admin add/edit/delete on the Archive writes one row here — who,
+-- what action, which item, when. item_id is nullable because a few admin
+-- actions (bulk tag rename/merge/delete) touch many articles at once; those
+-- log a single summary row (item_id NULL, detail describing the change)
+-- rather than one row per affected article. admin_id is nullable for the
+-- same reason _current_user_id can return None: the break-glass host-
+-- password admin login has no matching `users` row on some installs.
+CREATE TABLE IF NOT EXISTS archive_audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_id   INTEGER,
+    action     TEXT NOT NULL,             -- 'add' | 'edit' | 'delete'
+    item_id    INTEGER,                    -- articles.id; NULL for a bulk operation
+    detail     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_archive_audit_admin ON archive_audit_log(admin_id);
+CREATE INDEX IF NOT EXISTS idx_archive_audit_created ON archive_audit_log(created_at);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -352,6 +382,7 @@ CREATE INDEX IF NOT EXISTS idx_game_runs_user ON game_runs(user_id);
 # no-op there and the column isn't added until the migration loop runs).
 _POST_MIGRATION_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_reset_requests(token_hash)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_read_later_user_url ON read_later(user_id, url)",
 ]
 
 
@@ -487,6 +518,12 @@ class Library:
                 self.conn.commit()
             except sqlite3.OperationalError:
                 pass
+        # read_later predates per-user scoping (no user_id column, UNIQUE(url)
+        # inline constraint) — a plain ALTER TABLE ADD COLUMN can't fix the
+        # uniqueness half of that, so it gets its own table-recreation
+        # migration rather than a line in the loop above. Must run before
+        # _POST_MIGRATION_INDEXES, which assumes user_id already exists.
+        self._migrate_read_later_user_scope()
         # Indexes on any column added by the ALTER TABLE loop above must be
         # created here, never inside _SCHEMA — see the NOTE above the
         # password_reset_requests table in _SCHEMA for why (a real incident:
@@ -495,6 +532,45 @@ class Library:
         # no-op there and the column doesn't land until this loop runs).
         for _idx_sql in _POST_MIGRATION_INDEXES:
             self.conn.execute(_idx_sql)
+        self.conn.commit()
+
+    def _migrate_read_later_user_scope(self) -> None:
+        """One-time table recreation for DBs whose read_later predates
+        per-user scoping. It shipped as a single shared list (UNIQUE(url),
+        no owner column) back when only one admin used it; now that other
+        signed-in users can read/save independently, every row needs an
+        owner. SQLite can't drop or alter a UNIQUE constraint in place, so
+        this renames the old table aside, recreates it with user_id, copies
+        the data across (attributed to the earliest admin account, since
+        that's who saved it under the old single-user design), and drops
+        the old table. A no-op on a fresh DB, where _SCHEMA already created
+        read_later with user_id."""
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(read_later)").fetchall()}
+        if "user_id" in cols:
+            return
+        default_admin = self.conn.execute(
+            "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+        ).fetchone()
+        default_user_id = default_admin[0] if default_admin else None
+        self.conn.execute("ALTER TABLE read_later RENAME TO read_later_legacy")
+        self.conn.execute(
+            """CREATE TABLE read_later (
+                   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id     INTEGER,
+                   url         TEXT NOT NULL,
+                   title       TEXT NOT NULL DEFAULT '',
+                   source      TEXT NOT NULL DEFAULT '',
+                   summary     TEXT NOT NULL DEFAULT '',
+                   published_at TEXT,
+                   added_at    TEXT NOT NULL
+               )"""
+        )
+        self.conn.execute(
+            """INSERT INTO read_later (user_id, url, title, source, summary, published_at, added_at)
+               SELECT ?, url, title, source, summary, published_at, added_at FROM read_later_legacy""",
+            (default_user_id,),
+        )
+        self.conn.execute("DROP TABLE read_later_legacy")
         self.conn.commit()
 
     # -- writes -------------------------------------------------------------
@@ -1158,32 +1234,36 @@ class Library:
         self.conn.execute("DELETE FROM benchmarks WHERE id = ?", (benchmark_id,))
         self.conn.commit()
 
-    # -- read later ------------------------------------------------------------
+    # -- read later ---------------------------------------------------------
+    # A personal bookmark list — every method takes user_id and scopes to it,
+    # so one user's saves are never visible to or affected by another's.
 
-    def add_read_later(self, url: str, title: str = "", source: str = "",
+    def add_read_later(self, user_id: int, url: str, title: str = "", source: str = "",
                        summary: str = "", published_at: str | None = None) -> None:
         self.conn.execute(
-            """INSERT INTO read_later (url, title, source, summary, published_at, added_at)
-               VALUES (?,?,?,?,?,?)
-               ON CONFLICT(url) DO UPDATE SET
+            """INSERT INTO read_later (user_id, url, title, source, summary, published_at, added_at)
+               VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(user_id, url) DO UPDATE SET
                    title=excluded.title, source=excluded.source,
                    summary=excluded.summary, published_at=excluded.published_at""",
-            (url, title, source, summary, published_at, _now()),
+            (user_id, url, title, source, summary, published_at, _now()),
         )
         self.conn.commit()
 
-    def remove_read_later(self, url: str) -> None:
-        self.conn.execute("DELETE FROM read_later WHERE url=?", (url,))
+    def remove_read_later(self, user_id: int, url: str) -> None:
+        self.conn.execute("DELETE FROM read_later WHERE user_id=? AND url=?", (user_id, url))
         self.conn.commit()
 
-    def list_read_later(self) -> list[dict]:
+    def list_read_later(self, user_id: int) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT * FROM read_later ORDER BY added_at DESC"
+            "SELECT * FROM read_later WHERE user_id=? ORDER BY added_at DESC", (user_id,)
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def read_later_urls(self) -> set[str]:
-        return {r[0] for r in self.conn.execute("SELECT url FROM read_later").fetchall()}
+    def read_later_urls(self, user_id: int) -> set[str]:
+        return {r[0] for r in self.conn.execute(
+            "SELECT url FROM read_later WHERE user_id=?", (user_id,)
+        ).fetchall()}
 
     # -- library queue ---------------------------------------------------------
 
@@ -1720,6 +1800,30 @@ class Library:
                  ORDER BY score DESC, created_at ASC
                  LIMIT ?""",
             params + [limit],
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -- archive audit log ---------------------------------------------------
+
+    def record_archive_audit(self, admin_id: Optional[int], action: str,
+                             item_id: Optional[int] = None, detail: str = "") -> int:
+        """Log one admin add/edit/delete on the Archive. `item_id` is the
+        affected articles.id, or None for a bulk operation spanning many rows
+        (detail then carries a summary of the change)."""
+        cur = self.conn.execute(
+            "INSERT INTO archive_audit_log (admin_id, action, item_id, detail, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (admin_id, action, item_id, detail, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_archive_audit_log(self, limit: int = 500) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT a.*, u.username AS admin_username, u.name AS admin_name
+               FROM archive_audit_log a LEFT JOIN users u ON u.id = a.admin_id
+               ORDER BY a.created_at DESC LIMIT ?""",
+            (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 
