@@ -2737,6 +2737,20 @@ _SDR_CSS = """
   text-shadow:0 1px 2px rgba(255,255,255,0.7);}
 
 .sdr-steer-zone{position:absolute;top:0;left:0;width:60%;height:100%;z-index:5;cursor:grab;}
+/* Mobile row button (rowboat + touch only, toggled via inline style in JS —
+   see startRun/backToRankSelect). Anchored bottom-right in the untouched 40%
+   of the stage the steer-zone doesn't cover, so it never competes with the
+   ↑/↓ drag gesture in either orientation. bottom:34px (not the corner) keeps
+   clear of .sdr-progress-hud's right-aligned "N lives left" text, which is
+   also bottom/right-anchored — both orientations use the same fixed-px
+   offsets from the stage's own corner, so the relationship holds regardless
+   of the stage's current aspect ratio. */
+.sdr-row-btn{position:absolute;right:16px;bottom:34px;z-index:7;width:66px;height:66px;border-radius:50%;
+  align-items:center;justify-content:center;background:var(--navy);color:#fff;
+  border:2px solid rgba(163,229,212,0.55);font-family:var(--font-head);font-weight:700;font-size:12px;
+  letter-spacing:.03em;cursor:pointer;box-shadow:0 4px 10px rgba(0,41,117,0.35);
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;}
+.sdr-row-btn:active{transform:scale(0.92);background:var(--navy-deep);}
 /* Portrait footnote lives in normal page flow above the stage, not
    absolutely positioned on top of it — it must never overlap active
    gameplay, even briefly while fading. It's still a toast (shown once per
@@ -2981,6 +2995,23 @@ _SDR_JS = """
   var GRACE_MS = 1200;
   var STEER_KEY_RATE = 1.0;
   var BOAT_LERP = 8;
+  // Rowboat propulsion — boat-specific, not rank-tuned (rank still governs
+  // obstacle density/gust coverage/hit-tolerance identically for both
+  // boats; only forward-speed physics differ by boat). Each row() call
+  // (spacebar or the mobile row button) adds a burst to rowMomentum, which
+  // decays continuously (dm/dt = -ROW_DECAY_PER_SEC*m) rather than stepping
+  // down, so it reads as "coasting to a stop" instead of an abrupt cutoff.
+  // TUNABLE — first-pass values, not yet playtested; flagged in the PR
+  // description for a balance pass. Chosen so a single press immediately
+  // exceeds every rank's sailboat drift_speed (10-20 u/s, see
+  // _GAME_RANK_DEFAULTS) — "fast off the line" — while a sustainably
+  // rowable cadence (roughly one press per 1.5s) averages out below the
+  // sailboat's typical run speed (~26-29 u/s once its ramp + gust bonus are
+  // folded in) — "fades over the long haul".
+  var ROW_BURST_ADD = 34;        // u/s added to momentum per press
+  var ROW_MAX_MOMENTUM = 110;    // cap so mashing can't run away
+  var ROW_DECAY_PER_SEC = 1.1;   // exponential decay coefficient
+  var ROW_BASE_DRIFT = 4;        // u/s floor so an idle rowboat crawls rather than fully stalls
   // Nantucket's own threshold is 0.90, not 1.0 — the actual finish still
   // triggers at worldX >= COURSE_LENGTH (frac 1.0), but the backdrop/HUD
   // switch to Nantucket for a final-approach stretch beforehand, so the
@@ -3021,6 +3052,7 @@ _SDR_JS = """
   var introEl = document.getElementById('sdrIntro');
   var gameOver = document.getElementById('sdrGameOver');
   var steerZone = document.getElementById('sdrSteerZone');
+  var rowBtn = document.getElementById('sdrRowBtn');
   var whaleEl = document.getElementById('sdrWhale');
   var prizeEl = document.getElementById('sdrPrize');
   var sharkEl = document.getElementById('sdrShark');
@@ -3036,7 +3068,7 @@ _SDR_JS = """
   var state = {
     started: false, over: false, outcome: '',
     rank: 'mate', boat: 'sailboat', worldX: 0, boatY: 0.5, targetY: 0.5,
-    hits: 0, invincibleUntil: 0,
+    hits: 0, invincibleUntil: 0, rowMomentum: 0,
     obstacles: [], gustZones: [], score: 0, startTs: 0, lastTs: 0,
     whaleTriggered: false, whaleActive: false, whaleLane: 0.5, whaleTriggerTs: 0,
     checkpointIdx: 0,
@@ -3349,7 +3381,7 @@ _SDR_JS = """
     state.rank = rankKey;
     state.boat = boatKey || state.boat;
     state.worldX = 0; state.boatY = 0.5; state.targetY = 0.5;
-    state.hits = 0; state.invincibleUntil = 0;
+    state.hits = 0; state.invincibleUntil = 0; state.rowMomentum = 0;
     state.over = false; state.outcome = ''; state.score = 0;
     state.whaleTriggered = false; state.whaleActive = false; state.whaleTriggerTs = 0;
     state.checkpointIdx = 0;
@@ -3373,6 +3405,9 @@ _SDR_JS = """
     gameOver.style.display = 'none';
     stage.style.display = 'block';
     state.started = true;
+    // Mobile row button — only for the rowboat, and only on touch devices;
+    // sailboat play and desktop play must never show it.
+    rowBtn.style.display = (touchCapable && state.boat === 'rowboat') ? 'flex' : 'none';
     showPortraitToastIfNeeded();
   }
 
@@ -3383,6 +3418,7 @@ _SDR_JS = """
     stage.style.display = 'none';
     preGame.style.display = 'block';
     introEl.style.display = '';
+    rowBtn.style.display = 'none';
   }
 
   // -- Pre-game rank selector --
@@ -3411,19 +3447,33 @@ _SDR_JS = """
   document.getElementById('sdrRetryBtn').addEventListener('click', function(){ startRun(state.rank, state.boat); });
   document.getElementById('sdrChangeRankBtn').addEventListener('click', backToRankSelect);
 
-  // -- Keyboard (steering only — no row/Space input) --
+  // -- Rowing: each call adds one burst; decay happens continuously in
+  // update(). Only has any effect for the rowboat — a no-op for the
+  // sailboat, which has no manual propulsion input by design.
+  function row(){
+    if (!state.started || state.over || state.boat !== 'rowboat') return;
+    state.rowMomentum = Math.min(ROW_MAX_MOMENTUM, state.rowMomentum + ROW_BURST_ADD);
+  }
+
+  // -- Keyboard (steering + spacebar-to-row on the rowboat) --
   var keyUp = false, keyDown = false;
   window.addEventListener('keydown', function(e){
     if (!state.started || state.over) return;
     if (e.code === 'ArrowUp'){ keyUp = true; e.preventDefault(); }
     if (e.code === 'ArrowDown'){ keyDown = true; e.preventDefault(); }
+    if (e.code === 'Space'){ if (!e.repeat) row(); e.preventDefault(); }
   });
   window.addEventListener('keyup', function(e){
     if (e.code === 'ArrowUp') keyUp = false;
     if (e.code === 'ArrowDown') keyDown = false;
   });
 
-  // -- Touch/pointer steer-drag (the only touch input — no row button) --
+  // -- Mobile row button (rowboat + touch only; see startRun/backToRankSelect
+  // for the display toggle). pointerdown (not click) for the same low-latency
+  // feel as the steer-drag zone. --
+  rowBtn.addEventListener('pointerdown', function(e){ e.preventDefault(); row(); });
+
+  // -- Touch/pointer steer-drag --
   var dragging = false;
   function setTargetFromClientY(clientY){
     var rect = stage.getBoundingClientRect();
@@ -3461,14 +3511,26 @@ _SDR_JS = """
 
     var cfg = RANK_SETTINGS[state.rank];
     var elapsedSec = (ts - state.startTs) / 1000;
-    // No manual rowing — forward speed is a base that ramps up over elapsed
-    // run time (the difficulty lever, replacing the old row mechanic), plus
-    // an automatic, purely positional boost while inside a gust zone.
-    var sailing = isInGustZone(state.worldX);
-    var baseSpeed = cfg.drift_speed + cfg.speed_ramp_per_sec * elapsedSec;
-    var speed = baseSpeed + (sailing ? cfg.sail_speed : 0);
+    var speed;
+    if (state.boat === 'rowboat'){
+      // Manual propulsion only — no speed ramp, no gust boost (locked
+      // decision: the gust mechanic stays sailboat-only). Momentum decays
+      // continuously; row() adds bursts on each press/tap.
+      state.rowMomentum -= state.rowMomentum * ROW_DECAY_PER_SEC * dt;
+      if (state.rowMomentum < 0.01) state.rowMomentum = 0;
+      speed = ROW_BASE_DRIFT + state.rowMomentum;
+      boatInner.classList.remove('sdr-sailing');
+    } else {
+      // No manual rowing — forward speed is a base that ramps up over
+      // elapsed run time (the difficulty lever, replacing the old row
+      // mechanic), plus an automatic, purely positional boost while inside
+      // a gust zone.
+      var sailing = isInGustZone(state.worldX);
+      var baseSpeed = cfg.drift_speed + cfg.speed_ramp_per_sec * elapsedSec;
+      speed = baseSpeed + (sailing ? cfg.sail_speed : 0);
+      boatInner.classList.toggle('sdr-sailing', sailing);
+    }
     state.worldX = Math.min(COURSE_LENGTH, state.worldX + speed*dt);
-    boatInner.classList.toggle('sdr-sailing', sailing);
 
     var distanceFraction = state.worldX / COURSE_LENGTH;
     state.score = computeScore(cfg, distanceFraction, elapsedSec, state.hits, state.rank);
@@ -3781,6 +3843,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
   <div class="sdr-progress-hud"><span id="sdrLives"></span></div>
 
   <div id="sdrSteerZone" class="sdr-steer-zone"></div>
+  <button type="button" id="sdrRowBtn" class="sdr-row-btn" style="display:none;">Row</button>
 </div>
 
 <div id="sdrGameOver" class="sdr-outcome-scrim" style="display:none;">
