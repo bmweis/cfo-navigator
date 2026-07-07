@@ -233,6 +233,19 @@ async def _canonical_host_redirect(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def _no_store_admin_pages(request: Request, call_next):
+    """Admin pages carry the coral task badges — a browser serving one from
+    its back-forward cache after Brian views a source (clearing its badge)
+    would show the stale, still-"unread" badge on the very next back-nav.
+    `no-store` keeps every /admin response live, so the badge always
+    reflects what's actually still open."""
+    response = await call_next(request)
+    if request.url.path == "/admin" or request.url.path.startswith("/admin/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.on_event("startup")
 def _seed_toolbox():
     """Seed tools + the tool_categories vocabulary on first run, and keep the
@@ -571,6 +584,9 @@ a:hover{text-decoration:underline;}
 /* Admin hub: coral count badges, white text on coral fill */
 .task-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;
   padding:0 5px;border-radius:9px;background:var(--coral);color:#fff;font-size:11px;font-weight:700;line-height:1;}
+/* All-or-none sources (e.g. Contact Submissions) get a plain dot, not a count —
+   there's no per-item granularity for a number to honestly represent. */
+.task-badge-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--coral);flex-shrink:0;}
 .nav-toggle{display:none;background:none;border:1px solid var(--line-strong);border-radius:9px;width:40px;height:40px;color:var(--navy);font-size:18px;cursor:pointer;align-items:center;justify-content:center;}
 
 /* Headings */
@@ -636,6 +652,32 @@ def _short_title(title: str) -> str:
 
 def _task_badge(n: int) -> str:
     return f'<span class="task-badge">{n}</span>' if n else ""
+
+
+def _task_badge_dot() -> str:
+    return '<span class="task-badge-dot" aria-label="Unread"></span>'
+
+
+def _badge_for_href(href: str, n: int) -> str:
+    """Badge for a single admin href's card. All-or-none sources (see
+    webapp.tasks.DOT_ONLY_HREFS) render a plain dot instead of a count —
+    there's no per-item granularity for a number to honestly represent."""
+    if not n:
+        return ""
+    from webapp import tasks as _tasks
+    return _task_badge_dot() if href in _tasks.DOT_ONLY_HREFS else _task_badge(n)
+
+
+def _group_badge(task_counts: dict[str, int], hrefs) -> str:
+    """Badge for a collapsed section aggregating several hrefs. Sums the
+    individually-actionable ones into a real count; if only all-or-none
+    sources have anything pending, shows a dot instead of a misleading sum."""
+    from webapp import tasks as _tasks
+    numeric_total = sum(task_counts.get(h, 0) for h in hrefs if h not in _tasks.DOT_ONLY_HREFS)
+    if numeric_total:
+        return _task_badge(numeric_total)
+    dot_pending = any(task_counts.get(h, 0) for h in hrefs if h in _tasks.DOT_ONLY_HREFS)
+    return _task_badge_dot() if dot_pending else ""
 
 
 def _has_open_admin_tasks() -> bool:
@@ -7869,14 +7911,14 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
     finally:
         lib.close()
 
-    def _card(href, title, desc, badge=0):
+    def _card(href, title, desc, badge_html=""):
         return (
             f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
             f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
             f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="display:flex;align-items:center;gap:8px;">'
             f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-            f'{_task_badge(badge)}</span>'
+            f'{badge_html}</span>'
             f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
@@ -7886,22 +7928,22 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
     # groups defined in _ADMIN_GROUPS. The Archive card is never
     # inline-collapsible, so it always shows its aggregate badge here —
     # the per-step breakdown lives on /admin/library itself.
-    library_total = sum(task_counts.get(href, 0) for href, _, _ in _LIBRARY_TOOLS)
     library_card = _card("/admin/library", "Archive",
                          f"Build, curate, enrich, and back up your archive &mdash; {len(_LIBRARY_TOOLS)} tools.",
-                         library_total)
+                         _group_badge(task_counts, [href for href, _, _ in _LIBRARY_TOOLS]))
 
     groups_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
     for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
-        cards = "".join(_card(href, title, desc, task_counts.get(href, 0)) for href, title, desc in items)
-        group_total = sum(task_counts.get(href, 0) for href, _, _ in items)
+        cards = "".join(_card(href, title, desc, _badge_for_href(href, task_counts.get(href, 0)))
+                        for href, title, desc in items)
+        group_badge_html = _group_badge(task_counts, [href for href, _, _ in items])
         open_attr = " open" if gname == "Inbox" else ""   # Inbox starts expanded — everything else is click-to-expand
         groups_html += (
             f'<details class="admin-group"{open_attr} style="margin-bottom:14px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
             f'<summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
             f'<span style="font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(gname)}</span>'
-            f'<span class="group-badge">{_task_badge(group_total)}</span>'
+            f'<span class="group-badge">{group_badge_html}</span>'
             f'<span style="font-size:12px;color:var(--muted);">{len(items)} {"tool" if len(items)==1 else "tools"}</span>'
             f'</span>'
             f'<span class="admin-chevron" style="color:var(--navy);font-size:13px;line-height:1;transition:transform .15s;">&#9660;</span>'
@@ -7949,7 +7991,7 @@ def admin_library(request: Request):
     finally:
         lib.close()
 
-    def _step(n, href, title, desc, badge=0):
+    def _step(n, href, title, desc, badge_html=""):
         return (
             f'<a href="{href}" style="display:flex;gap:16px;align-items:flex-start;background:var(--surface);'
             f'border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;">'
@@ -7959,13 +8001,13 @@ def admin_library(request: Request):
             f'<span style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="display:flex;align-items:center;gap:8px;">'
             f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-            f'{_task_badge(badge)}</span>'
+            f'{badge_html}</span>'
             f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></span>'
             f'<span style="display:block;margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</span>'
             f'</span></a>'
         )
 
-    cards = "".join(_step(i + 1, href, title, desc, task_counts.get(href, 0))
+    cards = "".join(_step(i + 1, href, title, desc, _badge_for_href(href, task_counts.get(href, 0)))
                     for i, (href, title, desc) in enumerate(_LIBRARY_TOOLS))
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>

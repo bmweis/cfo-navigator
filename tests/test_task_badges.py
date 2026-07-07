@@ -2,8 +2,10 @@
 badge is built from, and webapp.tasks aggregating them into one dict keyed by
 admin href.
 """
+import os
 import pathlib
 import sys
+import tempfile
 
 import pytest
 
@@ -132,3 +134,139 @@ def test_open_task_counts_reflects_email_failure(lib):
     lib.log_email_failure("tool_submission", "boom")
     counts = tasks.open_task_counts(lib)
     assert counts["/admin/email-failures"] == 1
+
+
+# --- dot-vs-count rendering ---------------------------------------------------
+# All-or-none sources (viewed as one full list, no per-item action) get a plain
+# dot instead of a misleading count; individually-actionable sources keep theirs.
+
+def test_dot_only_hrefs_are_all_or_none_sources():
+    from webapp import tasks
+    assert tasks.DOT_ONLY_HREFS == {"/admin/contacts", "/admin/tools/leads"}
+
+
+def test_badge_for_href_renders_dot_for_all_or_none(monkeypatch):
+    monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    assert appmod._badge_for_href("/admin/contacts", 3) == '<span class="task-badge-dot" aria-label="Unread"></span>'
+    assert appmod._badge_for_href("/admin/tools/leads", 1) == '<span class="task-badge-dot" aria-label="Unread"></span>'
+    assert appmod._badge_for_href("/admin/contacts", 0) == ""
+
+
+def test_badge_for_href_renders_count_for_individually_actionable(monkeypatch):
+    monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    assert appmod._badge_for_href("/admin/tools", 2) == '<span class="task-badge">2</span>'
+    assert appmod._badge_for_href("/admin/email-failures", 1) == '<span class="task-badge">1</span>'
+    assert appmod._badge_for_href("/admin/tools", 0) == ""
+
+
+def test_group_badge_dot_when_only_all_or_none_pending(monkeypatch):
+    monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    counts = {"/admin/contacts": 2, "/admin/tools/leads": 1, "/admin/email-failures": 0}
+    hrefs = ["/admin/contacts", "/admin/tools/leads", "/admin/email-failures"]
+    assert appmod._group_badge(counts, hrefs) == '<span class="task-badge-dot" aria-label="Unread"></span>'
+
+
+def test_group_badge_counts_when_individually_actionable_pending(monkeypatch):
+    monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    # A real per-item task (an email failure) dominates the section total —
+    # the all-or-none contact isn't double-counted as if it were 1 more task.
+    counts = {"/admin/contacts": 1, "/admin/email-failures": 2}
+    hrefs = ["/admin/contacts", "/admin/email-failures"]
+    assert appmod._group_badge(counts, hrefs) == '<span class="task-badge">2</span>'
+
+
+def test_group_badge_empty_when_nothing_pending(monkeypatch):
+    monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    assert appmod._group_badge({}, ["/admin/contacts", "/admin/tools"]) == ""
+
+
+# --- end-to-end: badge clears at every level after viewing --------------------
+
+@pytest.fixture
+def admin_client(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    client = TestClient(appmod.app, raise_server_exceptions=True)
+    client.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    yield client, appmod, db
+    if os.path.exists(db):
+        os.remove(db)
+
+
+def test_admin_pages_are_never_cached(admin_client):
+    client, appmod, db = admin_client
+    r = client.get("/admin")
+    assert r.headers.get("cache-control") == "no-store"
+    r2 = client.get("/admin/contacts")
+    assert r2.headers.get("cache-control") == "no-store"
+    # Public pages are untouched — no reason to disable caching there.
+    r3 = client.get("/health")
+    assert r3.headers.get("cache-control") != "no-store"
+
+
+def test_contacts_badge_clears_after_viewing_at_every_level(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.save_contact("Jane", "jane@x.com", "hi there")
+    lib.close()
+
+    r1 = client.get("/admin")
+    assert '<span class="task-dot"' in r1.text                      # nav dot
+    assert '<span class="task-badge-dot" aria-label="Unread"></span>' in r1.text  # card dot, not a count
+
+    client.get("/admin/contacts")   # visiting clears the read-state
+
+    r2 = client.get("/admin")
+    assert '<span class="task-dot"' not in r2.text
+    assert '<span class="task-badge-dot"' not in r2.text
+
+
+def test_tool_leads_badge_clears_after_viewing(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    tool_id = lib.add_tool("A", "desc", "https://a.example", [], approved=1)
+    lib.save_tool_lead(tool_id, "A", "Jane", "jane@x.com", "Acme", "50-200")
+    lib.close()
+
+    r1 = client.get("/admin")
+    assert '<span class="task-badge-dot" aria-label="Unread"></span>' in r1.text
+
+    client.get("/admin/tools/leads")   # unfiltered view clears it
+
+    r2 = client.get("/admin")
+    assert '<span class="task-dot"' not in r2.text
+
+
+def test_pending_tool_badge_only_clears_on_approval_not_view(admin_client):
+    """Individually-actionable sources shouldn't clear from merely looking at
+    the list — only acting on the item (here, approving it) resolves it."""
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.add_tool("A", "desc", "https://a.example", [], approved=0)
+    lib.close()
+
+    r1 = client.get("/admin")
+    assert '<span class="task-badge">1</span>' in r1.text
+
+    client.get("/admin/tools")   # merely viewing the pending-submissions page
+
+    r2 = client.get("/admin")
+    assert '<span class="task-badge">1</span>' in r2.text   # still open — viewing isn't the action
