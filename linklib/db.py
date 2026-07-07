@@ -262,9 +262,13 @@ CREATE INDEX IF NOT EXISTS idx_dedupe_verdict ON dedupe_decisions(verdict);
 
 -- Single shared table backing all three Ask/FP&A Buddy surfaces: the admin
 -- report, a user's own history, and the public community Q&A browse view.
--- One row per API call (one per turn in a follow-up conversation), grouped by
--- conversation_id. Real cost is computed from actual token usage at call
--- time (see linklib.pricing) — never an estimate.
+-- One row per turn in a conversation, grouped by conversation_id. A follow-up
+-- turn can involve TWO API calls — the retrieval query-rewrite (Haiku) and the
+-- answer itself — folded into the same row: cost_usd is the turn TOTAL, so
+-- every SUM(cost_usd) (monthly cap, reports) needs no special handling, and
+-- the rewrite_* columns break out the rewrite's share. The plain token columns
+-- cover the answer call only. Real cost is computed from actual token usage
+-- at call time (see linklib.pricing) — never an estimate.
 CREATE TABLE IF NOT EXISTS ask_questions (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id       TEXT NOT NULL DEFAULT '',   -- groups follow-up turns; = str(id) of the first turn
@@ -281,7 +285,10 @@ CREATE TABLE IF NOT EXISTS ask_questions (
     output_tokens         INTEGER NOT NULL DEFAULT 0,
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
-    cost_usd              REAL NOT NULL DEFAULT 0,
+    cost_usd              REAL NOT NULL DEFAULT 0,     -- turn TOTAL: answer call + rewrite call
+    rewrite_input_tokens  INTEGER NOT NULL DEFAULT 0,  -- follow-up query-rewrite call; 0 on turn one
+    rewrite_output_tokens INTEGER NOT NULL DEFAULT 0,
+    rewrite_cost_usd      REAL NOT NULL DEFAULT 0,     -- rewrite's share, already inside cost_usd
     hidden_public         INTEGER NOT NULL DEFAULT 0,  -- admin removed from the community view only
     anonymized            INTEGER NOT NULL DEFAULT 0,  -- asker name hidden on the community view only
     created_at            TEXT NOT NULL
@@ -534,6 +541,14 @@ class Library:
             # deleted, same empty-string-sentinel idiom as resolved_at above,
             # rather than a real NULL.
             "ALTER TABLE contacts ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''",
+            # History-aware retrieval: the follow-up query-rewrite call's own
+            # usage, folded into the same turn's row. cost_usd remains the
+            # single authoritative column to SUM (it's the turn total,
+            # rewrite included); these break out the rewrite's share. No
+            # index — nothing queries these columns directly.
+            "ALTER TABLE ask_questions ADD COLUMN rewrite_input_tokens INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ask_questions ADD COLUMN rewrite_output_tokens INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ask_questions ADD COLUMN rewrite_cost_usd REAL NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1587,22 +1602,28 @@ class Library:
                             use_web: bool, conversation_id: str = "", turn_index: int = 0,
                             input_tokens: int = 0, output_tokens: int = 0,
                             cache_creation_tokens: int = 0, cache_read_tokens: int = 0,
-                            cost_usd: float = 0.0) -> int:
-        """Record one Ask API call. Backs all three surfaces (admin report, a
+                            cost_usd: float = 0.0, rewrite_input_tokens: int = 0,
+                            rewrite_output_tokens: int = 0,
+                            rewrite_cost_usd: float = 0.0) -> int:
+        """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
-        a conversation and the caller fills it in with str(id) after insert."""
+        a conversation and the caller fills it in with str(id) after insert.
+        `cost_usd` is the turn TOTAL (answer + any query-rewrite call); the
+        rewrite_* args break out the rewrite's share of it."""
         now = _now()
         cur = self.conn.execute(
             """INSERT INTO ask_questions
                (conversation_id, turn_index, user_id, question, answer, model, effort,
                 use_library, use_feed, use_web, input_tokens, output_tokens,
-                cache_creation_tokens, cache_read_tokens, cost_usd, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                cache_creation_tokens, cache_read_tokens, cost_usd,
+                rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-             cost_usd, now),
+             cost_usd, rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
+             now),
         )
         row_id = cur.lastrowid
         if not conversation_id:

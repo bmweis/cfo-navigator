@@ -22,6 +22,8 @@ import re
 import sqlite3
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib import db as db_mod
@@ -101,6 +103,75 @@ def test_open_existing_db_predating_token_hash(tmp_path):
     # Re-opening (second boot) against the now-migrated DB must also be a no-op, not a crash.
     lib2 = Library(path)
     lib2.close()
+
+
+def test_open_existing_db_predating_rewrite_columns(tmp_path):
+    """ask_questions tables created before the history-aware-retrieval
+    rewrite_* columns must migrate cleanly on open: no crash, columns
+    backfilled with zeros, and the new record/cap paths work end to end."""
+    path = str(tmp_path / "pre_rewrite.db")
+    conn = sqlite3.connect(path)
+    conn.execute("""
+        CREATE TABLE ask_questions (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id       TEXT NOT NULL DEFAULT '',
+            turn_index            INTEGER NOT NULL DEFAULT 0,
+            user_id               INTEGER NOT NULL,
+            question              TEXT NOT NULL DEFAULT '',
+            answer                TEXT NOT NULL DEFAULT '',
+            model                 TEXT NOT NULL DEFAULT '',
+            effort                TEXT NOT NULL DEFAULT '',
+            use_library           INTEGER NOT NULL DEFAULT 1,
+            use_feed              INTEGER NOT NULL DEFAULT 0,
+            use_web               INTEGER NOT NULL DEFAULT 1,
+            input_tokens          INTEGER NOT NULL DEFAULT 0,
+            output_tokens         INTEGER NOT NULL DEFAULT 0,
+            cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+            cost_usd              REAL NOT NULL DEFAULT 0,
+            hidden_public         INTEGER NOT NULL DEFAULT 0,
+            anonymized            INTEGER NOT NULL DEFAULT 0,
+            created_at            TEXT NOT NULL
+        )
+    """)
+    conn.execute("INSERT INTO ask_questions (user_id, question, created_at) "
+                 "VALUES (1, 'old row', '2026-01-01T00:00:00Z')")
+    conn.commit()
+    conn.close()
+
+    lib = Library(path)   # must not raise
+    try:
+        cols = {r[1] for r in lib.conn.execute("PRAGMA table_info(ask_questions)").fetchall()}
+        assert {"rewrite_input_tokens", "rewrite_output_tokens", "rewrite_cost_usd"} <= cols
+        # Pre-existing rows get zeros (the declared defaults).
+        old = lib.conn.execute("SELECT rewrite_cost_usd FROM ask_questions WHERE question='old row'").fetchone()
+        assert old[0] == 0
+        # And the new turn-total accounting works end to end: cost_usd is the
+        # total (answer + rewrite), so the monthly-cap SUM includes the
+        # rewrite spend with no query changes.
+        lib.record_ask_question(1, "q", "a", "claude-sonnet-4-6", "standard",
+                                True, False, True, cost_usd=0.0103,
+                                rewrite_input_tokens=200, rewrite_output_tokens=15,
+                                rewrite_cost_usd=0.0003)
+        assert lib.ask_cost_this_month(1) == pytest.approx(0.0103)
+    finally:
+        lib.close()
+
+    # Second boot against the now-migrated DB is a no-op, not a crash.
+    lib2 = Library(path)
+    lib2.close()
+
+
+def test_fresh_db_has_rewrite_columns(tmp_path):
+    """Fresh DBs get the rewrite_* columns straight from _SCHEMA's CREATE
+    TABLE (the ALTER in the migration loop no-ops) — pinned so the two paths
+    can't drift apart."""
+    lib = Library(str(tmp_path / "fresh_rewrite.db"))
+    try:
+        cols = {r[1] for r in lib.conn.execute("PRAGMA table_info(ask_questions)").fetchall()}
+        assert {"rewrite_input_tokens", "rewrite_output_tokens", "rewrite_cost_usd"} <= cols
+    finally:
+        lib.close()
 
 
 def test_open_fresh_db_also_fine(tmp_path):

@@ -7495,7 +7495,13 @@ async def ask(request: Request):
                 conversation_id=conversation_id, turn_index=prior_questions,
                 input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
                 cache_creation_tokens=ans.cache_creation_tokens,
-                cache_read_tokens=ans.cache_read_tokens, cost_usd=ans.cost_usd,
+                cache_read_tokens=ans.cache_read_tokens,
+                # ans.cost_usd is the turn total (answer + follow-up query
+                # rewrite), so the monthly-cap SUM sees the rewrite spend too.
+                cost_usd=ans.cost_usd,
+                rewrite_input_tokens=ans.rewrite_input_tokens,
+                rewrite_output_tokens=ans.rewrite_output_tokens,
+                rewrite_cost_usd=ans.rewrite_cost_usd,
             )
             new_conversation_id = conversation_id or str(row_id)
             cap = lib.get_effective_ask_cap(user_id)

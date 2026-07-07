@@ -132,6 +132,102 @@ def _question_tokens(question: str) -> set[str]:
             if len(w) > 2 and w not in _STOP}
 
 
+# --- Follow-up query rewrite -------------------------------------------------
+# On follow-up turns, a raw question like "what about for a Series A stage
+# company?" carries none of the conversation's subject, so FTS5/feed retrieval
+# grounds the answer in the wrong articles. One small, cheap Haiku call turns
+# the follow-up into a standalone search question first. Retrieval-only: the
+# answering prompt always carries the user's verbatim question (it already has
+# the raw history for conversational context). Best-effort by design — any
+# failure falls back silently to retrieving on the raw question, so the
+# rewrite can never block or fail an answer.
+REWRITE_MODEL = MODEL_ALIASES["haiku"]
+REWRITE_MAX_TOKENS = 120
+REWRITE_TIMEOUT_SECONDS = 10.0   # a slow rewrite isn't worth stalling the answer for
+REWRITE_MAX_CHARS = 300          # longer output = the model rambled; treat as malformed
+
+REWRITE_SYSTEM = (
+    "You rewrite the latest follow-up question from a conversation into ONE "
+    "standalone, self-contained search question. Resolve pronouns, ellipsis, "
+    "and implicit references using the conversation — e.g. after a discussion "
+    "of SaaS pricing benchmarks, \"what about for a Series A stage company?\" "
+    "becomes \"SaaS pricing benchmarks for Series A stage companies\". Keep "
+    "every concrete term that matters for search. Output ONLY the rewritten "
+    "question — no preamble, no quotes, no explanation, under 40 words."
+)
+
+
+@dataclass
+class RewriteResult:
+    """Outcome of one follow-up rewrite call. `text` is "" when the call ran
+    but produced nothing usable — the token usage is still real spend and gets
+    recorded either way; only retrieval falls back to the raw question."""
+    text: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def _clean_rewrite_output(raw: str) -> str:
+    """Reduce the rewrite model's output to one usable search question, or ""
+    if it's malformed: first non-empty line only, wrapping quotes stripped,
+    rejected outright when empty or suspiciously long."""
+    line = next((ln.strip() for ln in (raw or "").splitlines() if ln.strip()), "")
+    line = line.strip('"“”').strip("'").strip()
+    if not line or len(line) > REWRITE_MAX_CHARS:
+        return ""
+    return line
+
+
+def _rewrite_followup(trimmed_history: list[dict], question: str) -> RewriteResult | None:
+    """Rewrite a follow-up into a standalone search question via one Haiku call.
+
+    `trimmed_history` must already be bounded by _trim_history (the same cap
+    the answering prompt uses). Returns None when the call never ran — SDK or
+    key missing, or the API call raised/timed out — i.e. nothing was spent.
+    Returns a RewriteResult (possibly with text="") when the call completed,
+    so the caller can record the spend even if the output was unusable.
+    """
+    import importlib.util
+    if importlib.util.find_spec("anthropic") is None:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    transcript = "\n".join(
+        f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+        for m in trimmed_history
+    )
+    try:
+        resp = _get_client().messages.create(
+            model=REWRITE_MODEL,
+            max_tokens=REWRITE_MAX_TOKENS,
+            system=REWRITE_SYSTEM,
+            messages=[{
+                "role": "user",
+                "content": (f"Conversation so far:\n{transcript}\n\n"
+                            f"Follow-up question: {question}"),
+            }],
+            timeout=REWRITE_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return None
+
+    from .pricing import compute_cost
+    usage = resp.usage
+    in_tok = getattr(usage, "input_tokens", 0) or 0
+    out_tok = getattr(usage, "output_tokens", 0) or 0
+    cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+    cost = compute_cost(REWRITE_MODEL, in_tok, out_tok, cache_w, cache_r)
+
+    text = "".join(
+        b.text for b in resp.content if getattr(b, "type", None) == "text"
+    )
+    return RewriteResult(text=_clean_rewrite_output(text),
+                         input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost)
+
+
 @dataclass
 class Answer:
     text: str
@@ -144,13 +240,20 @@ class Answer:
     # been an alias or empty (e.g. a caller that never sends a model field).
     model: str = ""
     # Real usage from the API response (0 when the call never ran, e.g. no key).
-    # cost_usd is computed by linklib.pricing from these — the authoritative
-    # per-question dollar figure, as opposed to the pre-call COST_ESTIMATES.
+    # cost_usd is the authoritative per-TURN dollar figure — the answer call
+    # plus the follow-up rewrite call (when one ran) — as opposed to the
+    # pre-call COST_ESTIMATES. The token fields below cover the answer call
+    # only; the rewrite call's share is broken out in the rewrite_* fields.
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     cost_usd: float = 0.0
+    # Follow-up query-rewrite call (zero on turn one, or when it never ran).
+    # rewrite_cost_usd is already included in cost_usd above.
+    rewrite_input_tokens: int = 0
+    rewrite_output_tokens: int = 0
+    rewrite_cost_usd: float = 0.0
 
 
 # Reuse one client across requests so its httpx connection pool stays warm —
@@ -320,26 +423,44 @@ def answer_question(
         use_web: enable web_search tool against trusted domains.
         opml_path: path to preferred_sites.opml; required when use_feed or use_web is True.
         history: prior [{role, content}] turns for a follow-up; bounded by
-            MAX_HISTORY_CHARS. Retrieval still runs on the current question.
+            MAX_HISTORY_CHARS. On follow-up turns retrieval runs on a
+            history-aware rewrite of the question (falling back to the raw
+            question if the rewrite fails); the answering prompt always
+            carries the raw question verbatim.
     """
     settings = EFFORT_SETTINGS.get(effort, EFFORT_SETTINGS["standard"])
     model = MODEL_ALIASES.get(model, model) or settings.get("model") or DEFAULT_MODEL
+
+    # Follow-up turns only: resolve pronouns/ellipsis into a standalone
+    # question so FTS5 and feed matching see the conversation's subject, not
+    # just the raw follow-up. Turn one (no history) skips this entirely —
+    # zero added cost or latency for first questions.
+    trimmed_history = _trim_history(history)
+    rewrite = _rewrite_followup(trimmed_history, question) if trimmed_history else None
+    rw_in = rewrite.input_tokens if rewrite else 0
+    rw_out = rewrite.output_tokens if rewrite else 0
+    rw_cost = rewrite.cost_usd if rewrite else 0.0
+    retrieval_question = (rewrite.text if rewrite and rewrite.text else question)
 
     lib_hits: list[dict] = []
     feed_items: list[dict] = []
 
     if use_library:
-        lib_hits = retrieve(lib, question, max_sources=settings["max_library"])
+        lib_hits = retrieve(lib, retrieval_question, max_sources=settings["max_library"])
     if use_feed and opml_path:
-        feed_items = retrieve_feed(question, opml_path, max_items=settings["max_feed"])
+        feed_items = retrieve_feed(retrieval_question, opml_path, max_items=settings["max_feed"])
 
     import importlib.util
     if importlib.util.find_spec("anthropic") is None:
         return Answer(text="(Install `anthropic` to enable answers.)",
-                      sources=lib_hits, feed_sources=feed_items, model=model)
+                      sources=lib_hits, feed_sources=feed_items, model=model,
+                      cost_usd=rw_cost, rewrite_input_tokens=rw_in,
+                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost)
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return Answer(text="(Set ANTHROPIC_API_KEY to enable answers.)",
-                      sources=lib_hits, feed_sources=feed_items, model=model)
+                      sources=lib_hits, feed_sources=feed_items, model=model,
+                      cost_usd=rw_cost, rewrite_input_tokens=rw_in,
+                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost)
 
     sources_block = _format_all_sources(
         lib_hits, feed_items,
@@ -350,7 +471,9 @@ def answer_question(
 
     system = _build_system(use_library, use_feed, use_web)
 
-    messages = _trim_history(history) + [{"role": "user", "content": prompt}]
+    # The prompt carries the user's raw question verbatim (never the rewrite —
+    # the model already has the raw history for conversational context).
+    messages = trimmed_history + [{"role": "user", "content": prompt}]
     kwargs: dict = {
         "model": model,
         "max_tokens": settings["max_tokens"],
@@ -389,7 +512,13 @@ def answer_question(
 
         return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=web,
                      model=model, input_tokens=in_tok, output_tokens=out_tok,
-                     cache_creation_tokens=cache_w, cache_read_tokens=cache_r, cost_usd=cost)
+                     cache_creation_tokens=cache_w, cache_read_tokens=cache_r,
+                     cost_usd=cost + rw_cost, rewrite_input_tokens=rw_in,
+                     rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost)
     except Exception as e:
+        # The rewrite already spent real money even though the answer call
+        # failed — keep its cost on the Answer so it's still recorded.
         return Answer(text=f"(Answer call failed: {e})",
-                      sources=lib_hits, feed_sources=feed_items, model=model)
+                      sources=lib_hits, feed_sources=feed_items, model=model,
+                      cost_usd=rw_cost, rewrite_input_tokens=rw_in,
+                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost)
