@@ -2853,19 +2853,22 @@ _SDR_BOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
 # is now a single oar that sweeps right-to-left on every completed stroke
 # (see the JS's #sdrOar / sdr-stroke class, driven by row()), resting on the
 # right between strokes. Motion carries the "rowing" read instead of a
-# static twin-oar pose. The blade uses the seafoam accent (the sailboat's
-# identifying color is its sail) so each boat reads as its own thing while
+# static twin-oar pose. Drawn LAST (after the hull) so it paints on top —
+# drawing it first had the hull's fill covering the oar near the pivot,
+# reading as "behind the boat" rather than held out in front of it. The
+# blade uses the seafoam accent (the sailboat's identifying color is its
+# sail) so each boat reads as its own thing while
 # staying in the same navy/seafoam family.
 _SDR_ROWBOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
-  <g class="sdr-oar" id="sdrOar">
-    <line x1="65" y1="84" x2="99" y2="118" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
-    <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(102,121) rotate(45)"/>
-  </g>
   <ellipse cx="65" cy="80" rx="13" ry="15" fill="url(#sdrHullGrad)"/>
   <circle cx="65" cy="63" r="7.5" fill="#274E96"/>
   <path d="M12,93 C34,88 96,88 118,93 C115,108 96,121 65,122 C34,121 15,108 12,93 Z" fill="url(#sdrHullGrad)"/>
   <path d="M16,95 C36,90 94,90 114,95" fill="none" stroke="#3F5C9A" stroke-width="1.4" opacity="0.6"/>
   <path d="M20,100 C36,109 94,109 110,100" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
+  <g class="sdr-oar" id="sdrOar">
+    <line x1="65" y1="84" x2="99" y2="118" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
+    <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(102,121) rotate(45)"/>
+  </g>
 </svg>"""
 
 _SDR_ROCK_SVG = """<svg viewBox="0 0 40 32" width="40" height="32">
@@ -3348,7 +3351,13 @@ _SDR_JS = """
 
   function bumpOarStroke(){
     oarEl.classList.remove('sdr-stroke');
-    void oarEl.offsetWidth;
+    // oarEl is an SVG <g> — .offsetWidth (the usual reflow-forcing read,
+    // see bumpFlash above) is undefined on SVG elements and doesn't force
+    // a style recalculation, so the animation only ever restarted on the
+    // very first stroke. getBoundingClientRect() is defined on all
+    // Element types and reliably forces the recalc needed to restart a
+    // CSS animation via remove+reflow+re-add.
+    void oarEl.getBoundingClientRect();
     oarEl.classList.add('sdr-stroke');
   }
 
@@ -3364,12 +3373,16 @@ _SDR_JS = """
   function tryCollision(ob, cfg, now){
     if (ob.resolved) return;
     var dx = ob.worldX - state.worldX;
-    if (Math.abs(dx) > HITBOX_X_UNITS){
-      if (dx < -HITBOX_X_UNITS) ob.resolved = true;
-      return;
-    }
+    // "resolved" means "boat has moved past this obstacle" (cleanup, stop
+    // checking it) — it must NOT also mean "already hit once." A hit is
+    // debounced by registerHit's own invincibleUntil window, not by
+    // permanently disabling the obstacle; otherwise a boat that lingers in
+    // an obstacle's hitbox (e.g. a rowboat stalled with near-zero momentum)
+    // past the grace window never takes a second hit, even though it's
+    // still in continuous contact.
+    if (dx < -HITBOX_X_UNITS){ ob.resolved = true; return; }
+    if (dx > HITBOX_X_UNITS) return;
     if (Math.abs(ob.lane - state.boatY) > HITBOX_LANE_FRAC) return;
-    ob.resolved = true;
     registerHit(cfg, now);
   }
 

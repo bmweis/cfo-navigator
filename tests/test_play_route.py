@@ -103,6 +103,46 @@ def test_play_oar_stroke_animation_wired_up(env):
     assert "bumpOarStroke();" in body
 
 
+def test_play_oar_reflow_uses_getBoundingClientRect_not_offsetWidth(env):
+    """oarEl is an SVG <g> — .offsetWidth is undefined on SVG elements and
+    doesn't force the reflow needed to restart a CSS animation, so the oar
+    sweep only ever replayed on the first stroke. bumpOarStroke must use
+    getBoundingClientRect() (defined on all Element types) instead."""
+    _, client = env
+    body = client.get("/play").text
+    bump_fn = body[body.index("function bumpOarStroke()"):body.index("function registerHit")]
+    assert "oarEl.getBoundingClientRect()" in bump_fn
+    assert "oarEl.offsetWidth" not in bump_fn
+
+
+def test_play_oar_drawn_after_hull_in_rowboat_sprite(env):
+    """The oar <g id="sdrOar"> must be the LAST element in the rowboat
+    sprite's markup so it paints on top of the hull — drawing it first
+    let the hull's fill cover the oar near the pivot, reading as tucked
+    behind the boat instead of held out in front of it."""
+    _, client = env
+    body = client.get("/play").text
+    row_start = body.index('id="sdrBoatRowSprite"')
+    row_sprite_markup = body[row_start:body.index('</div>\n  </div>', row_start)]
+    hull_path_index = row_sprite_markup.index("sdrHullGrad")
+    oar_g_index = row_sprite_markup.index('<g class="sdr-oar" id="sdrOar">')
+    assert oar_g_index > hull_path_index
+
+
+def test_play_obstacle_can_be_hit_more_than_once(env):
+    """tryCollision must only permanently resolve an obstacle once the boat
+    has actually passed it (dx < -HITBOX_X_UNITS) — not on the first hit.
+    A hit is debounced by registerHit's own invincibleUntil window; if the
+    boat is still overlapping the obstacle after that window expires (e.g.
+    a rowboat stalled with near-zero momentum), it must be able to take a
+    second hit rather than being permanently immune to that obstacle."""
+    _, client = env
+    body = client.get("/play").text
+    fn = body[body.index("function tryCollision"):body.index("function hiKeyFor")]
+    assert "ob.resolved = true;\n    registerHit" not in fn
+    assert "if (dx < -HITBOX_X_UNITS){ ob.resolved = true; return; }" in fn
+
+
 def test_play_rowboat_propulsion_wired_up(env):
     """Rowboat propulsion: spacebar + the mobile row button both call row(),
     which is a no-op unless state.boat === 'rowboat' (sailboat keeps its
