@@ -245,7 +245,7 @@ link.
 Both are overridable via environment variables.
 
 **The model pickers are dynamic** (`linklib/models.py`): a single curated registry
-feeds every picker (Q&A, posts, re-enrich, backfill), and `models_for` reconciles it
+feeds every picker (re-enrich, backfill), and `models_for` reconciles it
 with the live Anthropic Models API — retired models drop off the lists on their own,
 and newly released models surface on the chat pickers automatically. So there's no
 longer a manual "check the current model IDs" step before a new model can be used:
@@ -253,6 +253,11 @@ add a row to `_REGISTRY` to give it a curated label/blurb, or just let the live 
 surface it. The enrichment pickers stay curated (no auto-surfacing) so a whole-archive
 re-enrich can't be pointed at an unexpectedly pricey new model by accident. When the
 API/key is unavailable, every picker falls back to the static registry.
+
+**FP&A Buddy (`/ask`) has no visible model picker.** The UI exposes only a
+Quick/Standard/Deep effort choice; each tier maps internally to a model, an
+archive/web-search count, and a token budget (`EFFORT_SETTINGS` in
+`linklib/agent.py`). The model is an implementation detail, not a user-facing choice.
 
 ## Billing note
 
