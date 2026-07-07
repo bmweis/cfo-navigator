@@ -371,6 +371,24 @@ CREATE TABLE IF NOT EXISTS archive_audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_archive_audit_admin ON archive_audit_log(admin_id);
 CREATE INDEX IF NOT EXISTS idx_archive_audit_created ON archive_audit_log(created_at);
+
+-- Same audit-trail shape as archive_audit_log above, kept as its own table
+-- rather than folded into that one: archive_audit_log's item_id is
+-- documented as an articles.id, and mixing contacts.id rows into the same
+-- column would make every existing row ambiguous about which table it
+-- refers to. action is always 'delete' for now (soft-delete is the only
+-- admin action on contacts today) but the column stays for parity/future use.
+CREATE TABLE IF NOT EXISTS contact_audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_id   INTEGER,
+    action     TEXT NOT NULL,             -- 'delete'
+    item_id    INTEGER,                    -- contacts.id; NULL for a bulk operation
+    detail     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_audit_admin ON contact_audit_log(admin_id);
+CREATE INDEX IF NOT EXISTS idx_contact_audit_created ON contact_audit_log(created_at);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -512,6 +530,10 @@ class Library:
             # flow shipped, so existing pending requests just get '' (no link).
             "ALTER TABLE password_reset_requests ADD COLUMN token_hash TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE password_reset_requests ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''",
+            # Soft delete for spam/junk contact submissions — '' means not
+            # deleted, same empty-string-sentinel idiom as resolved_at above,
+            # rather than a real NULL.
+            "ALTER TABLE contacts ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -992,18 +1014,65 @@ class Library:
         self.conn.commit()
         return cur.lastrowid
 
-    def list_contacts(self) -> list[dict]:
+    def list_contacts(self, include_deleted: bool = False) -> list[dict]:
+        where = "" if include_deleted else "WHERE deleted_at = ''"
         rows = self.conn.execute(
-            "SELECT * FROM contacts ORDER BY created_at DESC"
+            f"SELECT * FROM contacts {where} ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 
     def count_contacts_since(self, ts: str) -> int:
-        """Contacts created after `ts` (an ISO timestamp, '' = every row —
-        string comparison against '' is true for any non-empty created_at)."""
+        """Non-deleted contacts created after `ts` (an ISO timestamp, '' =
+        every row — string comparison against '' is true for any non-empty
+        created_at)."""
         return self.conn.execute(
-            "SELECT COUNT(*) FROM contacts WHERE created_at > ?", (ts,)
+            "SELECT COUNT(*) FROM contacts WHERE created_at > ? AND deleted_at = ''", (ts,)
         ).fetchone()[0]
+
+    def soft_delete_contacts(self, ids: list[int]) -> list[dict]:
+        """Soft-delete the given contacts.id values (already-deleted ids are
+        left alone). Returns the rows that were actually deleted, as they
+        looked just before deletion, for the caller to build an audit-log
+        detail string from."""
+        ids = [i for i in ids if isinstance(i, int)]
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT * FROM contacts WHERE id IN ({placeholders}) AND deleted_at = ''", ids
+        ).fetchall()
+        deleted = [dict(r) for r in rows]
+        if deleted:
+            self.conn.execute(
+                f"UPDATE contacts SET deleted_at=? WHERE id IN ({placeholders})",
+                [_now()] + ids,
+            )
+            self.conn.commit()
+        return deleted
+
+    # -- contact audit log ---------------------------------------------------
+
+    def record_contact_audit(self, admin_id: Optional[int], action: str,
+                              item_id: Optional[int] = None, detail: str = "") -> int:
+        """Log one admin delete of a contact submission (or a bulk delete,
+        item_id=None, detail carrying a summary). Same shape as
+        record_archive_audit."""
+        cur = self.conn.execute(
+            "INSERT INTO contact_audit_log (admin_id, action, item_id, detail, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (admin_id, action, item_id, detail, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_contact_audit_log(self, limit: int = 500) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT a.*, u.username AS admin_username, u.name AS admin_name
+               FROM contact_audit_log a LEFT JOIN users u ON u.id = a.admin_id
+               ORDER BY a.created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # -- tools directory ---------------------------------------------------
 
