@@ -25,15 +25,17 @@ MODEL_ALIASES: dict[str, str] = {
     "opus":    "claude-opus-4-8",
 }
 
-# Controls how many sources are pulled and how long synthesis runs.
+# Controls how many sources are pulled, how long synthesis runs, and which
+# model answers. The UI surfaces only this Quick/Standard/Deep tier — the
+# underlying model is an internal implementation detail, not a user choice.
 # web_max_uses caps the number of web_search tool calls Claude may make.
 EFFORT_SETTINGS: dict[str, dict] = {
     # source_chars: per-source grounding budget (summary + archived-text excerpt).
     # global_chars: hard cap on TOTAL grounding text per answer, so a query that
     #   retrieves many long articles can't balloon the prompt (cost guard).
-    "quick":    {"max_library": 4,  "max_feed": 3,  "web_max_uses": 2, "max_tokens": 700,  "source_chars": 900,  "global_chars": 6000},
-    "standard": {"max_library": 8,  "max_feed": 5,  "web_max_uses": 4, "max_tokens": 1500, "source_chars": 1800, "global_chars": 16000},
-    "deep":     {"max_library": 16, "max_feed": 8,  "web_max_uses": 6, "max_tokens": 2500, "source_chars": 3500, "global_chars": 40000},
+    "quick":    {"model": "claude-haiku-4-5-20251001", "max_library": 4,  "max_feed": 3,  "web_max_uses": 2, "max_tokens": 700,  "source_chars": 900,  "global_chars": 6000},
+    "standard": {"model": "claude-sonnet-4-6",         "max_library": 8,  "max_feed": 5,  "web_max_uses": 4, "max_tokens": 1500, "source_chars": 1800, "global_chars": 16000},
+    "deep":     {"model": "claude-opus-4-8",           "max_library": 16, "max_feed": 8,  "web_max_uses": 6, "max_tokens": 2500, "source_chars": 3500, "global_chars": 40000},
 }
 
 # Conversation cost guards — invisible and server-enforced, so a monetized user
@@ -294,7 +296,7 @@ def _collect_web_sources(content_blocks) -> list[dict]:
 def answer_question(
     lib: Library,
     question: str,
-    model: str = DEFAULT_MODEL,
+    model: str = "",
     effort: str = "standard",
     use_library: bool = True,
     use_feed: bool = False,
@@ -307,8 +309,12 @@ def answer_question(
     Args:
         lib: open Library connection (caller is responsible for closing it).
         question: the user's question.
-        model: canonical model ID or alias from MODEL_ALIASES.
-        effort: "quick" | "standard" | "deep" — controls source depth and token budget.
+        model: canonical model ID or alias from MODEL_ALIASES, to override the
+            effort tier's default model. Leave blank (the normal case — the UI
+            no longer exposes a model choice) to use the model that tier maps
+            to in EFFORT_SETTINGS.
+        effort: "quick" | "standard" | "deep" — controls source depth, token
+            budget, and (absent an explicit `model`) which model answers.
         use_library: search the SQLite FTS5 library.
         use_feed: include recent RSS feed items (requires opml_path).
         use_web: enable web_search tool against trusted domains.
@@ -316,8 +322,8 @@ def answer_question(
         history: prior [{role, content}] turns for a follow-up; bounded by
             MAX_HISTORY_CHARS. Retrieval still runs on the current question.
     """
-    model = MODEL_ALIASES.get(model, model) or DEFAULT_MODEL
     settings = EFFORT_SETTINGS.get(effort, EFFORT_SETTINGS["standard"])
+    model = MODEL_ALIASES.get(model, model) or settings.get("model") or DEFAULT_MODEL
 
     lib_hits: list[dict] = []
     feed_items: list[dict] = []

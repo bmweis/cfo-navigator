@@ -7055,8 +7055,7 @@ def ask_page(request: Request, q: str = ""):
         return _login_redirect(request)
     authed = _is_authed(request)   # admin flag (e.g. for any admin-only affordances)
 
-    from linklib.agent import COST_ESTIMATES
-    from linklib.models import models_for
+    from linklib.agent import COST_ESTIMATES, EFFORT_SETTINGS
 
     # This month's usage-to-date vs. the user's effective dollar cap (their
     # override, else the global default). None for token-only access or the
@@ -7074,53 +7073,70 @@ def ask_page(request: Request, q: str = ""):
     finally:
         usage_lib.close()
 
-    # Model rows from the shared registry (new models surface automatically).
-    models = [(m["id"], m["blurb"]) for m in models_for(allow_new=True)]
-    # Logged-in (Brian) gets the balanced default; anonymous users default to
-    # the most efficient model. Guard in case the default ever drops off the list.
-    ids = [mid for mid, _ in models]
-    default_model = "claude-sonnet-4-6" if authed else "claude-haiku-4-5-20251001"
-    if default_model not in ids:
-        default_model = ids[0] if ids else default_model
-
-    def model_row(mid, desc, checked):
-        chk = " checked" if checked else ""
-        return (
-            f'<label class="ask-radio-label">'
-            f'<input type="radio" name="model" value="{mid}" onchange="updateEstimate()"{chk}>'
-            f'<span class="ask-radio-id">{mid}</span>'
-            f'<span class="ask-radio-desc">{desc}</span>'
-            f'</label>'
-        )
-
-    model_rows = "".join(model_row(mid, desc, mid == default_model) for mid, desc in models)
-
+    # Quick / Standard / Deep is the only choice shown — no separate model
+    # picker. Each tier maps internally (linklib.agent.EFFORT_SETTINGS) to a
+    # model plus archive/web-search count and token budget; the model itself
+    # is an implementation detail, never surfaced to the end user.
     effort_details = [
         ("quick",    "Quick",    "4 archive &middot; 2 web searches &middot; ~700 tokens out"),
         ("standard", "Standard", "8 archive &middot; 4 web searches &middot; ~1,500 tokens out"),
         ("deep",     "Deep",     "16 archive &middot; 6 web searches &middot; ~2,500 tokens out"),
     ]
+    RECOMMENDED_TIER = "standard"
+    # Logged-in (Brian) gets the balanced default; anonymous users default to
+    # the most efficient tier (a cost guard, not a recommendation).
+    default_effort = "standard" if authed else "quick"
 
-    def effort_row(val, label, detail, checked):
-        chk = " checked" if checked else ""
+    def tier_card(val, label, detail, selected):
+        recommended = (val == RECOMMENDED_TIER)
+        classes = "ask-tier"
+        if recommended:
+            classes += " recommended"
+        if selected:
+            classes += " selected"
+        badge = '<span class="ask-tier-badge">Recommended</span>' if recommended else ""
         return (
-            f'<label class="ask-radio-label">'
-            f'<input type="radio" name="effort" value="{val}" onchange="updateEstimate()"{chk}>'
-            f'<strong>{label}</strong>'
-            f'<span class="ask-radio-desc">{detail}</span>'
-            f'</label>'
+            f'<button type="button" class="{classes}" data-tier="{val}" onclick="selectTier(this)">'
+            f'<span class="ask-tier-text">'
+            f'<span class="ask-tier-name">{label}{badge}</span>'
+            f'<span class="ask-tier-detail">{detail}</span>'
+            f'</span>'
+            f'<span class="ask-tier-radio"><span class="fill"></span></span>'
+            f'</button>'
         )
 
-    default_effort = "standard" if authed else "quick"
-    effort_rows = "".join(effort_row(v, l, d, v == default_effort) for v, l, d in effort_details)
+    tier_cards = "".join(tier_card(v, l, d, v == default_effort) for v, l, d in effort_details)
+
+    # Sources — the same seafoam-fill/navy-text tag component used elsewhere on
+    # the site (BRAND.md §5), toggled on/off by tap instead of a checkbox list.
+    source_defs = [
+        ("library", "My saved archive", True),
+        ("feed", "Current RSS feed", False),
+        ("web", "Web search (trusted sites)", True),
+    ]
+    _CHECK_SVG = ('<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">'
+                  '<path d="M1 5L4 8L9 2" stroke="#001B4F" stroke-width="1.6" fill="none" '
+                  'stroke-linecap="round" stroke-linejoin="round"/></svg>')
+
+    def source_tag(key, label, active):
+        cls = "ask-tag active" if active else "ask-tag"
+        return (f'<button type="button" class="{cls}" data-source="{key}" onclick="toggleSource(this)">'
+                f'{_CHECK_SVG}<span>{label}</span></button>')
+
+    source_tags = "".join(source_tag(k, l, a) for k, l, a in source_defs)
 
     # Cost estimates are for Brian's eyes only — never exposed to anonymous
     # users. When not authed, the cost table is empty and the estimate line is
-    # omitted from the page entirely.
+    # omitted from the page entirely. Keyed by tier only (not model) since the
+    # model is no longer a user-visible axis.
     import json as _json
-    cost_js = _json.dumps(COST_ESTIMATES) if authed else "{}"
-    cost_span = ('<span id="cost-est" style="font-size:13px;color:var(--muted);"></span>'
-                 if authed else "")
+    tier_cost = {
+        tier: COST_ESTIMATES.get(settings["model"], {}).get(tier)
+        for tier, settings in EFFORT_SETTINGS.items()
+    }
+    cost_js = _json.dumps(tier_cost) if authed else "{}"
+    cost_span = ('<div class="ask-cost"><span class="ask-cost-num" id="cost-est-num"></span>'
+                 '<span class="ask-cost-label">per query</span></div>' if authed else "")
 
     usage_html = ""
     if usage_today is not None:
@@ -7134,8 +7150,9 @@ def ask_page(request: Request, q: str = ""):
     pre_q = _esc(q)
 
     body = f"""<div class="page">
+<span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">Ask FP&amp;A Buddy</h1>
-<p style="color:var(--muted);margin:0 0 28px;">Query your saved archive, RSS feed, and trusted web sources. Tune cost vs. depth before each query.</p>
+<p style="color:var(--muted);margin:0 0 28px;">Query your saved archive, RSS feed, and trusted web sources &mdash; tune it before you ask.</p>
 {usage_html}
 
 <div class="ask-card">
@@ -7144,34 +7161,21 @@ def ask_page(request: Request, q: str = ""):
     style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin:16px 0;">
-
-  <div class="ask-card">
-    <div class="ask-section-label">Sources</div>
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      <label class="ask-check-label"><input type="checkbox" id="src-library" checked onchange="updateEstimate()"> My saved archive</label>
-      <label class="ask-check-label"><input type="checkbox" id="src-feed" onchange="updateEstimate()"> Current RSS feed</label>
-      <label class="ask-check-label"><input type="checkbox" id="src-web" checked onchange="updateEstimate()"> Web search (trusted sites)</label>
-    </div>
+<div class="ask-section">
+  <div class="ask-section-label">Sources</div>
+  <div class="ask-tags">
+    {source_tags}
   </div>
-
-  <div class="ask-card">
-    <div class="ask-section-label">Model</div>
-    <div style="display:flex;flex-direction:column;gap:10px;">
-      {model_rows}
-    </div>
-  </div>
-
-  <div class="ask-card">
-    <div class="ask-section-label">Effort</div>
-    <div style="display:flex;flex-direction:column;gap:10px;">
-      {effort_rows}
-    </div>
-  </div>
-
 </div>
 
-<div style="display:flex;align-items:center;gap:20px;margin-bottom:20px;">
+<div class="ask-section">
+  <div class="ask-section-label">How deep should I go?</div>
+  <div class="ask-tiers">
+    {tier_cards}
+  </div>
+</div>
+
+<div class="ask-action-row">
   <button class="btn" onclick="doAsk()" id="ask-btn" style="padding:11px 28px;font-size:15px;">Ask</button>
   {cost_span}
 </div>
@@ -7183,15 +7187,42 @@ def ask_page(request: Request, q: str = ""):
 </div>
 
 <style>
+.ask-eyebrow{{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}}
 .ask-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:0;}}
+.ask-section{{margin:20px 0;}}
 .ask-section-label{{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;}}
-.ask-check-label{{display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;}}
-.ask-check-label input{{accent-color:var(--accent);width:15px;height:15px;cursor:pointer;flex-shrink:0;}}
-.ask-radio-label{{display:flex;flex-direction:column;gap:2px;cursor:pointer;padding:6px 0;border-top:1px solid var(--line);}}
-.ask-radio-label:first-child{{border-top:none;padding-top:0;}}
-.ask-radio-label input{{accent-color:var(--accent);width:14px;height:14px;margin-bottom:3px;}}
-.ask-radio-id{{font-family:ui-monospace,monospace;font-size:12px;color:var(--ink);font-weight:500;}}
-.ask-radio-desc{{font-size:12px;color:var(--muted);}}
+
+.ask-tags{{display:flex;flex-wrap:wrap;gap:8px;}}
+.ask-tag{{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:6px;font:600 13px var(--font-body);
+  border:1px solid var(--line-strong);background:var(--surface);color:var(--ink-soft);cursor:pointer;}}
+.ask-tag svg{{opacity:0;flex-shrink:0;}}
+.ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);}}
+.ask-tag.active svg{{opacity:1;}}
+
+.ask-tiers{{display:flex;flex-direction:column;gap:10px;}}
+.ask-tier{{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;text-align:left;
+  font:inherit;padding:15px 16px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);cursor:pointer;
+  transition:background .12s ease,border-color .12s ease;}}
+.ask-tier-text{{display:flex;flex-direction:column;gap:2px;}}
+.ask-tier-name{{font-family:var(--font-head);font-weight:600;font-size:16.5px;color:var(--ink);}}
+.ask-tier-detail{{font-size:12.5px;color:var(--muted);margin-top:2px;}}
+.ask-tier-badge{{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--coral-deep);
+  background:var(--coral-wash);padding:2px 7px;border-radius:5px;margin-left:7px;vertical-align:middle;}}
+.ask-tier-radio{{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line-strong);flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;}}
+.ask-tier-radio .fill{{width:10px;height:10px;border-radius:50%;background:var(--navy);transform:scale(0);transition:transform .12s ease;}}
+.ask-tier.selected .ask-tier-radio{{border-color:var(--navy);}}
+.ask-tier.selected .ask-tier-radio .fill{{transform:scale(1);}}
+.ask-tier.recommended.selected{{background:var(--coral-wash);border-color:var(--coral-light);}}
+.ask-tier.recommended.selected .ask-tier-name{{color:var(--coral-deep);}}
+.ask-tier.recommended.selected .ask-tier-radio{{border-color:var(--coral-deep);}}
+.ask-tier.recommended.selected .ask-tier-radio .fill{{background:var(--coral-deep);}}
+
+.ask-action-row{{display:flex;align-items:center;gap:18px;margin:22px 0;}}
+.ask-cost{{display:flex;flex-direction:column;}}
+.ask-cost-num{{font-weight:700;font-size:14.5px;color:var(--ink);}}
+.ask-cost-label{{font-size:11px;color:var(--muted);margin-top:1px;}}
+
 .ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 24px;font-size:15px;line-height:1.7;}}
 .ask-answer p{{margin:0 0 14px;}}
 .ask-answer h3,.ask-answer h4,.ask-answer h5,.ask-answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:18px 0 8px;letter-spacing:-0.01em;}}
@@ -7209,14 +7240,24 @@ nav.site-nav a[href="/ask"]{{color:var(--ink);font-weight:600;}}
 
 <script>
 var COST = {cost_js};
+var selectedTier = "{default_effort}";
+
+function selectTier(el) {{
+  document.querySelectorAll('.ask-tier').forEach(function(t) {{ t.classList.remove('selected'); }});
+  el.classList.add('selected');
+  selectedTier = el.getAttribute('data-tier');
+  updateEstimate();
+}}
+
+function toggleSource(el) {{
+  el.classList.toggle('active');
+}}
 
 function updateEstimate() {{
-  var model = document.querySelector('input[name="model"]:checked');
-  var effort = document.querySelector('input[name="effort"]:checked');
-  var el = document.getElementById('cost-est');
-  if (!model || !effort || !el) return;
-  var c = (COST[model.value] || {{}})[effort.value];
-  el.textContent = c != null ? '~$' + c.toFixed(3) + ' estimated per query' : '';
+  var num = document.getElementById('cost-est-num');
+  if (!num) return;
+  var c = COST[selectedTier];
+  num.textContent = c != null ? '~$' + c.toFixed(3) : '';
 }}
 
 var convo = [];        // [{{role, content}}] prior turns, sent as history
@@ -7308,12 +7349,10 @@ async function doAsk() {{
   var q = qEl.value.trim();
   if (!q) {{ qEl.focus(); return; }}
 
-  var model = document.querySelector('input[name="model"]:checked')?.value || 'claude-sonnet-4-6';
-  var effort = document.querySelector('input[name="effort"]:checked')?.value || 'standard';
-  var sources = [];
-  if (document.getElementById('src-library').checked) sources.push('library');
-  if (document.getElementById('src-feed').checked) sources.push('feed');
-  if (document.getElementById('src-web').checked) sources.push('web');
+  var effort = selectedTier || 'standard';
+  var sources = Array.prototype.map.call(
+    document.querySelectorAll('.ask-tag.active'), function(t) {{ return t.getAttribute('data-source'); }}
+  );
   if (!sources.length) {{ alert('Select at least one source.'); return; }}
 
   var btn = document.getElementById('ask-btn');
@@ -7333,7 +7372,7 @@ async function doAsk() {{
     var resp = await fetch('/ask', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{ question: q, model: model, effort: effort, sources: sources, history: convo, conversation_id: convoId }})
+      body: JSON.stringify({{ question: q, effort: effort, sources: sources, history: convo, conversation_id: convoId }})
     }});
     var d = await resp.json();
     if (!resp.ok) {{
