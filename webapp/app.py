@@ -2619,24 +2619,12 @@ _SDR_CSS = """
 /* Five checkpoint backdrops, stacked and crossfaded by data-cp index as
    DistanceFraction crosses each segment boundary — the water/obstacles/gusts
    keep scrolling continuously underneath; only this distant backdrop layer
-   changes. The reflection wrap mirrors whichever backdrop is active by
-   reusing the identical SVG markup (flipped + blurred + dimmed), rather than
-   hand-authoring a second reflection art asset per checkpoint. */
+   changes. No mirrored reflection layer — a skyline should only ever read
+   right-side up, per design review. */
 .sdr-skyline-wrap{position:absolute;left:0;right:0;top:0;height:60%;overflow:hidden;}
 .sdr-skyline-layer{position:absolute;inset:0;opacity:0;transition:opacity 1.4s ease;}
 .sdr-skyline-layer.sdr-active{opacity:1;}
 .sdr-skyline-layer svg{width:100%;height:100%;display:block;}
-/* Fades to nothing well before the wrap's own bottom edge (mask, not just
-   low opacity) — mirroring the full skyline height at a flat opacity read
-   as a solid duplicate building rather than water; a real reflection loses
-   definition fast with depth. Blur sells "water" over "second building". */
-.sdr-reflection-wrap{position:absolute;left:0;right:0;top:58%;height:60%;opacity:.18;filter:blur(3px);
-  transform:scaleY(-1);transform-origin:top;overflow:hidden;
-  -webkit-mask-image:linear-gradient(0deg,transparent 0%,#000 30%);
-  mask-image:linear-gradient(0deg,transparent 0%,#000 30%);}
-.sdr-reflection-layer{position:absolute;top:0;left:0;right:0;height:100%;opacity:0;transition:opacity 1.4s ease;}
-.sdr-reflection-layer.sdr-active{opacity:1;}
-.sdr-reflection-layer svg{width:100%;height:100%;display:block;}
 .sdr-water{position:absolute;left:0;right:0;bottom:0;top:58%;overflow:hidden;}
 .sdr-band{position:absolute;left:0;right:-100%;height:100%;}
 .sdr-band1{background:var(--sdr-water-light);top:0;}
@@ -2853,19 +2841,22 @@ _SDR_BOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
 # is now a single oar that sweeps right-to-left on every completed stroke
 # (see the JS's #sdrOar / sdr-stroke class, driven by row()), resting on the
 # right between strokes. Motion carries the "rowing" read instead of a
-# static twin-oar pose. The blade uses the seafoam accent (the sailboat's
-# identifying color is its sail) so each boat reads as its own thing while
+# static twin-oar pose. Drawn LAST (after the hull) so it paints on top —
+# drawing it first had the hull's fill covering the oar near the pivot,
+# reading as "behind the boat" rather than held out in front of it. The
+# blade uses the seafoam accent (the sailboat's identifying color is its
+# sail) so each boat reads as its own thing while
 # staying in the same navy/seafoam family.
 _SDR_ROWBOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
-  <g class="sdr-oar" id="sdrOar">
-    <line x1="65" y1="84" x2="99" y2="118" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
-    <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(102,121) rotate(45)"/>
-  </g>
   <ellipse cx="65" cy="80" rx="13" ry="15" fill="url(#sdrHullGrad)"/>
   <circle cx="65" cy="63" r="7.5" fill="#274E96"/>
   <path d="M12,93 C34,88 96,88 118,93 C115,108 96,121 65,122 C34,121 15,108 12,93 Z" fill="url(#sdrHullGrad)"/>
   <path d="M16,95 C36,90 94,90 114,95" fill="none" stroke="#3F5C9A" stroke-width="1.4" opacity="0.6"/>
   <path d="M20,100 C36,109 94,109 110,100" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
+  <g class="sdr-oar" id="sdrOar">
+    <line x1="65" y1="84" x2="99" y2="118" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
+    <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(102,121) rotate(45)"/>
+  </g>
 </svg>"""
 
 _SDR_ROCK_SVG = """<svg viewBox="0 0 40 32" width="40" height="32">
@@ -3109,7 +3100,6 @@ _SDR_JS = """
   var prizeEl = document.getElementById('sdrPrize');
   var sharkEl = document.getElementById('sdrShark');
   var skylineLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-skyline-layer'));
-  var reflectionLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-reflection-layer'));
   var minimapDots = Array.prototype.slice.call(document.querySelectorAll('.sdr-minimap-dot'));
 
   var touchCapable = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
@@ -3242,16 +3232,15 @@ _SDR_JS = """
     return CHECKPOINTS[checkpointIndexFor(state.worldX / COURSE_LENGTH)][1];
   }
 
-  // Crossfades the distant skyline/reflection backdrop as the boat crosses
-  // into a new checkpoint segment; the water/obstacles/gusts keep scrolling
-  // underneath unaffected. Only touches the DOM on an actual index change.
+  // Crossfades the distant skyline backdrop as the boat crosses into a new
+  // checkpoint segment; the water/obstacles/gusts keep scrolling underneath
+  // unaffected. Only touches the DOM on an actual index change.
   function updateCheckpointLayer(frac){
     var idx = checkpointIndexFor(frac);
     if (idx === state.checkpointIdx) return;
     state.checkpointIdx = idx;
     var idxStr = String(idx);
     skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === idxStr); });
-    reflectionLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === idxStr); });
     minimapDots.forEach(function(el){ el.classList.toggle('sdr-active', parseInt(el.getAttribute('data-cp'), 10) <= idx); });
     document.getElementById('sdrMinimapLabel').textContent = CHECKPOINTS[idx][1];
     prizeEl.style.display = idx === 4 ? 'block' : 'none';
@@ -3348,7 +3337,13 @@ _SDR_JS = """
 
   function bumpOarStroke(){
     oarEl.classList.remove('sdr-stroke');
-    void oarEl.offsetWidth;
+    // oarEl is an SVG <g> — .offsetWidth (the usual reflow-forcing read,
+    // see bumpFlash above) is undefined on SVG elements and doesn't force
+    // a style recalculation, so the animation only ever restarted on the
+    // very first stroke. getBoundingClientRect() is defined on all
+    // Element types and reliably forces the recalc needed to restart a
+    // CSS animation via remove+reflow+re-add.
+    void oarEl.getBoundingClientRect();
     oarEl.classList.add('sdr-stroke');
   }
 
@@ -3364,12 +3359,16 @@ _SDR_JS = """
   function tryCollision(ob, cfg, now){
     if (ob.resolved) return;
     var dx = ob.worldX - state.worldX;
-    if (Math.abs(dx) > HITBOX_X_UNITS){
-      if (dx < -HITBOX_X_UNITS) ob.resolved = true;
-      return;
-    }
+    // "resolved" means "boat has moved past this obstacle" (cleanup, stop
+    // checking it) — it must NOT also mean "already hit once." A hit is
+    // debounced by registerHit's own invincibleUntil window, not by
+    // permanently disabling the obstacle; otherwise a boat that lingers in
+    // an obstacle's hitbox (e.g. a rowboat stalled with near-zero momentum)
+    // past the grace window never takes a second hit, even though it's
+    // still in continuous contact.
+    if (dx < -HITBOX_X_UNITS){ ob.resolved = true; return; }
+    if (dx > HITBOX_X_UNITS) return;
     if (Math.abs(ob.lane - state.boatY) > HITBOX_LANE_FRAC) return;
-    ob.resolved = true;
     registerHit(cfg, now);
   }
 
@@ -3453,7 +3452,6 @@ _SDR_JS = """
     sharkEl.classList.remove('sdr-lunging');
     sharkEl.style.display = 'none';
     skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
-    reflectionLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
     minimapDots.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
     document.getElementById('sdrMinimapLabel').textContent = CHECKPOINTS[0][1];
     prizeEl.style.display = 'none';
@@ -3815,9 +3813,7 @@ def _sdr_rank_pill_html(r, active):
 
 
 # One SVG per checkpoint, index-aligned with the JS CHECKPOINTS array
-# (0=Charles River ... 4=Nantucket). Reused verbatim for both the skyline
-# layer and its mirrored reflection layer — see the CSS comment on
-# .sdr-skyline-wrap for why there's no separate hand-authored reflection art.
+# (0=Charles River ... 4=Nantucket).
 _SDR_CHECKPOINT_SVGS = [
     _SDR_SKYLINE_CHARLES_SVG,
     _SDR_SKYLINE_HARBOR_SVG,
@@ -3839,10 +3835,6 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
     boat_pills_html = "".join(_sdr_boat_pill_html(b, b["boat"] == "sailboat") for b in _SDR_BOATS)
     skyline_layers = "".join(
         f'<div class="sdr-skyline-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">{svg}</div>'
-        for i, svg in enumerate(_SDR_CHECKPOINT_SVGS)
-    )
-    reflection_layers = "".join(
-        f'<div class="sdr-reflection-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">{svg}</div>'
         for i, svg in enumerate(_SDR_CHECKPOINT_SVGS)
     )
     rank_json = {
@@ -3892,7 +3884,6 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
 <div id="sdrStage" class="sdr-stage" style="display:none;">
   """ + _SDR_DEFS_SVG + f"""
   <div class="sdr-skyline-wrap">{skyline_layers}</div>
-  <div class="sdr-reflection-wrap">{reflection_layers}</div>
   """ + """
   <div class="sdr-water"><div class="sdr-band sdr-band1"></div><div class="sdr-band sdr-band2"></div><div class="sdr-band sdr-band3"></div></div>
   <div id="sdrGusts"></div>
