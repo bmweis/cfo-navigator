@@ -421,6 +421,16 @@ def _log_archive_audit(lib: Library, request: Request, action: str,
     lib.record_archive_audit(admin_id, action, item_id, detail)
 
 
+def _log_contact_audit(lib: Library, request: Request,
+                        item_id: int | None, detail: str) -> None:
+    """Record an admin soft-delete of one or more contact submissions. Same
+    skip-if-no-admin-row behavior as _log_archive_audit."""
+    admin_id = _current_user_id(lib, request)
+    if admin_id is None:
+        return
+    lib.record_contact_audit(admin_id, "delete", item_id, detail)
+
+
 def _is_authed(request: Request) -> bool:
     """True for an admin session (or when no password is configured — local dev).
     Admin is the gate for every currently-private route; user-tier gating is layered
@@ -5013,6 +5023,7 @@ def admin_contacts(request: Request):
     lib = _lib()
     try:
         contacts = lib.list_contacts()
+        audit_rows = lib.list_contact_audit_log(limit=100)
         # Viewing the page clears the Inbox badge — the next badge count is
         # only submissions newer than this visit.
         lib.set_setting("admin_viewed_contacts", datetime.now(timezone.utc).isoformat())
@@ -5035,13 +5046,19 @@ def admin_contacts(request: Request):
 
     rows = "".join(
         f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{c['id']}" class="contact-row-cb"></td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(c['created_at'][:10])}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{_esc(c['name'])}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{_esc(c['email'])}</td>
           {_contact_message_cell(c['message'])}
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
+            <button type="submit" name="single_id" value="{c['id']}" class="btn btn-ghost"
+              style="font-size:12px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;"
+              onclick="return confirm('Delete this submission?');">Delete</button>
+          </td>
         </tr>"""
         for c in contacts
-    ) or '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No submissions yet.</td></tr>'
+    ) or '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No submissions yet.</td></tr>'
     from linklib.email_utils import is_configured as _email_configured, default_notify_email
     notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
     email_status = (
@@ -5053,21 +5070,72 @@ def admin_contacts(request: Request):
         '(shared with the Drive backup) + <code>LINKLIB_FROM_EMAIL</code> (and optionally '
         '<code>LINKLIB_CONTACT_EMAIL</code>) to enable them. Until then, check this page manually.</div>'
     )
+    audit_html = "".join(
+        f"""<tr>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:13px;">{_esc(a['created_at'][:16].replace('T',' '))}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(a['admin_username'] or 'admin')}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{'Bulk delete' if a['item_id'] is None else 'Delete'}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-soft);">{_esc(a['detail'])}</td>
+        </tr>"""
+        for a in audit_rows
+    ) or '<tr><td colspan="4" style="padding:16px;color:var(--muted);font-size:13px;">No deletions yet.</td></tr>'
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Contact submissions</h1>
 {email_status}
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:24px;">
+<form method="post" action="/admin/contacts/delete">
+<div style="display:flex;align-items:center;gap:12px;margin:24px 0 -8px;">
+  <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;"
+    onclick="return document.querySelectorAll('.contact-row-cb:checked').length &amp;&amp; confirm('Delete ' + document.querySelectorAll('.contact-row-cb:checked').length + ' selected submission(s)?');">Delete selected</button>
+</div>
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-top:12px;">
 <thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" id="contact-select-all" onchange="document.querySelectorAll('.contact-row-cb').forEach(cb => cb.checked = this.checked);"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Email</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Message</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;"></th>
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
+</form>
+<h2 style="font-size:16px;margin:40px 0 12px;">Deletion history</h2>
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">Admin</th>
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">Action</th>
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">What was deleted</th>
+</tr></thead>
+<tbody>{audit_html}</tbody>
+</table>
 </div>"""
     return HTMLResponse(_page("Contacts—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/contacts/delete")
+async def admin_contacts_delete(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    single_id = form.get("single_id")
+    if single_id:
+        ids = [int(single_id)] if single_id.strip().isdigit() else []
+    else:
+        ids = [int(v) for v in form.getlist("ids") if v.strip().isdigit()]
+    lib = _lib()
+    try:
+        deleted = lib.soft_delete_contacts(ids)
+        if len(deleted) == 1:
+            c = deleted[0]
+            _log_contact_audit(lib, request, c["id"], detail=f"{c['name']} <{c['email']}>")
+        elif len(deleted) > 1:
+            summary = "; ".join(f"{c['name']} <{c['email']}>" for c in deleted)
+            _log_contact_audit(lib, request, None, detail=f"{len(deleted)} submissions — {summary}")
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/contacts", status_code=303)
 
 
 @app.get("/admin/email-failures", response_class=HTMLResponse)
