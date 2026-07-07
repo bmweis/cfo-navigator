@@ -2653,8 +2653,23 @@ _SDR_CSS = """
 .sdr-boat-inner{animation:sdrBob 2.8s ease-in-out infinite;}
 @keyframes sdrBob{0%,100%{transform:translateY(0) rotate(-2deg);}50%{transform:translateY(-5px) rotate(-3.5deg);}}
 .sdr-boat-shadow{position:absolute;bottom:-4px;left:16%;width:64%;height:9px;border-radius:50%;background:rgba(0,41,117,0.18);filter:blur(2px);}
-.sdr-sail-group{transform-origin:50px 60px;animation:sdrFlutter 2.2s ease-in-out infinite;}
+.sdr-sail-group{transform-origin:65px 88px;animation:sdrFlutter 2.2s ease-in-out infinite;}
 @keyframes sdrFlutter{0%,100%{transform:skewX(0deg);}50%{transform:skewX(-1.4deg);}}
+/* Rowboat oar: rests pointing down-and-right; each completed stroke (see
+   row() / bumpOarStroke()) retriggers this animation via a class remove+
+   reflow+re-add, same restart technique as .sdr-stage.sdr-flash. Rest pose
+   is a steep down-right "\" diagonal (45°); the 90° rotation sweeps it
+   through straight-down at the midpoint to a mirrored down-left "/"
+   diagonal — "\" to "/", both dipping down, per design review (an
+   ~178° rotation from a shallow near-horizontal rest pose was an earlier
+   pass; a rotation that large would carry this steeper 45° pose most of
+   the way back around to its own diagonal, not to the mirrored one — the
+   two are only 90° apart for a symmetric diagonal start). fill-mode
+   defaults to "none", so it snaps back to the resting "\" pose the instant
+   the animation ends, ready for the next stroke. */
+.sdr-oar{transform-origin:65px 84px;}
+.sdr-oar.sdr-stroke{animation:sdrOarStroke 0.5s ease-out;}
+@keyframes sdrOarStroke{0%{transform:rotate(0deg);}100%{transform:rotate(90deg);}}
 /* Positioning transform is set by JS on .sdr-obstacle itself every frame — the
    bob animation must live on an inner wrapper, never on the same element/property
    JS positions, or the CSS animation silently wins the cascade and the obstacle
@@ -2749,6 +2764,20 @@ _SDR_CSS = """
   text-shadow:0 1px 2px rgba(255,255,255,0.7);}
 
 .sdr-steer-zone{position:absolute;top:0;left:0;width:60%;height:100%;z-index:5;cursor:grab;}
+/* Mobile row button (rowboat + touch only, toggled via inline style in JS —
+   see startRun/backToRankSelect). Anchored bottom-right in the untouched 40%
+   of the stage the steer-zone doesn't cover, so it never competes with the
+   ↑/↓ drag gesture in either orientation. bottom:34px (not the corner) keeps
+   clear of .sdr-progress-hud's right-aligned "N lives left" text, which is
+   also bottom/right-anchored — both orientations use the same fixed-px
+   offsets from the stage's own corner, so the relationship holds regardless
+   of the stage's current aspect ratio. */
+.sdr-row-btn{position:absolute;right:16px;bottom:34px;z-index:7;width:66px;height:66px;border-radius:50%;
+  align-items:center;justify-content:center;background:var(--navy);color:#fff;
+  border:2px solid rgba(163,229,212,0.55);font-family:var(--font-head);font-weight:700;font-size:12px;
+  letter-spacing:.03em;cursor:pointer;box-shadow:0 4px 10px rgba(0,41,117,0.35);
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;}
+.sdr-row-btn:active{transform:scale(0.92);background:var(--navy-deep);}
 /* Portrait footnote lives in normal page flow above the stage, not
    absolutely positioned on top of it — it must never overlap active
    gameplay, even briefly while fading. It's still a toast (shown once per
@@ -2794,8 +2823,6 @@ _SDR_CSS = """
 _SDR_DEFS_SVG = """<svg width="0" height="0" style="position:absolute;">
   <defs>
     <linearGradient id="sdrHullGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#274E96"/><stop offset="100%" stop-color="#061A45"/></linearGradient>
-    <linearGradient id="sdrSailGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E0917A"/><stop offset="100%" stop-color="#B5553A"/></linearGradient>
-    <linearGradient id="sdrJibGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#D8987C"/><stop offset="100%" stop-color="#96432C"/></linearGradient>
     <linearGradient id="sdrRockGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#A8A69C"/><stop offset="100%" stop-color="#5C5A52"/></linearGradient>
     <linearGradient id="sdrBuoyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#9C7A54"/><stop offset="100%" stop-color="#5A4128"/></linearGradient>
     <linearGradient id="sdrWhaleGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3E5FA8"/><stop offset="100%" stop-color="#16418F"/></linearGradient>
@@ -2803,23 +2830,42 @@ _SDR_DEFS_SVG = """<svg width="0" height="0" style="position:absolute;">
   </defs>
 </svg>"""
 
+# Simplified toward the ⛵️ emoji's silhouette per design-review feedback: one
+# plain triangular sail (no jib/cabin/porthole greeble) and the same crescent
+# "bowl" hull the rowboat uses (_SDR_ROWBOAT_SVG below) — sharing the hull
+# construction is what makes the two read as one visual family now, more
+# than the shared palette alone did.
 _SDR_BOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
-  <line x1="65" y1="26" x2="28" y2="108" stroke="#002975" stroke-width="1" opacity="0.4"/>
-  <line x1="65" y1="26" x2="102" y2="108" stroke="#002975" stroke-width="1" opacity="0.4"/>
-  <line x1="24" y1="108" x2="8" y2="104" stroke="#0A2A6B" stroke-width="2"/>
-  <path d="M24,110 C24,102 42,98 65,98 C88,98 106,102 106,110 C100,118 82,124 65,124 C48,124 30,118 24,110 Z" fill="url(#sdrHullGrad)"/>
-  <path d="M28,112 C42,117 88,117 102,112" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
-  <ellipse cx="65" cy="99" rx="34" ry="4.5" fill="#16418F"/>
-  <rect x="56" y="93" width="18" height="7" rx="2" fill="#123a86"/>
-  <circle cx="65" cy="96.5" r="1.6" fill="#A3E5D4"/>
   <g class="sdr-sail-group">
-    <line x1="65" y1="24" x2="65" y2="100" stroke="#002975" stroke-width="2.5"/>
-    <path d="M66,26 C92,42 94,68 68,96 C74,68 72,46 66,26 Z" fill="url(#sdrSailGrad)" stroke="#002975" stroke-width="1.2"/>
-    <path d="M69,34 C82,46 83,62 70,88" fill="none" stroke="#F5E4DA" stroke-width="1" opacity="0.6"/>
-    <path d="M67,30 C78,42 79,60 68,92" fill="none" stroke="#8B3F28" stroke-width="1.2" opacity="0.45"/>
-    <path d="M63,38 C48,50 42,66 54,86 C50,68 54,50 63,38 Z" fill="url(#sdrJibGrad)" stroke="#002975" stroke-width="1"/>
-    <line x1="65" y1="96" x2="72" y2="98" stroke="#002975" stroke-width="2.2"/>
+    <line x1="65" y1="26" x2="65" y2="93" stroke="#002975" stroke-width="2.5"/>
+    <path d="M65,28 L65,89 L99,86 Z" fill="#FBFAF6" stroke="#002975" stroke-width="1.4"/>
+    <path d="M68,36 L94,84" stroke="#D8D3C8" stroke-width="1" opacity="0.8"/>
   </g>
+  <path d="M12,93 C34,88 96,88 118,93 C115,108 96,121 65,122 C34,121 15,108 12,93 Z" fill="url(#sdrHullGrad)"/>
+  <path d="M16,95 C36,90 94,90 114,95" fill="none" stroke="#3F5C9A" stroke-width="1.4" opacity="0.6"/>
+  <path d="M20,100 C36,109 94,109 110,100" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
+</svg>"""
+
+# Rowboat — same viewBox/scale/line-weight and the same crescent "bowl" hull
+# as the sailboat above (see its comment), plus a rower figure. Round 2 of
+# design review: two static oars (even after moving them to a center V, see
+# git history) still read as cluttered — "almost looks like four" — so this
+# is now a single oar that sweeps right-to-left on every completed stroke
+# (see the JS's #sdrOar / sdr-stroke class, driven by row()), resting on the
+# right between strokes. Motion carries the "rowing" read instead of a
+# static twin-oar pose. The blade uses the seafoam accent (the sailboat's
+# identifying color is its sail) so each boat reads as its own thing while
+# staying in the same navy/seafoam family.
+_SDR_ROWBOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
+  <g class="sdr-oar" id="sdrOar">
+    <line x1="65" y1="84" x2="99" y2="118" stroke="#002975" stroke-width="3" stroke-linecap="round"/>
+    <rect x="-13" y="-4.5" width="26" height="9" rx="3" fill="#A3E5D4" stroke="#002975" stroke-width="1.2" transform="translate(102,121) rotate(45)"/>
+  </g>
+  <ellipse cx="65" cy="80" rx="13" ry="15" fill="url(#sdrHullGrad)"/>
+  <circle cx="65" cy="63" r="7.5" fill="#274E96"/>
+  <path d="M12,93 C34,88 96,88 118,93 C115,108 96,121 65,122 C34,121 15,108 12,93 Z" fill="url(#sdrHullGrad)"/>
+  <path d="M16,95 C36,90 94,90 114,95" fill="none" stroke="#3F5C9A" stroke-width="1.4" opacity="0.6"/>
+  <path d="M20,100 C36,109 94,109 110,100" fill="none" stroke="#5FB89E" stroke-width="2" opacity="0.75"/>
 </svg>"""
 
 _SDR_ROCK_SVG = """<svg viewBox="0 0 40 32" width="40" height="32">
@@ -2993,6 +3039,28 @@ _SDR_JS = """
   var GRACE_MS = 1200;
   var STEER_KEY_RATE = 1.0;
   var BOAT_LERP = 8;
+  // Rowboat propulsion — boat-specific, not rank-tuned (rank still governs
+  // obstacle density/gust coverage/hit-tolerance identically for both
+  // boats; only forward-speed physics differ by boat). Each completed
+  // press-and-release of Space (or the mobile row button — see row(),
+  // which fires on release, not press) adds a burst to rowMomentum, which
+  // decays continuously (dm/dt = -ROW_DECAY_PER_SEC*m) rather than stepping
+  // down, so it reads as "coasting to a stop" instead of an abrupt cutoff.
+  // Requiring release (not just holding the key/button down) is deliberate,
+  // per design-review feedback — it forces a distinct stroke gesture that
+  // competes for attention with steering, rather than a hold-to-win button.
+  // TUNABLE — first-pass values, not yet playtested; flagged in the PR
+  // description for a balance pass. Chosen so a single stroke immediately,
+  // dramatically exceeds every rank's sailboat drift_speed (10-20 u/s, see
+  // _GAME_RANK_DEFAULTS) — "fast off the line" — while a sustainable
+  // stroke cadence (roughly one per 1.5s, realistic given each stroke is a
+  // deliberate press-and-release, not a held button) still averages out
+  // below the sailboat's typical run speed (~26-29 u/s once its ramp + gust
+  // bonus are folded in) — "fades over the long haul".
+  var ROW_BURST_ADD = 46;        // u/s added to momentum per completed stroke
+  var ROW_MAX_MOMENTUM = 145;    // cap so mashing can't run away
+  var ROW_DECAY_PER_SEC = 1.6;   // exponential decay coefficient
+  var ROW_BASE_DRIFT = 4;        // u/s floor so an idle rowboat crawls rather than fully stalls
   // Nantucket's own threshold is 0.90, not 1.0 — the actual finish still
   // triggers at worldX >= COURSE_LENGTH (frac 1.0), but the backdrop/HUD
   // switch to Nantucket for a final-approach stretch beforehand, so the
@@ -3026,13 +3094,17 @@ _SDR_JS = """
   var root = document.getElementById('sdrRoot');
   var stage = document.getElementById('sdrStage');
   var boatEl = document.getElementById('sdrBoat');
-  var boatInner = boatEl.querySelector('.sdr-boat-inner');
+  var boatSailInner = document.getElementById('sdrBoatSailSprite');
+  var boatRowInner = document.getElementById('sdrBoatRowSprite');
+  var boatInner = boatSailInner;  // sail-only visual state (sdr-sailing) always targets this one
+  var oarEl = document.getElementById('sdrOar');  // rowboat-only; see bumpOarStroke
   var obstacleContainer = document.getElementById('sdrObstacles');
   var gustContainer = document.getElementById('sdrGusts');
   var preGame = document.getElementById('sdrPreGame');
   var introEl = document.getElementById('sdrIntro');
   var gameOver = document.getElementById('sdrGameOver');
   var steerZone = document.getElementById('sdrSteerZone');
+  var rowBtn = document.getElementById('sdrRowBtn');
   var whaleEl = document.getElementById('sdrWhale');
   var prizeEl = document.getElementById('sdrPrize');
   var sharkEl = document.getElementById('sdrShark');
@@ -3048,7 +3120,7 @@ _SDR_JS = """
   var state = {
     started: false, over: false, outcome: '',
     rank: 'mate', boat: 'sailboat', worldX: 0, boatY: 0.5, targetY: 0.5,
-    hits: 0, invincibleUntil: 0,
+    hits: 0, invincibleUntil: 0, rowMomentum: 0,
     obstacles: [], gustZones: [], score: 0, startTs: 0, lastTs: 0,
     whaleTriggered: false, whaleActive: false, whaleLane: 0.5, whaleTriggerTs: 0,
     checkpointIdx: 0,
@@ -3274,6 +3346,12 @@ _SDR_JS = """
     stage.classList.add('sdr-flash');
   }
 
+  function bumpOarStroke(){
+    oarEl.classList.remove('sdr-stroke');
+    void oarEl.offsetWidth;
+    oarEl.classList.add('sdr-stroke');
+  }
+
   function registerHit(cfg, now){
     bumpFlash();
     if (cfg.collision_limit <= 0) return;
@@ -3361,7 +3439,7 @@ _SDR_JS = """
     state.rank = rankKey;
     state.boat = boatKey || state.boat;
     state.worldX = 0; state.boatY = 0.5; state.targetY = 0.5;
-    state.hits = 0; state.invincibleUntil = 0;
+    state.hits = 0; state.invincibleUntil = 0; state.rowMomentum = 0;
     state.over = false; state.outcome = ''; state.score = 0;
     state.whaleTriggered = false; state.whaleActive = false; state.whaleTriggerTs = 0;
     state.checkpointIdx = 0;
@@ -3385,6 +3463,14 @@ _SDR_JS = """
     gameOver.style.display = 'none';
     stage.style.display = 'block';
     state.started = true;
+    // Swap in the selected boat's sprite — see _SDR_ROWBOAT_SVG for why this
+    // is two pre-rendered sprites toggled by display, not one dynamically
+    // rebuilt element.
+    boatSailInner.style.display = (state.boat === 'rowboat') ? 'none' : 'block';
+    boatRowInner.style.display = (state.boat === 'rowboat') ? 'block' : 'none';
+    // Mobile row button — only for the rowboat, and only on touch devices;
+    // sailboat play and desktop play must never show it.
+    rowBtn.style.display = (touchCapable && state.boat === 'rowboat') ? 'flex' : 'none';
     showPortraitToastIfNeeded();
   }
 
@@ -3395,6 +3481,7 @@ _SDR_JS = """
     stage.style.display = 'none';
     preGame.style.display = 'block';
     introEl.style.display = '';
+    rowBtn.style.display = 'none';
   }
 
   // -- Pre-game rank selector --
@@ -3423,19 +3510,48 @@ _SDR_JS = """
   document.getElementById('sdrRetryBtn').addEventListener('click', function(){ startRun(state.rank, state.boat); });
   document.getElementById('sdrChangeRankBtn').addEventListener('click', backToRankSelect);
 
-  // -- Keyboard (steering only — no row/Space input) --
-  var keyUp = false, keyDown = false;
+  // -- Rowing: each call adds one burst and retriggers the single-oar sweep
+  // (bumpOarStroke); decay happens continuously in update(). Only has any
+  // effect for the rowboat — a no-op for the sailboat, which has no manual
+  // propulsion input by design.
+  function row(){
+    if (!state.started || state.over || state.boat !== 'rowboat') return;
+    state.rowMomentum = Math.min(ROW_MAX_MOMENTUM, state.rowMomentum + ROW_BURST_ADD);
+    bumpOarStroke();
+  }
+
+  // -- Keyboard (steering + spacebar-to-row on the rowboat) --
+  // Rowing fires on release, not press: holding Space down must not
+  // propel the boat on its own — each stroke is a deliberate press-and-
+  // release, which is harder to fit around steering than a hold-to-win
+  // button would be (see the ROW_* constants' comment above).
+  var keyUp = false, keyDown = false, spaceDown = false;
   window.addEventListener('keydown', function(e){
     if (!state.started || state.over) return;
     if (e.code === 'ArrowUp'){ keyUp = true; e.preventDefault(); }
     if (e.code === 'ArrowDown'){ keyDown = true; e.preventDefault(); }
+    if (e.code === 'Space'){ spaceDown = true; e.preventDefault(); }
   });
   window.addEventListener('keyup', function(e){
     if (e.code === 'ArrowUp') keyUp = false;
     if (e.code === 'ArrowDown') keyDown = false;
+    if (e.code === 'Space' && spaceDown){ spaceDown = false; row(); }
   });
 
-  // -- Touch/pointer steer-drag (the only touch input — no row button) --
+  // -- Mobile row button (rowboat + touch only; see startRun/backToRankSelect
+  // for the display toggle). Same press-and-release rule as Space: the
+  // stroke fires on pointerup, not pointerdown. setPointerCapture keeps
+  // pointerup targeting this element even if the finger drifts slightly. --
+  var rowPressed = false;
+  rowBtn.addEventListener('pointerdown', function(e){
+    e.preventDefault();
+    rowPressed = true;
+    try { rowBtn.setPointerCapture(e.pointerId); } catch(err){}
+  });
+  rowBtn.addEventListener('pointerup', function(){ if (rowPressed){ rowPressed = false; row(); } });
+  rowBtn.addEventListener('pointercancel', function(){ rowPressed = false; });
+
+  // -- Touch/pointer steer-drag --
   var dragging = false;
   function setTargetFromClientY(clientY){
     var rect = stage.getBoundingClientRect();
@@ -3473,14 +3589,26 @@ _SDR_JS = """
 
     var cfg = RANK_SETTINGS[state.rank];
     var elapsedSec = (ts - state.startTs) / 1000;
-    // No manual rowing — forward speed is a base that ramps up over elapsed
-    // run time (the difficulty lever, replacing the old row mechanic), plus
-    // an automatic, purely positional boost while inside a gust zone.
-    var sailing = isInGustZone(state.worldX);
-    var baseSpeed = cfg.drift_speed + cfg.speed_ramp_per_sec * elapsedSec;
-    var speed = baseSpeed + (sailing ? cfg.sail_speed : 0);
+    var speed;
+    if (state.boat === 'rowboat'){
+      // Manual propulsion only — no speed ramp, no gust boost (locked
+      // decision: the gust mechanic stays sailboat-only). Momentum decays
+      // continuously; row() adds bursts on each press/tap.
+      state.rowMomentum -= state.rowMomentum * ROW_DECAY_PER_SEC * dt;
+      if (state.rowMomentum < 0.01) state.rowMomentum = 0;
+      speed = ROW_BASE_DRIFT + state.rowMomentum;
+      boatInner.classList.remove('sdr-sailing');
+    } else {
+      // No manual rowing — forward speed is a base that ramps up over
+      // elapsed run time (the difficulty lever, replacing the old row
+      // mechanic), plus an automatic, purely positional boost while inside
+      // a gust zone.
+      var sailing = isInGustZone(state.worldX);
+      var baseSpeed = cfg.drift_speed + cfg.speed_ramp_per_sec * elapsedSec;
+      speed = baseSpeed + (sailing ? cfg.sail_speed : 0);
+      boatInner.classList.toggle('sdr-sailing', sailing);
+    }
     state.worldX = Math.min(COURSE_LENGTH, state.worldX + speed*dt);
-    boatInner.classList.toggle('sdr-sailing', sailing);
 
     var distanceFraction = state.worldX / COURSE_LENGTH;
     state.score = computeScore(cfg, distanceFraction, elapsedSec, state.hits, state.rank);
@@ -3744,9 +3872,10 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
 <h1 style="margin:0 0 6px;">Sail, Don&rsquo;t Row</h1>
+<p class="sdr-sub">Pick your boat. Sail and you might catch a free gust. Row and you&rsquo;ll move fast at first&mdash;but it&rsquo;s harder work, and you&rsquo;ll fade over the long haul.</p>
 <p class="sdr-sub">Make it all the way from Boston to the Cape, past Martha&rsquo;s Vineyard, and all the way to Nantucket&mdash;safely.</p>
 <p class="sdr-sub">Watch out for the rocks, steer clear of Wally the Whale, and outrun Susan the Shark.</p>
-<p class="sdr-sub">Controls are simple&mdash;&uarr;/&darr; (or drag the water on touch).</p>
+<p class="sdr-sub">Controls are simple&mdash;&uarr;/&darr; (or drag the water on touch) to steer. Rowing? Press Space (or tap Row on mobile) for each stroke.</p>
 <p class="sdr-sub">Track your best score on the leaderboard&mdash;brag rights only, no budget attached.</p>
 </div>
 
@@ -3771,7 +3900,10 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
   <div id="sdrWhale" class="sdr-whale"><div class="sdr-whale-inner">""" + _SDR_WHALE_SVG + """</div></div>
   <div id="sdrPrize" class="sdr-prize"><div class="sdr-prize-glow"></div><div class="sdr-prize-chest"></div><div class="sdr-prize-lid"></div></div>
   <div id="sdrShark" class="sdr-shark">""" + _SDR_SHARK_SVG + """</div>
-  <div id="sdrBoat" class="sdr-boat-wrap"><div class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div></div>
+  <div id="sdrBoat" class="sdr-boat-wrap">
+    <div id="sdrBoatSailSprite" class="sdr-boat-inner"><div class="sdr-boat-shadow"></div>""" + _SDR_BOAT_SVG + """</div>
+    <div id="sdrBoatRowSprite" class="sdr-boat-inner" style="display:none;"><div class="sdr-boat-shadow"></div>""" + _SDR_ROWBOAT_SVG + """</div>
+  </div>
 
   <div class="sdr-hud-top">
     <div class="sdr-minimap" id="sdrMinimap">
@@ -3793,6 +3925,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
   <div class="sdr-progress-hud"><span id="sdrLives"></span></div>
 
   <div id="sdrSteerZone" class="sdr-steer-zone"></div>
+  <button type="button" id="sdrRowBtn" class="sdr-row-btn" style="display:none;">Row</button>
 </div>
 
 <div id="sdrGameOver" class="sdr-outcome-scrim" style="display:none;">

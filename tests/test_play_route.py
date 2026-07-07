@@ -71,6 +71,73 @@ def test_play_boat_pill_wired_into_start(env):
     assert "startRun(selectedRank, selectedBoat)" in body
 
 
+def test_play_renders_distinct_boat_sprites(env):
+    """Both boat sprites render (toggled by display: JS, see boatSailInner/
+    boatRowInner in startRun), and the rowboat sprite has no mast/sail — it
+    must be a genuinely different sprite, not a recolor of the sailboat's."""
+    _, client = env
+    body = client.get("/play").text
+    assert 'id="sdrBoatSailSprite"' in body
+    assert 'id="sdrBoatRowSprite"' in body
+    sail_start = body.index('id="sdrBoatSailSprite"')
+    row_start = body.index('id="sdrBoatRowSprite"')
+    row_sprite_markup = body[row_start:body.index('</div>\n  </div>', row_start)]
+    assert "sdr-sail-group" not in row_sprite_markup
+    assert "sdrSailGrad" not in row_sprite_markup
+    assert sail_start < row_start
+    # Exactly one oar (design-review: two read as cluttered) — id="sdrOar"
+    # appears once, and there's a single <rect> paddle blade in the sprite.
+    assert row_sprite_markup.count('id="sdrOar"') == 1
+    assert row_sprite_markup.count("<rect") == 1
+
+
+def test_play_oar_stroke_animation_wired_up(env):
+    """Each row() call must retrigger the single-oar sweep animation (see
+    bumpOarStroke) via the same remove/reflow/re-add restart technique used
+    elsewhere in this file for the collision flash."""
+    _, client = env
+    body = client.get("/play").text
+    assert "function bumpOarStroke()" in body
+    assert "oarEl.classList.remove('sdr-stroke')" in body
+    assert "oarEl.classList.add('sdr-stroke')" in body
+    assert "bumpOarStroke();" in body
+
+
+def test_play_rowboat_propulsion_wired_up(env):
+    """Rowboat propulsion: spacebar + the mobile row button both call row(),
+    which is a no-op unless state.boat === 'rowboat' (sailboat keeps its
+    automatic-only propulsion). Momentum decays every frame in update()."""
+    _, client = env
+    body = client.get("/play").text
+    assert "function row()" in body
+    assert "state.boat !== 'rowboat'" in body
+    assert "e.code === 'Space'" in body
+    assert "rowBtn.addEventListener('pointerdown'" in body
+    assert "ROW_BURST_ADD" in body and "ROW_DECAY_PER_SEC" in body and "ROW_MAX_MOMENTUM" in body
+    assert "state.rowMomentum -= state.rowMomentum * ROW_DECAY_PER_SEC * dt" in body
+
+
+def test_play_rowboat_gets_no_gust_boost(env):
+    """Locked decision: the gust mechanic stays sailboat-only — the rowboat
+    branch of update() must never add cfg.sail_speed."""
+    _, client = env
+    body = client.get("/play").text
+    rowboat_branch = body[body.index("if (state.boat === 'rowboat'){"):body.index("} else {")]
+    assert "sail_speed" not in rowboat_branch
+    assert "isInGustZone" not in rowboat_branch
+
+
+def test_play_intro_copy_covers_boat_choice_and_rowing_controls(env):
+    """The intro copy (shown before Cast Off) must mention the boat trade-off
+    and both control schemes now that rowing exists — it previously only
+    described sailboat-only steering."""
+    _, client = env
+    body = client.get("/play").text
+    assert "Pick your boat" in body
+    assert "free gust" in body and "fade over the long haul" in body
+    assert "Press Space" in body and "tap Row" in body
+
+
 def test_collision_description_matches_mockup_defaults():
     """Default seed values must reproduce the four exact strings from
     design/mockups/sail-dont-row-final-rendering.html's rank selector."""
@@ -340,8 +407,11 @@ def appmod_with_auth(monkeypatch, tmp_path):
 
 
 def test_play_renders_minimap_not_stamina_bar(env):
-    """Round 2: rowing and the Stamina resource are gone entirely — the
-    top-left HUD slot is now a 5-checkpoint mini-map instead."""
+    """Round 2 removed the Stamina resource entirely — the top-left HUD slot
+    is a 5-checkpoint mini-map, not a Stamina bar. The boat-choice feature
+    later reintroduced manual rowing, but only as a rowboat-specific,
+    momentum-based mechanic (see sdrRowBtn/ROW_* constants) — a different
+    system from the old Stamina bar this test guards against."""
     _, client = env
     body = client.get("/play").text
     assert 'id="sdrMinimap"' in body
@@ -349,8 +419,15 @@ def test_play_renders_minimap_not_stamina_bar(env):
     assert 'id="sdrMinimapLabel"' in body
     assert body.count('class="sdr-minimap-dot') == 5
     assert "sdrStaminaFill" not in body
-    assert "sdrRowBtn" not in body
-    assert ">ROW<" not in body
+
+
+def test_play_row_button_hidden_by_default(env):
+    """The mobile row button exists in the DOM (JS toggles it per boat/device
+    at runtime) but must never be visible on initial page load."""
+    _, client = env
+    body = client.get("/play").text
+    assert 'id="sdrRowBtn"' in body
+    assert 'id="sdrRowBtn" class="sdr-row-btn" style="display:none;"' in body
 
 
 def test_play_bottom_hud_no_longer_has_floating_checkpoint_text(env):
