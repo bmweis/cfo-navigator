@@ -55,6 +55,10 @@ from webapp.thought_leadership_data import SECTIONS as TL_SECTIONS, TLItem
 DB_PATH = os.environ.get("LINKLIB_DB", "library.db")
 SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
 
+# /contact spam controls (see _contact_rate_limited and _is_contact_spam below).
+CONTACT_RATE_LIMIT_PER_HOUR = int(os.environ.get("LINKLIB_CONTACT_RATE_LIMIT_PER_HOUR", "5"))
+CONTACT_TIME_TRAP_SECONDS = float(os.environ.get("LINKLIB_CONTACT_TIME_TRAP_SECONDS", "3"))
+
 # One-time seed data for the `tool_categories` table (see _seed_toolbox).
 # Not read directly anywhere else — once seeded, the DB is the source of
 # truth and categories are managed at /admin/tools/categories.
@@ -284,6 +288,72 @@ def _job_set(name: str, **kw) -> None:
 def _job_get(name: str) -> dict:
     with _JOB_LOCK:
         return dict(_JOB_STATE.get(name, {}))
+
+
+# In-memory per-IP submission history for /contact rate limiting (single-
+# process deployment, same approach as _JOB_STATE above). Keyed by client IP;
+# value is a list of epoch seconds for submissions in the trailing hour. Not
+# evicted for idle IPs — traffic to this form is low-volume enough that the
+# dict never grows large in practice.
+_CONTACT_RATE_LOCK = threading.Lock()
+_CONTACT_SUBMIT_TIMES: dict[str, list[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP. Railway terminates TLS at a proxy, so when
+    present the real client address is the first hop in X-Forwarded-For."""
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
+def _contact_rate_limited(ip: str) -> bool:
+    """True if `ip` has already hit CONTACT_RATE_LIMIT_PER_HOUR /contact
+    submissions in the trailing hour. Records this attempt when it hasn't."""
+    now = time.time()
+    cutoff = now - 3600
+    with _CONTACT_RATE_LOCK:
+        times = [t for t in _CONTACT_SUBMIT_TIMES.get(ip, []) if t > cutoff]
+        limited = len(times) >= CONTACT_RATE_LIMIT_PER_HOUR
+        if not limited:
+            times.append(now)
+        _CONTACT_SUBMIT_TIMES[ip] = times
+    return limited
+
+
+# Blunt substring match against common SEO/marketing pitch phrasing seen in
+# spam contact submissions. Case-insensitive. Deliberately a plain list, not a
+# DB table, so tuning it is a one-line source edit — no migration, no admin
+# UI. Add more phrases here as new spam patterns show up on /admin/contacts.
+_CONTACT_SPAM_PHRASES = [
+    "boost your rankings",
+    "first page of google",
+    "improve your seo",
+    "improve your google ranking",
+    "grow your website traffic",
+    "increase your website traffic",
+    "increase your organic traffic",
+    "search engine rankings",
+    "search engine optimization services",
+    "backlink",
+    "link building",
+    "guest post",
+    "digital marketing services",
+    "social media marketing services",
+    "web design services",
+    "affordable seo",
+    "seo services",
+    "seo agency",
+    "google ads management",
+    "ppc campaign",
+    "unsubscribe from these emails",
+]
+
+
+def _is_contact_spam(message: str) -> bool:
+    text = message.lower()
+    return any(phrase in text for phrase in _CONTACT_SPAM_PHRASES)
 
 
 # --- Session cookie helpers (stdlib HMAC — no extra dependency) --------------
@@ -4088,7 +4158,7 @@ def contact_page(request: Request, submitted: str = ""):
 </div>"""
         return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request)))
 
-    body = """<div class="page page-narrow">
+    body = f"""<div class="page page-narrow">
 <h1>Get in Touch</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">I'm always happy to connect with finance leaders, founders, and operators.</p>
 <form method="post" action="/contact" style="display:grid;gap:16px;">
@@ -4104,6 +4174,9 @@ def contact_page(request: Request, submitted: str = ""):
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Message</label>
     <textarea name="message" required rows="5" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;" placeholder="What's on your mind?"></textarea>
   </div>
+  <input type="text" name="website" tabindex="-1" autocomplete="off"
+    style="position:absolute;left:-9999px;width:1px;height:1px;" aria-hidden="true">
+  <input type="hidden" name="ts" value="{time.time()}">
   <div>
     <button type="submit" class="btn">Send message</button>
   </div>
@@ -4115,11 +4188,37 @@ def contact_page(request: Request, submitted: str = ""):
 @app.post("/contact")
 async def contact_submit(request: Request):
     form = await request.form()
+
+    # Rate limit first, before any other check, so a flood can't dodge the
+    # cap just by tripping the honeypot or time-trap instead.
+    if _contact_rate_limited(_client_ip(request)):
+        raise HTTPException(status_code=400, detail="Something went wrong submitting that message. Please try again in a few minutes.")
+
+    # Honeypot: bots fill the hidden "website" field. Pretend success, drop silently.
+    if (form.get("website") or "").strip():
+        return RedirectResponse("/contact?submitted=1", status_code=303)
+
+    # Time-trap: real visitors take at least a few seconds to fill the form.
+    # Missing/unparseable `ts` (e.g. a direct POST bypassing the page) also
+    # fails this — defaulting to "now" makes the elapsed time 0, not a
+    # false-pass from `time.time() - 0` looking like an eternity has passed.
+    try:
+        rendered_at = float(form.get("ts") or "")
+    except ValueError:
+        rendered_at = time.time()
+    if time.time() - rendered_at < CONTACT_TIME_TRAP_SECONDS:
+        return RedirectResponse("/contact?submitted=1", status_code=303)
+
     name = (form.get("name") or "").strip()
     email = (form.get("email") or "").strip()
     message = (form.get("message") or "").strip()
     if not (name and email and message):
         raise HTTPException(status_code=400, detail="All fields required")
+
+    # Keyword-based auto-reject: common SEO/marketing pitch phrasing.
+    if _is_contact_spam(message):
+        return RedirectResponse("/contact?submitted=1", status_code=303)
+
     from linklib.email_utils import send_notification_email, send_contact_confirmation_email, default_notify_email
     lib = _lib()
     try:

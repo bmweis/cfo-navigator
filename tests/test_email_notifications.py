@@ -7,7 +7,7 @@ surface built on top of it (/admin/email-failures + its task badge).
 """
 import pathlib
 import sys
-import tempfile, os
+import tempfile, os, time
 from urllib.parse import unquote
 
 import pytest
@@ -62,13 +62,19 @@ def _configure_email(monkeypatch, fake_notification=None, fake_welcome=None,
                          fake_contact_confirmation or (lambda *a, **k: True))
 
 
+def _past_ts() -> str:
+    """A `ts` value old enough to clear /contact's time-trap, simulating a
+    form that was rendered a while before this submission."""
+    return str(time.time() - 10)
+
+
 # --- contact form -------------------------------------------------------------
 
 def test_contact_form_sends_notification(env, monkeypatch):
     calls = []
     _configure_email(monkeypatch, fake_notification=lambda to, subject, body, **kw: calls.append((to, subject, body)) or True)
     c = _client(env)
-    r = c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi"}, follow_redirects=False)
+    r = c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi", "ts": _past_ts()}, follow_redirects=False)
     assert r.status_code == 303
     assert len(calls) == 1 and "Jane" in calls[0][1]
 
@@ -78,7 +84,7 @@ def test_contact_form_failure_is_logged_not_silent(env, monkeypatch):
         raise RuntimeError("401 Unauthorized")
     _configure_email(monkeypatch, fake_notification=_boom)
     c = _client(env)
-    r = c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi"}, follow_redirects=False)
+    r = c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi", "ts": _past_ts()}, follow_redirects=False)
     assert r.status_code == 303   # the contact record still saves; email failure doesn't 500
     lib = env._lib()
     try:
@@ -96,7 +102,7 @@ def test_contact_form_sends_submitter_confirmation(env, monkeypatch):
     _configure_email(monkeypatch, fake_contact_confirmation=lambda to, name, message, **kw: calls.append(
         (to, name, message)) or True)
     c = _client(env)
-    r = c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi"}, follow_redirects=False)
+    r = c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi", "ts": _past_ts()}, follow_redirects=False)
     assert r.status_code == 303
     assert len(calls) == 1
     assert calls[0] == ("jane@x.com", "Jane", "hi")
@@ -107,7 +113,7 @@ def test_contact_confirmation_failure_is_logged_not_silent(env, monkeypatch):
         raise RuntimeError("mailer down")
     _configure_email(monkeypatch, fake_contact_confirmation=_boom)
     c = _client(env)
-    c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi"}, follow_redirects=False)
+    c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi", "ts": _past_ts()}, follow_redirects=False)
     lib = env._lib()
     try:
         failures = lib.list_email_failures()
@@ -120,7 +126,7 @@ def test_contact_form_not_configured_does_not_log_failure(env):
     # No OAuth configured (test default) — this is a graceful no-op, not a
     # failure, so nothing should land in email_failures.
     c = _client(env)
-    c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi"})
+    c.post("/contact", data={"name": "Jane", "email": "jane@x.com", "message": "hi", "ts": _past_ts()})
     lib = env._lib()
     try:
         assert lib.count_pending_email_failures() == 0
