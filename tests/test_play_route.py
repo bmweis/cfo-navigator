@@ -276,7 +276,15 @@ def test_play_renders_five_checkpoint_layers(env):
     body = client.get("/play").text
     for i in range(5):
         assert f'<div class="sdr-skyline-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">' in body
-        assert f'<div class="sdr-reflection-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">' in body
+
+
+def test_play_no_skyline_reflection(env):
+    """Design review: the skyline should only ever read right-side up — no
+    mirrored/upside-down reflection layer."""
+    _, client = env
+    body = client.get("/play").text
+    assert "sdr-reflection" not in body
+    assert "reflectionLayers" not in body
 
 
 def test_play_checkpoint_labels_and_thresholds(env):
