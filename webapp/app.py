@@ -7572,11 +7572,12 @@ def ask_history(request: Request):
     finally:
         lib.close()
 
-    def _row(r: dict) -> str:
+    def _single_card(r: dict) -> str:
+        # A one-turn conversation — same card the flat list always showed.
         q = _esc(r.get("question") or "")
         a = _esc((r.get("answer") or "")[:500])
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
   </div>
@@ -7584,7 +7585,43 @@ def ask_history(request: Request):
   <p style="font-size:13.5px;color:var(--ink-soft);margin:0;line-height:1.55;">{a}{'&hellip;' if len(r.get("answer") or "") > 500 else ''}</p>
 </div>"""
 
-    rows_html = "".join(_row(r) for r in rows) or \
+    def _turn_block(r: dict) -> str:
+        # One turn inside an expanded conversation — same content, truncation,
+        # and escaping as the flat card (citation markers stay literal text).
+        q = _esc(r.get("question") or "")
+        a = _esc((r.get("answer") or "")[:500])
+        return f"""<div style="padding:14px 0 4px;border-top:1px solid var(--line);">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div style="font-weight:600;color:var(--navy);font-size:14px;">{q}</div>
+    <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{a}{'&hellip;' if len(r.get("answer") or "") > 500 else ''}</p>
+</div>"""
+
+    def _card(turns: list[dict]) -> str:
+        if len(turns) == 1:
+            return _single_card(turns[0])
+        first = turns[0]
+        total = sum(t["cost_usd"] for t in turns)
+        n = len(turns) - 1
+        label = f"{n} follow-up" + ("" if n == 1 else "s")
+        q = _esc(first.get("question") or "")
+        # Native <details>: tap-to-expand with zero JS, works on any screen.
+        return f"""<details class="convo" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-bottom:12px;">
+  <summary style="padding:16px 18px;cursor:pointer;">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div style="font-weight:600;color:var(--navy);font-size:14.5px;flex:1 1 180px;">{q}</div>
+      <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])} &middot; ${total:.3f} total</div>
+    </div>
+    <span class="convo-chip"><span class="arr">&#9656;</span>&nbsp;{label}</span>
+  </summary>
+  <div style="padding:0 18px 6px;">
+    {"".join(_turn_block(t) for t in turns)}
+  </div>
+</details>"""
+
+    rows_html = "".join(_card(c) for c in _group_conversations(rows)) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
          '<a href="/ask">Ask FP&amp;A Buddy a question &rarr;</a></div>')
@@ -7597,6 +7634,13 @@ def ask_history(request: Request):
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>
 {rows_html}
+<style>
+.convo > summary{{list-style:none;}}
+.convo > summary::-webkit-details-marker{{display:none;}}
+.convo-chip{{display:inline-flex;align-items:center;margin-top:10px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:4px 12px;}}
+.convo .arr{{display:inline-block;transition:transform .15s;}}
+.convo[open] .arr{{transform:rotate(90deg);}}
+</style>
 </div>"""
     return HTMLResponse(_page("Your FP&A Buddy history—Brian Weisberg", "Library", body, role=_role(request)))
 
@@ -9231,6 +9275,32 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
 _ASK_SOURCE_ICONS = {"library": "&#128218;", "feed": "&#128240;", "web": "&#127760;"}
 
 
+def _group_conversations(rows: list[dict]) -> list[list[dict]]:
+    """Group flat ask_questions rows into conversations for display.
+
+    Returns a list of turn-lists: conversations ordered by their first turn's
+    created_at (newest first), turns within a conversation ordered by
+    turn_index (then id). Legacy rows predating conversation_id (stored as
+    the column default '') each become their own single-turn conversation.
+
+    Display-only, in Python rather than SQL: both views already fetch a
+    bounded page of rows, so grouping the page is trivial and leaves
+    list_ask_questions and the CSV export untouched. Known edge (inherited
+    from the flat list's own cutoff): a conversation sliced by the page
+    limit shows only its fetched turns.
+    """
+    groups: dict = {}
+    for r in rows:
+        key = r.get("conversation_id") or f"solo-{r.get('id')}"
+        groups.setdefault(key, []).append(r)
+    convos = list(groups.values())
+    for turns in convos:
+        turns.sort(key=lambda r: (r.get("turn_index") or 0, r.get("id") or 0))
+    convos.sort(key=lambda t: (t[0].get("created_at") or "", t[0].get("id") or 0),
+                reverse=True)
+    return convos
+
+
 def _ask_settings_badge(row: dict) -> str:
     srcs = "".join(_ASK_SOURCE_ICONS[k] for k, key in
                    (("library", "use_library"), ("feed", "use_feed"), ("web", "use_web"))
@@ -9262,18 +9332,51 @@ def admin_ask_report(request: Request, user: str = ""):
     finally:
         lib.close()
 
-    def _row(r: dict) -> str:
-        asker = r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
+    def _asker(r: dict) -> str:
+        return r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
+
+    def _turn_row(r: dict, gid: str = "") -> str:
+        # A per-turn row: today's flat row, optionally hidden under a
+        # conversation rollup (gid set) until the admin expands it.
         q = (r.get("question") or "")[:160]
-        return f"""<tr style="border-top:1px solid var(--line);">
+        attrs = f' data-convo="{_esc(gid)}" style="display:none;"' if gid else ""
+        marker = ('<span style="color:var(--muted);">&#8627; turn '
+                  f'{(r.get("turn_index") or 0) + 1}</span> ') if gid else ""
+        return f"""<tr class="turn-row"{attrs}>
   <td style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])}</td>
-  <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(asker)}</td>
-  <td style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}</td>
+  <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(r))}</td>
+  <td style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}</td>
   <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
   <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}</td>
 </tr>"""
 
-    table_rows = "".join(_row(r) for r in rows) or \
+    def _rollup_row(turns: list[dict], gid: str) -> str:
+        # One conversation: rollup keeps this view's job front and center —
+        # total turns, total cost across turns, models used — with the
+        # per-turn rows expandable beneath.
+        first = turns[0]
+        total = sum(t["cost_usd"] for t in turns)
+        models = sorted({(t.get("model") or "").replace("claude-", "")
+                         for t in turns if t.get("model")})
+        q = (first.get("question") or "")[:160]
+        return f"""<tr onclick="toggleConvo('{_esc(gid)}')" style="cursor:pointer;">
+  <td style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])}</td>
+  <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(first))}</td>
+  <td style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(first.get("question") or "") > 160 else ''}
+    <span id="chip-{_esc(gid)}" style="margin-left:8px;font-size:11px;font-weight:700;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:2px 10px;white-space:nowrap;">&#9656; {len(turns)} turns</span></td>
+  <td style="padding:8px 10px;font-size:12px;white-space:nowrap;color:var(--muted);">{_esc(", ".join(models))}</td>
+  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${total:.4f}</td>
+</tr>"""
+
+    parts: list[str] = []
+    for turns in _group_conversations(rows):
+        if len(turns) == 1:
+            parts.append(_turn_row(turns[0]))
+        else:
+            gid = turns[0].get("conversation_id") or f"solo-{turns[0].get('id')}"
+            parts.append(_rollup_row(turns, gid))
+            parts.extend(_turn_row(t, gid=gid) for t in turns)
+    table_rows = "".join(parts) or \
         '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--muted);">No questions asked yet.</td></tr>'
 
     user_options = "".join(
@@ -9323,7 +9426,24 @@ def admin_ask_report(request: Request, user: str = ""):
     <tbody>{table_rows}</tbody>
   </table>
 </div>
-<p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 500{' matching' if user else ''} questions. Download the CSV for the full archive.</p>
+<p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 500{' matching' if user else ''} questions, grouped by conversation. Download the CSV for the full archive (flat, one row per turn).</p>
+<style>
+tbody tr{{border-top:1px solid var(--line);}}
+tr[data-convo]{{background:var(--bg);}}
+</style>
+<script>
+function toggleConvo(g) {{
+  document.querySelectorAll('tr[data-convo="' + g + '"]').forEach(function(tr) {{
+    tr.style.display = tr.style.display === 'none' ? '' : 'none';
+  }});
+  var chip = document.getElementById('chip-' + g);
+  if (chip) {{
+    chip.textContent = chip.textContent.indexOf('\\u25B8') !== -1
+      ? chip.textContent.replace('\\u25B8', '\\u25BE')
+      : chip.textContent.replace('\\u25BE', '\\u25B8');
+  }}
+}}
+</script>
 </div>"""
     return HTMLResponse(_page("FP&A Buddy report — Admin", "Admin", body, authed=True))
 
