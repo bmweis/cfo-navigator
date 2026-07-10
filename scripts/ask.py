@@ -2,7 +2,7 @@
 """Ask your library an FP&A / finance question, grounded in your saved articles.
 
     python -m scripts.ask "how should I think about CAC payback for usage-based pricing?"
-    python -m scripts.ask --db library.db --sources 10 "what's a healthy net dollar retention?"
+    python -m scripts.ask --db library.db --effort deep "what's a healthy net dollar retention?"
 """
 from __future__ import annotations
 
@@ -20,14 +20,25 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Ask your library a finance question.")
     ap.add_argument("question")
     ap.add_argument("--db", default="library.db")
-    ap.add_argument("--sources", type=int, default=8)
+    # Source counts are tier-driven now (EFFORT_SETTINGS), not a free-standing
+    # number — the old --sources flag mapped to a parameter answer_question
+    # lost in the Quick/Standard/Deep redesign, which crashed every CLI run.
+    ap.add_argument("--effort", choices=["quick", "standard", "deep"], default="standard")
     args = ap.parse_args()
 
     lib = Library(args.db)
-    ans = answer_question(lib, args.question, max_sources=args.sources)
+    ans = answer_question(lib, args.question, effort=args.effort)
     print("\n" + ans.text + "\n")
-    if ans.sources:
+    if ans.citations:
+        # Cited sources, numbered to match the [n] markers in the answer.
         print("Sources:")
+        for c in ans.citations:
+            print(f"  [{c['n']}] {c['title']}")
+            print(f"      {c['url']}")
+    elif ans.sources:
+        # No citation metadata (e.g. the model cited nothing) — fall back to
+        # listing what was retrieved, as before.
+        print("Retrieved (uncited):")
         for i, s in enumerate(ans.sources, 1):
             print(f"  [{i}] {s['title']}")
             print(f"      {s['url']}")
