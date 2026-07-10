@@ -37,15 +37,21 @@ def _seed(db: str) -> dict:
     uid1 = lib.create_user("member1", "supersecret", role="user")
     uid2 = lib.create_user("member2", "supersecret", role="user")
 
+    # Turn one has no rewrite; follow-up turns carry a rewrite share INSIDE
+    # their cost_usd total (0.02 = 0.0196 answer + 0.0004 rewrite, etc.).
     first = lib.record_ask_question(uid1, "What is NRR?", "a1", "claude-sonnet-4-6",
                                     "standard", True, False, True, cost_usd=0.01)
     cid = str(first)
     lib.record_ask_question(uid1, "And for Series A?", "a2", "claude-sonnet-4-6",
                             "standard", True, False, True,
-                            conversation_id=cid, turn_index=1, cost_usd=0.02)
+                            conversation_id=cid, turn_index=1, cost_usd=0.02,
+                            rewrite_input_tokens=200, rewrite_output_tokens=15,
+                            rewrite_cost_usd=0.0004)
     lib.record_ask_question(uid1, "What about GRR?", "a3", "claude-haiku-4-5-20251001",
                             "quick", True, False, True,
-                            conversation_id=cid, turn_index=2, cost_usd=0.03)
+                            conversation_id=cid, turn_index=2, cost_usd=0.03,
+                            rewrite_input_tokens=220, rewrite_output_tokens=12,
+                            rewrite_cost_usd=0.0006)
 
     lib.record_ask_question(uid1, "Standalone question", "a4", "claude-sonnet-4-6",
                             "standard", True, False, True, cost_usd=0.05)
@@ -142,6 +148,24 @@ def test_admin_report_rollups_and_filter(env):
     assert "Other member question" in filtered2 and "3 turns" not in filtered2
 
 
+def test_admin_report_rewrite_cost_breakdown(env):
+    appmod, db = env
+    _seed(db)
+    html = _admin(appmod).get("/admin/ask-report").text
+    # Follow-up turn rows split answer + rewrite, and the split sums to the
+    # turn total (0.0196 + 0.0004 = 0.02; 0.0294 + 0.0006 = 0.03).
+    assert "$0.0196 + $0.0004 rewrite" in html
+    assert "$0.0294 + $0.0006 rewrite" in html
+    # Exactly the two follow-up turns show a split — turn one, the standalone,
+    # the legacy rows, and the other member's row all stay clean.
+    assert html.count("rewrite</div>") == 2
+    # Rollup keeps the total as the headline with a quiet inclusion note that
+    # reconciles with its turns' rewrite shares.
+    assert "$0.0600" in html
+    assert "incl. $0.0010 rewrites" in html
+    assert html.count("rewrites</div>") == 1
+
+
 def test_csv_export_stays_flat(env):
     appmod, db = env
     _seed(db)
@@ -150,3 +174,10 @@ def test_csv_export_stays_flat(env):
     # Header + one row per TURN (7 turns total across all conversations).
     assert len(lines) == 1 + 7
     assert "conversation_id" in lines[0]
+    # rewrite_cost_usd rides as the LAST column (appended, so positional
+    # parsers of the old columns keep working).
+    assert lines[0].endswith("rewrite_cost_usd")
+    follow_up = next(ln for ln in lines if "And for Series A?" in ln)
+    assert follow_up.endswith("0.000400")
+    turn_one = next(ln for ln in lines if "What is NRR?" in ln)
+    assert turn_one.endswith("0.000000")
