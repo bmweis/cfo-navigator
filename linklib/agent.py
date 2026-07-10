@@ -86,11 +86,17 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool) -> str:
                        "results, to supplement the library — not replace it.")
     source_list = "\n".join(f"{i+1}. {s}" for i, s in enumerate(sources))
 
+    # Citations happen at the API level now (documents are sent with
+    # citations enabled, and web search cites automatically) — the prompt no
+    # longer asks for [n] markers or a "Worth reading:" line; markers are
+    # injected server-side from the verified citation metadata.
     cite_parts = []
     if use_library or use_feed:
-        cite_parts.append("Cite the numbered sources you actually used with [n].")
+        cite_parts.append("The saved articles and feed items are provided as "
+                          "documents — cite them for every claim you draw from them.")
     if use_web:
-        cite_parts.append("Name web results inline with their title and URL.")
+        cite_parts.append("Don't paste raw URLs into the answer text; web "
+                          "results are cited automatically.")
     cite_note = " ".join(cite_parts)
 
     return (
@@ -111,8 +117,7 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool) -> str:
         "question well, say so plainly and note what's missing — don't guess.\n"
         "- If the question is missing key inputs (company stage, business model, the "
         "relevant numbers), ask one focused clarifying question alongside your "
-        "best-effort answer.\n"
-        "- End with a one-line \"Worth reading:\" pointer to the 1–2 most useful sources.\n\n"
+        "best-effort answer.\n\n"
         "Voice — write every answer this way:\n"
         f"{BRIAN_VOICE_CORE}"
     )
@@ -234,6 +239,11 @@ class Answer:
     sources: list[dict] = field(default_factory=list)       # saved-library hits
     feed_sources: list[dict] = field(default_factory=list)  # RSS feed hits
     web_sources: list[dict] = field(default_factory=list)   # fresh web results
+    # API-verified citations: [{n, title, url, type}] for the sources the
+    # answer ACTUALLY cited (type: library|feed|web), numbered to match the
+    # [n] markers injected into `text`. Empty when the model cited nothing or
+    # citation metadata was unusable — never blocks an answer.
+    citations: list[dict] = field(default_factory=list)
     # The resolved canonical model ID actually used (after MODEL_ALIASES /
     # DEFAULT_MODEL resolution) — callers that log/record this answer should
     # use this, not the raw `model` argument they passed in, which may have
@@ -312,50 +322,126 @@ def _ground_body(h: dict, source_chars: int) -> str:
     return (summary or content)[:source_chars]
 
 
-def _format_all_sources(lib_hits: list[dict], feed_items: list[dict],
-                        source_chars: int = 1800, global_chars: int = 16000) -> str:
-    """Format library and feed items as a unified numbered block for the prompt.
+def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
+                            source_chars: int = 1800, global_chars: int = 16000
+                            ) -> tuple[list[dict], list[dict]]:
+    """Build Citations-API `document` content blocks for the retrieved sources.
 
-    Each source gets up to `source_chars` of grounding text; the running total
-    is capped at `global_chars` so a query that hits many long articles can't
-    balloon the prompt (a cost guard).
+    Returns (doc_blocks, sent_docs). doc_blocks are plain-text document blocks
+    with citations enabled, in retrieval order — library first, then feed —
+    which keeps numbering deterministic. sent_docs[i] describes doc_blocks[i]
+    as {title, url, type}; a response citation's `document_index` indexes into
+    it, so it must describe what was actually SENT, not everything retrieved.
+
+    The same cost guards as the old flattened prompt apply, and only document
+    text counts against them (titles ride in the block's `title` field, like
+    the old header lines rode outside the budget): each source gets up to
+    `source_chars` of grounding text and the running total is capped at
+    `global_chars`. A source whose budget is exhausted (or that has no text at
+    all) is skipped entirely — an empty document block is worse than none.
     """
-    blocks: list[str] = []
-    idx = 1
+    doc_blocks: list[dict] = []
+    sent_docs: list[dict] = []
     used = 0
 
-    if lib_hits:
-        blocks.append("=== SAVED LIBRARY ===")
-        for h in lib_hits:
-            if used >= global_chars:
-                break
-            body = _ground_body(h, min(source_chars, global_chars - used))
-            used += len(body)
-            tags = ", ".join(h.get("tags", []))
-            blocks.append(
-                f"[{idx}] {h['title']}\n"
-                f"    URL: {h['url']}\n"
-                f"    Tags: {tags}\n"
-                f"    {body}"
-            )
-            idx += 1
+    def _add(title: str, url: str, kind: str, body: str) -> None:
+        nonlocal used
+        body = (body or "").strip()
+        if not body:
+            return
+        used += len(body)
+        doc_blocks.append({
+            "type": "document",
+            "source": {"type": "text", "media_type": "text/plain", "data": body},
+            "title": (title or url)[:250],
+            "citations": {"enabled": True},
+        })
+        sent_docs.append({"title": title or url, "url": url, "type": kind})
 
-    if feed_items:
-        blocks.append("=== CURRENT RSS FEED ===")
-        for item in feed_items:
-            if used >= global_chars:
-                break
-            body = (item.get("summary") or "")[: min(source_chars, global_chars - used)]
-            used += len(body)
-            blocks.append(
-                f"[{idx}] {item['title']}\n"
-                f"    URL: {item['url']}\n"
-                f"    Source: {item.get('source', '')}\n"
-                f"    {body}"
-            )
-            idx += 1
+    for h in lib_hits:
+        if used >= global_chars:
+            break
+        _add(h.get("title", ""), h.get("url", ""), "library",
+             _ground_body(h, min(source_chars, global_chars - used)))
 
-    return "\n\n".join(blocks) or "(no local articles matched)"
+    for item in feed_items:
+        if used >= global_chars:
+            break
+        _add(item.get("title", ""), item.get("url", ""), "feed",
+             (item.get("summary") or "")[: min(source_chars, global_chars - used)])
+
+    return doc_blocks, sent_docs
+
+
+def _cit_get(c, name):
+    """Read a field off a citation that may be an SDK object or a raw dict."""
+    v = getattr(c, name, None)
+    if v is None and isinstance(c, dict):
+        v = c.get(name)
+    return v
+
+
+def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
+                           ) -> tuple[str, list[dict]]:
+    """Reassemble the answer text with verified citation markers.
+
+    With citations enabled, the answer arrives as multiple text blocks and
+    cited spans carry a `citations` list. This appends [n] after each cited
+    span (the API splits text exactly at citation boundaries), where n indexes
+    one continuous, deduplicated, first-use-ordered list covering documents
+    (via `document_index` into sent_docs) and web results (via URL citations)
+    alike — the post-call renumbering that unifies all three source types.
+
+    Returns (text, citations) where citations is [{n, title, url, type}] for
+    the sources actually cited. Best-effort by design: any surprise in the
+    citation metadata degrades to the plain flattened text and an empty list —
+    citation handling must never fail an answer.
+    """
+    try:
+        parts: list[str] = []
+        cited: list[dict] = []
+        seen: dict = {}   # dedupe key -> assigned 1-based n
+
+        for block in content_blocks:
+            if getattr(block, "type", None) != "text":
+                continue
+            text = getattr(block, "text", "") or ""
+            nums: list[int] = []
+            for c in getattr(block, "citations", None) or []:
+                doc_idx = _cit_get(c, "document_index")
+                url = _cit_get(c, "url")
+                if isinstance(doc_idx, int) and 0 <= doc_idx < len(sent_docs):
+                    key = ("doc", doc_idx)
+                    info = sent_docs[doc_idx]
+                elif url:
+                    key = ("web", url)
+                    info = {"title": _cit_get(c, "title") or url,
+                            "url": url, "type": "web"}
+                else:
+                    continue   # unrecognized citation shape — skip silently
+                n = seen.get(key)
+                if n is None:
+                    n = len(cited) + 1
+                    seen[key] = n
+                    cited.append({"n": n, "title": info["title"],
+                                  "url": info["url"], "type": info["type"]})
+                if n not in nums:
+                    nums.append(n)
+            if nums:
+                # Attach markers to the span itself, before trailing whitespace,
+                # so they hug the sentence they cite.
+                stripped = text.rstrip()
+                trail = text[len(stripped):]
+                text = stripped + "".join(f"[{n}]" for n in sorted(nums)) + trail
+            parts.append(text)
+
+        return "".join(parts).strip(), cited
+    except Exception:
+        text = "".join(
+            getattr(b, "text", "") or "" for b in content_blocks
+            if getattr(b, "type", None) == "text"
+        ).strip()
+        return text, []
 
 
 def _trim_history(history) -> list[dict]:
@@ -462,18 +548,22 @@ def answer_question(
                       cost_usd=rw_cost, rewrite_input_tokens=rw_in,
                       rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost)
 
-    sources_block = _format_all_sources(
+    # Retrieved sources ride as Citations-API document blocks (library first,
+    # then feed — same order as the returned source lists). sent_docs is the
+    # document_index -> source manifest used to resolve response citations.
+    doc_blocks, sent_docs = _build_source_documents(
         lib_hits, feed_items,
         source_chars=settings.get("source_chars", 1800),
         global_chars=settings.get("global_chars", 16000),
     )
-    prompt = f"LOCAL SOURCES:\n{sources_block}\n\nQUESTION: {question}"
 
     system = _build_system(use_library, use_feed, use_web)
 
-    # The prompt carries the user's raw question verbatim (never the rewrite —
+    # The question rides verbatim as the final text block (never the rewrite —
     # the model already has the raw history for conversational context).
-    messages = trimmed_history + [{"role": "user", "content": prompt}]
+    # History turns stay flat strings; only the current turn uses blocks.
+    user_content = doc_blocks + [{"type": "text", "text": f"QUESTION: {question}"}]
+    messages = trimmed_history + [{"role": "user", "content": user_content}]
     kwargs: dict = {
         "model": model,
         "max_tokens": settings["max_tokens"],
@@ -497,9 +587,7 @@ def answer_question(
 
     try:
         resp = _get_client().messages.create(**kwargs)
-        text = "".join(
-            b.text for b in resp.content if getattr(b, "type", None) == "text"
-        ).strip()
+        text, citations = _assemble_cited_answer(resp.content, sent_docs)
         web = _collect_web_sources(resp.content) if use_web else []
 
         from .pricing import compute_cost
@@ -511,6 +599,7 @@ def answer_question(
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
         return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=web,
+                     citations=citations,
                      model=model, input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r,
                      cost_usd=cost + rw_cost, rewrite_input_tokens=rw_in,

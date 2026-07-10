@@ -6791,6 +6791,9 @@ def archive(request: Request, q: str = ""):
 #answer li{{margin-bottom:4px;}}
 #answer code{{background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:13px;font-family:ui-monospace,monospace;}}
 #answer a{{color:var(--accent);}}
+#answer sup.cite{{line-height:0;}}
+#answer sup.cite a{{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}}
+#answer sup.cite a:hover{{color:var(--accent);}}
 nav.site-nav a[href="/library"]{{color:var(--ink);font-weight:600;}}  /* bold the Library nav item while in the Archive */
 </style>
 <script>
@@ -6840,6 +6843,8 @@ function escapeHtml(s) {{
 }}
 // Same small markdown renderer as /ask — kept duplicated per this codebase's
 // no-shared-JS-module, self-contained-page-script convention.
+// Citations for the answer being rendered (set from each /ask response).
+var CITES = [];
 function mdInline(s) {{
   s = escapeHtml(s);
   s = s.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)/g, function(_, t, u) {{
@@ -6850,6 +6855,15 @@ function mdInline(s) {{
   s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
   s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1<em>$2</em>');
   s = s.replace(/(^|[^_])_([^_\\n]+)_(?!_)/g, '$1<em>$2</em>');
+  // Last, so the injected HTML is never re-processed: bare [n] citation
+  // markers become superscript links (same rule as the /ask page).
+  s = s.replace(/\\[(\\d{{1,2}})\\](?!\\()/g, function(m, num) {{
+    var i = parseInt(num, 10);
+    if (CITES && i >= 1 && i <= CITES.length) {{
+      return '<sup class="cite"><a href="' + encodeURI(CITES[i-1].url) + '" target="_blank" rel="noopener" title="' + escapeHtml(CITES[i-1].title) + '">[' + i + ']</a></sup>';
+    }}
+    return m;
+  }});
   return s;
 }}
 function mdToHtml(raw) {{
@@ -6894,11 +6908,11 @@ async function ask(){{
   try{{
     var r=await fetch('/ask',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{question:q}})}});
     var d=await r.json();
-    var idx=1;
-    var lib=(d.sources||[]).map(function(s){{return '<li><a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">['+(idx++)+'] '+escapeHtml(s.title)+'</a></li>';}}).join('');
-    var feed=(d.feed_sources||[]).map(function(s){{return '<li><a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">['+(idx++)+'] '+escapeHtml(s.title)+'</a></li>';}}).join('');
-    var web=(d.web_sources||[]).map(function(s){{return '<li><a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">&#127760; '+escapeHtml(s.title)+'</a></li>';}}).join('');
-    box.innerHTML=mdToHtml(d.answer)+((lib||feed||web)?'<ul style="padding-left:18px;font-size:13px;">'+lib+feed+web+'</ul>':'');
+    // Cited sources only, numbered to match the inline [n] markers.
+    CITES = d.citations || [];
+    var icons={{library:'&#128218;',feed:'&#128240;',web:'&#127760;'}};
+    var cites=CITES.map(function(c){{return '<li>'+(icons[c.type]||'')+' <a href="'+encodeURI(c.url)+'" target="_blank" rel="noopener">['+c.n+'] '+escapeHtml(c.title)+'</a></li>';}}).join('');
+    box.innerHTML=mdToHtml(d.answer)+(cites?'<ul style="padding-left:18px;font-size:13px;list-style:none;">'+cites+'</ul>':'');
   }}catch(e){{box.innerHTML='Something went wrong.';}}
 }}
 </script>"""
@@ -7231,6 +7245,9 @@ def ask_page(request: Request, q: str = ""):
 .ask-answer li{{margin-bottom:5px;}}
 .ask-answer code{{background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:13px;font-family:ui-monospace,monospace;}}
 .ask-answer a{{color:var(--accent);}}
+.ask-answer sup.cite{{line-height:0;}}
+.ask-answer sup.cite a{{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}}
+.ask-answer sup.cite a:hover{{color:var(--accent);}}
 .ask-q-bubble{{background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--navy);margin-bottom:8px;}}
 .ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-direction:column;gap:6px;}}
 .ask-src-list li{{font-size:13px;}}
@@ -7263,6 +7280,10 @@ function updateEstimate() {{
 var convo = [];        // [{{role, content}}] prior turns, sent as history
 var asked = false;
 var convoId = null;    // groups this conversation's turns server-side; set from the first response
+// Citations for the turn currently being rendered: [{{n, title, url, type}}].
+// Set from each response just before mdToHtml runs, so markers are per-turn
+// scoped — each turn's [n] links resolve against that turn's own list.
+var CITES = [];
 
 function updateUsage(usage) {{
   if (!usage) return;
@@ -7288,6 +7309,16 @@ function mdInline(s) {{
   s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
   s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1<em>$2</em>');
   s = s.replace(/(^|[^_])_([^_\\n]+)_(?!_)/g, '$1<em>$2</em>');
+  // Last, so the injected HTML is never re-processed: bare [n] citation
+  // markers become superscript links. Only numbers within the current
+  // turn's citation list are linkified — a literal [2026] in prose stays text.
+  s = s.replace(/\\[(\\d{{1,2}})\\](?!\\()/g, function(m, num) {{
+    var i = parseInt(num, 10);
+    if (CITES && i >= 1 && i <= CITES.length) {{
+      return '<sup class="cite"><a href="' + encodeURI(CITES[i-1].url) + '" target="_blank" rel="noopener" title="' + escapeHtml(CITES[i-1].title) + '">[' + i + ']</a></sup>';
+    }}
+    return m;
+  }});
   return s;
 }}
 function mdToHtml(raw) {{
@@ -7322,17 +7353,12 @@ function mdToHtml(raw) {{
   flushPara(); closeList();
   return html.join('');
 }}
+// Below-answer list: only the sources the answer actually cited, numbered to
+// match the inline [n] markers. Zero citations -> no list (silently allowed).
 function srcListHtml(d) {{
-  var items = [];
-  (d.sources || []).forEach(function(s, i) {{
-    items.push('<li>&#128218; <a href="' + encodeURI(s.url) + '" target="_blank" rel="noopener">[' + (i+1) + '] ' + escapeHtml(s.title) + '</a></li>');
-  }});
-  var feedOffset = (d.sources || []).length;
-  (d.feed_sources || []).forEach(function(s, i) {{
-    items.push('<li>&#128240; <a href="' + encodeURI(s.url) + '" target="_blank" rel="noopener">[' + (feedOffset+i+1) + '] ' + escapeHtml(s.title) + '</a></li>');
-  }});
-  (d.web_sources || []).forEach(function(s) {{
-    items.push('<li>&#127760; <a href="' + encodeURI(s.url) + '" target="_blank" rel="noopener">' + escapeHtml(s.title) + '</a></li>');
+  var icons = {{library: '&#128218;', feed: '&#128240;', web: '&#127760;'}};
+  var items = (d.citations || []).map(function(c) {{
+    return '<li>' + (icons[c.type] || '') + ' <a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">[' + c.n + '] ' + escapeHtml(c.title) + '</a></li>';
   }});
   return items.length ? '<ul class="ask-src-list">' + items.join('') + '</ul>' : '';
 }}
@@ -7381,6 +7407,7 @@ async function doAsk() {{
       return;
     }}
 
+    CITES = d.citations || [];
     answerEl.innerHTML = mdToHtml(d.answer) + srcListHtml(d);
     updateUsage(d.usage);
 
@@ -7511,6 +7538,9 @@ async def ask(request: Request):
         followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
         return {
             "answer": ans.text,
+            # API-verified citations only — what the answer's [n] markers map
+            # to. The full retrieved lists below stay for compatibility.
+            "citations": ans.citations,
             "sources":      [{"title": s["title"], "url": s["url"]} for s in ans.sources],
             "feed_sources": [{"title": s["title"], "url": s["url"]} for s in ans.feed_sources],
             "web_sources":  ans.web_sources,
@@ -8016,7 +8046,7 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
   <ul style="font-size:13.5px;color:var(--ink-soft);margin:0;padding-left:18px;line-height:1.6;">
     <li>Make subscriber-facing feed items <strong>link out</strong> to the original source; keep the in-app reader (<code>/read</code>) private to you.</li>
     <li>Serve only <strong>summaries, tags, and citations</strong> &mdash; never the stored full text (the <code>content</code> field).</li>
-    <li>Tighten <code>agent.py</code> so an answer can never fall back to raw <code>content</code> when a summary is missing (today it can, at <code>_format_all_sources</code>).</li>
+    <li>Tighten <code>agent.py</code> so an answer can never fall back to raw <code>content</code> when a summary is missing (today it can, at <code>_build_source_documents</code> via <code>_ground_body</code>).</li>
   </ul>
 </div>
 {groups_html}

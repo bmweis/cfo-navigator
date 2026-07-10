@@ -30,11 +30,138 @@ def test_ground_body_content_only_when_no_summary():
     assert agent._ground_body({"summary": "", "content": "xyz"}, 1000) == "xyz"
 
 
-def test_format_respects_global_cap():
+# --- Citations: document-block construction ---------------------------------
+
+def test_source_documents_respect_global_cap():
     hits = [{"title": f"T{i}", "url": f"u{i}", "summary": "",
              "content": "x" * 1000, "tags": []} for i in range(20)]
-    out = agent._format_all_sources(hits, [], source_chars=1000, global_chars=3000)
-    assert out.count("x") <= 3000      # total grounding text bounded
+    blocks, sent = agent._build_source_documents(hits, [], source_chars=1000, global_chars=3000)
+    total = sum(len(b["source"]["data"]) for b in blocks)
+    assert total <= 3000               # total grounding text bounded
+    assert len(blocks) == len(sent) < 20   # capped-out sources are skipped, in step
+
+
+def test_source_documents_order_manifest_and_citations_flag():
+    hits = [{"title": "Lib A", "url": "https://a", "summary": "sa", "content": "", "tags": []}]
+    feed = [{"title": "Feed B", "url": "https://b", "summary": "sb"}]
+    blocks, sent = agent._build_source_documents(hits, feed)
+    assert [d["type"] for d in sent] == ["library", "feed"]   # library first
+    assert sent[0] == {"title": "Lib A", "url": "https://a", "type": "library"}
+    assert sent[1] == {"title": "Feed B", "url": "https://b", "type": "feed"}
+    for b in blocks:
+        assert b["type"] == "document"
+        assert b["citations"] == {"enabled": True}
+        assert b["source"]["type"] == "text"
+    assert blocks[0]["title"] == "Lib A"
+
+
+def test_source_documents_skip_empty_bodies():
+    hits = [{"title": "Empty", "url": "https://e", "summary": "", "content": "", "tags": []},
+            {"title": "Real", "url": "https://r", "summary": "text", "content": "", "tags": []}]
+    blocks, sent = agent._build_source_documents(hits, [])
+    # The empty source produces no document — sent_docs must stay aligned
+    # with what was actually sent, or document_index would resolve wrongly.
+    assert len(blocks) == len(sent) == 1
+    assert sent[0]["title"] == "Real"
+
+
+# --- Citations: response reassembly + renumbering ----------------------------
+
+class _Block:
+    """Minimal stand-in for an SDK text content block."""
+    def __init__(self, text, citations=None, type="text"):
+        self.type = type
+        self.text = text
+        self.citations = citations
+
+
+class _DocCit:
+    def __init__(self, document_index):
+        self.type = "char_location"
+        self.document_index = document_index
+        self.cited_text = "…"
+
+
+class _WebCit:
+    def __init__(self, url, title=""):
+        self.type = "web_search_result_location"
+        self.url = url
+        self.title = title
+        self.cited_text = "…"
+
+
+_SENT = [{"title": "Doc One", "url": "https://one", "type": "library"},
+         {"title": "Feed Two", "url": "https://two", "type": "feed"}]
+
+
+def test_assemble_injects_markers_and_builds_cited_list():
+    blocks = [
+        _Block("Benchmarks vary. "),
+        _Block("Median ACV is $25k.", citations=[_DocCit(0)]),
+        _Block(" Growth differs at Series A.", citations=[_DocCit(1)]),
+    ]
+    text, cites = agent._assemble_cited_answer(blocks, _SENT)
+    assert text == "Benchmarks vary. Median ACV is $25k.[1] Growth differs at Series A.[2]"
+    assert cites == [
+        {"n": 1, "title": "Doc One", "url": "https://one", "type": "library"},
+        {"n": 2, "title": "Feed Two", "url": "https://two", "type": "feed"},
+    ]
+
+
+def test_assemble_unifies_web_citations_in_same_numbering():
+    blocks = [
+        _Block("Local fact.", citations=[_DocCit(1)]),
+        _Block(" Fresh fact.", citations=[_WebCit("https://web", "Web Title")]),
+    ]
+    text, cites = agent._assemble_cited_answer(blocks, _SENT)
+    assert "[1]" in text and "[2]" in text
+    assert cites[0]["type"] == "feed"
+    assert cites[1] == {"n": 2, "title": "Web Title", "url": "https://web", "type": "web"}
+
+
+def test_assemble_dedupes_repeat_citations():
+    blocks = [
+        _Block("First claim.", citations=[_DocCit(0)]),
+        _Block(" Second claim.", citations=[_DocCit(0)]),
+    ]
+    text, cites = agent._assemble_cited_answer(blocks, _SENT)
+    assert text.count("[1]") == 2       # same source, same number, both spans marked
+    assert len(cites) == 1
+
+
+def test_assemble_marker_hugs_text_before_trailing_whitespace():
+    blocks = [_Block("A claim.\n\n", citations=[_DocCit(0)])]
+    text, _ = agent._assemble_cited_answer(blocks, _SENT)
+    assert text == "A claim.[1]"        # outer .strip() removes the trailing blank
+
+
+def test_assemble_no_citations_falls_back_cleanly():
+    blocks = [_Block("Plain answer, "), _Block("no citations.")]
+    text, cites = agent._assemble_cited_answer(blocks, _SENT)
+    assert text == "Plain answer, no citations."
+    assert cites == []
+
+
+def test_assemble_skips_malformed_and_out_of_range_citations():
+    class _Junk:
+        pass
+    blocks = [_Block("Claim.", citations=[_Junk(), _DocCit(99), {"nonsense": 1}])]
+    text, cites = agent._assemble_cited_answer(blocks, _SENT)
+    assert text == "Claim."             # nothing usable → no marker
+    assert cites == []
+
+
+def test_assemble_survives_broken_blocks():
+    """Requirement: citation handling must never fail an answer."""
+    class _Explodes:
+        type = "text"
+        text = "Boom-adjacent text."
+        @property
+        def citations(self):
+            raise RuntimeError("malformed")
+    text, cites = agent._assemble_cited_answer([_Explodes()], _SENT)
+    assert text == "Boom-adjacent text."
+    assert cites == []
 
 
 def test_trim_history_filters_malformed_and_keeps_valid():
@@ -167,3 +294,6 @@ def test_system_prompt_has_persona_and_no_verbatim_guardrail():
     assert "verbatim" in s              # the monetization guardrail
     assert "saved library" in s         # library-first grounding
     assert "clarifying question" in s   # engages, doesn't one-shot
+    # Citations moved to the API level — the prompted-marker era is over.
+    assert "[n]" not in s
+    assert "worth reading" not in s
