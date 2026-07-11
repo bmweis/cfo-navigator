@@ -39,10 +39,27 @@ flowchart LR
 Notes on the edges:
 
 - **Cloudflare** is infrastructure outside this repo — nothing in the codebase
-  references it. Its config (proxy/caching/WAF rules) is managed in the
-  Cloudflare dashboard. The app itself handles canonical-host redirects
-  (www and the legacy `*.up.railway.app` hostname 301 to the apex) in a
-  FastAPI middleware, not at the edge.
+  references it; its config lives in the Cloudflare dashboard. Current setup
+  (verified July 2026): both `bmweis.com` and `www` are **proxied** (orange
+  cloud), so Cloudflare is on the request path, not just DNS. SSL/TLS mode is
+  **Full** — deliberately not Full (strict), per Railway's guidance about cert
+  renewal windows. No custom cache rules or WAF rules and no edge rate
+  limiting (stock defaults — HTML isn't cached, so the app's
+  `/admin/*` `no-store` behavior is unaffected); **Bot Fight Mode is on**.
+  Always Use HTTPS and HSTS are enabled (max-age 6 months, includeSubDomains,
+  preload deliberately off). One edge **Redirect Rule** 301s
+  `www.bmweis.com/*` → `bmweis.com/$1`, which wins over the app's
+  canonical-host middleware for proxied traffic — the middleware still covers
+  the legacy `*.up.railway.app` hostname and any traffic that reaches the
+  origin directly.
+- **The Railway origin is publicly reachable** (`*.up.railway.app` still
+  serves, and Railway has no built-in IP allowlisting), so direct requests
+  bypass every edge protection — the redirect rule, Bot Fight Mode, HSTS.
+  This is an **accepted risk**; the only real fix would be a Cloudflare
+  Tunnel, which isn't implemented. Consequence for app code: only
+  `CF-Connecting-IP` (set by Cloudflare on proxied requests) is a trustworthy
+  client IP — `X-Forwarded-For` can be spoofed by anyone hitting the origin
+  directly (see Known limitations).
 - **The volume path** is Railway configuration, not code: the app reads
   `LINKLIB_DB` (default `./library.db`); production points it at the mounted
   volume. The DB is deliberately not in git — it's personal reading history.
@@ -53,7 +70,9 @@ Notes on the edges:
 - **Email is the Gmail REST API, not SMTP** — Railway's Hobby plan blocks SMTP
   ports. Every send is best-effort and must never block the underlying DB
   write; failures land in the `email_failures` table and surface as an admin
-  badge instead of dying in a log.
+  badge instead of dying in a log. At the DNS level (Cloudflare-managed) the
+  domain has SPF and DKIM in place, plus DMARC in `p=none` monitoring mode —
+  collecting reports, not yet enforcing.
 
 ## 2. Database schema
 
@@ -299,9 +318,11 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
 - If **no password is configured at all**, private routes are open — a
   local-development convenience, never the hosted configuration.
 - Two middlewares wrap everything: a canonical-host 301 (www + legacy Railway
-  hostname → apex, guarded so dev instances and `/health` never redirect) and
-  `Cache-Control: no-store` on `/admin/*` (so task badges are never served
-  stale from the back-forward cache).
+  hostname → apex, guarded so dev instances and `/health` never redirect —
+  for proxied www traffic Cloudflare's edge Redirect Rule fires first, so this
+  middleware is the backstop for the legacy hostname and direct-origin hits)
+  and `Cache-Control: no-store` on `/admin/*` (so task badges are never
+  served stale from the back-forward cache).
 
 ## 4. Design decisions and their reasons
 
@@ -451,6 +472,13 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
 - **The follow-up cap trusts client-supplied history.** A client sending a
   trimmed history could exceed the 7-turn limit; the monthly dollar cap
   (server-side, from recorded spend) is the real guard.
+- **The `/contact` rate limiter keys off a spoofable header.** `_client_ip`
+  trusts the first `X-Forwarded-For` hop, and the Railway origin is directly
+  reachable (bypassing Cloudflare — see the deployment notes), so anyone
+  hitting the origin can rotate that header to evade the per-IP limit. Open
+  action item: prefer `CF-Connecting-IP` when present (trustworthy for
+  proxied requests), falling back to `X-Forwarded-For` only for direct
+  origin hits.
 - **Single-instance assumptions.** Job progress, the contact rate limiter,
   and the feed cache are in-process memory; SQLite is a local file. Scaling
   beyond one instance means externalizing all of that.
