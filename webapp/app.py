@@ -9342,12 +9342,18 @@ def admin_ask_report(request: Request, user: str = ""):
         attrs = f' data-convo="{_esc(gid)}" style="display:none;"' if gid else ""
         marker = ('<span style="color:var(--muted);">&#8627; turn '
                   f'{(r.get("turn_index") or 0) + 1}</span> ') if gid else ""
+        # cost_usd is the turn TOTAL; the follow-up query rewrite's share is
+        # broken out in rewrite_cost_usd. Split shown quietly, only when a
+        # rewrite actually ran (turn-one and legacy rows have 0).
+        rw = float(r.get("rewrite_cost_usd") or 0)
+        split = (f'<div style="font-size:11px;font-weight:400;color:var(--muted);white-space:nowrap;">'
+                 f'${r["cost_usd"] - rw:.4f} + ${rw:.4f} rewrite</div>') if rw > 0 else ""
         return f"""<tr class="turn-row"{attrs}>
   <td style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])}</td>
   <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(r))}</td>
   <td style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}</td>
   <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
-  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}</td>
+  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}{split}</td>
 </tr>"""
 
     def _rollup_row(turns: list[dict], gid: str) -> str:
@@ -9356,6 +9362,9 @@ def admin_ask_report(request: Request, user: str = ""):
         # per-turn rows expandable beneath.
         first = turns[0]
         total = sum(t["cost_usd"] for t in turns)
+        rw_total = sum(float(t.get("rewrite_cost_usd") or 0) for t in turns)
+        rw_note = (f'<div style="font-size:11px;font-weight:400;color:var(--muted);white-space:nowrap;">'
+                   f'incl. ${rw_total:.4f} rewrites</div>') if rw_total > 0 else ""
         models = sorted({(t.get("model") or "").replace("claude-", "")
                          for t in turns if t.get("model")})
         q = (first.get("question") or "")[:160]
@@ -9365,7 +9374,7 @@ def admin_ask_report(request: Request, user: str = ""):
   <td style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(first.get("question") or "") > 160 else ''}
     <span id="chip-{_esc(gid)}" style="margin-left:8px;font-size:11px;font-weight:700;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:2px 10px;white-space:nowrap;">&#9656; {len(turns)} turns</span></td>
   <td style="padding:8px 10px;font-size:12px;white-space:nowrap;color:var(--muted);">{_esc(", ".join(models))}</td>
-  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${total:.4f}</td>
+  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${total:.4f}{rw_note}</td>
 </tr>"""
 
     parts: list[str] = []
@@ -9477,9 +9486,12 @@ def admin_ask_report_export(request: Request, user: str = ""):
 
     buf = io.StringIO()
     writer = csv.writer(buf)
+    # rewrite_cost_usd appended LAST so anything parsing the CSV by position
+    # keeps working; it's the rewrite's share of cost_usd (the turn total),
+    # not an addition to it.
     writer.writerow(["date", "asker", "conversation_id", "turn", "question", "answer", "model", "effort",
                      "use_library", "use_feed", "use_web", "input_tokens", "output_tokens",
-                     "cache_creation_tokens", "cache_read_tokens", "cost_usd"])
+                     "cache_creation_tokens", "cache_read_tokens", "cost_usd", "rewrite_cost_usd"])
     for r in rows:
         asker = r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
         writer.writerow([
@@ -9487,7 +9499,7 @@ def admin_ask_report_export(request: Request, user: str = ""):
             _csv_safe(r["question"]), _csv_safe(r["answer"]),
             r["model"], r["effort"], bool(r["use_library"]), bool(r["use_feed"]), bool(r["use_web"]),
             r["input_tokens"], r["output_tokens"], r["cache_creation_tokens"], r["cache_read_tokens"],
-            f'{r["cost_usd"]:.6f}',
+            f'{r["cost_usd"]:.6f}', f'{float(r.get("rewrite_cost_usd") or 0):.6f}',
         ])
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return Response(
