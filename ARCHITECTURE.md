@@ -323,6 +323,22 @@ Details worth knowing:
   cited sources; nothing feeds back into prompts or retrieval automatically.
   The snapshot shape is deliberately per-turn — it's what the resume flow
   replays to re-render past turns' `[n]` markers.
+- **Server-rendered surfaces share one citation renderer.** Every
+  server-rendered view of a stored answer — `/ask/history`, the `/questions`
+  community view, and `/admin/ask-feedback` — calls
+  `_render_cited_answer(answer, citations_json, truncate=?)` in
+  `webapp/app.py`: it linkifies each `[n]` marker against that turn's own
+  snapshot (same marker contract as the client — 1–2 digits, not followed by
+  `(`, only in-range numbers link, so a literal `[2026]` stays text),
+  truncates without ever splitting a marker, and returns the matching
+  numbered source list. Legacy rows (backfilled `citations_json='[]'`)
+  degrade to plain literal markers with no source list — never fabricated
+  links, never an error. **Any future server-rendered answer surface must
+  call this helper**, and it is deliberately *not* unified with `/ask`'s
+  client-side JS rendering (`mdInline`/`srcListHtml` over live API
+  responses) — that's a different layer; keep them separate. The admin CSV
+  export deliberately keeps raw literal `[n]` markers (no HTML in a CSV) and
+  instead appends a plain-text `citations` column resolving them.
 
 ### Archive save / enrichment pipeline
 
@@ -522,11 +538,15 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
 
 ## 6. Known limitations / deferred work
 
-- **Citation markers render as literal text outside `/ask`.** The `[n]`
-  markers are linkified only on the live `/ask` page (and `/archive`'s
-  quick-ask widget). In `/ask/history`, the `/questions` community view, and
-  the admin CSV export, they appear as plain `[1]`/`[2]` text with no
-  resolution to their source list.
+- **Citation markers in the admin CSV export are literal text, on purpose.**
+  The server-rendered surfaces (`/ask/history`, `/questions`,
+  `/admin/ask-feedback`) now linkify `[n]` markers via the shared
+  `_render_cited_answer` helper (see §3), but the CSV keeps raw `[1]`/`[2]`
+  markers deliberately — no link conversion in a CSV — with a trailing
+  plain-text `citations` column resolving them. Don't "fix" the CSV markers
+  later. Turns recorded before the snapshot existed (`citations_json='[]'`)
+  still render their markers as plain text everywhere — those citations were
+  never stored and can't be recovered.
 - **Retrieval is FTS5 keyword search only.** `_safe_fts_query` ORs the
   question's keywords; feed matching is plain keyword overlap. No embeddings,
   so a question phrased entirely in synonyms can miss relevant saved

@@ -6989,13 +6989,16 @@ def community_questions(request: Request, q: str = ""):
       <form method="post" action="/questions/{r["id"]}/anonymize" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">{"Un-anonymize" if anonymized else "Anonymize asker"}</button></form>
     </div>"""
         q_txt = _esc(r.get("question") or "")
-        a_txt = _esc((r.get("answer") or "")[:600])
+        a_html, src_html = _render_cited_answer(r.get("answer") or "",
+                                                r.get("citations_json") or "[]",
+                                                truncate=600)
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
     <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q_txt}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(asker)} &middot; {_esc((r["created_at"] or "")[:10])}</div>
   </div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.55;">{a_txt}{'&hellip;' if len(r.get("answer") or "") > 600 else ''}</p>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.55;">{a_html}</p>
+  {src_html}
   {admin_controls}
 </div>"""
 
@@ -7891,28 +7894,34 @@ def ask_history(request: Request):
     def _single_card(r: dict) -> str:
         # A one-turn conversation — same card the flat list always showed.
         q = _esc(r.get("question") or "")
-        a = _esc((r.get("answer") or "")[:500])
+        a_html, src_html = _render_cited_answer(r.get("answer") or "",
+                                                r.get("citations_json") or "[]",
+                                                truncate=500)
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
   </div>
   <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:0;line-height:1.55;">{a}{'&hellip;' if len(r.get("answer") or "") > 500 else ''}</p>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:0;line-height:1.55;">{a_html}</p>
+  {src_html}
 </div>"""
 
     def _turn_block(r: dict) -> str:
         # One turn inside an expanded conversation — same content, truncation,
-        # and escaping as the flat card (citation markers stay literal text).
+        # and citation rendering as the flat card.
         q = _esc(r.get("question") or "")
-        a = _esc((r.get("answer") or "")[:500])
+        a_html, src_html = _render_cited_answer(r.get("answer") or "",
+                                                r.get("citations_json") or "[]",
+                                                truncate=500)
         return f"""<div style="padding:14px 0 4px;border-top:1px solid var(--line);">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div style="font-weight:600;color:var(--navy);font-size:14px;">{q}</div>
     <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
   </div>
   <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_ask_settings_badge(r)}</div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{a}{'&hellip;' if len(r.get("answer") or "") > 500 else ''}</p>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;line-height:1.55;">{a_html}</p>
+  {src_html}
 </div>"""
 
     def _card(turns: list[dict]) -> str:
@@ -9626,6 +9635,75 @@ def _ask_settings_badge(row: dict) -> str:
     return f'{srcs} <span style="color:var(--muted);">{_esc(model_short)} &middot; {_esc(row.get("effort") or "")}</span>'
 
 
+def _render_cited_answer(answer: str, citations_json: str,
+                         truncate: int | None = None) -> tuple[str, str]:
+    """Citation rendering for the server-rendered ask surfaces — /ask/history,
+    /questions, and /admin/ask-feedback all call this one helper (never a
+    per-surface reimplementation). Returns (answer_html, sources_html):
+    answer_html is the escaped answer text with each [n] marker linkified
+    against the turn's persisted citation snapshot
+    (ask_questions.citations_json); sources_html is the matching numbered
+    source list, "" when the turn has no citations — legacy rows are
+    backfilled with '[]' and must degrade to plain literal markers, never
+    fabricated links or errors.
+
+    Deliberately separate from /ask's client-side JS rendering (mdInline's
+    marker pass + srcListHtml over live API responses) — different layer,
+    kept unmerged on purpose. See ARCHITECTURE.md.
+    """
+    try:
+        cites = json.loads(citations_json or "[]")
+    except (TypeError, ValueError):
+        cites = []
+    if not isinstance(cites, list):
+        cites = []
+    cites = [c for c in cites if isinstance(c, dict)]
+
+    text = answer or ""
+    truncated = truncate is not None and len(text) > truncate
+    if truncated:
+        # Cut, then drop any partial marker dangling at the cut ("…[1").
+        text = re.sub(r"\[\d{0,2}$", "", text[:truncate])
+
+    def _link(m: re.Match) -> str:
+        i = int(m.group(1))
+        if 1 <= i <= len(cites) and cites[i - 1].get("url"):
+            c = cites[i - 1]
+            return (f'<sup class="cite"><a href="{_esc(c.get("url") or "")}" target="_blank" '
+                    f'rel="noopener" title="{_esc(c.get("title") or "")}">[{i}]</a></sup>')
+        return m.group(0)
+
+    # Same marker contract as the client renderer: a 1-2 digit [n] not
+    # followed by "(", linkified only when it resolves inside this turn's own
+    # list — a literal [2026] in prose stays text.
+    answer_html = re.sub(r"\[(\d{1,2})\](?!\()", _link, _esc(text))
+    if truncated:
+        answer_html += "&hellip;"
+
+    if not cites:
+        return answer_html, ""
+    items = []
+    for c in cites:
+        # Library citations carry the articles.id; feed/web are transient,
+        # so their persisted title/url snapshot is the whole record.
+        archive_ref = ""
+        if c.get("article_id") is not None:
+            try:
+                archive_ref = (f'<span style="color:var(--muted);"> &middot; '
+                               f'archive #{int(c["article_id"])}</span>')
+            except (TypeError, ValueError):
+                archive_ref = ""
+        items.append(
+            f'<li>{_ASK_SOURCE_ICONS.get(c.get("type"), "")} '
+            f'<a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener">'
+            f'[{_esc(c.get("n") if c.get("n") is not None else "")}] '
+            f'{_esc(c.get("title") or c.get("url") or "")}</a>{archive_ref}</li>'
+        )
+    sources_html = ('<ul style="margin:8px 0 0;padding-left:18px;list-style:none;font-size:13px;'
+                    f'display:flex;flex-direction:column;gap:4px;">{"".join(items)}</ul>')
+    return answer_html, sources_html
+
+
 @app.get("/admin/ask-report", response_class=HTMLResponse)
 def admin_ask_report(request: Request, user: str = ""):
     if not _is_authed(request):
@@ -9801,14 +9879,31 @@ def admin_ask_report_export(request: Request, user: str = ""):
         s = str(val)
         return "'" + s if s and s[0] in ("=", "+", "-", "@", "\t", "\r") else s
 
+    def _citations_text(r) -> str:
+        # Plain text only, deliberately: the answer column keeps its literal
+        # [n] markers (no link conversion in a CSV), and this column makes
+        # them human-resolvable — one "[n] title — url" line per source.
+        try:
+            cites = json.loads(r.get("citations_json") or "[]")
+        except (TypeError, ValueError):
+            cites = []
+        if not isinstance(cites, list):
+            return ""
+        return "\n".join(
+            f'[{c.get("n")}] {c.get("title") or ""} — {c.get("url") or ""}'
+            for c in cites if isinstance(c, dict)
+        )
+
     buf = io.StringIO()
     writer = csv.writer(buf)
-    # rewrite_cost_usd appended LAST so anything parsing the CSV by position
-    # keeps working; it's the rewrite's share of cost_usd (the turn total),
-    # not an addition to it.
+    # New columns appended LAST so anything parsing the CSV by position keeps
+    # working: rewrite_cost_usd is the rewrite's share of cost_usd (the turn
+    # total), not an addition to it; citations resolves the answer's literal
+    # [n] markers ("" on legacy rows recorded before the snapshot existed).
     writer.writerow(["date", "asker", "conversation_id", "turn", "question", "answer", "model", "effort",
                      "use_library", "use_feed", "use_web", "input_tokens", "output_tokens",
-                     "cache_creation_tokens", "cache_read_tokens", "cost_usd", "rewrite_cost_usd"])
+                     "cache_creation_tokens", "cache_read_tokens", "cost_usd", "rewrite_cost_usd",
+                     "citations"])
     for r in rows:
         asker = r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
         writer.writerow([
@@ -9817,6 +9912,7 @@ def admin_ask_report_export(request: Request, user: str = ""):
             r["model"], r["effort"], bool(r["use_library"]), bool(r["use_feed"]), bool(r["use_web"]),
             r["input_tokens"], r["output_tokens"], r["cache_creation_tokens"], r["cache_read_tokens"],
             f'{r["cost_usd"]:.6f}', f'{float(r.get("rewrite_cost_usd") or 0):.6f}',
+            _csv_safe(_citations_text(r)),
         ])
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return Response(
@@ -9855,28 +9951,6 @@ def admin_ask_feedback(request: Request, rating: str = ""):
     def _rater(r: dict) -> str:
         return r.get("rater_name") or r.get("rater_username") or f'user #{r["user_id"]}'
 
-    def _citation_list(r: dict) -> str:
-        try:
-            cites = json.loads(r.get("citations_json") or "[]")
-        except (TypeError, ValueError):
-            cites = []
-        if not cites:
-            return '<div style="font-size:12.5px;color:var(--muted);">No cited sources recorded for this turn.</div>'
-        icons = {"library": "&#128218;", "feed": "&#128240;", "web": "&#127760;"}
-        items = []
-        for c in cites:
-            # Library citations carry the articles.id; feed/web are transient,
-            # so their persisted title/url snapshot is the whole record.
-            archive_ref = (f'<span style="color:var(--muted);"> &middot; archive #{int(c["article_id"])}</span>'
-                           if c.get("article_id") is not None else "")
-            items.append(
-                f'<li>{icons.get(c.get("type"), "")} '
-                f'<a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener">'
-                f'[{c.get("n")}] {_esc(c.get("title") or c.get("url") or "")}</a>{archive_ref}</li>'
-            )
-        return ('<ul style="margin:4px 0 0;padding-left:18px;list-style:none;font-size:13px;'
-                f'display:flex;flex-direction:column;gap:4px;">{"".join(items)}</ul>')
-
     def _card(r: dict) -> str:
         label, fg, bg = _FEEDBACK_RATINGS.get(r["rating"], (r["rating"], "var(--ink)", "var(--surface-2)"))
         comment = ""
@@ -9884,12 +9958,13 @@ def admin_ask_feedback(request: Request, rating: str = ""):
             comment = (f'<div style="margin:8px 0 0;padding:8px 12px;background:var(--coral-wash);'
                        f'border-radius:8px;font-size:13.5px;color:var(--ink);">&ldquo;{_esc(r["comment"])}&rdquo;</div>')
         answer = r.get("answer") or ""
+        a_html, src_html = _render_cited_answer(answer, r.get("citations_json") or "[]")
         answer_html = (
             f'<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">'
             f'Answer ({len(answer):,} chars) &mdash; expand</summary>'
-            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:8px 0 0;">{_esc(answer)}</p></details>'
+            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:8px 0 0;">{a_html}</p></details>'
             if len(answer) > 300 else
-            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;margin:8px 0 0;">{_esc(answer)}</p>'
+            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;margin:8px 0 0;">{a_html}</p>'
         )
         model = (r.get("model") or "").replace("claude-", "")
         report_link = (f'/admin/ask-report?user={quote(r["rater_username"])}'
@@ -9905,7 +9980,7 @@ def admin_ask_feedback(request: Request, rating: str = ""):
   {answer_html}
   <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
     <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Cited sources</div>
-    {_citation_list(r)}
+    {src_html or '<div style="font-size:12.5px;color:var(--muted);">No cited sources recorded for this turn.</div>'}
   </div>
   <div style="font-size:12px;color:var(--muted);margin-top:8px;">{_esc(model)} &middot; {_esc(r.get("effort") or "")} &middot; ${float(r.get("cost_usd") or 0):.4f} &middot; conversation {_esc(r.get("conversation_id") or "")} turn {(r.get("turn_index") or 0) + 1}</div>
 </div>"""
