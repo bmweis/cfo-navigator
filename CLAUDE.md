@@ -219,6 +219,29 @@ before they compound across phases.
 for it in that moment.** Open the PR, make sure checks are green, then hand him the
 link.
 
+## Documentation
+
+`ARCHITECTURE.md` (repo root) is the living technical overview — schema, request
+flows, design decisions, and their Mermaid diagrams. Two standing rules keep the
+docs honest, **in the same PR as the change** (never a follow-up):
+
+1. **Any PR that changes the database schema** (a table or column in
+   `linklib/db.py`, including the migration list), **adds/removes/renames a
+   route, or alters a flow documented in ARCHITECTURE.md** must update
+   `ARCHITECTURE.md` in that PR — including any affected Mermaid diagram (the
+   deployment map, the ER diagram, the `/ask` sequence diagram), not just the
+   prose. All diagrams stay as fenced `mermaid` code blocks so they render on
+   GitHub and remain editable; no image files.
+2. **Any PR that adds or removes a dependency** (`requirements.txt` /
+   `requirements-dev.txt`) must update the open-source attributions page in
+   that PR: the `_OPEN_SOURCE` list in `webapp/app.py`, rendered at
+   `/admin/open-source` — add new components with their license, homepage, and
+   a one-line "what we use it for" blurb in the right group; remove entries for
+   dependencies no longer used. CI already fails on a bare mismatch
+   (`tests/test_open_source.py` keeps the showcase in sync with
+   `requirements*.txt`), but the test can't write the blurb or verify the
+   license — that part is on the PR.
+
 ## Deployment
 
 - **Host:** Railway, building from the `Dockerfile` (`python:3.11-slim`, runs
