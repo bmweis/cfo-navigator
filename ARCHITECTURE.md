@@ -219,8 +219,11 @@ tables above describe.)
 The retrieval-augmented Q&A flow. The UI exposes only a Quick/Standard/Deep
 effort tier; each tier maps internally to a model, retrieval counts, token
 budget, and per-source/global grounding-character caps (`EFFORT_SETTINGS` in
-`linklib/agent.py`). The client holds the conversation history and sends it
-back with every turn; the server holds the money guards.
+`linklib/agent.py`). The server is the source of truth for conversation
+history: the client sends only `conversation_id` + the new question, and the
+server rebuilds the transcript from the conversation's recorded
+`ask_questions` rows — client-fabricated history is impossible, and both the
+follow-up cap and the money guards are fully server-side.
 
 ```mermaid
 sequenceDiagram
@@ -231,14 +234,22 @@ sequenceDiagram
     participant H as Anthropic API (Haiku)
     participant C as Anthropic API (tier model)
 
-    B->>W: POST /ask {question, history[], conversation_id, effort}
+    B->>W: POST /ask {question, conversation_id?, effort}
     W->>W: _require_member (cookie or save token)
-    W->>W: follow-up cap: count user turns in history (max 7 total)
+    opt follow-up turn (conversation_id present)
+        W->>DB: load the conversation's ask_questions rows (turn_index order)
+        W->>W: ownership: 404 unknown id, 403 someone else's conversation
+        W->>W: follow-up cap: count recorded rows (max 7 turns)
+        alt turn cap reached
+            W-->>B: {capped: true}
+        end
+        W->>W: rebuild history[] from the rows (question/answer pairs)
+    end
     W->>DB: _current_user_id -> effective cap vs SUM(cost_usd) this month
     alt monthly dollar cap reached
         W-->>B: {capped: true, budget message}
     end
-    W->>AG: answer_question(question, history, effort)
+    W->>AG: answer_question(question, rebuilt history, effort)
     opt follow-up turn only (history non-empty)
         AG->>H: rewrite follow-up into a standalone search question
         H-->>AG: rewritten query (+ real token usage)
@@ -275,9 +286,31 @@ Details worth knowing:
   three source types. Any surprise in citation metadata degrades to plain
   text — citation handling can never fail an answer.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
-  budget per tier, a follow-up cap (6 extra turns), a history-character cap
-  carried into the prompt, and the authoritative monthly per-user dollar cap
-  checked against real recorded spend before any API call.
+  budget per tier, a follow-up cap (6 extra turns, counted from the
+  conversation's recorded `ask_questions` rows — never from anything
+  client-supplied), a history-character cap carried into the prompt, and the
+  authoritative monthly per-user dollar cap checked against real recorded
+  spend before any API call.
+- **Conversations resume across reloads and devices.** The `/ask` page offers
+  a "Recent conversations" list on load (`GET /ask/conversations` — the
+  user's last 5, first question as the label) and loads a full transcript
+  from `GET /ask/conversations/{id}`: per-turn question, answer, the
+  `citations_json` snapshot (parsed server-side so the client re-renders each
+  turn's `[n]` markers as links against that turn's own list), and the user's
+  existing feedback state, ready to re-rate. Both endpoints enforce the same
+  ownership contract as `POST /ask` (404 unknown, 403 someone else's); a
+  conversation at the turn cap loads read-only with the "start a new
+  question" affordance. Resume is offered, never forced — a fresh question
+  starts a new conversation exactly as before.
+- **Two compatibility notes.** A stale pre-deploy tab that still sends a
+  `history` field in the `POST /ask` payload is tolerated: the field is
+  ignored (untrusted), and the request proceeds on the server-rebuilt
+  history. And token-only access (`X-Save-Token`) is now effectively
+  one-shot: its turns were never recorded (there's no `users` row to
+  attribute them to), so there is nothing server-side to continue — it gets
+  `conversation_id: null` back and any `conversation_id` it sends is
+  rejected. Turns recorded before `conversation_id` existed (stored as `''`)
+  are likewise not resumable; they still appear in `/ask/history`.
 - **Each turn's cited sources are persisted, and answers can be rated.** The
   API-verified citation list is stored on the turn's row
   (`ask_questions.citations_json`) as a snapshot — feed and web sources are
@@ -288,8 +321,8 @@ Details worth knowing:
   `ask_feedback` row per turn per user — a changed rating updates in place. The
   `/admin/ask-feedback` page triages ratings with the question, answer, and
   cited sources; nothing feeds back into prompts or retrieval automatically.
-  The snapshot shape is deliberately per-turn so the planned server-side
-  conversation persistence can reuse it to re-render past turns' `[n]` markers.
+  The snapshot shape is deliberately per-turn — it's what the resume flow
+  replays to re-render past turns' `[n]` markers.
 
 ### Archive save / enrichment pipeline
 
@@ -383,20 +416,25 @@ recorded anywhere, it's flagged rather than invented.
   `/admin/library` states the rule explicitly. *Why:* resale-safety — the
   archive is built from other people's articles, so the product is the
   curation and synthesis, never republication.
-- **Client-held conversation history.** The `/ask` page keeps the running
-  `[{role, content}]` list in the browser and sends it back each turn; the
-  server is stateless per request. *Why:* the simplest thing that works with
-  one process and no session store. Server-side conversation persistence is
-  planned (the per-turn rows in `ask_questions` already capture the
-  transcript). Note the layering this creates today: the follow-up cap counts
-  turns in *client-supplied* history, so the authoritative guard is the
-  monthly dollar cap, which is fully server-side.
+- **Server-held conversation history, reconstructed per request.** The `/ask`
+  client sends only `conversation_id` + the new question; the server rebuilds
+  the transcript from the conversation's `ask_questions` rows (which were
+  already recording every turn) and enforces the follow-up cap by counting
+  those rows. There is still no session store or in-memory conversation
+  state — the DB rows *are* the state, re-read on each turn. *Why:*
+  client-supplied history was both the resume blocker (a reload orphaned the
+  conversation) and the trust gap (#96 — a client could fabricate or trim
+  history); reconstruction closes both without adding any new
+  infrastructure. History previously lived in the browser and was echoed
+  back each turn — chosen then as the simplest stateless thing that worked.
 - **Per-turn citation numbering.** Each answer's `[n]` markers resolve against
-  that turn's own citation list (the frontend re-scopes `CITES` per response);
-  numbering restarts every turn rather than accumulating across the
+  that turn's own citation list (the frontend re-scopes `CITES` per response,
+  and the resume flow replays each turn's `citations_json` snapshot the same
+  way); numbering restarts every turn rather than accumulating across the
   conversation. *Why:* each turn's list is verified against that API
-  response's citation metadata; a conversation-global numbering would need
-  server-held state (see previous entry).
+  response's citation metadata, and the persisted snapshot is per-turn —
+  conversation-global renumbering would mean rewriting stored answers'
+  markers whenever a conversation continues.
 - **Additive-only schema migrations.** Boot runs `CREATE TABLE IF NOT EXISTS`
   then a list of `ALTER TABLE ADD COLUMN`s that swallow "duplicate column"
   errors; columns are never dropped (dead game columns are kept and labeled).
@@ -489,16 +527,10 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
   quick-ask widget). In `/ask/history`, the `/questions` community view, and
   the admin CSV export, they appear as plain `[1]`/`[2]` text with no
   resolution to their source list.
-- **No server-side conversation persistence yet.** History lives in the
-  browser; a reload orphans the conversation (the turns are recorded in
-  `ask_questions`, but there's no UI to resume one). Planned.
 - **Retrieval is FTS5 keyword search only.** `_safe_fts_query` ORs the
   question's keywords; feed matching is plain keyword overlap. No embeddings,
   so a question phrased entirely in synonyms can miss relevant saved
   articles. Semantic/hybrid search is planned.
-- **The follow-up cap trusts client-supplied history.** A client sending a
-  trimmed history could exceed the 7-turn limit; the monthly dollar cap
-  (server-side, from recorded spend) is the real guard.
 - **The `/contact` rate limiter can be evaded via the origin.** `_client_ip`
   prefers `CF-Connecting-IP` (set authoritatively by Cloudflare on proxied
   traffic — Cloudflare only *appends* to `X-Forwarded-For`, so XFF's first
