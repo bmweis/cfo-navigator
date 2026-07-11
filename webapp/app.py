@@ -7201,6 +7201,8 @@ def ask_page(request: Request, q: str = ""):
   {cost_span}
 </div>
 
+<div id="ask-recent" class="ask-section" style="display:none;"></div>
+
 <div id="ask-thread"></div>
 <div id="ask-capped" style="display:none;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:14px;color:var(--muted);">
   You&rsquo;ve reached the limit for this conversation. <a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.
@@ -7238,6 +7240,15 @@ def ask_page(request: Request, q: str = ""):
 .ask-tier.recommended.selected .ask-tier-name{{color:var(--coral-deep);}}
 .ask-tier.recommended.selected .ask-tier-radio{{border-color:var(--coral-deep);}}
 .ask-tier.recommended.selected .ask-tier-radio .fill{{background:var(--coral-deep);}}
+
+.ask-recent-item{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;width:100%;text-align:left;
+  font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
+  margin-bottom:8px;transition:border-color .12s ease;}}
+.ask-recent-item:hover{{border-color:var(--navy);}}
+.ask-recent-q{{font-weight:600;font-size:13.5px;color:var(--navy);overflow:hidden;text-overflow:ellipsis;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}}
+.ask-recent-meta{{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;}}
+@media (max-width:520px){{.ask-recent-item{{flex-direction:column;align-items:flex-start;gap:3px;}}}}
 
 .ask-action-row{{display:flex;align-items:center;gap:18px;margin:22px 0;}}
 .ask-cost{{display:flex;flex-direction:column;}}
@@ -7294,9 +7305,11 @@ function updateEstimate() {{
   num.textContent = c != null ? '~$' + c.toFixed(3) : '';
 }}
 
-var convo = [];        // [{{role, content}}] prior turns, sent as history
 var asked = false;
-var convoId = null;    // groups this conversation's turns server-side; set from the first response
+var convoId = null;    // the server-side conversation to continue; set from the
+                       // first response (or a resumed conversation). The server
+                       // rebuilds history from its own records — no turn text
+                       // is ever sent back from the client.
 // Citations for the turn currently being rendered: [{{n, title, url, type}}].
 // Set from each response just before mdToHtml runs, so markers are per-turn
 // scoped — each turn's [n] links resolve against that turn's own list.
@@ -7435,11 +7448,99 @@ document.addEventListener('keydown', function(e) {{
   }}
 }});
 function resetConvo() {{
-  convo = []; asked = false; convoId = null;
+  asked = false; convoId = null;
   document.getElementById('ask-thread').innerHTML = '';
   document.getElementById('ask-capped').style.display = 'none';
+  var rec = document.getElementById('ask-recent');
+  if (rec.innerHTML) rec.style.display = 'block';
   var btn = document.getElementById('ask-btn'); btn.disabled = false; btn.textContent = 'Ask';
   var q = document.getElementById('ask-q'); q.placeholder = 'e.g. What frameworks do CFOs use for headcount planning in uncertain environments?'; q.focus();
+}}
+
+// --- Resume: recent conversations -------------------------------------------
+// On load, offer the last few conversations to pick back up. Offered, never
+// forced — a fresh question works exactly as before, and the list simply
+// hides once a conversation (new or resumed) is on screen.
+function relTime(iso) {{
+  var then = new Date(iso);
+  if (isNaN(then)) return '';
+  var mins = Math.max(0, Math.round((Date.now() - then.getTime()) / 60000));
+  if (mins < 60) return mins <= 1 ? 'just now' : mins + 'm ago';
+  var hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  var days = Math.round(hrs / 24);
+  return days === 1 ? 'yesterday' : days + 'd ago';
+}}
+async function loadRecent() {{
+  try {{
+    var resp = await fetch('/ask/conversations');
+    if (!resp.ok) return;
+    var d = await resp.json();
+    var list = d.conversations || [];
+    if (!list.length) return;
+    var box = document.getElementById('ask-recent');
+    box.innerHTML = '<div class="ask-section-label">Recent conversations</div>' +
+      list.map(function(c) {{
+        return '<button type="button" class="ask-recent-item" data-cid="' + escapeHtml(c.conversation_id) + '" onclick="resumeConvo(this)">' +
+               '<span class="ask-recent-q">' + escapeHtml(c.first_question) + '</span>' +
+               '<span class="ask-recent-meta">' + relTime(c.last_at) + ' &middot; ' +
+               c.turns + (c.turns === 1 ? ' turn' : ' turns') + (c.capped ? ' &middot; at limit' : '') + '</span></button>';
+      }}).join('');
+    box.style.display = 'block';
+  }} catch(e) {{}}
+}}
+// Pre-select the feedback controls with the turn's stored rating so a
+// resumed transcript looks exactly like it did live — and re-rating still
+// works (the server upserts one row per turn per user).
+function applyFbState(row, fb) {{
+  if (!row || !fb) return;
+  var btn = row.querySelector('.ask-fb-btn[data-rating="' + fb.rating + '"]');
+  if (!btn) return;
+  btn.classList.add(fb.rating === 'helpful' ? 'sel-pos' : 'sel-neg');
+  if (fb.rating !== 'helpful') {{
+    var box = row.querySelector('.ask-fb-comment');
+    box.style.display = 'flex';
+    box.querySelector('input').value = fb.comment || '';
+  }}
+}}
+async function resumeConvo(el) {{
+  var cid = el.getAttribute('data-cid');
+  try {{
+    var resp = await fetch('/ask/conversations/' + encodeURIComponent(cid));
+    if (!resp.ok) return;
+    var d = await resp.json();
+    var thread = document.getElementById('ask-thread');
+    thread.innerHTML = '';
+    (d.turns || []).forEach(function(t) {{
+      // Same per-turn CITES scoping as the live path: each turn's [n]
+      // markers resolve against that turn's own persisted citation snapshot.
+      CITES = t.citations || [];
+      var turn = document.createElement('div');
+      turn.style.marginTop = '18px';
+      turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(t.question) + '</div>' +
+                       '<div class="ask-answer">' + mdToHtml(t.answer) + srcListHtml(t) + '</div>';
+      var answerEl = turn.querySelector('.ask-answer');
+      if (t.turn_id) {{
+        answerEl.insertAdjacentHTML('beforeend', fbRowHtml(t.turn_id));
+        applyFbState(answerEl.querySelector('.ask-fb'), t.feedback);
+      }}
+      thread.appendChild(turn);
+    }});
+    convoId = d.conversation_id;
+    asked = true;
+    document.getElementById('ask-recent').style.display = 'none';
+    var btn = document.getElementById('ask-btn');
+    var qEl = document.getElementById('ask-q');
+    if (d.capped) {{
+      document.getElementById('ask-capped').style.display = 'block';
+      btn.disabled = true; btn.textContent = 'Limit reached';
+    }} else {{
+      document.getElementById('ask-capped').style.display = 'none';
+      btn.disabled = false; btn.textContent = 'Ask follow-up';
+      qEl.placeholder = 'Ask a follow-up…';
+    }}
+    if (thread.lastElementChild) thread.lastElementChild.scrollIntoView({{behavior:'smooth', block:'nearest'}});
+  }} catch(e) {{}}
 }}
 
 async function doAsk() {{
@@ -7460,6 +7561,7 @@ async function doAsk() {{
   turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(q) + '</div>' +
                    '<div class="ask-answer"><em style="color:var(--muted);">Querying sources…</em></div>';
   thread.appendChild(turn);
+  document.getElementById('ask-recent').style.display = 'none';
   var answerEl = turn.querySelector('.ask-answer');
 
   btn.disabled = true; btn.textContent = 'Thinking…';
@@ -7470,7 +7572,7 @@ async function doAsk() {{
     var resp = await fetch('/ask', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{ question: q, effort: effort, sources: sources, history: convo, conversation_id: convoId }})
+      body: JSON.stringify({{ question: q, effort: effort, sources: sources, conversation_id: convoId }})
     }});
     var d = await resp.json();
     if (!resp.ok) {{
@@ -7491,8 +7593,6 @@ async function doAsk() {{
     }}
 
     convoId = d.conversation_id || convoId;
-    convo.push({{role:'user', content:q}});
-    convo.push({{role:'assistant', content:d.answer}});
     asked = true;
     qEl.placeholder = 'Ask a follow-up…';
     btn.disabled = false; btn.textContent = 'Ask follow-up';
@@ -7512,6 +7612,7 @@ document.addEventListener('keydown', function(e) {{
 }});
 
 updateEstimate();
+loadRecent();
 </script>"""
 
     return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "Library", body, role=_role(request)))
@@ -7520,7 +7621,7 @@ updateEstimate();
 @app.post("/ask")
 async def ask(request: Request):
     _require_member(request)
-    from linklib.agent import answer_question, count_prior_questions, MAX_FOLLOWUPS
+    from linklib.agent import answer_question, MAX_FOLLOWUPS
     payload = await request.json()
     question = (payload.get("question") or "").strip()
     if not question:
@@ -7529,21 +7630,11 @@ async def ask(request: Request):
     model = (payload.get("model") or "")
     effort = (payload.get("effort") or "standard")
     conversation_id = (payload.get("conversation_id") or "").strip()
-
-    # Conversation history for follow-ups: [{role, content}, ...]. The follow-up
-    # cap is enforced here (invisible cost guard) — a capped conversation never
-    # reaches the API.
-    history = payload.get("history") or []
-    if not isinstance(history, list):
-        history = []
-    prior_questions = count_prior_questions(history)
-    if prior_questions >= 1 + MAX_FOLLOWUPS:
-        return {
-            "capped": True,
-            "answer": "We've reached the limit for this conversation. "
-                      "Start a new question to keep going.",
-            "sources": [], "feed_sources": [], "web_sources": [],
-        }
+    # Clients no longer send conversation history — on a follow-up the server
+    # rebuilds it from the conversation's recorded ask_questions rows below,
+    # so fabricated history is impossible. A stale pre-deploy tab may still
+    # include a `history` field in the payload; it's ignored (untrusted)
+    # rather than rejected so those tabs keep working through the transition.
 
     raw_sources = payload.get("sources") or ["library", "web"]
     if isinstance(raw_sources, str):
@@ -7555,6 +7646,35 @@ async def ask(request: Request):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
+
+        # Follow-up turn: rebuild history from the conversation's recorded
+        # rows (the server-side source of truth). Ownership mirrors the
+        # feedback endpoint — 404 for a conversation that doesn't exist, 403
+        # for someone else's. Token-only / break-glass access (user_id None)
+        # never has recorded turns, so it can't continue any conversation —
+        # each of its questions is one-shot.
+        history: list[dict] = []
+        prior_questions = 0
+        if conversation_id:
+            turns = lib.list_conversation_turns(conversation_id)
+            if not turns:
+                raise HTTPException(status_code=404, detail="unknown conversation")
+            if user_id is None or turns[0]["user_id"] != user_id:
+                raise HTTPException(status_code=403, detail="not your conversation")
+            # The follow-up cap counts recorded rows, never client-supplied
+            # turns (invisible cost guard) — a capped conversation never
+            # reaches the API.
+            prior_questions = len(turns)
+            if prior_questions >= 1 + MAX_FOLLOWUPS:
+                return {
+                    "capped": True,
+                    "answer": "We've reached the limit for this conversation. "
+                              "Start a new question to keep going.",
+                    "sources": [], "feed_sources": [], "web_sources": [],
+                }
+            for t in turns:
+                history.append({"role": "user", "content": t["question"]})
+                history.append({"role": "assistant", "content": t["answer"]})
 
         # Dollar-based rate limit — real spend this calendar month vs. the
         # user's effective cap (per-user override, else the global default).
@@ -7583,7 +7703,10 @@ async def ask(request: Request):
             history=history,
         )
 
-        new_conversation_id = conversation_id
+        # None for token-only / break-glass access: nothing was recorded, so
+        # there is no conversation to continue (the guards above already
+        # reject any conversation_id those callers send).
+        new_conversation_id = None
         usage_line = None
         turn_id = None
         if user_id is not None:
@@ -7666,6 +7789,81 @@ async def ask_feedback(request: Request):
             raise HTTPException(status_code=403, detail="not your conversation")
         lib.record_ask_feedback(question_id, user_id, rating, comment)
         return {"ok": True}
+    finally:
+        lib.close()
+
+
+@app.get("/ask/conversations")
+def ask_conversations(request: Request):
+    """The signed-in user's recent FP&A Buddy conversations — the /ask page's
+    resume list (last 5, first question as the label). Same auth model as
+    POST /ask; token-only / break-glass access has no recorded turns to
+    resume, so it gets an empty list rather than an error."""
+    _require_member(request)
+    from linklib.agent import MAX_FOLLOWUPS
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        if user_id is None:
+            return {"conversations": []}
+        return {"conversations": [
+            {
+                "conversation_id": c["conversation_id"],
+                "first_question": c["first_question"] or "",
+                "turns": c["turns"],
+                "last_at": c["last_at"],
+                "capped": c["turns"] >= 1 + MAX_FOLLOWUPS,
+            }
+            for c in lib.list_recent_conversations(user_id, limit=5)
+        ]}
+    finally:
+        lib.close()
+
+
+@app.get("/ask/conversations/{conversation_id}")
+def ask_conversation_transcript(conversation_id: str, request: Request):
+    """Full transcript of one of the signed-in user's conversations, for the
+    /ask resume flow: per-turn question, answer, citation snapshot (parsed
+    from citations_json so the client re-renders [n] markers as links), and
+    the user's existing feedback on each turn. 404 for a conversation that
+    doesn't exist, 403 for someone else's — the same ownership contract as
+    POST /ask and POST /ask/feedback."""
+    _require_member(request)
+    from linklib.agent import MAX_FOLLOWUPS
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        turns = lib.list_conversation_turns(conversation_id, feedback_user_id=user_id)
+        if not turns:
+            raise HTTPException(status_code=404, detail="unknown conversation")
+        if user_id is None or turns[0]["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="not your conversation")
+
+        def _turn(t: dict) -> dict:
+            try:
+                cites = json.loads(t.get("citations_json") or "[]")
+            except Exception:
+                cites = []   # a mangled snapshot degrades to plain text, never a 500
+            feedback = None
+            if t.get("fb_rating"):
+                feedback = {"rating": t["fb_rating"], "comment": t.get("fb_comment") or ""}
+            return {
+                "turn_id": t["id"],
+                "question": t["question"],
+                "answer": t["answer"],
+                "citations": cites,
+                "created_at": t["created_at"],
+                "effort": t.get("effort") or "",
+                "feedback": feedback,
+            }
+
+        followups_left = max(0, 1 + MAX_FOLLOWUPS - len(turns))
+        return {
+            "conversation_id": conversation_id,
+            "capped": followups_left == 0,
+            "followups_left": followups_left,
+            "turns": [_turn(t) for t in turns],
+        }
     finally:
         lib.close()
 

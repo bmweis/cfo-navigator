@@ -1756,6 +1756,58 @@ class Library:
             ).fetchone()[0]
         return self.conn.execute("SELECT COUNT(*) FROM ask_questions").fetchone()[0]
 
+    def list_conversation_turns(self, conversation_id: str,
+                                feedback_user_id: int | None = None) -> list[dict]:
+        """All turns of one conversation in conversation order (turn_index,
+        then id — the same ordering the history views use). This is the
+        server-side source of truth POST /ask rebuilds follow-up history from;
+        the follow-up cap counts these rows, never client-supplied turns.
+        Pass `feedback_user_id` to also carry that user's existing rating of
+        each turn as fb_rating/fb_comment (NULL when unrated), so the resume
+        transcript can show feedback state without a second query."""
+        if not conversation_id:
+            # Legacy pre-conversation_id rows store '' — they're solo turns,
+            # not a conversation, and '' must never match them all at once.
+            return []
+        if feedback_user_id is None:
+            rows = self.conn.execute(
+                "SELECT * FROM ask_questions WHERE conversation_id=?"
+                " ORDER BY turn_index, id",
+                (conversation_id,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """SELECT aq.*, f.rating AS fb_rating, f.comment AS fb_comment
+                   FROM ask_questions aq
+                   LEFT JOIN ask_feedback f
+                     ON f.question_id = aq.id AND f.user_id = ?
+                   WHERE aq.conversation_id=?
+                   ORDER BY aq.turn_index, aq.id""",
+                (feedback_user_id, conversation_id),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_recent_conversations(self, user_id: int, limit: int = 5) -> list[dict]:
+        """The user's most recent conversations, newest activity first — the
+        /ask resume list. One row per conversation_id: the first question
+        (the label), turn count, and last-activity timestamp. Legacy turns
+        that predate conversation_id (stored as '') are excluded — with no id
+        there is nothing to resume; /ask/history still shows them."""
+        rows = self.conn.execute(
+            """SELECT aq.conversation_id,
+                      COUNT(*) AS turns,
+                      MAX(aq.created_at) AS last_at,
+                      (SELECT q2.question FROM ask_questions q2
+                       WHERE q2.conversation_id = aq.conversation_id
+                       ORDER BY q2.turn_index, q2.id LIMIT 1) AS first_question
+               FROM ask_questions aq
+               WHERE aq.user_id=? AND aq.conversation_id != ''
+               GROUP BY aq.conversation_id
+               ORDER BY last_at DESC LIMIT ?""",
+            (user_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def list_public_ask_questions(self, query: str = "", limit: int = 200) -> list[dict]:
         """Non-hidden Q&A for the community browse view, newest first, optionally
         text-filtered on question/answer. Callers render `asker_name`/
