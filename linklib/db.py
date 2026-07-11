@@ -291,12 +291,40 @@ CREATE TABLE IF NOT EXISTS ask_questions (
     rewrite_cost_usd      REAL NOT NULL DEFAULT 0,     -- rewrite's share, already inside cost_usd
     hidden_public         INTEGER NOT NULL DEFAULT 0,  -- admin removed from the community view only
     anonymized            INTEGER NOT NULL DEFAULT 0,  -- asker name hidden on the community view only
+    citations_json        TEXT NOT NULL DEFAULT '[]',  -- the turn's API-verified cited sources (see record_ask_question)
     created_at            TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_ask_questions_user ON ask_questions(user_id);
 CREATE INDEX IF NOT EXISTS idx_ask_questions_created ON ask_questions(created_at);
 CREATE INDEX IF NOT EXISTS idx_ask_questions_conversation ON ask_questions(conversation_id);
+-- NOTE: no index on citations_json (nothing queries it by content). Any future
+-- index on it must go in _POST_MIGRATION_INDEXES, never here — on pre-existing
+-- DBs the column only arrives via the ALTER TABLE migration loop (see the note
+-- above password_reset_requests for the incident this rule comes from).
+
+-- Member feedback on FP&A Buddy answers: one row per rated turn per user,
+-- upserted on (question_id, user_id) so a changed rating updates in place
+-- rather than stacking rows. question_id -> ask_questions.id by convention
+-- (no declared FK, like everywhere else in this schema). Captured for three
+-- downstream uses: admin triage (/admin/ask-feedback), a retrieval eval set
+-- for the planned semantic-search build (flagged questions plus the
+-- citations_json snapshot on the rated ask_questions row), and prompt
+-- refinement. Feedback never mutates prompts or retrieval automatically —
+-- capture + triage only.
+CREATE TABLE IF NOT EXISTS ask_feedback (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id INTEGER NOT NULL,             -- ask_questions.id (the rated turn)
+    user_id     INTEGER NOT NULL,             -- who rated (always the turn's asker today)
+    rating      TEXT NOT NULL,                -- 'helpful' | 'inaccurate' | 'not_helpful'
+    comment     TEXT NOT NULL DEFAULT '',     -- optional "what was off?" free text
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL DEFAULT '',     -- '' until the rating is first changed
+    UNIQUE(question_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ask_feedback_rating  ON ask_feedback(rating);
+CREATE INDEX IF NOT EXISTS idx_ask_feedback_created ON ask_feedback(created_at);
 
 -- "Sail, Don't Row" — one row per rank (Deckhand/Mate/First Mate/Skipper), the
 -- tunable knobs the game engine reads instead of hardcoded constants, so Brian
@@ -549,6 +577,11 @@ class Library:
             "ALTER TABLE ask_questions ADD COLUMN rewrite_input_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE ask_questions ADD COLUMN rewrite_output_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE ask_questions ADD COLUMN rewrite_cost_usd REAL NOT NULL DEFAULT 0",
+            # Per-turn citation snapshot — the sources an answer ACTUALLY cited,
+            # persisted so a flagged answer stays inspectable later (feedback
+            # triage, retrieval eval set). Pre-existing turns get '[]' (their
+            # citations were only ever sent to the client, never stored).
+            "ALTER TABLE ask_questions ADD COLUMN citations_json TEXT NOT NULL DEFAULT '[]'",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1604,26 +1637,33 @@ class Library:
                             cache_creation_tokens: int = 0, cache_read_tokens: int = 0,
                             cost_usd: float = 0.0, rewrite_input_tokens: int = 0,
                             rewrite_output_tokens: int = 0,
-                            rewrite_cost_usd: float = 0.0) -> int:
+                            rewrite_cost_usd: float = 0.0,
+                            citations: Optional[list[dict]] = None) -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
         a conversation and the caller fills it in with str(id) after insert.
         `cost_usd` is the turn TOTAL (answer + any query-rewrite call); the
-        rewrite_* args break out the rewrite's share of it."""
+        rewrite_* args break out the rewrite's share of it.
+        `citations` is the turn's API-verified cited-source list
+        ([{n, title, url, type, article_id?}] — article_id only on
+        library-type entries), stored as a snapshot: feed and web sources are
+        transient, so the persisted title/url IS the record and is never
+        re-resolved later."""
         now = _now()
         cur = self.conn.execute(
             """INSERT INTO ask_questions
                (conversation_id, turn_index, user_id, question, answer, model, effort,
                 use_library, use_feed, use_web, input_tokens, output_tokens,
                 cache_creation_tokens, cache_read_tokens, cost_usd,
-                rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
+                citations_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
              cost_usd, rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
-             now),
+             json.dumps(citations or []), now),
         )
         row_id = cur.lastrowid
         if not conversation_id:
@@ -1751,6 +1791,78 @@ class Library:
             "UPDATE ask_questions SET anonymized=? WHERE id=?", (int(anonymized), question_id)
         )
         self.conn.commit()
+
+    # -- Ask / FP&A Buddy — answer feedback ------------------------------------
+
+    ASK_FEEDBACK_RATINGS = ("helpful", "inaccurate", "not_helpful")
+
+    def get_ask_question(self, question_id: int) -> Optional[dict]:
+        """One recorded turn by id — used by the feedback endpoint to verify
+        the turn exists and belongs to the rater before recording anything."""
+        row = self.conn.execute(
+            "SELECT * FROM ask_questions WHERE id=?", (question_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def record_ask_feedback(self, question_id: int, user_id: int, rating: str,
+                            comment: str = "") -> int:
+        """Record (or change) one user's rating of one Ask turn. Upserts on
+        (question_id, user_id), so re-rating updates the existing row — one
+        feedback row per turn per user, never a pile of superseded rows. The
+        comment is always overwritten too, so re-rating to 'helpful' clears a
+        stale "what was off?" note. Raises ValueError on an unknown rating."""
+        if rating not in self.ASK_FEEDBACK_RATINGS:
+            raise ValueError(f'Unknown rating "{rating}".')
+        cur = self.conn.execute(
+            """INSERT INTO ask_feedback (question_id, user_id, rating, comment, created_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(question_id, user_id) DO UPDATE SET
+                   rating=excluded.rating, comment=excluded.comment,
+                   updated_at=excluded.created_at""",
+            (question_id, user_id, rating, (comment or "").strip(), _now()),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT id FROM ask_feedback WHERE question_id=? AND user_id=?",
+            (question_id, user_id),
+        ).fetchone()
+        return row[0] if row else cur.lastrowid
+
+    def list_ask_feedback(self, rating: str | None = None, limit: int = 200) -> list[dict]:
+        """Feedback rows newest first, joined with the rated turn (question,
+        answer, model, cost, citations snapshot) and the rater's identity —
+        everything the admin triage view shows. Pass `rating` to filter."""
+        where, params = "", []
+        if rating:
+            where = "WHERE f.rating=?"
+            params.append(rating)
+        rows = self.conn.execute(
+            f"""SELECT f.*, u.username AS rater_username, u.name AS rater_name,
+                       aq.question, aq.answer, aq.model, aq.effort, aq.cost_usd,
+                       aq.conversation_id, aq.turn_index, aq.citations_json,
+                       aq.user_id AS asker_user_id
+                FROM ask_feedback f
+                LEFT JOIN users u ON u.id = f.user_id
+                LEFT JOIN ask_questions aq ON aq.id = f.question_id
+                {where}
+                ORDER BY f.created_at DESC LIMIT ?""",
+            params + [limit],
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def ask_feedback_counts(self, since: str = "") -> dict[str, int]:
+        """Per-rating counts (every rating key present, 0 when none), optionally
+        since an ISO date/datetime prefix — the admin view's stat cards."""
+        where, params = "", []
+        if since:
+            where = "WHERE created_at >= ?"
+            params.append(since)
+        counts = {r: 0 for r in self.ASK_FEEDBACK_RATINGS}
+        for rating, n in self.conn.execute(
+            f"SELECT rating, COUNT(*) FROM ask_feedback {where} GROUP BY rating", params
+        ).fetchall():
+            counts[rating] = n
+        return counts
 
     # -- "Sail, Don't Row" — rank/mode tuning ----------------------------------
 
