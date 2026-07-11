@@ -472,13 +472,14 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
 - **The follow-up cap trusts client-supplied history.** A client sending a
   trimmed history could exceed the 7-turn limit; the monthly dollar cap
   (server-side, from recorded spend) is the real guard.
-- **The `/contact` rate limiter keys off a spoofable header.** `_client_ip`
-  trusts the first `X-Forwarded-For` hop, and the Railway origin is directly
-  reachable (bypassing Cloudflare — see the deployment notes), so anyone
-  hitting the origin can rotate that header to evade the per-IP limit. Open
-  action item: prefer `CF-Connecting-IP` when present (trustworthy for
-  proxied requests), falling back to `X-Forwarded-For` only for direct
-  origin hits.
+- **The `/contact` rate limiter can be evaded via the origin.** `_client_ip`
+  prefers `CF-Connecting-IP` (set authoritatively by Cloudflare on proxied
+  traffic — Cloudflare only *appends* to `X-Forwarded-For`, so XFF's first
+  hop is client-forgeable even through the proxy), falling back to the first
+  `X-Forwarded-For` hop, then the socket peer. The residual gap: the Railway
+  origin is directly reachable (bypassing Cloudflare — see the deployment
+  notes), and a direct hit can forge either header. Accepted risk, same as
+  the origin-exposure note above; a Cloudflare Tunnel is the real fix.
 - **Single-instance assumptions.** Job progress, the contact rate limiter,
   and the feed cache are in-process memory; SQLite is a local file. Scaling
   beyond one instance means externalizing all of that.
