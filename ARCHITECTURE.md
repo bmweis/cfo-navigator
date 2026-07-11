@@ -97,7 +97,8 @@ are by convention (`user_id`, `tool_id`, `item_id` columns), enforced in code.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `ask_questions` | One row per conversation **turn**; the single table behind all three surfaces (admin report, a user's own history, the member-public community view). | `conversation_id` (groups follow-up turns; `= str(id)` of the first turn) + `turn_index`; token columns for the answer call; `rewrite_input_tokens`/`rewrite_output_tokens`/`rewrite_cost_usd` for the follow-up query-rewrite call; **`cost_usd` is the turn TOTAL (answer + rewrite)** so every `SUM(cost_usd)` — the monthly cap, the reports — needs no special handling; `hidden_public`/`anonymized` affect only the community view |
+| `ask_questions` | One row per conversation **turn**; the single table behind all three surfaces (admin report, a user's own history, the member-public community view). | `conversation_id` (groups follow-up turns; `= str(id)` of the first turn) + `turn_index`; token columns for the answer call; `rewrite_input_tokens`/`rewrite_output_tokens`/`rewrite_cost_usd` for the follow-up query-rewrite call; **`cost_usd` is the turn TOTAL (answer + rewrite)** so every `SUM(cost_usd)` — the monthly cap, the reports — needs no special handling; `hidden_public`/`anonymized` affect only the community view; `citations_json` is the turn's **API-verified cited-source snapshot** (`[{n, title, url, type, article_id?}]` — `article_id` on library entries only; feed/web sources are transient, so the stored title/url *is* the record, never re-resolved) |
+| `ask_feedback` | Member ratings of individual answers — **one row per rated turn per user**, upserted on `(question_id, user_id)` so a changed rating updates in place. Feeds the `/admin/ask-feedback` triage view and, later, a retrieval eval set (flagged questions + the rated turn's citation snapshot). Capture + triage only — feedback never mutates prompts or retrieval automatically. | `question_id` (→ `ask_questions.id`), `rating` (`helpful` \| `inaccurate` \| `not_helpful`), `comment` (optional "what was off?" free text), `updated_at` (`''` until first changed — the empty-string-sentinel idiom) |
 
 Cost figures are computed from **real API token usage** at call time
 (`linklib/pricing.py`) — never estimates.
@@ -138,6 +139,8 @@ Cost figures are computed from **real API token usage** at call time
 ```mermaid
 erDiagram
     users ||--o{ ask_questions : "user_id"
+    users ||--o{ ask_feedback : "user_id"
+    ask_questions ||--o{ ask_feedback : "question_id"
     users ||--o{ read_later : "user_id"
     users ||--o{ game_runs : "user_id"
     users ||--o{ password_reset_requests : "user_id"
@@ -169,6 +172,14 @@ erDiagram
         real rewrite_cost_usd "rewrite's share of cost_usd"
         int hidden_public
         int anonymized
+        text citations_json "cited-source snapshot per turn"
+    }
+    ask_feedback {
+        int id PK
+        int question_id "rated turn, UNIQUE with user_id"
+        int user_id
+        text rating "helpful | inaccurate | not_helpful"
+        text comment "optional free text"
     }
     users {
         int id PK
@@ -240,8 +251,12 @@ sequenceDiagram
     AG->>AG: reassemble answer - append [n] after each cited span,<br/>one deduped first-use-ordered list across library/feed/web
     AG->>AG: compute_cost from real token usage (pricing.py)
     AG-->>W: Answer {text, citations, cost_usd = answer + rewrite}
-    W->>DB: record_ask_question - one row per turn<br/>(conversation_id, turn_index, tokens, cost breakdown)
-    W-->>B: {answer, citations, sources, followups_left,<br/>conversation_id, usage: {spent, cap}}
+    W->>DB: record_ask_question - one row per turn<br/>(conversation_id, turn_index, tokens, cost breakdown,<br/>citations_json snapshot of the cited sources)
+    W-->>B: {answer, citations, sources, followups_left,<br/>conversation_id, turn_id, usage: {spent, cap}}
+    opt member rates the answer
+        B->>W: POST /ask/feedback {question_id: turn_id, rating, comment?}
+        W->>DB: record_ask_feedback - upsert on (question_id, user_id)
+    end
 ```
 
 Details worth knowing:
@@ -263,6 +278,18 @@ Details worth knowing:
   budget per tier, a follow-up cap (6 extra turns), a history-character cap
   carried into the prompt, and the authoritative monthly per-user dollar cap
   checked against real recorded spend before any API call.
+- **Each turn's cited sources are persisted, and answers can be rated.** The
+  API-verified citation list is stored on the turn's row
+  (`ask_questions.citations_json`) as a snapshot — feed and web sources are
+  transient, so the stored title/url is the record and is never re-resolved;
+  library entries additionally carry their `articles.id`. Under each answer on
+  `/ask`, quiet 👍/⚠️/👎 controls post to `POST /ask/feedback` (same auth as
+  `/ask`; you can only rate turns from your own conversations), upserting one
+  `ask_feedback` row per turn per user — a changed rating updates in place. The
+  `/admin/ask-feedback` page triages ratings with the question, answer, and
+  cited sources; nothing feeds back into prompts or retrieval automatically.
+  The snapshot shape is deliberately per-turn so the planned server-side
+  conversation persistence can reuse it to re-render past turns' `[n]` markers.
 
 ### Archive save / enrichment pipeline
 

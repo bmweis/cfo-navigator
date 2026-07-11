@@ -7259,6 +7259,16 @@ def ask_page(request: Request, q: str = ""):
 .ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-direction:column;gap:6px;}}
 .ask-src-list li{{font-size:13px;}}
 .ask-src-list a{{color:var(--accent);}}
+
+.ask-fb{{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}}
+.ask-fb-btn{{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--muted);font:600 12px var(--font-body);cursor:pointer;}}
+.ask-fb-btn.sel-pos{{background:var(--navy);border-color:var(--navy);color:#fff;}}
+.ask-fb-btn.sel-neg{{background:var(--coral-wash);border-color:var(--coral-deep);color:var(--coral-deep);}}
+.ask-fb-saved{{font-size:11.5px;color:var(--muted);opacity:0;transition:opacity .25s ease;}}
+.ask-fb-comment{{display:none;flex-basis:100%;gap:8px;align-items:center;}}
+.ask-fb-comment input{{flex:1;min-width:0;padding:7px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);}}
+.ask-fb-send{{padding:7px 14px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);font:600 12px var(--font-body);color:var(--ink-soft);cursor:pointer;}}
 nav.site-nav a[href="/ask"]{{color:var(--ink);font-weight:600;}}
 </style>
 
@@ -7369,6 +7379,61 @@ function srcListHtml(d) {{
   }});
   return items.length ? '<ul class="ask-src-list">' + items.join('') + '</ul>' : '';
 }}
+// Per-answer feedback: one tap records; tapping another option changes the
+// rating (the server upserts one row per turn per user). A negative rating
+// reveals an optional one-line "what was off?" field. Only rendered when the
+// turn was recorded server-side (d.turn_id present).
+var FB_OPTIONS = [
+  ['helpful', '&#128077; Helpful'],
+  ['inaccurate', '&#9888;&#65039; Inaccurate'],
+  ['not_helpful', '&#128078; Not helpful']
+];
+function fbRowHtml(turnId) {{
+  var btns = FB_OPTIONS.map(function(o) {{
+    return '<button type="button" class="ask-fb-btn" data-rating="' + o[0] + '" onclick="rateTurn(this)">' + o[1] + '</button>';
+  }}).join('');
+  return '<div class="ask-fb" data-turn-id="' + turnId + '">' + btns +
+         '<span class="ask-fb-saved">Saved</span>' +
+         '<div class="ask-fb-comment"><input type="text" maxlength="500" placeholder="What was off? (optional)">' +
+         '<button type="button" class="ask-fb-send" onclick="sendFbComment(this)">Save</button></div></div>';
+}}
+function rateTurn(el) {{
+  var row = el.closest('.ask-fb');
+  var rating = el.getAttribute('data-rating');
+  row.querySelectorAll('.ask-fb-btn').forEach(function(b) {{ b.classList.remove('sel-pos', 'sel-neg'); }});
+  el.classList.add(rating === 'helpful' ? 'sel-pos' : 'sel-neg');
+  var commentBox = row.querySelector('.ask-fb-comment');
+  commentBox.style.display = rating === 'helpful' ? 'none' : 'flex';
+  if (rating === 'helpful') commentBox.querySelector('input').value = '';
+  postFeedback(row);
+}}
+async function postFeedback(row) {{
+  var sel = row.querySelector('.ask-fb-btn.sel-pos, .ask-fb-btn.sel-neg');
+  if (!sel) return;
+  try {{
+    var resp = await fetch('/ask/feedback', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{
+        question_id: parseInt(row.getAttribute('data-turn-id'), 10),
+        rating: sel.getAttribute('data-rating'),
+        comment: row.querySelector('.ask-fb-comment input').value.trim()
+      }})
+    }});
+    if (resp.ok) {{
+      var saved = row.querySelector('.ask-fb-saved');
+      saved.style.opacity = '1';
+      setTimeout(function() {{ saved.style.opacity = '0'; }}, 1200);
+    }}
+  }} catch(e) {{}}
+}}
+function sendFbComment(el) {{ postFeedback(el.closest('.ask-fb')); }}
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Enter' && e.target && e.target.matches && e.target.matches('.ask-fb-comment input')) {{
+    e.preventDefault();
+    sendFbComment(e.target);
+  }}
+}});
 function resetConvo() {{
   convo = []; asked = false; convoId = null;
   document.getElementById('ask-thread').innerHTML = '';
@@ -7416,6 +7481,7 @@ async function doAsk() {{
 
     CITES = d.citations || [];
     answerEl.innerHTML = mdToHtml(d.answer) + srcListHtml(d);
+    if (d.turn_id) answerEl.insertAdjacentHTML('beforeend', fbRowHtml(d.turn_id));
     updateUsage(d.usage);
 
     if (d.capped) {{
@@ -7519,6 +7585,7 @@ async def ask(request: Request):
 
         new_conversation_id = conversation_id
         usage_line = None
+        turn_id = None
         if user_id is not None:
             row_id = lib.record_ask_question(
                 # ans.model is the resolved canonical model actually used —
@@ -7536,8 +7603,12 @@ async def ask(request: Request):
                 rewrite_input_tokens=ans.rewrite_input_tokens,
                 rewrite_output_tokens=ans.rewrite_output_tokens,
                 rewrite_cost_usd=ans.rewrite_cost_usd,
+                # Persisted snapshot of what this answer actually cited, so a
+                # later feedback flag stays inspectable with its sources.
+                citations=ans.citations,
             )
             new_conversation_id = conversation_id or str(row_id)
+            turn_id = row_id
             cap = lib.get_effective_ask_cap(user_id)
             spent = lib.ask_cost_this_month(user_id)
             usage_line = {"spent": round(spent, 2), "cap": round(cap, 2)}
@@ -7553,8 +7624,48 @@ async def ask(request: Request):
             "web_sources":  ans.web_sources,
             "followups_left": followups_left,
             "conversation_id": new_conversation_id,
+            # The recorded ask_questions row id for this turn — what the
+            # feedback controls rate. None when the turn wasn't recorded
+            # (token-only or break-glass access with no users row); the UI
+            # shows no feedback controls then.
+            "turn_id": turn_id,
             "usage": usage_line,
         }
+    finally:
+        lib.close()
+
+
+@app.post("/ask/feedback")
+async def ask_feedback(request: Request):
+    """Record a member's rating of one FP&A Buddy answer (helpful /
+    inaccurate / not_helpful, optional short comment). Same auth model as
+    POST /ask. One row per turn per user — re-rating updates in place. You
+    can only rate turns from your own conversations."""
+    _require_member(request)
+    payload = await request.json()
+    question_id = payload.get("question_id")
+    rating = (payload.get("rating") or "").strip()
+    comment = (payload.get("comment") or "").strip()[:500]
+    if not isinstance(question_id, int):
+        raise HTTPException(status_code=400, detail="question_id required")
+    if rating not in Library.ASK_FEEDBACK_RATINGS:
+        raise HTTPException(status_code=400, detail="unknown rating")
+
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        if user_id is None:
+            # Token-only / break-glass access has no users row to attribute
+            # feedback to — and no recorded turns to rate (POST /ask skips
+            # recording for the same reason), so this is consistent, not a gap.
+            raise HTTPException(status_code=400, detail="no account to record feedback for")
+        turn = lib.get_ask_question(question_id)
+        if turn is None:
+            raise HTTPException(status_code=404, detail="unknown turn")
+        if turn["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="not your conversation")
+        lib.record_ask_feedback(question_id, user_id, rating, comment)
+        return {"ok": True}
     finally:
         lib.close()
 
@@ -7711,6 +7822,7 @@ _ADMIN_GROUPS = [
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Features", "Per-feature settings and reporting.", [
         ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user — settings, cost, and a CSV export."),
+        ("/admin/ask-feedback",  "FP&A Buddy feedback", "Member ratings on answers — triage flagged answers with the sources they cited."),
         ("/admin/game-settings", "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
         ("/community",           "CFO community",       "Your community idea page — parked off the public site; sign-ups flow through the Google Form."),
     ]),
@@ -9513,6 +9625,130 @@ def admin_ask_report_export(request: Request, user: str = ""):
         content=buf.getvalue(), media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="ask-report-{stamp}.csv"'},
     )
+
+
+# Rating -> (label, badge fg, badge bg) for the feedback triage view.
+_FEEDBACK_RATINGS = {
+    "helpful":     ("&#128077; Helpful",     "var(--navy)",       "var(--seafoam)"),
+    "inaccurate":  ("&#9888;&#65039; Inaccurate",  "var(--coral-deep)", "var(--coral-wash)"),
+    "not_helpful": ("&#128078; Not helpful", "var(--coral-deep)", "var(--coral-wash)"),
+}
+
+
+@app.get("/admin/ask-feedback", response_class=HTMLResponse)
+def admin_ask_feedback(request: Request, rating: str = ""):
+    """Triage view for member feedback on FP&A Buddy answers: every rating,
+    newest first, with the full context needed to judge a flagged answer —
+    the question, the answer, and the sources it actually cited (persisted
+    per turn in ask_questions.citations_json). Capture + triage only: nothing
+    here feeds back into prompts or retrieval automatically."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if rating not in Library.ASK_FEEDBACK_RATINGS:
+        rating = ""
+    lib = _lib()
+    try:
+        rows = lib.list_ask_feedback(rating=rating or None, limit=200)
+        month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
+        month_counts = lib.ask_feedback_counts(since=month_start)
+    finally:
+        lib.close()
+
+    def _rater(r: dict) -> str:
+        return r.get("rater_name") or r.get("rater_username") or f'user #{r["user_id"]}'
+
+    def _citation_list(r: dict) -> str:
+        try:
+            cites = json.loads(r.get("citations_json") or "[]")
+        except (TypeError, ValueError):
+            cites = []
+        if not cites:
+            return '<div style="font-size:12.5px;color:var(--muted);">No cited sources recorded for this turn.</div>'
+        icons = {"library": "&#128218;", "feed": "&#128240;", "web": "&#127760;"}
+        items = []
+        for c in cites:
+            # Library citations carry the articles.id; feed/web are transient,
+            # so their persisted title/url snapshot is the whole record.
+            archive_ref = (f'<span style="color:var(--muted);"> &middot; archive #{int(c["article_id"])}</span>'
+                           if c.get("article_id") is not None else "")
+            items.append(
+                f'<li>{icons.get(c.get("type"), "")} '
+                f'<a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener">'
+                f'[{c.get("n")}] {_esc(c.get("title") or c.get("url") or "")}</a>{archive_ref}</li>'
+            )
+        return ('<ul style="margin:4px 0 0;padding-left:18px;list-style:none;font-size:13px;'
+                f'display:flex;flex-direction:column;gap:4px;">{"".join(items)}</ul>')
+
+    def _card(r: dict) -> str:
+        label, fg, bg = _FEEDBACK_RATINGS.get(r["rating"], (r["rating"], "var(--ink)", "var(--surface-2)"))
+        comment = ""
+        if r.get("comment"):
+            comment = (f'<div style="margin:8px 0 0;padding:8px 12px;background:var(--coral-wash);'
+                       f'border-radius:8px;font-size:13.5px;color:var(--ink);">&ldquo;{_esc(r["comment"])}&rdquo;</div>')
+        answer = r.get("answer") or ""
+        answer_html = (
+            f'<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">'
+            f'Answer ({len(answer):,} chars) &mdash; expand</summary>'
+            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:8px 0 0;">{_esc(answer)}</p></details>'
+            if len(answer) > 300 else
+            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;margin:8px 0 0;">{_esc(answer)}</p>'
+        )
+        model = (r.get("model") or "").replace("claude-", "")
+        report_link = (f'/admin/ask-report?user={quote(r["rater_username"])}'
+                       if r.get("rater_username") else "/admin/ask-report")
+        return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span style="font-size:12px;font-weight:700;color:{fg};background:{bg};border-radius:999px;padding:3px 12px;white-space:nowrap;">{label}</span>
+    <span style="font-size:12.5px;color:var(--muted);">{_esc(_rater(r))} &middot; {_esc((r["created_at"] or "")[:10])}{' &middot; edited' if r.get("updated_at") else ''}</span>
+    <a href="{report_link}" style="margin-left:auto;font-size:12px;color:var(--accent);white-space:nowrap;">View in ask report &rarr;</a>
+  </div>
+  {comment}
+  <div style="font-weight:600;color:var(--navy);font-size:14.5px;margin-top:10px;">{_esc(r.get("question") or "")}</div>
+  {answer_html}
+  <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Cited sources</div>
+    {_citation_list(r)}
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-top:8px;">{_esc(model)} &middot; {_esc(r.get("effort") or "")} &middot; ${float(r.get("cost_usd") or 0):.4f} &middot; conversation {_esc(r.get("conversation_id") or "")} turn {(r.get("turn_index") or 0) + 1}</div>
+</div>"""
+
+    cards = "".join(_card(r) for r in rows) or \
+        '<div style="padding:24px;text-align:center;color:var(--muted);border:1px solid var(--line);border-radius:12px;background:var(--surface);">No feedback yet.</div>'
+
+    stat_cards = "".join(
+        f"""<div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{month_counts.get(key, 0):,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">{label} this month</div>
+  </div>"""
+        for key, (label, _, _) in _FEEDBACK_RATINGS.items()
+    )
+
+    filter_options = "".join(
+        f'<option value="{key}"{" selected" if rating == key else ""}>{label}</option>'
+        for key, (label, _, _) in _FEEDBACK_RATINGS.items()
+    )
+
+    body = f"""<div class="page">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>FP&amp;A Buddy feedback</h1>
+<p style="color:var(--muted);margin:-6px 0 20px;">How members rated the answers &mdash; flagged answers stay inspectable with the sources they actually cited. Capture and triage only; nothing here changes prompts or retrieval.</p>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
+  {stat_cards}
+</div>
+
+<form method="get" action="/admin/ask-feedback" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+  <label style="font-size:13px;color:var(--muted);">Filter by rating:</label>
+  <select name="rating" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
+    <option value="">All ratings</option>
+    {filter_options}
+  </select>
+</form>
+
+{cards}
+<p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 200{' matching' if rating else ''} ratings.</p>
+</div>"""
+    return HTMLResponse(_page("FP&A Buddy feedback — Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/users", response_class=HTMLResponse)

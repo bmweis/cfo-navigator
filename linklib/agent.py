@@ -239,8 +239,9 @@ class Answer:
     sources: list[dict] = field(default_factory=list)       # saved-library hits
     feed_sources: list[dict] = field(default_factory=list)  # RSS feed hits
     web_sources: list[dict] = field(default_factory=list)   # fresh web results
-    # API-verified citations: [{n, title, url, type}] for the sources the
-    # answer ACTUALLY cited (type: library|feed|web), numbered to match the
+    # API-verified citations: [{n, title, url, type, article_id?}] for the
+    # sources the answer ACTUALLY cited (type: library|feed|web; article_id =
+    # articles.id, present on library entries only), numbered to match the
     # [n] markers injected into `text`. Empty when the model cited nothing or
     # citation metadata was unusable — never blocks an answer.
     citations: list[dict] = field(default_factory=list)
@@ -344,7 +345,8 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
     sent_docs: list[dict] = []
     used = 0
 
-    def _add(title: str, url: str, kind: str, body: str) -> None:
+    def _add(title: str, url: str, kind: str, body: str,
+             article_id: int | None = None) -> None:
         nonlocal used
         body = (body or "").strip()
         if not body:
@@ -356,13 +358,20 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
             "title": (title or url)[:250],
             "citations": {"enabled": True},
         })
-        sent_docs.append({"title": title or url, "url": url, "type": kind})
+        doc = {"title": title or url, "url": url, "type": kind}
+        if article_id is not None:
+            # Library sources keep their articles.id so a persisted citation
+            # can be traced back to the archive row (feed/web are transient —
+            # their title/url snapshot is the whole record).
+            doc["article_id"] = article_id
+        sent_docs.append(doc)
 
     for h in lib_hits:
         if used >= global_chars:
             break
         _add(h.get("title", ""), h.get("url", ""), "library",
-             _ground_body(h, min(source_chars, global_chars - used)))
+             _ground_body(h, min(source_chars, global_chars - used)),
+             article_id=h.get("id"))
 
     for item in feed_items:
         if used >= global_chars:
@@ -392,8 +401,8 @@ def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
     (via `document_index` into sent_docs) and web results (via URL citations)
     alike — the post-call renumbering that unifies all three source types.
 
-    Returns (text, citations) where citations is [{n, title, url, type}] for
-    the sources actually cited. Best-effort by design: any surprise in the
+    Returns (text, citations) where citations is [{n, title, url, type,
+    article_id?}] for the sources actually cited. Best-effort by design: any surprise in the
     citation metadata degrades to the plain flattened text and an empty list —
     citation handling must never fail an answer.
     """
@@ -423,8 +432,11 @@ def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
                 if n is None:
                     n = len(cited) + 1
                     seen[key] = n
-                    cited.append({"n": n, "title": info["title"],
-                                  "url": info["url"], "type": info["type"]})
+                    entry = {"n": n, "title": info["title"],
+                             "url": info["url"], "type": info["type"]}
+                    if info.get("article_id") is not None:
+                        entry["article_id"] = info["article_id"]
+                    cited.append(entry)
                 if n not in nums:
                     nums.append(n)
             if nums:
