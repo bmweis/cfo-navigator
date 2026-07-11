@@ -219,10 +219,23 @@ before they compound across phases.
 for it in that moment.** Open the PR, make sure checks are green, then hand him the
 link.
 
+**GitHub Issues track deferred work.** The working agreement:
+
+- Claude Code creates and edits Issues (backlog grooming, adding context,
+  linking related work), but **never closes them directly**. An Issue is closed
+  either by a merged PR that references it (`Closes #N` in the PR body) or by
+  Brian manually — those are the only two paths.
+- **Every PR that addresses an Issue must reference it** in the PR body —
+  `Closes #N` when the PR fully resolves it, a plain `#N` mention when it's
+  partial progress.
+
 ## Documentation
 
 `ARCHITECTURE.md` (repo root) is the living technical overview — schema, request
-flows, design decisions, and their Mermaid diagrams. Two standing rules keep the
+flows, design decisions, and their Mermaid diagrams. `RUNBOOK.md` (repo root)
+holds the operational procedures — DB restore from a Drive snapshot, save-token
+rotation, Railway-outage triage — and should be updated in the same PR whenever
+a change alters one of those procedures. Two standing rules keep the
 docs honest, **in the same PR as the change** (never a follow-up):
 
 1. **Any PR that changes the database schema** (a table or column in
