@@ -313,8 +313,15 @@ _CONTACT_SUBMIT_TIMES: dict[str, list[float]] = {}
 
 
 def _client_ip(request: Request) -> str:
-    """Best-effort client IP. Railway terminates TLS at a proxy, so when
-    present the real client address is the first hop in X-Forwarded-For."""
+    """Best-effort client IP. CF-Connecting-IP wins when present: Cloudflare
+    sets it authoritatively on proxied traffic, whereas it *appends* to any
+    X-Forwarded-For the client sent — so XFF's first hop is forgeable even
+    through the proxy. XFF is the fallback for direct-origin hits (Railway's
+    own proxy), where either header could be forged anyway (accepted risk,
+    see ARCHITECTURE.md)."""
+    cf = request.headers.get("cf-connecting-ip", "").strip()
+    if cf:
+        return cf
     fwd = request.headers.get("x-forwarded-for", "")
     if fwd:
         return fwd.split(",")[0].strip()
