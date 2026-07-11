@@ -219,6 +219,9 @@ before they compound across phases.
 for it in that moment.** Open the PR, make sure checks are green, then hand him the
 link.
 
+**When a prompt or instruction says to post a plan and wait for approval, that is a
+hard stop — do not proceed to code until approval is given in the session.**
+
 **GitHub Issues track deferred work.** The working agreement:
 
 - Claude Code creates and edits Issues (backlog grooming, adding context,
