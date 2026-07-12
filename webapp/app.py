@@ -7187,7 +7187,7 @@ def ask_page(request: Request, q: str = ""):
     body = f"""<div class="page">
 <span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">Ask FP&amp;A Buddy</h1>
-<p style="color:var(--muted);margin:0 0 28px;">A digital library of finance content, curated over years, searched instantly&mdash;skip the digging, get your answer.</p>
+<p style="color:var(--muted);margin:0 0 28px;">A digital library of finance content, curated over years, searched instantly. Skip the digging, get your answer.</p>
 {usage_html}
 
 <div class="ask-value">
