@@ -11658,7 +11658,7 @@ def admin_voice_page(request: Request):
         custom_fpa_buddy, VOICE_FPA_BUDDY_DEFAULT, 10)
 
     body = f"""<div class="page page-wide">
-<p style="margin:0 0 4px;"><a href="/admin/brand" style="font-size:13px;color:var(--muted);">&larr; Brand standards</a></p>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Verbal identity</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">The voice FP&amp;A Buddy answers in, and your site's tone &mdash; live, editable here, no redeploy.</p>
 
