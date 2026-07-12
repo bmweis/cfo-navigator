@@ -90,7 +90,8 @@ are by convention (`user_id`, `tool_id`, `item_id` columns), enforced in code.
 | `articles` | The archive: ~1,500+ curated articles. **URL is the natural key** (`UNIQUE`, normalized) — upserts merge tags and fill empty fields, never duplicate. | `url`, `summary` (Claude-generated, the member-facing asset), `content` (fetched full text — internal input only, never served), `tags_json`/`tags_text` (structured list + flattened copy for FTS), `enriched`/`enrich_model`/`enrich_rules` (provenance), `in_scope`/`scope_reason` (off-audience review flags) |
 | `articles_fts` | FTS5 virtual table (`content='articles'`, porter tokenizer) over title/author/source/summary/content/notes/tags_text. | Kept in sync by three triggers (`articles_ai`/`_ad`/`_au`) on insert/delete/update — no manual reindex, ever. |
 | `articles_vec` | `sqlite-vec` vec0 virtual table (#93) — one embedding vector per article, `rowid = articles.id` (same external-content-by-rowid idiom as `articles_fts`, minus trigger sync — see §4, "Hybrid retrieval..."). Powers the vector half of hybrid retrieval. | `embedding` (`float[1536]`, OpenAI `text-embedding-3-small`) |
-| `article_embeddings` | Companion ledger table (#93): which articles are embedded, with what text, and at what cost. Also **the overhead-cost ledger** for embed-on-save/backfill spend — never summed into `ask_questions`, never counts toward a user's Ask cap (see issue #105 for a general overhead ledger covering enrichment too). | `article_id` (PK), `content_hash` (of the exact embedded text — detects staleness after an edit), `model`, `input_tokens`, `cost_usd` |
+| `article_embeddings` | Companion ledger table (#93): which articles are embedded, with what text, and at what cost. Also **an overhead-cost ledger** for embed-on-save/backfill spend — never summed into `ask_questions`, never counts toward a user's Ask cap. Its sibling ledger, `enrichment_cost` (#105), covers enrichment spend; the two stay separate rather than sharing a schema — see §4, "Embedding cost is split by who pays for it" and "Enrichment cost gets its own ledger, not a shared one" below. | `article_id` (PK), `content_hash` (of the exact embedded text — detects staleness after an edit), `model`, `input_tokens`, `cost_usd` |
+| `enrichment_cost` | Overhead-cost ledger for `linklib.enrich.enrich()` calls (#105). Unlike `article_embeddings`, this is **append-only**, not upserted — an article can be enriched more than once (backfill force-reruns, a rules-version bump), and each call's real cost stays in history. `article_id` is nullable: `linklib/queue.py`'s pre-save enrichment (a candidate enriched before it's queued or promoted) has no `articles.id` yet, but the API call still cost real money even if the candidate is later dismissed. | `id` (PK, autoincrement), `article_id` (nullable), `model`, `input_tokens`, `output_tokens`, `cost_usd` |
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
@@ -151,6 +152,7 @@ erDiagram
     articles ||--|| articles_fts : "rowid, via triggers"
     articles ||--o| articles_vec : "rowid, written from Python (#93)"
     articles ||--o| article_embeddings : "article_id"
+    articles ||--o{ enrichment_cost : "article_id (nullable)"
     library_queue }o--|| articles : "promoted into (by URL)"
     articles ||--o{ archive_audit_log : "item_id (nullable)"
     contacts ||--o{ contact_audit_log : "item_id (nullable)"
@@ -183,6 +185,13 @@ erDiagram
         int article_id PK
         text content_hash "detects staleness after an edit"
         text model
+        real cost_usd "overhead — never in ask_questions"
+    }
+    enrichment_cost {
+        int id PK
+        int article_id "nullable — pre-save queue enrichment"
+        text model
+        int output_tokens "enrichment generates text; embeddings don't"
         real cost_usd "overhead — never in ask_questions"
     }
     ask_feedback {
@@ -488,9 +497,27 @@ recorded anywhere, it's flagged rather than invented.
   follow-up rewrite's cost already does. *Why:* one is Brian's overhead (he
   chose to build the archive), the other is spend triggered by a member's own
   question — conflating them would either overcharge members for the archive
-  existing or undercount what a heavy asker actually costs. A general
-  overhead ledger covering enrichment spend too (currently unrecorded
-  anywhere) is deferred — issue #105.
+  existing or undercount what a heavy asker actually costs.
+- **Enrichment cost gets its own ledger, not a shared one with embeddings
+  (#105).** `linklib.enrich.enrich()`'s real Claude usage is recorded in
+  `enrichment_cost`, a separate table from `article_embeddings` rather than a
+  generalized `overhead_costs` schema covering both. *Why:* #105's Phase 0
+  investigation found only one real precedent (`article_embeddings`) to
+  generalize from, and it already differs from enrichment's needs in ways
+  that matter — enrichment calls produce `output_tokens` (embeddings never
+  do), and `enrichment_cost` is append-only (an article can be re-enriched)
+  where `article_embeddings` is upserted (only the latest vector matters).
+  Building a shared schema from one real case would have meant guessing at
+  the shape of a second. Other Claude-calling modules (`dedupe.py`,
+  `suggest.py`, `tagstyle.py`, `voice_review.py`) spend real API money with
+  no cost capture at all today, but were deliberately left out of this
+  ledger too — none share `enrich()`'s per-article entity shape (they're
+  batch- or free-text-scoped), and two of them need bigger plumbing changes
+  first (`dedupe.py` doesn't receive `Library` today and raises on failure;
+  `voice_review.py` has no `Library` param and doesn't wrap its API call in
+  try/except at all). A generalized overhead-cost schema stays deferred
+  until a third real consumer needs one — see `/admin/overhead-spend` for
+  the admin view surfacing both ledgers today.
 - **Citations link to original external URLs only; stored full text is never
   served to members.** The archive's `content` column is an internal
   grounding/search input; the member-facing surface is summary + tags +
@@ -631,11 +658,15 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
   article whose embed-on-save call failed (no `OPENAI_API_KEY`, a transient
   API error) stays FTS5-only until the next backfill run; there's no retry
   queue or admin visibility into which articles are in that state yet.
-- **Enrichment spend is still unrecorded anywhere.** #93 added a real
-  overhead-cost ledger for embeddings (`article_embeddings.cost_usd`), but
-  `linklib/enrich.py`'s Claude calls — arguably the bigger recurring
-  overhead spend — still capture no token usage or cost at all. A general
-  ledger covering both is deferred to issue #105.
+- **Overhead cost is tracked for embeddings and enrichment; other
+  Claude-calling modules aren't yet (#105).** `article_embeddings.cost_usd`
+  and `enrichment_cost.cost_usd` cover embed-on-save/backfill and enrichment
+  spend, surfaced together on `/admin/overhead-spend`. `dedupe.py`,
+  `suggest.py`, `tagstyle.py`, and `voice_review.py` still spend real API
+  money with zero cost capture — deliberately out of scope for #105's build
+  (see §4, "Enrichment cost gets its own ledger, not a shared one"), a
+  natural follow-up if/when tracking their spend matters enough to justify
+  the plumbing each one needs.
 - **The `/contact` rate limiter can be evaded via the origin.** `_client_ip`
   prefers `CF-Connecting-IP` (set authoritatively by Cloudflare on proxied
   traffic — Cloudflare only *appends* to `X-Forwarded-For`, so XFF's first

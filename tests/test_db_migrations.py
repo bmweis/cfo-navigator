@@ -259,6 +259,36 @@ def test_fresh_db_has_rewrite_columns(tmp_path):
         lib.close()
 
 
+def test_enrichment_cost_table_on_existing_and_fresh_db(tmp_path):
+    """enrichment_cost (#105) is a brand-new table, not a migrated column —
+    CREATE TABLE IF NOT EXISTS handles both a fresh DB and one that predates
+    this change with no ALTER TABLE entry needed. Pinned so a future change
+    doesn't assume it needs migration-loop handling like a new column would."""
+    path = str(tmp_path / "pre_enrichment_cost.db")
+    # Build a DB on the full current schema, then drop enrichment_cost to
+    # simulate "a real DB from before this table existed" without having to
+    # hand-maintain a second copy of the whole legacy schema.
+    setup = Library(path)
+    setup.conn.execute("DROP TABLE enrichment_cost")
+    setup.conn.commit()
+    setup.close()
+
+    lib = Library(path)   # must not raise
+    try:
+        assert lib.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='enrichment_cost'"
+        ).fetchone()
+        indexes = {r[1] for r in lib.conn.execute("PRAGMA index_list(enrichment_cost)").fetchall()}
+        assert "idx_enrichment_cost_article" in indexes
+        lib.record_enrichment_cost(None, "claude-haiku-4-5-20251001", cost_usd=0.001)
+        assert lib.enrichment_cost_total() == pytest.approx(0.001)
+    finally:
+        lib.close()
+
+    lib2 = Library(path)  # second boot is a no-op, not a crash
+    lib2.close()
+
+
 def test_open_fresh_db_also_fine(tmp_path):
     """The fresh-DB path never broke (CREATE TABLE runs in full, including
     token_hash, before the index in the same script) — pinned here so a

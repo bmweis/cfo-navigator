@@ -58,6 +58,10 @@ def main() -> int:
             res = enrich_mod.enrich(art.title, art.title)  # no body text in export
             if res:
                 lib.apply_enrichment(article_id, res.summary, res.tags)
+                lib.record_enrichment_cost(article_id, res.model,
+                                           input_tokens=res.input_tokens,
+                                           output_tokens=res.output_tokens,
+                                           cost_usd=res.cost_usd)
         parsed += 1
         if parsed % 250 == 0:
             print(f"  ...{parsed} links parsed ({lib.count()} unique so far)")

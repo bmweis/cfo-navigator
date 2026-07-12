@@ -8043,9 +8043,10 @@ _ADMIN_GROUPS = [
         ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email — warm intro, welcome, password reset, and submission confirmations — changes go live immediately, no redeploy."),
     ]),
     ("System", "Accounts, health, and plumbing.", [
-        ("/admin/users",         "Users",               "Create and manage member accounts for the gated sections."),
-        ("/admin/checks",        "Checks",              "Live status of the automated checks that guard the site."),
-        ("/admin/open-source",   "Open source",         "The open-source projects this site is built on — with gratitude."),
+        ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
+        ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
+        ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost — Brian's operating cost, separate from any user's Ask cap."),
+        ("/admin/open-source",     "Open source",         "The open-source projects this site is built on — with gratitude."),
     ]),
 ]
 
@@ -9942,6 +9943,84 @@ def admin_ask_report_export(request: Request, user: str = ""):
         content=buf.getvalue(), media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="ask-report-{stamp}.csv"'},
     )
+
+
+@app.get("/admin/overhead-spend", response_class=HTMLResponse)
+def admin_overhead_spend(request: Request):
+    """Brian's operating cost, not any user's: embed-on-save/backfill spend
+    (article_embeddings) plus enrichment spend (enrichment_cost, issue 105) —
+    both overhead ledgers that are never summed into ask_questions and never
+    count toward a user's monthly Ask cap. See /admin/ask-report for that
+    separate, user-cap-side cost reporting."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        breakdown = lib.overhead_cost_breakdown()
+        by_month = lib.overhead_cost_by_month()
+        total_cost = sum(s["total_cost"] for s in breakdown)
+        month_cost = sum(s["this_month_cost"] for s in breakdown)
+    finally:
+        lib.close()
+
+    source_rows = "".join(f"""<tr>
+  <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(s["source"])}</td>
+  <td style="padding:8px 10px;font-size:13px;text-align:right;">{s["count"]:,}</td>
+  <td style="padding:8px 10px;font-size:13px;text-align:right;">${s["this_month_cost"]:.4f}</td>
+  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${s["total_cost"]:.4f}</td>
+</tr>""" for s in breakdown)
+
+    month_rows = "".join(f"""<tr>
+  <td style="padding:8px 10px;font-size:13px;">{_esc(m["month"])}</td>
+  <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${m["cost_usd"]:.4f}</td>
+</tr>""" for m in by_month) or \
+        '<tr><td colspan="2" style="padding:24px;text-align:center;color:var(--muted);">No overhead spend recorded yet.</td></tr>'
+
+    body = f"""<div class="page page-wide">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Overhead spend</h1>
+<p style="color:var(--muted);margin:-6px 0 6px;">Brian&rsquo;s operating cost for running the archive &mdash; embedding and enrichment API spend, broken out by source and by month.</p>
+<p style="color:var(--muted);margin:0 0 20px;">This is never summed into any user&rsquo;s FP&amp;A Buddy cost cap &mdash; see <a href="/admin/ask-report">the Ask report</a> for that separate, user-facing spend.</p>
+
+<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px;">
+  <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${total_cost:.2f}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Total overhead, all time</div>
+  </div>
+  <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${month_cost:.2f}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">This calendar month</div>
+  </div>
+</div>
+
+<h2 style="font-size:15px;margin:0 0 10px;">By source</h2>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:24px;">
+  <table style="width:100%;border-collapse:collapse;min-width:480px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Source</th>
+      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Calls</th>
+      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">This month</th>
+      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">All time</th>
+    </tr></thead>
+    <tbody>{source_rows}</tbody>
+  </table>
+</div>
+
+<h2 style="font-size:15px;margin:0 0 10px;">By month</h2>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:320px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Month</th>
+      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Combined cost</th>
+    </tr></thead>
+    <tbody>{month_rows}</tbody>
+  </table>
+</div>
+<style>
+tbody tr{{border-top:1px solid var(--line);}}
+</style>
+</div>"""
+    return HTMLResponse(_page("Overhead spend — Admin", "Admin", body, authed=True))
 
 
 # Rating -> (label, badge fg, badge bg) for the feedback triage view.

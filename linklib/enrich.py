@@ -82,6 +82,9 @@ class Enrichment:
     rules_version: str = ""   # ENRICH_RULES_VERSION at the time
     in_scope: bool = True     # False = off-audience (e.g. how-to-get-into-VC)
     scope_reason: str = ""    # short rationale for the in_scope call
+    input_tokens: int = 0     # real usage from this call, for the overhead-cost
+    output_tokens: int = 0    # ledger (linklib.db.Library.record_enrichment_cost,
+    cost_usd: float = 0.0     # issue #105) — callers persist it, not enrich() itself
 
 
 def enrich(title: str, text: str, known_tags: list[str] | None = None,
@@ -114,11 +117,21 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
         tags = [str(t).strip() for t in data.get("tags", []) if str(t).strip()]
+
+        from .pricing import compute_cost
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
         return Enrichment(
             summary=str(data.get("summary", "")).strip(), tags=tags,
             model=model, rules_version=ENRICH_RULES_VERSION,
             in_scope=bool(data.get("in_scope", True)),
             scope_reason=str(data.get("scope_reason", "")).strip(),
+            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception:
         return None
