@@ -1445,6 +1445,17 @@ class Library:
         )
         self.conn.commit()
 
+    def update_tool_content(self, tool_id: int, name: str, description: str) -> None:
+        """Narrow update for scripts/seed_tools.py's re-sync pass (#113): touches only
+        name and description, leaving categories/advisor/promoted/vendor/warm-intro
+        fields untouched so a content refresh can never clobber admin edits made
+        directly on the live site after seeding."""
+        self.conn.execute(
+            "UPDATE tools SET name=?, description=?, updated_at=? WHERE id=?",
+            (name.strip(), description.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
     def quick_update_tool(self, tool_id: int, description: str,
                           warm_intro_enabled: int, vendor_name: str,
                           vendor_email: str) -> None:
