@@ -54,6 +54,8 @@ scripts/           # CLI entry points
   enrich_backfill.py  # backfill Claude summaries/tags over imported rows
   enrich_compare.py   # manual QA: compare enrichment quality across models on one article
   embed_backfill.py   # one-time, batched: embed existing articles for semantic search
+  eval_retrieval.py   # manual QA: replay flagged Ask questions through FTS5-only vs.
+                      #   hybrid retrieval side by side (no Claude calls)
   backfill_queue.py   # one-time sitemap sweep to queue historical articles
   seed_tools.py       # seed/refresh the CFO Toolbox vendor list (TOOLS is also
                       #   imported live by webapp/app.py)
