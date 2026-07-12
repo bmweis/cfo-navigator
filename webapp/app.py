@@ -1063,7 +1063,7 @@ def _fpa_buddy_announcement(margin: str = "20px 0") -> str:
         '<p style="margin:0;font-size:14px;color:var(--ink-soft);line-height:1.55;">'
         '<strong style="font-family:var(--font-head);font-weight:600;color:var(--navy);">&#x1F6A7; Under '
         'development</strong>&mdash;A curated digital library that includes my personal feed of finance and '
-        'technology blogs, searchable digital archive of content, and an interactive FP&amp;A Buddy to ask all '
+        'technology blogs, searchable digital archive of content, and the FP&amp;A Buddy to ask all '
         'of your pressing questions about frameworks, metrics, and more.</p></div>'
     )
 
@@ -7173,11 +7173,30 @@ def ask_page(request: Request, q: str = ""):
 
     pre_q = _esc(q)
 
+    # Rendered twice below: an always-open list for wider screens, and inside
+    # a collapsed-by-default <details> for narrow screens (CSS media query
+    # picks which one is visible — no JS). Built once here so the copy
+    # itself only lives in one place in the source.
+    ask_value_bullets = (
+        '<li><strong>Cited, not guessed.</strong> Every answer traces to a source you can click and read. Verified citations, not self-reported ones.</li>'
+        '<li><strong>Remembers the thread.</strong> Ask a follow-up and it knows what you meant. Come back tomorrow and the conversation&rsquo;s still there.</li>'
+        '<li><strong>Finds by meaning, not just keywords.</strong> Semantic search pairs with keyword search (hybrid retrieval), so it surfaces the right article even when your wording doesn&rsquo;t match the source&rsquo;s.</li>'
+        '<li><strong>Gets sharper.</strong> Every rating feeds a real eval set that improves retrieval and answer quality over time.</li>'
+    )
+
     body = f"""<div class="page">
 <span class="ask-eyebrow">CFO Navigator</span>
-<h1 style="margin-bottom:6px;">Ask FP&amp;A Buddy</h1>
-<p style="color:var(--muted);margin:0 0 28px;">Query your saved archive, RSS feed, and trusted web sources &mdash; tune it before you ask.</p>
+<h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
+<p style="color:var(--muted);margin:0 0 28px;">A digital library of finance content, curated over years, searched instantly. Skip the digging, get your answer.</p>
 {usage_html}
+
+<div class="ask-value">
+  <ul class="ask-value-list ask-value-list-static">{ask_value_bullets}</ul>
+  <details class="ask-value-details">
+    <summary>What can FP&amp;A Buddy do?</summary>
+    <ul class="ask-value-list">{ask_value_bullets}</ul>
+  </details>
+</div>
 
 <div class="ask-card">
   <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
@@ -7215,6 +7234,20 @@ def ask_page(request: Request, q: str = ""):
 <style>
 .ask-eyebrow{{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}}
 .ask-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:0;}}
+
+.ask-value{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:16px;}}
+.ask-value-list{{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}}
+.ask-value-list li{{font-size:13px;line-height:1.5;color:var(--ink-soft);}}
+.ask-value-list strong{{color:var(--ink);}}
+.ask-value-details{{display:none;}}
+.ask-value-details summary{{cursor:pointer;font:600 13px var(--font-body);color:var(--navy);}}
+.ask-value-details[open] summary{{margin-bottom:10px;}}
+@media (max-width:640px){{
+  .ask-value{{padding:14px 16px;}}
+  .ask-value-list-static{{display:none;}}
+  .ask-value-details{{display:block;}}
+  .ask-value-details .ask-value-list{{grid-template-columns:1fr;gap:8px;}}
+}}
 .ask-section{{margin:20px 0;}}
 .ask-section-label{{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;}}
 
@@ -7952,7 +7985,7 @@ def ask_history(request: Request):
     rows_html = "".join(_card(c) for c in _group_conversations(rows)) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
-         '<a href="/ask">Ask FP&amp;A Buddy a question &rarr;</a></div>')
+         '<a href="/ask">Ask a question &rarr;</a></div>')
 
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
@@ -8045,7 +8078,7 @@ _ADMIN_GROUPS = [
     ("System", "Accounts, health, and plumbing.", [
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
-        ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost — Brian's operating cost, separate from any user's Ask cap."),
+        ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost — Brian's operating cost, separate from any user's FP&A Buddy cap."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on — with gratitude."),
     ]),
 ]
@@ -9980,7 +10013,7 @@ def admin_overhead_spend(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Overhead spend</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Brian&rsquo;s operating cost for running the archive &mdash; embedding and enrichment API spend, broken out by source and by month.</p>
-<p style="color:var(--muted);margin:0 0 20px;">This is never summed into any user&rsquo;s FP&amp;A Buddy cost cap &mdash; see <a href="/admin/ask-report">the Ask report</a> for that separate, user-facing spend.</p>
+<p style="color:var(--muted);margin:0 0 20px;">This is never summed into any user&rsquo;s FP&amp;A Buddy cost cap &mdash; see <a href="/admin/ask-report">the FP&amp;A Buddy report</a> for that separate, user-facing spend.</p>
 
 <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px;">
   <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
