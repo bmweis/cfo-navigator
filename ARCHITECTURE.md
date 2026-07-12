@@ -122,6 +122,18 @@ Cost figures are computed from **real API token usage** at call time
 | `benchmarks` | The Benchmarking Resources section on `/tools`. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
 
+`POST /admin/tools/generate-description` (admin-only) drafts a description
+from just a name + URL — used by the "Generate" button on the Add Tool form,
+Quick Edit, and Full Edit. It's stateless: fetches the URL via
+`linklib/extract.py` (same best-effort fetch as article capture) for
+grounding, then one Claude call (`linklib/enrich.py::generate_tool_description`,
+`LINKLIB_ENRICH_MODEL`) drafts the description — never auto-saved, and never
+asserts an acquisition, since that stays a manual/reviewed call. When the page
+fetch comes back empty, the draft is flagged `low_confidence` so the admin UI
+can warn that it's working from the model's own knowledge rather than the live
+page. The call's cost lands in the same `enrichment_cost` ledger as article
+enrichment (`article_id=NULL`) — overhead, not a user-facing budget.
+
 ### Site operations
 
 | Table | Purpose | Columns that carry meaning |

@@ -135,3 +135,84 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         )
     except Exception:
         return None
+
+
+_TOOL_DESC_PROMPT = """You are drafting a short vendor description for the CFO Toolbox, a
+directory read by finance leaders at high-growth tech companies.
+
+Write a description of the tool named below. Follow these rules exactly:
+1. Say what the tool does — plainly and specifically, not a tagline.
+2. Note how it differs from competitors, or its core strengths — capability-focused.
+3. No marketing language: no "powerful," "seamless," "game-changing," "best-in-class,"
+   or similar adjective stacking. No exclamation points.
+4. 1-2 sentences, roughly 25-45 words total.
+5. Do not mention or guess whether the company has been acquired by another company —
+   leave that out entirely, even if you believe you know.
+
+Return ONLY the description as plain text — no quotes, no markdown, no preamble.
+
+Tool name: {name}
+Tool URL: {url}
+
+{content_block}
+"""
+
+
+@dataclass
+class ToolDescriptionDraft:
+    description: str
+    low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -> ToolDescriptionDraft | None:
+    """Draft a CFO Toolbox description for a vendor from its name + URL, or None
+    if the SDK/key is unavailable or the call fails. Fetches the URL's page text
+    (best-effort, same fetch as article extraction) as grounding; when that fetch
+    comes back empty, `low_confidence=True` flags the draft as based on the
+    model's own knowledge rather than the live page, so the caller can warn
+    whoever reviews it. Never infers acquisition status — see rule 5 above."""
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    from . import extract
+    page = extract.fetch_page(url)
+    low_confidence = not bool(page.content.strip())
+    content_block = (
+        f"Page content (fetched from the URL):\n{page.content[:6000]}" if not low_confidence
+        else "(Could not fetch page content — draft from your own knowledge of this "
+             "company/product if you have it, keeping to the rules above.)"
+    )
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model,
+            max_tokens=200,
+            messages=[{"role": "user",
+                       "content": _TOOL_DESC_PROMPT.format(name=name, url=url, content_block=content_block)}],
+        )
+        text = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text").strip()
+        text = text.strip('"').strip()
+
+        from .pricing import compute_cost
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
+        return ToolDescriptionDraft(
+            description=text, low_confidence=low_confidence, model=model,
+            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+        )
+    except Exception:
+        return None
