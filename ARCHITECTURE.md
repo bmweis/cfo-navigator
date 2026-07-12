@@ -126,7 +126,7 @@ Cost figures are computed from **real API token usage** at call time
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `settings` | Generic key/value store (global Ask cap default, editable email copy, tag-style guide, …). | `key`/`value` |
+| `settings` | Generic key/value store (global Ask cap default, editable email copy, tag-style guide, `voice_core`/`voice_fpa_buddy` voice guide, …). | `key`/`value` |
 | `contacts` | Contact-form submissions. | `deleted_at` (`''` = live — soft delete for spam, never hard delete) |
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
@@ -298,6 +298,18 @@ sequenceDiagram
 
 Details worth knowing:
 
+- **The system prompt's voice block is DB-backed, two fields, live-editable
+  from `/admin/voice`.** `_build_system` (`linklib/agent.py`) reads the
+  `voice_core` and `voice_fpa_buddy` settings and concatenates them; each
+  falls back to its code-constant default (`VOICE_CORE_DEFAULT`,
+  `VOICE_FPA_BUDDY_DEFAULT`) when empty, so the field is never silently
+  blank. `voice_core` is written persona-neutrally (mechanics + tone only,
+  no assistant framing) so it also serves standalone as `/admin/voice`'s
+  "General / site copy" reviewer rubric; `voice_fpa_buddy` layers the
+  analyst-specific register (third-person, cite-or-name-the-gap, no
+  first-person experience claims) on top for both generation and its own
+  "FP&A Buddy answer" rubric. No caching — one indexed SELECT on an
+  already-open connection is immaterial next to the Claude API round-trip.
 - **Two, sometimes three, API calls can happen per turn.** On follow-ups, a
   cheap Haiku call first rewrites e.g. *"what about at Series A?"* into a
   standalone search question so retrieval sees the conversation's subject.
@@ -591,6 +603,25 @@ recorded anywhere, it's flagged rather than invented.
   client-reported and only bounds-checked. *Why:* recorded in the schema
   comment — server-side simulation isn't worth it for a leaderboard among
   members; the trust model is stated, not accidental.
+- **Voice is two DB-backed settings, not a hardcoded constant (#95).**
+  `voice_core` (mechanics + tone, persona-neutral) and `voice_fpa_buddy`
+  (FP&A Buddy's analyst-specific register, appended after core) replace the
+  old `BRIAN_VOICE_CORE` append that `_build_system` used to pull from
+  `linklib/social.py`. *Why:* Phase 0 investigation (#95) found first-person
+  Brian phrasing — asserted personal experience, personal-interest metaphors
+  — actively conflicted with the prompt's citation-grounding rules; an
+  assistant citing someone else's saved articles can't also claim to have
+  personally done the thing it's citing. Splitting into two fields (rather
+  than one combined constant) lets `voice_core` double as the `/admin/voice`
+  reviewer's "General / site copy" rubric on its own, while `voice_fpa_buddy`
+  stays specific to the analyst persona. Both are editable live from
+  `/admin/voice` with no redeploy, each falling back to a code-constant
+  default when the field is empty — the reviewer, the fallback panel on
+  `/admin/voice`, and `_build_system` all read the same live settings, so
+  there's no separate hardcoded copy to drift out of sync. LinkedIn/social
+  generation (`linklib/social.py`, `scripts/post.py`) was removed entirely in
+  the same change — superseded by Brian's `write-like-brian` skill used
+  directly in Claude, so the app no longer needs its own drafting surface.
 
 ## 5. Directory map
 
@@ -603,7 +634,8 @@ webapp/
   static/                   # served assets (headshot etc.) via GET /static/{filename}
 linklib/                    # the core library — everything durable lives here
   db.py                     # SQLite + FTS5 + sqlite-vec schema, migrations, Library class — the spine
-  agent.py                  # FP&A Buddy: hybrid retrieval (FTS5+vector, RRF), rewrite, Citations API, cost capture
+  agent.py                  # FP&A Buddy: hybrid retrieval (FTS5+vector, RRF), rewrite, Citations
+                            #   API, cost capture; VOICE_CORE_DEFAULT/VOICE_FPA_BUDDY_DEFAULT (#95)
   embeddings.py             # OpenAI text-embedding-3-small: document text, content hash, embed calls (#93)
   pricing.py                # exact per-call USD cost from real token usage (Claude + embeddings)
   pipeline.py               # shared ingest (fetch → upsert → enrich → embed) for CLI and web
@@ -618,13 +650,12 @@ linklib/                    # the core library — everything durable lives here
   tagstyle.py               # learns the curator's tagging style; feeds enrichment
   models.py                 # curated model registry reconciled with the live Models API
   passwords.py              # scrypt hashing (stdlib only)
-  social.py                 # BRIAN_VOICE prompt (reused by Ask) + LinkedIn drafting (CLI only)
   email_utils.py            # outbound email via Gmail REST API (Railway blocks SMTP)
   backup.py                 # weekly off-site DB snapshot to Google Drive
   authcheck.py              # probes paywall auth cookies so a stale one surfaces
   brand_check.py, voice_review.py  # deterministic BRAND.md palette/voice checks
 scripts/                    # CLI entry points (import, add_link, enrich_backfill,
-                            #   embed_backfill, ask, post, seed_tools, backfill_queue,
+                            #   embed_backfill, ask, seed_tools, backfill_queue,
                             #   mcp_server, …)
 tests/                      # pytest suite run by CI (.github/workflows/qa.yml)
 preferred_sites.opml        # dual-purpose: web-search allowlist AND /feed subscriptions

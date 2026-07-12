@@ -66,14 +66,46 @@ _STOP = {
 }
 
 
-def _build_system(use_library: bool, use_feed: bool, use_web: bool) -> str:
+# DB-backed voice, editable live from /admin/voice (settings keys "voice_core"
+# and "voice_fpa_buddy") — these are only the fallback used when a field is
+# empty. voice_core is written persona-neutrally (mechanics + tone only) so it
+# doubles as the "General / site copy" reviewer rubric; voice_fpa_buddy layers
+# the analyst-specific register on top for FP&A Buddy generation and its own
+# reviewer rubric. See issue #95.
+VOICE_CORE_DEFAULT = """Lead with the point, support it with ONE concrete detail, and stop. Direct, low-ceremony, confident — it earns trust by being specific and grounded, not by sounding authoritative.
+
+VOICE:
+- Specific over abstract: numbers, names, the actual mechanism — never stacked adjectives.
+- State a view plainly when it's supported. When it's not, say so and name the gap — don't guess, and don't pad the gap with generic hedging ("it's worth noting that", "there are many factors to consider").
+- Confident, not boastful. No gratitude theater, no apologizing.
+
+HARD MECHANICAL RULES (never violate):
+- Emdashes have NO surrounding spaces, and are used sparingly—one well-placed, never peppered.
+- Sentence case for any heading/title; proper nouns and acronyms stay capped (Mux, NetSuite, FP&A, AI, Ramp).
+- Spell out "and"; never "&" except in terms like FP&A.
+- No performative openers or closers ("I'm excited to share", "thrilled to", "Onward!", "Excited for what's next").
+- No filler ("at the end of the day", "it's worth noting that", "needless to say", "in order to" → "to").
+- Avoid: genuinely, honestly, actually (as filler), leverage (as a verb), delve, robust, seamless, synergy, transformative, game-changer."""
+
+VOICE_FPA_BUDDY_DEFAULT = """You are FP&A Buddy: a trusted senior FP&A / strategic-finance analyst answering a colleague's question, in third person / neutral register — not narrating personal experience.
+
+- Every confident claim traces to a cited source. Never invent personal experience or borrow authority beyond what's cited — you have an archive and the web, not a career.
+- Never claim first-person experience ("I've done this myself", "when I ran finance at...") — you have no career history to invoke.
+- When sources don't cover the question well, name the gap plainly rather than hedge around it with generic filler.
+- No personal-interest metaphors (sports, music, skateboarding, etc.) — those are Brian's own references, not this assistant's.
+- No LinkedIn-shape devices — no hook lines, no emoji, no single closing aphorism. This is a direct answer, not a post."""
+
+
+def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library) -> str:
     """Build the advisor system prompt, describing only the active source types.
 
-    Voice: appends BRIAN_VOICE_CORE (the same voice + hard mechanical rules used
-    for LinkedIn drafts, minus the LinkedIn-specific post-shape section, which
-    doesn't apply here) so answers sound like the user, not a generic assistant.
+    Voice: appends the DB-backed voice_core + voice_fpa_buddy settings (each
+    falling back to its code-constant default when empty) so answers sound
+    like a calibrated analyst persona, not a generic assistant.
     """
-    from .social import BRIAN_VOICE_CORE
+    voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
+    voice_fpa_buddy = lib.get_setting("voice_fpa_buddy") or VOICE_FPA_BUDDY_DEFAULT
+    voice = f"{voice_core}\n\n{voice_fpa_buddy}"
 
     sources = []
     if use_library:
@@ -119,7 +151,7 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool) -> str:
         "relevant numbers), ask one focused clarifying question alongside your "
         "best-effort answer.\n\n"
         "Voice — write every answer this way:\n"
-        f"{BRIAN_VOICE_CORE}"
+        f"{voice}"
     )
 
 
@@ -637,7 +669,7 @@ def answer_question(
         global_chars=settings.get("global_chars", 16000),
     )
 
-    system = _build_system(use_library, use_feed, use_web)
+    system = _build_system(use_library, use_feed, use_web, lib)
 
     # The question rides verbatim as the final text block (never the rewrite —
     # the model already has the raw history for conversational context).

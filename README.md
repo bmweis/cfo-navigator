@@ -86,7 +86,6 @@ automatically; enrichment models stay curated.
 ## Other CLI tools
 
 ```
-scripts/post.py           draft a LinkedIn post in your voice (CLI-only; the web UI was removed)
 scripts/voice_review.py   check any text against the writing-voice standards
 scripts/backfill_queue.py one-time sitemap sweep to queue historical articles
 scripts/mcp_server.py     stdio MCP server wrapping /api/search — lets Claude
@@ -101,7 +100,7 @@ linklib/    core library — db.py (SQLite+FTS5 spine), agent.py (FP&A Buddy),
             queue.py, suggest.py, tagstyle.py, models.py, pricing.py,
             backup.py (Drive backup), email_utils.py (Gmail API email),
             passwords.py, authcheck.py, brand_check.py, voice_review.py,
-            social.py, sources.py, archive.py
+            sources.py, archive.py
 scripts/    CLI entry points (see above)
 webapp/     app.py (all routes + inline HTML/CSS/JS), checks.py (/admin/checks),
             tasks.py (admin badges), thought_leadership_data.py, static/
