@@ -1063,7 +1063,7 @@ def _fpa_buddy_announcement(margin: str = "20px 0") -> str:
         '<p style="margin:0;font-size:14px;color:var(--ink-soft);line-height:1.55;">'
         '<strong style="font-family:var(--font-head);font-weight:600;color:var(--navy);">&#x1F6A7; Under '
         'development</strong>&mdash;A curated digital library that includes my personal feed of finance and '
-        'technology blogs, searchable digital archive of content, and an interactive FP&amp;A Buddy to ask all '
+        'technology blogs, searchable digital archive of content, and the FP&amp;A Buddy to ask all '
         'of your pressing questions about frameworks, metrics, and more.</p></div>'
     )
 
