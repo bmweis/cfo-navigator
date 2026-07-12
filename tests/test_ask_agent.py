@@ -207,7 +207,7 @@ def _capture_retrieval(monkeypatch):
 
     def fake_retrieve(lib, question, max_sources=8):
         seen["question"] = question
-        return []
+        return [], 0, 0.0
 
     monkeypatch.setattr(agent, "retrieve", fake_retrieve)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

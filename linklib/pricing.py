@@ -45,3 +45,24 @@ def compute_cost(model: str, input_tokens: int = 0, output_tokens: int = 0,
         + cache_creation_tokens * rates["cache_write"]
         + cache_read_tokens * rates["cache_read"]
     ) / 1_000_000
+
+
+# USD per million input tokens. Embeddings have no output/cache tokens.
+# Checked 2026-07-02 against OpenAI's published rates alongside the Claude
+# table above — same "no live pricing API" caveat applies (see module
+# docstring): a stale row here silently mis-records overhead spend.
+EMBEDDING_PRICING: dict[str, float] = {
+    "text-embedding-3-small": 0.02,
+}
+
+_EMBEDDING_FALLBACK = EMBEDDING_PRICING["text-embedding-3-small"]
+
+
+def compute_embedding_cost(model: str, input_tokens: int = 0) -> float:
+    """Exact USD cost for one embeddings API call from its real token usage.
+
+    Falls back to text-embedding-3-small's rate for an unrecognized model ID,
+    matching compute_cost's never-silently-$0 behavior above.
+    """
+    rate = EMBEDDING_PRICING.get(model, _EMBEDDING_FALLBACK)
+    return input_tokens * rate / 1_000_000

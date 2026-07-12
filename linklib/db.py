@@ -289,6 +289,9 @@ CREATE TABLE IF NOT EXISTS ask_questions (
     rewrite_input_tokens  INTEGER NOT NULL DEFAULT 0,  -- follow-up query-rewrite call; 0 on turn one
     rewrite_output_tokens INTEGER NOT NULL DEFAULT 0,
     rewrite_cost_usd      REAL NOT NULL DEFAULT 0,     -- rewrite's share, already inside cost_usd
+    embed_input_tokens    INTEGER NOT NULL DEFAULT 0,  -- query-time embedding call for hybrid retrieval (#93)
+    embed_cost_usd        REAL NOT NULL DEFAULT 0,     -- embed's share, already inside cost_usd (user-cap cost,
+                                                        -- unlike embed-on-save which is overhead — see article_embeddings)
     hidden_public         INTEGER NOT NULL DEFAULT 0,  -- admin removed from the community view only
     anonymized            INTEGER NOT NULL DEFAULT 0,  -- asker name hidden on the community view only
     citations_json        TEXT NOT NULL DEFAULT '[]',  -- the turn's API-verified cited sources (see record_ask_question)
@@ -424,6 +427,26 @@ CREATE TABLE IF NOT EXISTS contact_audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_contact_audit_admin ON contact_audit_log(admin_id);
 CREATE INDEX IF NOT EXISTS idx_contact_audit_created ON contact_audit_log(created_at);
+
+-- Overhead cost ledger for embed-on-save + the one-off backfill (#93) — one
+-- row per embedded article, upserted by article_id. content_hash is the
+-- SHA-256 of the exact text that was embedded (linklib.embeddings.
+-- document_text + content_hash); a later edit changes the hash, so the
+-- backfill script can detect staleness and re-embed only what actually
+-- changed rather than the whole corpus. cost_usd here is Brian's overhead
+-- spend — it is never summed into ask_questions and never counts toward a
+-- user's monthly Ask cap (see ask_questions.embed_cost_usd for the
+-- user-cap-side embedding cost, i.e. embedding the QUESTION at retrieval
+-- time, which is a different call). A general ledger covering enrichment
+-- spend too is deferred — see issue #105.
+CREATE TABLE IF NOT EXISTS article_embeddings (
+    article_id   INTEGER PRIMARY KEY,
+    content_hash TEXT NOT NULL DEFAULT '',
+    model        TEXT NOT NULL DEFAULT '',
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd     REAL NOT NULL DEFAULT 0,
+    embedded_at  TEXT NOT NULL DEFAULT ''
+);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -582,6 +605,12 @@ class Library:
             # triage, retrieval eval set). Pre-existing turns get '[]' (their
             # citations were only ever sent to the client, never stored).
             "ALTER TABLE ask_questions ADD COLUMN citations_json TEXT NOT NULL DEFAULT '[]'",
+            # Hybrid retrieval (#93): embedding the retrieval question is a
+            # user-cap cost (unlike embed-on-save, which is overhead — see
+            # article_embeddings), so it's folded into cost_usd the same way
+            # rewrite_cost_usd is, with these columns breaking out its share.
+            "ALTER TABLE ask_questions ADD COLUMN embed_input_tokens INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ask_questions ADD COLUMN embed_cost_usd REAL NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -603,6 +632,48 @@ class Library:
         for _idx_sql in _POST_MIGRATION_INDEXES:
             self.conn.execute(_idx_sql)
         self.conn.commit()
+        # Vector search (#93) — best-effort, never blocks boot. See
+        # _init_vector_search's docstring for why this can't live in _SCHEMA.
+        self._vec_available = self._init_vector_search()
+
+    def _init_vector_search(self) -> bool:
+        """Load the sqlite-vec extension on this connection and create the
+        articles_vec virtual table. Returns True when vector search is usable
+        here, False otherwise (extension not installed, or this SQLite build
+        has extension loading disabled) — every caller must check this rather
+        than assume it worked, and degrade to FTS5-only rather than fail.
+
+        Deliberately NOT part of _SCHEMA: creating a vec0 virtual table
+        requires the extension to be loaded on THIS connection first, and any
+        connection that can't load it must still be able to do ordinary
+        articles reads/writes — a hard failure here would mean the whole app
+        can't boot just because semantic search is unavailable.
+
+        articles_vec uses rowid = articles.id (mirroring articles_fts's
+        content_rowid='id' convention) rather than a stored article_id column
+        — the same external-content-by-rowid idiom already used for FTS5,
+        just without the trigger sync FTS5 gets (a network call can't run
+        inside a SQL trigger, so embeddings are written from Python instead;
+        see upsert_article_embedding). No explicit distance metric is
+        configured: OpenAI's text-embedding-3 vectors are unit-length
+        normalized, so vec0's default L2 distance is a monotonic transform of
+        cosine similarity (L2^2 = 2 - 2*cos_sim) — ranking by ascending L2
+        already ranks by descending cosine similarity.
+        """
+        try:
+            import sqlite_vec
+            from .embeddings import EMBED_DIM
+            self.conn.enable_load_extension(True)
+            sqlite_vec.load(self.conn)
+            self.conn.enable_load_extension(False)
+            self.conn.execute(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS articles_vec USING "
+                f"vec0(embedding float[{EMBED_DIM}])"
+            )
+            self.conn.commit()
+            return True
+        except Exception:
+            return False
 
     def _migrate_read_later_user_scope(self) -> None:
         """One-time table recreation for DBs whose read_later predates
@@ -715,8 +786,15 @@ class Library:
         self.conn.commit()
 
     def delete_article(self, article_id: int) -> None:
-        """Permanently remove an article. FTS is updated by the articles_ad trigger."""
+        """Permanently remove an article. FTS is updated by the articles_ad
+        trigger; the vector index and embedding ledger row are cleaned up
+        here instead — a trigger can't load the sqlite-vec extension or make
+        a network call, so embeddings never get trigger-based sync (see
+        _init_vector_search)."""
         self.conn.execute("DELETE FROM articles WHERE id=?", (article_id,))
+        self.conn.execute("DELETE FROM article_embeddings WHERE article_id=?", (article_id,))
+        if self._vec_available:
+            self.conn.execute("DELETE FROM articles_vec WHERE rowid=?", (article_id,))
         self.conn.commit()
 
     def rename_tag(self, old: str, new: str) -> int:
@@ -777,6 +855,103 @@ class Library:
              model, rules, int(in_scope), scope_reason, _now(), article_id),
         )
         self.conn.commit()
+
+    # -- embeddings / semantic retrieval (#93) ---------------------------------
+
+    def vector_search_available(self) -> bool:
+        """Whether this connection can do vector search (sqlite-vec loaded).
+        Callers (agent.retrieve) use this to skip embedding a query entirely
+        when the answer would be an empty result anyway."""
+        return self._vec_available
+
+    def upsert_article_embedding(self, article_id: int, vector: list[float],
+                                 content_hash: str, model: str,
+                                 input_tokens: int = 0, cost_usd: float = 0.0) -> bool:
+        """Persist one article's embedding vector (articles_vec) plus its
+        overhead-cost ledger row (article_embeddings).
+
+        Returns False and writes nothing when vector search isn't available
+        on this connection — a ledger row implying "this article is
+        searchable" would be misleading with no vector behind it.
+
+        Upserts by deleting any prior vector for this article_id first: vec0
+        virtual tables reject a duplicate rowid even with `INSERT OR REPLACE`
+        (verified — raises the same UNIQUE-constraint error as a plain
+        duplicate insert), so this mirrors the delete-then-insert idiom the
+        articles_fts triggers already use for the same reason.
+        """
+        if not self._vec_available:
+            return False
+        import sqlite_vec
+        self.conn.execute("DELETE FROM articles_vec WHERE rowid=?", (article_id,))
+        self.conn.execute(
+            "INSERT INTO articles_vec(rowid, embedding) VALUES (?,?)",
+            (article_id, sqlite_vec.serialize_float32(vector)),
+        )
+        self.conn.execute(
+            """INSERT INTO article_embeddings
+               (article_id, content_hash, model, input_tokens, cost_usd, embedded_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(article_id) DO UPDATE SET
+                   content_hash=excluded.content_hash, model=excluded.model,
+                   input_tokens=excluded.input_tokens, cost_usd=excluded.cost_usd,
+                   embedded_at=excluded.embedded_at""",
+            (article_id, content_hash, model, input_tokens, cost_usd, _now()),
+        )
+        self.conn.commit()
+        return True
+
+    def get_article(self, article_id: int) -> Optional[dict]:
+        """One article by id, or None. A plain indexed lookup — used by the
+        embed-on-save hook, which needs the freshly-upserted row (content may
+        have been merged/kept from an existing row, not the just-saved
+        Article object) rather than a linear scan of search results."""
+        row = self.conn.execute("SELECT * FROM articles WHERE id=?", (article_id,)).fetchone()
+        return self._row_to_dict(row) if row else None
+
+    def embedding_content_hash(self, article_id: int) -> Optional[str]:
+        """Stored content_hash for one article's embedding, or None if it's
+        never been embedded. A single-row lookup for the embed-on-save hook
+        (called once per save) — the bulk embedding_hashes() map below is for
+        the backfill script, which needs every row's hash at once."""
+        row = self.conn.execute(
+            "SELECT content_hash FROM article_embeddings WHERE article_id=?", (article_id,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def embedding_hashes(self) -> dict[int, str]:
+        """Map of article_id -> stored content_hash for every embedded
+        article, in one query. Used by the backfill script to skip rows
+        whose current document_text hash already matches, without a
+        per-row lookup."""
+        rows = self.conn.execute(
+            "SELECT article_id, content_hash FROM article_embeddings"
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def vector_search(self, vector: list[float], limit: int = 50) -> list[dict]:
+        """K-nearest-neighbor search over embedded articles, nearest first.
+        Returns [] when vector search isn't available on this connection or
+        `vector` is empty — callers fall back to FTS5-only, same contract as
+        every other best-effort call in this codebase."""
+        if not self._vec_available or not vector:
+            return []
+        import sqlite_vec
+        rows = self.conn.execute(
+            "SELECT rowid FROM articles_vec WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+            (sqlite_vec.serialize_float32(vector), limit),
+        ).fetchall()
+        if not rows:
+            return []
+        ids = [r[0] for r in rows]
+        placeholders = ",".join("?" * len(ids))
+        by_id = {a["id"]: a for a in
+                 [self._row_to_dict(r) for r in
+                  self.conn.execute(f"SELECT * FROM articles WHERE id IN ({placeholders})", ids).fetchall()]}
+        # Preserve KNN rank order; silently skip a rowid whose article no
+        # longer exists (delete_article cleans up articles_vec too, so this
+        # is just a guard against drift, not an expected case).
+        return [by_id[rid] for (rid,) in rows if rid in by_id]
 
     # -- audience-scope review (Phase 3) ---------------------------------------
 
@@ -1638,13 +1813,18 @@ class Library:
                             cost_usd: float = 0.0, rewrite_input_tokens: int = 0,
                             rewrite_output_tokens: int = 0,
                             rewrite_cost_usd: float = 0.0,
+                            embed_input_tokens: int = 0, embed_cost_usd: float = 0.0,
                             citations: Optional[list[dict]] = None) -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
         a conversation and the caller fills it in with str(id) after insert.
-        `cost_usd` is the turn TOTAL (answer + any query-rewrite call); the
-        rewrite_* args break out the rewrite's share of it.
+        `cost_usd` is the turn TOTAL (answer + any query-rewrite call + any
+        query-time embedding call for hybrid retrieval); the rewrite_* and
+        embed_* args break out each call's share of it. (embed_* here is the
+        user-cap cost of embedding the QUESTION — a different thing from
+        article_embeddings.cost_usd, which is Brian's embed-on-save overhead
+        and never touches this table.)
         `citations` is the turn's API-verified cited-source list
         ([{n, title, url, type, article_id?}] — article_id only on
         library-type entries), stored as a snapshot: feed and web sources are
@@ -1657,12 +1837,14 @@ class Library:
                 use_library, use_feed, use_web, input_tokens, output_tokens,
                 cache_creation_tokens, cache_read_tokens, cost_usd,
                 rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
+                embed_input_tokens, embed_cost_usd,
                 citations_json, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
              cost_usd, rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
+             embed_input_tokens, embed_cost_usd,
              json.dumps(citations or []), now),
         )
         row_id = cur.lastrowid

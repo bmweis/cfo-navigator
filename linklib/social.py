@@ -90,7 +90,7 @@ def draft_post(lib: Library, article_id: int | None = None, url: str | None = No
         row = lib.conn.execute("SELECT * FROM articles WHERE url = ?", (url,)).fetchone()
         source_rows = [lib._row_to_dict(row)] if row else []
     elif topic:
-        source_rows = retrieve(lib, topic, max_sources=4)
+        source_rows, _embed_in, _embed_cost = retrieve(lib, topic, max_sources=4)
 
     try:
         from anthropic import Anthropic
