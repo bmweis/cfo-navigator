@@ -4634,7 +4634,7 @@ def tools_directory(request: Request):
 .intro-close:hover{{background:var(--navy-wash);color:var(--ink);}}
 </style>
 
-<script>
+<script>{_GENERATE_DESC_JS}
 var ALL_TOOLS = {tools_json};
 var AUTHED = {'true' if authed else 'false'};
 var MEMBER = {'true' if is_member else 'false'};
@@ -4714,7 +4714,13 @@ function renderTools(tools) {{
       // else (name, URL, categories, advisor/featured) stays on the full
       // edit page, since those change far less often.
       quickEditPanel = '<div class="tool-quickedit" id="qe-' + t.id + '" style="display:none;">'
-        + '<label>Description</label>'
+        + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;">'
+        + '<label style="margin:0;">Description</label>'
+        + '<span><button type="button" class="tool-admin-btn" onclick="generateDescription('
+        + esc(JSON.stringify(t.name)) + ',' + esc(JSON.stringify(t.url))
+        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\')">Generate</button>'
+        + ' <span id="qe-gen-status-' + t.id + '" class="qe-status"></span></span>'
+        + '</div>'
         + '<textarea id="qe-desc-' + t.id + '" rows="2">' + esc(t.description) + '</textarea>'
         + '<label class="qe-checkbox"><input type="checkbox" id="qe-warm-' + t.id + '"' + (t.warm_intro_enabled ? ' checked' : '') + '> Offer a Warm Intro button</label>'
         + '<div class="qe-row">'
@@ -4965,6 +4971,34 @@ def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None
         for c in categories
     ) or '<p style="grid-column:1/-1;font-size:13px;color:var(--muted);margin:0;">' \
          'No categories yet — <a href="/admin/tools/categories">add one</a> first.</p>'
+
+
+# Shared by /admin/tools/new, /admin/tools/{id}/edit, and the Quick Edit panel
+# on /tools — all three point a "Generate" button at the same stateless
+# endpoint, since it only needs a name + URL to draft a description.
+_GENERATE_DESC_JS = """
+async function generateDescription(name, url, descId, statusId) {
+  name = (name || '').trim();
+  url = (url || '').trim();
+  var status = document.getElementById(statusId);
+  if (!name || !url) { status.textContent = 'Enter a name and URL first.'; return; }
+  status.textContent = 'Generating…';
+  try {
+    var r = await fetch('/admin/tools/generate-description', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, url: url})
+    });
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
+    document.getElementById(descId).value = d.description;
+    status.textContent = d.low_confidence
+      ? 'Drafted — could not fetch the page, verify facts before saving.'
+      : 'Drafted — review before saving.';
+  } catch (e) {
+    status.textContent = e.message || 'Generation failed — write the description by hand.';
+  }
+}
+"""
 
 
 @app.get("/tools/submit", response_class=HTMLResponse)
@@ -5719,18 +5753,24 @@ def admin_tools_new(request: Request):
 <form method="post" action="/admin/tools/new" style="display:grid;gap:20px;">
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tool name *</label>
-    <input name="name" required maxlength="200"
+    <input id="tool-name" name="name" required maxlength="200"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
-    <input name="url" type="url" required maxlength="500"
+    <input id="tool-url" name="url" type="url" required maxlength="500"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short description *</label>
-    <textarea name="description" required maxlength="400" rows="3"
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Short description *</label>
+      <span>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status')">Generate</button>
+        <span id="tool-gen-status" class="qe-status"></span>
+      </span>
+    </div>
+    <textarea id="tool-desc" name="description" required maxlength="400" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="What does it do? 1–2 sentences."></textarea>
   </div>
@@ -5777,7 +5817,8 @@ def admin_tools_new(request: Request):
     <a href="/admin/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
-</div>"""
+</div>
+<script>{_GENERATE_DESC_JS}</script>"""
     return HTMLResponse(_page("Add Tool—CFO Toolbox", "", body, authed=True))
 
 
@@ -5858,17 +5899,23 @@ def admin_tools_edit(request: Request, tool_id: int):
 <form method="post" action="/admin/tools/{tool_id}/edit" style="display:grid;gap:20px;">
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tool name *</label>
-    <input name="name" required maxlength="200" value="{_esc(tool['name'])}"
+    <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
-    <input name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
+    <input id="tool-url" name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short description *</label>
-    <textarea name="description" required maxlength="400" rows="3"
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Short description *</label>
+      <span>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status')">Generate</button>
+        <span id="tool-gen-status" class="qe-status"></span>
+      </span>
+    </div>
+    <textarea id="tool-desc" name="description" required maxlength="400" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(tool['description'])}</textarea>
   </div>
   <div>
@@ -5914,7 +5961,8 @@ def admin_tools_edit(request: Request, tool_id: int):
     <a href="/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
-</div>"""
+</div>
+<script>{_GENERATE_DESC_JS}</script>"""
     return HTMLResponse(_page(f"Edit {_esc(tool['name'])}—CFO Toolbox", "", body, authed=True))
 
 
@@ -5991,6 +6039,35 @@ async def admin_tools_quick_edit(request: Request, tool_id: int):
         "vendor_email": vendor_email,
         "has_warm_intro": bool(warm_intro_enabled and vendor_email),
     }})
+
+
+@app.post("/admin/tools/generate-description")
+async def admin_tools_generate_description(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    name = (body.get("name") or "").strip()
+    url = (body.get("url") or "").strip()
+    if not (name and url):
+        return JSONResponse({"ok": False, "error": "Name and URL are required."}, status_code=400)
+
+    from linklib.enrich import generate_tool_description
+    draft = generate_tool_description(name, url)
+    if draft is None:
+        return JSONResponse({"ok": False, "error": "Description generation is unavailable right now "
+                                                     "(missing ANTHROPIC_API_KEY, or the request failed) "
+                                                     "— write the description by hand."}, status_code=503)
+
+    lib = _lib()
+    try:
+        lib.record_enrichment_cost(None, draft.model, draft.input_tokens, draft.output_tokens, draft.cost_usd)
+    finally:
+        lib.close()
+
+    return JSONResponse({"ok": True, "description": draft.description, "low_confidence": draft.low_confidence})
 
 
 @app.post("/tools/{tool_id}/interest")
