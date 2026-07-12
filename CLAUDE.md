@@ -28,8 +28,9 @@ linklib/           # core library (the only thing that matters long-term)
   archive.py       # parses Feedly "Download your data" bookmark HTML export
   extract.py       # best-effort full-text fetch (trafilatura preferred, BS4 fallback)
   enrich.py        # Claude API: generates summary + auto-tags for each article
-  pipeline.py      # shared ingest used by CLI and web app
-  agent.py         # FP&A Buddy Q&A: library retrieval + web search, cited answer
+  pipeline.py      # shared ingest used by CLI and web app; also embed-on-save (embed_article)
+  agent.py         # FP&A Buddy Q&A: hybrid library retrieval (FTS5 + vector, RRF-merged) + web search, cited answer
+  embeddings.py    # OpenAI text-embedding-3-small: document-text builder, content hashing, embed calls
   social.py        # LinkedIn post generator in Brian's voice (self-contained)
   sources.py       # parses preferred_sites.opml → domain allowlist for web search
   feed.py          # RSS/Atom reader over the OPML list: concurrent fetch, 30-min cache
@@ -52,6 +53,9 @@ scripts/           # CLI entry points
   add_link.py         # save a single URL
   enrich_backfill.py  # backfill Claude summaries/tags over imported rows
   enrich_compare.py   # manual QA: compare enrichment quality across models on one article
+  embed_backfill.py   # one-time, batched: embed existing articles for semantic search
+  eval_retrieval.py   # manual QA: replay flagged Ask questions through FTS5-only vs.
+                      #   hybrid retrieval side by side (no Claude calls)
   backfill_queue.py   # one-time sitemap sweep to queue historical articles
   seed_tools.py       # seed/refresh the CFO Toolbox vendor list (TOOLS is also
                       #   imported live by webapp/app.py)
@@ -87,6 +91,22 @@ library.db            # NOT in git (personal data, large). Lives beside the code
 - **Web search is domain-restricted.** `agent.py` passes `preferred_sites.opml` domains
   as `allowed_domains` to the `web_search_20250305` tool, so the chatbot only cites
   sources Brian already trusts.
+- **Library retrieval is hybrid: FTS5 + vector search, merged by reciprocal rank
+  fusion.** `sqlite-vec` adds a vec0 virtual table (`articles_vec`) inside `library.db`
+  — no separate vector database. Embeddings (OpenAI `text-embedding-3-small`) can't be
+  written from a SQL trigger the way FTS5 is (a network call can't run inside a
+  trigger), so vector search is eventually consistent by design: embed-on-save
+  (`pipeline.embed_article`, best-effort, never blocks a save) handles new articles,
+  and `scripts/embed_backfill.py` is the one-off batched pass for the existing corpus
+  and for anything embed-on-save missed. A content hash on `article_embeddings` detects
+  when an article's embeddable text has changed, so re-running the backfill only
+  re-embeds what's actually stale.
+- **Embedding costs are split by who pays for them.** Embed-on-save/backfill cost is
+  Brian's overhead (`article_embeddings.cost_usd`) and never touches a user's Ask
+  budget. Embedding the retrieval QUESTION at ask-time is a user-cap cost — it folds
+  into `ask_questions.cost_usd` the same way the follow-up query-rewrite's cost already
+  does (`embed_cost_usd` breaks out its share). A general ledger covering overhead
+  spend more broadly (enrichment included) is deferred — see issue #105.
 - **`preferred_sites.opml` is dual-purpose.** It's both the web-search allowlist and the
   `/feed` reader's subscription list. Use direct RSS/Atom URLs — Feedly proxy URLs
   (`feedly.com/web/...`) are skipped because they require auth. Paywalled sources are
@@ -146,6 +166,8 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 | Variable | Default | Purpose |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
+| `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
+| `LINKLIB_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model for `linklib/embeddings.py` |
 | `LINKLIB_DB` | `library.db` | Path to the SQLite database |
 | `LINKLIB_SAVE_TOKEN` | (none) | Token for `POST /save` + bookmarklet; also the default login password. Set when hosted. |
 | `LINKLIB_PASSWORD` | = `LINKLIB_SAVE_TOKEN` | Login password for the private section. Set to decouple the login password from the save token. |
@@ -168,6 +190,9 @@ python -m scripts.import_archive --zip feedly-archive.zip --db library.db
 # Backfill enrichment
 python -m scripts.enrich_backfill --db library.db
 
+# Backfill embeddings for semantic search (optional — needs OPENAI_API_KEY)
+python -m scripts.embed_backfill --db library.db
+
 # Web app
 uvicorn webapp.app:app --reload    # http://localhost:8000
 
@@ -183,7 +208,9 @@ python -m scripts.mcp_server
 - Going-forward capture: CLI (`add_link.py`) and web (`/save`)
 - FTS5 search and web UI
 - Enrichment backfill
-- FP&A Q&A (library + web search)
+- FP&A Q&A (hybrid library retrieval — FTS5 + vector search via `sqlite-vec`, RRF-merged
+  — + web search); `scripts/embed_backfill.py` backfills the vector side for the
+  existing corpus
 - Bookmarklet
 - Public site: bio homepage (`/`), thought leadership (`/thought-leadership`),
   Growth Engine Ratio page + calculator (`/growth-engine-ratio`), contact (`/contact`)
@@ -280,8 +307,9 @@ docs honest, **in the same PR as the change** (never a follow-up):
 
 - Enrichment: `claude-haiku-4-5-20251001` (cheap, processes thousands of articles)
 - Q&A and post drafting: `claude-sonnet-4-6` (better synthesis quality)
+- Embeddings (hybrid retrieval, `linklib/embeddings.py`): OpenAI `text-embedding-3-small`
 
-Both are overridable via environment variables.
+All three are overridable via environment variables.
 
 **The model pickers are dynamic** (`linklib/models.py`): a single curated registry
 feeds every picker (re-enrich, backfill), and `models_for` reconciles it
@@ -300,10 +328,13 @@ archive/web-search count, and a token budget (`EFFORT_SETTINGS` in
 
 ## Billing note
 
-Two separate billing relationships:
+Three separate billing relationships:
 - **Building the site** → Claude Pro subscription (flat monthly, covers Claude Code)
-- **Running the app** → Anthropic API key, pay-per-use (`ANTHROPIC_API_KEY`)
+- **Running the app (Claude)** → Anthropic API key, pay-per-use (`ANTHROPIC_API_KEY`)
+- **Running the app (embeddings)** → OpenAI API key, pay-per-use (`OPENAI_API_KEY`) —
+  embed-on-save/backfill cost is overhead; the `text-embedding-3-small` rate is a
+  fraction of a cent per thousand articles
 
-Keep the app's API key out of Claude Code building sessions (don't set it in the
+Keep the app's API keys out of Claude Code building sessions (don't set them in the
 terminal where you run `claude`), or Code will bill the API key instead of the
 subscription.

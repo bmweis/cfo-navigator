@@ -7724,11 +7724,14 @@ async def ask(request: Request):
                 cache_creation_tokens=ans.cache_creation_tokens,
                 cache_read_tokens=ans.cache_read_tokens,
                 # ans.cost_usd is the turn total (answer + follow-up query
-                # rewrite), so the monthly-cap SUM sees the rewrite spend too.
+                # rewrite + query-time embedding for hybrid retrieval), so
+                # the monthly-cap SUM sees all of it.
                 cost_usd=ans.cost_usd,
                 rewrite_input_tokens=ans.rewrite_input_tokens,
                 rewrite_output_tokens=ans.rewrite_output_tokens,
                 rewrite_cost_usd=ans.rewrite_cost_usd,
+                embed_input_tokens=ans.embed_input_tokens,
+                embed_cost_usd=ans.embed_cost_usd,
                 # Persisted snapshot of what this answer actually cited, so a
                 # later feedback flag stays inspectable with its sources.
                 citations=ans.citations,
@@ -8107,6 +8110,8 @@ _OPEN_SOURCE = [
     ("Stores & searches", "Where your archive lives and how it's searched.", [
         ("SQLite + FTS5", None, "Public Domain", "https://www.sqlite.org",
          "The entire database is a single SQLite file, with FTS5 powering full-text search across your archive."),
+        ("sqlite-vec", "sqlite-vec", "Apache-2.0", "https://github.com/asg017/sqlite-vec",
+         "A vector-search extension living in the same SQLite file — powers FP&A Buddy's semantic retrieval alongside FTS5."),
         ("Python", None, "PSF License", "https://www.python.org",
          "The language it's all written in — and its standard library does a lot of the quiet heavy lifting."),
     ]),
@@ -8123,6 +8128,8 @@ _OPEN_SOURCE = [
     ("Intelligence", "The AI behind enrichment, FP&A Buddy, drafting, and dedupe verification.", [
         ("Anthropic SDK", "anthropic", "MIT", "https://github.com/anthropics/anthropic-sdk-python",
          "The Python client for Claude — summaries, auto-tags, cited FP&A Buddy answers, post drafts, and duplicate checks."),
+        ("OpenAI SDK", "openai", "Apache-2.0", "https://github.com/openai/openai-python",
+         "The Python client for text-embedding-3-small — turns saved articles and FP&A Buddy questions into vectors for semantic search."),
     ]),
     ("Built & kept tidy", "The tools that make and maintain the site — including a couple we leaned on right here.", [
         ("pytest", "pytest", "MIT", "https://pytest.org",
@@ -8545,6 +8552,22 @@ def _scan_feed_background() -> None:
         from linklib.queue import scan_feed_into_queue
         scan_feed_into_queue(lib, OPML_PATH)
         backup.maybe_backup(DB_PATH)
+    except Exception:
+        pass
+    finally:
+        lib.close()
+
+
+def _embed_article_background(article_id: int) -> None:
+    """Best-effort embed-on-save for one promoted queue article (#93).
+    Off-request, mirroring the other _*_background jobs here: promotion
+    already returned to the admin before this runs, so a slow or failed
+    embedding call never delays the response — the article stays fully
+    searchable via FTS5 either way."""
+    lib = _lib()
+    try:
+        from linklib.pipeline import embed_article
+        embed_article(lib, article_id)
     except Exception:
         pass
     finally:
@@ -10399,6 +10422,7 @@ async def admin_queue_add(request: Request, background_tasks: BackgroundTasks):
         if not article_id:
             raise HTTPException(status_code=404, detail="not in queue")
         _log_archive_audit(lib, request, "add", article_id, detail=url)
+        background_tasks.add_task(_embed_article_background, article_id)
         background_tasks.add_task(backup.maybe_backup, DB_PATH)
         return JSONResponse({"ok": True, "id": article_id})
     finally:

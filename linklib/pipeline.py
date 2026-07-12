@@ -6,6 +6,13 @@
                   terminal go through identical logic.
 - `enrich_library`: backfill Claude summaries/tags over rows that don't have
                   them yet (e.g. right after the Feedly import).
+- `embed_article` : best-effort embed-on-save for one article (#93), called
+                  after enrichment so the embedding sees the finished
+                  summary. `scripts/embed_backfill.py` is the separate,
+                  batched one-off pass over the existing corpus — it does
+                  NOT call this (it needs the OpenAI API's batch endpoint for
+                  efficiency), but shares its document_text/content_hash
+                  primitives from `linklib.embeddings`.
 """
 from __future__ import annotations
 
@@ -58,8 +65,48 @@ def ingest_url(
                                  model=result.model, rules=result.rules_version,
                                  in_scope=result.in_scope, scope_reason=result.scope_reason)
 
+    embed_article(lib, article_id)
+
     return next((r for r in lib.search("", limit=10000) if r["id"] == article_id),
                 {"id": article_id, "url": url})
+
+
+def embed_article(lib: Library, article_id: int) -> bool:
+    """Best-effort embed-on-save for one article (#93). Builds the same
+    document text the backfill script embeds (title + tags + summary +
+    content excerpt — see linklib.embeddings.document_text), skips the API
+    call when the content hash matches what's already stored (nothing
+    changed since the last embed), and persists the vector + overhead-cost
+    ledger row via Library.upsert_article_embedding.
+
+    Reads the article fresh from the DB rather than trusting the caller's
+    in-memory Article: on a merge into an existing row, `upsert()` keeps the
+    EXISTING content/summary over a new-but-empty field, so the row actually
+    saved may differ from what the caller passed in.
+
+    Never raises and never blocks a save — a skipped or failed embed leaves
+    the article fully searchable via FTS5, just not via vector search yet
+    (the backfill script will pick it up later). Returns False on any no-op
+    (nothing to embed, vector search unavailable, API call failed, or
+    already up to date) so callers/tests can tell whether it actually wrote.
+    """
+    from . import embeddings as embed_mod
+    article = lib.get_article(article_id)
+    if article is None:
+        return False
+    text = embed_mod.document_text(article)
+    if not text:
+        return False
+    new_hash = embed_mod.content_hash(text)
+    if lib.embedding_content_hash(article_id) == new_hash:
+        return False
+    result = embed_mod.embed_texts([text])
+    if result is None or not result.vectors:
+        return False
+    return lib.upsert_article_embedding(
+        article_id, result.vectors[0], new_hash, embed_mod.DEFAULT_MODEL,
+        input_tokens=result.input_tokens, cost_usd=result.cost_usd,
+    )
 
 
 def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,

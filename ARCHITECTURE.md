@@ -89,6 +89,8 @@ are by convention (`user_id`, `tool_id`, `item_id` columns), enforced in code.
 |---|---|---|
 | `articles` | The archive: ~1,500+ curated articles. **URL is the natural key** (`UNIQUE`, normalized) — upserts merge tags and fill empty fields, never duplicate. | `url`, `summary` (Claude-generated, the member-facing asset), `content` (fetched full text — internal input only, never served), `tags_json`/`tags_text` (structured list + flattened copy for FTS), `enriched`/`enrich_model`/`enrich_rules` (provenance), `in_scope`/`scope_reason` (off-audience review flags) |
 | `articles_fts` | FTS5 virtual table (`content='articles'`, porter tokenizer) over title/author/source/summary/content/notes/tags_text. | Kept in sync by three triggers (`articles_ai`/`_ad`/`_au`) on insert/delete/update — no manual reindex, ever. |
+| `articles_vec` | `sqlite-vec` vec0 virtual table (#93) — one embedding vector per article, `rowid = articles.id` (same external-content-by-rowid idiom as `articles_fts`, minus trigger sync — see §4, "Hybrid retrieval..."). Powers the vector half of hybrid retrieval. | `embedding` (`float[1536]`, OpenAI `text-embedding-3-small`) |
+| `article_embeddings` | Companion ledger table (#93): which articles are embedded, with what text, and at what cost. Also **the overhead-cost ledger** for embed-on-save/backfill spend — never summed into `ask_questions`, never counts toward a user's Ask cap (see issue #105 for a general overhead ledger covering enrichment too). | `article_id` (PK), `content_hash` (of the exact embedded text — detects staleness after an edit), `model`, `input_tokens`, `cost_usd` |
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
@@ -97,7 +99,7 @@ are by convention (`user_id`, `tool_id`, `item_id` columns), enforced in code.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `ask_questions` | One row per conversation **turn**; the single table behind all three surfaces (admin report, a user's own history, the member-public community view). | `conversation_id` (groups follow-up turns; `= str(id)` of the first turn) + `turn_index`; token columns for the answer call; `rewrite_input_tokens`/`rewrite_output_tokens`/`rewrite_cost_usd` for the follow-up query-rewrite call; **`cost_usd` is the turn TOTAL (answer + rewrite)** so every `SUM(cost_usd)` — the monthly cap, the reports — needs no special handling; `hidden_public`/`anonymized` affect only the community view; `citations_json` is the turn's **API-verified cited-source snapshot** (`[{n, title, url, type, article_id?}]` — `article_id` on library entries only; feed/web sources are transient, so the stored title/url *is* the record, never re-resolved) |
+| `ask_questions` | One row per conversation **turn**; the single table behind all three surfaces (admin report, a user's own history, the member-public community view). | `conversation_id` (groups follow-up turns; `= str(id)` of the first turn) + `turn_index`; token columns for the answer call; `rewrite_input_tokens`/`rewrite_output_tokens`/`rewrite_cost_usd` for the follow-up query-rewrite call; `embed_input_tokens`/`embed_cost_usd` for embedding the retrieval QUESTION during hybrid retrieval (#93 — a **user-cap** cost, unlike `article_embeddings.cost_usd`, which is embed-on-save overhead); **`cost_usd` is the turn TOTAL (answer + rewrite + query embedding)** so every `SUM(cost_usd)` — the monthly cap, the reports — needs no special handling; `hidden_public`/`anonymized` affect only the community view; `citations_json` is the turn's **API-verified cited-source snapshot** (`[{n, title, url, type, article_id?}]` — `article_id` on library entries only; feed/web sources are transient, so the stored title/url *is* the record, never re-resolved) |
 | `ask_feedback` | Member ratings of individual answers — **one row per rated turn per user**, upserted on `(question_id, user_id)` so a changed rating updates in place. Feeds the `/admin/ask-feedback` triage view and, later, a retrieval eval set (flagged questions + the rated turn's citation snapshot). Capture + triage only — feedback never mutates prompts or retrieval automatically. | `question_id` (→ `ask_questions.id`), `rating` (`helpful` \| `inaccurate` \| `not_helpful`), `comment` (optional "what was off?" free text), `updated_at` (`''` until first changed — the empty-string-sentinel idiom) |
 
 Cost figures are computed from **real API token usage** at call time
@@ -147,6 +149,8 @@ erDiagram
     users ||--o{ archive_audit_log : "admin_id (nullable)"
     users ||--o{ contact_audit_log : "admin_id (nullable)"
     articles ||--|| articles_fts : "rowid, via triggers"
+    articles ||--o| articles_vec : "rowid, written from Python (#93)"
+    articles ||--o| article_embeddings : "article_id"
     library_queue }o--|| articles : "promoted into (by URL)"
     articles ||--o{ archive_audit_log : "item_id (nullable)"
     contacts ||--o{ contact_audit_log : "item_id (nullable)"
@@ -168,11 +172,18 @@ erDiagram
         text conversation_id "groups turns"
         int turn_index
         int user_id
-        real cost_usd "turn TOTAL: answer + rewrite"
+        real cost_usd "turn TOTAL: answer + rewrite + embed"
         real rewrite_cost_usd "rewrite's share of cost_usd"
+        real embed_cost_usd "query-embed's share of cost_usd (#93)"
         int hidden_public
         int anonymized
         text citations_json "cited-source snapshot per turn"
+    }
+    article_embeddings {
+        int article_id PK
+        text content_hash "detects staleness after an edit"
+        text model
+        real cost_usd "overhead — never in ask_questions"
     }
     ask_feedback {
         int id PK
@@ -209,8 +220,8 @@ erDiagram
 
 (Diagram shows key columns and conventional relationships only; `settings`,
 `contacts`, `email_failures`, `benchmarks`, `dedupe_decisions`, `read_later`,
-`tool_categories`, and the audit tables carry no columns beyond what the
-tables above describe.)
+`tool_categories`, `articles_vec`, and the audit tables carry no columns
+beyond what the tables above describe.)
 
 ## 3. Key request flows
 
@@ -232,6 +243,7 @@ sequenceDiagram
     participant DB as SQLite (Library)
     participant AG as linklib/agent.py
     participant H as Anthropic API (Haiku)
+    participant O as OpenAI API (embeddings)
     participant C as Anthropic API (tier model)
 
     B->>W: POST /ask {question, conversation_id?, effort}
@@ -255,13 +267,18 @@ sequenceDiagram
         H-->>AG: rewritten query (+ real token usage)
         Note over AG: best-effort - on any failure,<br/>retrieval falls back to the raw question
     end
-    AG->>DB: FTS5 search (bm25-ranked) on the retrieval question
+    AG->>DB: FTS5 search (bm25-ranked) on the retrieval question, 2x max_library
+    AG->>O: embed the retrieval question (text-embedding-3-small)
+    O-->>AG: query vector (+ real token usage)
+    Note over AG: best-effort - vector search unavailable or the<br/>embed call fails -> falls back to FTS5-only silently
+    AG->>DB: vec0 KNN search on the query vector, 2x max_library
+    AG->>AG: reciprocal rank fusion - merge FTS5 + vector hits,<br/>dedupe by article id, take top max_library
     AG->>AG: optional feed matching (keyword overlap, 30-min cached feed)
     AG->>C: messages.create: sources as document blocks with<br/>citations enabled + web_search tool (allowed_domains from OPML)
     C-->>AG: text blocks with citation spans + web results + usage
     AG->>AG: reassemble answer - append [n] after each cited span,<br/>one deduped first-use-ordered list across library/feed/web
     AG->>AG: compute_cost from real token usage (pricing.py)
-    AG-->>W: Answer {text, citations, cost_usd = answer + rewrite}
+    AG-->>W: Answer {text, citations, cost_usd = answer + rewrite + query embed}
     W->>DB: record_ask_question - one row per turn<br/>(conversation_id, turn_index, tokens, cost breakdown,<br/>citations_json snapshot of the cited sources)
     W-->>B: {answer, citations, sources, followups_left,<br/>conversation_id, turn_id, usage: {spent, cap}}
     opt member rates the answer
@@ -272,13 +289,25 @@ sequenceDiagram
 
 Details worth knowing:
 
-- **Two API calls can happen per turn.** On follow-ups, a cheap Haiku call
-  first rewrites e.g. *"what about at Series A?"* into a standalone search
-  question so FTS5 retrieval sees the conversation's subject. It's
-  retrieval-only (the answering prompt always gets the verbatim question plus
-  raw history), strictly best-effort (10s timeout, malformed output rejected,
-  silent fallback), and its spend is still recorded — folded into the same
-  row's `cost_usd` with `rewrite_*` columns breaking out its share.
+- **Two, sometimes three, API calls can happen per turn.** On follow-ups, a
+  cheap Haiku call first rewrites e.g. *"what about at Series A?"* into a
+  standalone search question so retrieval sees the conversation's subject.
+  It's retrieval-only (the answering prompt always gets the verbatim question
+  plus raw history), strictly best-effort (10s timeout, malformed output
+  rejected, silent fallback), and its spend is still recorded — folded into
+  the same row's `cost_usd` with `rewrite_*` columns breaking out its share.
+  A separate OpenAI call embeds that same retrieval question for the vector
+  half of hybrid search — same best-effort contract, same fold-into-`cost_usd`
+  pattern (`embed_*` columns).
+- **Library retrieval is hybrid: FTS5 keyword search + vector semantic
+  search, merged by reciprocal rank fusion (`agent._rrf_merge`, k=60).** Each
+  path fetches 2x the tier's `max_library` so the merge has real rank signal
+  to work with, not two already-truncated top-N lists. Chosen over blending
+  bm25 scores with cosine distances: the two live on incomparable scales with
+  no corpus-scale signal (a ~1,500-article library) to calibrate a blend
+  weight against, whereas RRF only needs rank position. Every failure mode —
+  `sqlite-vec` unavailable, no `OPENAI_API_KEY`, the embed call erroring —
+  degrades silently to FTS5-only, never blocking an answer.
 - **Citations are API-verified, not prompted.** Library/feed sources ride as
   Citations-API `document` blocks; web search cites automatically. The
   response's cited spans are reassembled server-side into `[n]` markers
@@ -290,7 +319,10 @@ Details worth knowing:
   conversation's recorded `ask_questions` rows — never from anything
   client-supplied), a history-character cap carried into the prompt, and the
   authoritative monthly per-user dollar cap checked against real recorded
-  spend before any API call.
+  spend before any API call. The monthly cap SUMs `cost_usd`, which already
+  includes the query-embedding cost — but never embed-ON-SAVE cost, which
+  lives on a separate table entirely (`article_embeddings`, Brian's overhead,
+  never a user's).
 - **Conversations resume across reloads and devices.** The `/ask` page offers
   a "Recent conversations" list on load (`GET /ask/conversations` — the
   user's last 5, first question as the label) and loads a full transcript
@@ -354,7 +386,11 @@ All capture paths converge on `linklib/pipeline.py::ingest_url` or the
   existing tag vocabulary (`linklib/tagstyle.py` learns the curator's tagging
   style and feeds the prompt). Enrichment is **additive and optional** — a
   save without an API key just leaves `enriched=0` for
-  `scripts/enrich_backfill.py` to fill later.
+  `scripts/enrich_backfill.py` to fill later. `ingest_url` then calls
+  `pipeline.embed_article` (#93) — same additive-and-optional shape: no
+  `OPENAI_API_KEY` or a failed call just leaves the article FTS5-searchable
+  but not yet in `articles_vec`, for `scripts/embed_backfill.py` to catch
+  later.
 - **Queued candidates** (reviewed — land in `library_queue` first): the RSS
   scan and one-time sitemap backfill (`linklib/queue.py`), and member reader
   submissions (`POST /library/submit`, honeypot-protected, deliberately
@@ -362,8 +398,16 @@ All capture paths converge on `linklib/pipeline.py::ingest_url` or the
   Claude-predicted keep/skip. The admin reviews at `/admin/queue`;
   **promoting** moves the row into `articles` preserving any enrichment
   already paid for, **dismissing** keeps the row so it's never re-proposed.
+  Embedding happens after promotion too, off-request (`background_tasks`,
+  same pattern as the post-promotion DB backup) since promotion itself has no
+  other network call to piggyback the latency on.
 - FTS5 stays in sync automatically via the triggers — every insert/update
-  cascades into the index.
+  cascades into the index. `articles_vec` does **not**: a SQL trigger can't
+  make a network call, so embeddings are written from Python instead
+  (`embed_article`, `embed_backfill.py`), making vector search **eventually
+  consistent by design** rather than trigger-synchronous like FTS5 — an
+  article is always immediately findable via FTS5, and via vector search
+  once its embed call (inline or backfilled) has actually completed.
 
 ### Auth: three tiers, one cookie
 
@@ -425,6 +469,28 @@ recorded anywhere, it's flagged rather than invented.
   misprice reality — a Deep Opus answer costs ~60× a Quick Haiku one. Caps
   are data (a settings row + a per-user column), not logic, so a future paid
   tier is a different row, not a code branch.
+- **Hybrid retrieval (FTS5 + vector search) inside the same SQLite file,
+  merged by reciprocal rank fusion.** `sqlite-vec`'s vec0 virtual table lives
+  in `library.db` alongside `articles_fts` — no separate vector database, no
+  migration off SQLite. RRF (`agent._rrf_merge`, k=60) merges the two ranked
+  lists rather than blending bm25 scores with cosine distances. *Why:* the
+  two score types are on incomparable scales with no corpus-scale signal (a
+  ~1,500-article library) to calibrate a blend weight against; RRF needs only
+  rank position, so it's scale-free and deterministic without tuning. A
+  network call can't run inside a SQL trigger the way FTS5 sync does, so
+  embeddings are written from Python (`embed_article`, `embed_backfill.py`)
+  and vector search is eventually consistent by design, not
+  trigger-synchronous — an accepted tradeoff, not an oversight (issue #93).
+- **Embedding cost is split by who pays for it.** Embed-on-save/backfill cost
+  lives on `article_embeddings.cost_usd` and is never summed into
+  `ask_questions`; embedding the retrieval QUESTION at ask-time is a
+  user-cap cost and folds into `ask_questions.cost_usd` exactly like the
+  follow-up rewrite's cost already does. *Why:* one is Brian's overhead (he
+  chose to build the archive), the other is spend triggered by a member's own
+  question — conflating them would either overcharge members for the archive
+  existing or undercount what a heavy asker actually costs. A general
+  overhead ledger covering enrichment spend too (currently unrecorded
+  anywhere) is deferred — issue #105.
 - **Citations link to original external URLs only; stored full text is never
   served to members.** The archive's `content` column is an internal
   grounding/search input; the member-facing surface is summary + tags +
@@ -472,11 +538,12 @@ recorded anywhere, it's flagged rather than invented.
   standing constraint: the app does not scale horizontally without moving
   that state.
 - **Best-effort everywhere an AI or email call rides along a user action.**
-  Enrichment, the follow-up rewrite, citation assembly, and every outbound
-  email are wrapped so failure degrades (unenriched row, raw-question
-  retrieval, uncited text, logged failure) instead of blocking the save or
-  the answer. Failures that need a human land in durable tables
-  (`email_failures`) with admin badges — best-effort must not mean silent.
+  Enrichment, the follow-up rewrite, embed-on-save/query-embedding, citation
+  assembly, and every outbound email are wrapped so failure degrades
+  (unenriched row, raw-question retrieval, FTS5-only retrieval, uncited text,
+  logged failure) instead of blocking the save or the answer. Failures that
+  need a human land in durable tables (`email_failures`) with admin badges —
+  best-effort must not mean silent.
 - **Seed once, then the DB owns it.** Tool categories, benchmarks, and game
   tuning are seeded on first boot from source constants but never re-synced
   (except the tools `advisor` flag, deliberately) — admin edits survive every
@@ -508,10 +575,11 @@ webapp/
   thought_leadership_data.py# curated content for /thought-leadership
   static/                   # served assets (headshot etc.) via GET /static/{filename}
 linklib/                    # the core library — everything durable lives here
-  db.py                     # SQLite + FTS5 schema, migrations, Library class — the spine
-  agent.py                  # FP&A Buddy: retrieval, rewrite, Citations API, cost capture
-  pricing.py                # exact per-call USD cost from real token usage
-  pipeline.py               # shared ingest (fetch → upsert → enrich) for CLI and web
+  db.py                     # SQLite + FTS5 + sqlite-vec schema, migrations, Library class — the spine
+  agent.py                  # FP&A Buddy: hybrid retrieval (FTS5+vector, RRF), rewrite, Citations API, cost capture
+  embeddings.py             # OpenAI text-embedding-3-small: document text, content hash, embed calls (#93)
+  pricing.py                # exact per-call USD cost from real token usage (Claude + embeddings)
+  pipeline.py               # shared ingest (fetch → upsert → enrich → embed) for CLI and web
   enrich.py                 # Claude summary + auto-tags per article
   extract.py                # full-text fetch (trafilatura preferred, BS4 fallback)
   archive.py                # parses the one-time Feedly "Download your data" export
@@ -528,8 +596,9 @@ linklib/                    # the core library — everything durable lives here
   backup.py                 # weekly off-site DB snapshot to Google Drive
   authcheck.py              # probes paywall auth cookies so a stale one surfaces
   brand_check.py, voice_review.py  # deterministic BRAND.md palette/voice checks
-scripts/                    # CLI entry points (import, add_link, enrich_backfill, ask,
-                            #   post, seed_tools, backfill_queue, mcp_server, …)
+scripts/                    # CLI entry points (import, add_link, enrich_backfill,
+                            #   embed_backfill, ask, post, seed_tools, backfill_queue,
+                            #   mcp_server, …)
 tests/                      # pytest suite run by CI (.github/workflows/qa.yml)
 preferred_sites.opml        # dual-purpose: web-search allowlist AND /feed subscriptions
 Dockerfile, Procfile, railway.toml  # Railway deploy (uvicorn, /health healthcheck)
@@ -547,10 +616,26 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
   later. Turns recorded before the snapshot existed (`citations_json='[]'`)
   still render their markers as plain text everywhere — those citations were
   never stored and can't be recovered.
-- **Retrieval is FTS5 keyword search only.** `_safe_fts_query` ORs the
-  question's keywords; feed matching is plain keyword overlap. No embeddings,
-  so a question phrased entirely in synonyms can miss relevant saved
-  articles. Semantic/hybrid search is planned.
+- **Library retrieval is hybrid (FTS5 + vector, #93); feed matching is still
+  keyword-only.** `agent.retrieve` merges FTS5 keyword search with
+  `sqlite-vec` semantic search via reciprocal rank fusion, but
+  `retrieve_feed`'s keyword overlap is unchanged — feed items are transient
+  (30-minute cache, no stable IDs) and were deliberately excluded from
+  embedding, so a feed-only question phrased entirely in synonyms can still
+  miss relevant items even though library retrieval no longer has that gap.
+- **Vector search is eventually consistent, not trigger-synchronous like
+  FTS5.** A SQL trigger can't make a network call, so an article is
+  immediately findable via FTS5 on save but only findable via vector search
+  once its embed call has actually completed — inline (embed-on-save,
+  best-effort, can fail silently) or via `scripts/embed_backfill.py`. An
+  article whose embed-on-save call failed (no `OPENAI_API_KEY`, a transient
+  API error) stays FTS5-only until the next backfill run; there's no retry
+  queue or admin visibility into which articles are in that state yet.
+- **Enrichment spend is still unrecorded anywhere.** #93 added a real
+  overhead-cost ledger for embeddings (`article_embeddings.cost_usd`), but
+  `linklib/enrich.py`'s Claude calls — arguably the bigger recurring
+  overhead spend — still capture no token usage or cost at all. A general
+  ledger covering both is deferred to issue #105.
 - **The `/contact` rate limiter can be evaded via the origin.** `_client_ip`
   prefers `CF-Connecting-IP` (set authoritatively by Cloudflare on proxied
   traffic — Cloudflare only *appends* to `X-Forwarded-For`, so XFF's first

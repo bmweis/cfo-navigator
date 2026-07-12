@@ -265,6 +265,14 @@ class Answer:
     rewrite_input_tokens: int = 0
     rewrite_output_tokens: int = 0
     rewrite_cost_usd: float = 0.0
+    # Query-time embedding call for hybrid library retrieval (#93) — zero
+    # when vector search is unavailable or the embedding call failed (both
+    # fall back to FTS5-only silently). This is a USER-CAP cost (embedding
+    # the question), unlike article_embeddings.cost_usd, which is embed-ON-
+    # SAVE overhead and never appears here. embed_cost_usd is already
+    # included in cost_usd above.
+    embed_input_tokens: int = 0
+    embed_cost_usd: float = 0.0
 
 
 # Reuse one client across requests so its httpx connection pool stays warm —
@@ -281,8 +289,63 @@ def _get_client():
     return _client
 
 
-def retrieve(lib: Library, question: str, max_sources: int = 8) -> list[dict]:
-    return lib.search(_safe_fts_query(question), limit=max_sources)
+# Reciprocal Rank Fusion constant (standard default from the TREC literature).
+# Chosen over blending bm25 scores with cosine distances: the two live on
+# incomparable scales with no corpus-scale signal on a ~1,500-article library
+# to calibrate a blend weight against, whereas RRF only uses rank position —
+# scale-free and deterministic. See #93 for the fuller writeup.
+RRF_K = 60
+
+
+def _rrf_merge(ranked_lists: list[list[dict]], limit: int, k: int = RRF_K) -> list[dict]:
+    """Reciprocal Rank Fusion: merge multiple best-first result lists into
+    one by summing 1/(k + rank) per item across lists, then sorting
+    descending by that summed score. An item near the top of either list
+    (or both) outranks one that's merely present.
+
+    Items are deduped by `id`. When an item appears in more than one list,
+    the copy from whichever list it was first seen in wins (search() and
+    vector_search() both return the same _row_to_dict shape, so this is
+    just picking one representation, not a data quality concern).
+    """
+    scores: dict[int, float] = {}
+    items: dict[int, dict] = {}
+    for ranked in ranked_lists:
+        for rank, item in enumerate(ranked):
+            item_id = item.get("id")
+            if item_id is None:
+                continue
+            scores[item_id] = scores.get(item_id, 0.0) + 1.0 / (k + rank + 1)
+            items.setdefault(item_id, item)
+    ordered = sorted(scores, key=lambda i: -scores[i])
+    return [items[i] for i in ordered[:limit]]
+
+
+def retrieve(lib: Library, question: str, max_sources: int = 8
+            ) -> tuple[list[dict], int, float]:
+    """Hybrid library retrieval: FTS5 keyword search plus vector semantic
+    search (sqlite-vec), merged by reciprocal rank fusion. Each path fetches
+    2x max_sources candidates so the merge has room to actually blend rank
+    signal, rather than RRF-ing two already-truncated top-N lists.
+
+    Returns (hits, embed_input_tokens, embed_cost_usd). The token/cost
+    figures are 0 unless a query-embedding call actually ran — vector search
+    being unavailable, or the embedding call failing, both degrade silently
+    to FTS5-only, the same best-effort contract as the follow-up rewrite.
+    """
+    fts_hits = lib.search(_safe_fts_query(question), limit=max_sources * 2)
+
+    if not lib.vector_search_available():
+        return fts_hits[:max_sources], 0, 0.0
+
+    from .embeddings import embed_text
+    embedded = embed_text(question)
+    if embedded is None or not embedded.vectors:
+        return fts_hits[:max_sources], 0, 0.0
+
+    vec_hits = lib.vector_search(embedded.vectors[0], limit=max_sources * 2)
+    merged = _rrf_merge([fts_hits, vec_hits], limit=max_sources)
+    return merged, embedded.input_tokens, embedded.cost_usd
 
 
 def retrieve_feed(question: str, opml_path: str, max_items: int = 5) -> list[dict]:
@@ -542,9 +605,12 @@ def answer_question(
 
     lib_hits: list[dict] = []
     feed_items: list[dict] = []
+    embed_in = 0
+    embed_cost = 0.0
 
     if use_library:
-        lib_hits = retrieve(lib, retrieval_question, max_sources=settings["max_library"])
+        lib_hits, embed_in, embed_cost = retrieve(
+            lib, retrieval_question, max_sources=settings["max_library"])
     if use_feed and opml_path:
         feed_items = retrieve_feed(retrieval_question, opml_path, max_items=settings["max_feed"])
 
@@ -552,13 +618,15 @@ def answer_question(
     if importlib.util.find_spec("anthropic") is None:
         return Answer(text="(Install `anthropic` to enable answers.)",
                       sources=lib_hits, feed_sources=feed_items, model=model,
-                      cost_usd=rw_cost, rewrite_input_tokens=rw_in,
-                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost)
+                      cost_usd=rw_cost + embed_cost, rewrite_input_tokens=rw_in,
+                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
+                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost)
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return Answer(text="(Set ANTHROPIC_API_KEY to enable answers.)",
                       sources=lib_hits, feed_sources=feed_items, model=model,
-                      cost_usd=rw_cost, rewrite_input_tokens=rw_in,
-                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost)
+                      cost_usd=rw_cost + embed_cost, rewrite_input_tokens=rw_in,
+                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
+                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost)
 
     # Retrieved sources ride as Citations-API document blocks (library first,
     # then feed — same order as the returned source lists). sent_docs is the
@@ -614,12 +682,15 @@ def answer_question(
                      citations=citations,
                      model=model, input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r,
-                     cost_usd=cost + rw_cost, rewrite_input_tokens=rw_in,
-                     rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost)
+                     cost_usd=cost + rw_cost + embed_cost, rewrite_input_tokens=rw_in,
+                     rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
+                     embed_input_tokens=embed_in, embed_cost_usd=embed_cost)
     except Exception as e:
-        # The rewrite already spent real money even though the answer call
-        # failed — keep its cost on the Answer so it's still recorded.
+        # The rewrite/embedding calls already spent real money even though
+        # the answer call failed — keep their cost on the Answer so it's
+        # still recorded.
         return Answer(text=f"(Answer call failed: {e})",
                       sources=lib_hits, feed_sources=feed_items, model=model,
-                      cost_usd=rw_cost, rewrite_input_tokens=rw_in,
-                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost)
+                      cost_usd=rw_cost + embed_cost, rewrite_input_tokens=rw_in,
+                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
+                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost)
