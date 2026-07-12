@@ -1,6 +1,7 @@
-"""Voice review — keep written content in Brian's voice.
+"""Voice review — keep written content on the site's voice guide.
 
-Two layers, mirroring the two kinds of rules in ``social.BRIAN_VOICE``:
+Two layers, mirroring the two kinds of rules in the DB-backed voice guide
+(``linklib.agent.VOICE_CORE_DEFAULT`` / ``voice_core`` setting):
 
 * **Mechanical** (`mechanical_findings`) — deterministic, no API. The hard rules
   that can be checked with string matching: banned buzzwords, filler phrases,
@@ -10,7 +11,7 @@ Two layers, mirroring the two kinds of rules in ``social.BRIAN_VOICE``:
   "actually"/"honestly" which are only banned *as filler*) — those judgment calls
   are left to the holistic review.
 * **Holistic** (`review_text`) — calls Claude with the voice guide as the rubric to
-  judge tone ("does this sound like me"). Needs ``anthropic`` + ``ANTHROPIC_API_KEY``;
+  judge tone ("does this sound on-voice"). Needs ``anthropic`` + ``ANTHROPIC_API_KEY``;
   imported lazily so this module stays dependency-free for the test.
 """
 from __future__ import annotations
@@ -19,9 +20,9 @@ import os
 import re
 
 # --- Deterministic rules (single source of truth) ---------------------------
-# Unambiguous buzzwords from BRIAN_VOICE's "Avoid" list. Context-dependent ones
-# ("leverage", "journey", "actually", "honestly", "genuinely") are deliberately
-# NOT here — the holistic review handles those to avoid false positives.
+# Unambiguous buzzwords from the voice guide's "Avoid" list. Context-dependent
+# ones ("leverage", "journey", "actually", "honestly", "genuinely") are
+# deliberately NOT here — the holistic review handles those to avoid false positives.
 BANNED_WORDS = [
     "delve", "robust", "seamless", "synergy",
     "transformative", "game-changer", "game changer",
@@ -60,9 +61,9 @@ def review_text(text: str, voice_prompt: str | None = None, model: str | None = 
     Returns {"mechanical": [...], "review": str, "ok": bool|None}. `ok` is None when
     the LLM step is unavailable (no SDK / no key) — the mechanical findings still apply.
     """
-    from .social import BRIAN_VOICE, DEFAULT_MODEL
+    from .agent import VOICE_CORE_DEFAULT, DEFAULT_MODEL
 
-    voice = (voice_prompt or BRIAN_VOICE).strip()
+    voice = (voice_prompt or VOICE_CORE_DEFAULT).strip()
     model = model or DEFAULT_MODEL
     mechanical = mechanical_findings(text)
 

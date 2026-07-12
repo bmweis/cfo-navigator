@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib import agent
+from linklib.db import Library
 
 
 def test_ground_body_combines_summary_and_archived_text():
@@ -288,8 +289,12 @@ def test_clean_rewrite_output_validation():
     assert clean("x" * (agent.REWRITE_MAX_CHARS + 1)) == ""   # rambled → malformed
 
 
-def test_system_prompt_has_persona_and_no_verbatim_guardrail():
-    s = agent._build_system(use_library=True, use_feed=False, use_web=True).lower()
+def test_system_prompt_has_persona_and_no_verbatim_guardrail(tmp_path):
+    lib = Library(str(tmp_path / "t.db"))
+    try:
+        s = agent._build_system(use_library=True, use_feed=False, use_web=True, lib=lib).lower()
+    finally:
+        lib.close()
     assert "advisor" in s
     assert "verbatim" in s              # the monetization guardrail
     assert "saved library" in s         # library-first grounding
@@ -297,3 +302,41 @@ def test_system_prompt_has_persona_and_no_verbatim_guardrail():
     # Citations moved to the API level — the prompted-marker era is over.
     assert "[n]" not in s
     assert "worth reading" not in s
+
+
+# --- Voice: DB-backed two-field composition (#95) ----------------------------
+
+def test_build_system_uses_code_constant_defaults_when_settings_empty(tmp_path):
+    lib = Library(str(tmp_path / "t.db"))
+    try:
+        s = agent._build_system(use_library=True, use_feed=False, use_web=True, lib=lib)
+    finally:
+        lib.close()
+    assert agent.VOICE_CORE_DEFAULT in s
+    assert agent.VOICE_FPA_BUDDY_DEFAULT in s
+
+
+def test_build_system_prefers_db_settings_over_defaults(tmp_path):
+    lib = Library(str(tmp_path / "t.db"))
+    try:
+        lib.set_setting("voice_core", "CUSTOM CORE VOICE")
+        lib.set_setting("voice_fpa_buddy", "CUSTOM FPA BUDDY VOICE")
+        s = agent._build_system(use_library=True, use_feed=False, use_web=True, lib=lib)
+    finally:
+        lib.close()
+    assert "CUSTOM CORE VOICE" in s
+    assert "CUSTOM FPA BUDDY VOICE" in s
+    assert agent.VOICE_CORE_DEFAULT not in s
+    assert agent.VOICE_FPA_BUDDY_DEFAULT not in s
+
+
+def test_build_system_mixes_one_custom_one_default(tmp_path):
+    lib = Library(str(tmp_path / "t.db"))
+    try:
+        lib.set_setting("voice_core", "CUSTOM CORE VOICE")
+        s = agent._build_system(use_library=True, use_feed=False, use_web=True, lib=lib)
+    finally:
+        lib.close()
+    assert "CUSTOM CORE VOICE" in s
+    assert agent.VOICE_FPA_BUDDY_DEFAULT in s
+    assert agent.VOICE_CORE_DEFAULT not in s

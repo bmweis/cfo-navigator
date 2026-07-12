@@ -10,7 +10,7 @@ diffable, PR-reviewable code change, consistent with how the rest of the
 site's copy is authored.
 
 `description` is a synopsis, 1-2 sentences, in Brian's voice (see
-linklib/social.py:BRIAN_VOICE_CORE). Where it's empty, `needs_synopsis` is
+linklib/agent.py:VOICE_CORE_DEFAULT). Where it's empty, `needs_synopsis` is
 True and the page renders an explicit "Synopsis pending" placeholder instead
 of silently showing nothing or inventing content — items land in that state
 because their source couldn't be read yet (blocked fetch, invite-only event

@@ -4,9 +4,9 @@ Brian's voice has mechanical rules (banned buzzwords, filler, performative phras
 can be checked deterministically, and holistic tone that can't. This test enforces the
 mechanical rules over the site's authored copy in ``webapp/app.py``.
 
-Scanning that file's source is correct: the ``BRIAN_VOICE`` rulebook (which *lists* the
-banned words) lives in ``linklib/social.py`` and is only pulled in at runtime, so the
-source of ``app.py`` contains the site's own prose, not the rulebook. Holistic tone is
+Scanning that file's source is correct: the banned-word rulebook lives natively in
+``linklib/voice_review.py`` and is only pulled in at runtime, so the source of
+``app.py`` contains the site's own prose, not the rulebook. Holistic tone is
 handled on demand by ``linklib.voice_review.review_text`` (Claude), not here.
 """
 import pathlib

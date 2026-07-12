@@ -12,9 +12,9 @@ Two capabilities, both backed by a single SQLite database (`library.db`):
    via Claude.
 
 (A third capability, LinkedIn post drafting, had a web UI at `/admin/social` and `/draft`
-— both were removed. `linklib/social.py` still holds `BRIAN_VOICE` (reused for
-voice-matching elsewhere, e.g. the Q&A chatbot) and `draft_post()` (still backs the
-`scripts/post.py` CLI), but there's no web UI for drafting posts anymore.)
+— both were removed, and the underlying generator (`linklib/social.py`, `scripts/post.py`)
+was removed entirely in #95 (superseded by Brian's `write-like-brian` skill used directly
+in Claude). There's no LinkedIn/social generation surface anywhere in the app anymore.)
 
 The site is live at **bmweis.com** (custom domain on Railway, July 2026): a
 public-facing bio/thought-leadership section and a login-gated private section for
@@ -29,9 +29,9 @@ linklib/           # core library (the only thing that matters long-term)
   extract.py       # best-effort full-text fetch (trafilatura preferred, BS4 fallback)
   enrich.py        # Claude API: generates summary + auto-tags for each article
   pipeline.py      # shared ingest used by CLI and web app; also embed-on-save (embed_article)
-  agent.py         # FP&A Buddy Q&A: hybrid library retrieval (FTS5 + vector, RRF-merged) + web search, cited answer
+  agent.py         # FP&A Buddy Q&A: hybrid library retrieval (FTS5 + vector, RRF-merged) + web
+                   #   search, cited answer; also holds the voice_core/voice_fpa_buddy defaults
   embeddings.py    # OpenAI text-embedding-3-small: document-text builder, content hashing, embed calls
-  social.py        # LinkedIn post generator in Brian's voice (self-contained)
   sources.py       # parses preferred_sites.opml → domain allowlist for web search
   feed.py          # RSS/Atom reader over the OPML list: concurrent fetch, 30-min cache
   models.py        # curated Claude model registry, reconciled with the live Models API
@@ -60,7 +60,6 @@ scripts/           # CLI entry points
   seed_tools.py       # seed/refresh the CFO Toolbox vendor list (TOOLS is also
                       #   imported live by webapp/app.py)
   ask.py              # FP&A Buddy from the terminal
-  post.py             # draft a LinkedIn post from the terminal
   voice_review.py     # check a file/stdin against the voice standards
   mcp_server.py       # stdio MCP server wrapping GET /api/search for Claude Desktop/Code
 

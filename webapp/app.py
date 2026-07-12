@@ -8038,7 +8038,7 @@ _ADMIN_GROUPS = [
     ]),
     ("Brand & voice", "How the site looks and sounds.", [
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
-        ("/admin/voice",         "Verbal identity",     "Your writing voice guide, and an on-demand check for whether new copy sounds like you."),
+        ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
         ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy — changes go live immediately, no redeploy."),
         ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email — warm intro, welcome, password reset, and submission confirmations — changes go live immediately, no redeploy."),
     ]),
@@ -11488,57 +11488,83 @@ def admin_brand_avatar_remove(request: Request):
 
 @app.get("/admin/voice", response_class=HTMLResponse)
 def admin_voice_page(request: Request):
-    """Verbal identity: the editable voice guide Claude drafts in, plus an
-    on-demand check for whether a piece of copy sounds like Brian. Split out
-    of /admin/brand (which stays the visual/color system) since the two are
-    edited and read independently."""
+    """Verbal identity: the two DB-backed voice fields FP&A Buddy generation
+    and the reviewer both draw from live (voice_core, voice_fpa_buddy), plus
+    an on-demand check for whether a piece of copy or an FP&A Buddy answer is
+    on-voice. Split out of /admin/brand (which stays the visual/color system)
+    since the two are edited and read independently."""
     if not _is_authed(request):
         return _login_redirect(request)
 
+    from linklib.agent import VOICE_CORE_DEFAULT, VOICE_FPA_BUDDY_DEFAULT
+
     lib = _lib()
     try:
-        custom_voice = lib.get_setting("voice_prompt")
+        custom_core = lib.get_setting("voice_core")
+        custom_fpa_buddy = lib.get_setting("voice_fpa_buddy")
     finally:
         lib.close()
-    from linklib.social import BRIAN_VOICE
-    current_voice = custom_voice or BRIAN_VOICE
-    is_customized = bool(custom_voice)
-    if is_customized:
-        voice_badge = ('<span id="voice-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
-                       'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
-    else:
-        voice_badge = ('<span id="voice-badge" style="font-size:12px;color:var(--muted);'
-                       'margin-left:10px;vertical-align:middle;">Built-in default</span>')
-    reset_btn = (
-        '<button id="reset-btn" onclick="resetVoice()" class="btn btn-ghost" '
-        'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
-        f'{"" if is_customized else "display:none;"}">Reset to default</button>'
-    )
 
     mono = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
             "font:13px/1.6 ui-monospace,monospace;background:var(--bg);resize:vertical;")
 
+    def _voice_field(field_id, title, blurb, custom_value, default_value, rows):
+        current = custom_value or default_value
+        is_customized = bool(custom_value)
+        if is_customized:
+            badge = (f'<span id="{field_id}-badge" style="font-size:12px;font-weight:600;background:#d1fae5;'
+                      'color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Customized</span>')
+        else:
+            badge = (f'<span id="{field_id}-badge" style="font-size:12px;color:var(--muted);'
+                      'margin-left:10px;vertical-align:middle;">Built-in default</span>')
+        reset_btn = (
+            f'<button id="{field_id}-reset-btn" onclick="resetVoice(\'{field_id}\')" class="btn btn-ghost" '
+            'style="font-size:13px;color:#b91c1c;border-color:#fca5a5;'
+            f'{"" if is_customized else "display:none;"}">Reset to default</button>'
+        )
+        return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">
+<span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">{title}</span>
+{badge}</div>
+<p style="color:var(--muted);margin:0 0 14px;font-size:14px;">{blurb}</p>
+<textarea id="{field_id}-prompt" rows="{rows}" style="{mono}">{_esc(current)}</textarea>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+<button id="{field_id}-save-btn" onclick="saveVoice('{field_id}')" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+{reset_btn}
+<span id="{field_id}-status" style="font-size:13px;color:var(--muted);"></span></div>
+<details style="margin-top:14px;">
+<summary style="cursor:pointer;font-size:13px;color:var(--muted);">Default voice guide (used when the field above is empty)</summary>
+<pre style="white-space:pre-wrap;font:12px/1.6 ui-monospace,monospace;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:10px;color:var(--muted);">{_esc(default_value)}</pre>
+</details>
+</div>"""
+
+    core_block = _voice_field(
+        "voice-core", "Voice core",
+        "Shared mechanics and tone &mdash; em-dashes, sentence case, banned words, lead with the point. Used on its own as the &ldquo;General / site copy&rdquo; rubric, and as the base every other voice field builds on.",
+        custom_core, VOICE_CORE_DEFAULT, 14)
+    fpa_buddy_block = _voice_field(
+        "voice-fpa", "FP&amp;A Buddy voice",
+        "Appended after the voice core for FP&amp;A Buddy specifically &mdash; third-person register, cite-or-name-the-gap, no personal metaphors or LinkedIn-shape devices.",
+        custom_fpa_buddy, VOICE_FPA_BUDDY_DEFAULT, 10)
+
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin/brand" style="font-size:13px;color:var(--muted);">&larr; Brand standards</a></p>
 <h1>Verbal identity</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Your writing voice &mdash; the guide Claude drafts from, and an on-demand check for whether new copy sounds like you.</p>
+<p style="color:var(--muted);margin:4px 0 26px;">The voice FP&amp;A Buddy answers in, and your site's tone &mdash; live, editable here, no redeploy.</p>
 
-<div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">
-<span style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">Voice guide</span>
-{voice_badge}</div>
-<p style="color:var(--muted);margin:0 0 14px;font-size:14px;">The guide Claude uses to draft in your voice, and the rubric the voice check holds new writing to.</p>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<textarea id="voice-prompt" rows="16" style="{mono}">{_esc(current_voice)}</textarea>
-<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
-<button id="voice-save-btn" onclick="saveVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Save voice</button>
-{reset_btn}
-<span id="voice-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+{core_block}
+{fpa_buddy_block}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 6px;">Paste any draft or page copy — including an FP&amp;A Buddy answer you want to spot-check.</p>
 <p style="font-size:13px;color:var(--muted);margin:0 0 6px;">Mechanical rules (banned words, filler, performative phrases) flag instantly. Review adds Claude&rsquo;s read on tone.</p>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">This is manual and on-demand only — FP&amp;A Buddy never calls it automatically, so answering a question never costs more than the one API call.</p>
+<label style="font-size:13px;color:var(--muted);display:block;margin:0 0 10px;">Rubric
+<select id="vr-rubric" style="margin-left:8px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);">
+<option value="general">General / site copy</option>
+<option value="fpa_buddy">FP&amp;A Buddy answer</option>
+</select></label>
 <textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice — a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>
@@ -11548,18 +11574,23 @@ def admin_voice_page(request: Request):
 </div>
 
 <script>
-async function saveVoice() {{
-  var prompt = document.getElementById('voice-prompt').value;
-  var btn = document.getElementById('voice-save-btn');
-  var status = document.getElementById('voice-status');
+var VOICE_ENDPOINTS = {{'voice-core': '/admin/voice/core', 'voice-fpa': '/admin/voice/fpa-buddy'}};
+var VOICE_KEYS = {{'voice-core': 'voice_core', 'voice-fpa': 'voice_fpa_buddy'}};
+
+async function saveVoice(fieldId) {{
+  var prompt = document.getElementById(fieldId + '-prompt').value;
+  var btn = document.getElementById(fieldId + '-save-btn');
+  var status = document.getElementById(fieldId + '-status');
   btn.disabled = true; btn.textContent = 'Saving…';
   try {{
-    var r = await fetch('/admin/voice', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{voice_prompt: prompt.trim()}})}});
+    var body = {{}};
+    body[VOICE_KEYS[fieldId]] = prompt.trim();
+    var r = await fetch(VOICE_ENDPOINTS[fieldId], {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(body)}});
     if (!r.ok) throw new Error();
     var d = await r.json();
     status.textContent = 'Saved.'; status.style.color = '#065f46';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
-    var badge = document.getElementById('voice-badge'), resetBtn = document.getElementById('reset-btn');
+    var badge = document.getElementById(fieldId + '-badge'), resetBtn = document.getElementById(fieldId + '-reset-btn');
     if (d.custom) {{
       badge.textContent = 'Customized';
       badge.style.cssText = 'font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;';
@@ -11571,13 +11602,15 @@ async function saveVoice() {{
     }}
   }} catch(e) {{
     status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
-  }} finally {{ btn.disabled = false; btn.textContent = 'Save voice'; }}
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
 }}
 
-async function resetVoice() {{
-  if (!confirm('Reset to the built-in default voice prompt? Your edits will be lost.')) return;
+async function resetVoice(fieldId) {{
+  if (!confirm('Reset to the built-in default? Your edits will be lost.')) return;
   try {{
-    var r = await fetch('/admin/voice', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{voice_prompt: ''}})}});
+    var body = {{}};
+    body[VOICE_KEYS[fieldId]] = '';
+    var r = await fetch(VOICE_ENDPOINTS[fieldId], {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(body)}});
     if (!r.ok) throw new Error();
     window.location.reload();
   }} catch(e) {{ alert('Reset failed — try again.'); }}
@@ -11586,11 +11619,12 @@ async function resetVoice() {{
 async function reviewVoice() {{
   var text = document.getElementById('vr-input').value.trim();
   if (!text) {{ document.getElementById('vr-input').focus(); return; }}
+  var rubric = document.getElementById('vr-rubric').value;
   var btn = document.getElementById('vr-btn'), box = document.getElementById('vr-result');
   btn.disabled = true; btn.textContent = 'Reviewing…';
   box.style.display = 'block'; box.innerHTML = '<em>Checking…</em>';
   try {{
-    var r = await fetch('/admin/voice/review', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{text: text}})}});
+    var r = await fetch('/admin/voice/review', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{text: text, rubric: rubric}})}});
     var d = await r.json();
     var mech = d.mechanical || [];
     var mechHtml = mech.length
@@ -11606,16 +11640,31 @@ async function reviewVoice() {{
     return HTMLResponse(_page("Verbal identity — Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/voice")
-async def admin_voice_save(request: Request):
-    """Save (or reset) the custom voice prompt."""
+@app.post("/admin/voice/core")
+async def admin_voice_save_core(request: Request):
+    """Save (or reset, when blank) the voice_core setting."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
-    prompt = (payload.get("voice_prompt") or "").strip()
+    prompt = (payload.get("voice_core") or "").strip()
     lib = _lib()
     try:
-        lib.set_setting("voice_prompt", prompt)
+        lib.set_setting("voice_core", prompt)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "custom": bool(prompt)})
+
+
+@app.post("/admin/voice/fpa-buddy")
+async def admin_voice_save_fpa_buddy(request: Request):
+    """Save (or reset, when blank) the voice_fpa_buddy setting."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    prompt = (payload.get("voice_fpa_buddy") or "").strip()
+    lib = _lib()
+    try:
+        lib.set_setting("voice_fpa_buddy", prompt)
     finally:
         lib.close()
     return JSONResponse({"ok": True, "custom": bool(prompt)})
@@ -11623,20 +11672,27 @@ async def admin_voice_save(request: Request):
 
 @app.post("/admin/voice/review")
 async def admin_voice_review(request: Request):
-    """Review pasted content against the voice guide (mechanical lint + Claude tone read)."""
+    """Review pasted content against a voice rubric (mechanical lint + Claude
+    tone read). `rubric` picks which guide, both composed live from the same
+    settings FP&A Buddy generation uses: "general" (default) is voice_core
+    alone; "fpa_buddy" is voice_core + voice_fpa_buddy — see issue #95."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
     text = (payload.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
+    rubric = payload.get("rubric") or "general"
+    from linklib.agent import VOICE_CORE_DEFAULT, VOICE_FPA_BUDDY_DEFAULT
     from linklib.voice_review import review_text
     lib = _lib()
     try:
-        custom_voice = lib.get_setting("voice_prompt")
+        voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
+        voice_fpa_buddy = lib.get_setting("voice_fpa_buddy") or VOICE_FPA_BUDDY_DEFAULT
     finally:
         lib.close()
-    return JSONResponse(review_text(text, voice_prompt=custom_voice or None))
+    voice_prompt = f"{voice_core}\n\n{voice_fpa_buddy}" if rubric == "fpa_buddy" else voice_core
+    return JSONResponse(review_text(text, voice_prompt=voice_prompt))
 
 
 @app.get("/admin/copy", response_class=HTMLResponse)
