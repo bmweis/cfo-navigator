@@ -11460,6 +11460,11 @@ def admin_voice_page(request: Request):
 <p style="font-size:13px;color:var(--muted);margin:0 0 6px;">Paste any draft or page copy — including an FP&amp;A Buddy answer you want to spot-check.</p>
 <p style="font-size:13px;color:var(--muted);margin:0 0 6px;">Mechanical rules (banned words, filler, performative phrases) flag instantly. Review adds Claude&rsquo;s read on tone.</p>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">This is manual and on-demand only — FP&amp;A Buddy never calls it automatically, so answering a question never costs more than the one API call.</p>
+<label style="font-size:13px;color:var(--muted);display:block;margin:0 0 6px;">Rubric
+<select id="vr-rubric" style="margin-left:8px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);">
+<option value="general">General / LinkedIn voice</option>
+<option value="fpa_buddy">FP&amp;A Buddy answer</option>
+</select></label>
 <textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice — a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>
@@ -11507,11 +11512,12 @@ async function resetVoice() {{
 async function reviewVoice() {{
   var text = document.getElementById('vr-input').value.trim();
   if (!text) {{ document.getElementById('vr-input').focus(); return; }}
+  var rubric = document.getElementById('vr-rubric').value;
   var btn = document.getElementById('vr-btn'), box = document.getElementById('vr-result');
   btn.disabled = true; btn.textContent = 'Reviewing…';
   box.style.display = 'block'; box.innerHTML = '<em>Checking…</em>';
   try {{
-    var r = await fetch('/admin/voice/review', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{text: text}})}});
+    var r = await fetch('/admin/voice/review', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{text: text, rubric: rubric}})}});
     var d = await r.json();
     var mech = d.mechanical || [];
     var mechHtml = mech.length
@@ -11544,20 +11550,29 @@ async def admin_voice_save(request: Request):
 
 @app.post("/admin/voice/review")
 async def admin_voice_review(request: Request):
-    """Review pasted content against the voice guide (mechanical lint + Claude tone read)."""
+    """Review pasted content against a voice guide (mechanical lint + Claude tone
+    read). `rubric` picks which guide: "general" (default) is Brian's own
+    writing voice — the DB-customized voice_prompt if set, else BRIAN_VOICE;
+    "fpa_buddy" is FP&A Buddy's own analyst voice (linklib.agent.FPA_BUDDY_VOICE),
+    which the general rubric doesn't fit — see issue #95."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
     text = (payload.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
+    rubric = payload.get("rubric") or "general"
     from linklib.voice_review import review_text
-    lib = _lib()
-    try:
-        custom_voice = lib.get_setting("voice_prompt")
-    finally:
-        lib.close()
-    return JSONResponse(review_text(text, voice_prompt=custom_voice or None))
+    if rubric == "fpa_buddy":
+        from linklib.agent import FPA_BUDDY_VOICE
+        voice_prompt = FPA_BUDDY_VOICE
+    else:
+        lib = _lib()
+        try:
+            voice_prompt = lib.get_setting("voice_prompt") or None
+        finally:
+            lib.close()
+    return JSONResponse(review_text(text, voice_prompt=voice_prompt))
 
 
 @app.get("/admin/copy", response_class=HTMLResponse)

@@ -289,6 +289,13 @@ sequenceDiagram
 
 Details worth knowing:
 
+- **The system prompt's voice block is `FPA_BUDDY_VOICE` (`linklib/agent.py`),
+  not Brian's personal writing voice.** It's a dedicated analyst-voice spec —
+  confident, source-grounded, third-person — distinct from `BRIAN_VOICE_CORE`
+  (`linklib/social.py`, used for LinkedIn/social drafting). The two used to be
+  the same constant until issue #95: first-person-Brian phrasing (asserted
+  personal experience, personal-interest metaphors) actively conflicted with
+  the citation-grounding rules below it in the same prompt.
 - **Two, sometimes three, API calls can happen per turn.** On follow-ups, a
   cheap Haiku call first rewrites e.g. *"what about at Series A?"* into a
   standalone search question so retrieval sees the conversation's subject.
@@ -560,6 +567,16 @@ recorded anywhere, it's flagged rather than invented.
   hashing, constant-time comparisons — no `itsdangerous`, no
   SessionMiddleware. *Why:* recorded in `CLAUDE.md`: one fewer dependency for
   a small, well-understood surface.
+- **FP&A Buddy has its own voice, separate from Brian's personal writing
+  voice.** `FPA_BUDDY_VOICE` (`linklib/agent.py`) replaced the appended
+  `BRIAN_VOICE_CORE` in the Ask system prompt. *Why:* first-person Brian
+  phrasing — asserted personal experience, personal-interest metaphors —
+  actively conflicts with the prompt's citation-grounding rules (issue #95);
+  an assistant citing someone else's saved articles can't also claim to have
+  personally done the thing it's citing. Kept as a hardcoded constant rather
+  than a new admin-editable field (like `/admin/voice`'s `voice_prompt`
+  setting): the voice is new and unproven, so it stays reviewable via PR
+  while it's dialed in — an editable field can follow once it's settled.
 - **The game is client-authoritative.** `/play` is a DOM+CSS game; scores are
   client-reported and only bounds-checked. *Why:* recorded in the schema
   comment — server-side simulation isn't worth it for a leaderboard among
@@ -631,6 +648,14 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
   article whose embed-on-save call failed (no `OPENAI_API_KEY`, a transient
   API error) stays FTS5-only until the next backfill run; there's no retry
   queue or admin visibility into which articles are in that state yet.
+- **`/admin/voice`'s custom `voice_prompt` setting only ever reaches the
+  on-demand reviewer's general/LinkedIn rubric.** It does not feed
+  `draft_post()` or FP&A Buddy generation — both always use their respective
+  hardcoded constants (`BRIAN_VOICE`, `FPA_BUDDY_VOICE`) regardless of what's
+  saved there. Customizing the field on that page changes what the reviewer
+  grades other text against; it does not change what either generator
+  actually writes. Pre-existing gap, confirmed while investigating #95;
+  fixing the generation wiring is out of scope for that issue.
 - **Enrichment spend is still unrecorded anywhere.** #93 added a real
   overhead-cost ledger for embeddings (`article_embeddings.cost_usd`), but
   `linklib/enrich.py`'s Claude calls — arguably the bigger recurring
