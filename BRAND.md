@@ -170,6 +170,12 @@ That's the entire nautical vocabulary. **No anchors, ropes, boats, waves, knots,
 
 - **Buttons** — primary = navy fill; secondary = ghost (navy outline, transparent). Radius 10px.
   Hover deepens to navy-deep. *Color is never a button background.*
+- **Inline row-action buttons** — a third, smaller button style for compact per-row actions inside
+  a list or card (e.g. "Quick edit" / "Full edit" / "Delete" / "Generate" on a Toolbox card, "Edit
+  tags" on the reader). `--muted` text, `--line` border (not navy), radius 6px, ~12px font,
+  `padding:3px 10px`. Hover fills `--navy-wash` (`--accent-light`) with `--ink` text. Quieter than
+  the primary/secondary pair by design — these sit inside dense rows where a full navy or
+  navy-outline button would compete with the row's own content, not label the row's primary action.
 - **Inputs** — white surface, `--line` border, radius 10px. Focus = navy border + soft seafoam
   ring `0 0 0 3px rgba(163,229,212,.55)`.
 - **Tags / badges** — seafoam fill, navy text, radius 6px, 600 weight, ~11px.
@@ -178,7 +184,8 @@ That's the entire nautical vocabulary. **No anchors, ropes, boats, waves, knots,
 - **Links** — navy; optional seafoam underline for emphasis in editorial copy.
 
 ### Radius scale
-`10px` buttons & inputs · `12–16px` cards & panels · `6px` tags/chips · `999px` filter pills.
+`10px` buttons & inputs · `12–16px` cards & panels · `6px` tags/chips & inline row-action buttons ·
+`999px` filter pills.
 
 ### Layout
 Reading measure **780px** (820px for the calculator, 860px for the Toolbox grid).
