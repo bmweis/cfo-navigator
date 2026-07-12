@@ -7985,7 +7985,7 @@ def ask_history(request: Request):
     rows_html = "".join(_card(c) for c in _group_conversations(rows)) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
-         '<a href="/ask">Ask FP&amp;A Buddy a question &rarr;</a></div>')
+         '<a href="/ask">Ask a question &rarr;</a></div>')
 
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
@@ -8078,7 +8078,7 @@ _ADMIN_GROUPS = [
     ("System", "Accounts, health, and plumbing.", [
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
-        ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost — Brian's operating cost, separate from any user's Ask cap."),
+        ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost — Brian's operating cost, separate from any user's FP&A Buddy cap."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on — with gratitude."),
     ]),
 ]
@@ -10013,7 +10013,7 @@ def admin_overhead_spend(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Overhead spend</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Brian&rsquo;s operating cost for running the archive &mdash; embedding and enrichment API spend, broken out by source and by month.</p>
-<p style="color:var(--muted);margin:0 0 20px;">This is never summed into any user&rsquo;s FP&amp;A Buddy cost cap &mdash; see <a href="/admin/ask-report">the Ask report</a> for that separate, user-facing spend.</p>
+<p style="color:var(--muted);margin:0 0 20px;">This is never summed into any user&rsquo;s FP&amp;A Buddy cost cap &mdash; see <a href="/admin/ask-report">the FP&amp;A Buddy report</a> for that separate, user-facing spend.</p>
 
 <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px;">
   <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
