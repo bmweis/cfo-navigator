@@ -7186,12 +7186,11 @@ def ask_page(request: Request, q: str = ""):
 
     body = f"""<div class="page">
 <span class="ask-eyebrow">CFO Navigator</span>
-<h1 style="margin-bottom:6px;">Ask FP&amp;A Buddy</h1>
+<h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
 <p style="color:var(--muted);margin:0 0 28px;">A digital library of finance content, curated over years, searched instantly. Skip the digging, get your answer.</p>
 {usage_html}
 
 <div class="ask-value">
-  <span class="ask-value-kicker">Ask FP&amp;A Buddy</span>
   <ul class="ask-value-list ask-value-list-static">{ask_value_bullets}</ul>
   <details class="ask-value-details">
     <summary>What can FP&amp;A Buddy do?</summary>
@@ -7237,7 +7236,6 @@ def ask_page(request: Request, q: str = ""):
 .ask-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:0;}}
 
 .ask-value{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:16px;}}
-.ask-value-kicker{{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}}
 .ask-value-list{{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}}
 .ask-value-list li{{font-size:13px;line-height:1.5;color:var(--ink-soft);}}
 .ask-value-list strong{{color:var(--ink);}}
