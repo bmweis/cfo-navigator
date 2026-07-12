@@ -204,12 +204,6 @@ TOOLS = [
         "categories": ["Spend Management"],
     },
     {
-        "name": "Vendr",
-        "url": "https://www.vendr.com",
-        "description": "SaaS purchasing platform combining procurement software with expert negotiation services. Manages vendor discovery, renewal workflows, and price benchmarking to reduce software spend.",
-        "categories": ["Procurement", "Spend Management"],
-    },
-    {
         "name": "Tipalti",
         "url": "https://www.tipalti.com",
         "description": "Global payables automation platform. Handles supplier onboarding, invoice processing, multi-currency payments, tax compliance (W-9/W-8/1099), and AP reconciliation at scale.",
@@ -540,12 +534,6 @@ TOOLS = [
         "categories": ["Financial Close"],
     },
     {
-        "name": "Silverfin",
-        "url": "https://www.silverfin.com",
-        "description": "Cloud-based financial reporting and close platform for accountants and finance teams. Automates workpapers, reconciliations, and management reporting—with strong multi-entity consolidation support across European jurisdictions.",
-        "categories": ["Financial Close"],
-    },
-    {
         "name": "Gappify",
         "url": "https://gappify.com",
         "description": "Account reconciliation and close automation platform. Automates accruals, reconciliations, and close task management with full audit trails. Competes with FloQast and BlackLine for controller-owned workflows.",
@@ -748,12 +736,6 @@ TOOLS = [
         "name": "Mesh Payments",
         "url": "https://www.meshpayments.com",
         "description": "Global corporate payment and spend management platform. Provides virtual and physical cards, AP automation, and cross-border payment capabilities with multi-currency support for companies operating internationally.",
-        "categories": ["Spend Management"],
-    },
-    {
-        "name": "PayEm",
-        "url": "https://www.payem.co",
-        "description": "Global spend and procurement management platform. Handles purchase requests, multi-currency vendor payments, and corporate cards in a single workflow—built for finance teams managing international operations.",
         "categories": ["Spend Management"],
     },
     # Cap Table Management additions
