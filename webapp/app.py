@@ -4546,20 +4546,20 @@ def tools_directory(request: Request):
 
 <div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
-<div id="tool-grid" style="display:grid;gap:14px;">
+<div id="tool-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
 </div>
 
 <div id="tool-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
 
 <p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
 
-<div style="margin-top:40px;padding-top:28px;border-top:1px solid var(--line);">
+<div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
   <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these companies.</p>
   <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
     {'<a href="/tools/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit a tool →</a>'}</p>
 </div>
 
-<div style="margin-top:48px;padding-top:40px;border-top:1px solid var(--line);">
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
     <h2 style="font-size:20px;font-weight:700;margin:0 0 6px;">Benchmarking Resources</h2>
     {'<a href="/admin/tools/benchmarks" style="font-size:14px;font-weight:500;">Manage →</a>' if authed else ''}
