@@ -438,7 +438,7 @@ CREATE INDEX IF NOT EXISTS idx_contact_audit_created ON contact_audit_log(create
 -- user's monthly Ask cap (see ask_questions.embed_cost_usd for the
 -- user-cap-side embedding cost, i.e. embedding the QUESTION at retrieval
 -- time, which is a different call). A general ledger covering enrichment
--- spend too is deferred — see issue #105.
+-- spend too now lives in enrichment_cost below (#105).
 CREATE TABLE IF NOT EXISTS article_embeddings (
     article_id   INTEGER PRIMARY KEY,
     content_hash TEXT NOT NULL DEFAULT '',
@@ -447,6 +447,30 @@ CREATE TABLE IF NOT EXISTS article_embeddings (
     cost_usd     REAL NOT NULL DEFAULT 0,
     embedded_at  TEXT NOT NULL DEFAULT ''
 );
+
+-- Overhead cost ledger for linklib.enrich.enrich() calls (#105 — scoped down
+-- from a general ledger once article_embeddings above turned out to be the
+-- only real precedent: enrichment needs output_tokens, which embeddings
+-- never has, so the two ledgers stay separate rather than sharing a schema).
+-- Append-only: unlike article_embeddings, this is NOT upserted by article_id
+-- — an article can be enriched more than once (backfill force-reruns, a
+-- rules-version bump), and each real call's cost should stay in history
+-- rather than overwrite the previous call's row. article_id is NULL for
+-- enrichment that happens before a candidate is saved (linklib.queue's
+-- pre-save enrichment path) — the API call still cost real money even if
+-- the candidate is later dismissed rather than promoted into articles.
+-- cost_usd here is Brian's overhead spend, same rule as article_embeddings:
+-- never summed into ask_questions, never counts toward a user's Ask cap.
+CREATE TABLE IF NOT EXISTS enrichment_cost (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id    INTEGER,
+    model         TEXT NOT NULL DEFAULT '',
+    input_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd      REAL NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_enrichment_cost_article ON enrichment_cost(article_id);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -900,6 +924,75 @@ class Library:
         )
         self.conn.commit()
         return True
+
+    def record_enrichment_cost(self, article_id: Optional[int], model: str,
+                               input_tokens: int = 0, output_tokens: int = 0,
+                               cost_usd: float = 0.0) -> None:
+        """Append one enrichment API call's real cost to the overhead ledger
+        (#105). A plain INSERT, not an upsert like upsert_article_embedding —
+        enrichment_cost keeps every call's history rather than the latest
+        call only. `article_id=None` records enrichment that happened before
+        a candidate was saved (linklib.queue's pre-save path) — the spend
+        still counts even if the candidate is later dismissed."""
+        self.conn.execute(
+            """INSERT INTO enrichment_cost
+               (article_id, model, input_tokens, output_tokens, cost_usd, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (article_id, model, input_tokens, output_tokens, cost_usd, _now()),
+        )
+        self.conn.commit()
+
+    def enrichment_cost_total(self, since: Optional[str] = None) -> float:
+        """Total enrichment overhead spend, optionally since an ISO date/datetime
+        prefix. Mirrors ask_cost_total's shape for the user-cap ledger."""
+        clause = "WHERE created_at>=?" if since else ""
+        params = [since] if since else []
+        row = self.conn.execute(
+            f"SELECT COALESCE(SUM(cost_usd),0) FROM enrichment_cost {clause}", params
+        ).fetchone()
+        return float(row[0])
+
+    def overhead_cost_breakdown(self) -> list[dict]:
+        """One row per overhead-cost source (embeddings, enrichment) for the
+        admin overhead-spend view: count of ledger rows, total cost all-time,
+        and total cost this calendar month. Never touches ask_questions —
+        overhead is deliberately reported separate from the user-cap ledger."""
+        month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
+        sources = [
+            ("Embeddings", "article_embeddings", "embedded_at"),
+            ("Enrichment", "enrichment_cost", "created_at"),
+        ]
+        out = []
+        for label, table, ts_col in sources:
+            row = self.conn.execute(
+                f"SELECT COUNT(*), COALESCE(SUM(cost_usd),0) FROM {table}"
+            ).fetchone()
+            month_row = self.conn.execute(
+                f"SELECT COALESCE(SUM(cost_usd),0) FROM {table} WHERE {ts_col}>=?",
+                (month_start,),
+            ).fetchone()
+            out.append({
+                "source": label, "count": row[0], "total_cost": float(row[1]),
+                "this_month_cost": float(month_row[0]),
+            })
+        return out
+
+    def overhead_cost_by_month(self, months: int = 12) -> list[dict]:
+        """Combined embeddings + enrichment overhead spend grouped by
+        calendar month, most recent first, for the admin overhead-spend
+        view's by-month breakdown table."""
+        totals: dict[str, float] = {}
+        for table, ts_col in (("article_embeddings", "embedded_at"),
+                              ("enrichment_cost", "created_at")):
+            rows = self.conn.execute(
+                f"""SELECT strftime('%Y-%m', {ts_col}) AS ym, SUM(cost_usd)
+                    FROM {table} WHERE {ts_col} != '' GROUP BY ym"""
+            ).fetchall()
+            for ym, cost in rows:
+                if ym:
+                    totals[ym] = totals.get(ym, 0.0) + float(cost)
+        return [{"month": ym, "cost_usd": totals[ym]}
+                for ym in sorted(totals, reverse=True)[:months]]
 
     def get_article(self, article_id: int) -> Optional[dict]:
         """One article by id, or None. A plain indexed lookup — used by the

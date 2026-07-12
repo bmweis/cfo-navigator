@@ -64,6 +64,10 @@ def ingest_url(
             lib.apply_enrichment(article_id, result.summary, result.tags,
                                  model=result.model, rules=result.rules_version,
                                  in_scope=result.in_scope, scope_reason=result.scope_reason)
+            lib.record_enrichment_cost(article_id, result.model,
+                                       input_tokens=result.input_tokens,
+                                       output_tokens=result.output_tokens,
+                                       cost_usd=result.cost_usd)
 
     embed_article(lib, article_id)
 
@@ -153,6 +157,10 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
             lib.apply_enrichment(row["id"], result.summary, result.tags,
                                  model=result.model, rules=result.rules_version,
                                  in_scope=result.in_scope, scope_reason=result.scope_reason)
+            lib.record_enrichment_cost(row["id"], result.model,
+                                       input_tokens=result.input_tokens,
+                                       output_tokens=result.output_tokens,
+                                       cost_usd=result.cost_usd)
             done += 1
         progress(done, len(rows), row["title"])
     return done

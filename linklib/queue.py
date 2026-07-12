@@ -59,6 +59,12 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
 
     `item` is a feed/sitemap dict with at least `url`; `title`, `source`,
     `summary`, `published_at` are used when present.
+
+    The returned dict also carries `input_tokens`/`output_tokens`/`cost_usd`
+    (issue #105) — real ledger fields `Library.add_to_queue` doesn't accept,
+    so callers must pop them before `**cand`-ing into it, then persist them
+    via `Library.record_enrichment_cost(article_id=None, ...)` since this
+    candidate has no `articles.id` yet (it may never get one, if dismissed).
     """
     url = item["url"]
     title = item.get("title", "") or ""
@@ -71,6 +77,9 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
     enrich_rules = ""
     in_scope = True
     page_published = ""
+    input_tokens = 0
+    output_tokens = 0
+    cost_usd = 0.0
 
     if enrich:
         try:
@@ -98,6 +107,9 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
             enrich_model = result.model
             enrich_rules = result.rules_version
             in_scope = result.in_scope
+            input_tokens = result.input_tokens
+            output_tokens = result.output_tokens
+            cost_usd = result.cost_usd
 
     if not tags:
         tags = suggest_tags_heuristic(title, summary, source, vocab)
@@ -112,6 +124,7 @@ def _enrich_candidate(item: dict, vocab: list[str], *, enrich: bool,
         origin=item.get("origin", "feed"), enriched=enriched,
         enrich_model=enrich_model, enrich_rules=enrich_rules,
         in_scope=in_scope,
+        input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd,
     )
 
 
@@ -186,6 +199,12 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
     for i, it in enumerate(new_items):
         cand = _enrich_candidate(it, lib.known_tags(), enrich=enrich, model=model,
                                  tag_guide=guide)
+        in_tok, out_tok, cost = (cand.pop("input_tokens"), cand.pop("output_tokens"),
+                                 cand.pop("cost_usd"))
+        if cost:
+            lib.record_enrichment_cost(None, cand.get("enrich_model", ""),
+                                       input_tokens=in_tok, output_tokens=out_tok,
+                                       cost_usd=cost)
         if not cand.pop("in_scope", True):
             skipped_scope += 1       # off-audience — don't even propose it
             progress(i + 1, len(new_items), it.get("title", ""))
@@ -403,6 +422,12 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
                         "origin": f"backfill:{f.name}"}
                 cand = _enrich_candidate(item, lib.known_tags(), enrich=enrich, model=model,
                                          tag_guide=guide)
+                in_tok, out_tok, cost = (cand.pop("input_tokens"), cand.pop("output_tokens"),
+                                         cand.pop("cost_usd"))
+                if cost:
+                    lib.record_enrichment_cost(None, cand.get("enrich_model", ""),
+                                               input_tokens=in_tok, output_tokens=out_tok,
+                                               cost_usd=cost)
                 if not cand.pop("in_scope", True):
                     stat["skipped_scope"] += 1   # off-audience — don't propose it
                     progress(f.name, i + 1, len(candidates))
