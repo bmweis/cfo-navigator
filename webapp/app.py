@@ -7173,11 +7173,32 @@ def ask_page(request: Request, q: str = ""):
 
     pre_q = _esc(q)
 
+    # Rendered twice below: an always-open list for wider screens, and inside
+    # a collapsed-by-default <details> for narrow screens (CSS media query
+    # picks which one is visible — no JS). Built once here so the copy
+    # itself only lives in one place in the source.
+    ask_value_bullets = (
+        '<li><strong>Cited, not guessed.</strong> Every answer traces to a source you can click and read. Verified citations, not self-reported ones.</li>'
+        '<li><strong>Remembers the thread.</strong> Ask a follow-up and it knows what you meant. Come back tomorrow and the conversation&rsquo;s still there.</li>'
+        '<li><strong>Finds by meaning, not just keywords.</strong> Semantic search pairs with keyword search (hybrid retrieval), so it surfaces the right article even when your wording doesn&rsquo;t match the source&rsquo;s.</li>'
+        '<li><strong>Gets sharper.</strong> Every rating feeds a real eval set that improves retrieval and answer quality over time.</li>'
+    )
+
     body = f"""<div class="page">
 <span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">Ask FP&amp;A Buddy</h1>
 <p style="color:var(--muted);margin:0 0 28px;">Query your saved archive, RSS feed, and trusted web sources &mdash; tune it before you ask.</p>
 {usage_html}
+
+<div class="ask-value">
+  <span class="ask-value-kicker">Ask FP&amp;A Buddy</span>
+  <p class="ask-value-sub">A trusted analyst over this library&mdash;not a generic chatbot.</p>
+  <ul class="ask-value-list ask-value-list-static">{ask_value_bullets}</ul>
+  <details class="ask-value-details">
+    <summary>What can FP&amp;A Buddy do?</summary>
+    <ul class="ask-value-list">{ask_value_bullets}</ul>
+  </details>
+</div>
 
 <div class="ask-card">
   <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
@@ -7215,6 +7236,22 @@ def ask_page(request: Request, q: str = ""):
 <style>
 .ask-eyebrow{{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}}
 .ask-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:0;}}
+
+.ask-value{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:16px;}}
+.ask-value-kicker{{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;}}
+.ask-value-sub{{font:600 14.5px var(--font-head);color:var(--ink);margin:0 0 12px;}}
+.ask-value-list{{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}}
+.ask-value-list li{{font-size:13px;line-height:1.5;color:var(--ink-soft);}}
+.ask-value-list strong{{color:var(--ink);}}
+.ask-value-details{{display:none;}}
+.ask-value-details summary{{cursor:pointer;font:600 13px var(--font-body);color:var(--navy);}}
+.ask-value-details[open] summary{{margin-bottom:10px;}}
+@media (max-width:640px){{
+  .ask-value{{padding:14px 16px;}}
+  .ask-value-list-static{{display:none;}}
+  .ask-value-details{{display:block;}}
+  .ask-value-details .ask-value-list{{grid-template-columns:1fr;gap:8px;}}
+}}
 .ask-section{{margin:20px 0;}}
 .ask-section-label{{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;}}
 
