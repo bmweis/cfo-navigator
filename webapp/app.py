@@ -4996,10 +4996,10 @@ async function generateDescription(name, url, descId, statusId) {
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
     document.getElementById(descId).value = d.description;
     status.textContent = d.low_confidence
-      ? 'Drafted — could not fetch the page, verify facts before saving.'
-      : 'Drafted — review before saving.';
+      ? 'Drafted. Could not fetch the page, so verify facts before saving.'
+      : 'Drafted. Review before saving.';
   } catch (e) {
-    status.textContent = e.message || 'Generation failed — write the description by hand.';
+    status.textContent = e.message || 'Generation failed. Write the description by hand.';
   }
 }
 """
@@ -5380,13 +5380,10 @@ def admin_tools(request: Request):
 </div>
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
-  Editing <code>scripts/seed_tools.py</code> and deploying keeps existing tools&rsquo; <strong>name</strong>
-  and <strong>description</strong> in sync automatically &mdash; the app re-checks the seed list against
-  the database on every startup (every Railway deploy), updating those two fields wherever they&rsquo;ve
-  changed. No manual re-seed or script run needed. <strong>Categories, Advisor, Featured, and Warm Intro
-  fields are never touched by that sync</strong> &mdash; they&rsquo;re owned by the database once a tool
-  exists, so edit them here (Full edit / Quick edit on <a href="/tools">/tools</a>) and they&rsquo;ll
-  survive future deploys untouched.
+  Editing <code>scripts/seed_tools.py</code> updates a tool&rsquo;s <strong>name</strong> and
+  <strong>description</strong> here automatically on the next deploy. No manual re-seed needed.
+  <strong>Categories, Advisor, Featured, and Warm Intro are database-only</strong>: edit them here
+  (Full edit / Quick edit on <a href="/tools">/tools</a>), and this sync will never touch them.
 </p>
 </div>"""
     return HTMLResponse(_page("Tools—CFO Toolbox Admin", "", body, authed=True))
@@ -6072,8 +6069,8 @@ async def admin_tools_generate_description(request: Request):
     draft = generate_tool_description(name, url)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Description generation is unavailable right now "
-                                                     "(missing ANTHROPIC_API_KEY, or the request failed) "
-                                                     "— write the description by hand."}, status_code=503)
+                                                     "(missing ANTHROPIC_API_KEY, or the request failed). "
+                                                     "Write the description by hand."}, status_code=503)
 
     lib = _lib()
     try:
