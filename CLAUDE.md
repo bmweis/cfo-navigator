@@ -298,9 +298,11 @@ mechanism clause onto an already-complete sentence, especially with a nested
 parenthetical) is a cadence judgment call, not a string match.
 
 **So: whenever you write new site or admin copy that uses an em dash, flag it
-to Brian explicitly before it ships** — quote the sentence and call out the em
-dash — rather than deciding yourself that it's fine. He'll tell you to keep it
-or give you an editorial rewrite. This applies to draft copy you're presenting
+to Brian explicitly before it ships**, rather than deciding yourself that it's
+fine. Quote the full sentence the em dash appears in, plus the sentence(s)
+immediately before and after it, so he has enough context to sign off without
+having to go dig up the surrounding copy himself. He'll tell you to keep it or
+give you an editorial rewrite. This applies to draft copy you're presenting
 for review same as anything you're about to commit.
 
 ## Deployment
