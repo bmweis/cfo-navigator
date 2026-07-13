@@ -249,10 +249,12 @@ async def _no_store_admin_pages(request: Request, call_next):
 @app.on_event("startup")
 def _seed_toolbox():
     """Seed tools + the tool_categories vocabulary on first run, and keep the
-    advisor flag in sync with the seed list. categories_json is NOT re-synced
-    from the seed list for tools that already exist — once seeded, categories
-    are owned by the DB and edited at /admin/tools/categories, so this must
-    not clobber changes made there on every restart/deploy."""
+    advisor flag and name/description in sync with the seed list on every
+    restart/deploy. categories_json is NOT re-synced from the seed
+    list for tools that already exist — once seeded, categories are owned by
+    the DB and edited at /admin/tools/categories, so this must not clobber
+    changes made there. Same for promoted/vendor/warm-intro fields, which are
+    admin-site-only and never touched here."""
     from scripts.seed_tools import TOOLS
     lib = _lib()
     try:
@@ -266,7 +268,7 @@ def _seed_toolbox():
         lib.seed_game_rank_settings()
         for t in TOOLS:
             row = lib.conn.execute(
-                "SELECT id, advisor, categories_json FROM tools WHERE url = ?", (t["url"],)
+                "SELECT id, name, description, advisor, categories_json FROM tools WHERE url = ?", (t["url"],)
             ).fetchone()
             if not row:
                 lib.add_tool(t["name"], t["description"], t["url"], t["categories"],
@@ -279,6 +281,8 @@ def _seed_toolbox():
                         (new_adv, row["id"]),
                     )
                     lib.conn.commit()
+                if row["name"] != t["name"] or row["description"] != t["description"]:
+                    lib.update_tool_content(row["id"], t["name"], t["description"])
     finally:
         lib.close()
 
