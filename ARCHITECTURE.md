@@ -117,9 +117,9 @@ Cost figures are computed from **real API token usage** at call time
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `tools` | The vendor directory on `/tools`. `scripts/seed_tools.py` is re-runnable, not one-shot: it adds any tool missing by URL and syncs `name`/`description` on existing rows when the script's copy changes (#113), via `Library.update_tool_content` — a narrow update that never touches `categories`/`advisor`/`promoted`/vendor/warm-intro fields, so admin edits made directly on the live site survive a re-run. | `slug` (unique), `approved` (reader submissions wait for approval), `advisor`, `promoted`, `warm_intro_enabled` + `vendor_name`/`vendor_email` (the intro button needs both) |
+| `tools` | The vendor directory on `/tools/software`. `scripts/seed_tools.py` is re-runnable, not one-shot: it adds any tool missing by URL and syncs `name`/`description` on existing rows when the script's copy changes (#113), via `Library.update_tool_content` — a narrow update that never touches `categories`/`advisor`/`promoted`/vendor/warm-intro fields, so admin edits made directly on the live site survive a re-run. | `slug` (unique), `approved` (reader submissions wait for approval), `advisor`, `promoted`, `warm_intro_enabled` + `vendor_name`/`vendor_email` (the intro button needs both) |
 | `tool_categories` | Controlled vocabulary of filter pills — can exist empty, unlike article tags which are purely usage-derived. | `name` (unique), `sort_order` |
-| `benchmarks` | The Benchmarking Resources section on `/tools`, managed at `/admin/tools/benchmarks`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
+| `benchmarks` | The Benchmarking page at `/tools/benchmarks`, managed at `/admin/tools/benchmarks`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
 
 `POST /admin/tools/generate-description` (admin-only) drafts a description
@@ -458,7 +458,8 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
 - **Three surfaces**:
   - *Public* — no auth: `/`, `/thought-leadership`,
     `/thought-leadership/growth-engine-ratio`, `/thought-leadership/ai-hackathon-playbook`,
-    `/thought-leadership/netsuite-mcp`, `/tools`, `/contact`, `/play`, `/login`,
+    `/thought-leadership/netsuite-mcp`, `/tools`, `/tools/software`, `/tools/benchmarks`,
+    `/tools/communities`, `/contact`, `/play`, `/login`,
     `/static/*`, `/health`. (The old flat `/growth-engine-ratio`, `/finops-ai-hackathon`,
     `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
   - *Member* (`_is_member` — any valid session): `/library`, `/library/archive`,
