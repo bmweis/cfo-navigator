@@ -94,11 +94,11 @@ def test_feed_page_read_later_view_only_shows_own_saves(env):
     c1.post("/feed/read-later", data={"url": "https://ex.com/a", "title": "Alpha Piece"})
     c2.post("/feed/read-later", data={"url": "https://ex.com/b", "title": "Beta Piece"})
 
-    html1 = c1.get("/feed?rl=1").text
+    html1 = c1.get("/library/feed?rl=1").text
     assert "Alpha Piece" in html1
     assert "Beta Piece" not in html1
 
-    html2 = c2.get("/feed?rl=1").text
+    html2 = c2.get("/library/feed?rl=1").text
     assert "Beta Piece" in html2
     assert "Alpha Piece" not in html2
 
@@ -118,7 +118,7 @@ def test_admin_only_reminder_shown_to_admin_not_members(env):
     get forgotten before the UI gate is flipped."""
     appmod, _ = env
     admin = _login(appmod, "admin", "adminpass")   # break-glass host-password admin
-    assert "admin-only for now" in admin.get("/feed").text
+    assert "admin-only for now" in admin.get("/library/feed").text
 
     member = _login(appmod, "member1", "supersecret")
-    assert "admin-only for now" not in member.get("/feed").text
+    assert "admin-only for now" not in member.get("/library/feed").text

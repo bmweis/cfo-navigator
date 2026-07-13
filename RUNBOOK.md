@@ -208,7 +208,7 @@ Work down this list; each step splits the problem in half.
    Dockerfile — nothing about the app is Railway-specific.
 
 **After any recovery:** hit `/admin/checks` (mirrors CI) and click through
-`/library`, `/ask`, `/feed` once. Then check `/admin` for email-failure
+`/library`, `/library/ask`, `/library/feed` once. Then check `/admin` for email-failure
 badges — outbound email during the outage will have landed in
 `email_failures` rather than vanishing.
 

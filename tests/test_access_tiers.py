@@ -58,7 +58,16 @@ PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           "/play", "/play/leaderboard"]
 # Submitting a tool / a piece, or requesting a warm intro, is account-only (spam
 # control) even though the directory and home page are public.
-MEMBER = ["/library", "/archive", "/feed", "/ask", "/tools/submit", "/library/submit"]
+MEMBER = ["/library", "/library/archive", "/library/feed", "/library/ask",
+          "/tools/submit", "/library/submit"]
+# Old flat URLs 301-redirect to their nested equivalents, unconditionally
+# (even signed-out — the redirect itself carries no gated content).
+OLD_TO_NEW = {
+    "/archive": "/library/archive",
+    "/feed": "/library/feed",
+    "/ask": "/library/ask",
+    "/questions": "/library/past-questions",
+}
 
 
 def test_public_pages_open_to_anonymous(env):
@@ -80,6 +89,14 @@ def test_member_can_reach_member_pages(env):
     for path in MEMBER:
         r = c.get(path, follow_redirects=False)
         assert r.status_code == 200, f"{path} -> {r.status_code}"
+
+
+def test_old_library_urls_redirect_to_nested_paths(env):
+    c = _client(env)
+    for old, new in OLD_TO_NEW.items():
+        r = c.get(old, follow_redirects=False)
+        assert r.status_code == 301, f"{old} -> {r.status_code}"
+        assert r.headers["location"] == new, f"{old} -> {r.headers['location']}"
 
 
 def test_member_blocked_from_admin_and_reader(env):

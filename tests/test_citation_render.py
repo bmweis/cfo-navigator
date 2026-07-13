@@ -145,7 +145,7 @@ def _login(appmod, username, password):
 
 @pytest.mark.parametrize("path,who", [
     ("/ask/history", "member1"),
-    ("/questions", "member1"),
+    ("/library/past-questions", "member1"),
     ("/admin/ask-feedback", "admin"),
 ])
 def test_surface_renders_linked_markers_and_source_list(env, path, who):
