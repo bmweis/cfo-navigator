@@ -4,9 +4,9 @@
 Public routes (no auth):
     GET  /                     Bio homepage
     GET  /thought-leadership   Podcasts, writing, interviews
-    GET  /growth-engine-ratio  GER framework + calculator
-    GET  /finops-ai-hackathon  AI hackathon playbook
-    GET  /netsuite-mcp         Claude–NetSuite setup guide
+    GET  /thought-leadership/growth-engine-ratio    GER framework + calculator
+    GET  /thought-leadership/ai-hackathon-playbook  AI hackathon playbook
+    GET  /thought-leadership/netsuite-mcp           Claude–NetSuite setup guide
     GET  /contact              Contact form
     POST /contact              Submit contact form
     GET  /login / POST /login  Password sign-in (sets a signed session cookie)
@@ -716,7 +716,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     if role is None:
         role = "admin" if authed else "guest"
     # "Sail, Don't Row" (/play) is deliberately not in the nav — it's an
-    # easter egg linked only from the bottom of /finops-ai-hackathon.
+    # easter egg linked only from the bottom of /thought-leadership/ai-hackathon-playbook.
     public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
               ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
     # Account-only section — one nav entry ("Library") that opens a hub linking to
@@ -1228,15 +1228,15 @@ def thought_leadership(request: Request):
 
     featured = (
         '<div class="tl-featured">'
-        + fcard("/growth-engine-ratio", "Framework", "var(--coral-deep)",
+        + fcard("/thought-leadership/growth-engine-ratio", "Framework", "var(--coral-deep)",
                 "The Growth Engine Ratio",
                 "A metric for how R&amp;D and GTM investments work together to drive growth—with an interactive calculator.",
                 "Read the framework")
-        + fcard("/finops-ai-hackathon", "Playbook", "var(--seafoam-deep)",
+        + fcard("/thought-leadership/ai-hackathon-playbook", "Playbook", "var(--seafoam-deep)",
                 "Sail, Don&rsquo;t Row",
                 "How to run an AI hackathon with your finance team—the full format, facilitation mechanics, and how to make it stick.",
                 "Read the playbook")
-        + fcard("/netsuite-mcp", "Setup Guide", "var(--navy-light)",
+        + fcard("/thought-leadership/netsuite-mcp", "Setup Guide", "var(--navy-light)",
                 "Connecting Claude to NetSuite",
                 "End-to-end setup for the two-role OAuth architecture—what it is, why it&rsquo;s secure, and how to use it.",
                 "Read the guide")
@@ -1285,9 +1285,18 @@ def thought_leadership(request: Request):
     return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
-@app.get("/growth-engine-ratio", response_class=HTMLResponse)
+@app.get("/growth-engine-ratio")
+def growth_engine_ratio_redirect(request: Request):
+    target = "/thought-leadership/growth-engine-ratio"
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=301)
+
+
+@app.get("/thought-leadership/growth-engine-ratio", response_class=HTMLResponse)
 def growth_engine_ratio(request: Request):
     body = """<div class="page">
+<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
@@ -2003,9 +2012,18 @@ renderTL();
     return HTMLResponse(_page("The Growth Engine Ratio—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
-@app.get("/finops-ai-hackathon", response_class=HTMLResponse)
+@app.get("/finops-ai-hackathon")
+def finops_ai_hackathon_redirect(request: Request):
+    target = "/thought-leadership/ai-hackathon-playbook"
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=301)
+
+
+@app.get("/thought-leadership/ai-hackathon-playbook", response_class=HTMLResponse)
 def finops_ai_hackathon(request: Request):
     body = """<div class="page">
+<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
 <style>
   .fah-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
   .fah-pull p{margin:0;font-size:17px;font-style:italic;line-height:1.55;color:var(--ink);}
@@ -2362,9 +2380,18 @@ def finops_ai_hackathon(request: Request):
     return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
-@app.get("/netsuite-mcp", response_class=HTMLResponse)
+@app.get("/netsuite-mcp")
+def netsuite_mcp_redirect(request: Request):
+    target = "/thought-leadership/netsuite-mcp"
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=301)
+
+
+@app.get("/thought-leadership/netsuite-mcp", response_class=HTMLResponse)
 def netsuite_mcp(request: Request):
     body = """<div class="page">
+<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
 <style>
   .ns-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
   .ns-pull p{margin:0;font-size:16px;font-style:italic;line-height:1.55;color:var(--ink);}

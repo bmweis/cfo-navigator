@@ -244,10 +244,10 @@ def test_play_not_in_site_nav(env):
 
 def test_play_easter_egg_link_on_hackathon_page(env):
     """The only place Sail, Don't Row is linked from is the bottom of the
-    finops-ai-hackathon article — a quiet easter egg for readers who scroll
+    ai-hackathon-playbook article — a quiet easter egg for readers who scroll
     all the way down, not a promoted CTA."""
     _, client = env
-    body = client.get("/finops-ai-hackathon").text
+    body = client.get("/thought-leadership/ai-hackathon-playbook").text
     assert 'href="/play"' in body
     assert "Sail, Don&rsquo;t Row" in body or "Sail, Don't Row" in body
 

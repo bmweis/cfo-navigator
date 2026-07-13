@@ -65,8 +65,9 @@ scripts/           # CLI entry points
 
 webapp/
   app.py           # FastAPI, ~110 routes, all HTML/CSS/JS inline: public site
-                   #   (/, /thought-leadership, /growth-engine-ratio, /tools, /contact,
-                   #   /finops-ai-hackathon, /netsuite-mcp, /play) + private tools
+                   #   (/, /thought-leadership [+ /thought-leadership/growth-engine-ratio,
+                   #   /thought-leadership/ai-hackathon-playbook, /thought-leadership/netsuite-mcp],
+                   #   /tools, /contact, /play) + private tools
                    #   (/library, /library/feed, /read, /library/ask, /save, /api/search, /bookmarklet)
                    #   + auth (/login, /logout) + the /admin back office (~40 pages)
   checks.py        # aggregates the automated checks for /admin/checks (mirrors CI)
@@ -135,8 +136,10 @@ tables, no third-party dependency.
   **If `LINKLIB_SECRET_KEY` is unset, an app restart invalidates all sessions** (you just
   log in again — harmless). Set it on the host to keep sessions sticky across deploys.
 - **Route protection:**
-  - Public (no auth): `/`, `/thought-leadership`, `/growth-engine-ratio`, `/contact`,
-    `/login`, `/logout`, `/static/*`, `/health`.
+  - Public (no auth): `/`, `/thought-leadership`, `/thought-leadership/growth-engine-ratio`,
+    `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp`, `/contact`,
+    `/login`, `/logout`, `/static/*`, `/health`. (The old flat `/growth-engine-ratio`,
+    `/finops-ai-hackathon`, `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
   - Private HTML pages → **redirect to `/login`** when signed out: `/library`,
     `/library/archive`, `/library/feed`, `/library/ask`, `/library/past-questions`,
     `/read`, `/admin/contacts`. (The old flat `/archive`, `/feed`, `/ask`, `/questions`
@@ -214,7 +217,7 @@ python -m scripts.mcp_server
   existing corpus
 - Bookmarklet
 - Public site: bio homepage (`/`), thought leadership (`/thought-leadership`),
-  Growth Engine Ratio page + calculator (`/growth-engine-ratio`), contact (`/contact`)
+  Growth Engine Ratio page + calculator (`/thought-leadership/growth-engine-ratio`), contact (`/contact`)
 - Password login for the private section (`/login` + signed session cookie)
 - CFO Feed RSS reader (`/library/feed`) with category tabs, per-source filter, save-to-library
 - Article reader, Instapaper-style (`/read`)
