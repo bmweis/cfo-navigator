@@ -119,7 +119,7 @@ Cost figures are computed from **real API token usage** at call time
 |---|---|---|
 | `tools` | The vendor directory on `/tools`. `scripts/seed_tools.py` is re-runnable, not one-shot: it adds any tool missing by URL and syncs `name`/`description` on existing rows when the script's copy changes (#113), via `Library.update_tool_content` — a narrow update that never touches `categories`/`advisor`/`promoted`/vendor/warm-intro fields, so admin edits made directly on the live site survive a re-run. | `slug` (unique), `approved` (reader submissions wait for approval), `advisor`, `promoted`, `warm_intro_enabled` + `vendor_name`/`vendor_email` (the intro button needs both) |
 | `tool_categories` | Controlled vocabulary of filter pills — can exist empty, unlike article tags which are purely usage-derived. | `name` (unique), `sort_order` |
-| `benchmarks` | The Benchmarking Resources section on `/tools`. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
+| `benchmarks` | The Benchmarking Resources section on `/tools`, managed at `/admin/tools/benchmarks`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
 
 `POST /admin/tools/generate-description` (admin-only) drafts a description
@@ -595,11 +595,18 @@ recorded anywhere, it's flagged rather than invented.
   logged failure) instead of blocking the save or the answer. Failures that
   need a human land in durable tables (`email_failures`) with admin badges —
   best-effort must not mean silent.
-- **Seed once, then the DB owns it.** Tool categories, benchmarks, and game
-  tuning are seeded on first boot from source constants but never re-synced
-  (except the tools `advisor` flag, deliberately) — admin edits survive every
-  deploy. *Why:* recorded in the seeding docstrings; the admin UI is the
-  editor of record, source constants are just day-one data.
+- **Seed once for some fields, sync forever for others.** Tool categories and
+  game tuning are seeded on first boot from source constants and never
+  re-synced — admin edits survive every deploy, source constants are just
+  day-one data. Tools and benchmarks are different: their `name`/`description`
+  (plus the tools `advisor` flag) re-sync from the source constants
+  (`scripts/seed_tools.py`'s `TOOLS`, `webapp/app.py`'s `_DEFAULT_BENCHMARKS`)
+  on every startup, while every other field (categories, promoted, vendor/
+  warm-intro, coverage, pricing) stays admin-owned and untouched. *Why:*
+  content (name/description) is meant to be maintained in the source list and
+  pushed live by deploying, per #113; everything else is meant to be edited
+  live via the admin UI. Each narrow sync method documents which fields it
+  touches.
 - **Effort tiers instead of a model picker.** `/ask` exposes
   Quick/Standard/Deep; the model behind each tier is an implementation detail
   (`EFFORT_SETTINGS`). *Why:* members shouldn't need model literacy to make a

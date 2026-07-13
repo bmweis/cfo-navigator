@@ -1626,6 +1626,16 @@ class Library:
         )
         self.conn.commit()
 
+    def update_benchmark_content(self, benchmark_id: int, name: str, description: str) -> None:
+        """Narrow update for the startup seed-sync pass: touches only name and
+        description, leaving coverage/pricing untouched so an admin edit made
+        directly on /admin/tools/benchmarks survives a re-sync."""
+        self.conn.execute(
+            "UPDATE benchmarks SET name=?, description=? WHERE id=?",
+            (name.strip(), description.strip(), benchmark_id),
+        )
+        self.conn.commit()
+
     def delete_benchmark(self, benchmark_id: int) -> None:
         self.conn.execute("DELETE FROM benchmarks WHERE id = ?", (benchmark_id,))
         self.conn.commit()

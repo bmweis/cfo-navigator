@@ -119,69 +119,69 @@ _DEFAULT_BENCHMARKS = [
     {
         "name": "ICONIQ Growth",
         "url": "https://iconiqcapital.com/growth/",
-        "description": "ICONIQ's annual State of SaaS report. Top-tier portfolio, so keep that in mind when comparing—but the data and analysis are excellent.",
+        "description": "ICONIQ's annual State of SaaS report. Best for benchmarking against top-tier, well-funded growth-stage companies; the portfolio is elite, so treat it as a ceiling, not a median.",
         "coverage": "Private",
     },
     {
         "name": "ICONIQ Compass",
         "url": "https://compass.iconiqgrowth.com/",
-        "description": "Their interactive benchmarking tool. Lets you slice the data by ARR range, growth rate, and other filters so you're actually comparing against something relevant.",
+        "description": "ICONIQ's interactive companion to the State of SaaS report. Use this over the static report when you want to filter by ARR range and growth rate down to a genuinely comparable peer set.",
         "coverage": "Private",
     },
     {
         "name": "HighAlpha (formerly OpenView)",
         "url": "https://www.highalpha.com/saas-benchmarks",
-        "description": "Took over OpenView's annual SaaS benchmarks report. NRR, GRR, CAC payback, and the usual suspects for private SaaS companies.",
+        "description": "Took over OpenView's annual SaaS benchmarks report: NRR, GRR, CAC payback, and the usual suspects. Best for a broad general read on private SaaS metrics, not a narrow or niche cut of the data.",
         "coverage": "Private",
     },
     {
         "name": "Benchmarkit",
         "url": "https://www.benchmarkit.ai/",
-        "description": "Ray Rike's interactive benchmarking tool. Better segmentation than most—you can control who you're comparing against, which is the whole point.",
+        "description": "Ray Rike's interactive benchmarking tool, with better segmentation than most. Best when you want tight control over your comparison set, benchmarking against companies actually built like yours, not a generic cohort.",
         "coverage": "Private",
     },
     {
         "name": "SaaStr Benchmarking",
         "url": "https://saastr.ai/startup-benchmarking",
-        "description": "Startup benchmarking hub for early-stage SaaS—revenue, growth, and efficiency marks by stage, with Jason Lemkin's take on what 'good' actually looks like.",
+        "description": "Startup benchmarking hub built for early-stage SaaS, with Jason Lemkin's take on what 'good' looks like. Best for founders benchmarking pre-scale; later-stage companies will outgrow it fast.",
         "coverage": "Private",
     },
     {
         "name": "OpexEngine",
         "url": "https://www.opexengine.com/",
-        "description": "Private and public SaaS benchmarks across Rule of 40, unit economics, and operating metrics. One of the more comprehensive data sets out there.",
+        "description": "Covers both private and public SaaS benchmarks across Rule of 40, unit economics, and operating metrics. Best when you want one source spanning both, instead of stitching together separate private and public reports.",
         "coverage": "Both",
         "pricing": "paid",
     },
     {
         "name": "Bessemer Venture Partners",
         "url": "https://www.bvp.com/atlas/state-of-the-cloud",
-        "description": "State of the Cloud and the Good-Better-Best SaaS metrics framework. Widely cited—worth knowing what everyone else is measuring against.",
+        "description": "State of the Cloud and the Good-Better-Best SaaS metrics framework. Best as a shared reference point: it's the framework most other benchmarking sources and investors already measure against.",
         "coverage": "Both",
     },
     {
         "name": "Clouded Judgement (Jamin Ball)",
         "url": "https://cloudedjudgement.substack.com/",
-        "description": "Jamin Ball's weekly newsletter on public SaaS benchmarks and market trends. One of the best signals for tracking what's actually happening across cloud.",
+        "description": "Jamin Ball's weekly newsletter on public SaaS benchmarks and market trends. Best for staying current on public market sentiment week to week, not for a one-time lookup.",
         "coverage": "Public",
     },
     {
         "name": "Meritech Analytics",
         "url": "https://meritechanalytics.com/",
-        "description": "Interactive public cloud benchmarks—growth, efficiency, and valuation multiples, updated in real time. Great for understanding where public comps are trading.",
+        "description": "Interactive public cloud benchmarks updated in real time: growth, efficiency, and valuation multiples. Best when you need today's actual trading multiples, not a static periodic report.",
         "coverage": "Public",
     },
     {
         "name": "PublicComps",
         "url": "https://www.publiccomps.com/",
-        "description": "Public SaaS comps and operating metrics. Good filters by category and scale.",
+        "description": "Public SaaS comps and operating metrics with filters by category and scale. Best for a quick, self-serve public comps lookup, not a narrative writeup.",
         "coverage": "Public",
         "pricing": "freemium",
     },
     {
         "name": "Baremetrics Open Benchmarks",
         "url": "https://baremetrics.com/open-benchmarks",
-        "description": "Real, anonymized metrics—MRR growth, churn, ARPU, LTV—aggregated from thousands of Baremetrics-tracked subscription businesses. Skews SMB, but it's actual data, not a survey.",
+        "description": "Real, anonymized metrics (MRR growth, churn, ARPU, LTV) aggregated from thousands of Baremetrics-tracked subscription businesses, not a survey. Best for SMB-stage benchmarks specifically; it skews smaller than most other sources here.",
         "coverage": "Private",
     },
 ]
@@ -248,23 +248,30 @@ async def _no_store_admin_pages(request: Request, call_next):
 
 @app.on_event("startup")
 def _seed_toolbox():
-    """Seed tools + the tool_categories vocabulary on first run, and keep the
-    advisor flag and name/description in sync with the seed list on every
-    restart/deploy. categories_json is NOT re-synced from the seed
-    list for tools that already exist — once seeded, categories are owned by
-    the DB and edited at /admin/tools/categories, so this must not clobber
-    changes made there. Same for promoted/vendor/warm-intro fields, which are
-    admin-site-only and never touched here."""
+    """Seed tools, benchmarks, and the tool_categories vocabulary on first run,
+    and keep the advisor flag and name/description (for tools) or name/
+    description (for benchmarks) in sync with their seed lists on every
+    restart/deploy. categories_json is NOT re-synced from the seed list for
+    tools that already exist — once seeded, categories are owned by the DB
+    and edited at /admin/tools/categories, so this must not clobber changes
+    made there. Same for promoted/vendor/warm-intro fields (tools) and
+    coverage/pricing (benchmarks), which are admin-site-only and never
+    touched here."""
     from scripts.seed_tools import TOOLS
     lib = _lib()
     try:
         if not lib.list_tool_categories():
             for name in _DEFAULT_TOOL_CATEGORIES:
                 lib.add_tool_category(name, _DEFAULT_CATEGORY_DESCRIPTIONS.get(name, ""))
-        if not lib.list_benchmarks():
-            for b in _DEFAULT_BENCHMARKS:
+        for b in _DEFAULT_BENCHMARKS:
+            brow = lib.conn.execute(
+                "SELECT id, name, description FROM benchmarks WHERE url = ?", (b["url"],)
+            ).fetchone()
+            if not brow:
                 lib.add_benchmark(b["name"], b["url"], b["description"],
                                   b.get("coverage", "Private"), b.get("pricing", "free"))
+            elif brow["name"] != b["name"] or brow["description"] != b["description"]:
+                lib.update_benchmark_content(brow["id"], b["name"], b["description"])
         lib.seed_game_rank_settings()
         for t in TOOLS:
             row = lib.conn.execute(
@@ -5652,6 +5659,13 @@ def admin_benchmarks(request: Request):
 <tbody>{rows}</tbody>
 </table>
 </div>
+
+<p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
+  Editing <code>_DEFAULT_BENCHMARKS</code> in <code>webapp/app.py</code> updates a resource&rsquo;s
+  <strong>name</strong> and <strong>description</strong> here automatically on the next deploy.
+  No manual re-seed needed. <strong>Coverage and Pricing are database-only</strong>: edit them here
+  (Edit above), and this sync will never touch them.
+</p>
 </div>"""
     return HTMLResponse(_page("Benchmarking resources—CFO Toolbox Admin", "", body, authed=True))
 
