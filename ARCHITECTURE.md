@@ -259,7 +259,7 @@ follow-up cap and the money guards are fully server-side.
 
 ```mermaid
 sequenceDiagram
-    participant B as Browser (/ask page)
+    participant B as Browser (/library/ask page)
     participant W as webapp/app.py
     participant DB as SQLite (Library)
     participant AG as linklib/agent.py
@@ -356,7 +356,7 @@ Details worth knowing:
   includes the query-embedding cost — but never embed-ON-SAVE cost, which
   lives on a separate table entirely (`article_embeddings`, Brian's overhead,
   never a user's).
-- **Conversations resume across reloads and devices.** The `/ask` page offers
+- **Conversations resume across reloads and devices.** The `/library/ask` page offers
   a "Recent conversations" list on load (`GET /ask/conversations` — the
   user's last 5, first question as the label) and loads a full transcript
   from `GET /ask/conversations/{id}`: per-turn question, answer, the
@@ -381,7 +381,7 @@ Details worth knowing:
   (`ask_questions.citations_json`) as a snapshot — feed and web sources are
   transient, so the stored title/url is the record and is never re-resolved;
   library entries additionally carry their `articles.id`. Under each answer on
-  `/ask`, quiet 👍/⚠️/👎 controls post to `POST /ask/feedback` (same auth as
+  `/library/ask`, quiet 👍/⚠️/👎 controls post to `POST /ask/feedback` (same auth as
   `/ask`; you can only rate turns from your own conversations), upserting one
   `ask_feedback` row per turn per user — a changed rating updates in place. The
   `/admin/ask-feedback` page triages ratings with the question, answer, and
@@ -389,8 +389,8 @@ Details worth knowing:
   The snapshot shape is deliberately per-turn — it's what the resume flow
   replays to re-render past turns' `[n]` markers.
 - **Server-rendered surfaces share one citation renderer.** Every
-  server-rendered view of a stored answer — `/ask/history`, the `/questions`
-  community view, and `/admin/ask-feedback` — calls
+  server-rendered view of a stored answer — `/ask/history`, the
+  `/library/past-questions` view, and `/admin/ask-feedback` — calls
   `_render_cited_answer(answer, citations_json, truncate=?)` in
   `webapp/app.py`: it linkifies each `[n]` marker against that turn's own
   snapshot (same marker contract as the client — 1–2 digits, not followed by
@@ -399,7 +399,7 @@ Details worth knowing:
   numbered source list. Legacy rows (backfilled `citations_json='[]'`)
   degrade to plain literal markers with no source list — never fabricated
   links, never an error. **Any future server-rendered answer surface must
-  call this helper**, and it is deliberately *not* unified with `/ask`'s
+  call this helper**, and it is deliberately *not* unified with `/library/ask`'s
   client-side JS rendering (`mdInline`/`srcListHtml` over live API
   responses) — that's a different layer; keep them separate. The admin CSV
   export deliberately keeps raw literal `[n]` markers (no HTML in a CSV) and
@@ -458,9 +458,11 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
 - **Three surfaces**:
   - *Public* — no auth: `/`, `/thought-leadership`, `/growth-engine-ratio`,
     `/tools`, `/contact`, `/play`, `/login`, `/static/*`, `/health`.
-  - *Member* (`_is_member` — any valid session): `/library`, `/archive`,
-    `/feed`, `/read`, `/ask`, `/questions`, `/library/submit`. HTML pages
-    redirect to `/login`; APIs return 401.
+  - *Member* (`_is_member` — any valid session): `/library`, `/library/archive`,
+    `/library/feed`, `/read`, `/library/ask`, `/library/past-questions`,
+    `/library/submit`. HTML pages redirect to `/login`; APIs return 401. (The
+    old flat `/archive`, `/feed`, `/ask`, `/questions` URLs 301-redirect to
+    their nested equivalents.)
   - *Admin* (`_is_authed` — session with `role=admin`): everything under
     `/admin/*`, plus admin-only actions on shared pages.
 - **Token auth in parallel**: `POST /save` is token-only
@@ -549,8 +551,8 @@ recorded anywhere, it's flagged rather than invented.
   `/admin/library` states the rule explicitly. *Why:* resale-safety — the
   archive is built from other people's articles, so the product is the
   curation and synthesis, never republication.
-- **Server-held conversation history, reconstructed per request.** The `/ask`
-  client sends only `conversation_id` + the new question; the server rebuilds
+- **Server-held conversation history, reconstructed per request.** The
+  `/library/ask` client sends only `conversation_id` + the new question; the server rebuilds
   the transcript from the conversation's `ask_questions` rows (which were
   already recording every turn) and enforces the follow-up cap by counting
   those rows. There is still no session store or in-memory conversation
@@ -607,7 +609,7 @@ recorded anywhere, it's flagged rather than invented.
   pushed live by deploying, per #113; everything else is meant to be edited
   live via the admin UI. Each narrow sync method documents which fields it
   touches.
-- **Effort tiers instead of a model picker.** `/ask` exposes
+- **Effort tiers instead of a model picker.** `/library/ask` exposes
   Quick/Standard/Deep; the model behind each tier is an implementation detail
   (`EFFORT_SETTINGS`). *Why:* members shouldn't need model literacy to make a
   cost/quality choice (PR #84 collapsed the previous model+effort UI).
@@ -677,7 +679,7 @@ scripts/                    # CLI entry points (import, add_link, enrich_backfil
                             #   embed_backfill, ask, seed_tools, backfill_queue,
                             #   mcp_server, …)
 tests/                      # pytest suite run by CI (.github/workflows/qa.yml)
-preferred_sites.opml        # dual-purpose: web-search allowlist AND /feed subscriptions
+preferred_sites.opml        # dual-purpose: web-search allowlist AND /library/feed subscriptions
 Dockerfile, Procfile, railway.toml  # Railway deploy (uvicorn, /health healthcheck)
 CLAUDE.md, BRAND.md         # working agreements: context for agents, design system
 ```
@@ -685,7 +687,7 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
 ## 6. Known limitations / deferred work
 
 - **Citation markers in the admin CSV export are literal text, on purpose.**
-  The server-rendered surfaces (`/ask/history`, `/questions`,
+  The server-rendered surfaces (`/ask/history`, `/library/past-questions`,
   `/admin/ask-feedback`) now linkify `[n]` markers via the shared
   `_render_cited_answer` helper (see §3), but the CSV keeps raw `[1]`/`[2]`
   markers deliberately — no link conversion in a CSV — with a trailing

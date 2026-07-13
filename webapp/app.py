@@ -17,8 +17,11 @@ Public routes (no auth):
     GET  /health               Health check
 
 Private routes (require login cookie; API routes also accept a token):
-    GET  /library              Search + browse saved articles
-    GET  /feed                 RSS reader over the OPML subscription list
+    GET  /library              Library hub: Reading Room + FP&A Buddy sections
+    GET  /library/archive      Search + browse saved articles
+    GET  /library/feed         RSS reader over the OPML subscription list
+    GET  /library/ask          FP&A Buddy Q&A page
+    GET  /library/past-questions  Browse other members' past FP&A Buddy questions
     GET  /read                 Article reader (Instapaper-style clean view)
     POST /ask                  FP&A Q&A
     POST /post                 Draft a LinkedIn post
@@ -6150,7 +6153,15 @@ async def tools_interest(tool_id: int, request: Request):
 OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferred_sites.opml"))
 
 
-@app.get("/feed", response_class=HTMLResponse)
+@app.get("/feed")
+def feed_redirect(request: Request):
+    target = "/library/feed"
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=301)
+
+
+@app.get("/library/feed", response_class=HTMLResponse)
 def feed_reader(request: Request, cat: str = "", rl: str = ""):
     if not _is_member(request):
         return _login_redirect(request)
@@ -6193,14 +6204,14 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
 
     # Tab bar
     if rl:
-        tabs = '<a href="/feed" class="ftab" style="margin-right:4px;">&larr; Back</a>'
+        tabs = '<a href="/library/feed" class="ftab" style="margin-right:4px;">&larr; Back</a>'
     else:
-        tabs = '<a href="/feed" class="ftab{active}">All</a>'.format(
+        tabs = '<a href="/library/feed" class="ftab{active}">All</a>'.format(
             active=' ftab-on' if not cat else '',
         )
         for c in categories:
             active = ' ftab-on' if c == cat else ''
-            tabs += f'<a href="/feed?cat={quote(c)}" class="ftab{active}">{_esc(c)}</a>'
+            tabs += f'<a href="/library/feed?cat={quote(c)}" class="ftab{active}">{_esc(c)}</a>'
 
     def _fmt_date(iso: str) -> str:
         if not iso:
@@ -6320,7 +6331,7 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
 </div>"""
 
     rl_count = f' ({len(rl_items_raw)})' if rl_items_raw else ''
-    rl_link = '/feed' if rl else '/feed?rl=1'
+    rl_link = '/library/feed' if rl else '/library/feed?rl=1'
     rl_extra = ' style="background:var(--accent);color:#fff;border-color:var(--accent);"' if rl else ''
 
     feed_css = """<style>
@@ -6510,7 +6521,10 @@ function saveCustomFilters() {{
         '</div>' if is_admin else ''
     )
 
-    body = f"""<div style="border-bottom:1px solid var(--line);padding:12px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
+    body = f"""<div style="max-width:860px;margin:0 auto;padding:12px 24px 0;">
+  <a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a>
+</div>
+<div style="border-bottom:1px solid var(--line);padding:12px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
   <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
     <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1;">{tabs}</div>
     <a href="{rl_link}" class="filter-btn"{rl_extra}>&#128204; Read Later{rl_count}</a>
@@ -6628,7 +6642,7 @@ def reader(request: Request, url: str = "", id: int = 0):
     from linklib.extract import fetch_page
     import html as html_mod
 
-    back_url = "/archive"
+    back_url = "/library/archive"
     back_label = "Archive"
 
     # Try to load from DB first (may have cached content)
@@ -6650,7 +6664,7 @@ def reader(request: Request, url: str = "", id: int = 0):
         body_html = """<div class="reader-empty">
   <h2>Read any article</h2>
   <p style="margin-bottom:1.5rem;">Paste a URL below, or open an article from your
-    <a href="/archive">Archive</a> or <a href="/feed">Feed</a>.</p>
+    <a href="/library/archive">Archive</a> or <a href="/library/feed">Feed</a>.</p>
   <form method="get" action="/read"
         style="display:flex;gap:8px;max-width:500px;margin:0 auto;">
     <input type="url" name="url" placeholder="https://…" autofocus required
@@ -6799,7 +6813,15 @@ async function deleteArticle(id) {{
     ))
 
 
-@app.get("/archive", response_class=HTMLResponse)
+@app.get("/archive")
+def archive_redirect(request: Request):
+    target = "/library/archive"
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=301)
+
+
+@app.get("/library/archive", response_class=HTMLResponse)
 def archive(request: Request, q: str = ""):
     if not _is_member(request):
         return _login_redirect(request)
@@ -6852,16 +6874,17 @@ def archive(request: Request, q: str = ""):
     cards = "".join(_card(r) for r in results) or '<p style="color:var(--muted);">No matches.</p>'
 
     tagbar = "".join(
-        f'<a href="/archive?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
+        f'<a href="/library/archive?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
     )
 
     page_body = f"""<div style="border-bottom:1px solid var(--line);padding:20px 24px;">
   <div style="max-width:780px;margin:0 auto;">
+    <p style="margin:0 0 10px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
     <div style="font-size:13px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:16px;">
       <span>{total} saved</span>
       <a href="/read" style="color:var(--accent);font-weight:500;">&#9654; Article Reader</a>
     </div>
-    <form method="get" action="/archive" style="display:flex;gap:8px;max-width:680px;">
+    <form method="get" action="/library/archive" style="display:flex;gap:8px;max-width:680px;">
       <input type="search" name="q" value="{_esc(q)}" placeholder="Search titles, summaries, notes, tags…"
              style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font-size:15px;background:#fff;" autofocus>
       <button type="submit" class="btn">Search</button>
@@ -6873,7 +6896,7 @@ def archive(request: Request, q: str = ""):
       <button class="btn" onclick="ask()">Ask</button>
     </div>
     <div style="margin-top:6px;max-width:680px;text-align:right;">
-      <a id="more-opts-link" href="/ask" style="font-size:12px;color:var(--muted);">More options (model, effort, sources) &rarr;</a>
+      <a id="more-opts-link" href="/library/ask" style="font-size:12px;color:var(--muted);">More options (model, effort, sources) &rarr;</a>
     </div>
     <div id="answer" style="display:none;margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;font-size:15px;max-width:680px;"></div>
   </div>
@@ -7011,7 +7034,7 @@ async function ask(){{
   var q=document.getElementById('askq').value.trim();
   if(!q)return;
   var link=document.getElementById('more-opts-link');
-  if(link) link.href='/ask?q='+encodeURIComponent(q);
+  if(link) link.href='/library/ask?q='+encodeURIComponent(q);
   var box=document.getElementById('answer');
   box.style.display='block';box.innerHTML='<em>Thinking…</em>';
   try{{
@@ -7050,28 +7073,46 @@ def library(request: Request):
             f'<p style="margin:7px 0 0;font-size:14.5px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    cards = "".join([
-        _hcard("/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag &mdash; your curated reading history."),
-        _hcard("/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive."),
-        _hcard("/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive &mdash; a cited answer drawn from the Archive plus trusted web sources."),
-        _hcard("/questions", "Community Q&amp;A", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
+    def _section(title, cards):
+        return (
+            f'<h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);'
+            f'margin:0 0 12px;">{title}</h2>'
+            f'<div style="display:grid;gap:14px;margin-bottom:28px;">{cards}</div>'
+        )
+
+    reading_room = "".join([
+        _hcard("/library/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag &mdash; your curated reading history."),
+        _hcard("/library/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive."),
+    ])
+    fpa_buddy = "".join([
+        _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive &mdash; a cited answer drawn from the Archive plus trusted web sources."),
+        _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
     ])
 
     body = f"""<div class="page">
 <h1 style="margin:0 0 6px;">Library</h1>
 <p style="color:var(--muted);margin:0 0 26px;">Your private workspace &mdash; the curated archive, the live feed, and the FP&amp;A assistant.</p>
-<div style="display:grid;gap:14px;">{cards}</div>
+{_section("Reading Room", reading_room)}
+{_section("FP&amp;A Buddy", fpa_buddy)}
 </div>"""
     return HTMLResponse(_page("Library—Brian Weisberg", "Library", body, role=_role(request)))
 
 
-@app.get("/questions", response_class=HTMLResponse)
+@app.get("/questions")
+def community_questions_redirect(request: Request):
+    target = "/library/past-questions"
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=301)
+
+
+@app.get("/library/past-questions", response_class=HTMLResponse)
 def community_questions(request: Request, q: str = ""):
-    """Public (to members) community Q&A browse — questions other members
-    already asked FP&A Buddy, so a member can check before spending a query
-    on something already answered. Reads from the same ask_questions table
-    as the admin report and /ask/history; admin-only inline controls here
-    only affect this view (see hide/anonymize below)."""
+    """Past Questions: questions other members already asked FP&A Buddy, so a
+    member can check before spending a query on something already answered.
+    Reads from the same ask_questions table as the admin report and
+    /ask/history; admin-only inline controls here only affect this view (see
+    hide/anonymize below)."""
     if not _is_member(request):
         return _login_redirect(request)
     is_admin = _is_authed(request)
@@ -7108,21 +7149,21 @@ def community_questions(request: Request, q: str = ""):
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:32px;text-align:center;color:var(--muted);">'
          + ('No questions match your search.' if q else
-            'No community questions yet. Answers show up here after members ask FP&amp;A Buddy something.')
+            'No past questions yet. Answers show up here after members ask FP&amp;A Buddy something.')
          + '</div>')
 
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
-<h1>Community Q&amp;A</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy &mdash; check here before spending a query re-asking one. <a href="/ask">Ask your own &rarr;</a></p>
-<form method="get" action="/questions" style="display:flex;gap:8px;margin-bottom:22px;">
+<h1>Past Questions</h1>
+<p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy &mdash; check here before spending a query re-asking one. <a href="/library/ask">Ask your own &rarr;</a></p>
+<form method="get" action="/library/past-questions" style="display:flex;gap:8px;margin-bottom:22px;">
   <input type="search" name="q" value="{_esc(q)}" placeholder="Search past questions&hellip;"
     style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   <button type="submit" class="btn">Search</button>
 </form>
 {rows_html}
 </div>"""
-    return HTMLResponse(_page("Community Q&A—Brian Weisberg", "Library", body, role=_role(request)))
+    return HTMLResponse(_page("Past Questions—Brian Weisberg", "Library", body, role=_role(request)))
 
 
 @app.post("/questions/{question_id}/hide")
@@ -7137,7 +7178,7 @@ async def community_question_hide(request: Request, question_id: int):
         lib.set_ask_question_hidden(question_id, not bool(row["hidden_public"]))
     finally:
         lib.close()
-    return RedirectResponse("/questions", status_code=303)
+    return RedirectResponse("/library/past-questions", status_code=303)
 
 
 @app.post("/questions/{question_id}/anonymize")
@@ -7152,7 +7193,7 @@ async def community_question_anonymize(request: Request, question_id: int):
         lib.set_ask_question_anonymized(question_id, not bool(row["anonymized"]))
     finally:
         lib.close()
-    return RedirectResponse("/questions", status_code=303)
+    return RedirectResponse("/library/past-questions", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -7174,7 +7215,15 @@ def api_search(request: Request, q: str = "", limit: int = 50, token: str | None
         lib.close()
 
 
-@app.get("/ask", response_class=HTMLResponse)
+@app.get("/ask")
+def ask_page_redirect(request: Request):
+    target = "/library/ask"
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=301)
+
+
+@app.get("/library/ask", response_class=HTMLResponse)
 def ask_page(request: Request, q: str = ""):
     # Member-gated: signed-in members and admin. Anonymous visitors go to login.
     if not _is_member(request):
@@ -7287,6 +7336,7 @@ def ask_page(request: Request, q: str = ""):
     )
 
     body = f"""<div class="page">
+<p style="margin:0 0 12px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
 <p style="color:var(--muted);margin:0 0 28px;">A digital library of finance content, curated over years, searched instantly. Skip the digging, get your answer.</p>
@@ -8087,12 +8137,12 @@ def ask_history(request: Request):
     rows_html = "".join(_card(c) for c in _group_conversations(rows)) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
-         '<a href="/ask">Ask a question &rarr;</a></div>')
+         '<a href="/library/ask">Ask a question &rarr;</a></div>')
 
     body = f"""<div class="page">
-<p style="margin:0 0 4px;"><a href="/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
+<p style="margin:0 0 4px;"><a href="/library/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage &mdash; it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/questions">community Q&amp;A page</a> for other members to browse.</p>
+<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage &mdash; it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/library/past-questions">Past Questions page</a> for other members to browse.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:22px;font-size:14px;">
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>
@@ -10978,7 +11028,7 @@ def admin_enrich(request: Request):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
   <p style="font-size:13.5px;color:var(--muted);margin:0;line-height:1.6;">
     <strong>After finishing:</strong> visit <a href="/admin/review-removals">Review removals</a> to confirm any articles the enricher flagged as off-audience,
-    and check the enriched summaries in the <a href="/archive">Archive</a>.
+    and check the enriched summaries in the <a href="/library/archive">Archive</a>.
   </p>
 </div>
 
@@ -12343,7 +12393,7 @@ def backup_now_route(request: Request, token: str | None = None):
     except Exception as e:
         msg = f"Backup failed: {e}"
     body = f"""<div class="page"><h1>Backup</h1><p>{msg}</p>
-  <p style="margin-top:1rem;"><a href="/archive">Back to the archive →</a></p></div>"""
+  <p style="margin-top:1rem;"><a href="/library/archive">Back to the archive →</a></p></div>"""
     return HTMLResponse(_page("Backup", "", body, authed=True))
 
 
@@ -12471,7 +12521,7 @@ def library_delete(request: Request, article_id: int):
         _log_archive_audit(lib, request, "delete", article_id)
     finally:
         lib.close()
-    return RedirectResponse("/archive", status_code=303)
+    return RedirectResponse("/library/archive", status_code=303)
 
 
 @app.get("/static/{filename}")

@@ -67,7 +67,7 @@ webapp/
   app.py           # FastAPI, ~110 routes, all HTML/CSS/JS inline: public site
                    #   (/, /thought-leadership, /growth-engine-ratio, /tools, /contact,
                    #   /finops-ai-hackathon, /netsuite-mcp, /play) + private tools
-                   #   (/library, /feed, /read, /ask, /save, /api/search, /bookmarklet)
+                   #   (/library, /library/feed, /read, /library/ask, /save, /api/search, /bookmarklet)
                    #   + auth (/login, /logout) + the /admin back office (~40 pages)
   checks.py        # aggregates the automated checks for /admin/checks (mirrors CI)
   tasks.py         # open-task badge counts for the admin hub
@@ -107,11 +107,11 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   does (`embed_cost_usd` breaks out its share). A general ledger covering overhead
   spend more broadly (enrichment included) is deferred — see issue #105.
 - **`preferred_sites.opml` is dual-purpose.** It's both the web-search allowlist and the
-  `/feed` reader's subscription list. Use direct RSS/Atom URLs — Feedly proxy URLs
+  `/library/feed` reader's subscription list. Use direct RSS/Atom URLs — Feedly proxy URLs
   (`feedly.com/web/...`) are skipped because they require auth. Paywalled sources are
   tagged in `feed.py` (`PAYWALLED_DOMAINS`) and shown with a badge; the in-app reader is
   disabled for them.
-- **The `/feed` reader caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
+- **The `/library/feed` reader caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
   item dicts are shallow-copied before mutation — never mutate a cached entry in place.
   Editing the OPML won't show up live until the cache expires or the app restarts.
 
@@ -137,8 +137,10 @@ tables, no third-party dependency.
 - **Route protection:**
   - Public (no auth): `/`, `/thought-leadership`, `/growth-engine-ratio`, `/contact`,
     `/login`, `/logout`, `/static/*`, `/health`.
-  - Private HTML pages → **redirect to `/login`** when signed out: `/library`, `/feed`,
-    `/read`, `/admin/contacts`.
+  - Private HTML pages → **redirect to `/login`** when signed out: `/library`,
+    `/library/archive`, `/library/feed`, `/library/ask`, `/library/past-questions`,
+    `/read`, `/admin/contacts`. (The old flat `/archive`, `/feed`, `/ask`, `/questions`
+    URLs 301-redirect to their nested equivalents above, unconditionally.)
   - Private API → **401** when unauthenticated, but also accept a valid token (cookie OR
     `X-Save-Token`/`?token=`): `/ask`, `/post`, `/feed/save`, `/api/search`.
   - `/save` is **token-only** (`X-Save-Token` header or `?token=`) because the bookmarklet
@@ -174,7 +176,7 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 | `LINKLIB_ENRICH_MODEL` | `claude-haiku-4-5-20251001` | Claude model for enrichment |
 | `LINKLIB_CHAT_MODEL` | `claude-sonnet-4-6` | Claude model for Q&A and post drafting |
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
-| `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/feed` source list |
+| `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/library/feed` source list |
 
 ## Running locally
 
@@ -214,7 +216,7 @@ python -m scripts.mcp_server
 - Public site: bio homepage (`/`), thought leadership (`/thought-leadership`),
   Growth Engine Ratio page + calculator (`/growth-engine-ratio`), contact (`/contact`)
 - Password login for the private section (`/login` + signed session cookie)
-- CFO Feed RSS reader (`/feed`) with category tabs, per-source filter, save-to-library
+- CFO Feed RSS reader (`/library/feed`) with category tabs, per-source filter, save-to-library
 - Article reader, Instapaper-style (`/read`)
 - Hosting/deployment on Railway (see Deployment below)
 - bmweis.com custom domain pointed at Railway (July 2026)
@@ -341,7 +343,7 @@ surface it. The enrichment pickers stay curated (no auto-surfacing) so a whole-a
 re-enrich can't be pointed at an unexpectedly pricey new model by accident. When the
 API/key is unavailable, every picker falls back to the static registry.
 
-**FP&A Buddy (`/ask`) has no visible model picker.** The UI exposes only a
+**FP&A Buddy (`/library/ask`) has no visible model picker.** The UI exposes only a
 Quick/Standard/Deep effort choice; each tier maps internally to a model, an
 archive/web-search count, and a token budget (`EFFORT_SETTINGS` in
 `linklib/agent.py`). The model is an implementation detail, not a user-facing choice.
