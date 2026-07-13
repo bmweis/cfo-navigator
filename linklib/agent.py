@@ -78,6 +78,7 @@ VOICE:
 - Specific over abstract: numbers, names, the actual mechanism — never stacked adjectives.
 - State a view plainly when it's supported. When it's not, say so and name the gap — don't guess, and don't pad the gap with generic hedging ("it's worth noting that", "there are many factors to consider").
 - Confident, not boastful. No gratitude theater, no apologizing.
+- An emdash marks a short pivot or label, not a place to bolt on a longer explanation: if what follows could stand as its own sentence, or carries its own parenthetical, split it into two sentences instead.
 
 HARD MECHANICAL RULES (never violate):
 - Emdashes have NO surrounding spaces, and are used sparingly—one well-placed, never peppered.

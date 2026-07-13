@@ -284,6 +284,25 @@ docs honest, **in the same PR as the change** (never a follow-up):
    `requirements*.txt`), but the test can't write the blurb or verify the
    license — that part is on the PR.
 
+## Voice — em dash policy
+
+The voice guide (`BRAND.md` §9, rubric text in `linklib.agent.VOICE_CORE_DEFAULT`)
+is enforced two ways: mechanical (deterministic banned words/filler/performative
+phrases, `tests/test_voice_standards.py`) and holistic (Claude judges tone on
+demand, `/admin/brand`'s "Check content against your voice"). Em dash usage
+doesn't fit either bucket cleanly — a scan of the live site found 63 lines of
+Brian's own existing copy using spaced em dashes inconsistent with the rubric's
+literal "no surrounding spaces" line, so a mechanical rule would false-positive
+constantly, and what actually reads as off-voice (an em dash bolting a long
+mechanism clause onto an already-complete sentence, especially with a nested
+parenthetical) is a cadence judgment call, not a string match.
+
+**So: whenever you write new site or admin copy that uses an em dash, flag it
+to Brian explicitly before it ships** — quote the sentence and call out the em
+dash — rather than deciding yourself that it's fine. He'll tell you to keep it
+or give you an editorial rewrite. This applies to draft copy you're presenting
+for review same as anything you're about to commit.
+
 ## Deployment
 
 - **Host:** Railway, building from the `Dockerfile` (`python:3.11-slim`, runs
