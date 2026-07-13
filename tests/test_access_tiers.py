@@ -51,7 +51,10 @@ def _admin_client(appmod):
 PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           # CFO Toolbox browsing and everything linked from the thought-leadership
           # page are fully public; only the account tools below stay gated.
-          "/tools", "/growth-engine-ratio", "/netsuite-mcp", "/finops-ai-hackathon",
+          "/tools",
+          "/thought-leadership/growth-engine-ratio",
+          "/thought-leadership/netsuite-mcp",
+          "/thought-leadership/ai-hackathon-playbook",
           # Sail, Don't Row is fully playable signed-out, and the per-rank
           # leaderboards are publicly viewable — only submitting a run
           # (POST /play/submit) requires an account.
@@ -67,6 +70,9 @@ OLD_TO_NEW = {
     "/feed": "/library/feed",
     "/ask": "/library/ask",
     "/questions": "/library/past-questions",
+    "/growth-engine-ratio": "/thought-leadership/growth-engine-ratio",
+    "/finops-ai-hackathon": "/thought-leadership/ai-hackathon-playbook",
+    "/netsuite-mcp": "/thought-leadership/netsuite-mcp",
 }
 
 
@@ -91,7 +97,7 @@ def test_member_can_reach_member_pages(env):
         assert r.status_code == 200, f"{path} -> {r.status_code}"
 
 
-def test_old_library_urls_redirect_to_nested_paths(env):
+def test_old_flat_urls_redirect_to_nested_paths(env):
     c = _client(env)
     for old, new in OLD_TO_NEW.items():
         r = c.get(old, follow_redirects=False)

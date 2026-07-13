@@ -45,19 +45,19 @@ class TLItem:
 WRITING: list[TLItem] = [
     TLItem(
         title="The Growth Engine Ratio: Accounting for the Missing Half of Your Efficiency Equation",
-        url="/growth-engine-ratio", venue="The F Suite", date_label="Jun 2026", sort_key="2026-06",
+        url="/thought-leadership/growth-engine-ratio", venue="The F Suite", date_label="Jun 2026", sort_key="2026-06",
         type="writing",
         description="A metric for how R&D and GTM investment work together to drive growth—with an interactive calculator.",
     ),
     TLItem(
         title="Sail, Don't Row: A Playbook for Running an AI Hackathon With Your Finance Team",
-        url="/finops-ai-hackathon", venue="", date_label="Jun 2026", sort_key="2026-06",
+        url="/thought-leadership/ai-hackathon-playbook", venue="", date_label="Jun 2026", sort_key="2026-06",
         type="writing",
         description="How to run an AI hackathon with your finance team—the full format, facilitation mechanics, and how to make it stick.",
     ),
     TLItem(
         title="Connecting Claude to NetSuite: A Setup Guide for Finance Teams",
-        url="/netsuite-mcp", venue="", date_label="Jun 2026", sort_key="2026-06",
+        url="/thought-leadership/netsuite-mcp", venue="", date_label="Jun 2026", sort_key="2026-06",
         type="writing",
         description="End-to-end setup for the two-role OAuth architecture—what it is, why it's secure, and how to use it.",
     ),

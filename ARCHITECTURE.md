@@ -456,8 +456,11 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   password — unset means restarts invalidate sessions), HttpOnly,
   SameSite=Lax, 30-day TTL.
 - **Three surfaces**:
-  - *Public* — no auth: `/`, `/thought-leadership`, `/growth-engine-ratio`,
-    `/tools`, `/contact`, `/play`, `/login`, `/static/*`, `/health`.
+  - *Public* — no auth: `/`, `/thought-leadership`,
+    `/thought-leadership/growth-engine-ratio`, `/thought-leadership/ai-hackathon-playbook`,
+    `/thought-leadership/netsuite-mcp`, `/tools`, `/contact`, `/play`, `/login`,
+    `/static/*`, `/health`. (The old flat `/growth-engine-ratio`, `/finops-ai-hackathon`,
+    `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
   - *Member* (`_is_member` — any valid session): `/library`, `/library/archive`,
     `/library/feed`, `/read`, `/library/ask`, `/library/past-questions`,
     `/library/submit`. HTML pages redirect to `/login`; APIs return 401. (The

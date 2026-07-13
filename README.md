@@ -11,13 +11,17 @@ search is the spine; everything reads and writes through it.
 
 **Public site**
 - `/` — bio homepage
-- `/thought-leadership` — talks, podcasts, events, writing
-- `/growth-engine-ratio` — the GER essay + interactive calculator (and the song)
+- `/thought-leadership` — talks, podcasts, events, writing, and the three
+  showcase pages below
+- `/thought-leadership/growth-engine-ratio` — the GER essay + interactive
+  calculator (and the song)
 - `/tools` — CFO Toolbox: a curated vendor directory with categories,
   benchmarking resources, reader submissions, and Warm Intro requests
-- `/finops-ai-hackathon`, `/netsuite-mcp` — guides
+- `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp` — guides
 - `/contact` — contact form (submissions stored, and emailed once Google
   OAuth is configured — see `.env.example`)
+- (`/growth-engine-ratio`, `/finops-ai-hackathon`, `/netsuite-mcp` 301-redirect
+  to the nested paths above)
 
 **Private (login or token)**
 - `/library` — the CFO Library hub, grouping the pages below into "Reading
