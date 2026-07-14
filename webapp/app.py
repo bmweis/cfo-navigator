@@ -2727,11 +2727,15 @@ def netsuite_mcp(request: Request):
 # by their own seeded PRNG, independent of the obstacle seed, so tuning one
 # never reshuffles the other.
 #
-# Round 2 (post-playtesting, superseding some of the above): manual rowing
-# and the Stamina resource were removed entirely — steering (keyboard
-# arrows or touch-drag) is the only input. Difficulty now comes from a
-# speed ramp instead (base forward speed rises over elapsed run time, per
-# rank), plus the same automatic, purely positional gust boost as before.
+# Round 2 (post-playtesting, superseding some of the above): universal
+# rowing and the Stamina resource were removed entirely — steering
+# (keyboard arrows or touch-drag) became the only input, for both boats.
+# Difficulty now comes from a speed ramp instead (base forward speed rises
+# over elapsed run time, per rank), plus the same automatic, purely
+# positional gust boost as before. Manual rowing was later reintroduced as
+# the rowboat's distinguishing mechanic (see #sdrRowBtn / row(), ~line
+# 3711) — the sailboat still has no rowing input and relies solely on the
+# speed ramp and gust boost described above.
 # Scoring dropped the Efficiency/Stamina term and instead applies a direct
 # CollisionPenalty (0 for Deckhand regardless of hits — true no-penalty
 # practice mode; 10/hit for Mate/First Mate/Skipper) on top of the
