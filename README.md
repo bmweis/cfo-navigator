@@ -15,8 +15,11 @@ search is the spine; everything reads and writes through it.
   showcase pages below
 - `/thought-leadership/growth-engine-ratio` — the GER essay + interactive
   calculator (and the song)
-- `/tools` — CFO Toolbox: a curated vendor directory with categories,
-  benchmarking resources, reader submissions, and Warm Intro requests
+- `/tools` — CFO Toolbox landing page, linking to:
+  - `/tools/software` — curated vendor directory with categories, reader
+    submissions, and Warm Intro requests
+  - `/tools/benchmarks` — benchmarking resources
+  - `/tools/communities` — CFO/finance communities directory (placeholder)
 - `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp` — guides
 - `/contact` — contact form (submissions stored, and emailed once Google
   OAuth is configured — see `.env.example`)

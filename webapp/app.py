@@ -1109,9 +1109,8 @@ def homepage(request: Request):
                "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
                "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press."),
         _rcard("/tools", "CFO Toolbox",
-               "A curated directory of the software high-growth finance teams actually use&mdash;plus the "
-               "benchmarking sources I rely on, and an honest take on where benchmarks help and where they "
-               "mislead."),
+               "Software, benchmarking, and community resources for the Office of the CFO&mdash;the vendors "
+               "high-growth finance teams actually use, and the benchmarking sources I rely on."),
     ])
 
     # The "suggest a piece" prompt is shown only to signed-in members — submissions
@@ -4490,6 +4489,33 @@ your answers will directly shape what I build.</p>
 
 
 @app.get("/tools", response_class=HTMLResponse)
+def tools_landing(request: Request):
+    """CFO Toolbox landing page: three pillars, each its own subpage."""
+    def _hcard(href, title, desc):
+        return (
+            f'<a href="{href}" style="display:block;border:1px solid var(--line);background:var(--surface);'
+            f'border-radius:14px;padding:22px 24px;text-decoration:none;">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+            f'<p style="margin:7px 0 0;font-size:14.5px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
+        )
+
+    cards = "".join([
+        _hcard("/tools/software", "Software", "A curated directory of the software high-growth finance teams actually use &mdash; searchable, filterable, with a Warm Intro button for the vendors I know well."),
+        _hcard("/tools/benchmarks", "Benchmarking", "The benchmarking sources I actually rely on &mdash; plus an honest take on where benchmarks help and where they mislead."),
+        _hcard("/tools/communities", "Communities", "A directory of CFO and finance communities worth joining. Coming soon."),
+    ])
+
+    body = f"""<div class="page">
+<h1 style="margin:0 0 6px;">CFO Toolbox</h1>
+<p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO.</p>
+<div style="display:grid;gap:14px;">{cards}</div>
+</div>"""
+    return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.get("/tools/software", response_class=HTMLResponse)
 def tools_directory(request: Request):
     authed = _is_authed(request)   # admin sees the management controls
     is_member = _is_member(request)  # submit / warm-intro are account-only
@@ -4497,7 +4523,6 @@ def tools_directory(request: Request):
     try:
         tools = lib.list_tools(approved_only=True)
         categories = lib.list_tool_categories()
-        benchmarks = lib.list_benchmarks()
     finally:
         lib.close()
 
@@ -4535,41 +4560,10 @@ def tools_directory(request: Request):
         for c in categories
     )
 
-    def _bench_badge_style(cov: str) -> str:
-        return {
-            "Private": "background:#dbeafe;color:#1d4ed8",
-            "Public":  "background:#dcfce7;color:#16a34a",
-            "Both":    "background:#ede9fe;color:#7c3aed",
-        }.get(cov, "background:var(--accent-light);color:var(--accent)")
-
-    def _bench_pricing_badge(b: dict) -> str:
-        p = (b.get("pricing") or "free").lower()
-        if p == "paid":
-            label = "$ Paid"
-        elif p == "freemium":
-            label = "$ Free + paid"
-        else:
-            return ""
-        return (f'<span class="bench-badge" title="Paid resource" '
-                f'style="background:#fef3c7;color:#92400e;">{label}</span>')
-
-    bench_cards = "".join(
-        f'<a class="bench-card" href="{_esc(b["url"])}" target="_blank" rel="noopener">'
-        f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px;">'
-        f'<span class="bench-name">{_esc(b["name"])}</span>'
-        f'<span style="display:flex;gap:6px;align-items:center;flex-shrink:0;">'
-        f'{_bench_pricing_badge(b)}'
-        f'<span class="bench-badge" style="{_bench_badge_style(b["coverage"])}">{_esc(b["coverage"])}</span>'
-        f'</span>'
-        f'</div>'
-        f'<p class="bench-desc">{_esc(b["description"])}</p>'
-        f'</a>'
-        for b in benchmarks
-    )
-
     body = f"""<div class="page page-wide">
+<p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-  <h1 style="margin:0;">CFO Toolbox</h1>
+  <h1 style="margin:0;">Software</h1>
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
@@ -4599,18 +4593,6 @@ def tools_directory(request: Request):
   <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
     {'<a href="/tools/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit a tool →</a>'}</p>
 </div>
-
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-    <h2 style="font-size:20px;font-weight:700;margin:0 0 6px;">Benchmarking Resources</h2>
-    {'<a href="/admin/tools/benchmarks" style="font-size:14px;font-weight:500;">Manage →</a>' if authed else ''}
-  </div>
-  <p style="color:var(--muted);font-size:14px;margin:0 0 12px;">The benchmarking sources I actually use.</p>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a>&mdash;it&rsquo;s not always what you think it is.</p>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
-    {bench_cards}
-  </div>
-</div>
 </div>
 
 <style>
@@ -4633,12 +4615,6 @@ def tools_directory(request: Request):
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 .tool-meta{{font-size:12px;color:var(--muted);margin-top:10px;}}
-.bench-card{{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;transition:border-color .15s;}}
-.bench-card:hover{{border-color:var(--accent);text-decoration:none;}}
-.bench-name{{font-size:15px;font-weight:600;color:var(--ink);}}
-.bench-card:hover .bench-name{{color:var(--accent);}}
-.bench-badge{{font-size:11px;font-weight:500;border-radius:6px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}}
-.bench-desc{{font-size:13px;color:#3a352e;margin:0;line-height:1.5;}}
 .tool-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
 .tool-intro-btn{{font-size:13px;font-weight:600;color:var(--navy);background:none;border:1px solid var(--navy);
   border-radius:8px;padding:6px 14px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
@@ -5000,7 +4976,87 @@ function submitIntroForm() {
   });
 }
 </script>"""
-    return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Software—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.get("/tools/benchmarks", response_class=HTMLResponse)
+def tools_benchmarks(request: Request):
+    authed = _is_authed(request)
+    lib = _lib()
+    try:
+        benchmarks = lib.list_benchmarks()
+    finally:
+        lib.close()
+
+    def _bench_badge_style(cov: str) -> str:
+        return {
+            "Private": "background:#dbeafe;color:#1d4ed8",
+            "Public":  "background:#dcfce7;color:#16a34a",
+            "Both":    "background:#ede9fe;color:#7c3aed",
+        }.get(cov, "background:var(--accent-light);color:var(--accent)")
+
+    def _bench_pricing_badge(b: dict) -> str:
+        p = (b.get("pricing") or "free").lower()
+        if p == "paid":
+            label = "$ Paid"
+        elif p == "freemium":
+            label = "$ Free + paid"
+        else:
+            return ""
+        return (f'<span class="bench-badge" title="Paid resource" '
+                f'style="background:#fef3c7;color:#92400e;">{label}</span>')
+
+    bench_cards = "".join(
+        f'<a class="bench-card" href="{_esc(b["url"])}" target="_blank" rel="noopener">'
+        f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px;">'
+        f'<span class="bench-name">{_esc(b["name"])}</span>'
+        f'<span style="display:flex;gap:6px;align-items:center;flex-shrink:0;">'
+        f'{_bench_pricing_badge(b)}'
+        f'<span class="bench-badge" style="{_bench_badge_style(b["coverage"])}">{_esc(b["coverage"])}</span>'
+        f'</span>'
+        f'</div>'
+        f'<p class="bench-desc">{_esc(b["description"])}</p>'
+        f'</a>'
+        for b in benchmarks
+    )
+
+    body = f"""<div class="page page-wide">
+<p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
+<div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+  <h1 style="margin:0;">Benchmarking</h1>
+  {'<a href="/admin/tools/benchmarks" style="font-size:14px;font-weight:500;">Manage →</a>' if authed else ''}
+</div>
+<p style="color:var(--muted);font-size:14px;margin:8px 0 12px;">The benchmarking sources I actually use.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a>&mdash;it&rsquo;s not always what you think it is.</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
+  {bench_cards}
+</div>
+</div>
+
+<style>
+.bench-card{{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;transition:border-color .15s;}}
+.bench-card:hover{{border-color:var(--accent);text-decoration:none;}}
+.bench-name{{font-size:15px;font-weight:600;color:var(--ink);}}
+.bench-card:hover .bench-name{{color:var(--accent);}}
+.bench-badge{{font-size:11px;font-weight:500;border-radius:6px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}}
+.bench-desc{{font-size:13px;color:#3a352e;margin:0;line-height:1.5;}}
+</style>"""
+    return HTMLResponse(_page("Benchmarking—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.get("/tools/communities", response_class=HTMLResponse)
+def tools_communities(request: Request):
+    body = """<div class="page">
+<p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
+<h1 style="margin:0 0 10px;">Communities</h1>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:28px 26px;">
+<p style="color:var(--ink);margin:0 0 10px;font-size:15px;line-height:1.6;">A directory of CFO and finance
+communities &mdash; peer groups, Slack channels, forums &mdash; is in progress.</p>
+<p style="color:var(--muted);margin:0;font-size:14px;line-height:1.6;">No filtering or listings yet. Check back
+soon.</p>
+</div>
+</div>"""
+    return HTMLResponse(_page("Communities—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
 def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None = None) -> str:
@@ -5050,7 +5106,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
         body = """<div class="page page-narrow">
 <h1>Thanks—submission received.</h1>
 <p>Your tool has been submitted for review. If approved, it'll appear in the CFO Toolbox shortly.</p>
-<a href="/tools" class="btn btn-ghost" style="margin-top:8px;">Back to CFO Toolbox</a>
+<a href="/tools/software" class="btn btn-ghost" style="margin-top:8px;">Back to CFO Toolbox</a>
 </div>"""
         return HTMLResponse(_page("Submission received—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
@@ -5382,7 +5438,7 @@ def admin_tools(request: Request):
   <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
 </div>
 <p style="margin:0 0 24px;">
-  <a href="/tools" style="font-size:13px;color:var(--muted);">View public directory →</a>
+  <a href="/tools/software" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
 </p>
@@ -5420,7 +5476,7 @@ def admin_tools(request: Request):
   Editing <code>scripts/seed_tools.py</code> updates a tool&rsquo;s <strong>name</strong> and
   <strong>description</strong> here automatically on the next deploy. No manual re-seed needed.
   <strong>Categories, Advisor, Featured, and Warm Intro are database-only</strong>: edit them here
-  (Full edit / Quick edit on <a href="/tools">/tools</a>), and this sync will never touch them.
+  (Full edit / Quick edit on <a href="/tools/software">/tools/software</a>), and this sync will never touch them.
 </p>
 </div>"""
     return HTMLResponse(_page("Tools—CFO Toolbox Admin", "", body, authed=True))
@@ -5518,7 +5574,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox categories</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">These are the filter pills on <a href="/tools">/tools</a>.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">These are the filter pills on <a href="/tools/software">/tools/software</a>.</p>
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;">
 <li><strong>Renaming</strong> updates every tool tagged with the old name.</li>
 <li><strong>Deleting</strong> removes the tag from tagged tools, but leaves the tools themselves in the directory — they still show under <strong>All</strong>, just not under any specific pill.</li>
@@ -5676,7 +5732,7 @@ def admin_benchmarks(request: Request):
   <h1>Benchmarking resources</h1>
   <a href="/admin/tools/benchmarks/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add resource</a>
 </div>
-<p style="margin:0 0 24px;"><a href="/tools#Benchmarking%20Resources" style="font-size:13px;color:var(--muted);">View on public directory →</a></p>
+<p style="margin:0 0 24px;"><a href="/tools/benchmarks" style="font-size:13px;color:var(--muted);">View on public directory →</a></p>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -5900,7 +5956,7 @@ async def admin_tools_new_submit(request: Request):
                      warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
     finally:
         lib.close()
-    return RedirectResponse("/tools", status_code=303)
+    return RedirectResponse("/tools/software", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/approve")
@@ -6013,7 +6069,7 @@ def admin_tools_edit(request: Request, tool_id: int):
   </div>
   <div>
     <button type="submit" class="btn">Save changes</button>
-    <a href="/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>
@@ -6044,7 +6100,7 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
     finally:
         lib.close()
-    return RedirectResponse("/tools", status_code=303)
+    return RedirectResponse("/tools/software", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/delete")
@@ -6052,12 +6108,12 @@ async def admin_tools_delete(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
-    # Deleting is offered both on /tools (public directory, admin controls)
+    # Deleting is offered both on /tools/software (public directory, admin controls)
     # and /admin/tools (Toolbox submissions) — return to whichever one asked,
     # validated against an allowlist since it echoes into a redirect.
-    redirect_to = form.get("redirect_to") or "/tools"
-    if redirect_to not in ("/tools", "/admin/tools"):
-        redirect_to = "/tools"
+    redirect_to = form.get("redirect_to") or "/tools/software"
+    if redirect_to not in ("/tools/software", "/admin/tools"):
+        redirect_to = "/tools/software"
     lib = _lib()
     try:
         lib.delete_tool(tool_id)

@@ -51,7 +51,7 @@ def _admin_client(appmod):
 PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           # CFO Toolbox browsing and everything linked from the thought-leadership
           # page are fully public; only the account tools below stay gated.
-          "/tools",
+          "/tools", "/tools/software", "/tools/benchmarks", "/tools/communities",
           "/thought-leadership/growth-engine-ratio",
           "/thought-leadership/netsuite-mcp",
           "/thought-leadership/ai-hackathon-playbook",
