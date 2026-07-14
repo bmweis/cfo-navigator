@@ -6334,13 +6334,13 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="featured" value="1"{' checked' if c.get('featured') else ''}>
-      <span>&#10024; Featured—pin to top of directory with coral badge</span>
+      <span>&#10024; Featured: pin to top of directory with coral badge</span>
     </label>
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="advisor" value="1"{' checked' if c.get('advisor') else ''}>
-      <span>&#9733; Formal advisor—mark this community with an advisor star</span>
+      <span>&#9733; Formal advisor: marks this community with an advisor star</span>
     </label>
   </div>"""
 
