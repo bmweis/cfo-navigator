@@ -36,6 +36,44 @@ _CORAL_TEXT_MIN_PX = 18
 
 # --- Documented non-token colors that are allowed to appear -------------------
 # Each must be sanctioned and commented. Adding one here is a deliberate act.
+#
+# Unlike §7's core tokens (checked value-by-value against BRAND.md, see
+# scripts/generate_brand_docs.py), these are NOT individually CI-checked against
+# BRAND.md — BRAND.md §8 documents the categories, not each hex. So when you add
+# one: don't invent a new hue from scratch. Find the existing color already used
+# for a similar purpose below and match its tone/weight (a status red should look
+# like the other status reds, not a fresh shade). The categories, each grounded in
+# a real, current usage:
+#
+#   - Neutrals / surfaces — off-token grays/creams close to --ink-soft/--muted,
+#     used inline instead of the token. E.g. #3a352e, the CFO Toolbox card
+#     description text (`.tool-desc`, webapp/app.py:4636).
+#   - Data-viz tints — light fills/bands for chart series and tier bands, kin of
+#     the seafoam/coral tokens but softened for use as an area fill rather than a
+#     line/text color. E.g. #D6EFE8, the GER contribution diagram's prior-revenue
+#     bar (webapp/app.py:1777); #E3F2EC/#EDF5F1/#FAF1E1/#F9E8E3, the GER line
+#     chart's Elite/Strong/Typical/Below-target tier bands (webapp/app.py:1964).
+#   - Status / feedback — semantic UI state, not brand: success green, error red,
+#     paywall amber. E.g. #d1fae5/#065f46, the "Saved"/"Done" success banner
+#     (webapp/app.py:5809); #b91c1c/#fca5a5, the "Delete"/"Reject" button and its
+#     hover border (webapp/app.py:5664).
+#   - Benchmark coverage badges (CFO Toolbox) — one fixed color pair per
+#     Private/Public/Both tag. E.g. #dbeafe/#1d4ed8 for "Private"
+#     (webapp/app.py:5020).
+#   - In-progress / info state — admin job progress bars and banners (a distinct
+#     blue from the benchmark badges above, reserved for "a background job is
+#     running"). E.g. #eff6ff/#bfdbfe/#2563eb, the re-enrichment progress bar
+#     (webapp/app.py:11715-11719).
+#   - Amber / warning — advisory banners and counts that aren't errors but need
+#     attention. E.g. #d97706, the "needs enrichment" stat (webapp/app.py:11762);
+#     #fefce8/#fde68a, the queue-sweep advisory banner (webapp/app.py:11992).
+#   - Misc — one-off UI accents that don't fit the above. E.g. #b8860b, the
+#     Toolbox advisor gold-star marker (webapp/app.py:4639).
+#   - "Sail, Don't Row" (/play) — a deliberately realistic sky/water/skyline/boat
+#     palette, not brand tokens (see the design/mockups/ spec); the game reads as
+#     an actual landscape. E.g. #C9A24B, the State House gold dome
+#     (webapp/app.py:2770); #B5553A, the mainsail's coral shading
+#     (webapp/app.py:2922).
 AUX_COLORS = {
     # Neutrals / surfaces used inline (close kin of the neutral tokens)
     "#3a352e",  # legacy body-copy ink (≈ --ink-soft) in card/summary text
