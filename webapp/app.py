@@ -5101,6 +5101,7 @@ def tools_communities(request: Request):
             "format": c.get("format") or "",
             "notes": c.get("notes") or "",
             "categories": c["categories"],
+            "featured": bool(c.get("featured")),
         }
 
     communities_json = _json.dumps([_community_entry(c) for c in communities])
@@ -5178,6 +5179,7 @@ groups, associations, and Slack channels.</p>
 #comm-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #comm-pagination-label{{font-size:13px;color:var(--muted);}}
 .comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
+.comm-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
 .comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
 .comm-name:hover{{color:var(--navy);}}
 .comm-meta{{font-size:13px;color:var(--muted);margin:0 0 8px;line-height:1.5;}}
@@ -5239,7 +5241,12 @@ function renderCommunities(list) {{
     return;
   }}
   empty.style.display = 'none';
-  var sorted = list.slice().sort(function(a, b) {{ return commEsc(a.name).localeCompare(commEsc(b.name)); }});
+  // Featured communities first, then alphabetical within each group.
+  var sorted = list.slice().sort(function(a, b) {{
+    if (a.featured && !b.featured) return -1;
+    if (!a.featured && b.featured) return 1;
+    return commEsc(a.name).localeCompare(commEsc(b.name));
+  }});
   var totalPages = Math.ceil(sorted.length / COMM_PAGE_SIZE);
   if (commCurrentPage >= totalPages) commCurrentPage = totalPages - 1;
   if (commCurrentPage < 0) commCurrentPage = 0;
@@ -5271,11 +5278,18 @@ function renderCommunities(list) {{
     if (c.notes || c.cost_note) {{
       notesLine = '<p class="comm-notes">' + commEsc([c.notes, c.cost_note].filter(Boolean).join(' ')) + '</p>';
     }}
-    return '<article class="comm-card" data-comm-id="' + c.id + '">'
+    var featuredBadge = c.featured
+      ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
+        + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
+      : '';
+    return '<article class="comm-card' + (c.featured ? ' comm-card-featured' : '') + '" data-comm-id="' + c.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
+      + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
+      + featuredBadge
       + (c.url
           ? '<a class="comm-name" href="' + commEsc(c.url) + '" target="_blank" rel="noopener">' + commEsc(c.name) + '</a>'
           : '<span class="comm-name">' + commEsc(c.name) + '</span>')
+      + '</div>'
       + '<span class="comm-cost">' + commEsc(c.cost_band) + '</span>'
       + '</div>'
       + '<p class="comm-meta">' + metaParts.join(' &middot; ') + '</p>'
@@ -6288,6 +6302,12 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
       {_community_category_checkboxes(categories, c.get('categories') or [])}
     </div>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="featured" value="1"{' checked' if c.get('featured') else ''}>
+      <span>&#10024; Featured—pin to top of directory with coral badge</span>
+    </label>
   </div>"""
 
 
@@ -6303,8 +6323,9 @@ def admin_communities(request: Request):
 
     def _row(c: dict) -> str:
         cats = ", ".join(c["categories"]) or "—"
+        featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if c.get("featured") else ""
         return f"""<tr style="border-top:1px solid var(--line);">
-  <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}</td>
+  <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['region'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
@@ -6524,6 +6545,7 @@ async def admin_communities_new_submit(request: Request):
     categories = form.getlist("categories")
     reach = (form.get("reach") or "National").strip()
     metros = form.getlist("metros")
+    featured = 1 if form.get("featured") == "1" else 0
     if not (name and demographic):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
@@ -6532,7 +6554,7 @@ async def admin_communities_new_submit(request: Request):
                           cost_band=cost_band, categories=categories, cost_note=cost_note,
                           sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                           access=access, format=format_, notes=notes, approved=1,
-                          reach=reach, metros=metros)
+                          reach=reach, metros=metros, featured=featured)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -6582,6 +6604,7 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
     categories = form.getlist("categories")
     reach = (form.get("reach") or "National").strip()
     metros = form.getlist("metros")
+    featured = 1 if form.get("featured") == "1" else 0
     if not (name and demographic):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
@@ -6590,7 +6613,7 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
                              cost_band=cost_band, categories=categories, cost_note=cost_note,
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                              access=access, format=format_, notes=notes,
-                             reach=reach, metros=metros)
+                             reach=reach, metros=metros, featured=featured)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
