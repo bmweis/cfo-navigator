@@ -480,6 +480,11 @@ CREATE INDEX IF NOT EXISTS idx_enrichment_cost_article ON enrichment_cost(articl
 -- $495->$545 in Jan 2026), so a band is the durable fact and cost_note is
 -- free text for anything more specific (e.g. a multi-seat corporate rate).
 -- sponsorship_type is 'Independent'|'Vendor-sponsored'|'Investor-sponsored'.
+-- region is legacy: an admin free-text note field, no longer the filter key
+-- (see reach/metros_json, added by migration below — kept here in the
+-- CREATE TABLE only for column order/documentation; a fresh DB still gets
+-- reach/metros_json from the ALTER TABLE loop in Library.__init__, same as
+-- every other post-launch communities column).
 CREATE TABLE IF NOT EXISTS communities (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT NOT NULL DEFAULT '',
@@ -676,6 +681,15 @@ class Library:
             # rewrite_cost_usd is, with these columns breaking out its share.
             "ALTER TABLE ask_questions ADD COLUMN embed_input_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE ask_questions ADD COLUMN embed_cost_usd REAL NOT NULL DEFAULT 0",
+            # Communities geography model: replaces the free-text `region`
+            # column (kept in place as an admin note field, no longer filterable)
+            # with a controlled `reach` value plus a `metros` tag list, so the
+            # region filter can match a metro against national/global communities
+            # with a local chapter there, not just purely-regional ones.
+            # scripts/backfill_community_geo.py is the one-off pass that
+            # populates these for the existing corpus.
+            "ALTER TABLE communities ADD COLUMN reach TEXT NOT NULL DEFAULT 'National'",
+            "ALTER TABLE communities ADD COLUMN metros_json TEXT NOT NULL DEFAULT '[]'",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1690,7 +1704,8 @@ class Library:
                       cost_band: str, categories: list[str], cost_note: str = "",
                       sponsorship_type: str = "Independent", sponsor_name: str = "",
                       access: str = "", format: str = "", notes: str = "",
-                      submitted_by: str = "", approved: int = 0) -> int:
+                      submitted_by: str = "", approved: int = 0,
+                      reach: str = "National", metros: list[str] | None = None) -> int:
         base = _slugify(name)
         slug = base
         suffix = 2
@@ -1701,12 +1716,14 @@ class Library:
         cur = self.conn.execute(
             """INSERT INTO communities (name, slug, url, region, demographic, cost_band,
                cost_note, sponsorship_type, sponsor_name, access, format, notes,
-               categories_json, approved, submitted_by, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               categories_json, approved, submitted_by, created_at, updated_at,
+               reach, metros_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, url.strip(), region.strip(), demographic.strip(),
              cost_band, cost_note.strip(), sponsorship_type, sponsor_name.strip(),
              access.strip(), format.strip(), notes.strip(), json.dumps(categories),
-             approved, submitted_by.strip(), now, now),
+             approved, submitted_by.strip(), now, now,
+             reach, json.dumps(metros or [])),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -1730,14 +1747,16 @@ class Library:
                          demographic: str, cost_band: str, categories: list[str],
                          cost_note: str = "", sponsorship_type: str = "Independent",
                          sponsor_name: str = "", access: str = "", format: str = "",
-                         notes: str = "") -> None:
+                         notes: str = "", reach: str = "National",
+                         metros: list[str] | None = None) -> None:
         self.conn.execute(
             """UPDATE communities SET name=?, url=?, region=?, demographic=?, cost_band=?,
                cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
-               notes=?, categories_json=?, updated_at=? WHERE id=?""",
+               notes=?, categories_json=?, updated_at=?, reach=?, metros_json=? WHERE id=?""",
             (name.strip(), url.strip(), region.strip(), demographic.strip(), cost_band,
              cost_note.strip(), sponsorship_type, sponsor_name.strip(), access.strip(),
-             format.strip(), notes.strip(), json.dumps(categories), _now(), community_id),
+             format.strip(), notes.strip(), json.dumps(categories), _now(),
+             reach, json.dumps(metros or []), community_id),
         )
         self.conn.commit()
 
@@ -1746,9 +1765,9 @@ class Library:
         seeder): touches only name and notes — the two fields sourced straight from the
         underlying research, same role as name/description for tools and benchmarks.
         region/demographic/cost_band/cost_note/sponsorship_type/sponsor_name/access/format/
-        categories_json/approved are admin-owned, edited at /admin/tools/communities, and
-        never touched here — otherwise an admin's edit would get silently reverted on the
-        next deploy's re-sync."""
+        categories_json/approved/reach/metros_json are admin-owned, edited at
+        /admin/tools/communities, and never touched here — otherwise an admin's edit
+        would get silently reverted on the next deploy's re-sync."""
         self.conn.execute(
             "UPDATE communities SET name=?, notes=?, updated_at=? WHERE id=?",
             (name.strip(), notes.strip(), _now(), community_id),
@@ -1770,6 +1789,7 @@ class Library:
     def _community_to_dict(r: sqlite3.Row) -> dict:
         d = dict(r)
         d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
+        d["metros"] = json.loads(d.pop("metros_json", "[]") or "[]")
         return d
 
     # -- community categories (the /tools/communities filter pills) ---------
