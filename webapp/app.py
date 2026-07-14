@@ -5122,7 +5122,7 @@ def tools_communities(request: Request):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
-<p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining&mdash;peer
+<p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
 groups, associations, and Slack channels.</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
