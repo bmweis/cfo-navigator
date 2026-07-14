@@ -259,10 +259,12 @@ def _seed_toolbox():
     are owned by the DB and edited at /admin/tools/categories, so this must
     not clobber changes made there. Same for promoted/vendor/warm-intro fields
     (tools) and coverage/pricing (benchmarks), which are admin-site-only and
-    never touched here. Communities are the exception: every curated field
-    (including categories_json) re-syncs from scripts/seed_communities.py's
-    COMMUNITIES on every restart, same as Library.update_community_content —
-    only `approved` is admin-owned there."""
+    never touched here. Communities follow the identical name+description
+    contract: only name/notes re-sync from scripts/seed_communities.py's
+    COMMUNITIES on every restart (via Library.update_community_content); every
+    other field — region, cost_band, cost_note, sponsorship_type,
+    sponsor_name, access, format, categories_json, approved — is admin-owned,
+    edited at /admin/tools/communities, and never touched here."""
     from scripts.seed_tools import TOOLS
     from scripts.seed_communities import CATEGORIES as COMMUNITY_CATEGORIES, COMMUNITIES
     lib = _lib()
@@ -278,25 +280,19 @@ def _seed_toolbox():
             crow = lib.conn.execute(
                 "SELECT * FROM communities WHERE url = ?", (c["url"],)
             ).fetchone()
-            fields = dict(
-                name=c["name"], url=c["url"], region=c["region"],
-                demographic=c["demographic"], cost_band=c["cost_band"],
-                categories=c["categories"], cost_note=c.get("cost_note", ""),
-                sponsorship_type=c.get("sponsorship_type", "Independent"),
-                sponsor_name=c.get("sponsor_name", ""), access=c.get("access", ""),
-                format=c.get("format", ""), notes=c.get("notes", ""),
-            )
             if not crow:
-                lib.add_community(**fields, approved=1)
-            else:
-                current = lib._community_to_dict(crow)
-                drifted = any(
-                    (sorted(current.get(k) or []) != sorted(v)) if k == "categories"
-                    else (current.get(k) != v)
-                    for k, v in fields.items()
+                lib.add_community(
+                    name=c["name"], url=c["url"], region=c["region"],
+                    demographic=c["demographic"], cost_band=c["cost_band"],
+                    categories=c["categories"], cost_note=c.get("cost_note", ""),
+                    sponsorship_type=c.get("sponsorship_type", "Independent"),
+                    sponsor_name=c.get("sponsor_name", ""), access=c.get("access", ""),
+                    format=c.get("format", ""), notes=c.get("notes", ""), approved=1,
                 )
-                if drifted:
-                    lib.update_community_content(crow["id"], **fields)
+            else:
+                notes = c.get("notes", "")
+                if crow["name"] != c["name"] or crow["notes"] != notes:
+                    lib.update_community_content(crow["id"], c["name"], notes)
         for b in _DEFAULT_BENCHMARKS:
             brow = lib.conn.execute(
                 "SELECT id, name, description FROM benchmarks WHERE url = ?", (b["url"],)
@@ -6117,6 +6113,422 @@ def admin_benchmarks_delete(request: Request, benchmark_id: int):
     return RedirectResponse("/admin/tools/benchmarks", status_code=303)
 
 
+_COMMUNITY_COST_BANDS = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
+_COMMUNITY_SPONSORSHIP_TYPES = ["Independent", "Vendor-sponsored", "Investor-sponsored"]
+
+
+def _community_category_checkboxes(categories: list[dict], selected: list[str] | None = None) -> str:
+    selected = selected or []
+    return "".join(
+        f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">'
+        f'<input type="checkbox" name="categories" value="{_esc(c["name"])}"'
+        f'{" checked" if c["name"] in selected else ""}> {_esc(c["name"])}</label>'
+        for c in categories
+    ) or '<p style="grid-column:1/-1;font-size:13px;color:var(--muted);margin:0;">' \
+         'No categories yet. <a href="/admin/tools/communities/categories">Add one</a> first.</p>'
+
+
+def _community_form_fields(c: dict | None = None, categories: list[dict] | None = None) -> str:
+    c = c or {}
+    categories = categories or []
+    cost_opts = "".join(
+        f'<option value="{_esc(b)}"{" selected" if c.get("cost_band", "Undisclosed dues") == b else ""}>{_esc(b)}</option>'
+        for b in _COMMUNITY_COST_BANDS
+    )
+    sponsor_opts = "".join(
+        f'<option value="{_esc(s)}"{" selected" if c.get("sponsorship_type", "Independent") == s else ""}>{_esc(s)}</option>'
+        for s in _COMMUNITY_SPONSORSHIP_TYPES
+    )
+    return f"""  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
+    <input name="name" required maxlength="200" value="{_esc(c.get('name', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL</label>
+    <input name="url" type="url" maxlength="500" value="{_esc(c.get('url', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…">
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Region *</label>
+      <input name="region" required maxlength="200" value="{_esc(c.get('region', ''))}"
+        placeholder="e.g. National/Global, Boston"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Demographic *</label>
+      <input name="demographic" required maxlength="300" value="{_esc(c.get('demographic', ''))}"
+        placeholder="e.g. CFOs &amp; VP Finance"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost band</label>
+      <select name="cost_band" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {cost_opts}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost note</label>
+      <input name="cost_note" maxlength="300" value="{_esc(c.get('cost_note', ''))}"
+        placeholder="Exact dues, multi-seat pricing, etc."
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sponsorship</label>
+      <select name="sponsorship_type" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {sponsor_opts}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sponsor name</label>
+      <input name="sponsor_name" maxlength="200" value="{_esc(c.get('sponsor_name', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Access</label>
+      <input name="access" maxlength="200" value="{_esc(c.get('access', ''))}"
+        placeholder="e.g. Invite-only, Application, Open"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Format</label>
+      <input name="format" maxlength="200" value="{_esc(c.get('format', ''))}"
+        placeholder="e.g. Hybrid, Slack, In-person"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    </div>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Notes</label>
+    <textarea name="notes" maxlength="500" rows="3"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(c.get('notes', ''))}</textarea>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:8px;">Categories</label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+      {_community_category_checkboxes(categories, c.get('categories') or [])}
+    </div>
+  </div>"""
+
+
+@app.get("/admin/tools/communities", response_class=HTMLResponse)
+def admin_communities(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        communities = lib.list_communities(approved_only=False)
+    finally:
+        lib.close()
+
+    def _row(c: dict) -> str:
+        cats = ", ".join(c["categories"]) or "—"
+        return f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['region'])}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+  <td style="padding:10px 12px;white-space:nowrap;">
+    <a href="/admin/tools/communities/{c['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="display:inline;"
+          onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
+      <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+
+    rows = "".join(_row(c) for c in communities) or \
+        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>'
+
+    body = f"""<div class="page page-wide">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+  <h1>Communities</h1>
+  <a href="/admin/tools/communities/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add community</a>
+</div>
+<p style="margin:0 0 24px;">
+  <a href="/tools/communities" style="font-size:13px;color:var(--muted);">View public directory →</a>
+  &nbsp;&middot;&nbsp;
+  <a href="/admin/tools/communities/categories" style="font-size:13px;color:var(--muted);">Manage categories →</a>
+</p>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Region</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>
+
+<p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
+  Editing <code>scripts/seed_communities.py</code> updates a community&rsquo;s <strong>name</strong> and
+  <strong>notes</strong> here automatically on the next deploy. No manual re-seed needed.
+  <strong>Everything else is database-only</strong>: edit it here (Edit above), and this sync will never touch it.
+</p>
+</div>"""
+    return HTMLResponse(_page("Communities—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.get("/admin/tools/communities/categories", response_class=HTMLResponse)
+def admin_communities_categories(request: Request, msg: str = "", error: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        categories = lib.list_community_categories()
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
+                     f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
+
+    rows = ""
+    for c in categories:
+        cid = c["id"]
+        rows += f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:9px 12px;">
+    <form method="post" action="/admin/tools/communities/categories/{cid}/edit" style="display:grid;gap:6px;margin:0;max-width:420px;">
+      <input type="text" name="name" value="{_esc(c['name'])}" required maxlength="80"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:var(--bg);">
+      <input type="text" name="description" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);">
+      <div><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button></div>
+    </form>
+  </td>
+  <td style="padding:9px 12px;font-size:13px;color:var(--muted);vertical-align:top;">{c['community_count']} communit{'y' if c['community_count'] == 1 else 'ies'}</td>
+  <td style="padding:9px 12px;vertical-align:top;">
+    <form method="post" action="/admin/tools/communities/categories/{cid}/delete" style="margin:0;"
+          onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['community_count']} communit{'y' if c['community_count'] == 1 else 'ies'}, which stay in the directory under All, just untagged for this category.');">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+    if not categories:
+        rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet. Add one below.</td></tr>'
+
+    body = f"""<div class="page">
+<p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
+<h1>Community categories</h1>
+<p style="color:var(--muted);margin:-6px 0 6px;">These are the filter pills on <a href="/tools/communities">/tools/communities</a>.</p>
+<ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;">
+<li><strong>Renaming</strong> updates every community tagged with the old name.</li>
+<li><strong>Deleting</strong> removes the tag from tagged communities, but leaves the communities themselves in the directory: they still show under <strong>All</strong>, just not under any specific pill.</li>
+</ul>
+{banner}{error_banner}
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:28px;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name &amp; description</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Communities</th>
+      <th style="padding:9px 12px;"></th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;">
+  <h2 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a category</h2>
+  <form method="post" action="/admin/tools/communities/categories/new" style="display:grid;gap:12px;">
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
+      <input type="text" name="name" required maxlength="80" placeholder="e.g. Treasury"
+        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+    </div>
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description <span style="font-weight:400;color:var(--muted);">(tooltip on the pill, optional)</span></label>
+      <input type="text" name="description" maxlength="300"
+        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+    </div>
+    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add category</button></div>
+  </form>
+</div>
+</div>"""
+    return HTMLResponse(_page("Community categories—CFO Toolbox Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/tools/communities/categories/new")
+async def admin_communities_categories_new(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    description = (form.get("description") or "").strip()
+    lib = _lib()
+    try:
+        lib.add_community_category(name, description)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/tools/communities/categories?error={quote(str(e))}", status_code=303)
+    finally:
+        lib.close()
+    msg = f'Added "{name}".'
+    return RedirectResponse(f"/admin/tools/communities/categories?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/tools/communities/categories/{category_id}/edit")
+async def admin_communities_categories_edit(request: Request, category_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    description = (form.get("description") or "").strip()
+    lib = _lib()
+    try:
+        n = lib.rename_community_category(category_id, name, description)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/tools/communities/categories?error={quote(str(e))}", status_code=303)
+    finally:
+        lib.close()
+    msg = f'Saved "{name}".' + (f' Updated on {n} communit{"y" if n == 1 else "ies"}.' if n else '')
+    return RedirectResponse(f"/admin/tools/communities/categories?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/tools/communities/categories/{category_id}/delete")
+def admin_communities_categories_delete(request: Request, category_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        n = lib.delete_community_category(category_id)
+    finally:
+        lib.close()
+    msg = f'Deleted. Removed from {n} communit{"y" if n == 1 else "ies"}.' if n else 'Deleted.'
+    return RedirectResponse(f"/admin/tools/communities/categories?msg={quote(msg)}", status_code=303)
+
+
+@app.get("/admin/tools/communities/new", response_class=HTMLResponse)
+def admin_communities_new(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        categories = lib.list_community_categories()
+    finally:
+        lib.close()
+    body = f"""<div class="page page-narrow">
+<h1>Add a community</h1>
+<form method="post" action="/admin/tools/communities/new" style="display:grid;gap:20px;">
+{_community_form_fields(categories=categories)}
+  <div>
+    <button type="submit" class="btn">Add community</button>
+    <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Add community—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.post("/admin/tools/communities/new")
+async def admin_communities_new_submit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    url = (form.get("url") or "").strip()
+    region = (form.get("region") or "").strip()
+    demographic = (form.get("demographic") or "").strip()
+    cost_band = (form.get("cost_band") or "Undisclosed dues").strip()
+    cost_note = (form.get("cost_note") or "").strip()
+    sponsorship_type = (form.get("sponsorship_type") or "Independent").strip()
+    sponsor_name = (form.get("sponsor_name") or "").strip()
+    access = (form.get("access") or "").strip()
+    format_ = (form.get("format") or "").strip()
+    notes = (form.get("notes") or "").strip()
+    categories = form.getlist("categories")
+    if not (name and region and demographic):
+        raise HTTPException(status_code=400, detail="Name, region, and demographic are required.")
+    lib = _lib()
+    try:
+        lib.add_community(name=name, url=url, region=region, demographic=demographic,
+                          cost_band=cost_band, categories=categories, cost_note=cost_note,
+                          sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
+                          access=access, format=format_, notes=notes, approved=1)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools/communities", status_code=303)
+
+
+@app.get("/admin/tools/communities/{community_id}/edit", response_class=HTMLResponse)
+def admin_communities_edit(request: Request, community_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        c = lib.get_community(community_id)
+        categories = lib.list_community_categories()
+    finally:
+        lib.close()
+    if not c:
+        raise HTTPException(status_code=404, detail="Community not found")
+    body = f"""<div class="page page-narrow">
+<h1>Edit community</h1>
+<form method="post" action="/admin/tools/communities/{community_id}/edit" style="display:grid;gap:20px;">
+{_community_form_fields(c, categories)}
+  <div>
+    <button type="submit" class="btn">Save changes</button>
+    <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.post("/admin/tools/communities/{community_id}/edit")
+async def admin_communities_edit_submit(request: Request, community_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    url = (form.get("url") or "").strip()
+    region = (form.get("region") or "").strip()
+    demographic = (form.get("demographic") or "").strip()
+    cost_band = (form.get("cost_band") or "Undisclosed dues").strip()
+    cost_note = (form.get("cost_note") or "").strip()
+    sponsorship_type = (form.get("sponsorship_type") or "Independent").strip()
+    sponsor_name = (form.get("sponsor_name") or "").strip()
+    access = (form.get("access") or "").strip()
+    format_ = (form.get("format") or "").strip()
+    notes = (form.get("notes") or "").strip()
+    categories = form.getlist("categories")
+    if not (name and region and demographic):
+        raise HTTPException(status_code=400, detail="Name, region, and demographic are required.")
+    lib = _lib()
+    try:
+        lib.update_community(community_id, name=name, url=url, region=region, demographic=demographic,
+                             cost_band=cost_band, categories=categories, cost_note=cost_note,
+                             sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
+                             access=access, format=format_, notes=notes)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools/communities", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/delete")
+def admin_communities_delete(request: Request, community_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_community(community_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools/communities", status_code=303)
+
+
 @app.get("/admin/tools/new", response_class=HTMLResponse)
 def admin_tools_new(request: Request):
     if not _is_authed(request):
@@ -8552,6 +8964,7 @@ _TOOLBOX_TOOLS = [
     ("/admin/tools",            "Tools",                "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
     ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
     ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section — name, URL, description, coverage, and pricing."),
+    ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
