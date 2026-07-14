@@ -65,13 +65,13 @@ WRITING: list[TLItem] = [
         title="Exit Readiness for CFOs",
         url="https://www.fsuite.co/blog/exit-readiness-cfos", venue="The F Suite",
         date_label="Mar 2026", sort_key="2026-03", type="writing",
-        description="There's no single right exit (IPO, acquisition, sponsor sale, secondary), so the real job is building a company that's ready no matter which door opens, starting years before any process does.",
+        description="There's no single right exit—IPO, acquisition, sponsor sale, secondary—so the real job is building a company that's ready no matter which door opens, starting years before any process does.",
     ),
     TLItem(
         title="Building a Modern Finance Team: How Two Leaders Are Rethinking the Process",
         url="https://www.fsuite.co/blog/building-a-modern-finance-team", venue="The F Suite",
         date_label="Apr 2026", sort_key="2026-04", type="writing",
-        description="Co-authored with Mux CFO Jaime Ortiz on why the old revenue-banded hiring ladder for finance teams breaks down, and the three principles that replace it: prioritize whichever leg of the stool (accounting, FP&A, or business ops) is weakest, default to generalists over narrow specialists, and scale through systems and data before headcount.",
+        description="Co-authored with Mux CFO Jaime Ortiz on why the old revenue-banded hiring ladder for finance teams breaks down, and the three principles that replace it: prioritize whichever leg of the stool—accounting, FP&A, or business ops—is weakest, default to generalists over narrow specialists, and scale through systems and data before headcount.",
     ),
     TLItem(
         title="Building Dashboards That Matter",
@@ -135,7 +135,7 @@ SPEAKING: list[TLItem] = [
         title="F Suite Regional Forum: Your Moment, Your Move—Leading Through Uncertainty (Co-Chair)",
         url="https://bostonregionalforum.splashthat.com", venue="The F Suite",
         date_label="Jun 2025", sort_key="2025-06", type="speaking",
-        description="Co-chaired this half-day Boston forum on preparing for major company and career transitions (IPOs, M&As, and exits), alongside mainstage sessions on exit readiness and AI in finance.",
+        description="Co-chaired this half-day Boston forum on preparing for major company and career transitions—IPOs, M&As, and exits—alongside mainstage sessions on exit readiness and AI in finance.",
     ),
     TLItem(
         title="CFO Roundtable—M&A and Managing Uncertainty",

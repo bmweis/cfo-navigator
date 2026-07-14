@@ -1084,7 +1084,7 @@ Right now that shows up in three places at once. Building it inside Mux. Advisin
 
 Different rooms, same instinct: see around corners, take action early, think a few steps ahead, bring the people around me into it. I was AI-native before AI-native was a thing, and I still read more from other finance and AI thinkers than I write myself.
 
-None of that's abstract. I led finance through two acquisitions (Ansible to Red Hat, Tidelift to Sonar), both LOI to close in under 45 days. At Tidelift I took the company from under a dozen people to 70-plus, raised $73.5M through Series B and C, and built the payment infrastructure behind it. I'm a founding member of The F Suite, a network of 1,000-plus CFOs, and I host The Cash Flow Show with OnlyCFO. Earned secrets (the kind you only get from being in the room) are the throughline in all of it.
+None of that's abstract. I led finance through two acquisitions—Ansible to Red Hat, Tidelift to Sonar—both LOI to close in under 45 days. At Tidelift I took the company from under a dozen people to 70-plus, raised $73.5M through Series B and C, and built the payment infrastructure behind it. I'm a founding member of The F Suite, a network of 1,000-plus CFOs, and I host The Cash Flow Show with OnlyCFO. Earned secrets—the kind you only get from being in the room—are the throughline in all of it.
 
 I'm looking for the next place to put that to work. Could be early stage. Could be growth. Could be something I haven't done yet."""
 
@@ -1362,7 +1362,7 @@ def growth_engine_ratio(request: Request):
 
 <div style="background:var(--accent-light);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:18px 22px;margin:0 0 36px;">
   <p style="margin:0;font-size:15px;">
-    The full guide (including benchmark data from 200+ public and private SaaS companies via OPEXEngine)
+    The full guide—including benchmark data from 200+ public and private SaaS companies via OPEXEngine—
     is available as a downloadable whitepaper on The F Suite.
     <strong><a href="https://www.fsuite.co" target="_blank" rel="noopener">Read the full article and download the guide &rarr;</a></strong>
     <em style="display:block;margin-top:6px;font-size:13px;color:var(--muted);">(Link will be live when The F Suite publishes—coming soon.)</em>
@@ -1372,7 +1372,7 @@ def growth_engine_ratio(request: Request):
 <h2 style="margin-top:0;">Why I Built This</h2>
 <p>Most SaaS efficiency metrics measure one engine at a time. CAC payback tells you how quickly GTM
 investment pays back on new logos. Magic Number tells you how much ARR you're getting per dollar of
-sales and marketing spend. Both are useful (I use them all the time), but they share a blind spot:
+sales and marketing spend. Both are useful—I use them all the time—but they share a blind spot:
 they leave R&D entirely out of the efficiency equation.</p>
 
 <p>That bothers me. At most companies, R&D is 20–30% of revenue. It's a meaningful investment, and
@@ -1596,7 +1596,7 @@ need to retain each customer for 1.7 years just to recover acquisition costs—a
 assumes flat renewal with no expansion. Strong NRR (above 110%) compresses that timeline;
 contraction can make it indefinitely long.</p>
 
-<p>Companies below $1.00 (which is most of them) need both high gross retention and strong
+<p>Companies below $1.00, which is most of them, need both high gross retention and strong
 net expansion for the economics to work. One without the other isn't sufficient. The ratio
 makes that constraint explicit in a way that's hard to argue with in a board room.</p>
 
@@ -2141,14 +2141,14 @@ def finops_ai_hackathon(request: Request):
 <p>A hackathon fixes that by force. It carves out protected time and makes <em>exploring together</em> the actual assignment. The format works for three reasons:</p>
 <ul style="padding-left:22px;margin:0 0 20px;">
   <li style="margin-bottom:10px;"><strong>Psychological safety.</strong> When everyone is learning at the same time, in the same room, there's no expert to defer to and no reason to hide. Half-formed ideas get air.</li>
-  <li style="margin-bottom:10px;"><strong>Time-boxing as a feature.</strong> The constraint (ninety minutes to build something shippable) focuses effort better than a two-week sprint with no end in sight. Done is better than perfect.</li>
+  <li style="margin-bottom:10px;"><strong>Time-boxing as a feature.</strong> The constraint—ninety minutes to build something shippable—focuses effort better than a two-week sprint with no end in sight. Done is better than perfect.</li>
   <li style="margin-bottom:10px;"><strong>Compounding returns.</strong> A team that has learned something together learns faster next time. The first hackathon is the hardest. Run it annually and it becomes a flywheel.</li>
 </ul>
 
 <p>The goal isn't to automate the whole finance function. It's to close the gap between your team's potential and its current velocity—on purpose, together, in a way that compounds.</p>
 
 <h2>The method behind it: design thinking</h2>
-<p>Before the mechanics, the philosophy. The prioritization format I use (post-its, dot stickers, a 2×2) isn't a team-building exercise. It's the application of a specific method: design thinking.</p>
+<p>Before the mechanics, the philosophy. The prioritization format I use: post-its, dot stickers, a 2×2. It isn't a team-building exercise. It's the application of a specific method: design thinking.</p>
 
 <p>Design thinking is a problem-solving approach that starts with the people experiencing the problem, not with the solution. It works in two modes:</p>
 
@@ -2369,10 +2369,10 @@ def finops_ai_hackathon(request: Request):
 
 <p>Without this, the hackathon produces prototypes. With it, it produces compounding assets. The next person who picks up a similar problem starts from the answer, not from scratch.</p>
 
-<p>Two database views worth setting up: an <strong>effort × value matrix</strong> (the digital twin of your sticky-note 2×2, auto-sorted by vote count) and a <strong>groups board</strong> by theme. The groups view is useful for spotting when one area (say, month-end close) quietly dominates the shortlist, which is usually a signal worth paying attention to.</p>
+<p>Two database views worth setting up: an <strong>effort × value matrix</strong> (the digital twin of your sticky-note 2×2, auto-sorted by vote count) and a <strong>groups board</strong> by theme. The groups view is useful for spotting when one area—say, month-end close—quietly dominates the shortlist, which is usually a signal worth paying attention to.</p>
 
 <h2>After: building the AI Lab</h2>
-<p>The hackathon is a beginning, not a destination. What makes it compound over time is institutionalizing what you learned: a shared space (call it the AI Lab, call it whatever fits your culture) where builds live and can be forked.</p>
+<p>The hackathon is a beginning, not a destination. What makes it compound over time is institutionalizing what you learned: a shared space—call it the AI Lab, call it whatever fits your culture—where builds live and can be forked.</p>
 
 <p>The operating model is simple:</p>
 <ul style="padding-left:22px;margin:0 0 20px;">
@@ -2491,7 +2491,7 @@ def netsuite_mcp(request: Request):
   <div class="ns-case">
     <div class="ns-case-label">Use case 01</div>
     <div class="ns-case-title">Revenue flow tracker</div>
-    <p>If you work with deferred revenue (annual contracts, prepaid arrangements, usage-based billing), it's hard to get a clear picture of how money is moving at any point in time. Claude can pull a month-by-month view showing how revenue is loading into deferred, releasing into recognized, and what the ending balance looks like. Run it for the whole business or for a specific customer.</p>
+    <p>If you work with deferred revenue—annual contracts, prepaid arrangements, usage-based billing—it's hard to get a clear picture of how money is moving at any point in time. Claude can pull a month-by-month view showing how revenue is loading into deferred, releasing into recognized, and what the ending balance looks like. Run it for the whole business or for a specific customer.</p>
     <p>A typical output: a waterfall table (deferred loaded, released, ending balance by month), a transaction-level trace from invoice through recognition, and a findings section flagging anything off—like a balance that should have cleared at contract termination but didn't.</p>
     <div class="ns-tip"><strong>Tip:</strong> Ask Claude to include a math check confirming every ending balance ties back to the underlying arithmetic. Easy to add, catches rounding errors before they make it into something you share.</div>
   </div>
@@ -2505,7 +2505,7 @@ def netsuite_mcp(request: Request):
   <div class="ns-case">
     <div class="ns-case-label">Use case 03</div>
     <div class="ns-case-title">Per-employee benefit and stipend tracking</div>
-    <p>If your company offers benefits employees draw on over time (L&amp;D stipends, wellness budgets, home office allowances) and those transactions flow through NetSuite in any form, Claude can extract and organize them by person. A useful output: each employee's YTD usage broken down by category, with transaction-level detail on demand. Useful for answering "who has used their full allocation?" without compiling spreadsheets manually.</p>
+    <p>If your company offers benefits employees draw on over time—L&amp;D stipends, wellness budgets, home office allowances—and those transactions flow through NetSuite in any form, Claude can extract and organize them by person. A useful output: each employee's YTD usage broken down by category, with transaction-level detail on demand. Useful for answering "who has used their full allocation?" without compiling spreadsheets manually.</p>
     <div class="ns-tip"><strong>Tip:</strong> Employee names in NetSuite memos are often inconsistent—nicknames, initials, misspellings. Ask Claude to show you the distinct name variations it finds before attributing spend, so you can confirm the mapping is right.</div>
   </div>
 </div>
@@ -2619,7 +2619,7 @@ def netsuite_mcp(request: Request):
 
 <h3 style="font-size:16px;margin:24px 0 8px;">Filter at the line level, not the header</h3>
 <p>Revenue recognition journal entries are often posted as a single large entry covering many customers at once. The customer is recorded at the line level inside the entry, not on the entry itself. If Claude filters at the wrong level, it can return results for a completely different customer—or nothing at all.</p>
-<p>If results for a customer look wrong (too high, too low, or zero when you know there should be activity), ask Claude: <em>"Are you filtering on the transaction line entity, not the transaction header entity?"</em> That question catches the most common mistake.</p>
+<p>If results for a customer look wrong—too high, too low, or zero when you know there should be activity—ask Claude: <em>"Are you filtering on the transaction line entity, not the transaction header entity?"</em> That question catches the most common mistake.</p>
 
 <h3 style="font-size:16px;margin:24px 0 8px;">If you get zero results, pull an unfiltered sample first</h3>
 <p>Zero results almost always mean a filter is wrong, not that the data is missing. Ask Claude to run a quick sample: <em>"Can you pull 5–10 raw rows with no filters so we can see what's actually there?"</em> This almost always reveals the issue—a filter too narrow, a date range that doesn't match, or a field with data in a slightly different format than expected.</p>

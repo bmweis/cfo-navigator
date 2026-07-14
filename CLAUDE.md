@@ -320,6 +320,18 @@ having to go dig up the surrounding copy himself. He'll tell you to keep it or
 give you an editorial rewrite. This applies to draft copy you're presenting
 for review same as anything you're about to commit.
 
+**Clarified rule (from the #134 em-dash cleanup round-trip):** a spaced em
+dash ( — with spaces) is never allowed. An unspaced em dash is fine, and so is
+a matched pair of unspaced em dashes bracketing a short aside or appositive
+(e.g. "two acquisitions—Ansible to Red Hat, Tidelift to Sonar—both LOI to
+close in under 45 days") when that's the most natural construction—don't
+mechanically force it into parentheses or a colon just to get the dash count
+down. What's actually off-voice is peppering em-dash asides into nearly every
+sentence of a piece, or using one to bolt a long trailing clause onto an
+already-complete sentence. Still flag it rather than deciding unilaterally;
+Brian may prefer a comma or colon rewrite for a specific sentence even when
+the em-dash form would otherwise be fine.
+
 ## Deployment
 
 - **Host:** Railway, building from the `Dockerfile` (`python:3.11-slim`, runs

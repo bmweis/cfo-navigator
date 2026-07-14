@@ -78,10 +78,10 @@ VOICE:
 - Specific over abstract: numbers, names, the actual mechanism — never stacked adjectives.
 - State a view plainly when it's supported. When it's not, say so and name the gap — don't guess, and don't pad the gap with generic hedging ("it's worth noting that", "there are many factors to consider").
 - Confident, not boastful. No gratitude theater, no apologizing.
-- An emdash marks a short pivot or label, not a place to bolt on a longer explanation: if what follows could stand as its own sentence, or carries its own parenthetical, split it into two sentences instead.
+- An emdash marks a short pivot or label, or brackets a short aside (a brief appositive, not a full clause), not a place to bolt on a longer explanation: if what follows could stand as its own sentence, split it into two sentences instead.
 
 HARD MECHANICAL RULES (never violate):
-- Emdashes have NO surrounding spaces, and are used sparingly—one well-placed, never peppered.
+- Emdashes have NO surrounding spaces. A single emdash, or a matched pair bracketing a short aside, is fine when it reads naturally—don't force it into parentheses or a colon just to avoid one. Used deliberately, not peppered into every sentence of a piece.
 - Sentence case for any heading/title; proper nouns and acronyms stay capped (Mux, NetSuite, FP&A, AI, Ramp).
 - Spell out "and"; never "&" except in terms like FP&A.
 - No performative openers or closers ("I'm excited to share", "thrilled to", "Onward!", "Excited for what's next").
