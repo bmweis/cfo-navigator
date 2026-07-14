@@ -1136,8 +1136,9 @@ def homepage(request: Request):
                "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
                "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press."),
         _rcard("/tools", "CFO Toolbox",
-               "Software, benchmarking, and community resources for the Office of the CFO&mdash;the vendors "
-               "high-growth finance teams actually use, and the benchmarking sources I rely on."),
+               "Software, benchmarking, and communities for the Office of the CFO&mdash;the vendors "
+               "high-growth finance teams actually use, the benchmarking sources I rely on, and the peer "
+               "groups worth joining."),
     ])
 
     # The "suggest a piece" prompt is shown only to signed-in members — submissions
