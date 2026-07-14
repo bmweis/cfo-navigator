@@ -686,9 +686,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
 # redundant since _page() prepends a consistent "BMW CFO ·" tab-title prefix
 # instead. Stripped so a tab reads e.g. "BMW CFO · Archive" instead of the
 # doubled-up "BMW CFO · Archive — Brian Weisberg".
-_TITLE_SUFFIXES = ("—Brian Weisberg", " — Brian Weisberg",
-                   "—CFO Toolbox", " — CFO Toolbox",
-                   "—Admin", " — Admin")
+_TITLE_SUFFIXES = ("—Brian Weisberg", "—CFO Toolbox", "—Admin")
 
 
 def _short_title(title: str) -> str:
@@ -821,10 +819,10 @@ def login_page(request: Request, next: str = "/library", error: str = "", reset:
         # Send them to /library instead, which any member can always reach.
         safe_next = (next or "/library") if _is_authed(request) else "/library"
         return RedirectResponse(safe_next, status_code=303)
-    err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That didn&rsquo;t work — check your details and try again.</p>'
+    err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That didn&rsquo;t work—check your details and try again.</p>'
            if error else "")
     reset_notice = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
-                     'font-size:14px;margin:0 0 16px;">Password updated — sign in with your new password.</p>'
+                     'font-size:14px;margin:0 0 16px;">Password updated—sign in with your new password.</p>'
                      if reset else "")
     body = f"""<div class="page page-narrow">
 <h1>Sign in</h1>
@@ -852,7 +850,7 @@ def forgot_password_page(request: Request, sent: str = ""):
         body = """<div class="page page-narrow">
 <h1>Check your email</h1>
 <p style="color:var(--muted);margin:4px 0 20px;">If that username has an account with an email on file, a password
-reset link is on its way — it expires in 1 hour. If we don&rsquo;t have an email for that account, Brian&rsquo;s been
+reset link is on its way—it expires in 1 hour. If we don&rsquo;t have an email for that account, Brian&rsquo;s been
 notified and will reset it for you directly.</p>
 <p><a href="/login" style="font-size:14px;">&larr; Back to sign in</a></p>
 </div>"""
@@ -1074,7 +1072,7 @@ _HOMEPAGE_SUBHEAD_DEFAULT = ("This is where I share the writing, tools, and hard
                               "leaders at high-growth tech companies step into that role: GTM efficiency, "
                               "headcount and org design, mentorship, and the cross-functional calls finance "
                               "gets pulled into as a company scales.")
-_HOMEPAGE_TEASER_DEFAULT = "Brian Weisberg — CFO who builds finance functions from scratch, not inherits them."
+_HOMEPAGE_TEASER_DEFAULT = "Brian Weisberg—CFO who builds finance functions from scratch, not inherits them."
 _HOMEPAGE_EXPANDED_DEFAULT = """I'm wrapping up my time at Mux over the next couple of weeks and actively exploring what's next—early stage, growth stage, or something I haven't done yet.
 
 If you're building something and think I could help, let's talk."""
@@ -1082,7 +1080,7 @@ _ABOUT_COPY_DEFAULT = """I've spent 15 years doing one thing well: building.
 
 Finance functions from scratch. Trust with boards, teams, and the room outside the room. Systems that let people sail instead of row.
 
-Right now that shows up in three places at once. Building it inside Mux. Advising early-stage companies selling into the office of the CFO, who need someone who's sat in that seat. And showing up for the finance community itself, as a voice—or shoulder—on where AI earns its keep in finance versus where it's just hype.
+Right now that shows up in three places at once. Building it inside Mux. Advising early-stage companies selling into the office of the CFO, who need someone who's sat in that seat. And showing up for the finance community itself, as a voice (or shoulder) on where AI earns its keep in finance versus where it's just hype.
 
 Different rooms, same instinct: see around corners, take action early, think a few steps ahead, bring the people around me into it. I was AI-native before AI-native was a thing, and I still read more from other finance and AI thinkers than I write myself.
 
@@ -1208,7 +1206,7 @@ def about_page(request: Request):
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
 </div>
 </div>"""
-    return HTMLResponse(_page("About — Brian Weisberg", "About", body, role=_role(request)))
+    return HTMLResponse(_page("About—Brian Weisberg", "About", body, role=_role(request)))
 
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
@@ -1301,7 +1299,7 @@ def thought_leadership(request: Request):
         '.tl-row-top{flex-direction:column;gap:2px;}}'
         '</style>'
         '<h1>Thought Leadership</h1>'
-        '<p style="color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press &mdash; from a tech CFO working in the thick of the business.</p>'
+        '<p style="color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
         + featured
     )
 
@@ -1378,7 +1376,7 @@ sales and marketing spend. Both are useful—I use them all the time—but they 
 they leave R&D entirely out of the efficiency equation.</p>
 
 <p>That bothers me. At most companies, R&D is 20–30% of revenue. It's a meaningful investment, and
-it directly influences how easy—or hard—it is for GTM to do its job. A great product shortens
+it directly influences how easy or hard it is for GTM to do its job. A great product shortens
 sales cycles, reduces churn, and drives expansion. A product that's hard to understand or hasn't
 kept pace with customer needs makes every dollar of GTM spend work harder just to stay in place.</p>
 
@@ -1598,7 +1596,7 @@ need to retain each customer for 1.7 years just to recover acquisition costs—a
 assumes flat renewal with no expansion. Strong NRR (above 110%) compresses that timeline;
 contraction can make it indefinitely long.</p>
 
-<p>Companies below $1.00—which is most of them—need both high gross retention and strong
+<p>Companies below $1.00, which is most of them, need both high gross retention and strong
 net expansion for the economics to work. One without the other isn't sufficient. The ratio
 makes that constraint explicit in a way that's hard to argue with in a board room.</p>
 
@@ -1738,7 +1736,7 @@ function contributionSVG(strip, cur, labels) {
     '<linearGradient id="cgR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + RED + '" stop-opacity="0.30"/><stop offset="1" stop-color="' + RED + '" stop-opacity="0.08"/></linearGradient>' +
     '</defs>';
 
-  s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#1a1a1a">How ' + labels[cur] + ' is built &#8212; Time-Distributed Contribution</text>';
+  s += '<text x="' + (W / 2) + '" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="#1a1a1a">How ' + labels[cur] + ' is built&#8212;Time-Distributed Contribution</text>';
   s += '<text x="' + (W / 2) + '" y="52" text-anchor="middle" font-size="13" fill="' + MUT + '">25% of every quarter of spend feeds the window &#183; Efficiency Ratio = $' + ratio.toFixed(2) + '</text>';
 
   s += '<text x="20" y="186" font-size="13" font-weight="700" fill="' + BLUE + '">GTM</text>';
@@ -2150,7 +2148,7 @@ def finops_ai_hackathon(request: Request):
 <p>The goal isn't to automate the whole finance function. It's to close the gap between your team's potential and its current velocity—on purpose, together, in a way that compounds.</p>
 
 <h2>The method behind it: design thinking</h2>
-<p>Before the mechanics, the philosophy. The prioritization format I use—post-its, dot stickers, a 2×2—isn't a team-building exercise. It's the application of a specific method: design thinking.</p>
+<p>Before the mechanics, the philosophy. The prioritization format I use: post-its, dot stickers, a 2×2. It isn't a team-building exercise. It's the application of a specific method: design thinking.</p>
 
 <p>Design thinking is a problem-solving approach that starts with the people experiencing the problem, not with the solution. It works in two modes:</p>
 
@@ -2202,7 +2200,7 @@ def finops_ai_hackathon(request: Request):
 <p>The single biggest mistake in running a hackathon is walking into the room cold. If the first thing you do is ask "so what should we build?"—you'll spend half your time generating half-baked ideas and the other half convincing people to try something. Do the intake work before you're in a room together.</p>
 
 <div class="fah-callout">
-  <div class="fah-callout-title">Async intake — 1–2 weeks before the event</div>
+  <div class="fah-callout-title">Async intake—1–2 weeks before the event</div>
   <ul>
     <li>Set up a simple intake form (Notion works well) with these fields: <strong>problem statement</strong> (one sentence), <strong>who it hurts</strong>, <strong>type</strong> (automation / visibility / missing skill / analysis), <strong>impact and feasibility</strong> (a first guess), and <strong>definition of done</strong>.</li>
     <li>Ask specific questions. <em>"What do you do every week that feels like copy-paste?"</em> gets better answers than <em>"What problems do you have?"</em></li>
@@ -2253,7 +2251,7 @@ def finops_ai_hackathon(request: Request):
 </div>
 
 <div class="fah-matrix">
-  <div class="fah-matrix-label">Value vs. Effort — how to sort your ideas</div>
+  <div class="fah-matrix-label">Value vs. Effort—how to sort your ideas</div>
   <div class="fah-matrix-grid">
     <div class="fah-m-y">Value &uarr;</div>
     <div class="fah-q fah-q-star">
@@ -2303,11 +2301,11 @@ def finops_ai_hackathon(request: Request):
 <h2>Protect the gap: inspire, sleep, build</h2>
 <p>Here's the sequencing decision that separates a good hackathon from a great one: <strong>don't build on the framing day.</strong></p>
 
-<p>The framing session is dense with new thinking—a full backlog processed, clustered, voted on, and prioritized. Ending there—inspired rather than rushed—gives that thinking time to settle. People go home with a problem in their head. They think about it in the shower. They wake up with the approach half-formed. That overnight processing is doing real work.</p>
+<p>The framing session is dense with new thinking—a full backlog processed, clustered, voted on, and prioritized. Ending there, inspired rather than rushed, gives that thinking time to settle. People go home with a problem in their head. They think about it in the shower. They wake up with the approach half-formed. That overnight processing is doing real work.</p>
 
 <div class="fah-pull"><p>"Inspire → Sleep → Build. That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method."</p></div>
 
-<p>Add one more step on the morning of the build day before anyone opens a laptop: <strong>15–20 minutes of inspiration.</strong> Show examples of what other finance teams have actually built with AI. Real demos, not slides. Actual workflows someone is using. Then—and this is the move worth stealing—clear the votes and run a second idea-generation round from scratch. The second round is almost always better than the first. People arrive with new angles, sharper problem statements, and sometimes a completely different sense of what they want to build.</p>
+<p>Add one more step on the morning of the build day before anyone opens a laptop: <strong>15–20 minutes of inspiration.</strong> Show examples of what other finance teams have actually built with AI. Real demos, not slides. Actual workflows someone is using. Then, and this is the move worth stealing, clear the votes and run a second idea-generation round from scratch. The second round is almost always better than the first. People arrive with new angles, sharper problem statements, and sometimes a completely different sense of what they want to build.</p>
 
 <h2>The build day</h2>
 <p>The build sprint is simple by design. Complexity is the enemy of shipping.</p>
@@ -2322,7 +2320,7 @@ def finops_ai_hackathon(request: Request):
   </ul>
 </div>
 
-<p>The constraint—90 minutes—is the point. It forces scope decisions early. A team that's trying to build the perfect reconciliation engine will fail. A team that's trying to build a working prototype of one slice of that engine will ship something. "Done enough to demo" is the bar.</p>
+<p>The constraint (90 minutes) is the point. It forces scope decisions early. A team that's trying to build the perfect reconciliation engine will fail. A team that's trying to build a working prototype of one slice of that engine will ship something. "Done enough to demo" is the bar.</p>
 
 <p>What floaters actually do: when a pair is stuck on a tool behavior, a data question, or scope creep, the floater doesn't solve the problem for them. They ask one question: <em>"What's the smallest thing you could build that would prove this works?"</em> That's usually enough to unblock.</p>
 
@@ -2352,7 +2350,7 @@ def finops_ai_hackathon(request: Request):
 <p>The post-its get the attention. They're not what makes this work. What makes it work is the underlying system—one intake database, one page per idea, a structured record that outlives the event.</p>
 
 <div class="fah-template">
-  <div class="fah-template-title">📋 Hackathon intake form — fields that matter</div>
+  <div class="fah-template-title">📋 Hackathon intake form—fields that matter</div>
   <h3>Submission name</h3>
   <p>A 3–6 word label. Forces clarity before anyone has read the full submission.</p>
   <h3>Problem statement</h3>
@@ -2501,7 +2499,7 @@ def netsuite_mcp(request: Request):
     <div class="ns-case-label">Use case 02</div>
     <div class="ns-case-title">Vendor spend analysis</div>
     <p>Vendor spend is deceptively messy in NetSuite. The same vendor might appear under different names across bills. Some vendors route through a spend management platform (Ramp, Navan, Brex), which means they show up as a single vendor with the actual vendor buried in a memo field. Others route through a marketplace, invisible unless you know where to look.</p>
-    <p>Claude can learn these patterns. Once you show it how your vendors are recorded—<em>"this vendor always comes through as the platform with the name in the memo"</em>—it applies that logic consistently. The result is a spend picture that reflects reality, not just whatever's in the vendor field.</p>
+    <p>Claude can learn these patterns. Once you show it how your vendors are recorded, for example <em>"this vendor always comes through as the platform with the name in the memo,"</em> it applies that logic consistently. The result is a spend picture that reflects reality, not just whatever's in the vendor field.</p>
     <div class="ns-tip"><strong>Tip:</strong> The first time you run a vendor spend query, ask Claude to show you a sample of raw transaction data before it aggregates anything. Easy way to spot non-obvious mappings before they roll up into a wrong total.</div>
   </div>
   <div class="ns-case">
@@ -2515,14 +2513,14 @@ def netsuite_mcp(request: Request):
 <h2>The security architecture</h2>
 <p>The setup involves creating a dedicated read-only role in NetSuite for Claude to authenticate as. The reason matters.</p>
 
-<p>Claude's NetSuite integration includes tools that can create and update records—not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do. The protection is enforced by NetSuite, not by hoping Claude behaves.</p>
+<p>Claude's NetSuite integration includes tools that can create and update records, not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do. The protection is enforced by NetSuite, not by hoping Claude behaves.</p>
 
 <div class="ns-warn">
   <div class="ns-warn-title">One thing that trips people up</div>
   <p>When you connect Claude, you need to be logged into NetSuite under your <strong>normal working role</strong>—not the new read-only role you're about to create. You'll select the read-only role on a screen that appears during the connection flow. More on this in Part 2.</p>
 </div>
 
-<h2>Part 1 — NetSuite setup</h2>
+<h2>Part 1—NetSuite setup</h2>
 <p style="color:var(--muted);font-size:14px;margin:-8px 0 20px;">You need Administrator access for these steps, or ask your NetSuite admin to complete them.</p>
 
 <div class="ns-track">
@@ -2575,7 +2573,7 @@ def netsuite_mcp(request: Request):
   </div>
 </div>
 
-<h2>Part 2 — Connecting Claude</h2>
+<h2>Part 2—Connecting Claude</h2>
 <p style="color:var(--muted);font-size:14px;margin:-8px 0 20px;">NetSuite is set up. This part takes about two minutes per person.</p>
 
 <div class="ns-track">
@@ -4248,7 +4246,7 @@ def play_leaderboard(request: Request, scope: str = "week"):
 </div>"""
     else:
         rows_html = ('<p style="padding:24px;text-align:center;color:var(--muted);">'
-                     'No runs yet — be the first to set a Score.</p>')
+                     'No runs yet—be the first to set a Score.</p>')
 
     body = """<div class="page">
 <style>""" + _SDR_PILL_CSS + """
@@ -4270,7 +4268,7 @@ def play_leaderboard(request: Request, scope: str = "week"):
 </style>
 <p style="margin:0 0 4px;"><a href="/play" style="font-size:13px;color:var(--muted);">&larr; Sail, Don&rsquo;t Row</a></p>
 <h1 style="margin:0 0 6px;">Leaderboard</h1>
-<p style="color:var(--muted);margin:0 0 22px;">One board across every rank &mdash; each run is tagged with the
+<p style="color:var(--muted);margin:0 0 22px;">One board across every rank&mdash;each run is tagged with the
 rank and difficulty it was played on, so a Storm-Warning Skipper run and a Fair-Winds Deckhand run are both
 visible at a glance, side by side.</p>
 <div class="sdr-lb-tabs">""" + scope_tabs + """</div>
@@ -4395,7 +4393,7 @@ def library_submit_page(request: Request, submitted: str = ""):
 <p>I review every suggestion personally. If it's a fit for the archive, it'll join the collection.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
-        return HTMLResponse(_page("Suggestion received — Brian Weisberg", "", body, role=_role(request)))
+        return HTMLResponse(_page("Suggestion received—Brian Weisberg", "", body, role=_role(request)))
 
     body = """<div class="page page-narrow">
 <h1>Suggest a piece for the archive</h1>
@@ -4432,7 +4430,7 @@ def library_submit_page(request: Request, submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Suggest a piece — Brian Weisberg", "", body, role=_role(request)))
+    return HTMLResponse(_page("Suggest a piece—Brian Weisberg", "", body, role=_role(request)))
 
 
 @app.post("/library/submit")
@@ -4534,8 +4532,8 @@ def tools_landing(request: Request):
         )
 
     cards = "".join([
-        _hcard("/tools/software", "Software", "A curated directory of the software high-growth finance teams actually use &mdash; searchable, filterable, with a Warm Intro button for the vendors I know well."),
-        _hcard("/tools/benchmarks", "Benchmarking", "The benchmarking sources I actually rely on &mdash; plus an honest take on where benchmarks help and where they mislead."),
+        _hcard("/tools/software", "Software", "A curated directory of the software high-growth finance teams actually use&mdash;searchable, filterable, with a Warm Intro button for the vendors I know well."),
+        _hcard("/tools/benchmarks", "Benchmarking", "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks help and where they mislead."),
         _hcard("/tools/communities", "Communities", "CFO and finance communities worth joining: peer groups, associations, and Slack channels, searchable and filterable."),
     ])
 
@@ -4842,7 +4840,7 @@ async function saveQuickEdit(id) {{
     }}
     renderTools(filtered());
   }} catch (e) {{
-    status.textContent = 'Save failed — try again.';
+    status.textContent = 'Save failed—try again.';
   }}
 }}
 
@@ -5336,7 +5334,7 @@ def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None
         f'{" checked" if c["name"] in selected else ""}> {_esc(c["name"])}</label>'
         for c in categories
     ) or '<p style="grid-column:1/-1;font-size:13px;color:var(--muted);margin:0;">' \
-         'No categories yet — <a href="/admin/tools/categories">add one</a> first.</p>'
+         'No categories yet—<a href="/admin/tools/categories">add one</a> first.</p>'
 
 
 # Shared by /admin/tools/new, /admin/tools/{id}/edit, and the Quick Edit panel
@@ -5408,7 +5406,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
       placeholder="What does it do? 1–2 sentences."></textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional — select any that apply)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply)</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
       {_tool_category_checkboxes(categories)}
     </div>
@@ -5512,10 +5510,10 @@ def admin_contacts(request: Request):
     notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
     email_status = (
         f'<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">'
-        f'Email notifications are <strong>on</strong> &mdash; new submissions are emailed to <code>{_esc(notify_to)}</code>.</div>'
+        f'Email notifications are <strong>on</strong>&mdash;new submissions are emailed to <code>{_esc(notify_to)}</code>.</div>'
         if _email_configured() else
         '<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">'
-        'Email notifications are <strong>off</strong> &mdash; set the <code>GOOGLE_OAUTH_*</code> vars '
+        'Email notifications are <strong>off</strong>&mdash;set the <code>GOOGLE_OAUTH_*</code> vars '
         '(shared with the Drive backup) + <code>LINKLIB_FROM_EMAIL</code> (and optionally '
         '<code>LINKLIB_CONTACT_EMAIL</code>) to enable them. Until then, check this page manually.</div>'
     )
@@ -5581,7 +5579,7 @@ async def admin_contacts_delete(request: Request):
             _log_contact_audit(lib, request, c["id"], detail=f"{c['name']} <{c['email']}>")
         elif len(deleted) > 1:
             summary = "; ".join(f"{c['name']} <{c['email']}>" for c in deleted)
-            _log_contact_audit(lib, request, None, detail=f"{len(deleted)} submissions — {summary}")
+            _log_contact_audit(lib, request, None, detail=f"{len(deleted)} submissions—{summary}")
     finally:
         lib.close()
     return RedirectResponse("/admin/contacts", status_code=303)
@@ -5612,7 +5610,7 @@ def admin_email_failures(request: Request):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Email delivery failures</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Every outbound email is best-effort — contact form, tool submissions, welcome emails, password resets, warm intros. The underlying record always saves even if the send fails.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Every outbound email is best-effort—contact form, tool submissions, welcome emails, password resets, warm intros. The underlying record always saves even if the send fails.</p>
 <p style="color:var(--muted);margin:0 0 18px;">A failure lands here instead of just a server log, so it never goes unnoticed.</p>
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -5779,11 +5777,11 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
         </tr>"""
         for ld in leads
     ) or '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No leads yet.</td></tr>'
-    title_suffix = f" — {_esc(tool_name_filter)}" if tool_name_filter else ""
+    title_suffix = f"—{_esc(tool_name_filter)}" if tool_name_filter else ""
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox intros{title_suffix}</h1>
-<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm Intro requests from readers &mdash; {len(leads)} total.</p>
+<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm Intro requests from readers&mdash;{len(leads)} total.</p>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -5832,13 +5830,13 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
   <td style="padding:9px 12px;font-size:13px;color:var(--muted);vertical-align:top;">{c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}</td>
   <td style="padding:9px 12px;vertical-align:top;">
     <form method="post" action="/admin/tools/categories/{cid}/delete" style="margin:0;"
-          onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''} — they stay in the directory under All, just untagged for this category.');">
+          onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}—they stay in the directory under All, just untagged for this category.');">
       <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
     </form>
   </td>
 </tr>"""
     if not categories:
-        rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet — add one below.</td></tr>'
+        rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one below.</td></tr>'
 
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -5846,7 +5844,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 <p style="color:var(--muted);margin:-6px 0 6px;">These are the filter pills on <a href="/tools/software">/tools/software</a>.</p>
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;">
 <li><strong>Renaming</strong> updates every tool tagged with the old name.</li>
-<li><strong>Deleting</strong> removes the tag from tagged tools, but leaves the tools themselves in the directory — they still show under <strong>All</strong>, just not under any specific pill.</li>
+<li><strong>Deleting</strong> removes the tag from tagged tools, but leaves the tools themselves in the directory—they still show under <strong>All</strong>, just not under any specific pill.</li>
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:28px;">
@@ -5912,7 +5910,7 @@ async def admin_tools_categories_edit(request: Request, category_id: int):
         return RedirectResponse(f"/admin/tools/categories?error={quote(str(e))}", status_code=303)
     finally:
         lib.close()
-    msg = f'Saved "{name}"' + (f' — updated on {n} tool{"s" if n != 1 else ""}.' if n else '.')
+    msg = f'Saved "{name}"' + (f'—updated on {n} tool{"s" if n != 1 else ""}.' if n else '.')
     return RedirectResponse(f"/admin/tools/categories?msg={quote(msg)}", status_code=303)
 
 
@@ -5925,7 +5923,7 @@ def admin_tools_categories_delete(request: Request, category_id: int):
         n = lib.delete_tool_category(category_id)
     finally:
         lib.close()
-    msg = f'Deleted — removed from {n} tool{"s" if n != 1 else ""}.' if n else 'Deleted.'
+    msg = f'Deleted—removed from {n} tool{"s" if n != 1 else ""}.' if n else 'Deleted.'
     return RedirectResponse(f"/admin/tools/categories?msg={quote(msg)}", status_code=303)
 
 
@@ -6571,7 +6569,7 @@ def admin_tools_new(request: Request):
       placeholder="What does it do? 1–2 sentences."></textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional — select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
       {_tool_category_checkboxes(categories)}
     </div>
@@ -6579,13 +6577,13 @@ def admin_tools_new(request: Request):
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="advisor" value="1">
-      <span>&#9733; Formal advisor — mark this tool with an advisor star</span>
+      <span>&#9733; Formal advisor—mark this tool with an advisor star</span>
     </label>
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="promoted" value="1">
-      <span>&#10024; Featured — pin to top of directory with coral badge</span>
+      <span>&#10024; Featured—pin to top of directory with coral badge</span>
     </label>
   </div>
   <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
@@ -6594,7 +6592,7 @@ def admin_tools_new(request: Request):
       <input type="checkbox" name="warm_intro_enabled" value="1">
       <span>&#10024; Offer a Warm Intro button for this tool</span>
     </label>
-    <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below — either alone isn&rsquo;t enough.</p>
+    <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below—either alone isn&rsquo;t enough.</p>
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
       <input name="vendor_name" maxlength="200"
@@ -6715,7 +6713,7 @@ def admin_tools_edit(request: Request, tool_id: int):
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(tool['description'])}</textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional — select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
       {_tool_category_checkboxes(categories, tool['categories'])}
     </div>
@@ -6723,13 +6721,13 @@ def admin_tools_edit(request: Request, tool_id: int):
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
-      <span>&#9733; Formal advisor — mark this tool with an advisor star</span>
+      <span>&#9733; Formal advisor—mark this tool with an advisor star</span>
     </label>
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
-      <span>&#10024; Featured — pin to top of directory with coral badge</span>
+      <span>&#10024; Featured—pin to top of directory with coral badge</span>
     </label>
   </div>
   <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
@@ -6738,7 +6736,7 @@ def admin_tools_edit(request: Request, tool_id: int):
       <input type="checkbox" name="warm_intro_enabled" value="1"{'checked' if tool.get('warm_intro_enabled') else ''}>
       <span>&#10024; Offer a Warm Intro button for this tool</span>
     </label>
-    <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below — either alone isn&rsquo;t enough.</p>
+    <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below—either alone isn&rsquo;t enough.</p>
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
       <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
@@ -6966,7 +6964,7 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
         try:
             items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
         except Exception as e:
-            return HTMLResponse(_page("CFO Feed — Brian Weisberg", "Library",
+            return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Library",
                 f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
                 role=_role(request)))
 
@@ -7554,7 +7552,7 @@ async function saveReaderTags() {{
     box.innerHTML = spans + editBtn;
     closeReaderTagEditor();
   }} catch(e) {{
-    alert('Could not save tags — please try again.');
+    alert('Could not save tags—please try again.');
   }}
 }}
 async function deleteArticle(id) {{
@@ -7565,7 +7563,7 @@ async function deleteArticle(id) {{
     if (r.redirected) {{ window.location.href = r.url; return; }}
     window.location.href = '/library';
   }} catch(e) {{
-    alert('Could not delete — please try again.');
+    alert('Could not delete—please try again.');
   }}
 }}
 </script>"""
@@ -7727,13 +7725,13 @@ async function _doSaveTags(id, tags) {{
 async function saveTags(id) {{
   var input = document.getElementById('tag-input-' + id);
   var tags = input.value.split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
-  try {{ await _doSaveTags(id, tags); }} catch(e) {{ alert('Could not save tags — please try again.'); }}
+  try {{ await _doSaveTags(id, tags); }} catch(e) {{ alert('Could not save tags—please try again.'); }}
 }}
 async function quickRemoveTag(id, tag) {{
   var box = document.getElementById('tags-' + id);
   var current = (box.dataset.tags || '').split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
   try {{ await _doSaveTags(id, current.filter(function(t) {{ return t !== tag; }})); }}
-  catch(e) {{ alert('Could not remove tag — please try again.'); }}
+  catch(e) {{ alert('Could not remove tag—please try again.'); }}
 }}
 function quickRemoveTagBtn(btn) {{
   quickRemoveTag(parseInt(btn.dataset.articleId), btn.dataset.tag);
@@ -7849,17 +7847,17 @@ def library(request: Request):
         )
 
     reading_room = "".join([
-        _hcard("/library/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag &mdash; your curated reading history."),
+        _hcard("/library/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag&mdash;your curated reading history."),
         _hcard("/library/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive."),
     ])
     fpa_buddy = "".join([
-        _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive &mdash; a cited answer drawn from the Archive plus trusted web sources."),
+        _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive&mdash;a cited answer drawn from the Archive plus trusted web sources."),
         _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
     ])
 
     body = f"""<div class="page">
 <h1 style="margin:0 0 6px;">Library</h1>
-<p style="color:var(--muted);margin:0 0 26px;">Your private workspace &mdash; the curated archive, the live feed, and the FP&amp;A assistant.</p>
+<p style="color:var(--muted);margin:0 0 26px;">Your private workspace&mdash;the curated archive, the live feed, and the FP&amp;A assistant.</p>
 {_section("Reading Room", reading_room)}
 {_section("FP&amp;A Buddy", fpa_buddy)}
 </div>"""
@@ -7923,7 +7921,7 @@ def community_questions(request: Request, q: str = ""):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Past Questions</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy &mdash; check here before spending a query re-asking one. <a href="/library/ask">Ask your own &rarr;</a></p>
+<p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy&mdash;check here before spending a query re-asking one. <a href="/library/ask">Ask your own &rarr;</a></p>
 <form method="get" action="/library/past-questions" style="display:flex;gap:8px;margin-bottom:22px;">
   <input type="search" name="q" value="{_esc(q)}" placeholder="Search past questions&hellip;"
     style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
@@ -8910,7 +8908,7 @@ def ask_history(request: Request):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/library/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage &mdash; it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/library/past-questions">Past Questions page</a> for other members to browse.</p>
+<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/library/past-questions">Past Questions page</a> for other members to browse.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:22px;font-size:14px;">
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>
@@ -8955,11 +8953,11 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 _LIBRARY_TOOLS = [
     ("/admin/backup",       "Archive backup",      "Snapshot the database before you start, so you can roll back if needed."),
     ("/admin/backfill",     "Historical sweep",    "One-time catch-up: crawl each source's sitemap for older articles you saved before this tool existed, and queue them for review. Run once per source; new candidates land in Archive Queue below."),
-    ("/admin/queue",        "Archive Queue",       "Review every proposed save — from the historical sweep or an ongoing feed scan — fix dates, edit tags, and approve into the archive or dismiss."),
+    ("/admin/queue",        "Archive Queue",       "Review every proposed save from the historical sweep or an ongoing feed scan—fix dates, edit tags, and approve into the archive or dismiss."),
     ("/admin/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
     ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
     ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
-    ("/admin/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content — this is the material FP&A Buddy reads from, so depth here pays off there."),
+    ("/admin/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content—this is the material FP&A Buddy reads from, so depth here pays off there."),
     ("/admin/review-removals", "Remove content",   "Filter for content the enricher flagged as potentially off-target for this archive (e.g. podcasts, annual predictions, fund/LP content) and confirm or keep each one."),
 ]
 
@@ -8968,7 +8966,7 @@ _LIBRARY_TOOLS = [
 _TOOLBOX_TOOLS = [
     ("/admin/tools",            "Tools",                "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
     ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
-    ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section — name, URL, description, coverage, and pricing."),
+    ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
 ]
 
@@ -8980,27 +8978,27 @@ _TOOLBOX_TOOLS = [
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
-        ("/admin/tools/leads",  "Toolbox intros",          "Warm Intro requests from readers — name, email, company, and which tool they want an intro to."),
-        ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets — so a broken send never goes unnoticed."),
+        ("/admin/tools/leads",  "Toolbox intros",          "Warm Intro requests from readers—name, email, company, and which tool they want an intro to."),
+        ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Features", "Per-feature settings and reporting.", [
-        ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user — settings, cost, and a CSV export."),
-        ("/admin/ask-feedback",  "FP&A Buddy feedback", "Member ratings on answers — triage flagged answers with the sources they cited."),
+        ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
+        ("/admin/ask-feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
         ("/admin/game-settings", "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
-        ("/community",           "CFO community",       "Your community idea page — parked off the public site; sign-ups flow through the Google Form."),
+        ("/community",           "CFO community",       "Your community idea page—parked off the public site; sign-ups flow through the Google Form."),
     ]),
     ("Brand & voice", "How the site looks and sounds.", [
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
         ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
-        ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy — changes go live immediately, no redeploy."),
-        ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email — warm intro, welcome, password reset, and submission confirmations — changes go live immediately, no redeploy."),
+        ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy—changes go live immediately, no redeploy."),
+        ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email (warm intro, welcome, password reset, and submission confirmations)—changes go live immediately, no redeploy."),
     ]),
     ("System", "Accounts, health, and plumbing.", [
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
-        ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost — Brian's operating cost, separate from any user's FP&A Buddy cap."),
-        ("/admin/open-source",     "Open source",         "The open-source projects this site is built on — with gratitude."),
+        ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost—Brian's operating cost, separate from any user's FP&A Buddy cap."),
+        ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
     ]),
 ]
 
@@ -9052,47 +9050,47 @@ def _content_flow_diagram(highlight: str = "") -> str:
 _OPEN_SOURCE = [
     ("Runs the site", "The web stack every page and request is served through.", [
         ("FastAPI", "fastapi", "MIT", "https://fastapi.tiangolo.com",
-         "The web framework the whole app is written in — every route, page, and API."),
+         "The web framework the whole app is written in—every route, page, and API."),
         ("Starlette", "starlette", "BSD-3-Clause", "https://www.starlette.io",
-         "The ASGI toolkit under FastAPI — routing, responses, and the test client."),
+         "The ASGI toolkit under FastAPI—routing, responses, and the test client."),
         ("Uvicorn", "uvicorn", "BSD-3-Clause", "https://www.uvicorn.org",
          "The fast ASGI server that actually runs the site in production."),
         ("Pydantic", "pydantic", "MIT", "https://docs.pydantic.dev",
          "Parses and validates incoming request data behind FastAPI."),
         ("python-multipart", "python-multipart", "Apache-2.0", "https://github.com/Kludex/python-multipart",
-         "Reads the form posts — login, contact, and tool submissions."),
+         "Reads the form posts—login, contact, and tool submissions."),
     ]),
     ("Stores & searches", "Where your archive lives and how it's searched.", [
         ("SQLite + FTS5", None, "Public Domain", "https://www.sqlite.org",
          "The entire database is a single SQLite file, with FTS5 powering full-text search across your archive."),
         ("sqlite-vec", "sqlite-vec", "Apache-2.0", "https://github.com/asg017/sqlite-vec",
-         "A vector-search extension living in the same SQLite file — powers FP&A Buddy's semantic retrieval alongside FTS5."),
+         "A vector-search extension living in the same SQLite file—powers FP&A Buddy's semantic retrieval alongside FTS5."),
         ("Python", None, "PSF License", "https://www.python.org",
-         "The language it's all written in — and its standard library does a lot of the quiet heavy lifting."),
+         "The language it's all written in—and its standard library does a lot of the quiet heavy lifting."),
     ]),
     ("Reads the web", "Fetching articles and feeds, and making sense of messy pages.", [
         ("Requests", "requests", "Apache-2.0", "https://requests.readthedocs.io",
          "Fetches article pages and RSS/Atom feeds."),
         ("Beautiful Soup", "beautifulsoup4", "MIT", "https://www.crummy.com/software/BeautifulSoup/",
-         "Parses real-world HTML — the fallback full-text extractor."),
+         "Parses real-world HTML—the fallback full-text extractor."),
         ("trafilatura", "trafilatura", "Apache-2.0", "https://trafilatura.readthedocs.io",
-         "The preferred extractor — pulls clean article text out of a noisy page."),
+         "The preferred extractor—pulls clean article text out of a noisy page."),
         ("lxml", "lxml", "BSD-3-Clause", "https://lxml.de",
          "The fast C-backed parser the extractors lean on."),
     ]),
     ("Intelligence", "The AI behind enrichment, FP&A Buddy, drafting, and dedupe verification.", [
         ("Anthropic SDK", "anthropic", "MIT", "https://github.com/anthropics/anthropic-sdk-python",
-         "The Python client for Claude — summaries, auto-tags, cited FP&A Buddy answers, post drafts, and duplicate checks."),
+         "The Python client for Claude—summaries, auto-tags, cited FP&A Buddy answers, post drafts, and duplicate checks."),
         ("OpenAI SDK", "openai", "Apache-2.0", "https://github.com/openai/openai-python",
-         "The Python client for text-embedding-3-small — turns saved articles and FP&A Buddy questions into vectors for semantic search."),
+         "The Python client for text-embedding-3-small—turns saved articles and FP&A Buddy questions into vectors for semantic search."),
     ]),
-    ("Built & kept tidy", "The tools that make and maintain the site — including a couple we leaned on right here.", [
+    ("Built & kept tidy", "The tools that make and maintain the site—including a couple we leaned on right here.", [
         ("pytest", "pytest", "MIT", "https://pytest.org",
          "Runs the test suite that guards every change."),
         ("pyflakes", "pyflakes", "MIT", "https://github.com/PyCQA/pyflakes",
-         "Keeps the wire clean — catches unused imports and dead code on every push (just wired into CI)."),
+         "Keeps the wire clean—catches unused imports and dead code on every push (just wired into CI)."),
         ("Pillow", "pillow", "HPND", "https://python-pillow.org",
-         "Drew the compass-rose favicons — the PNG and .ico — from a few lines of code."),
+         "Drew the compass-rose favicons (the PNG and .ico) from a few lines of code."),
         ("httpx", "httpx", "BSD-3-Clause", "https://www.python-httpx.org",
          "The HTTP client powering the test client."),
     ]),
@@ -9173,11 +9171,11 @@ def admin_open_source(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Built with open source</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 6px;font-size:16px;line-height:1.6;">This whole site stands on the shoulders of {total}-plus open-source projects&mdash;maintained by people who gave their work away so the rest of us could build. From the framework that serves every page to the tiny tool that keeps the code tidy and the one that drew the favicon, none of it would exist without them. With gratitude. &#129518;</p>
-<p style="color:var(--muted);margin:0 0 28px;font-size:13px;">If you maintain one of these &mdash; thank you. Consider <a href="https://opencollective.com" target="_blank" rel="noopener" style="color:var(--accent);">sponsoring a maintainer</a> you rely on.</p>
+<p style="color:var(--muted);margin:0 0 28px;font-size:13px;">If you maintain one of these&mdash;thank you. Consider <a href="https://opencollective.com" target="_blank" rel="noopener" style="color:var(--accent);">sponsoring a maintainer</a> you rely on.</p>
 {groups_html}
 {love}
 </div>"""
-    return HTMLResponse(_page("Open source — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Open source—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/checks", response_class=HTMLResponse)
@@ -9196,7 +9194,7 @@ def admin_checks(request: Request):
     elif failing:
         summary = (f'<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
                    f'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">{len(failing)} live check'
-                   f'{"s" if len(failing) != 1 else ""} failing &mdash; details below.</p>')
+                   f'{"s" if len(failing) != 1 else ""} failing&mdash;details below.</p>')
     else:
         summary = (f'<p style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;border-radius:10px;'
                    f'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">&#10003; All {passing} live checks passing.</p>')
@@ -9232,7 +9230,7 @@ def admin_checks(request: Request):
 {rows}
 <p style="margin:18px 0 0;font-size:12.5px;color:var(--muted);">CI status for every check, including the ones above: <a href="{_checks.GITHUB_ACTIONS_URL}" target="_blank" rel="noopener" style="color:var(--accent);">view the latest QA run &rarr;</a></p>
 </div>"""
-    return HTMLResponse(_page("Checks — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
 
 
 def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:
@@ -9336,7 +9334,7 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
     # inline-collapsible, so it always shows its aggregate badge here —
     # the per-step breakdown lives on /admin/library itself.
     library_card = _card("/admin/library", "Archive",
-                         f"Build, curate, enrich, and back up your archive &mdash; {len(_LIBRARY_TOOLS)} tools.",
+                         f"Build, curate, enrich, and back up your archive&mdash;{len(_LIBRARY_TOOLS)} tools.",
                          _group_badge(task_counts, [href for href, _, _ in _LIBRARY_TOOLS]))
 
     groups_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
@@ -9373,17 +9371,17 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 <p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
 {auth_banner}
 <div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 28px;">
-  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);margin-bottom:6px;">Before opening the archive to paid subscribers &mdash; read this</div>
+  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);margin-bottom:6px;">Before opening the archive to paid subscribers&mdash;read this</div>
   <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">The archive stores the full text of other people&rsquo;s articles. That&rsquo;s fine for your own research, but charging readers for access to it would mean redistributing content you don&rsquo;t own. Settle licensing with the authors you can, and before any paid access goes live:</p>
   <ul style="font-size:13.5px;color:var(--ink-soft);margin:0;padding-left:18px;line-height:1.6;">
     <li>Make subscriber-facing feed items <strong>link out</strong> to the original source; keep the in-app reader (<code>/read</code>) private to you.</li>
-    <li>Serve only <strong>summaries, tags, and citations</strong> &mdash; never the stored full text (the <code>content</code> field).</li>
+    <li>Serve only <strong>summaries, tags, and citations</strong>&mdash;never the stored full text (the <code>content</code> field).</li>
     <li>Tighten <code>agent.py</code> so an answer can never fall back to raw <code>content</code> when a summary is missing (today it can, at <code>_build_source_documents</code> via <code>_ground_body</code>).</li>
   </ul>
 </div>
 {groups_html}
 </div>"""
-    return HTMLResponse(_page("Admin — Brian Weisberg", "Admin", body, authed=True))
+    return HTMLResponse(_page("Admin—Brian Weisberg", "Admin", body, authed=True))
 
 
 @app.get("/admin/library", response_class=HTMLResponse)
@@ -9420,7 +9418,7 @@ def admin_library(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Archive</h1>
 <p style="color:var(--muted);margin:4px 0 6px;">Full management of the digital archive. The eight tools below cover backing it up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from.</p>
-<p style="color:var(--muted);margin:0 0 18px;">For a first-time cleanup, work top to bottom &mdash; each step sets up the next. Once set up, jump to any tool directly anytime.</p>
+<p style="color:var(--muted);margin:0 0 18px;">For a first-time cleanup, work top to bottom&mdash;each step sets up the next. Once set up, jump to any tool directly anytime.</p>
 {_content_flow_diagram()}
 <p style="color:var(--muted);font-size:14px;margin:-8px 0 6px;">New content always enters through the queue (step&nbsp;2 or&nbsp;3) for your review before it's saved. From there:</p>
 <ul style="color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px;padding-left:20px;">
@@ -9431,24 +9429,24 @@ def admin_library(request: Request):
 
 <h2 style="margin:40px 0 6px;">Saving articles from anywhere</h2>
 <p style="color:var(--muted);font-size:14px;margin:0 0 8px;line-height:1.6;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
-<p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong> &mdash; the old copies embed the old values. Set them up again from this page's instructions.</p>
+<p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong>&mdash;the old copies embed the old values. Set them up again from this page's instructions.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
-<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);">Desktop &mdash; the bookmarklet</summary>
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);">Desktop&mdash;the bookmarklet</summary>
 <div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
-<p style="margin:0 0 10px;">A bookmarklet is an ordinary browser bookmark whose &ldquo;URL&rdquo; is a tiny program instead of a web address. Clicking it runs the program on whatever page you're reading &mdash; it grabs that page's address and saves it to the archive.</p>
+<p style="margin:0 0 10px;">A bookmarklet is an ordinary browser bookmark whose &ldquo;URL&rdquo; is a tiny program instead of a web address. Clicking it runs the program on whatever page you're reading&mdash;it grabs that page's address and saves it to the archive.</p>
 <ol style="margin:0 0 10px;padding-left:20px;">
-  <li>Open <a href="/bookmarklet">/bookmarklet</a> (login-gated) and copy the <em>entire</em> snippet &mdash; click the text, <strong>Cmd+A</strong>, <strong>Cmd+C</strong>.</li>
+  <li>Open <a href="/bookmarklet">/bookmarklet</a> (login-gated) and copy the <em>entire</em> snippet&mdash;click the text, <strong>Cmd+A</strong>, <strong>Cmd+C</strong>.</li>
   <li>Show the bookmarks bar (<strong>Cmd+Shift+B</strong> in Chrome), right-click an empty spot on it &rarr; <strong>Add page&hellip;</strong></li>
   <li>Name: <code>Save to CFO Library</code>. URL: <strong>paste the snippet</strong>. Save.</li>
   <li>On any article page, click it like a button &rarr; optional tags prompt &rarr; &ldquo;Saved to archive.&rdquo;</li>
 </ol>
-<p style="margin:0;color:var(--muted);font-size:13px;">It won't fire on browser-internal pages (new tab, chrome:// pages) &mdash; that's a browser rule. The snippet contains the save token in plaintext, so don't paste it anywhere public.</p>
+<p style="margin:0;color:var(--muted);font-size:13px;">It won't fire on browser-internal pages (new tab, chrome:// pages)&mdash;that's a browser rule. The snippet contains the save token in plaintext, so don't paste it anywhere public.</p>
 </div>
 </details>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
-<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);">iPhone / iPad &mdash; Share-Sheet shortcut</summary>
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);">iPhone / iPad&mdash;Share-Sheet shortcut</summary>
 <div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
 <p style="margin:0 0 10px;">One-time setup in the <strong>Shortcuts</strong> app (~5 minutes); afterwards &ldquo;Save to CFO Library&rdquo; appears in Safari's share sheet.</p>
 <ol style="margin:0 0 10px;padding-left:20px;">
@@ -9464,11 +9462,11 @@ def admin_library(request: Request):
   <li>Optional: add <strong>&ldquo;Show Notification&rdquo;</strong> saying &ldquo;Saved to archive&rdquo; so you get visible confirmation.</li>
   <li>Use it: in Safari, tap <strong>Share &rarr; Save to CFO Library</strong>. The article lands in the queue-free save path, same as the bookmarklet.</li>
 </ol>
-<p style="margin:0;color:var(--muted);font-size:13px;">Articles saved this way arrive untagged &mdash; tag them later in the Library, or add a second JSON text field named <code>tags</code> with a comma-separated list if you want a fixed default.</p>
+<p style="margin:0;color:var(--muted);font-size:13px;">Articles saved this way arrive untagged&mdash;tag them later in the Library, or add a second JSON text field named <code>tags</code> with a comma-separated list if you want a fixed default.</p>
 </div>
 </details>
 </div>"""
-    return HTMLResponse(_page("Archive — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Archive—Admin", "Admin", body, authed=True))
 
 
 def _auth_recheck_background() -> None:
@@ -9554,7 +9552,7 @@ def _suggest_background(source: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         if preds is None:
             note = (f"Couldn’t predict {source}. Approve a few articles first so it has "
-                    f"something to learn from — or the AI may be briefly unavailable.")
+                    f"something to learn from—or the AI may be briefly unavailable.")
             n = 0
         elif not preds:
             note = f"No pending candidates for {source}."
@@ -9639,10 +9637,10 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
             reason = _esc(sug.get("reason", ""))
             if keep:
                 suggest_badge = (f'<div style="font-size:12px;color:var(--seafoam-deep);margin:0 0 8px;">'
-                                 f'&#10003; <strong>Likely keep</strong>{(" &mdash; " + reason) if reason else ""}</div>')
+                                 f'&#10003; <strong>Likely keep</strong>{("&mdash;" + reason) if reason else ""}</div>')
             else:
                 suggest_badge = (f'<div style="font-size:12px;color:var(--navy);margin:0 0 8px;">'
-                                 f'&#8855; <strong>Likely skip</strong>{(" &mdash; " + reason) if reason else ""}</div>')
+                                 f'&#8855; <strong>Likely skip</strong>{("&mdash;" + reason) if reason else ""}</div>')
         return f"""<div data-card data-url="{url}"{suggest_attr} style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
     <a href="{url}" target="_blank" rel="noopener" style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);line-height:1.35;">{title}</a>
@@ -9702,15 +9700,15 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
     if scanning:
         scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
                        'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
-                       'Scanning the feed in the background &mdash; reload this page in a minute to see new candidates.</div>')
+                       'Scanning the feed in the background&mdash;reload this page in a minute to see new candidates.</div>')
     elif redating:
         scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
                        'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
-                       'Re-reading publish dates from the article pages in the background &mdash; reload in a minute to see corrected dates.</div>')
+                       'Re-reading publish dates from the article pages in the background&mdash;reload in a minute to see corrected dates.</div>')
     elif suggesting:
         scan_notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
                        'padding:12px 16px;margin-bottom:20px;font-size:14px;color:var(--seafoam-deep);">'
-                       'Predicting which candidates you&rsquo;d keep, from your past picks &mdash; reload in a minute to see &ldquo;Likely keep / skip&rdquo; on each card.</div>')
+                       'Predicting which candidates you&rsquo;d keep, from your past picks&mdash;reload in a minute to see &ldquo;Likely keep / skip&rdquo; on each card.</div>')
     elif suggest_status.get("note"):
         # Show the result of the last prediction run so it's never a silent no-op.
         ok = suggest_status.get("n", 0) > 0
@@ -9739,7 +9737,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Archive Queue</h1>
-<p style="color:var(--muted);margin:4px 0 6px;">Proposed saves waiting for your review — from &ldquo;Scan feed&rdquo; below (ongoing) or a <a href="/admin/backfill">Historical sweep</a> (one-time back-catalog catch-up).</p>
+<p style="color:var(--muted);margin:4px 0 6px;">Proposed saves waiting for your review—from &ldquo;Scan feed&rdquo; below (ongoing) or a <a href="/admin/backfill">Historical sweep</a> (one-time back-catalog catch-up).</p>
 <p style="color:var(--muted);margin:0 0 22px;">Approve into the archive (edit the tags first if you like), or dismiss what you don&rsquo;t want.</p>
 {scan_notice}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
@@ -9822,7 +9820,7 @@ async function dismissAll(btn){{
   for (const c of cards) {{ await dismissOne(c.querySelector('.add-btn')); }}
 }}
 </script>"""
-    return HTMLResponse(_page("Archive Queue — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Archive Queue—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/queue/refresh-feed")
@@ -9890,7 +9888,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
     if merging:
         merge_html = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
                       'padding:12px 16px;margin-bottom:16px;font-size:14px;color:var(--seafoam-deep);">'
-                      'Looking for tags to consolidate &mdash; reload in a few seconds to see proposed merges.</div>')
+                      'Looking for tags to consolidate&mdash;reload in a few seconds to see proposed merges.</div>')
     elif merge_status == "unavailable":
         merge_html = ('<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:10px;'
                       'padding:12px 16px;margin-bottom:16px;font-size:14px;color:var(--navy);">'
@@ -9975,7 +9973,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
   </table>
 </div>
 </div>"""
-    return HTMLResponse(_page("Tag cleanup — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Tag cleanup—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/tags/suggest-merges")
@@ -10048,7 +10046,7 @@ async def admin_tags_rename(request: Request, background_tasks: BackgroundTasks)
     finally:
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
-    msg = f'Renamed “{old}” → “{new}” on {n} article{"s" if n != 1 else ""}.' if n else f'No change — “{old}” not found.'
+    msg = f'Renamed “{old}” → “{new}” on {n} article{"s" if n != 1 else ""}.' if n else f'No change—“{old}” not found.'
     return RedirectResponse(f"/admin/tags?msg={quote(msg)}", status_code=303)
 
 
@@ -10106,31 +10104,31 @@ def admin_tag_style(request: Request, generating: int = 0):
     is_generating = bool(generating) or status == "generating"
     notice = ('<div style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
               'padding:12px 16px;margin-bottom:18px;font-size:14px;color:var(--seafoam-deep);">'
-              'Studying your archive in the background &mdash; reload in about a minute to see the guide.</div>'
+              'Studying your archive in the background&mdash;reload in about a minute to see the guide.</div>'
               if is_generating else '')
 
     has_guide = bool(guide and guide.strip())
     state_badge = ('<span style="font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle;">Active</span>'
                    if has_guide else
-                   '<span style="font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;">Not set &mdash; auto-tagging uses your vocabulary only</span>')
+                   '<span style="font-size:12px;color:var(--muted);margin-left:10px;vertical-align:middle;">Not set&mdash;auto-tagging uses your vocabulary only</span>')
 
     gen_label = "Re-learn from my archive" if has_guide else "Learn from my archive"
 
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Tagging style{state_badge}</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Auto-tagging already reuses your vocabulary. This goes further — it studies <strong>how</strong> you tagged your {n_tags} tags:</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Auto-tagging already reuses your vocabulary. This goes further—it studies <strong>how</strong> you tagged your {n_tags} tags:</p>
 <ul style="color:var(--muted);margin:0 0 8px;padding-left:20px;">
 <li>What each tag means.</li>
 <li>How granular you go.</li>
 <li>What you leave untagged.</li>
 </ul>
 <p style="color:var(--muted);margin:0 0 6px;">From that, it distills soft rules injected into enrichment, so new tags match your judgment.</p>
-<p style="color:var(--muted);margin:0 0 18px;">Review and edit anything below — your edits are what the tagger follows.</p>
+<p style="color:var(--muted);margin:0 0 18px;">Review and edit anything below—your edits are what the tagger follows.</p>
 {notice}
 
 <form method="post" action="/admin/tag-style/objective" style="margin:0 0 22px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;">
-  <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging objective &mdash; why these tags exist</label>
+  <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging objective&mdash;why these tags exist</label>
   <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">The north star for tagging. It steers both the learning below and live auto-tagging, even before a guide exists. Frame it around the jobs a strategic finance leader gets pulled into.</p>
   <textarea name="objective" rows="5" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(objective)}</textarea>
   <button type="submit" class="btn" style="font-size:14px;padding:8px 18px;margin-top:10px;">Save objective</button>
@@ -10152,7 +10150,7 @@ def admin_tag_style(request: Request, generating: int = 0):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Tagging style — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Tagging style—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/tag-style/generate")
@@ -10283,8 +10281,8 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
 
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Sail, Don&rsquo;t Row &mdash; rank settings</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Tune pace, wind, obstacle density, and the collision rule per rank. The game reads these live — changes apply to the next run, no redeploy needed.</p>
+<h1>Sail, Don&rsquo;t Row&mdash;rank settings</h1>
+<p style="color:var(--muted);margin:-6px 0 6px;">Tune pace, wind, obstacle density, and the collision rule per rank. The game reads these live—changes apply to the next run, no redeploy needed.</p>
 <p style="color:var(--muted);margin:0 0 20px;">Course length is a fixed 4300 world-units. Par time is what a full finish at that rank is calibrated against for the pace score.</p>
 {banner}{error_banner}
 {cards}
@@ -10368,7 +10366,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
 
     verified = verify_status == "verified"
     if verify_status == "no_key":
-        verify_note = ("<p style=\"margin:0 0 6px;\">&#9888;&#65039; <strong>Claude verification is off</strong> — no "
+        verify_note = ("<p style=\"margin:0 0 6px;\">&#9888;&#65039; <strong>Claude verification is off</strong>—no "
                        "<code>ANTHROPIC_API_KEY</code> is set on the host. These are raw title matches, so "
                        "look-alikes (different role, milestone, or question) may appear.</p>"
                        "<p style=\"margin:0;\">Set the key in Railway to turn on semantic verification. Your "
@@ -10451,8 +10449,8 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                     rows += (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);">'
                              f'<div style="min-width:0;"><a href="{_esc(a["url"])}" target="_blank" rel="noopener" style="font-size:14px;color:var(--navy);font-weight:500;">{_esc(a.get("title") or a["url"])}</a>'
                              f'<div style="font-size:12px;color:var(--muted);">{d}</div>{match}</div>{tag}</div>')
-                cluster_label = ("near-duplicates &mdash; verified by Claude" if verified
-                                 else "title matches &mdash; <span style=\"color:var(--coral-deep);\">not verified</span>")
+                cluster_label = ("near-duplicates&mdash;verified by Claude" if verified
+                                 else "title matches&mdash;<span style=\"color:var(--coral-deep);\">not verified</span>")
                 blocks += (f'<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px 18px 14px;margin-bottom:14px;">'
                            f'<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:10px 0 2px;">{len(c)} {cluster_label}</div>{rows}</div>')
             verify_banner = (f'<div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;'
@@ -10468,13 +10466,13 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Content de-dupe</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Scans one source for articles that are likely duplicates or near-duplicates — most often the same piece republished under a different title, which exact-URL dedup misses.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Scans one source for articles that are likely duplicates or near-duplicates—most often the same piece republished under a different title, which exact-URL dedup misses.</p>
 <p style="color:var(--muted);margin:0 0 6px;">A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged.</p>
 <p style="color:var(--muted);margin:0 0 18px;">The keeper is the original over a &ldquo;Dear SaaStr&rdquo; rehash, otherwise the newest.</p>
 {banner}
 {body_inner}
 </div>"""
-    return HTMLResponse(_page("Content de-dupe — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Content de-dupe—Admin", "Admin", body, authed=True))
 
 
 def _dedupe_pair(form) -> tuple[dict, dict, str]:
@@ -10769,7 +10767,7 @@ def admin_ask_report(request: Request, user: str = ""):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>FP&amp;A Buddy report</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Every question asked, across every user — question, asker, settings used, and cost per question.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Every question asked, across every user—question, asker, settings used, and cost per question.</p>
 <p style="color:var(--muted);margin:0 0 20px;">The full answer text is left out of this view on purpose, so you can scan cost and volume without reading every answer. It&rsquo;s included in the CSV export.</p>
 
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
@@ -10827,7 +10825,7 @@ function toggleConvo(g) {{
 }}
 </script>
 </div>"""
-    return HTMLResponse(_page("FP&A Buddy report — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("FP&A Buddy report—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/ask-report/export.csv")
@@ -10868,7 +10866,7 @@ def admin_ask_report_export(request: Request, user: str = ""):
         if not isinstance(cites, list):
             return ""
         return "\n".join(
-            f'[{c.get("n")}] {c.get("title") or ""} — {c.get("url") or ""}'
+            f'[{c.get("n")}] {c.get("title") or ""}—{c.get("url") or ""}'
             for c in cites if isinstance(c, dict)
         )
 
@@ -10933,8 +10931,8 @@ def admin_overhead_spend(request: Request):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Overhead spend</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Brian&rsquo;s operating cost for running the archive &mdash; embedding and enrichment API spend, broken out by source and by month.</p>
-<p style="color:var(--muted);margin:0 0 20px;">This is never summed into any user&rsquo;s FP&amp;A Buddy cost cap &mdash; see <a href="/admin/ask-report">the FP&amp;A Buddy report</a> for that separate, user-facing spend.</p>
+<p style="color:var(--muted);margin:-6px 0 6px;">Brian&rsquo;s operating cost for running the archive&mdash;embedding and enrichment API spend, broken out by source and by month.</p>
+<p style="color:var(--muted);margin:0 0 20px;">This is never summed into any user&rsquo;s FP&amp;A Buddy cost cap&mdash;see <a href="/admin/ask-report">the FP&amp;A Buddy report</a> for that separate, user-facing spend.</p>
 
 <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px;">
   <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
@@ -10974,7 +10972,7 @@ def admin_overhead_spend(request: Request):
 tbody tr{{border-top:1px solid var(--line);}}
 </style>
 </div>"""
-    return HTMLResponse(_page("Overhead spend — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Overhead spend—Admin", "Admin", body, authed=True))
 
 
 # Rating -> (label, badge fg, badge bg) for the feedback triage view.
@@ -11017,7 +11015,7 @@ def admin_ask_feedback(request: Request, rating: str = ""):
         a_html, src_html = _render_cited_answer(answer, r.get("citations_json") or "[]")
         answer_html = (
             f'<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">'
-            f'Answer ({len(answer):,} chars) &mdash; expand</summary>'
+            f'Answer ({len(answer):,} chars)&mdash;expand</summary>'
             f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:8px 0 0;">{a_html}</p></details>'
             if len(answer) > 300 else
             f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;margin:8px 0 0;">{a_html}</p>'
@@ -11060,7 +11058,7 @@ def admin_ask_feedback(request: Request, rating: str = ""):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>FP&amp;A Buddy feedback</h1>
-<p style="color:var(--muted);margin:-6px 0 20px;">How members rated the answers &mdash; flagged answers stay inspectable with the sources they actually cited. Capture and triage only; nothing here changes prompts or retrieval.</p>
+<p style="color:var(--muted);margin:-6px 0 20px;">How members rated the answers&mdash;flagged answers stay inspectable with the sources they actually cited. Capture and triage only; nothing here changes prompts or retrieval.</p>
 
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
   {stat_cards}
@@ -11077,7 +11075,7 @@ def admin_ask_feedback(request: Request, rating: str = ""):
 {cards}
 <p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 200{' matching' if rating else ''} ratings.</p>
 </div>"""
-    return HTMLResponse(_page("FP&A Buddy feedback — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("FP&A Buddy feedback—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/users", response_class=HTMLResponse)
@@ -11124,7 +11122,7 @@ def admin_users(request: Request, msg: str = ""):
                 f'<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:9px;'
                 f'padding:8px 12px;margin:8px 0 0;display:flex;align-items:center;justify-content:space-between;'
                 f'gap:10px;font-size:13px;color:var(--navy);">'
-                f'<span>Requested a password reset &mdash; {when}</span>'
+                f'<span>Requested a password reset&mdash;{when}</span>'
                 f'<form method="post" action="/admin/users/{uid}/password-reset/dismiss" style="margin:0;">'
                 f'<button type="submit" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;'
                 f'color:var(--coral-deep);border-color:var(--coral);">Dismiss</button></form></div>'
@@ -11161,7 +11159,7 @@ def admin_users(request: Request, msg: str = ""):
       <form method="post" action="/admin/users/{uid}/ask-cap" style="display:flex;gap:6px;align-items:center;">
         <span style="font-size:13px;color:var(--muted);">$</span>
         <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
-          placeholder="${default_cap:.2f}" title="Monthly cap override — blank inherits the site default"
+          placeholder="${default_cap:.2f}" title="Monthly cap override—blank inherits the site default"
           style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
         <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
         <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
@@ -11240,7 +11238,7 @@ function toggleManage(uid) {{
   if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
 }}
 </script>"""
-    return HTMLResponse(_page("Users — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Users—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/users/create")
@@ -11275,9 +11273,9 @@ async def admin_users_create(request: Request):
                 if sent:
                     msg += f" Welcome email sent to {email}."
                 else:
-                    msg += f" Couldn't email {email} — share the temporary password with them directly."
+                    msg += f" Couldn't email {email}—share the temporary password with them directly."
             else:
-                msg += " No email on file — share the temporary password with them directly."
+                msg += " No email on file—share the temporary password with them directly."
         except _sql.IntegrityError:
             msg = f'Username “{username.lower()}” already exists.'
     finally:
@@ -11342,7 +11340,7 @@ async def admin_users_ask_cap(request: Request, user_id: int):
             msg = f'FP&A Buddy cap override set to ${cap:.2f}/month.'
         else:
             lib.set_user_ask_cap(user_id, None)
-            msg = 'FP&A Buddy cap override cleared — this user now follows the site default.'
+            msg = 'FP&A Buddy cap override cleared—this user now follows the site default.'
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
@@ -11526,7 +11524,7 @@ def admin_review_removals(request: Request):
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Remove content</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as potentially off-target for this archive &mdash; most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so: keep the false positives, remove the rest.</p>
+<p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as potentially off-target for this archive&mdash;most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so: keep the false positives, remove the rest.</p>
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px;">
   <div><span id="flagged-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{n}</span> <span style="color:var(--muted);">flagged</span></div>
   <button class="btn btn-ghost" onclick="removeAll()" style="font-size:12px;padding:6px 14px;color:var(--alert);border-color:var(--alert);">Remove all</button>
@@ -11588,7 +11586,7 @@ async function checkLink(card){{
   await Promise.all(Array.from({{length: concurrency}}, worker));
 }})();
 </script>"""
-    return HTMLResponse(_page("Remove content — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Remove content—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/review-removals/check-link")
@@ -11727,7 +11725,7 @@ def admin_enrich(request: Request):
     elif job_error:
         status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: {_esc(job_error)}</div>'
     elif job_done and not running:
-        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done — {job_done} articles enriched with {_esc(job_model)}.</div>'
+        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done—{job_done} articles enriched with {_esc(job_model)}.</div>'
 
     from linklib.models import models_for
     # Curated (no auto-surfacing): a re-enrich runs over the whole archive, so the
@@ -11781,15 +11779,15 @@ def admin_enrich(request: Request):
         <input type="checkbox" name="force" value="1" style="margin-top:3px;accent-color:var(--accent);">
         <span><strong>Re-run the entire library, not just new articles</strong>
         <span style="display:block;font-size:12px;color:var(--muted);margin-top:4px;line-height:1.6;">
-          <strong>Unchecked</strong> (default) &mdash; only articles that haven&rsquo;t been enriched yet get processed. Fast, cheap, safe to run anytime.<br>
-          <strong>Checked</strong> &mdash; every article is re-run, including ones already enriched. Use this to standardize the whole library on a new model or rules version.<br>
+          <strong>Unchecked</strong> (default)&mdash;only articles that haven&rsquo;t been enriched yet get processed. Fast, cheap, safe to run anytime.<br>
+          <strong>Checked</strong>&mdash;every article is re-run, including ones already enriched. Use this to standardize the whole library on a new model or rules version.<br>
           Either way: each article&rsquo;s summary is overwritten, and its tags are merged (existing tags are kept, not replaced).
         </span></span>
       </label>
     </div>
     <div>
       <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {disable}>Start enrichment</button>
-      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs in the background — you can leave this page.</span>
+      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs in the background—you can leave this page.</span>
     </div>
   </form>
 </div>
@@ -11822,7 +11820,7 @@ def admin_enrich(request: Request):
         // Job finished while we were watching — reload so the stat counters refresh.
         window.location.reload();
       }} else if (s.done > 0 && !s.error) {{
-        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done — ' + s.done + ' articles enriched with ' + s.model + '.</div>';
+        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done—' + s.done + ' articles enriched with ' + s.model + '.</div>';
       }} else if (s.error) {{
         container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
       }}
@@ -11834,7 +11832,7 @@ def admin_enrich(request: Request):
   }});
 }})();
 </script>"""
-    return HTMLResponse(_page("Re-enrich archive — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Re-enrich archive—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/enrich/start")
@@ -11923,7 +11921,7 @@ def admin_backfill(request: Request):
     # Curated (best-first); QUEUE_ENRICH_MODEL is the selected/recommended option.
     model_options = "".join(
         f'<option value="{m["id"]}" {"selected" if QUEUE_ENRICH_MODEL == m["id"] else ""}>'
-        f'{m["label"]} — {m["blurb"]}{" (recommended)" if m["id"] == QUEUE_ENRICH_MODEL else ""}</option>'
+        f'{m["label"]}—{m["blurb"]}{" (recommended)" if m["id"] == QUEUE_ENRICH_MODEL else ""}</option>'
         for m in reversed(models_for(blurb="short"))
     )
 
@@ -11952,7 +11950,7 @@ def admin_backfill(request: Request):
         total_added = sum(r.get("added", 0) for r in report)
         total_cands = sum(r.get("candidates", 0) for r in report)
         total_scope = sum(r.get("skipped_scope", 0) for r in report)
-        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete &mdash; {total_added} articles queued from {total_cands} candidates ({total_scope} skipped as off-audience). <a href="/admin/queue">Review in Archive Queue &rarr;</a></div>'
+        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;{total_added} articles queued from {total_cands} candidates ({total_scope} skipped as off-audience). <a href="/admin/queue">Review in Archive Queue &rarr;</a></div>'
 
     def _report_row(r):
         added = r.get("added", 0)
@@ -11992,12 +11990,12 @@ def admin_backfill(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Historical sweep</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review.</p>
-<p style="color:var(--muted);margin:0 0 20px;">A one-time catch-up on your back catalog — it doesn&rsquo;t save anything by itself, it just fills the queue below for you to approve.</p>
+<p style="color:var(--muted);margin:0 0 20px;">A one-time catch-up on your back catalog—it doesn&rsquo;t save anything by itself, it just fills the queue below for you to approve.</p>
 
 <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:22px;font-size:13.5px;color:#92400e;line-height:1.6;">
   <p style="margin:0 0 8px;"><strong>Run this once per source.</strong></p>
   <ul style="margin:0 0 8px;padding-left:20px;">
-    <li>Results land in the <a href="/admin/queue">Archive Queue</a> for you to review — nothing is saved to the archive automatically.</li>
+    <li>Results land in the <a href="/admin/queue">Archive Queue</a> for you to review—nothing is saved to the archive automatically.</li>
     <li>After the first sweep, the Archive Queue&rsquo;s own &ldquo;Scan feed&rdquo; button is what keeps you current going forward.</li>
   </ul>
   <p style="margin:0;">Start with a <strong>dry run</strong> to see the reach before any sweep spends API calls.</p>
@@ -12018,14 +12016,14 @@ def admin_backfill(request: Request):
         <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Max articles per source</label>
         <input type="number" name="per_source" value="150" min="10" max="2000"
           style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-        <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">150 is a safe starting point. Raise it to reach further back — the sweep takes the most recent N, so a low cap stops early on prolific sources.</p>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">150 is a safe starting point. Raise it to reach further back—the sweep takes the most recent N, so a low cap stops early on prolific sources.</p>
       </div>
     </div>
     <div>
       <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Limit to sources <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
       <input type="text" name="only_sources" placeholder="e.g. Kellblog, Stratechery, SaaStr"
         style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-      <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Comma-separated. Leave blank to sweep everything. Re-running is safe — already-queued and saved URLs are skipped, so a bigger limit only adds the older articles you haven&rsquo;t seen yet.</p>
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Comma-separated. Leave blank to sweep everything. Re-running is safe—already-queued and saved URLs are skipped, so a bigger limit only adds the older articles you haven&rsquo;t seen yet.</p>
     </div>
     <div>
       <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Enrichment model</label>
@@ -12042,7 +12040,7 @@ def admin_backfill(request: Request):
     </div>
     <div>
       <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {disable}>Run sweep</button>
-      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side &mdash; you can leave this page. Results appear in the <a href="/admin/queue">Archive Queue</a>.</span>
+      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side&mdash;you can leave this page. Results appear in the <a href="/admin/queue">Archive Queue</a>.</span>
     </div>
   </form>
 </div>
@@ -12072,7 +12070,7 @@ def admin_backfill(request: Request):
         var totalAdded = s.report.reduce((a, r) => a + (r.added || 0), 0);
         var totalCands = s.report.reduce((a, r) => a + (r.candidates || 0), 0);
         var totalScope = s.report.reduce((a, r) => a + (r.skipped_scope || 0), 0);
-        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete &mdash; ' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/queue\\">Review in Archive Queue &rarr;</a></div>';
+        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/queue\\">Review in Archive Queue &rarr;</a></div>';
       }} else if (s.error) {{
         container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
       }}
@@ -12084,7 +12082,7 @@ def admin_backfill(request: Request):
   }});
 }})();
 </script>"""
-    return HTMLResponse(_page("Historical sweep — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Historical sweep—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/backfill/start")
@@ -12126,7 +12124,7 @@ def admin_backup(request: Request, uploaded: str = ""):
         lib.close()
     uploaded_banner = (
         f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
-        f'font-size:14px;margin:-6px 0 16px;">Database replaced — {_esc(uploaded)} articles now live.</p>'
+        f'font-size:14px;margin:-6px 0 16px;">Database replaced—{_esc(uploaded)} articles now live.</p>'
         if uploaded else ''
     )
     body = f"""<div class="page">
@@ -12144,7 +12142,7 @@ def admin_backup(request: Request, uploaded: str = ""):
     </div>
     <div style="border-left:1px solid var(--line);padding-left:24px;">
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately — no restart needed.</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately—no restart needed.</p>
       <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
         <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
           style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
@@ -12154,7 +12152,7 @@ def admin_backup(request: Request, uploaded: str = ""):
   </div>
 </div>
 </div>"""
-    return HTMLResponse(_page("Archive backup — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Archive backup—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/brand", response_class=HTMLResponse)
@@ -12170,7 +12168,7 @@ def admin_brand(request: Request):
         "Custom upload, stored in the database." if avatar_src
         else ("Static file (webapp/static/headshot.jpg)."
               if os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg"))
-              else "None set — showing the initials monogram.")
+              else "None set—showing the initials monogram.")
     )
     avatar_section = (
         '<h2 style="margin-top:0;">Avatar</h2>'
@@ -12179,7 +12177,7 @@ def admin_brand(request: Request):
         f'{_avatar(84)}'
         '<div style="flex:1;min-width:240px;">'
         f'<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">{avatar_source_note} '
-        'Stored in the database (not the filesystem) so it survives a redeploy &mdash; the static file above is only a fallback.</p>'
+        'Stored in the database (not the filesystem) so it survives a redeploy&mdash;the static file above is only a fallback.</p>'
         '<form method="post" action="/admin/brand/avatar" enctype="multipart/form-data" '
         'style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
         '<input type="file" name="file" accept="image/jpeg,image/png,image/webp" required '
@@ -12222,29 +12220,29 @@ def admin_brand(request: Request):
         return (f'<div style="font:600 12px var(--font-body);letter-spacing:.1em;'
                 f'text-transform:uppercase;color:var(--navy);margin:0 0 10px;">{text}</div>')
 
-    navy_ramp = ramp_label("Navy — primary (cool)") + grid(
+    navy_ramp = ramp_label("Navy—primary (cool)") + grid(
         swatch("#001B4F", "Navy-deep", "Button hover, depth.")
-        + swatch("#002975", "Navy", "Base — wordmark, links, buttons, headings accents.")
-        + swatch("#3F5C9A", "Navy-light", "Lighter navy — secondary accents, borders. Text-capable (5.9:1).")
-        + swatch("#EEF1F7", "Navy-wash", "Soft navy fill — chip & ghost-button hovers.", border=True)
+        + swatch("#002975", "Navy", "Base—wordmark, links, buttons, headings accents.")
+        + swatch("#3F5C9A", "Navy-light", "Lighter navy—secondary accents, borders. Text-capable (5.9:1).")
+        + swatch("#EEF1F7", "Navy-wash", "Soft navy fill—chip & ghost-button hovers.", border=True)
     )
-    green_ramp = ramp_label("Seafoam / Green — cool accent") + grid(
-        swatch("#1F7A66", "Seafoam-deep", "Deepest teal — text-capable on light (4.7:1).")
-        + swatch("#2E9C86", "Seafoam-mid", "Mid teal — data-viz; legible as a fill/line. ≥18px text only.")
-        + swatch("#A3E5D4", "Seafoam", "Base accent (light mint) — tags, badges, active-nav underline.", border=True)
-        + swatch("#EAF7F2", "Seafoam-wash", "Soft fill — readout panels, table accents.", border=True)
+    green_ramp = ramp_label("Seafoam / Green—cool accent") + grid(
+        swatch("#1F7A66", "Seafoam-deep", "Deepest teal—text-capable on light (4.7:1).")
+        + swatch("#2E9C86", "Seafoam-mid", "Mid teal—data-viz; legible as a fill/line. ≥18px text only.")
+        + swatch("#A3E5D4", "Seafoam", "Base accent (light mint)—tags, badges, active-nav underline.", border=True)
+        + swatch("#EAF7F2", "Seafoam-wash", "Soft fill—readout panels, table accents.", border=True)
     )
-    coral_ramp = ramp_label("Coral — warm accent (rare)") + grid(
-        swatch(CORAL_DEEP, "Coral-deep", "Text-capable coral (4.9:1) — only when coral must carry small text.")
-        + swatch(CORAL, "Coral", "Base — display pop, badges, data-viz R&D series. Graphics & ≥24px only.")
-        + swatch("#F4A98F", "Coral-light", "Lighter coral — soft highlights, fills only (never text).", border=True)
-        + swatch(CORAL_WASH, "Coral-wash", "Soft fill — callout blocks (put navy text on it).", border=True)
+    coral_ramp = ramp_label("Coral—warm accent (rare)") + grid(
+        swatch(CORAL_DEEP, "Coral-deep", "Text-capable coral (4.9:1)—only when coral must carry small text.")
+        + swatch(CORAL, "Coral", "Base—display pop, badges, data-viz R&D series. Graphics & ≥24px only.")
+        + swatch("#F4A98F", "Coral-light", "Lighter coral—soft highlights, fills only (never text).", border=True)
+        + swatch(CORAL_WASH, "Coral-wash", "Soft fill—callout blocks (put navy text on it).", border=True)
     )
 
     dataviz_note = (
         '<div style="background:var(--seafoam-wash);border:1px solid #C9EADF;border-radius:12px;padding:14px 18px;margin:0 0 20px;">'
         '<p style="margin:0;font-size:14px;color:var(--navy);"><strong>Data-viz palette:</strong> charts use the three families '
-        'as categories — <strong>GTM&nbsp;=&nbsp;navy</strong>, <strong>Revenue&nbsp;=&nbsp;seafoam-mid teal</strong>, '
+        'as categories—<strong>GTM&nbsp;=&nbsp;navy</strong>, <strong>Revenue&nbsp;=&nbsp;seafoam-mid teal</strong>, '
         '<strong>R&amp;D&nbsp;=&nbsp;coral</strong> (coral marks the series to notice). See the Growth Engine Ratio charts. '
         'Chart text is DM&nbsp;Sans; big readouts are Outfit.</p></div>'
     )
@@ -12263,7 +12261,7 @@ def admin_brand(request: Request):
     semantic_row = grid(
         swatch("#002975", "good", "GER 'Elite/Strong' tiers.")
         + swatch("#9A6B12", "caution", "GER 'Typical' tier.")
-        + swatch("#9E3B30", "alert", "Errors, GER 'Below target'. Status only — never decorative.")
+        + swatch("#9E3B30", "alert", "Errors, GER 'Below target'. Status only—never decorative.")
     )
 
     callout = (lambda bg, bd, body_html:
@@ -12271,25 +12269,25 @@ def admin_brand(request: Request):
 
     type_specimens = (
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;">'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Outfit — headings &amp; display</div>'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Outfit—headings &amp; display</div>'
         '<div style="font-family:var(--font-head);font-weight:600;font-size:42px;letter-spacing:-0.025em;line-height:1.05;color:var(--ink);">Brian Weisberg</div>'
         '<div style="font-family:var(--font-head);font-weight:600;font-size:21px;letter-spacing:-0.01em;color:var(--ink);margin-top:10px;">Strategic finance for companies that are scaling</div>'
         '<div style="height:18px;"></div>'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">DM Sans — body &amp; UI</div>'
-        '<p style="margin:0;color:var(--ink-soft);">The quick brown fox jumps over the lazy dog. Body copy is DM Sans at 16px / 1.65 — warm, readable, and quiet enough to disappear behind the content. Eyebrows and labels use the same family, uppercase, with wide tracking.</p>'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">DM Sans—body &amp; UI</div>'
+        '<p style="margin:0;color:var(--ink-soft);">The quick brown fox jumps over the lazy dog. Body copy is DM Sans at 16px / 1.65—warm, readable, and quiet enough to disappear behind the content. Eyebrows and labels use the same family, uppercase, with wide tracking.</p>'
         '<div style="height:18px;"></div>'
         '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
-        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4 — long-form reading only (/read)</div>'
+        '<div style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Source Serif 4—long-form reading only (/read)</div>'
         '<p style="margin:0;font-family:\'Source Serif 4\',Georgia,serif;font-size:18px;line-height:1.75;color:var(--ink);">Revenue recognized today is the result of investments made over the past several quarters, not just last quarter. Features ship before they\'re sold; pipeline built in Q1 converts in Q3. The serif appears nowhere else in the system.</p>'
         '</div>'
     )
 
     motif = (
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;">'
-        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Rope rule — the double hairline. Frames the header/footer or separates major sections. Never repeated decoratively.</div>'
+        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Rope rule—the double hairline. Frames the header/footer or separates major sections. Never repeated decoratively.</div>'
         '<div class="rule"></div>'
         '<div style="height:26px;"></div>'
-        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Compass star — one per page, in the footer. Navy by default; a coral variant is reserved for special headers.</div>'
+        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Compass star—one per page, in the footer. Navy by default; a coral variant is reserved for special headers.</div>'
         f'<div style="display:flex;align-items:center;gap:20px;">{star("#002975")}{star(CORAL)}</div>'
         '<div style="margin-top:14px;font:500 13px var(--font-body);color:var(--alert);">No anchors, ropes-everywhere, boats, waves, knots, or clip-art. These two marks are the entire nautical vocabulary.</div>'
         '</div>'
@@ -12298,28 +12296,28 @@ def admin_brand(request: Request):
     components = (
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;display:grid;gap:22px;">'
         # buttons
-        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Buttons — navy fill or ghost outline (never a color fill)</div>'
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Buttons—navy fill or ghost outline (never a color fill)</div>'
         '<a class="btn" href="#" onclick="return false;">Primary</a> '
         '<a class="btn btn-ghost" href="#" onclick="return false;" style="margin-left:8px;">Ghost</a></div>'
         # tags
-        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Tags — seafoam fill, navy text</div>'
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Tags—seafoam fill, navy text</div>'
         '<span style="font:600 11px var(--font-body);color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;">FP&amp;A</span> '
         '<span style="font:600 11px var(--font-body);color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;margin-left:4px;">Treasury</span></div>'
         # input
-        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Input — click to see the seafoam focus ring</div>'
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Input—click to see the seafoam focus ring</div>'
         '<input type="text" placeholder="Search…" style="width:100%;max-width:320px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--surface);"></div>'
         # table
-        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Table — navy header, white text</div>'
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Table—navy header, white text</div>'
         '<table style="width:100%;max-width:380px;border-collapse:collapse;font-size:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;">'
         '<thead><tr style="background:var(--navy);"><th style="padding:8px 12px;text-align:left;color:#fff;">Tier</th><th style="padding:8px 12px;text-align:left;color:#fff;">Ratio</th></tr></thead>'
         '<tbody><tr style="border-top:1px solid var(--line);"><td style="padding:8px 12px;">Elite</td><td style="padding:8px 12px;">&gt; $1.20</td></tr>'
         '<tr style="border-top:1px solid var(--line);background:var(--surface-2);"><td style="padding:8px 12px;">Strong</td><td style="padding:8px 12px;">$0.70–1.20</td></tr></tbody></table></div>'
         # coral in action
-        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Coral in action — rare, decorative, never status</div>'
+        '<div><div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Coral in action—rare, decorative, never status</div>'
         f'<span style="font:600 11px var(--font-body);letter-spacing:.06em;text-transform:uppercase;color:#fff;background:{CORAL};border-radius:6px;padding:3px 10px;">New</span>'
         f'<div style="background:{CORAL_WASH};border:1px solid #F3D3C6;border-radius:12px;padding:14px 18px;margin-top:12px;">'
         f'<span style="font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:{CORAL_DEEP};">Highlight</span>'
-        '<p style="margin:6px 0 0;color:var(--navy);">A coral-wash callout carries navy text at 11:1 contrast — the accessible way to make coral carry a block of copy.</p></div></div>'
+        '<p style="margin:6px 0 0;color:var(--navy);">A coral-wash callout carries navy text at 11:1 contrast—the accessible way to make coral carry a block of copy.</p></div></div>'
         '</div>'
     )
 
@@ -12327,10 +12325,10 @@ def admin_brand(request: Request):
         "var(--surface)", "var(--line)",
         '<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin-bottom:10px;">Usage rules</div>'
         '<ul style="margin:0;padding-left:20px;color:var(--ink-soft);line-height:1.7;">'
-        '<li><strong>Balance ~70 / 20 / 10</strong> — navy + neutrals, then seafoam, then a sliver of coral. One coral element per screen, max.</li>'
-        '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart — keep it that way.</li>'
+        '<li><strong>Balance ~70 / 20 / 10</strong>—navy + neutrals, then seafoam, then a sliver of coral. One coral element per screen, max.</li>'
+        '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart—keep it that way.</li>'
         '<li><strong>Coral is display-only.</strong> It\'s too light for body text (2.8:1); use coral-deep, or navy-on-coral-wash, when text is involved.</li>'
-        '<li><strong>Buttons are navy or ghost</strong> — never a seafoam or coral fill.</li>'
+        '<li><strong>Buttons are navy or ghost</strong>—never a seafoam or coral fill.</li>'
         '<li><strong>One rope rule, one compass star</strong> per page. Outfit for headings, DM Sans for everything, Source Serif 4 for reading only.</li>'
         '</ul>'
     )
@@ -12347,26 +12345,26 @@ def admin_brand(request: Request):
         '</tr></thead><tbody>'
         '<tr style="border-top:1px solid var(--line);">'
         '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Brand check</td>'
-        '<td style="padding:10px 12px;">Colors, fonts, and the voice <em>mechanics</em> &mdash; banned buzzwords, filler, performative phrases.</td>'
+        '<td style="padding:10px 12px;">Colors, fonts, and the voice <em>mechanics</em>&mdash;banned buzzwords, filler, performative phrases.</td>'
         '<td style="padding:10px 12px;"><strong>Automatic.</strong> Every push &amp; pull request via GitHub Actions (<code>.github/workflows/qa.yml</code>); blocks merge on failure. Locally: <code>pytest -q</code>.</td>'
         '<td style="padding:10px 12px;white-space:nowrap;">Free &middot; deterministic</td>'
         '</tr>'
         '<tr style="border-top:1px solid var(--line);background:var(--surface-2);">'
         '<td style="padding:10px 12px;font-weight:600;color:var(--navy);">Tone review</td>'
-        '<td style="padding:10px 12px;">The holistic read &mdash; &ldquo;does this sound like me&rdquo; &mdash; judged by Claude against the voice guide.</td>'
+        '<td style="padding:10px 12px;">The holistic read: &ldquo;does this sound like me,&rdquo; judged by Claude against the voice guide.</td>'
         '<td style="padding:10px 12px;"><strong>On demand only.</strong> The <em>Check content against your voice</em> box below, or the CLI <code>python -m scripts.voice_review</code>. <strong>Never in CI.</strong></td>'
         '<td style="padding:10px 12px;white-space:nowrap;">API key, per run</td>'
         '</tr>'
         '</tbody></table></div>'
         '<p style="font-size:13px;color:var(--muted);margin:14px 0 0;">Both share one source of truth: the voice guide below and <code>linklib/voice_review.py</code>. '
-        'Tone review stays out of CI on purpose &mdash; running Claude on every commit would be slow, non-deterministic, and spend the pay-per-use API key.</p>'
+        'Tone review stays out of CI on purpose&mdash;running Claude on every commit would be slow, non-deterministic, and spend the pay-per-use API key.</p>'
         '</div>'
     )
 
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Brand standards</h1>
-<p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com — New England nautical, restrained.
+<p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com—New England nautical, restrained.
 The full written reference is <code>BRAND.md</code> in the repo; an automated check
 (<code>tests/test_brand_standards.py</code>) keeps new content on-palette.</p>
 
@@ -12381,7 +12379,7 @@ Deep shades are text-capable; base/mid are for graphics and large display; light
 {dataviz_note}
 <h2>Neutrals</h2>
 {neutral_row}
-<h2>Semantic — status only</h2>
+<h2>Semantic—status only</h2>
 <p style="color:var(--muted);margin:-6px 0 16px;font-size:14px;">Reserved for state. Never used decoratively, and never confused with coral.</p>
 {semantic_row}
 
@@ -12400,9 +12398,9 @@ Deep shades are text-capable; base/mid are for graphics and large display; light
 <h2>How the checks run</h2>
 {checks_doc}
 
-<p style="margin-top:8px;"><a href="/admin/voice" class="btn btn-ghost" style="font-size:14px;">Verbal identity — your voice guide &rarr;</a></p>
+<p style="margin-top:8px;"><a href="/admin/voice" class="btn btn-ghost" style="font-size:14px;">Verbal identity—your voice guide &rarr;</a></p>
 </div>"""
-    return HTMLResponse(_page("Brand standards — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Brand standards—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/brand/avatar")
@@ -12494,32 +12492,32 @@ def admin_voice_page(request: Request):
 
     core_block = _voice_field(
         "voice-core", "Voice core",
-        "Shared mechanics and tone &mdash; em-dashes, sentence case, banned words, lead with the point. Used on its own as the &ldquo;General / site copy&rdquo; rubric, and as the base every other voice field builds on.",
+        "Shared mechanics and tone&mdash;em-dashes, sentence case, banned words, lead with the point. Used on its own as the &ldquo;General / site copy&rdquo; rubric, and as the base every other voice field builds on.",
         custom_core, VOICE_CORE_DEFAULT, 14)
     fpa_buddy_block = _voice_field(
         "voice-fpa", "FP&amp;A Buddy voice",
-        "Appended after the voice core for FP&amp;A Buddy specifically &mdash; third-person register, cite-or-name-the-gap, no personal metaphors or LinkedIn-shape devices.",
+        "Appended after the voice core for FP&amp;A Buddy specifically&mdash;third-person register, cite-or-name-the-gap, no personal metaphors or LinkedIn-shape devices.",
         custom_fpa_buddy, VOICE_FPA_BUDDY_DEFAULT, 10)
 
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Verbal identity</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">The voice FP&amp;A Buddy answers in, and your site's tone &mdash; live, editable here, no redeploy.</p>
+<p style="color:var(--muted);margin:4px 0 26px;">The voice FP&amp;A Buddy answers in, and your site's tone&mdash;live, editable here, no redeploy.</p>
 
 {core_block}
 {fpa_buddy_block}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 6px;">Paste any draft or page copy — including an FP&amp;A Buddy answer you want to spot-check.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 6px;">Paste any draft or page copy—including an FP&amp;A Buddy answer you want to spot-check.</p>
 <p style="font-size:13px;color:var(--muted);margin:0 0 6px;">Mechanical rules (banned words, filler, performative phrases) flag instantly. Review adds Claude&rsquo;s read on tone.</p>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">This is manual and on-demand only — FP&amp;A Buddy never calls it automatically, so answering a question never costs more than the one API call.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">This is manual and on-demand only—FP&amp;A Buddy never calls it automatically, so answering a question never costs more than the one API call.</p>
 <label style="font-size:13px;color:var(--muted);display:block;margin:0 0 10px;">Rubric
 <select id="vr-rubric" style="margin-left:8px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);">
 <option value="general">General / site copy</option>
 <option value="fpa_buddy">FP&amp;A Buddy answer</option>
 </select></label>
-<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice — a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>
+<textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice—a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="vr-btn" onclick="reviewVoice()" class="btn" style="font-size:14px;padding:9px 22px;">Review against my voice</button>
 <span id="vr-status" style="font-size:13px;color:var(--muted);"></span></div>
@@ -12555,7 +12553,7 @@ async function saveVoice(fieldId) {{
       resetBtn.style.display = 'none';
     }}
   }} catch(e) {{
-    status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
+    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
   }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
 }}
 
@@ -12567,7 +12565,7 @@ async function resetVoice(fieldId) {{
     var r = await fetch(VOICE_ENDPOINTS[fieldId], {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(body)}});
     if (!r.ok) throw new Error();
     window.location.reload();
-  }} catch(e) {{ alert('Reset failed — try again.'); }}
+  }} catch(e) {{ alert('Reset failed—try again.'); }}
 }}
 
 async function reviewVoice() {{
@@ -12583,15 +12581,15 @@ async function reviewVoice() {{
     var mech = d.mechanical || [];
     var mechHtml = mech.length
       ? '<div style="margin-bottom:12px;"><strong style="color:#9E3B30;">Mechanical flags (' + mech.length + ')</strong>'
-        + '<ul style="margin:6px 0 0;padding-left:18px;">' + mech.map(function(m) {{ return '<li><code>' + m[1] + '</code> — ' + m[0] + '</li>'; }}).join('') + '</ul></div>'
+        + '<ul style="margin:6px 0 0;padding-left:18px;">' + mech.map(function(m) {{ return '<li><code>' + m[1] + '</code>—' + m[0] + '</li>'; }}).join('') + '</ul></div>'
       : '<div style="margin-bottom:12px;color:#065f46;"><strong>No mechanical violations.</strong></div>';
     var rev = (d.review || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\\n/g, '<br>');
     box.innerHTML = mechHtml + '<div>' + rev + '</div>';
-  }} catch(e) {{ box.innerHTML = 'Review failed — try again.'; }}
+  }} catch(e) {{ box.innerHTML = 'Review failed—try again.'; }}
   finally {{ btn.disabled = false; btn.textContent = 'Review against my voice'; }}
 }}
 </script>"""
-    return HTMLResponse(_page("Verbal identity — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Verbal identity—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/voice/core")
@@ -12674,7 +12672,7 @@ def admin_copy_page(request: Request):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Site copy</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site &mdash; no redeploy.</p>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the bio copy on the homepage and About page. Changes save straight to the live site&mdash;no redeploy.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage headline</div>
@@ -12689,7 +12687,7 @@ def admin_copy_page(request: Request):
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage copy</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on the homepage: a short lead line, followed by the rest of the bio &mdash; both always visible.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Shown on the homepage: a short lead line, followed by the rest of the bio&mdash;both always visible.</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Lead line</label>
 <textarea id="home-teaser" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_teaser)}</textarea>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Rest of the bio</label>
@@ -12719,7 +12717,7 @@ async function saveAbout() {{
     status.textContent = 'Saved.'; status.style.color = '#065f46';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
   }} catch(e) {{
-    status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
+    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
   }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
 }}
 
@@ -12735,7 +12733,7 @@ async function saveHeadline() {{
     status.textContent = 'Saved.'; status.style.color = '#065f46';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
   }} catch(e) {{
-    status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
+    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
   }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
 }}
 
@@ -12751,11 +12749,11 @@ async function saveHomepage() {{
     status.textContent = 'Saved.'; status.style.color = '#065f46';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
   }} catch(e) {{
-    status.textContent = 'Save failed — try again.'; status.style.color = '#b91c1c';
+    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
   }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
 }}
 </script>"""
-    return HTMLResponse(_page("Site copy — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Site copy—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/copy/headline")
@@ -12955,7 +12953,7 @@ def admin_emails_page(request: Request):
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
-<p style="font-size:12px;color:var(--muted);margin:8px 12px 0;">The three internal notices are also tagged with an <code>X-CFO-Notification-Type</code> header (e.g. <code>tool_submission</code>), for mail clients that can filter on custom headers. Gmail's filter UI can't &mdash; use the subject tag there instead.</p>
+<p style="font-size:12px;color:var(--muted);margin:8px 12px 0;">The three internal notices are also tagged with an <code>X-CFO-Notification-Type</code> header (e.g. <code>tool_submission</code>), for mail clients that can filter on custom headers. Gmail's filter UI can't&mdash;use the subject tag there instead.</p>
 </div>"""
 
     def _section(row: dict) -> str:
@@ -12964,7 +12962,7 @@ def admin_emails_page(request: Request):
         status_line = (
             "Currently sending your saved override below."
             if has_override else
-            "Currently sending the built-in default below &mdash; nothing's been saved for this email yet."
+            "Currently sending the built-in default below&mdash;nothing's been saved for this email yet."
         )
         return f"""\
 <div id="{section_id}" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;scroll-margin-top:16px;">
@@ -13006,12 +13004,12 @@ def admin_emails_page(request: Request):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Email templates</h1>
-<p style="color:var(--muted);margin:4px 0 12px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site &mdash; no redeploy.</p>
+<p style="color:var(--muted);margin:4px 0 12px;">Edit the subject, body, and sign-off for outbound emails. Changes save straight to the live site&mdash;no redeploy.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 20px;font-size:13px;color:var(--ink-soft);line-height:1.6;">
-<p style="margin:0 0 10px;"><strong style="color:var(--navy);">How this works:</strong> each email has a built-in default. You can save your own version below &mdash; whichever is saved is what actually sends.</p>
+<p style="margin:0 0 10px;"><strong style="color:var(--navy);">How this works:</strong> each email has a built-in default. You can save your own version below&mdash;whichever is saved is what actually sends.</p>
 <ul style="margin:0 0 10px;padding-left:20px;">
-<li>Unsaved edits don't count &mdash; only your last Save takes effect.</li>
-<li>No auto-reset &mdash; if the built-in default changes later, your saved override keeps winning until you update it yourself.</li>
+<li>Unsaved edits don't count&mdash;only your last Save takes effect.</li>
+<li>No auto-reset&mdash;if the built-in default changes later, your saved override keeps winning until you update it yourself.</li>
 </ul>
 <p style="margin:0;font-size:12px;color:var(--muted);">Each section's &ldquo;Built-in default&rdquo; box always shows the current default, so you can compare or copy it over.</p>
 </div>
@@ -13028,7 +13026,7 @@ function fillEmailDefault(id) {{
   document.getElementById(id + '-body').value = d.body;
   document.getElementById(id + '-signoff').value = d.signoff;
   var status = document.getElementById(id + '-status');
-  status.textContent = 'Default copied in — click Save to use it.'; status.style.color = 'var(--navy)';
+  status.textContent = 'Default copied in—click Save to use it.'; status.style.color = 'var(--navy)';
 }}
 async function saveEmailSection(id) {{
   var subject = document.getElementById(id + '-subject').value.trim();
@@ -13050,11 +13048,11 @@ async function saveEmailSection(id) {{
     overrideStatus.style.color = 'var(--accent)';
     setTimeout(function() {{ status.textContent = ''; }}, 3000);
   }} catch(e) {{
-    status.textContent = e.message || 'Save failed — try again.'; status.style.color = '#b91c1c';
+    status.textContent = e.message || 'Save failed—try again.'; status.style.color = '#b91c1c';
   }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
 }}
 </script>"""
-    return HTMLResponse(_page("Email templates — Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Email templates—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/emails/{section_id}")
