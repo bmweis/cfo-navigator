@@ -259,10 +259,11 @@ def _seed_toolbox():
     are owned by the DB and edited at /admin/tools/categories, so this must
     not clobber changes made there. Same for promoted/vendor/warm-intro fields
     (tools) and coverage/pricing (benchmarks), which are admin-site-only and
-    never touched here. Communities follow the identical name+description
-    contract: only name/notes re-sync from scripts/seed_communities.py's
-    COMMUNITIES on every restart (via Library.update_community_content); every
-    other field — region, cost_band, cost_note, sponsorship_type,
+    never touched here. Communities follow the identical name+description+
+    advisor contract: name/notes/advisor re-sync from
+    scripts/seed_communities.py's COMMUNITIES on every restart (advisor the
+    same way tools.advisor does, just below); every other field — region,
+    reach, metros_json, featured, cost_band, cost_note, sponsorship_type,
     sponsor_name, access, format, categories_json, approved — is admin-owned,
     edited at /admin/tools/communities, and never touched here."""
     from scripts.seed_tools import TOOLS
@@ -288,8 +289,16 @@ def _seed_toolbox():
                     sponsorship_type=c.get("sponsorship_type", "Independent"),
                     sponsor_name=c.get("sponsor_name", ""), access=c.get("access", ""),
                     format=c.get("format", ""), notes=c.get("notes", ""), approved=1,
+                    advisor=int(c.get("advisor", False)),
                 )
             else:
+                new_adv = int(c.get("advisor", False))
+                if crow["advisor"] != new_adv:
+                    lib.conn.execute(
+                        "UPDATE communities SET advisor=? WHERE id=?",
+                        (new_adv, crow["id"]),
+                    )
+                    lib.conn.commit()
                 notes = c.get("notes", "")
                 if crow["name"] != c["name"] or crow["notes"] != notes:
                     lib.update_community_content(crow["id"], c["name"], notes)
@@ -5102,6 +5111,7 @@ def tools_communities(request: Request):
             "notes": c.get("notes") or "",
             "categories": c["categories"],
             "featured": bool(c.get("featured")),
+            "advisor": bool(c.get("advisor")),
         }
 
     communities_json = _json.dumps([_community_entry(c) for c in communities])
@@ -5134,6 +5144,7 @@ groups, associations, and Slack channels.</p>
   <input id="comm-search" type="search" placeholder="Search communities…"
     oninput="filterCommunities()"
     style="flex:1;min-width:200px;max-width:400px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <button id="comm-advisor-btn" class="ccat-btn" onclick="toggleCommAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#9733; Advisor</button>
   <select id="comm-region" onchange="filterCommunities()"
     style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink);">
     <option value="">All regions</option>
@@ -5168,6 +5179,10 @@ groups, associations, and Slack channels.</p>
 <div id="comm-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
 
 <p id="comm-empty" style="display:none;color:var(--muted);padding:32px 0;">No communities match your search.</p>
+
+<div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
+  <p style="font-size:13px;color:var(--muted);">&#9733; Formal advisor to these communities.</p>
+</div>
 </div>
 
 <style>
@@ -5180,6 +5195,7 @@ groups, associations, and Slack channels.</p>
 #comm-pagination-label{{font-size:13px;color:var(--muted);}}
 .comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
 .comm-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
+.comm-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 .comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
 .comm-name:hover{{color:var(--navy);}}
 .comm-meta{{font-size:13px;color:var(--muted);margin:0 0 8px;line-height:1.5;}}
@@ -5194,6 +5210,7 @@ groups, associations, and Slack channels.</p>
 var ALL_COMMUNITIES = {communities_json};
 var activeCommCats = new Set();
 var activeCommCost = '';
+var commAdvisorOnly = false;
 var COMM_PAGE_SIZE = 10;
 var commCurrentPage = 0;
 
@@ -5282,10 +5299,11 @@ function renderCommunities(list) {{
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
+    var advisorStar = c.advisor ? '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' : '';
     return '<article class="comm-card' + (c.featured ? ' comm-card-featured' : '') + '" data-comm-id="' + c.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
-      + featuredBadge
+      + featuredBadge + advisorStar
       + (c.url
           ? '<a class="comm-name" href="' + commEsc(c.url) + '" target="_blank" rel="noopener">' + commEsc(c.name) + '</a>'
           : '<span class="comm-name">' + commEsc(c.name) + '</span>')
@@ -5312,6 +5330,7 @@ function commFiltered() {{
     }}
     if (accessType && accessBucket(c.access) !== accessType) return false;
     if (activeCommCost && c.cost_band !== activeCommCost) return false;
+    if (commAdvisorOnly && !c.advisor) return false;
     if (activeCommCats.size > 0) {{
       var cats = c.categories || [];
       var hit = false;
@@ -5332,6 +5351,15 @@ function syncCommButtons() {{
     var c = b.dataset.cost;
     b.classList.toggle('ccat-active', c === '' ? activeCommCost === '' : activeCommCost === c);
   }});
+  var ab = document.getElementById('comm-advisor-btn');
+  if (ab) ab.classList.toggle('ccat-active', commAdvisorOnly);
+}}
+
+function toggleCommAdvisor() {{
+  commAdvisorOnly = !commAdvisorOnly;
+  commCurrentPage = 0;
+  syncCommButtons();
+  renderCommunities(commFiltered());
 }}
 
 function filterCommCat(btn) {{
@@ -6308,6 +6336,12 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
       <input type="checkbox" name="featured" value="1"{' checked' if c.get('featured') else ''}>
       <span>&#10024; Featured—pin to top of directory with coral badge</span>
     </label>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="advisor" value="1"{' checked' if c.get('advisor') else ''}>
+      <span>&#9733; Formal advisor—mark this community with an advisor star</span>
+    </label>
   </div>"""
 
 
@@ -6546,6 +6580,7 @@ async def admin_communities_new_submit(request: Request):
     reach = (form.get("reach") or "National").strip()
     metros = form.getlist("metros")
     featured = 1 if form.get("featured") == "1" else 0
+    advisor = 1 if form.get("advisor") == "1" else 0
     if not (name and demographic):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
@@ -6554,7 +6589,7 @@ async def admin_communities_new_submit(request: Request):
                           cost_band=cost_band, categories=categories, cost_note=cost_note,
                           sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                           access=access, format=format_, notes=notes, approved=1,
-                          reach=reach, metros=metros, featured=featured)
+                          reach=reach, metros=metros, featured=featured, advisor=advisor)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -6605,6 +6640,7 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
     reach = (form.get("reach") or "National").strip()
     metros = form.getlist("metros")
     featured = 1 if form.get("featured") == "1" else 0
+    advisor = 1 if form.get("advisor") == "1" else 0
     if not (name and demographic):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
@@ -6613,7 +6649,7 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
                              cost_band=cost_band, categories=categories, cost_note=cost_note,
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                              access=access, format=format_, notes=notes,
-                             reach=reach, metros=metros, featured=featured)
+                             reach=reach, metros=metros, featured=featured, advisor=advisor)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
