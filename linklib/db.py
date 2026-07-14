@@ -690,6 +690,9 @@ class Library:
             # populates these for the existing corpus.
             "ALTER TABLE communities ADD COLUMN reach TEXT NOT NULL DEFAULT 'National'",
             "ALTER TABLE communities ADD COLUMN metros_json TEXT NOT NULL DEFAULT '[]'",
+            # Featured pinning, mirroring tools.promoted exactly (coral badge +
+            # pin-to-top; independent of the advisor flag tools already has).
+            "ALTER TABLE communities ADD COLUMN featured INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1705,7 +1708,8 @@ class Library:
                       sponsorship_type: str = "Independent", sponsor_name: str = "",
                       access: str = "", format: str = "", notes: str = "",
                       submitted_by: str = "", approved: int = 0,
-                      reach: str = "National", metros: list[str] | None = None) -> int:
+                      reach: str = "National", metros: list[str] | None = None,
+                      featured: int = 0) -> int:
         base = _slugify(name)
         slug = base
         suffix = 2
@@ -1717,13 +1721,13 @@ class Library:
             """INSERT INTO communities (name, slug, url, region, demographic, cost_band,
                cost_note, sponsorship_type, sponsor_name, access, format, notes,
                categories_json, approved, submitted_by, created_at, updated_at,
-               reach, metros_json)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               reach, metros_json, featured)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, url.strip(), region.strip(), demographic.strip(),
              cost_band, cost_note.strip(), sponsorship_type, sponsor_name.strip(),
              access.strip(), format.strip(), notes.strip(), json.dumps(categories),
              approved, submitted_by.strip(), now, now,
-             reach, json.dumps(metros or [])),
+             reach, json.dumps(metros or []), featured),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -1748,15 +1752,16 @@ class Library:
                          cost_note: str = "", sponsorship_type: str = "Independent",
                          sponsor_name: str = "", access: str = "", format: str = "",
                          notes: str = "", reach: str = "National",
-                         metros: list[str] | None = None) -> None:
+                         metros: list[str] | None = None, featured: int = 0) -> None:
         self.conn.execute(
             """UPDATE communities SET name=?, url=?, region=?, demographic=?, cost_band=?,
                cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
-               notes=?, categories_json=?, updated_at=?, reach=?, metros_json=? WHERE id=?""",
+               notes=?, categories_json=?, updated_at=?, reach=?, metros_json=?,
+               featured=? WHERE id=?""",
             (name.strip(), url.strip(), region.strip(), demographic.strip(), cost_band,
              cost_note.strip(), sponsorship_type, sponsor_name.strip(), access.strip(),
              format.strip(), notes.strip(), json.dumps(categories), _now(),
-             reach, json.dumps(metros or []), community_id),
+             reach, json.dumps(metros or []), featured, community_id),
         )
         self.conn.commit()
 
@@ -1765,7 +1770,7 @@ class Library:
         seeder): touches only name and notes — the two fields sourced straight from the
         underlying research, same role as name/description for tools and benchmarks.
         region/demographic/cost_band/cost_note/sponsorship_type/sponsor_name/access/format/
-        categories_json/approved/reach/metros_json are admin-owned, edited at
+        categories_json/approved/reach/metros_json/featured are admin-owned, edited at
         /admin/tools/communities, and never touched here — otherwise an admin's edit
         would get silently reverted on the next deploy's re-sync."""
         self.conn.execute(
