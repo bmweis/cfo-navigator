@@ -269,7 +269,7 @@ recorded, which is the point.
 
 The brand is verbal as well as visual. The full voice guide (lead with the point, specific over
 abstract, first-person proof, earned metaphors, the LinkedIn shape, and the hard mechanical rules) is
-the editable **Voice guide** on `/admin/brand` — it's both what Claude uses to draft posts and the
+the editable **Voice guide** on `/admin/voice` — it's both what Claude uses to draft posts and the
 rubric the voice check holds new writing to.
 
 Like color, voice has two kinds of rules:
@@ -282,6 +282,6 @@ Like color, voice has two kinds of rules:
   of truth. Context-dependent words (*leverage* the noun, *actually*/*honestly* as filler) are left to
   the holistic review to avoid false positives.
 - **Tone** (judgment) — "does this sound like me." Reviewed on demand by Claude, never in CI (it costs
-  API and isn't deterministic). Use the **Check content against your voice** box on `/admin/brand`, or
+  API and isn't deterministic). Use the **Check content against your voice** box on `/admin/voice`, or
   the CLI: `python -m scripts.voice_review draft.md` (reads a file or stdin; exits non-zero on any
   mechanical violation, so it can gate a pre-publish script).
