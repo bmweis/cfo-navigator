@@ -64,6 +64,16 @@ def open_source_problems() -> list[str]:
     return problems
 
 
+# --- BRAND.md §7 ↔ live :root sync -------------------------------------------
+def brand_docs_problems() -> list[str]:
+    from scripts.generate_brand_docs import stale as brand_docs_stale
+    brand_md = (_ROOT / "BRAND.md").read_text(encoding="utf-8")
+    if brand_docs_stale(brand_md, _app_src()):
+        return ["BRAND.md §7 is out of date with webapp/app.py's :root block — "
+                "run `python -m scripts.generate_brand_docs` and commit the diff."]
+    return []
+
+
 # --- dead code (pyflakes) — runs live only where pyflakes is installed -------
 def _pyflakes_problems() -> list[str] | None:
     try:
@@ -102,6 +112,12 @@ def run_all() -> list[dict]:
         "name": "Open-source showcase in sync", "where": "Live + CI", "ok": not op,
         "what": "Every dependency is celebrated, and nothing showcased is no longer a dependency.",
         "detail": "; ".join(op) if op else "Showcase matches requirements. (test_open_source)"})
+
+    bd = brand_docs_problems()
+    results.append({
+        "name": "BRAND.md §7 in sync", "where": "Live + CI", "ok": not bd,
+        "what": "BRAND.md's token table is generated from the live :root block, not hand-copied.",
+        "detail": "; ".join(bd) if bd else "BRAND.md matches the live CSS. (test_brand_docs_sync)"})
 
     pf = _pyflakes_problems()
     if pf is None:

@@ -208,29 +208,48 @@ Generous page padding (≈48px top). Whitespace before density.
 
 ## 7. Token reference (CSS variables)
 
+<!-- BEGIN GENERATED TOKENS (scripts/generate_brand_docs.py) -->
+> Generated from `webapp/app.py`'s `:root` block — don't hand-edit this table.
+> To change the brand, edit the CSS, then run `python -m scripts.generate_brand_docs`.
+
 ```css
 :root{
   /* Surfaces */
-  --bg:#F5F4EF; --surface:#FFFFFF; --surface-2:#FAF9F4;
-  /* Brand — Navy (primary): deep · base · light · wash */
-  --navy-deep:#001B4F; --navy:#002975; --navy-light:#3F5C9A; --navy-wash:#EEF1F7;
-  --accent:#002975; --accent-light:#EEF1F7; /* legacy aliases = navy / navy-wash */
-  /* Brand — Seafoam/Green (cool accent): deep · mid · base · wash */
-  --seafoam-deep:#1F7A66; --seafoam-mid:#2E9C86; --seafoam:#A3E5D4; --seafoam-wash:#EAF7F2;
-  /* Brand — Coral (warm accent): deep · base · light · wash */
-  --coral-deep:#B14A30; --coral:#E8704F; --coral-light:#F4A98F; --coral-wash:#FBEAE3;
+  --bg:#F5F4EF;            /* warm off-white page */
+  --surface:#FFFFFF;       /* cards, inputs */
+  --surface-2:#FAF9F4;     /* subtle alt panels, table stripes */
+  /* Brand — Navy (primary, cool). deep · base · light · wash */
+  --navy-deep:#001B4F;     /* button hover / depth */
+  --navy:#002975;          /* primary base */
+  --navy-light:#3F5C9A;    /* lighter navy — secondary accents, borders */
+  --navy-wash:#EEF1F7;     /* soft navy fill — chip/ghost hovers */
+  --accent:#002975;        /* legacy name now = navy (keeps old markup working) */
+  --accent-light:#EEF1F7;  /* legacy name now = --navy-wash */
+  /* Brand — Seafoam/Green (cool accent). deep · mid · base · wash */
+  --seafoam-deep:#1F7A66;  /* deepest teal — text-capable on light (AA) */
+  --seafoam-mid:#2E9C86;   /* mid teal — data-viz (legible as a fill/line) */
+  --seafoam:#A3E5D4;       /* accent base (light mint) — tags, badges, underline */
+  --seafoam-wash:#EAF7F2;  /* soft accent fill — calc readout, table accents */
+  /* Brand — Coral (warm accent, rare). deep · base · light · wash */
+  --coral-deep:#B14A30;    /* coral that must carry small text (AA on canvas) */
+  --coral:#E8704F;         /* warm accent base — display pop, data-viz R&D series */
+  --coral-light:#F4A98F;   /* lighter coral — soft highlights */
+  --coral-wash:#FBEAE3;    /* soft coral fill — callouts (navy text) */
   /* Text */
-  --ink:#1a1a1a; --ink-soft:#3a3833; --muted:#6F6A60;
-  /* Lines */
-  --line:#E4E0D6; --line-strong:#D6D1C4;
-  /* Semantic — status only */
+  --ink:#1a1a1a;
+  --ink-soft:#3a3833;
+  --muted:#6F6A60;         /* warm mid-gray */
+  /* Lines (warm-toned) */
+  --line:#E4E0D6;
+  --line-strong:#D6D1C4;
+  /* Semantic — GER calculator readout only */
   --good:#002975; --caution:#9A6B12; --alert:#9E3B30;
   /* Type */
   --font-head:'Outfit',system-ui,-apple-system,'Segoe UI',sans-serif;
   --font-body:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
-  --font-read:'Source Serif 4',Georgia,serif;
 }
 ```
+<!-- END GENERATED TOKENS -->
 
 This token block is wired into the live `_CSS` in `webapp/app.py`. Coral is in use on the GER charts
 (the data-viz R&D series). The automated brand check in `tests/test_brand_standards.py` keeps the

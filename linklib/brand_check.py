@@ -160,6 +160,31 @@ def brand_token_colors(src: str) -> set[str]:
     return colors
 
 
+# The `--font-head` declaration is unique to the main design-system :root block
+# in `_CSS` (as opposed to `/read`'s smaller, scoped :root), so it disambiguates
+# which block is "the" palette when a source file defines more than one.
+_MAIN_ROOT_MARKER = "--font-head"
+
+
+def brand_root_block(src: str) -> str:
+    """Raw text of the main design-system `:root{...}` block, `:root{` through
+    the matching `}` inclusive — used to regenerate BRAND.md §7 verbatim from
+    the live CSS (see `scripts/generate_brand_docs.py`)."""
+    for m in re.finditer(r":root\{(.*?)\}", src, re.S):
+        if _MAIN_ROOT_MARKER in m.group(1):
+            return m.group(0)
+    raise ValueError("main :root block (containing --font-head) not found")
+
+
+_TOKEN_RE = re.compile(r"(--[\w-]+)\s*:\s*([^;]+);")
+
+
+def brand_tokens(src: str) -> dict[str, str]:
+    """Ordered name -> value mapping (hex colors and font stacks alike) from the
+    main design-system :root block."""
+    return {m.group(1): m.group(2).strip() for m in _TOKEN_RE.finditer(brand_root_block(src))}
+
+
 def quoted_fonts_used(src: str) -> set[str]:
     names: set[str] = set()
     for m in _FONT_RE.finditer(src):
