@@ -6118,6 +6118,21 @@ def admin_benchmarks_delete(request: Request, benchmark_id: int):
 
 _COMMUNITY_COST_BANDS = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
 _COMMUNITY_SPONSORSHIP_TYPES = ["Independent", "Vendor-sponsored", "Investor-sponsored"]
+# reach describes a community's overall footprint; metros (below) is the
+# separate list of cities/areas where it has a chapter, hub, or local focus —
+# a National/Global community can still carry metros (e.g. FEI has 55+ US
+# chapters), and the /tools/communities region filter matches a metro against
+# `metros` regardless of `reach`, so a city search surfaces both purely-local
+# and national-with-a-local-chapter communities.
+_COMMUNITY_REACH = ["Regional", "National", "Global"]
+# Controlled metro vocabulary. California and UK are broad tags for a
+# statewide/countrywide footprint that doesn't reduce to one metro area.
+_COMMUNITY_METROS = [
+    "Atlanta", "Baltimore", "Berlin", "Boston", "California", "Chicago",
+    "Dallas–Fort Worth", "Denver", "Houston", "London", "Los Angeles",
+    "New York", "Paris", "SF Bay Area", "Seattle", "Toronto", "UK",
+    "Washington DC",
+]
 
 
 def _community_category_checkboxes(categories: list[dict], selected: list[str] | None = None) -> str:
@@ -6131,6 +6146,16 @@ def _community_category_checkboxes(categories: list[dict], selected: list[str] |
          'No categories yet. <a href="/admin/tools/communities/categories">Add one</a> first.</p>'
 
 
+def _community_metro_checkboxes(selected: list[str] | None = None) -> str:
+    selected = selected or []
+    return "".join(
+        f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">'
+        f'<input type="checkbox" name="metros" value="{_esc(m)}"'
+        f'{" checked" if m in selected else ""}> {_esc(m)}</label>'
+        for m in _COMMUNITY_METROS
+    )
+
+
 def _community_form_fields(c: dict | None = None, categories: list[dict] | None = None) -> str:
     c = c or {}
     categories = categories or []
@@ -6141,6 +6166,10 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
     sponsor_opts = "".join(
         f'<option value="{_esc(s)}"{" selected" if c.get("sponsorship_type", "Independent") == s else ""}>{_esc(s)}</option>'
         for s in _COMMUNITY_SPONSORSHIP_TYPES
+    )
+    reach_opts = "".join(
+        f'<option value="{_esc(r)}"{" selected" if c.get("reach", "National") == r else ""}>{_esc(r)}</option>'
+        for r in _COMMUNITY_REACH
     )
     return f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
@@ -6155,10 +6184,10 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Region *</label>
-      <input name="region" required maxlength="200" value="{_esc(c.get('region', ''))}"
-        placeholder="e.g. National/Global, Boston"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Reach *</label>
+      <select name="reach" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {reach_opts}
+      </select>
     </div>
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Demographic *</label>
@@ -6166,6 +6195,19 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
         placeholder="e.g. CFOs &amp; VP Finance"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
     </div>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:8px;">Metros</label>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Cities/areas where this community has a chapter, hub, or local focus. Leave empty for a purely online/national community with no local footprint.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 16px;">
+      {_community_metro_checkboxes(c.get('metros') or [])}
+    </div>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Region note</label>
+    <input name="region" maxlength="200" value="{_esc(c.get('region', ''))}"
+      placeholder="Legacy free-text note — no longer used for filtering"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
@@ -6452,14 +6494,17 @@ async def admin_communities_new_submit(request: Request):
     format_ = (form.get("format") or "").strip()
     notes = (form.get("notes") or "").strip()
     categories = form.getlist("categories")
-    if not (name and region and demographic):
-        raise HTTPException(status_code=400, detail="Name, region, and demographic are required.")
+    reach = (form.get("reach") or "National").strip()
+    metros = form.getlist("metros")
+    if not (name and demographic):
+        raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
     try:
         lib.add_community(name=name, url=url, region=region, demographic=demographic,
                           cost_band=cost_band, categories=categories, cost_note=cost_note,
                           sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
-                          access=access, format=format_, notes=notes, approved=1)
+                          access=access, format=format_, notes=notes, approved=1,
+                          reach=reach, metros=metros)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -6507,14 +6552,17 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
     format_ = (form.get("format") or "").strip()
     notes = (form.get("notes") or "").strip()
     categories = form.getlist("categories")
-    if not (name and region and demographic):
-        raise HTTPException(status_code=400, detail="Name, region, and demographic are required.")
+    reach = (form.get("reach") or "National").strip()
+    metros = form.getlist("metros")
+    if not (name and demographic):
+        raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
     try:
         lib.update_community(community_id, name=name, url=url, region=region, demographic=demographic,
                              cost_band=cost_band, categories=categories, cost_note=cost_note,
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
-                             access=access, format=format_, notes=notes)
+                             access=access, format=format_, notes=notes,
+                             reach=reach, metros=metros)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
