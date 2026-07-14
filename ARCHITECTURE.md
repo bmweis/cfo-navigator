@@ -121,7 +121,7 @@ Cost figures are computed from **real API token usage** at call time
 | `tool_categories` | Controlled vocabulary of filter pills — can exist empty, unlike article tags which are purely usage-derived. | `name` (unique), `sort_order` |
 | `benchmarks` | The Benchmarking page at `/tools/benchmarks`, managed at `/admin/tools/benchmarks`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
-| `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content` — the identical name+description contract as `tools`/`benchmarks`. Every other field (`region`, `reach`, `metros_json`, `featured`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `reach` (`Regional`\|`National`\|`Global` — a community's overall footprint), `metros_json` (JSON array from a controlled city/area vocabulary — where it has a chapter, hub, or local focus; independent of `reach`, so a National community like FEI can still carry metros), `region` (legacy free-text note, superseded by `reach`/`metros_json` — kept for any detail those two fields don't capture, no longer read by the region filter), `featured` (pin-to-top + coral badge, same pattern as `tools.promoted`; independent of `reach`/`metros_json`), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
+| `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content`, plus `advisor` (a direct `UPDATE`, mirroring `tools.advisor` exactly — see below) — the identical name+description+advisor contract as `tools`. Every other field (`region`, `reach`, `metros_json`, `featured`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `reach` (`Regional`\|`National`\|`Global` — a community's overall footprint), `metros_json` (JSON array from a controlled city/area vocabulary — where it has a chapter, hub, or local focus; independent of `reach`, so a National community like FEI can still carry metros), `region` (legacy free-text note, superseded by `reach`/`metros_json` — kept for any detail those two fields don't capture, no longer read by the region filter), `featured` (pin-to-top + coral badge, same pattern as `tools.promoted`; independent of `reach`/`metros_json`/`advisor`), `advisor` (⭐ marker + "Advisor" filter chip, same pattern as `tools.advisor` — discloses a personal relationship, e.g. The F Suite; independent of `featured`), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
 | `community_categories` | Controlled vocabulary of filter pills for `/tools/communities`, same shape and same reasoning as `tool_categories`. | `name` (unique), `sort_order` |
 
 `POST /admin/tools/generate-description` (admin-only) drafts a description
@@ -241,6 +241,7 @@ erDiagram
         text metros_json "controlled city/area vocabulary"
         text region "legacy free-text note, superseded by reach/metros_json"
         int featured "pin-to-top + coral badge, mirrors tools.promoted"
+        int advisor "star marker + filter chip, mirrors tools.advisor"
         text cost_band "Free | Undisclosed dues | <$1k/yr | <$2,500/yr | $2,500+/yr"
         text sponsorship_type "Independent | Vendor-sponsored | Investor-sponsored"
         int approved
@@ -620,15 +621,16 @@ recorded anywhere, it's flagged rather than invented.
   constants and never re-synced — admin edits survive every deploy, source
   constants are just day-one data. Tools, benchmarks, and communities are
   different: their `name`/`description` (or `name`/`notes` for communities,
-  plus the tools `advisor` flag) re-sync from the source constants
-  (`scripts/seed_tools.py`'s `TOOLS`, `webapp/app.py`'s `_DEFAULT_BENCHMARKS`,
-  `scripts/seed_communities.py`'s `COMMUNITIES`) on every startup, while every
-  other field (categories, promoted, vendor/warm-intro, coverage, pricing,
-  region, cost_band, access, sponsorship) stays admin-owned and untouched.
-  *Why:* content (name/description) is meant to be maintained in the source
-  list and pushed live by deploying, per #113; everything else is meant to be
-  edited live via the admin UI. Each narrow sync method documents which fields
-  it touches.
+  plus the `advisor` flag on both tools and communities) re-sync from the
+  source constants (`scripts/seed_tools.py`'s `TOOLS`, `webapp/app.py`'s
+  `_DEFAULT_BENCHMARKS`, `scripts/seed_communities.py`'s `COMMUNITIES`) on
+  every startup, while every other field (categories, promoted/featured,
+  vendor/warm-intro, coverage, pricing, region, reach, metros, cost_band,
+  access, sponsorship) stays admin-owned and untouched. *Why:* content
+  (name/description) and the advisor disclosure are meant to be maintained
+  in the source list and pushed live by deploying, per #113; everything else
+  is meant to be edited live via the admin UI. Each narrow sync method
+  documents which fields it touches.
 - **Effort tiers instead of a model picker.** `/library/ask` exposes
   Quick/Standard/Deep; the model behind each tier is an implementation detail
   (`EFFORT_SETTINGS`). *Why:* members shouldn't need model literacy to make a

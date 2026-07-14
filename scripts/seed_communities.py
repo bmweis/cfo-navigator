@@ -4,10 +4,11 @@ and CFO peer communities, associations, and Slack groups.
 
 Safe to run multiple times — adds any community missing by URL and syncs
 name/notes on existing rows (same contract as tools/benchmarks' name+
-description re-sync). Every other field — region, cost_band, cost_note,
-sponsorship_type, sponsor_name, access, format, categories, approved — is
-admin-owned once seeded, edited at /admin/tools/communities, and never
-touched by a re-run.
+description re-sync), plus advisor (mirroring tools.advisor: bumped True
+here if the source says so, never demoted). Every other field — region,
+reach, metros, featured, cost_band, cost_note, sponsorship_type,
+sponsor_name, access, format, categories, approved — is admin-owned once
+seeded, edited at /admin/tools/communities, and never touched by a re-run.
 
 Usage:
     python -m scripts.seed_communities [--db library.db]
@@ -46,8 +47,9 @@ COMMUNITIES = [
         "sponsor_name": "The Suite, Inc.",
         "access": "Invite-only (peer nomination)",
         "format": "Hybrid (Braintrust platform + app + in-person conferences)",
-        "notes": "750+ CFOs. Merged with the Seattle Tech CFO Group in May 2024; that group's founder, Evan Fein, became Chairman. Excludes fractional CFOs and vendors from the core network.",
+        "notes": "750+ CFOs. Merged with the Seattle Tech CFO Group in May 2024; that group's founder, Evan Fein, became Chairman. Excludes fractional CFOs and vendors from the core network. Brian is a Founding Member of The F Suite as well as supported them as an advisor over the years.",
         "categories": ["CFO-specific invite-only"],
+        "advisor": True,
     },
     {
         "name": "Operators Guild",
@@ -570,9 +572,15 @@ def main():
                 format=c.get("format", ""), notes=c.get("notes", ""),
             )
             if existing:
-                # Only name/notes re-sync — region/cost_band/access/categories/etc. are
-                # admin-owned once seeded (edited at /admin/tools/communities), same
-                # contract as tools/benchmarks' name+description re-sync.
+                # name/notes/advisor re-sync — region/cost_band/access/categories/
+                # featured/etc. are admin-owned once seeded (edited at
+                # /admin/tools/communities), same contract as tools/benchmarks'
+                # name+description re-sync (advisor mirrors tools.advisor: only
+                # bumped True here, never demoted, same as seed_tools.py's main()).
+                if c.get("advisor") and not existing["advisor"]:
+                    lib.conn.execute("UPDATE communities SET advisor=1 WHERE id=?", (existing["id"],))
+                    lib.conn.commit()
+                    print(f"  UPDATED advisor flag: {c['name']}")
                 if existing["name"] != fields["name"] or existing["notes"] != fields["notes"]:
                     lib.update_community_content(existing["id"], fields["name"], fields["notes"])
                     print(f"  UPDATED: {c['name']}")
@@ -581,7 +589,7 @@ def main():
                     print(f"  SKIP  {c['name']}")
                 skipped += 1
                 continue
-            community_id = lib.add_community(**fields, approved=1)
+            community_id = lib.add_community(**fields, approved=1, advisor=int(c.get("advisor", False)))
             print(f"  ADDED {c['name']} (id={community_id})")
             added += 1
     finally:
