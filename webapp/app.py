@@ -4535,7 +4535,7 @@ def tools_landing(request: Request):
     cards = "".join([
         _hcard("/tools/software", "Software", "A curated directory of the software high-growth finance teams actually use &mdash; searchable, filterable, with a Warm Intro button for the vendors I know well."),
         _hcard("/tools/benchmarks", "Benchmarking", "The benchmarking sources I actually rely on &mdash; plus an honest take on where benchmarks help and where they mislead."),
-        _hcard("/tools/communities", "Communities", "A directory of CFO and finance communities worth joining. Coming soon."),
+        _hcard("/tools/communities", "Communities", "CFO and finance communities worth joining: peer groups, associations, and Slack channels, searchable and filterable."),
     ])
 
     body = f"""<div class="page">
@@ -5077,16 +5077,253 @@ def tools_benchmarks(request: Request):
 
 @app.get("/tools/communities", response_class=HTMLResponse)
 def tools_communities(request: Request):
-    body = """<div class="page">
+    lib = _lib()
+    try:
+        communities = lib.list_communities(approved_only=True)
+        categories = lib.list_community_categories()
+    finally:
+        lib.close()
+
+    import json as _json
+
+    def _community_entry(c: dict) -> dict:
+        return {
+            "id": c["id"],
+            "name": c["name"],
+            "url": c["url"],
+            "region": c["region"],
+            "demographic": c["demographic"],
+            "cost_band": c["cost_band"],
+            "cost_note": c.get("cost_note") or "",
+            "sponsorship_type": c.get("sponsorship_type") or "",
+            "sponsor_name": c.get("sponsor_name") or "",
+            "access": c.get("access") or "",
+            "format": c.get("format") or "",
+            "notes": c.get("notes") or "",
+            "categories": c["categories"],
+        }
+
+    communities_json = _json.dumps([_community_entry(c) for c in communities])
+    regions = sorted({c["region"] for c in communities if c["region"]})
+    region_options = "".join(
+        f'<option value="{_esc(r)}">{_esc(r)}</option>' for r in regions
+    )
+    cat_buttons = "".join(
+        f'<button class="ccat-btn" data-cat="{_esc(c["name"])}" onclick="filterCommCat(this)"'
+        f' title="{_esc(c["description"])}">{_esc(c["name"])}</button>'
+        for c in categories
+    )
+    cost_bands = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
+    cost_buttons = "".join(
+        f'<button class="ccat-btn" data-cost="{_esc(b)}" onclick="filterCommCost(this)">{_esc(b)}</button>'
+        for b in cost_bands
+    )
+
+    body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
-<h1 style="margin:0 0 10px;">Communities</h1>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:28px 26px;">
-<p style="color:var(--ink);margin:0 0 10px;font-size:15px;line-height:1.6;">A directory of CFO and finance
-communities &mdash; peer groups, Slack channels, forums &mdash; is in progress.</p>
-<p style="color:var(--muted);margin:0;font-size:14px;line-height:1.6;">No filtering or listings yet. Check back
-soon.</p>
+<h1 style="margin:0;">Communities</h1>
+<p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
+groups, associations, and Slack channels.</p>
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+  <input id="comm-search" type="search" placeholder="Search communities…"
+    oninput="filterCommunities()"
+    style="flex:1;min-width:200px;max-width:400px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  <select id="comm-region" onchange="filterCommunities()"
+    style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink);">
+    <option value="">All regions</option>
+    {region_options}
+  </select>
+  <select id="comm-access" onchange="filterCommunities()"
+    style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink);">
+    <option value="">All access types</option>
+    <option value="Invite-only">Invite-only</option>
+    <option value="Application">Application</option>
+    <option value="Open">Open</option>
+    <option value="Other">Other</option>
+  </select>
 </div>
-</div>"""
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+  <button class="ccat-btn ccat-all ccat-active" data-cat="" onclick="filterCommCat(this)">All categories</button>
+  {cat_buttons}
+</div>
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
+  <button class="ccat-btn ccat-all ccat-active" data-cost="" onclick="filterCommCost(this)">All cost bands</button>
+  {cost_buttons}
+</div>
+
+<div id="comm-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
+
+<div id="comm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;">
+</div>
+
+<div id="comm-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
+
+<p id="comm-empty" style="display:none;color:var(--muted);padding:32px 0;">No communities match your search.</p>
+</div>
+
+<style>
+.ccat-btn{{font-size:13px;font-weight:500;padding:6px 14px;border-radius:20px;border:1px solid var(--line);
+  background:none;color:var(--muted);cursor:pointer;white-space:nowrap;}}
+.ccat-btn:hover{{background:var(--accent-light);color:var(--ink);}}
+.ccat-active{{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;}}
+#comm-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
+#comm-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
+#comm-pagination-label{{font-size:13px;color:var(--muted);}}
+.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
+.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
+.comm-name:hover{{color:var(--navy);}}
+.comm-meta{{font-size:13px;color:var(--muted);margin:0 0 8px;line-height:1.5;}}
+.comm-demo{{font-size:14px;color:#3a352e;margin:0 0 10px;line-height:1.5;}}
+.comm-notes{{font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5;}}
+.comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
+.comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
+.comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
+</style>
+
+<script>
+var ALL_COMMUNITIES = {communities_json};
+var activeCommCats = new Set();
+var activeCommCost = '';
+var COMM_PAGE_SIZE = 10;
+var commCurrentPage = 0;
+
+function commEsc(s) {{
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
+
+function accessBucket(access) {{
+  var a = (access || '');
+  if (a.indexOf('Invite') === 0) return 'Invite-only';
+  if (a.indexOf('Application') !== -1 || a.indexOf('Qualification') !== -1) return 'Application';
+  if (a.indexOf('Open') === 0) return 'Open';
+  return 'Other';
+}}
+
+function renderCommunities(list) {{
+  var grid = document.getElementById('comm-grid');
+  var empty = document.getElementById('comm-empty');
+  var count = document.getElementById('comm-count');
+  var pagination = document.getElementById('comm-pagination');
+  if (list.length === 0) {{
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+    count.textContent = '';
+    pagination.style.display = 'none';
+    pagination.innerHTML = '';
+    return;
+  }}
+  empty.style.display = 'none';
+  var sorted = list.slice().sort(function(a, b) {{ return commEsc(a.name).localeCompare(commEsc(b.name)); }});
+  var totalPages = Math.ceil(sorted.length / COMM_PAGE_SIZE);
+  if (commCurrentPage >= totalPages) commCurrentPage = totalPages - 1;
+  if (commCurrentPage < 0) commCurrentPage = 0;
+  var pageStart = commCurrentPage * COMM_PAGE_SIZE;
+  var pageItems = sorted.slice(pageStart, pageStart + COMM_PAGE_SIZE);
+  count.textContent = sorted.length + ' communit' + (sorted.length === 1 ? 'y' : 'ies')
+    + (totalPages > 1 ? ' · showing ' + (pageStart + 1) + '–' + (pageStart + pageItems.length) : '');
+  if (totalPages > 1) {{
+    pagination.style.display = 'flex';
+    pagination.innerHTML = '<button type="button" class="btn btn-ghost" onclick="goToCommPage(commCurrentPage - 1)"'
+      + (commCurrentPage === 0 ? ' disabled' : '') + '>&larr; Back</button>'
+      + '<span id="comm-pagination-label">Page ' + (commCurrentPage + 1) + ' of ' + totalPages + '</span>'
+      + '<button type="button" class="btn btn-ghost" onclick="goToCommPage(commCurrentPage + 1)"'
+      + (commCurrentPage >= totalPages - 1 ? ' disabled' : '') + '>Next &rarr;</button>';
+  }} else {{
+    pagination.style.display = 'none';
+    pagination.innerHTML = '';
+  }}
+  grid.innerHTML = pageItems.map(function(c) {{
+    var cats = (c.categories || []).map(function(x) {{
+      return '<span class="comm-cat">' + commEsc(x) + '</span>';
+    }}).join('');
+    var metaParts = [commEsc(c.region)];
+    if (c.access) metaParts.push(commEsc(c.access));
+    if (c.sponsorship_type) {{
+      metaParts.push(commEsc(c.sponsorship_type) + (c.sponsor_name ? ' (' + commEsc(c.sponsor_name) + ')' : ''));
+    }}
+    var notesLine = '';
+    if (c.notes || c.cost_note) {{
+      notesLine = '<p class="comm-notes">' + commEsc([c.notes, c.cost_note].filter(Boolean).join(' ')) + '</p>';
+    }}
+    return '<article class="comm-card" data-comm-id="' + c.id + '">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
+      + (c.url
+          ? '<a class="comm-name" href="' + commEsc(c.url) + '" target="_blank" rel="noopener">' + commEsc(c.name) + '</a>'
+          : '<span class="comm-name">' + commEsc(c.name) + '</span>')
+      + '<span class="comm-cost">' + commEsc(c.cost_band) + '</span>'
+      + '</div>'
+      + '<p class="comm-meta">' + metaParts.join(' &middot; ') + '</p>'
+      + '<p class="comm-demo">' + commEsc(c.demographic) + '</p>'
+      + notesLine
+      + '<div class="comm-cats">' + cats + '</div>'
+      + '</article>';
+  }}).join('');
+}}
+
+function commFiltered() {{
+  var q = (document.getElementById('comm-search').value || '').toLowerCase();
+  var region = document.getElementById('comm-region').value;
+  var accessType = document.getElementById('comm-access').value;
+  return ALL_COMMUNITIES.filter(function(c) {{
+    if (region && c.region !== region) return false;
+    if (accessType && accessBucket(c.access) !== accessType) return false;
+    if (activeCommCost && c.cost_band !== activeCommCost) return false;
+    if (activeCommCats.size > 0) {{
+      var cats = c.categories || [];
+      var hit = false;
+      for (var i = 0; i < cats.length; i++) {{ if (activeCommCats.has(cats[i])) {{ hit = true; break; }} }}
+      if (!hit) return false;
+    }}
+    if (!q) return true;
+    return (c.name + ' ' + c.demographic + ' ' + c.notes + ' ' + c.region + ' ' + (c.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
+  }});
+}}
+
+function syncCommButtons() {{
+  document.querySelectorAll('.ccat-btn[data-cat]').forEach(function(b) {{
+    var c = b.dataset.cat;
+    b.classList.toggle('ccat-active', c === '' ? activeCommCats.size === 0 : activeCommCats.has(c));
+  }});
+  document.querySelectorAll('.ccat-btn[data-cost]').forEach(function(b) {{
+    var c = b.dataset.cost;
+    b.classList.toggle('ccat-active', c === '' ? activeCommCost === '' : activeCommCost === c);
+  }});
+}}
+
+function filterCommCat(btn) {{
+  var cat = btn.dataset.cat;
+  if (cat === '') {{
+    activeCommCats.clear();
+  }} else if (activeCommCats.has(cat)) {{
+    activeCommCats.delete(cat);
+  }} else {{
+    activeCommCats.add(cat);
+  }}
+  commCurrentPage = 0;
+  syncCommButtons();
+  renderCommunities(commFiltered());
+}}
+
+function filterCommCost(btn) {{
+  activeCommCost = btn.dataset.cost;
+  commCurrentPage = 0;
+  syncCommButtons();
+  renderCommunities(commFiltered());
+}}
+
+function filterCommunities() {{ commCurrentPage = 0; renderCommunities(commFiltered()); }}
+
+function goToCommPage(page) {{
+  commCurrentPage = page;
+  renderCommunities(commFiltered());
+  document.getElementById('comm-grid').scrollIntoView({{behavior: 'smooth', block: 'start'}});
+}}
+
+renderCommunities(ALL_COMMUNITIES);
+</script>"""
     return HTMLResponse(_page("Communities—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
