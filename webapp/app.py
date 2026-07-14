@@ -5090,7 +5090,8 @@ def tools_communities(request: Request):
             "id": c["id"],
             "name": c["name"],
             "url": c["url"],
-            "region": c["region"],
+            "reach": c.get("reach") or "National",
+            "metros": c.get("metros") or [],
             "demographic": c["demographic"],
             "cost_band": c["cost_band"],
             "cost_note": c.get("cost_note") or "",
@@ -5103,9 +5104,13 @@ def tools_communities(request: Request):
         }
 
     communities_json = _json.dumps([_community_entry(c) for c in communities])
-    regions = sorted({c["region"] for c in communities if c["region"]})
+    # Only metros that actually have at least one community — matches
+    # regardless of reach (a National community with a Boston chapter still
+    # surfaces under "Boston"), alphabetized. "Online / National" is a
+    # separate sentinel value, not a metro, since it groups by reach instead.
+    used_metros = sorted({m for c in communities for m in (c.get("metros") or [])})
     region_options = "".join(
-        f'<option value="{_esc(r)}">{_esc(r)}</option>' for r in regions
+        f'<option value="{_esc(m)}">{_esc(m)}</option>' for m in used_metros
     )
     cat_buttons = "".join(
         f'<button class="ccat-btn" data-cat="{_esc(c["name"])}" onclick="filterCommCat(this)"'
@@ -5131,6 +5136,7 @@ groups, associations, and Slack channels.</p>
   <select id="comm-region" onchange="filterCommunities()"
     style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink);">
     <option value="">All regions</option>
+    <option value="__national__">Online / National</option>
     {region_options}
   </select>
   <select id="comm-access" onchange="filterCommunities()"
@@ -5201,6 +5207,24 @@ function accessBucket(access) {{
   return 'Other';
 }}
 
+// Regional: just the metro(s) (usually one). National/Global with metros:
+// "<reach> · <up to 3 metros> +N". National/Global with none: "Global" or
+// "National · online".
+function commGeoLine(c) {{
+  var metros = c.metros || [];
+  var reach = c.reach || 'National';
+  if (reach === 'Regional') {{
+    return commEsc(metros.length ? metros.join(', ') : 'Regional');
+  }}
+  if (metros.length === 0) {{
+    return commEsc(reach === 'Global' ? 'Global' : 'National · online');
+  }}
+  var shown = metros.slice(0, 3);
+  var extra = metros.length - shown.length;
+  var line = reach + ' · ' + shown.join(', ') + (extra > 0 ? ' +' + extra : '');
+  return commEsc(line);
+}}
+
 function renderCommunities(list) {{
   var grid = document.getElementById('comm-grid');
   var empty = document.getElementById('comm-empty');
@@ -5238,7 +5262,7 @@ function renderCommunities(list) {{
     var cats = (c.categories || []).map(function(x) {{
       return '<span class="comm-cat">' + commEsc(x) + '</span>';
     }}).join('');
-    var metaParts = [commEsc(c.region)];
+    var metaParts = [commGeoLine(c)];
     if (c.access) metaParts.push(commEsc(c.access));
     if (c.sponsorship_type) {{
       metaParts.push(commEsc(c.sponsorship_type) + (c.sponsor_name ? ' (' + commEsc(c.sponsor_name) + ')' : ''));
@@ -5267,7 +5291,11 @@ function commFiltered() {{
   var region = document.getElementById('comm-region').value;
   var accessType = document.getElementById('comm-access').value;
   return ALL_COMMUNITIES.filter(function(c) {{
-    if (region && c.region !== region) return false;
+    if (region === '__national__') {{
+      if (c.reach !== 'National' && c.reach !== 'Global') return false;
+    }} else if (region) {{
+      if ((c.metros || []).indexOf(region) === -1) return false;
+    }}
     if (accessType && accessBucket(c.access) !== accessType) return false;
     if (activeCommCost && c.cost_band !== activeCommCost) return false;
     if (activeCommCats.size > 0) {{
@@ -5277,7 +5305,7 @@ function commFiltered() {{
       if (!hit) return false;
     }}
     if (!q) return true;
-    return (c.name + ' ' + c.demographic + ' ' + c.notes + ' ' + c.region + ' ' + (c.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
+    return (c.name + ' ' + c.demographic + ' ' + c.notes + ' ' + (c.metros || []).join(' ') + ' ' + (c.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
   }});
 }}
 
