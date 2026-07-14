@@ -121,6 +121,8 @@ Cost figures are computed from **real API token usage** at call time
 | `tool_categories` | Controlled vocabulary of filter pills — can exist empty, unlike article tags which are purely usage-derived. | `name` (unique), `sort_order` |
 | `benchmarks` | The Benchmarking page at `/tools/benchmarks`, managed at `/admin/tools/benchmarks`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
+| `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs every curated content field on existing rows via `Library.update_community_content`, leaving `approved` untouched so an admin review (or a future reader submission) survives a re-run. | `slug` (unique), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
+| `community_categories` | Controlled vocabulary of filter pills for `/tools/communities`, same shape and same reasoning as `tool_categories`. | `name` (unique), `sort_order` |
 
 `POST /admin/tools/generate-description` (admin-only) drafts a description
 from just a name + URL — used by the "Generate" button on the Add Tool form,
@@ -170,6 +172,7 @@ erDiagram
     contacts ||--o{ contact_audit_log : "item_id (nullable)"
     tools ||--o{ tool_leads : "tool_id"
     tool_categories }o--o{ tools : "by name in categories_json"
+    community_categories }o--o{ communities : "by name in categories_json"
     game_rank_settings ||--o{ game_runs : "rank"
 
     articles {
@@ -231,6 +234,13 @@ erDiagram
         int approved
         int warm_intro_enabled
     }
+    communities {
+        int id PK
+        text slug UK
+        text cost_band "Free | Undisclosed dues | <$1k/yr | <$2,500/yr | $2,500+/yr"
+        text sponsorship_type "Independent | Vendor-sponsored | Investor-sponsored"
+        int approved
+    }
     game_runs {
         int id PK
         text rank
@@ -241,8 +251,8 @@ erDiagram
 
 (Diagram shows key columns and conventional relationships only; `settings`,
 `contacts`, `email_failures`, `benchmarks`, `dedupe_decisions`, `read_later`,
-`tool_categories`, `articles_vec`, and the audit tables carry no columns
-beyond what the tables above describe.)
+`tool_categories`, `community_categories`, `articles_vec`, and the audit
+tables carry no columns beyond what the tables above describe.)
 
 ## 3. Key request flows
 
