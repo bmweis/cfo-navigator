@@ -288,6 +288,16 @@ docs honest, **in the same PR as the change** (never a follow-up):
    (`tests/test_open_source.py` keeps the showcase in sync with
    `requirements*.txt`), but the test can't write the blurb or verify the
    license — that part is on the PR.
+3. **`BRAND.md`** is the other doc this rule covers. §7 (the CSS token table)
+   is generated, not hand-edited — it's copied verbatim from the live `:root`
+   block in `webapp/app.py`'s `_CSS` by `scripts/generate_brand_docs.py`; run
+   `python -m scripts.generate_brand_docs` and commit the diff after touching
+   that block (CI, `tests/test_brand_docs_sync.py`, fails a stale table). §9
+   (voice) is prose about `/admin/voice`'s DB-backed settings, not a duplicated
+   copy — no generator, but **any PR that adds/renames/removes an
+   `/admin/voice*` route or changes what's editable there must update §9 by
+   hand** in the same PR, the same way ARCHITECTURE.md gets updated for other
+   route changes.
 
 ## Voice — em dash policy
 
