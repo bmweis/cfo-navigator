@@ -1741,22 +1741,17 @@ class Library:
         )
         self.conn.commit()
 
-    def update_community_content(self, community_id: int, name: str, url: str, region: str,
-                                 demographic: str, cost_band: str, categories: list[str],
-                                 cost_note: str = "", sponsorship_type: str = "Independent",
-                                 sponsor_name: str = "", access: str = "", format: str = "",
-                                 notes: str = "") -> None:
-        """Narrow update for scripts/seed_communities.py's re-sync pass: touches every
-        curated field pulled from the source research, leaving approved untouched so a
-        content refresh can never unpublish (or silently republish) a row an admin
-        already reviewed."""
+    def update_community_content(self, community_id: int, name: str, notes: str = "") -> None:
+        """Narrow update for scripts/seed_communities.py's re-sync pass (and the startup
+        seeder): touches only name and notes — the two fields sourced straight from the
+        underlying research, same role as name/description for tools and benchmarks.
+        region/demographic/cost_band/cost_note/sponsorship_type/sponsor_name/access/format/
+        categories_json/approved are admin-owned, edited at /admin/tools/communities, and
+        never touched here — otherwise an admin's edit would get silently reverted on the
+        next deploy's re-sync."""
         self.conn.execute(
-            """UPDATE communities SET name=?, url=?, region=?, demographic=?, cost_band=?,
-               cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
-               notes=?, categories_json=?, updated_at=? WHERE id=?""",
-            (name.strip(), url.strip(), region.strip(), demographic.strip(), cost_band,
-             cost_note.strip(), sponsorship_type, sponsor_name.strip(), access.strip(),
-             format.strip(), notes.strip(), json.dumps(categories), _now(), community_id),
+            "UPDATE communities SET name=?, notes=?, updated_at=? WHERE id=?",
+            (name.strip(), notes.strip(), _now(), community_id),
         )
         self.conn.commit()
 

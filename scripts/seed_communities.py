@@ -2,9 +2,12 @@
 """Seed the CFO Toolbox Communities directory with a curated list of finance
 and CFO peer communities, associations, and Slack groups.
 
-Safe to run multiple times — adds any community missing by URL, syncs the
-curated content fields on existing rows, and leaves `approved` untouched so
-an admin's review decision (or a future reader submission) survives a re-run.
+Safe to run multiple times — adds any community missing by URL and syncs
+name/notes on existing rows (same contract as tools/benchmarks' name+
+description re-sync). Every other field — region, cost_band, cost_note,
+sponsorship_type, sponsor_name, access, format, categories, approved — is
+admin-owned once seeded, edited at /admin/tools/communities, and never
+touched by a re-run.
 
 Usage:
     python -m scripts.seed_communities [--db library.db]
@@ -567,13 +570,11 @@ def main():
                 format=c.get("format", ""), notes=c.get("notes", ""),
             )
             if existing:
-                current = lib._community_to_dict(existing)
-                drifted = any(
-                    current.get(k) != v if k != "categories" else sorted(current.get(k) or []) != sorted(v)
-                    for k, v in fields.items()
-                )
-                if drifted:
-                    lib.update_community_content(existing["id"], **fields)
+                # Only name/notes re-sync — region/cost_band/access/categories/etc. are
+                # admin-owned once seeded (edited at /admin/tools/communities), same
+                # contract as tools/benchmarks' name+description re-sync.
+                if existing["name"] != fields["name"] or existing["notes"] != fields["notes"]:
+                    lib.update_community_content(existing["id"], fields["name"], fields["notes"])
                     print(f"  UPDATED: {c['name']}")
                     updated += 1
                 else:

@@ -121,7 +121,7 @@ Cost figures are computed from **real API token usage** at call time
 | `tool_categories` | Controlled vocabulary of filter pills — can exist empty, unlike article tags which are purely usage-derived. | `name` (unique), `sort_order` |
 | `benchmarks` | The Benchmarking page at `/tools/benchmarks`, managed at `/admin/tools/benchmarks`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
-| `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs every curated content field on existing rows via `Library.update_community_content`, leaving `approved` untouched so an admin review (or a future reader submission) survives a re-run. | `slug` (unique), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
+| `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content` — the identical name+description contract as `tools`/`benchmarks`. Every other field (`region`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
 | `community_categories` | Controlled vocabulary of filter pills for `/tools/communities`, same shape and same reasoning as `tool_categories`. | `name` (unique), `sort_order` |
 
 `POST /admin/tools/generate-description` (admin-only) drafts a description
@@ -611,18 +611,20 @@ recorded anywhere, it's flagged rather than invented.
   logged failure) instead of blocking the save or the answer. Failures that
   need a human land in durable tables (`email_failures`) with admin badges —
   best-effort must not mean silent.
-- **Seed once for some fields, sync forever for others.** Tool categories and
-  game tuning are seeded on first boot from source constants and never
-  re-synced — admin edits survive every deploy, source constants are just
-  day-one data. Tools and benchmarks are different: their `name`/`description`
-  (plus the tools `advisor` flag) re-sync from the source constants
-  (`scripts/seed_tools.py`'s `TOOLS`, `webapp/app.py`'s `_DEFAULT_BENCHMARKS`)
-  on every startup, while every other field (categories, promoted, vendor/
-  warm-intro, coverage, pricing) stays admin-owned and untouched. *Why:*
-  content (name/description) is meant to be maintained in the source list and
-  pushed live by deploying, per #113; everything else is meant to be edited
-  live via the admin UI. Each narrow sync method documents which fields it
-  touches.
+- **Seed once for some fields, sync forever for others.** Tool categories,
+  community categories, and game tuning are seeded on first boot from source
+  constants and never re-synced — admin edits survive every deploy, source
+  constants are just day-one data. Tools, benchmarks, and communities are
+  different: their `name`/`description` (or `name`/`notes` for communities,
+  plus the tools `advisor` flag) re-sync from the source constants
+  (`scripts/seed_tools.py`'s `TOOLS`, `webapp/app.py`'s `_DEFAULT_BENCHMARKS`,
+  `scripts/seed_communities.py`'s `COMMUNITIES`) on every startup, while every
+  other field (categories, promoted, vendor/warm-intro, coverage, pricing,
+  region, cost_band, access, sponsorship) stays admin-owned and untouched.
+  *Why:* content (name/description) is meant to be maintained in the source
+  list and pushed live by deploying, per #113; everything else is meant to be
+  edited live via the admin UI. Each narrow sync method documents which fields
+  it touches.
 - **Effort tiers instead of a model picker.** `/library/ask` exposes
   Quick/Standard/Deep; the model behind each tier is an implementation detail
   (`EFFORT_SETTINGS`). *Why:* members shouldn't need model literacy to make a
