@@ -4535,7 +4535,7 @@ def tools_landing(request: Request):
     cards = "".join([
         _hcard("/tools/software", "Software", "A curated directory of the software high-growth finance teams actually use &mdash; searchable, filterable, with a Warm Intro button for the vendors I know well."),
         _hcard("/tools/benchmarks", "Benchmarking", "The benchmarking sources I actually rely on &mdash; plus an honest take on where benchmarks help and where they mislead."),
-        _hcard("/tools/communities", "Communities", "A directory of CFO and finance communities worth joining &mdash; peer groups, associations, and Slack channels, searchable and filterable."),
+        _hcard("/tools/communities", "Communities", "CFO and finance communities worth joining: peer groups, associations, and Slack channels, searchable and filterable."),
     ])
 
     body = f"""<div class="page">
@@ -5122,8 +5122,8 @@ def tools_communities(request: Request):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
-<p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities &mdash; peer groups,
-associations, and Slack channels &mdash; worth joining.</p>
+<p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining&mdash;peer
+groups, associations, and Slack channels.</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"
