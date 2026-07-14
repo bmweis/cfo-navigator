@@ -252,20 +252,51 @@ async def _no_store_admin_pages(request: Request, call_next):
 @app.on_event("startup")
 def _seed_toolbox():
     """Seed tools, benchmarks, and the tool_categories vocabulary on first run,
-    and keep the advisor flag and name/description (for tools) or name/
-    description (for benchmarks) in sync with their seed lists on every
-    restart/deploy. categories_json is NOT re-synced from the seed list for
-    tools that already exist — once seeded, categories are owned by the DB
-    and edited at /admin/tools/categories, so this must not clobber changes
-    made there. Same for promoted/vendor/warm-intro fields (tools) and
-    coverage/pricing (benchmarks), which are admin-site-only and never
-    touched here."""
+    and communities on first run, and keep the advisor flag and name/
+    description (for tools) or name/description (for benchmarks) in sync with
+    their seed lists on every restart/deploy. categories_json is NOT re-synced
+    from the seed list for tools that already exist — once seeded, categories
+    are owned by the DB and edited at /admin/tools/categories, so this must
+    not clobber changes made there. Same for promoted/vendor/warm-intro fields
+    (tools) and coverage/pricing (benchmarks), which are admin-site-only and
+    never touched here. Communities are the exception: every curated field
+    (including categories_json) re-syncs from scripts/seed_communities.py's
+    COMMUNITIES on every restart, same as Library.update_community_content —
+    only `approved` is admin-owned there."""
     from scripts.seed_tools import TOOLS
+    from scripts.seed_communities import CATEGORIES as COMMUNITY_CATEGORIES, COMMUNITIES
     lib = _lib()
     try:
         if not lib.list_tool_categories():
             for name in _DEFAULT_TOOL_CATEGORIES:
                 lib.add_tool_category(name, _DEFAULT_CATEGORY_DESCRIPTIONS.get(name, ""))
+        existing_community_cats = {c["name"] for c in lib.list_community_categories()}
+        for cat_name, cat_desc in COMMUNITY_CATEGORIES:
+            if cat_name not in existing_community_cats:
+                lib.add_community_category(cat_name, cat_desc)
+        for c in COMMUNITIES:
+            crow = lib.conn.execute(
+                "SELECT * FROM communities WHERE url = ?", (c["url"],)
+            ).fetchone()
+            fields = dict(
+                name=c["name"], url=c["url"], region=c["region"],
+                demographic=c["demographic"], cost_band=c["cost_band"],
+                categories=c["categories"], cost_note=c.get("cost_note", ""),
+                sponsorship_type=c.get("sponsorship_type", "Independent"),
+                sponsor_name=c.get("sponsor_name", ""), access=c.get("access", ""),
+                format=c.get("format", ""), notes=c.get("notes", ""),
+            )
+            if not crow:
+                lib.add_community(**fields, approved=1)
+            else:
+                current = lib._community_to_dict(crow)
+                drifted = any(
+                    (sorted(current.get(k) or []) != sorted(v)) if k == "categories"
+                    else (current.get(k) != v)
+                    for k, v in fields.items()
+                )
+                if drifted:
+                    lib.update_community_content(crow["id"], **fields)
         for b in _DEFAULT_BENCHMARKS:
             brow = lib.conn.execute(
                 "SELECT id, name, description FROM benchmarks WHERE url = ?", (b["url"],)

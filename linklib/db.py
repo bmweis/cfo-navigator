@@ -471,6 +471,47 @@ CREATE TABLE IF NOT EXISTS enrichment_cost (
     created_at    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_enrichment_cost_article ON enrichment_cost(article_id);
+
+-- CFO Toolbox "Communities" directory (/tools/communities), a sibling of
+-- tools/tool_categories above: peer groups, associations, and Slack
+-- communities rather than software vendors. cost_band is one of five fixed
+-- values ('Free', 'Undisclosed dues', '<$1k/yr', '<$2,500/yr', '$2,500+/yr')
+-- bucketed by the individual/base rate — exact dues go stale (AFP alone moved
+-- $495->$545 in Jan 2026), so a band is the durable fact and cost_note is
+-- free text for anything more specific (e.g. a multi-seat corporate rate).
+-- sponsorship_type is 'Independent'|'Vendor-sponsored'|'Investor-sponsored'.
+CREATE TABLE IF NOT EXISTS communities (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT NOT NULL DEFAULT '',
+    slug             TEXT NOT NULL UNIQUE DEFAULT '',
+    url              TEXT NOT NULL DEFAULT '',
+    region           TEXT NOT NULL DEFAULT '',
+    demographic      TEXT NOT NULL DEFAULT '',
+    cost_band        TEXT NOT NULL DEFAULT 'Undisclosed dues',
+    cost_note        TEXT NOT NULL DEFAULT '',
+    sponsorship_type TEXT NOT NULL DEFAULT 'Independent',
+    sponsor_name     TEXT NOT NULL DEFAULT '',
+    access           TEXT NOT NULL DEFAULT '',
+    format           TEXT NOT NULL DEFAULT '',
+    notes            TEXT NOT NULL DEFAULT '',
+    categories_json  TEXT NOT NULL DEFAULT '[]',
+    approved         INTEGER NOT NULL DEFAULT 0,
+    submitted_by     TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_communities_approved ON communities(approved);
+
+-- The controlled vocabulary of category pills shown on /tools/communities,
+-- same shape and same reasoning as tool_categories above: independent of
+-- which communities currently use them.
+CREATE TABLE IF NOT EXISTS community_categories (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    sort_order  INTEGER NOT NULL DEFAULT 0
+);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -1639,6 +1680,205 @@ class Library:
     def delete_benchmark(self, benchmark_id: int) -> None:
         self.conn.execute("DELETE FROM benchmarks WHERE id = ?", (benchmark_id,))
         self.conn.commit()
+
+    # -- communities (the /tools/communities directory) ---------------------
+    # Mirrors the tools/tool_categories shape above: categories_json holds the
+    # many-to-many relationship inline (no join table), community_categories
+    # is just the controlled vocabulary of pills.
+
+    def add_community(self, name: str, url: str, region: str, demographic: str,
+                      cost_band: str, categories: list[str], cost_note: str = "",
+                      sponsorship_type: str = "Independent", sponsor_name: str = "",
+                      access: str = "", format: str = "", notes: str = "",
+                      submitted_by: str = "", approved: int = 0) -> int:
+        base = _slugify(name)
+        slug = base
+        suffix = 2
+        while self.conn.execute("SELECT 1 FROM communities WHERE slug=?", (slug,)).fetchone():
+            slug = f"{base}-{suffix}"
+            suffix += 1
+        now = _now()
+        cur = self.conn.execute(
+            """INSERT INTO communities (name, slug, url, region, demographic, cost_band,
+               cost_note, sponsorship_type, sponsor_name, access, format, notes,
+               categories_json, approved, submitted_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (name.strip(), slug, url.strip(), region.strip(), demographic.strip(),
+             cost_band, cost_note.strip(), sponsorship_type, sponsor_name.strip(),
+             access.strip(), format.strip(), notes.strip(), json.dumps(categories),
+             approved, submitted_by.strip(), now, now),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_communities(self, approved_only: bool = True) -> list[dict]:
+        if approved_only:
+            rows = self.conn.execute(
+                "SELECT * FROM communities WHERE approved=1 ORDER BY name"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM communities ORDER BY approved, created_at DESC"
+            ).fetchall()
+        return [self._community_to_dict(r) for r in rows]
+
+    def get_community(self, community_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM communities WHERE id=?", (community_id,)).fetchone()
+        return self._community_to_dict(row) if row else None
+
+    def update_community(self, community_id: int, name: str, url: str, region: str,
+                         demographic: str, cost_band: str, categories: list[str],
+                         cost_note: str = "", sponsorship_type: str = "Independent",
+                         sponsor_name: str = "", access: str = "", format: str = "",
+                         notes: str = "") -> None:
+        self.conn.execute(
+            """UPDATE communities SET name=?, url=?, region=?, demographic=?, cost_band=?,
+               cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
+               notes=?, categories_json=?, updated_at=? WHERE id=?""",
+            (name.strip(), url.strip(), region.strip(), demographic.strip(), cost_band,
+             cost_note.strip(), sponsorship_type, sponsor_name.strip(), access.strip(),
+             format.strip(), notes.strip(), json.dumps(categories), _now(), community_id),
+        )
+        self.conn.commit()
+
+    def update_community_content(self, community_id: int, name: str, url: str, region: str,
+                                 demographic: str, cost_band: str, categories: list[str],
+                                 cost_note: str = "", sponsorship_type: str = "Independent",
+                                 sponsor_name: str = "", access: str = "", format: str = "",
+                                 notes: str = "") -> None:
+        """Narrow update for scripts/seed_communities.py's re-sync pass: touches every
+        curated field pulled from the source research, leaving approved untouched so a
+        content refresh can never unpublish (or silently republish) a row an admin
+        already reviewed."""
+        self.conn.execute(
+            """UPDATE communities SET name=?, url=?, region=?, demographic=?, cost_band=?,
+               cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
+               notes=?, categories_json=?, updated_at=? WHERE id=?""",
+            (name.strip(), url.strip(), region.strip(), demographic.strip(), cost_band,
+             cost_note.strip(), sponsorship_type, sponsor_name.strip(), access.strip(),
+             format.strip(), notes.strip(), json.dumps(categories), _now(), community_id),
+        )
+        self.conn.commit()
+
+    def approve_community(self, community_id: int) -> None:
+        self.conn.execute("UPDATE communities SET approved=1 WHERE id=?", (community_id,))
+        self.conn.commit()
+
+    def count_pending_communities(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM communities WHERE approved=0").fetchone()[0]
+
+    def delete_community(self, community_id: int) -> None:
+        self.conn.execute("DELETE FROM communities WHERE id=?", (community_id,))
+        self.conn.commit()
+
+    @staticmethod
+    def _community_to_dict(r: sqlite3.Row) -> dict:
+        d = dict(r)
+        d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
+        return d
+
+    # -- community categories (the /tools/communities filter pills) ---------
+
+    def list_community_categories(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, name, description, sort_order FROM community_categories ORDER BY sort_order, name"
+        ).fetchall()
+        counts: dict[str, int] = {}
+        for (cj,) in self.conn.execute("SELECT categories_json FROM communities"):
+            for c in json.loads(cj) or []:
+                counts[c] = counts.get(c, 0) + 1
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["community_count"] = counts.get(d["name"], 0)
+            result.append(d)
+        return result
+
+    def add_community_category(self, name: str, description: str = "") -> int:
+        name, description = name.strip(), description.strip()
+        if not name:
+            raise ValueError("Category name is required.")
+        existing = self.conn.execute(
+            "SELECT 1 FROM community_categories WHERE name = ? COLLATE NOCASE", (name,)
+        ).fetchone()
+        if existing:
+            raise ValueError(f'A category named "{name}" already exists.')
+        next_order = self.conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM community_categories"
+        ).fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO community_categories (name, description, sort_order) VALUES (?,?,?)",
+            (name, description, next_order),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def rename_community_category(self, category_id: int, new_name: str, description: str = "") -> int:
+        """Rename/re-describe a category, cascading the name change onto every
+        community that has it. Returns the number of communities whose
+        categories_json changed. Raises ValueError on a name collision."""
+        new_name, description = new_name.strip(), description.strip()
+        if not new_name:
+            raise ValueError("Category name is required.")
+        row = self.conn.execute(
+            "SELECT name FROM community_categories WHERE id = ?", (category_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Category not found.")
+        old_name = row["name"]
+        if new_name.lower() != old_name.lower():
+            collision = self.conn.execute(
+                "SELECT 1 FROM community_categories WHERE name = ? COLLATE NOCASE AND id != ?",
+                (new_name, category_id),
+            ).fetchone()
+            if collision:
+                raise ValueError(f'A category named "{new_name}" already exists.')
+        self.conn.execute(
+            "UPDATE community_categories SET name=?, description=? WHERE id=?",
+            (new_name, description, category_id),
+        )
+        changed = 0
+        if new_name != old_name:
+            for c in self.conn.execute(
+                "SELECT id, categories_json FROM communities WHERE categories_json LIKE ?", (f'%"{old_name}"%',)
+            ).fetchall():
+                cats = json.loads(c["categories_json"]) or []
+                if old_name not in cats:
+                    continue
+                updated = sorted(set(new_name if x == old_name else x for x in cats))
+                self.conn.execute(
+                    "UPDATE communities SET categories_json=? WHERE id=?",
+                    (json.dumps(updated), c["id"]),
+                )
+                changed += 1
+        self.conn.commit()
+        return changed
+
+    def delete_community_category(self, category_id: int) -> int:
+        """Delete a category and strip it from every community that has it.
+        Returns the number of communities changed."""
+        row = self.conn.execute(
+            "SELECT name FROM community_categories WHERE id = ?", (category_id,)
+        ).fetchone()
+        if not row:
+            return 0
+        name = row["name"]
+        self.conn.execute("DELETE FROM community_categories WHERE id = ?", (category_id,))
+        changed = 0
+        for c in self.conn.execute(
+            "SELECT id, categories_json FROM communities WHERE categories_json LIKE ?", (f'%"{name}"%',)
+        ).fetchall():
+            cats = json.loads(c["categories_json"]) or []
+            if name not in cats:
+                continue
+            kept = [x for x in cats if x != name]
+            self.conn.execute(
+                "UPDATE communities SET categories_json=? WHERE id=?",
+                (json.dumps(kept), c["id"]),
+            )
+            changed += 1
+        self.conn.commit()
+        return changed
 
     # -- read later ---------------------------------------------------------
     # A personal bookmark list — every method takes user_id and scopes to it,
