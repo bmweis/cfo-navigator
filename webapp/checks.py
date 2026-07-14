@@ -69,8 +69,8 @@ def brand_docs_problems() -> list[str]:
     from scripts.generate_brand_docs import stale as brand_docs_stale
     brand_md = (_ROOT / "BRAND.md").read_text(encoding="utf-8")
     if brand_docs_stale(brand_md, _app_src()):
-        return ["BRAND.md §7 is out of date with webapp/app.py's :root block — "
-                "run `python -m scripts.generate_brand_docs` and commit the diff."]
+        return ["BRAND.md §7 is out of date with webapp/app.py's :root block"
+                "—run `python -m scripts.generate_brand_docs` and commit the diff."]
     return []
 
 
@@ -133,7 +133,7 @@ def run_all() -> list[dict]:
 
     results.append({
         "name": "Rest of the test suite (pytest)", "where": "CI", "ok": None,
-        "what": "Everything else the suite covers — access tiers, auth, dedupe, publish dates, tagging, users.",
+        "what": "Everything else the suite covers—access tiers, auth, dedupe, publish dates, tagging, users.",
         "detail": "Runs the whole suite (including the three above) on every commit."})
 
     results.append({

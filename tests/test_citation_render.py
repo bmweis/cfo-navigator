@@ -173,7 +173,7 @@ def test_csv_export_stays_raw_with_citations_column(env):
     assert "<a" not in cited[header.index("answer")]
     # The new column resolves them, one plain-text line per source.
     cites = cited[header.index("citations")]
-    assert "[1] Saved piece — https://ex.com/a" in cites
-    assert "[3] Web hit — https://ex.com/c" in cites
+    assert "[1] Saved piece—https://ex.com/a" in cites
+    assert "[3] Web hit—https://ex.com/c" in cites
     # Legacy row: empty citations cell, nothing invented.
     assert by_q["Legacy question?"][header.index("citations")] == ""

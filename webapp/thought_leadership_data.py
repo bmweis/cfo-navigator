@@ -65,13 +65,13 @@ WRITING: list[TLItem] = [
         title="Exit Readiness for CFOs",
         url="https://www.fsuite.co/blog/exit-readiness-cfos", venue="The F Suite",
         date_label="Mar 2026", sort_key="2026-03", type="writing",
-        description="There's no single right exit—IPO, acquisition, sponsor sale, secondary—so the real job is building a company that's ready no matter which door opens, starting years before any process does.",
+        description="There's no single right exit (IPO, acquisition, sponsor sale, secondary), so the real job is building a company that's ready no matter which door opens, starting years before any process does.",
     ),
     TLItem(
         title="Building a Modern Finance Team: How Two Leaders Are Rethinking the Process",
         url="https://www.fsuite.co/blog/building-a-modern-finance-team", venue="The F Suite",
         date_label="Apr 2026", sort_key="2026-04", type="writing",
-        description="Co-authored with Mux CFO Jaime Ortiz on why the old revenue-banded hiring ladder for finance teams breaks down, and the three principles that replace it: prioritize whichever leg of the stool—accounting, FP&A, or business ops—is weakest, default to generalists over narrow specialists, and scale through systems and data before headcount.",
+        description="Co-authored with Mux CFO Jaime Ortiz on why the old revenue-banded hiring ladder for finance teams breaks down, and the three principles that replace it: prioritize whichever leg of the stool (accounting, FP&A, or business ops) is weakest, default to generalists over narrow specialists, and scale through systems and data before headcount.",
     ),
     TLItem(
         title="Building Dashboards That Matter",
@@ -83,7 +83,7 @@ WRITING: list[TLItem] = [
 
 SPEAKING: list[TLItem] = [
     TLItem(
-        title="Abacum AI Summit — Recording",
+        title="Abacum AI Summit—Recording",
         url="https://www.youtube.com/watch?v=MDBz0OpR1II", venue="Abacum",
         date_label="Apr 2026", sort_key="2026-04", type="speaking",
         description="A panel on what AI adoption changes inside a finance team once the pilot phase ends, recorded live at Abacum's invite-only summit in New York.",
@@ -114,13 +114,13 @@ SPEAKING: list[TLItem] = [
         description="Customer speaker at F Suite's virtual demo day evaluating Abacum, Aleph, and QuotaPath—live demos and a closed-door, vendor-free CFO panel on FP&A tooling.",
     ),
     TLItem(
-        title="Cash Cycle Demo Day — Co-Chair",
+        title="Cash Cycle Demo Day—Co-Chair",
         url="https://cashcycledemoday.splashthat.com/", venue="The F Suite",
         date_label="Oct 2025", sort_key="2025-10", type="speaking",
         description="Hosted The F Suite's virtual Cash Cycle Demo Day—five vendors (RightRev, Routable, Sequence, Tabs, Vayu) walked through billing, collections, and revenue-rec tooling, followed by a closed-door, vendor-free Q&A with peer CFOs.",
     ),
     TLItem(
-        title="CFO Clubhouse: Staying Out of the Weeds — The Strategic CFO (Co-Chair / Discussion Lead)",
+        title="CFO Clubhouse: Staying Out of the Weeds—The Strategic CFO (Co-Chair / Discussion Lead)",
         url="https://augustcfoclubhouse.splashthat.com", venue="The F Suite",
         date_label="Aug 2025", sort_key="2025-08", type="speaking",
         description="Led this Clubhouse discussion on staying strategic as a CFO scales—delegation, building operational partnerships, and structuring finance teams without getting pulled into the weeds.",
@@ -132,13 +132,13 @@ SPEAKING: list[TLItem] = [
         description="A panel for in-house counsel on partnering with Finance—budgeting best practices, accrual timing, and clearer communication around legal spend and P&L realities.",
     ),
     TLItem(
-        title="F Suite Regional Forum: Your Moment, Your Move — Leading Through Uncertainty (Co-Chair)",
+        title="F Suite Regional Forum: Your Moment, Your Move—Leading Through Uncertainty (Co-Chair)",
         url="https://bostonregionalforum.splashthat.com", venue="The F Suite",
         date_label="Jun 2025", sort_key="2025-06", type="speaking",
-        description="Co-chaired this half-day Boston forum on preparing for major company and career transitions—IPOs, M&As, and exits—alongside mainstage sessions on exit readiness and AI in finance.",
+        description="Co-chaired this half-day Boston forum on preparing for major company and career transitions (IPOs, M&As, and exits), alongside mainstage sessions on exit readiness and AI in finance.",
     ),
     TLItem(
-        title="CFO Roundtable — M&A and Managing Uncertainty",
+        title="CFO Roundtable—M&A and Managing Uncertainty",
         url="https://luma.com/7fwtr2n8", venue="Fidelity",
         date_label="Mar 2025", sort_key="2025-03", type="speaking",
         description="A Fidelity Private Shares and York IE gathering in Boston for CFOs and heads of finance—one panel on M&A prep from both sides of the table, another on planning through uncertainty, with roundtable discussion after each.",
@@ -165,13 +165,13 @@ SPEAKING: list[TLItem] = [
 
 PODCASTS: list[TLItem] = [
     TLItem(
-        title="The Cash Flow Show — Conversations About How Tech Companies Make Money (Host · Full Episode Feed)",
+        title="The Cash Flow Show—Conversations About How Tech Companies Make Money (Host · Full Episode Feed)",
         url="https://www.onlycfo.io/podcast", venue="OnlyCFO", date_label="", sort_key="",
         type="podcast",
         description="Brian's own interview series, hosted via OnlyCFO—operators on how their companies make money, in their own words. Full episode archive.",
     ),
     TLItem(
-        title="Adopting AI in Finance & Accounting — with Sowmya Ranganathan (former Controller, OpenAI)",
+        title="Adopting AI in Finance & Accounting—with Sowmya Ranganathan (former Controller, OpenAI)",
         url="https://open.spotify.com/episode/6uXkeypUPX5g5yB8lHGq2V", venue="The Cash Flow Show",
         date_label="Aug 2025", sort_key="2025-08", type="podcast",
         description="Sowmya scaled finance at Square, Rippling, and OpenAI before founding Lumera—we get into how OpenAI rolled out AI in finance, including running internal hackathons instead of mandating tools from the top down.",
@@ -189,7 +189,7 @@ PODCASTS: list[TLItem] = [
         description="ARR stopped being a clean metric once companies started blending usage-based and non-traditional revenue into it—we dig into what's worth tracking instead.",
     ),
     TLItem(
-        title="Commission Plan Strategies in 2025 — with Meir Rotenberg & David Ma",
+        title="Commission Plan Strategies in 2025—with Meir Rotenberg & David Ma",
         url="https://open.spotify.com/episode/64DsKmsDgOshd3LQdM4Cte", venue="The Cash Flow Show",
         date_label="Mar 2025", sort_key="2025-03", type="podcast",
         description="With Meir Rotenberg and David Ma on quota setting, scaling a GTM team without breaking it, and comp plan design—including why misaligned incentives across sales, deal desk, and implementation cause most of the pain, plus whether AI SDRs are earning their keep or just hype.",
@@ -198,10 +198,10 @@ PODCASTS: list[TLItem] = [
         title="The M&A Playbook",
         url="https://open.spotify.com/episode/5kMa3kkutDhsoc4SBoOBZ1", venue="The Cash Flow Show",
         date_label="Mar 2025", sort_key="2025-03", type="podcast",
-        description="With Spiff's former exec on how a years-long relationship with an investor—Salesforce backed two rounds before acquiring—became an exit, plus a banker's take on when to engage advisors, what drags out diligence, and how strategics and PE firms value a target differently.",
+        description="With Spiff's former exec on how a years-long relationship with an investor (Salesforce backed two rounds before acquiring) became an exit, plus a banker's take on when to engage advisors, what drags out diligence, and how strategics and PE firms value a target differently.",
     ),
     TLItem(
-        title="Code to Cash, Ep. 9 — Monetizing Thoughtfully: Architecting Financial Stacks (Guest)",
+        title="Code to Cash, Ep. 9—Monetizing Thoughtfully: Architecting Financial Stacks (Guest)",
         url="https://creators.spotify.com/pod/profile/codetocash/episodes/Episode-9-Monetizing-Thoughtfully--Architecting-Financial-Stacks-with-Brian-Weisberg--CFO-of-Tidelift-e28unsn",
         venue="Monetizely", date_label="Sep 2023", sort_key="2023-09", type="podcast",
         description="With Monetizely's Ajit Ghuman on treating pricing as a system, not a single number—choosing metrics that track real customer value, and building the pricebooks and discount guardrails that make a pricing change stick.",
