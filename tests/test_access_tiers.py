@@ -172,11 +172,10 @@ def test_admin_username_breakglass_with_host_password(env):
     assert c.get("/admin", follow_redirects=False).status_code == 200
 
 
-def test_community_is_admin_only(env):
-    anon, member, admin = _client(env), _member_client(env), _admin_client(env)
-    assert anon.get("/community", follow_redirects=False).status_code == 303
-    assert member.get("/community", follow_redirects=False).status_code == 303
-    assert admin.get("/community", follow_redirects=False).status_code == 200
+def test_community_route_removed(env):
+    anon, admin = _client(env), _admin_client(env)
+    assert anon.get("/community", follow_redirects=False).status_code == 404
+    assert admin.get("/community", follow_redirects=False).status_code == 404
 
 
 def test_public_pages_have_no_community_links(env):
