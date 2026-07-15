@@ -517,6 +517,40 @@ CREATE TABLE IF NOT EXISTS community_categories (
     description TEXT NOT NULL DEFAULT '',
     sort_order  INTEGER NOT NULL DEFAULT 0
 );
+
+-- Deep, opinionated read on a community (Community Profiles, Phase 2): the
+-- qualitative judgment calls a directory row's cost/access/region fields can't
+-- carry. 1:1 with communities via community_id as the PRIMARY KEY, mirroring
+-- article_embeddings.article_id rather than a SQL-level FK — this codebase
+-- doesn't declare REFERENCES anywhere, so cleanup on delete is manual (see
+-- delete_community) same as delete_article does for article_embeddings.
+-- sponsor_relationship_note is deliberately separate from communities'
+-- sponsor_name/sponsorship_type — those are factual, this is a qualitative
+-- read on whether the sponsor presence feels value-add or a sales funnel.
+-- Drafted via POST /admin/tools/communities/generate-profile
+-- (linklib/enrich.py::generate_community_profile), mirroring
+-- generate_tool_description's contract exactly: never auto-saved, and
+-- low_confidence flags a draft made without a successful page fetch so
+-- whoever reviews it knows to double-check facts. Rows can be empty/thin
+-- until Research content is available and backfilled, or an admin generates
+-- one per-community via that button.
+CREATE TABLE IF NOT EXISTS community_profiles (
+    community_id             INTEGER PRIMARY KEY,
+    ideal_member              TEXT NOT NULL DEFAULT '',
+    anti_fit                  TEXT NOT NULL DEFAULT '',
+    value_prop                TEXT NOT NULL DEFAULT '',
+    format_reality            TEXT NOT NULL DEFAULT '',
+    engagement_level          TEXT NOT NULL DEFAULT '',
+    sponsor_relationship_note TEXT NOT NULL DEFAULT '',
+    application_friction      TEXT NOT NULL DEFAULT '',
+    cost_value_verdict        TEXT NOT NULL DEFAULT '',
+    notable_members           TEXT NOT NULL DEFAULT '',
+    founded_year              INTEGER,
+    public_criticism          TEXT NOT NULL DEFAULT '',
+    verdict_summary           TEXT NOT NULL DEFAULT '',
+    low_confidence            INTEGER NOT NULL DEFAULT 0,
+    updated_at                TEXT NOT NULL DEFAULT ''
+);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -1798,6 +1832,7 @@ class Library:
 
     def delete_community(self, community_id: int) -> None:
         self.conn.execute("DELETE FROM communities WHERE id=?", (community_id,))
+        self.conn.execute("DELETE FROM community_profiles WHERE community_id=?", (community_id,))
         self.conn.commit()
 
     @staticmethod
@@ -1806,6 +1841,55 @@ class Library:
         d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
         d["metros"] = json.loads(d.pop("metros_json", "[]") or "[]")
         return d
+
+    # -- community profiles (deep qualitative read per community) -----------
+    # 1:1 with communities via community_id; see the CREATE TABLE comment in
+    # _SCHEMA for why this stays an upsert-by-PK rather than a SQL FK.
+
+    def get_community_profile(self, community_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM community_profiles WHERE community_id=?", (community_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_community_profile(self, community_id: int, ideal_member: str = "",
+                                 anti_fit: str = "", value_prop: str = "",
+                                 format_reality: str = "", engagement_level: str = "",
+                                 sponsor_relationship_note: str = "",
+                                 application_friction: str = "", cost_value_verdict: str = "",
+                                 notable_members: str = "", founded_year: Optional[int] = None,
+                                 public_criticism: str = "", verdict_summary: str = "",
+                                 low_confidence: int = 0) -> None:
+        """Insert or fully replace a community's profile row. There's no partial
+        update here (unlike update_community_content's narrow sync) — the admin
+        edit form always submits every field, generated or hand-written."""
+        self.conn.execute(
+            """INSERT INTO community_profiles
+               (community_id, ideal_member, anti_fit, value_prop, format_reality,
+                engagement_level, sponsor_relationship_note, application_friction,
+                cost_value_verdict, notable_members, founded_year, public_criticism,
+                verdict_summary, low_confidence, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(community_id) DO UPDATE SET
+                 ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
+                 value_prop=excluded.value_prop, format_reality=excluded.format_reality,
+                 engagement_level=excluded.engagement_level,
+                 sponsor_relationship_note=excluded.sponsor_relationship_note,
+                 application_friction=excluded.application_friction,
+                 cost_value_verdict=excluded.cost_value_verdict,
+                 notable_members=excluded.notable_members,
+                 founded_year=excluded.founded_year,
+                 public_criticism=excluded.public_criticism,
+                 verdict_summary=excluded.verdict_summary,
+                 low_confidence=excluded.low_confidence,
+                 updated_at=excluded.updated_at""",
+            (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
+             format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
+             application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
+             founded_year, public_criticism.strip(), verdict_summary.strip(),
+             low_confidence, _now()),
+        )
+        self.conn.commit()
 
     # -- community categories (the /tools/communities filter pills) ---------
 

@@ -216,3 +216,163 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         )
     except Exception:
         return None
+
+
+# The twelve fields generate_community_profile drafts (excludes low_confidence,
+# which is computed from the fetch, and updated_at, which is set on save) —
+# shared with webapp/app.py so the "existing draft as context" block and the
+# JSON response stay in lockstep with what the form actually submits.
+COMMUNITY_PROFILE_FIELDS = [
+    "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
+    "sponsor_relationship_note", "application_friction", "cost_value_verdict",
+    "notable_members", "founded_year", "public_criticism", "verdict_summary",
+]
+
+_COMMUNITY_PROFILE_PROMPT = """You are drafting a deep, opinionated profile of a peer community for the
+CFO Toolbox's Communities directory, read by finance leaders deciding whether a
+community is worth their time and money. This is not directory metadata (cost,
+region, access are handled elsewhere) — it's the qualitative read: who it's
+actually for, what it's actually like, and whether it delivers.
+
+Write about the community named below. Follow these rules exactly:
+1. Be specific and opinionated, not generic marketing copy. No "powerful,"
+   "vibrant," "world-class," or similar adjective stacking. No exclamation points.
+2. Ground every claim in the page content provided below (or your own knowledge,
+   if the page content is unavailable) — never invent specifics you can't support.
+3. `founded_year` must be a four-digit integer or null — only if you're confident
+   of the year.
+4. `notable_members` must be null unless you know of PUBLICLY reported members or
+   alumni — never guess or infer private membership from indirect signals.
+5. `public_criticism` is a drawback that's actually been reported or is visible
+   from the page/your knowledge (e.g. pay-to-play concerns, inconsistent chapter
+   quality) — null if you don't know of any, never a fabricated nitpick.
+6. `verdict_summary` is one short sentence in the shape "Best for X, not for Y."
+7. Every other field is 1-3 plain-prose sentences, no markdown, no quotes.
+
+Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
+
+  "ideal_member": who this community is actually for.
+  "anti_fit": who should probably skip it.
+  "value_prop": the primary thing members get out of it.
+  "format_reality": the actual cadence and mix of in-person vs. virtual.
+  "engagement_level": how much active participation membership expects or rewards.
+  "sponsor_relationship_note": whether sponsor presence (if any) reads as
+     value-add or a sales funnel for members — a qualitative read, distinct from
+     the factual sponsor name/sponsorship type recorded elsewhere.
+  "application_friction": the real barrier to entry, not just the access-model
+     label (e.g. "invite-only in name, but any VP with a LinkedIn intro gets in").
+  "cost_value_verdict": whether the price is justified by what members report
+     getting out of it.
+  "notable_members": publicly known alumni/members, or null.
+  "founded_year": four-digit year, or null.
+  "public_criticism": any visible/reported drawback, or null.
+  "verdict_summary": one short "best for X, not for Y" line.
+
+Community name: {name}
+Community URL: {url}
+{existing_block}
+{content_block}
+"""
+
+
+@dataclass
+class CommunityProfileDraft:
+    ideal_member: str = ""
+    anti_fit: str = ""
+    value_prop: str = ""
+    format_reality: str = ""
+    engagement_level: str = ""
+    sponsor_relationship_note: str = ""
+    application_friction: str = ""
+    cost_value_verdict: str = ""
+    notable_members: str = ""
+    founded_year: int | None = None
+    public_criticism: str = ""
+    verdict_summary: str = ""
+    low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def generate_community_profile(name: str, url: str, existing: dict | None = None,
+                               model: str = DEFAULT_MODEL) -> CommunityProfileDraft | None:
+    """Draft all twelve qualitative Community Profile fields from a community's
+    name + URL in one Claude call, mirroring generate_tool_description exactly
+    (same page-fetch grounding, same low_confidence rule) but sized for the
+    larger field count. `existing`, when given, feeds back any already-drafted
+    or admin-edited fields as context so a regenerate refines rather than
+    starts from scratch. Never auto-saved — same review contract as the tool
+    description draft. Returns None if the SDK/key is unavailable or the call
+    fails."""
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    from . import extract
+    page = extract.fetch_page(url)
+    low_confidence = not bool(page.content.strip())
+    content_block = (
+        f"Page content (fetched from the URL):\n{page.content[:6000]}" if not low_confidence
+        else "(Could not fetch page content — draft from your own knowledge of this "
+             "community if you have it, keeping to the rules above.)"
+    )
+    existing = existing or {}
+    existing_lines = "\n".join(
+        f"  {field}: {existing[field]}" for field in COMMUNITY_PROFILE_FIELDS
+        if str(existing.get(field) or "").strip()
+    )
+    existing_block = (
+        f"\nExisting draft (refine using the content above rather than just repeating it):\n{existing_lines}\n"
+        if existing_lines else ""
+    )
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model,
+            max_tokens=1600,
+            messages=[{"role": "user",
+                       "content": _COMMUNITY_PROFILE_PROMPT.format(
+                           name=name, url=url, existing_block=existing_block, content_block=content_block)}],
+        )
+        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+
+        from .pricing import compute_cost
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
+        founded_year = data.get("founded_year")
+        try:
+            founded_year = int(founded_year) if founded_year is not None else None
+        except (TypeError, ValueError):
+            founded_year = None
+
+        return CommunityProfileDraft(
+            ideal_member=str(data.get("ideal_member", "")).strip(),
+            anti_fit=str(data.get("anti_fit", "")).strip(),
+            value_prop=str(data.get("value_prop", "")).strip(),
+            format_reality=str(data.get("format_reality", "")).strip(),
+            engagement_level=str(data.get("engagement_level", "")).strip(),
+            sponsor_relationship_note=str(data.get("sponsor_relationship_note", "")).strip(),
+            application_friction=str(data.get("application_friction", "")).strip(),
+            cost_value_verdict=str(data.get("cost_value_verdict", "")).strip(),
+            notable_members=str(data.get("notable_members") or "").strip(),
+            founded_year=founded_year,
+            public_criticism=str(data.get("public_criticism") or "").strip(),
+            verdict_summary=str(data.get("verdict_summary", "")).strip(),
+            low_confidence=low_confidence, model=model,
+            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+        )
+    except Exception:
+        return None

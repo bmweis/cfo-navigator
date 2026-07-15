@@ -123,6 +123,7 @@ Cost figures are computed from **real API token usage** at call time
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
 | `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content`, plus `advisor` (a direct `UPDATE`, mirroring `tools.advisor` exactly — see below) — the identical name+description+advisor contract as `tools`. Every other field (`region`, `reach`, `metros_json`, `featured`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `reach` (`Regional`\|`National`\|`Global` — a community's overall footprint), `metros_json` (JSON array from a controlled city/area vocabulary — where it has a chapter, hub, or local focus; independent of `reach`, so a National community like FEI can still carry metros), `region` (legacy free-text note, superseded by `reach`/`metros_json` — kept for any detail those two fields don't capture, no longer read by the region filter), `featured` (pin-to-top + coral badge, same pattern as `tools.promoted`; independent of `reach`/`metros_json`/`advisor`), `advisor` (⭐ marker + "Advisor" filter chip, same pattern as `tools.advisor` — discloses a personal relationship, e.g. The F Suite; independent of `featured`), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
 | `community_categories` | Controlled vocabulary of filter pills for `/tools/communities`, same shape and same reasoning as `tool_categories`. | `name` (unique), `sort_order` |
+| `community_profiles` | Deep, opinionated read per community (Community Profiles, Phase 2) — the qualitative judgment a directory row's cost/access/region fields can't carry, edited at `/admin/tools/communities/{id}/profile`. 1:1 with `communities` via `community_id` as the primary key (no SQL-level `REFERENCES`, same as `article_embeddings.article_id` — this codebase does cleanup on delete in application code, not via a declared FK; see `delete_community`). Empty/thin until Research content backfills it or an admin generates a draft. No public-facing surface yet. | `community_id` (PK), `sponsor_relationship_note` (qualitative — value-add or sales funnel? — distinct from the factual `sponsor_name`/`sponsorship_type` on `communities`), `application_friction` (the real barrier to entry, not just the `access` label), `founded_year` (nullable), `notable_members`/`public_criticism` (nullable — only when verifiably public/reported), `low_confidence` |
 
 `POST /admin/tools/generate-description` (admin-only) drafts a description
 from just a name + URL — used by the "Generate" button on the Add Tool form,
@@ -135,6 +136,17 @@ fetch comes back empty, the draft is flagged `low_confidence` so the admin UI
 can warn that it's working from the model's own knowledge rather than the live
 page. The call's cost lands in the same `enrichment_cost` ledger as article
 enrichment (`article_id=NULL`) — overhead, not a user-facing budget.
+
+`POST /admin/tools/communities/generate-profile` (admin-only) mirrors that
+exact contract for `community_profiles`, sized up for a much larger field
+count: one Claude call (`linklib/enrich.py::generate_community_profile`)
+drafts all twelve qualitative fields as structured JSON from a community's
+name + URL (plus whatever's already on the edit form, fed back as context so
+a regenerate refines rather than starts over), grounded in the same
+`linklib/extract.py` page fetch, with the same `low_confidence` rule and the
+same never-auto-saved review contract — the draft lands in the
+`/admin/tools/communities/{id}/profile` form fields for the admin to check
+before saving. Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
 ### Site operations
 
@@ -173,6 +185,7 @@ erDiagram
     tools ||--o{ tool_leads : "tool_id"
     tool_categories }o--o{ tools : "by name in categories_json"
     community_categories }o--o{ communities : "by name in categories_json"
+    communities ||--o| community_profiles : "community_id"
     game_rank_settings ||--o{ game_runs : "rank"
 
     articles {
@@ -245,6 +258,15 @@ erDiagram
         text cost_band "Free | Undisclosed dues | <$1k/yr | <$2,500/yr | $2,500+/yr"
         text sponsorship_type "Independent | Vendor-sponsored | Investor-sponsored"
         int approved
+    }
+    community_profiles {
+        int community_id PK "1:1 with communities, no SQL FK"
+        text sponsor_relationship_note "qualitative — distinct from sponsor_name/type"
+        text application_friction "real barrier to entry, not just the access label"
+        int founded_year "nullable"
+        text notable_members "nullable — only if verifiably public"
+        text public_criticism "nullable"
+        int low_confidence "drafted without a successful page fetch"
     }
     game_runs {
         int id PK

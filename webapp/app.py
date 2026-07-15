@@ -5380,6 +5380,50 @@ async function generateDescription(name, url, descId, statusId) {
 }
 """
 
+# The Community Profile draft has 12 fields rather than one description
+# string, so it can't reuse generateDescription's single-field contract above
+# — same fetch/status pattern, but fills every "cp-<field>" input by id and
+# feeds back whatever's already on the form as context for a regenerate.
+_COMMUNITY_PROFILE_FIELD_IDS = [
+    "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
+    "sponsor_relationship_note", "application_friction", "cost_value_verdict",
+    "notable_members", "founded_year", "public_criticism", "verdict_summary",
+]
+_GENERATE_PROFILE_JS = """
+var COMMUNITY_PROFILE_FIELDS = """ + json.dumps(_COMMUNITY_PROFILE_FIELD_IDS) + """;
+async function generateCommunityProfile(name, url, statusId) {
+  name = (name || '').trim();
+  url = (url || '').trim();
+  var status = document.getElementById(statusId);
+  if (!name || !url) { status.textContent = 'Missing name or URL.'; return; }
+  status.textContent = 'Generating…';
+  var existing = {};
+  COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
+    var el = document.getElementById('cp-' + k);
+    if (el && el.value) existing[k] = el.value;
+  });
+  try {
+    var r = await fetch('/admin/tools/communities/generate-profile', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, url: url, existing: existing})
+    });
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
+    COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
+      var el = document.getElementById('cp-' + k);
+      if (el) el.value = (d[k] === null || d[k] === undefined) ? '' : d[k];
+    });
+    var lowConf = document.getElementById('cp-low_confidence');
+    if (lowConf) lowConf.checked = !!d.low_confidence;
+    status.textContent = d.low_confidence
+      ? 'Drafted. Could not fetch the page, so verify facts before saving.'
+      : 'Drafted. Review before saving.';
+  } catch (e) {
+    status.textContent = e.message || 'Generation failed. Write the profile by hand.';
+  }
+}
+"""
+
 
 @app.get("/tools/submit", response_class=HTMLResponse)
 def tools_submit_page(request: Request, submitted: str = ""):
@@ -6291,6 +6335,57 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
   </div>"""
 
 
+def _community_profile_form_fields(p: dict | None, community: dict) -> str:
+    """The Community Profile edit form (deep qualitative fields, distinct from
+    the directory metadata in _community_form_fields above). Field ids are
+    'cp-<column name>' — generateCommunityProfile (_GENERATE_PROFILE_JS)
+    reads/writes them by that convention."""
+    p = p or {}
+
+    def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2) -> str:
+        req_mark = " *" if required else ""
+        req_attr = " required" if required else ""
+        ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
+        return f"""  <div>
+    <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}{req_mark}</label>
+    <textarea id="cp-{key}" name="{key}" rows="{rows}"{req_attr}{ph}
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(p.get(key, ''))}</textarea>
+  </div>"""
+
+    return f"""  <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;">
+    <p style="color:var(--muted);margin:0;max-width:520px;">The deep, opinionated read behind the directory listing: who it's for, what it's actually like, and whether it's worth it. Empty is fine until this is written or generated.</p>
+    <span style="white-space:nowrap;">
+      <input type="hidden" id="cp-name" value="{_esc(community.get('name', ''))}">
+      <input type="hidden" id="cp-url" value="{_esc(community.get('url', ''))}">
+      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status')">Generate profile draft</button>
+      <span id="cp-gen-status" class="qe-status"></span>
+    </span>
+  </div>
+{_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True)}
+{_field('anti_fit', 'Anti-fit', 'Who should probably skip it')}
+{_field('value_prop', 'Value proposition', 'The primary thing members get out of it')}
+{_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual')}
+{_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards')}
+{_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.")}
+{_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label')}
+{_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting')}
+{_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.')}
+  <div>
+    <label for="cp-founded_year" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Founded year</label>
+    <input id="cp-founded_year" name="founded_year" type="number" min="1800" max="2100"
+      value="{p.get('founded_year') or ''}"
+      style="width:160px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+{_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.')}
+{_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True)}
+  <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" id="cp-low_confidence" name="low_confidence" value="1"{' checked' if p.get('low_confidence') else ''}>
+      <span>Low confidence: drafted without a successful page fetch or verified grounding. Needs a human check before it's trusted.</span>
+    </label>
+  </div>"""
+
+
 @app.get("/admin/tools/communities", response_class=HTMLResponse)
 def admin_communities(request: Request):
     if not _is_authed(request):
@@ -6312,6 +6407,7 @@ def admin_communities(request: Request):
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
   <td style="padding:10px 12px;white-space:nowrap;">
     <a href="/admin/tools/communities/{c['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="margin-left:4px;">Profile</a>
     <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="display:inline;"
           onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
       <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
@@ -6611,6 +6707,112 @@ def admin_communities_delete(request: Request, community_id: int):
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
+
+
+@app.get("/admin/tools/communities/{community_id}/profile", response_class=HTMLResponse)
+def admin_community_profile_edit(request: Request, community_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        c = lib.get_community(community_id)
+        p = lib.get_community_profile(community_id)
+    finally:
+        lib.close()
+    if not c:
+        raise HTTPException(status_code=404, detail="Community not found")
+    body = f"""<div class="page page-narrow">
+<p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
+<h1>Profile: {_esc(c['name'])}</h1>
+<form method="post" action="/admin/tools/communities/{community_id}/profile" style="display:grid;gap:20px;">
+{_community_profile_form_fields(p, c)}
+  <div>
+    <button type="submit" class="btn">Save profile</button>
+    <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>
+<script>{_GENERATE_PROFILE_JS}</script>"""
+    return HTMLResponse(_page(f"Profile: {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.post("/admin/tools/communities/{community_id}/profile")
+async def admin_community_profile_submit(request: Request, community_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        if not lib.get_community(community_id):
+            raise HTTPException(status_code=404, detail="Community not found")
+        form = await request.form()
+        founded_year_raw = (form.get("founded_year") or "").strip()
+        founded_year = int(founded_year_raw) if founded_year_raw.isdigit() else None
+        lib.upsert_community_profile(
+            community_id,
+            ideal_member=(form.get("ideal_member") or "").strip(),
+            anti_fit=(form.get("anti_fit") or "").strip(),
+            value_prop=(form.get("value_prop") or "").strip(),
+            format_reality=(form.get("format_reality") or "").strip(),
+            engagement_level=(form.get("engagement_level") or "").strip(),
+            sponsor_relationship_note=(form.get("sponsor_relationship_note") or "").strip(),
+            application_friction=(form.get("application_friction") or "").strip(),
+            cost_value_verdict=(form.get("cost_value_verdict") or "").strip(),
+            notable_members=(form.get("notable_members") or "").strip(),
+            founded_year=founded_year,
+            public_criticism=(form.get("public_criticism") or "").strip(),
+            verdict_summary=(form.get("verdict_summary") or "").strip(),
+            low_confidence=1 if form.get("low_confidence") == "1" else 0,
+        )
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools/communities", status_code=303)
+
+
+@app.post("/admin/tools/communities/generate-profile")
+async def admin_communities_generate_profile(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    name = (body.get("name") or "").strip()
+    url = (body.get("url") or "").strip()
+    existing = body.get("existing")
+    if not isinstance(existing, dict):
+        existing = None
+    if not (name and url):
+        return JSONResponse({"ok": False, "error": "Name and URL are required."}, status_code=400)
+
+    from linklib.enrich import generate_community_profile
+    draft = generate_community_profile(name, url, existing=existing)
+    if draft is None:
+        return JSONResponse({"ok": False, "error": "Profile generation is unavailable right now "
+                                                     "(missing ANTHROPIC_API_KEY, or the request failed). "
+                                                     "Write the profile by hand."}, status_code=503)
+
+    lib = _lib()
+    try:
+        lib.record_enrichment_cost(None, draft.model, draft.input_tokens, draft.output_tokens, draft.cost_usd)
+    finally:
+        lib.close()
+
+    return JSONResponse({
+        "ok": True,
+        "low_confidence": draft.low_confidence,
+        "ideal_member": draft.ideal_member,
+        "anti_fit": draft.anti_fit,
+        "value_prop": draft.value_prop,
+        "format_reality": draft.format_reality,
+        "engagement_level": draft.engagement_level,
+        "sponsor_relationship_note": draft.sponsor_relationship_note,
+        "application_friction": draft.application_friction,
+        "cost_value_verdict": draft.cost_value_verdict,
+        "notable_members": draft.notable_members,
+        "founded_year": draft.founded_year,
+        "public_criticism": draft.public_criticism,
+        "verdict_summary": draft.verdict_summary,
+    })
 
 
 @app.get("/admin/tools/new", response_class=HTMLResponse)
