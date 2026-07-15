@@ -4287,7 +4287,7 @@ visible at a glance, side by side.</p>
 
 
 @app.get("/contact", response_class=HTMLResponse)
-def contact_page(request: Request, submitted: str = ""):
+def contact_page(request: Request, submitted: str = "", message: str = ""):
     if submitted == "1":
         body = """<div class="page page-narrow">
 <h1>Thanks for reaching out.</h1>
@@ -4310,7 +4310,7 @@ def contact_page(request: Request, submitted: str = ""):
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Message</label>
-    <textarea name="message" required rows="5" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;" placeholder="What's on your mind?"></textarea>
+    <textarea name="message" required rows="5" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;" placeholder="What's on your mind?">{_esc(message)}</textarea>
   </div>
   <input type="text" name="website" tabindex="-1" autocomplete="off"
     style="position:absolute;left:-9999px;width:1px;height:1px;" aria-hidden="true">
@@ -5045,6 +5045,7 @@ def tools_communities(request: Request):
             "id": c["id"],
             "name": c["name"],
             "url": c["url"],
+            "slug": c["slug"],
             "reach": c.get("reach") or "National",
             "metros": c.get("metros") or [],
             "demographic": c["demographic"],
@@ -5250,9 +5251,7 @@ function renderCommunities(list) {{
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
       + featuredBadge + advisorStar
-      + (c.url
-          ? '<a class="comm-name" href="' + commEsc(c.url) + '" target="_blank" rel="noopener">' + commEsc(c.name) + '</a>'
-          : '<span class="comm-name">' + commEsc(c.name) + '</span>')
+      + '<a class="comm-name" href="/tools/communities/' + commEsc(c.slug) + '" target="_blank" rel="noopener">' + commEsc(c.name) + '</a>'
       + '</div>'
       + '<span class="comm-cost">' + commEsc(c.cost_band) + '</span>'
       + '</div>'
@@ -5340,6 +5339,154 @@ function goToCommPage(page) {{
 renderCommunities(ALL_COMMUNITIES);
 </script>"""
     return HTMLResponse(_page("Communities—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+
+
+def _community_geo_line(c: dict) -> str:
+    """Python mirror of the /tools/communities card's commGeoLine JS helper,
+    for server-rendering the same geography summary on the profile page."""
+    metros = c.get("metros") or []
+    reach = c.get("reach") or "National"
+    if reach == "Regional":
+        return ", ".join(metros) if metros else "Regional"
+    if not metros:
+        return "Global" if reach == "Global" else "National · online"
+    shown = metros[:3]
+    extra = len(metros) - len(shown)
+    line = f"{reach} · {', '.join(shown)}"
+    return line + (f" +{extra}" if extra > 0 else "")
+
+
+# The deep profile fields, in the order the public page presents them —
+# verdict up top as the scannable takeaway, then fit, then the practical
+# details. (label, key, is_multiline) — founded_year is handled separately
+# since it's numeric, not a text block.
+_COMMUNITY_PROFILE_PUBLIC_FIELDS = [
+    ("Ideal member", "ideal_member"),
+    ("Who should skip it", "anti_fit"),
+    ("Value proposition", "value_prop"),
+    ("Format, in practice", "format_reality"),
+    ("Engagement level", "engagement_level"),
+    ("Cost vs. value", "cost_value_verdict"),
+    ("Application friction", "application_friction"),
+    ("Sponsor relationship", "sponsor_relationship_note"),
+    ("Notable members", "notable_members"),
+    ("Public criticism", "public_criticism"),
+]
+
+
+# Stub for the Phase 5 gap-collection flow: for now it just routes the
+# visitor into /contact with the community pre-filled as context, so the
+# "Tell us why" CTA on each profile page is live rather than a dead link.
+# Phase 5 replaces the redirect target with the real gap-collection form
+# without changing this URL, so nothing upstream needs to change. Registered
+# before /tools/communities/{slug} below so "gap" isn't swallowed as a slug.
+@app.get("/tools/communities/gap")
+def tools_community_gap(request: Request, community_id: int = 0):
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id) if community_id else None
+    finally:
+        lib.close()
+    name = community["name"] if community else ""
+    message = f"Re: {name}: this community wasn't quite the right fit because " if name else ""
+    return RedirectResponse(f"/contact?message={quote(message)}", status_code=303)
+
+
+@app.get("/tools/communities/{slug}", response_class=HTMLResponse)
+def tools_community_profile(request: Request, slug: str):
+    lib = _lib()
+    try:
+        community = lib.get_community_by_slug(slug)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        profile = lib.get_community_profile(community["id"]) or {}
+    finally:
+        lib.close()
+
+    text_fields = [k for _, k in _COMMUNITY_PROFILE_PUBLIC_FIELDS] + ["verdict_summary"]
+    has_profile = any((profile.get(k) or "").strip() for k in text_fields) or profile.get("founded_year")
+
+    meta_parts = [_community_geo_line(community)]
+    if community.get("access"):
+        meta_parts.append(community["access"])
+    if community.get("sponsorship_type"):
+        sp = community["sponsorship_type"]
+        if community.get("sponsor_name"):
+            sp += f" ({community['sponsor_name']})"
+        meta_parts.append(sp)
+    meta_line = " &middot; ".join(_esc(p) for p in meta_parts)
+
+    cats = "".join(f'<span class="comm-cat">{_esc(x)}</span>' for x in community.get("categories") or [])
+    featured_badge = (
+        '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
+        'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>'
+        if community.get("featured") else ""
+    )
+    advisor_star = (
+        '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>'
+        if community.get("advisor") else ""
+    )
+    notes_line = ""
+    if community.get("notes") or community.get("cost_note"):
+        notes_line = (
+            f'<p style="color:var(--muted);margin:0 0 20px;line-height:1.6;">'
+            f'{_esc(" ".join(filter(None, [community.get("notes"), community.get("cost_note")])))}</p>'
+        )
+
+    verdict_block = ""
+    if has_profile and (profile.get("verdict_summary") or "").strip():
+        verdict_block = f"""<div style="background:var(--seafoam);border-radius:12px;padding:16px 20px;margin:0 0 24px;">
+  <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Bottom line</div>
+  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;">{_esc(profile['verdict_summary'])}</p>
+</div>"""
+
+    profile_sections = ""
+    if has_profile:
+        sections = "".join(
+            f"""<div style="margin-bottom:20px;">
+  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
+  <p style="margin:0;color:#3a352e;line-height:1.6;">{_esc(profile[key])}</p>
+</div>"""
+            for label, key in _COMMUNITY_PROFILE_PUBLIC_FIELDS
+            if (profile.get(key) or "").strip()
+        )
+        if profile.get("founded_year"):
+            sections += f"""<div style="margin-bottom:20px;">
+  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Founded</div>
+  <p style="margin:0;color:#3a352e;line-height:1.6;">{profile['founded_year']}</p>
+</div>"""
+        profile_sections = f"""<div style="margin-top:8px;padding-top:24px;border-top:1px solid var(--line);">
+{sections}</div>"""
+
+    body = f"""<div class="page">
+<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:2px;">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    {featured_badge}{advisor_star}
+    <h1 style="margin:0;">{_esc(community['name'])}</h1>
+  </div>
+  <span class="comm-cost">{_esc(community['cost_band'])}</span>
+</div>
+<p style="color:var(--muted);margin:8px 0 4px;">{meta_line}</p>
+{f'<p style="margin:4px 0 20px;"><a href="{_esc(community["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if community.get('url') else ''}
+<p style="font-size:15px;color:#3a352e;margin:0 0 16px;line-height:1.6;">{_esc(community['demographic'])}</p>
+{notes_line}
+<div class="comm-cats" style="margin-bottom:8px;">{cats}</div>
+{verdict_block}
+{profile_sections}
+
+<div style="margin-top:36px;padding-top:20px;border-top:1px solid var(--line);">
+  <a href="/tools/communities/gap?community_id={community['id']}" style="font-size:13px;color:var(--muted);">Not quite the right fit? Tell us why &rarr;</a>
+</div>
+</div>
+
+<style>
+.comm-star{{font-size:16px;color:#b8860b;}}
+.comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
+.comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
+.comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:4px 10px;white-space:nowrap;}}
+</style>"""
+    return HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request)))
 
 
 def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None = None) -> str:

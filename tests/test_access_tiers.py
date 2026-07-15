@@ -52,6 +52,10 @@ PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           # CFO Toolbox browsing and everything linked from the thought-leadership
           # page are fully public; only the account tools below stay gated.
           "/tools", "/tools/software", "/tools/benchmarks", "/tools/communities",
+          # /tools/communities/{slug} (the profile page) and
+          # /tools/communities/gap (redirects to /contact, not a 200) are
+          # both public but don't fit this static 200-only list — covered
+          # separately in tests/test_community_profiles.py.
           "/thought-leadership/growth-engine-ratio",
           "/thought-leadership/netsuite-mcp",
           "/thought-leadership/ai-hackathon-playbook",
