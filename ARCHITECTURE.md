@@ -187,6 +187,26 @@ at `/admin/community-gaps`, and unreviewed submissions feed the shared admin
 badge system (`webapp/tasks.py::open_task_counts`) the same way pending tool
 submissions and unread contacts do.
 
+**Community compare** (Phase 6). `GET /tools/communities/compare?ids=<id>,<id>,<id>`
+renders 2-3 selected communities side by side, reusing the same directory-card
+fields (region/access/sponsor/cost) and `_COMMUNITY_PROFILE_PUBLIC_FIELDS`
+profile fields as the single profile page. `ids` is a plain comma-separated
+query param — deduped and capped at 3 server-side, with unapproved/unknown
+ids silently dropped — and carries no session or server-side selection state,
+so a compare URL is copy/paste-able and bookmarkable on its own. The
+selection itself lives only in the directory page's JS (`compareSelected`, a
+capped array persisted across re-renders as the visitor filters/paginates);
+a sticky compare bar surfaces the count and the link once 1+ communities are
+checked, and disables further checkboxes with an inline message (not a
+browser alert) once the cap of 3 is reached. Rows in the comparison table are
+per-field: a row renders only if at least one selected community has content
+for that field, and any still-empty cell in a rendered row shows "Not
+available yet" rather than leaving a blank or erroring — the same
+degrade-gracefully contract as a thin/profile-less community on the single
+profile page, just applied per cell instead of to a whole page. Registered
+before `/tools/communities/{slug}` so "compare" isn't swallowed as a slug,
+same reasoning as `/gap` and `/submit`.
+
 ### Site operations
 
 | Table | Purpose | Columns that carry meaning |
