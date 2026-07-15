@@ -138,7 +138,7 @@ tables, no third-party dependency.
 - **Route protection:**
   - Public (no auth): `/`, `/thought-leadership`, `/thought-leadership/growth-engine-ratio`,
     `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp`, `/contact`,
-    `/login`, `/logout`, `/static/*`, `/health`. (The old flat `/growth-engine-ratio`,
+    `/privacy`, `/login`, `/logout`, `/static/*`, `/health`. (The old flat `/growth-engine-ratio`,
     `/finops-ai-hackathon`, `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
   - Private HTML pages → **redirect to `/login`** when signed out: `/library`,
     `/library/archive`, `/library/feed`, `/library/ask`, `/library/past-questions`,

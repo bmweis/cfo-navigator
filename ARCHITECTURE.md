@@ -519,7 +519,7 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     opened in a new tab from a directory card), `/tools/communities/gap` (the "not
     quite the right fit?" CTA on a profile page — currently a stub that redirects
     into `/contact` with the community pre-filled as context, pending the real
-    Phase 5 gap-collection flow), `/contact`, `/play`, `/login`,
+    Phase 5 gap-collection flow), `/contact`, `/privacy`, `/play`, `/login`,
     `/static/*`, `/health`. (The old flat `/growth-engine-ratio`, `/finops-ai-hackathon`,
     `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
   - *Member* (`_is_member` — any valid session): `/library`, `/library/archive`,
