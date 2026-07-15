@@ -5902,14 +5902,14 @@ def admin_tools(request: Request):
     pending_rows = "".join(_tool_row(t) for t in pending) or \
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
     approved_rows = "".join(_approved_row(t) for t in approved) or \
-        '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No approved tools yet.</td></tr>'
+        '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No approved software yet.</td></tr>'
     total_leads = sum(lead_counts.values())
 
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Tools</h1>
-  <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>
+  <h1>Software</h1>
+  <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add software</a>
 </div>
 <p style="margin:0 0 24px;">
   <a href="/tools/software" style="font-size:13px;color:var(--muted);">View public directory →</a>
@@ -5933,7 +5933,7 @@ def admin_tools(request: Request):
 </table>
 </div>
 
-<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved tools</h2>
+<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software</h2>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -5953,7 +5953,7 @@ def admin_tools(request: Request):
   (Full edit / Quick edit on <a href="/tools/software">/tools/software</a>), and this sync will never touch them.
 </p>
 </div>"""
-    return HTMLResponse(_page("Tools—CFO Toolbox Admin", "", body, authed=True))
+    return HTMLResponse(_page("Software—CFO Toolbox Admin", "", body, authed=True))
 
 
 @app.get("/admin/tools/leads", response_class=HTMLResponse)
@@ -6972,11 +6972,11 @@ def admin_tools_new(request: Request):
     finally:
         lib.close()
     body = f"""<div class="page page-narrow">
-<h1>Add a tool</h1>
+<h1>Add software</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
 <form method="post" action="/admin/tools/new" style="display:grid;gap:20px;">
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tool name *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
     <input id="tool-name" name="name" required maxlength="200"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
@@ -7043,7 +7043,7 @@ def admin_tools_new(request: Request):
 </form>
 </div>
 <script>{_GENERATE_DESC_JS}</script>"""
-    return HTMLResponse(_page("Add Tool—CFO Toolbox", "", body, authed=True))
+    return HTMLResponse(_page("Add Software—CFO Toolbox", "", body, authed=True))
 
 
 @app.post("/admin/tools/new")
@@ -7118,11 +7118,11 @@ def admin_tools_edit(request: Request, tool_id: int):
     meta_line = (" &middot; ".join(meta_parts)) if meta_parts else ""
 
     body = f"""<div class="page page-narrow">
-<h1>Edit tool</h1>
+<h1>Edit software</h1>
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form method="post" action="/admin/tools/{tool_id}/edit" style="display:grid;gap:20px;">
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tool name *</label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
     <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
@@ -9394,7 +9394,7 @@ _LIBRARY_TOOLS = [
 # CFO Toolbox items, used as one of the expandable groups below (same pattern
 # as the other groups — no separate hub page).
 _TOOLBOX_TOOLS = [
-    ("/admin/tools",            "Tools",                "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
+    ("/admin/tools",            "Software",             "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
     ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
     ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
