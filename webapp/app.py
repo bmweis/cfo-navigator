@@ -5529,7 +5529,7 @@ def tools_community_gap(request: Request, community_id: int = 0, q: str = "", re
 
     note = ""
     if zero and search_summary:
-        note = f"That search came up empty: you were {search_summary}."
+        note = f"That search came up empty. You were {search_summary}."
         if viewed_clause:
             note += f" You also {viewed_clause} before landing here."
         note += " Tell us what you were hoping to find instead, so we don&rsquo;t have to ask you to repeat it below."
@@ -5546,9 +5546,9 @@ def tools_community_gap(request: Request, community_id: int = 0, q: str = "", re
     body = f"""<div class="page">
 <p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <h1 style="margin:0;">Tell us where communities fall short</h1>
-<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Every field here is optional. The goal is simple:
-find out what's missing from the finance community landscape so this directory (and maybe a future community) can
-actually close the gap.</p>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Every field here is optional. We just want to know
+what's missing from the finance community landscape, so this directory (and maybe a future community) can actually
+close the gap.</p>
 {note_block}
 {intro}
 <form method="post" action="/tools/communities/gap" style="display:flex;flex-direction:column;gap:16px;max-width:520px;">
