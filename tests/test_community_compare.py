@@ -39,7 +39,8 @@ def test_compare_renders_two_communities_side_by_side(env):
     c2 = lib.add_community("Community Two", "https://example.com", "", "Finance leaders",
                             "<$1k/yr", [], access="Open", approved=1)
     lib.upsert_community_profile(c1, ideal_member="Solo CFOs at Series A/B",
-                                  verdict_summary="Great for scrappy operators.")
+                                  verdict_summary="Great for scrappy operators.",
+                                  business_model="Free-to-join funnel monetized via paid tiers.")
     lib.close()
 
     c = _client(env)
@@ -48,6 +49,8 @@ def test_compare_renders_two_communities_side_by_side(env):
     assert "Community One" in r.text
     assert "Community Two" in r.text
     assert "Solo CFOs at Series A/B" in r.text
+    assert "Free-to-join funnel monetized via paid tiers." in r.text
+    assert "Business model" in r.text
     assert "Not available yet" in r.text  # Community Two has no profile
 
 

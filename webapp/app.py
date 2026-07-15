@@ -5547,6 +5547,7 @@ _COMMUNITY_PROFILE_PUBLIC_FIELDS = [
     ("Cost vs. value", "cost_value_verdict"),
     ("Application friction", "application_friction"),
     ("Sponsor relationship", "sponsor_relationship_note"),
+    ("Business model", "business_model"),
     ("Notable members", "notable_members"),
     ("Public criticism", "public_criticism"),
 ]
@@ -6054,13 +6055,13 @@ async function generateDescription(name, url, descId, statusId) {
 }
 """
 
-# The Community Profile draft has 12 fields rather than one description
+# The Community Profile draft has 13 fields rather than one description
 # string, so it can't reuse generateDescription's single-field contract above
 # — same fetch/status pattern, but fills every "cp-<field>" input by id and
 # feeds back whatever's already on the form as context for a regenerate.
 _COMMUNITY_PROFILE_FIELD_IDS = [
     "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
-    "sponsor_relationship_note", "application_friction", "cost_value_verdict",
+    "sponsor_relationship_note", "business_model", "application_friction", "cost_value_verdict",
     "notable_members", "founded_year", "public_criticism", "verdict_summary",
 ]
 _GENERATE_PROFILE_JS = """
@@ -7041,6 +7042,7 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
 {_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual')}
 {_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards')}
 {_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.")}
+{_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.")}
 {_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label')}
 {_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting')}
 {_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.')}
@@ -7499,6 +7501,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             format_reality=(form.get("format_reality") or "").strip(),
             engagement_level=(form.get("engagement_level") or "").strip(),
             sponsor_relationship_note=(form.get("sponsor_relationship_note") or "").strip(),
+            business_model=(form.get("business_model") or "").strip(),
             application_friction=(form.get("application_friction") or "").strip(),
             cost_value_verdict=(form.get("cost_value_verdict") or "").strip(),
             notable_members=(form.get("notable_members") or "").strip(),
@@ -7550,6 +7553,7 @@ async def admin_communities_generate_profile(request: Request):
         "format_reality": draft.format_reality,
         "engagement_level": draft.engagement_level,
         "sponsor_relationship_note": draft.sponsor_relationship_note,
+        "business_model": draft.business_model,
         "application_friction": draft.application_friction,
         "cost_value_verdict": draft.cost_value_verdict,
         "notable_members": draft.notable_members,

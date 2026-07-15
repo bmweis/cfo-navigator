@@ -218,13 +218,13 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         return None
 
 
-# The twelve fields generate_community_profile drafts (excludes low_confidence,
+# The thirteen fields generate_community_profile drafts (excludes low_confidence,
 # which is computed from the fetch, and updated_at, which is set on save) —
 # shared with webapp/app.py so the "existing draft as context" block and the
 # JSON response stay in lockstep with what the form actually submits.
 COMMUNITY_PROFILE_FIELDS = [
     "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
-    "sponsor_relationship_note", "application_friction", "cost_value_verdict",
+    "sponsor_relationship_note", "business_model", "application_friction", "cost_value_verdict",
     "notable_members", "founded_year", "public_criticism", "verdict_summary",
 ]
 
@@ -259,6 +259,12 @@ Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
   "sponsor_relationship_note": whether sponsor presence (if any) reads as
      value-add or a sales funnel for members — a qualitative read, distinct from
      the factual sponsor name/sponsorship type recorded elsewhere.
+  "business_model": how the community structurally sustains itself, e.g. a
+     gated, dues-funded peer group insulated from a sales pitch by design, vs.
+     a wide-funnel free-to-join community monetized via paid tiers, events, or
+     sponsorships. Distinct from sponsor_relationship_note above, which judges
+     whether a sponsor's presence feels value-add or salesy, not how the
+     community itself makes money.
   "application_friction": the real barrier to entry, not just the access-model
      label (e.g. "invite-only in name, but any VP with a LinkedIn intro gets in").
   "cost_value_verdict": whether the price is justified by what members report
@@ -283,6 +289,7 @@ class CommunityProfileDraft:
     format_reality: str = ""
     engagement_level: str = ""
     sponsor_relationship_note: str = ""
+    business_model: str = ""
     application_friction: str = ""
     cost_value_verdict: str = ""
     notable_members: str = ""
@@ -298,7 +305,7 @@ class CommunityProfileDraft:
 
 def generate_community_profile(name: str, url: str, existing: dict | None = None,
                                model: str = DEFAULT_MODEL) -> CommunityProfileDraft | None:
-    """Draft all twelve qualitative Community Profile fields from a community's
+    """Draft all thirteen qualitative Community Profile fields from a community's
     name + URL in one Claude call, mirroring generate_tool_description exactly
     (same page-fetch grounding, same low_confidence rule) but sized for the
     larger field count. `existing`, when given, feeds back any already-drafted
@@ -365,6 +372,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             format_reality=str(data.get("format_reality", "")).strip(),
             engagement_level=str(data.get("engagement_level", "")).strip(),
             sponsor_relationship_note=str(data.get("sponsor_relationship_note", "")).strip(),
+            business_model=str(data.get("business_model", "")).strip(),
             application_friction=str(data.get("application_friction", "")).strip(),
             cost_value_verdict=str(data.get("cost_value_verdict", "")).strip(),
             notable_members=str(data.get("notable_members") or "").strip(),

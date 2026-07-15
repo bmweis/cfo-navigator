@@ -41,7 +41,7 @@ def test_profile_page_renders_full_profile(env):
     lib.upsert_community_profile(
         cid, ideal_member="Solo CFOs at Series A/B", anti_fit="Enterprise CFOs",
         verdict_summary="Best for scrappy operators, not late-stage teams.",
-        founded_year=2019,
+        founded_year=2019, business_model="Gated subscription, insulated by design.",
     )
     community = lib.get_community(cid)
     lib.close()
@@ -56,6 +56,8 @@ def test_profile_page_renders_full_profile(env):
     assert "2019" in r.text
     assert "Tell us why" in r.text
     assert f"/tools/communities/gap?community_id={cid}" in r.text
+    assert "Gated subscription, insulated by design." in r.text
+    assert "Business model" in r.text
 
 
 def test_profile_page_falls_back_to_minimal_when_no_profile(env):
