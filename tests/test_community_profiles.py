@@ -196,6 +196,44 @@ def _slug_for(env, community_id):
     return c["slug"]
 
 
+def test_gap_form_closest_match_and_transparency_note_render_together(env):
+    """closest_community_id (the per-profile 'Re: X' line) and the session
+    transparency note are independent — neither suppresses the other when
+    both a closest match and search/viewed context are present in the same
+    session."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    closest_id = lib.add_community(
+        "Closest Match Community", "https://example.com", "", "Finance leaders",
+        "Free", [], approved=1,
+    )
+    other_id = lib.add_community(
+        "Other Viewed Community", "https://example.com", "", "Finance leaders",
+        "Free", [], approved=1,
+    )
+    lib.close()
+
+    c = _client(env)
+    # Visit a different community's profile first, so it's tracked as
+    # "viewed" independently of the eventual closest-match pick.
+    profile_resp = c.get(f"/tools/communities/{_slug_for(env, other_id)}")
+    cookie = profile_resp.cookies.get("cfo_visitor")
+    c.cookies.set("cfo_visitor", cookie)
+
+    r = c.get(f"/tools/communities/gap?community_id={closest_id}&q=tax&region=Boston")
+    assert r.status_code == 200
+
+    # The per-profile "Re: X" line renders.
+    assert "Re: <strong>Closest Match Community</strong>" in r.text
+    assert "wasn&rsquo;t quite the right fit" in r.text
+
+    # The session transparency note renders too, unsuppressed, mentioning
+    # both the search context and the other viewed profile.
+    assert "We noticed" in r.text
+    assert "Boston" in r.text
+    assert "Other Viewed Community" in r.text
+
+
 def test_gap_form_submission_persists_and_records_server_side_viewed_ids(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
