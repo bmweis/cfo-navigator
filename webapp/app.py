@@ -4428,7 +4428,7 @@ def privacy_page(request: Request):
 <p>Everything described above is kept indefinitely unless you ask me to remove it. There's no automatic deletion schedule. If you want something taken down, see below.</p>
 
 <h2>Questions or requests</h2>
-<p>If you want something you submitted removed, or have questions about any of this, <a href="/contact">reach out through the contact form</a> and I'll take care of it directly.</p>
+<p>If you want something you submitted removed, or have questions about any of this, reach out at <a href="mailto:brian@bmweis.com">brian@bmweis.com</a> and I'll take care of it directly.</p>
 
 <hr style="border:none;border-top:1px solid var(--line);margin:32px 0;">
 <p style="font-size:13px;color:var(--muted);font-style:italic;">This is a plain-language description of what the site actually does, written by the person who built it&mdash;not a substitute for legal advice.</p>
