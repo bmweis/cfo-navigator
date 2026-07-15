@@ -1786,6 +1786,15 @@ class Library:
         row = self.conn.execute("SELECT * FROM communities WHERE id=?", (community_id,)).fetchone()
         return self._community_to_dict(row) if row else None
 
+    def get_community_by_slug(self, slug: str) -> dict | None:
+        """Used by the public profile page (/tools/communities/<slug>). Only
+        returns approved rows — an unapproved/pending community has no live
+        directory listing, so its profile shouldn't be reachable either."""
+        row = self.conn.execute(
+            "SELECT * FROM communities WHERE slug=? AND approved=1", (slug,)
+        ).fetchone()
+        return self._community_to_dict(row) if row else None
+
     def update_community(self, community_id: int, name: str, url: str, region: str,
                          demographic: str, cost_band: str, categories: list[str],
                          cost_note: str = "", sponsorship_type: str = "Independent",
