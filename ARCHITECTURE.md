@@ -150,6 +150,26 @@ same never-auto-saved review contract — the draft lands in the
 `/admin/tools/communities/{id}/profile` form fields for the admin to check
 before saving. Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
+**Community submissions.** `GET/POST /tools/communities/submit` mirrors the
+tool-submission flow (`/tools/submit`) exactly, deliberately trimmed to just
+name + URL (no description/categories, since a pending community is thin
+until Brian writes or generates its profile). It's member-gated like the
+tool form (`_is_member`). The submission lands via `add_community(...,
+submitted_by=..., approved=0)`, fires the internal notification email plus a
+`COMMUNITY_SUBMISSION_*`-templated confirmation to the submitter (both
+admin-editable at `/admin/emails`, same `_send_email_safely` best-effort
+pattern as tool submissions), and waits at `/admin/tools/communities` in a
+"Pending submissions" table above the "Approved communities" list — the same
+two-section layout as `/admin/tools`. `POST
+/admin/tools/communities/{id}/approve` calls `approve_community` and redirects
+straight to `/admin/tools/communities/{id}/profile` (rather than back to the
+list) so the "Generate profile draft" button is immediately in front of
+Brian for a community that would otherwise sit thin in the directory;
+`POST .../reject` deletes the row, mirroring `approve_tool`/reject for
+tools. Pending-count badging (`lib.count_pending_communities()`) feeds
+`webapp/tasks.py::open_task_counts` at `/admin/tools/communities`, the same
+mechanism as pending tool submissions.
+
 **Community gap-collection** (Phase 5) is reachable three ways: the CTA card
 at the bottom of `/tools/communities`, the same CTA auto-surfaced (with a
 `zero=1` query param) when a search/filter combination returns no results,

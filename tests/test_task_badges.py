@@ -30,6 +30,15 @@ def test_count_pending_tools(lib):
     assert lib.count_pending_tools() == 1
 
 
+def test_count_pending_communities(lib):
+    assert lib.count_pending_communities() == 0
+    lib.add_community(name="A", url="https://a.example", region="", demographic="CFOs",
+                       cost_band="Free", categories=[], approved=0)
+    lib.add_community(name="B", url="https://b.example", region="", demographic="CFOs",
+                       cost_band="Free", categories=[], approved=1)
+    assert lib.count_pending_communities() == 1
+
+
 def test_count_contacts_since(lib):
     assert lib.count_contacts_since("") == 0
     lib.save_contact("Jane", "jane@x.com", "hi")
@@ -83,6 +92,7 @@ def test_open_task_counts_empty_by_default(lib):
     # only on the signals this test actually manipulates, not the whole dict.
     assert "/admin/queue" not in counts
     assert "/admin/tools" not in counts
+    assert "/admin/tools/communities" not in counts
     assert "/admin/contacts" not in counts
     assert tasks.has_open_tasks(lib) is (len(counts) > 0)
 
@@ -92,6 +102,15 @@ def test_open_task_counts_reflects_pending_tool(lib):
     lib.add_tool("A", "desc", "https://a.example", [], approved=0)
     counts = tasks.open_task_counts(lib)
     assert counts["/admin/tools"] == 1
+    assert tasks.has_open_tasks(lib) is True
+
+
+def test_open_task_counts_reflects_pending_community(lib):
+    from webapp import tasks
+    lib.add_community(name="A", url="https://a.example", region="", demographic="CFOs",
+                       cost_band="Free", categories=[], approved=0)
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/tools/communities"] == 1
     assert tasks.has_open_tasks(lib) is True
 
 
@@ -270,3 +289,47 @@ def test_pending_tool_badge_only_clears_on_approval_not_view(admin_client):
 
     r2 = client.get("/admin")
     assert '<span class="task-badge">1</span>' in r2.text   # still open — viewing isn't the action
+
+
+def test_pending_community_badge_clears_on_approval(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    community_id = lib.add_community(name="A", url="https://a.example", region="",
+                                      demographic="CFOs", cost_band="Free", categories=[], approved=0)
+    lib.close()
+
+    r1 = client.get("/admin")
+    assert '<span class="task-badge">1</span>' in r1.text
+
+    client.get("/admin/tools/communities")   # merely viewing doesn't clear it
+    r2 = client.get("/admin")
+    assert '<span class="task-badge">1</span>' in r2.text
+
+    # Approving redirects straight to the profile editor so "Generate profile
+    # draft" is immediately in front of Brian, rather than back to the list.
+    r3 = client.post(f"/admin/tools/communities/{community_id}/approve", follow_redirects=False)
+    assert r3.status_code == 303
+    assert r3.headers["location"] == f"/admin/tools/communities/{community_id}/profile"
+
+    r4 = client.get("/admin")
+    assert '<span class="task-badge">1</span>' not in r4.text
+
+
+def test_reject_community_deletes_pending_submission(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    community_id = lib.add_community(name="A", url="https://a.example", region="",
+                                      demographic="CFOs", cost_band="Free", categories=[], approved=0)
+    lib.close()
+
+    r = client.post(f"/admin/tools/communities/{community_id}/reject", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/tools/communities"
+
+    lib = Library(db)
+    try:
+        assert lib.get_community(community_id) is None
+    finally:
+        lib.close()

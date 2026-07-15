@@ -130,6 +130,19 @@ Thanks for submitting {tool_name} to the CFO Toolbox, confirmed from {submitted_
 I'll take a look and follow up once it's reviewed. Reply directly to this email if you have questions or need to change anything above."""
 TOOL_SUBMISSION_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg"
 
+COMMUNITY_SUBMISSION_PLACEHOLDERS = ["community_name", "community_url", "submitted_by"]
+COMMUNITY_SUBMISSION_SUBJECT_DEFAULT = "Got your submission: {community_name}"
+COMMUNITY_SUBMISSION_BODY_DEFAULT = """\
+Hi there,
+
+Thanks for submitting {community_name} to the CFO Toolbox Communities directory, confirmed from {submitted_by}.
+
+{community_name}
+{community_url}
+
+I'll take a look and follow up once it's reviewed. Reply directly to this email if you have questions or need to change anything above."""
+COMMUNITY_SUBMISSION_SIGNOFF_DEFAULT = "My best,\nBrian Weisberg"
+
 CONTACT_CONFIRMATION_PLACEHOLDERS = ["name", "email", "message"]
 CONTACT_CONFIRMATION_SUBJECT_DEFAULT = "Got your message"
 CONTACT_CONFIRMATION_BODY_DEFAULT = """\
@@ -379,6 +392,36 @@ def send_tool_submission_confirmation_email(
     signoff = TOOL_SUBMISSION_SIGNOFF_DEFAULT if signoff is None else signoff
 
     placeholders = dict(tool_name=tool_name, tool_url=tool_url, description=description, submitted_by=to)
+    msg = _build_templated_message(subject_template, body_template, signoff, placeholders, to=to)
+    _send(msg)
+    return True
+
+
+def send_community_submission_confirmation_email(
+    to: str,
+    community_name: str,
+    community_url: str,
+    subject_template: str | None = None,
+    body_template: str | None = None,
+    signoff: str | None = None,
+) -> bool:
+    """Confirm a member's Communities directory submission back to them.
+    Returns True if sent, False if Google OAuth is not configured (graceful
+    no-op) — the submission is still recorded either way. Raises on API
+    errors.
+
+    subject_template/body_template/signoff default to the
+    COMMUNITY_SUBMISSION_* module constants. Body/subject templates may use
+    any of COMMUNITY_SUBMISSION_PLACEHOLDERS.
+    """
+    if not is_configured():
+        return False
+
+    subject_template = subject_template or COMMUNITY_SUBMISSION_SUBJECT_DEFAULT
+    body_template = body_template or COMMUNITY_SUBMISSION_BODY_DEFAULT
+    signoff = COMMUNITY_SUBMISSION_SIGNOFF_DEFAULT if signoff is None else signoff
+
+    placeholders = dict(community_name=community_name, community_url=community_url, submitted_by=to)
     msg = _build_templated_message(subject_template, body_template, signoff, placeholders, to=to)
     _send(msg)
     return True

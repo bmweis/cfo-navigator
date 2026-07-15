@@ -5059,6 +5059,7 @@ def _set_visitor_cookie(request: Request, resp, session_id: str) -> None:
 
 @app.get("/tools/communities", response_class=HTMLResponse)
 def tools_communities(request: Request):
+    is_member = _is_member(request)  # submit is account-only
     lib = _lib()
     try:
         communities = lib.list_communities(approved_only=True)
@@ -5113,7 +5114,8 @@ def tools_communities(request: Request):
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
-groups, associations, and Slack channels.</p>
+groups, associations, and Slack channels.
+{'<a href="/tools/communities/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Suggest a community</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to suggest a community</a>'}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"
@@ -5162,7 +5164,9 @@ groups, associations, and Slack channels.</p>
 </div>
 
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
-  <p style="font-size:13px;color:var(--muted);">&#9733; Formal advisor to these communities.</p>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these communities.</p>
+  <p style="font-size:15px;color:var(--muted);">Know a community that belongs here?
+    {'<a href="/tools/communities/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to suggest a community →</a>'}</p>
 </div>
 </div>
 
@@ -5595,6 +5599,87 @@ async def tools_community_gap_submit(request: Request):
     finally:
         lib.close()
     return RedirectResponse("/tools/communities/gap?submitted=1", status_code=303)
+
+
+# Registered before /tools/communities/{slug} below so "submit" isn't
+# swallowed as a slug (same reasoning as /tools/communities/gap above).
+@app.get("/tools/communities/submit", response_class=HTMLResponse)
+def tools_communities_submit_page(request: Request, submitted: str = ""):
+    if not _is_member(request):
+        return _login_redirect(request)
+    if submitted == "1":
+        body = """<div class="page page-narrow">
+<h1>Thanks, submission received.</h1>
+<p>Your community has been submitted for review. If approved, it'll appear in the Communities directory shortly.</p>
+<a href="/tools/communities" class="btn btn-ghost" style="margin-top:8px;">Back to Communities</a>
+</div>"""
+        return HTMLResponse(_page("Submission received: CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+    body = """<div class="page page-narrow">
+<h1>Suggest a Community</h1>
+<p style="color:var(--muted);margin:4px 0 32px;">Know a CFO or finance community that belongs in the directory? Submit it for review.</p>
+<form method="post" action="/tools/communities/submit" style="display:grid;gap:20px;">
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Community name *</label>
+    <input name="name" required maxlength="200"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="e.g. CFO Slack Collective">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
+    <input name="url" type="url" required maxlength="500"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Your email *</label>
+    <input name="submitted_by" type="email" required maxlength="200"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="you@example.com">
+  </div>
+  <div>
+    <button type="submit" class="btn">Submit for review</button>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Suggest a Community: CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.post("/tools/communities/submit")
+async def tools_communities_submit(request: Request):
+    if not _is_member(request):
+        return _login_redirect(request)
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    url = (form.get("url") or "").strip()
+    submitted_by = (form.get("submitted_by") or "").strip()
+    if not (name and url and submitted_by):
+        raise HTTPException(status_code=400, detail="Name, URL, and email are required.")
+    from linklib.email_utils import send_notification_email, send_community_submission_confirmation_email, default_notify_email
+    lib = _lib()
+    try:
+        lib.add_community(name=name, url=url, region="", demographic="", cost_band="Undisclosed dues",
+                           categories=[], submitted_by=submitted_by, approved=0)
+        notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
+        if notify_to:
+            _send_email_safely(
+                lib, "community_submission", send_notification_email,
+                notify_to,
+                subject=f"Community submission: {name}",
+                body=(f"Submitted by: {submitted_by}\n\n{name}\n{url}\n\n"
+                      f"Review at /admin/tools/communities."),
+                notification_type="community_submission",
+            )
+        _send_email_safely(
+            lib, "community_submission_confirmation", send_community_submission_confirmation_email,
+            to=submitted_by, community_name=name, community_url=url,
+            subject_template=lib.get_setting("community_submission_subject_template") or None,
+            body_template=lib.get_setting("community_submission_body_template") or None,
+            signoff=lib.get_setting("community_submission_signoff") or None,
+        )
+    finally:
+        lib.close()
+    return RedirectResponse("/tools/communities/submit?submitted=1", status_code=303)
 
 
 @app.get("/tools/communities/{slug}", response_class=HTMLResponse)
@@ -6748,11 +6833,34 @@ def admin_communities(request: Request):
         return _login_redirect(request)
     lib = _lib()
     try:
-        communities = lib.list_communities(approved_only=False)
+        all_communities = lib.list_communities(approved_only=False)
     finally:
         lib.close()
 
-    def _row(c: dict) -> str:
+    pending = [c for c in all_communities if not c["approved"]]
+    approved = [c for c in all_communities if c["approved"]]
+
+    def _pending_row(c: dict) -> str:
+        cats = ", ".join(c["categories"]) or "—"
+        return f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(c['created_at'][:10])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(c['name'])}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(c['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(c['url'][:60])}{'…' if len(c['url']) > 60 else ''}</a></td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px;">{_esc(c['notes'] or '—')}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(c['submitted_by'] or '—')}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
+            <form method="post" action="/admin/tools/communities/{c['id']}/approve" style="display:inline;">
+              <button class="btn" style="padding:6px 14px;font-size:13px;">Approve</button>
+            </form>
+            <form method="post" action="/admin/tools/communities/{c['id']}/reject" style="display:inline;margin-left:6px;"
+                  onsubmit="return confirm('Reject and delete this submission?');">
+              <button class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Reject</button>
+            </form>
+          </td>
+        </tr>"""
+
+    def _approved_row(c: dict) -> str:
         cats = ", ".join(c["categories"]) or "—"
         featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if c.get("featured") else ""
         return f"""<tr style="border-top:1px solid var(--line);">
@@ -6771,7 +6879,9 @@ def admin_communities(request: Request):
   </td>
 </tr>"""
 
-    rows = "".join(_row(c) for c in communities) or \
+    pending_rows = "".join(_pending_row(c) for c in pending) or \
+        '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
+    approved_rows = "".join(_approved_row(c) for c in approved) or \
         '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>'
 
     body = f"""<div class="page page-wide">
@@ -6785,6 +6895,24 @@ def admin_communities(request: Request):
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/communities/categories" style="font-size:13px;color:var(--muted);">Manage categories →</a>
 </p>
+
+<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
+<div style="overflow-x:auto;margin-bottom:40px;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Description</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Submitted by</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody>{pending_rows}</tbody>
+</table>
+</div>
+
+<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved communities</h2>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -6795,7 +6923,7 @@ def admin_communities(request: Request):
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
-<tbody>{rows}</tbody>
+<tbody>{approved_rows}</tbody>
 </table>
 </div>
 
@@ -7055,6 +7183,33 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
 
 @app.post("/admin/tools/communities/{community_id}/delete")
 def admin_communities_delete(request: Request, community_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_community(community_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools/communities", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/approve")
+def admin_communities_approve(request: Request, community_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.approve_community(community_id)
+    finally:
+        lib.close()
+    # Straight to the profile editor rather than back to the list—so
+    # "Generate profile draft" is right there for a newly-approved community
+    # instead of it sitting thin in the directory.
+    return RedirectResponse(f"/admin/tools/communities/{community_id}/profile", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/reject")
+def admin_communities_reject(request: Request, community_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
@@ -13646,6 +13801,16 @@ def _email_template_registry() -> list[dict]:
             "signoff_default": eu.TOOL_SUBMISSION_SIGNOFF_DEFAULT,
         },
         {
+            "id": "community-submission", "prefix": "community_submission", "title": "Community submission confirmation",
+            "recipient": "Submitter",
+            "trigger": "A member submits a community on /tools/communities/submit",
+            "blurb": "Confirms what was submitted back to the member, and invites a reply if they have questions or need to change anything.",
+            "placeholders": eu.COMMUNITY_SUBMISSION_PLACEHOLDERS,
+            "subject_default": eu.COMMUNITY_SUBMISSION_SUBJECT_DEFAULT,
+            "body_default": eu.COMMUNITY_SUBMISSION_BODY_DEFAULT,
+            "signoff_default": eu.COMMUNITY_SUBMISSION_SIGNOFF_DEFAULT,
+        },
+        {
             "id": "contact-confirmation", "prefix": "contact_confirmation", "title": "Contact form confirmation",
             "recipient": "Message sender",
             "trigger": "Someone submits /contact",
@@ -13667,6 +13832,8 @@ def _email_template_registry() -> list[dict]:
 _INTERNAL_EMAIL_ROWS = [
     {"title": "Tool submission notice", "recipient": "You", "trigger": "A member submits a tool on /tools/submit",
      "notification_type": "tool_submission"},
+    {"title": "Community submission notice", "recipient": "You", "trigger": "A member submits a community on /tools/communities/submit",
+     "notification_type": "community_submission"},
     {"title": "Contact form notice", "recipient": "You", "trigger": "Someone submits /contact",
      "notification_type": "contact"},
     {"title": "Password reset notice", "recipient": "You",
