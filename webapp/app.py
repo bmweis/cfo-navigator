@@ -4473,60 +4473,6 @@ async def library_submit(request: Request):
     # Always confirm — never reveal whether the URL was already in the archive.
     return RedirectResponse("/library/submit?submitted=1", status_code=303)
 
-# ---------------------------------------------------------------------------
-# Community
-# ---------------------------------------------------------------------------
-
-# The community sign-up Google Form lives in Brian's Workspace. Response
-# notifications are configured inside the Form itself (Responses tab > get
-# email notifications), not through this app.
-_COMMUNITY_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfEyvK77VKnICPzrqLBRfsm0WvnEYmB7ZWFVCj7qffVNX5m8Q/viewform"
-_COMMUNITY_FORM_CONFIGURED = _COMMUNITY_FORM_URL != "#community-form-coming-soon"
-
-
-@app.get("/community", response_class=HTMLResponse)
-def community_page(request: Request):
-    # Parked: kept reachable for admin (so the idea/copy isn't lost) but off the
-    # public site — the signed-out site is a clean bio while job-hunting.
-    if not _is_authed(request):
-        return _login_redirect(request)
-    cta_block = (
-        f'<a href="{_COMMUNITY_FORM_URL}" target="_blank" rel="noopener" class="btn" '
-        f'style="font-size:15px;padding:12px 26px;">Share your experience &rarr;</a>'
-        if _COMMUNITY_FORM_CONFIGURED else
-        '<div style="background:var(--coral-wash);border:1px solid #F3D3C6;border-radius:12px;'
-        'padding:16px 20px;margin-top:8px;">'
-        '<p style="margin:0;font-size:14px;color:var(--navy);font-weight:500;">'
-        '&#9888; Google Form not yet configured. Create the form in Google Workspace '
-        'and update <code>_COMMUNITY_FORM_URL</code> in <code>webapp/app.py</code>.</p></div>'
-    )
-    body = f"""<div class="page">
-<div style="font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;">CFO Community</div>
-<h1 style="margin:0 0 28px;">Building something better<br>for CFO peers.</h1>
-
-<p>I&rsquo;ve spent years inside finance communities&mdash;as a founding member and eventually as GM of
-<a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a>, the invite-only network
-for CFOs of high-growth tech companies. I&rsquo;ve seen what makes these communities genuinely valuable,
-and I&rsquo;ve seen where even the best ones fall short.</p>
-
-<p>I&rsquo;m working on something new in this space. Before I build anything, I want to hear from
-peers who&rsquo;ve been in these communities: what they got right, what they missed, and what a
-version that actually works would look like for the finance leaders who need it most.</p>
-
-<p>If you have a few minutes, I&rsquo;d love your input. The form takes about two minutes and
-your answers will directly shape what I build.</p>
-
-<div style="margin-top:32px;">
-{cta_block}
-</div>
-
-<div style="margin-top:48px;padding-top:32px;border-top:1px solid var(--line);">
-  <p style="font-size:13px;color:var(--muted);margin:0;">Questions? <a href="/contact">Get in touch directly.</a></p>
-</div>
-</div>"""
-    return HTMLResponse(_page("CFO Community—Brian Weisberg", "", body, role=_role(request)))
-
-
 @app.get("/tools", response_class=HTMLResponse)
 def tools_landing(request: Request):
     """CFO Toolbox landing page: three pillars, each its own subpage."""
@@ -9121,7 +9067,6 @@ _ADMIN_GROUPS = [
         ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
         ("/admin/ask-feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
         ("/admin/game-settings", "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
-        ("/community",           "CFO community",       "Your community idea page—parked off the public site; sign-ups flow through the Google Form."),
     ]),
     ("Brand & voice", "How the site looks and sounds.", [
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
