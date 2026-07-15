@@ -816,7 +816,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 <div class="rule"></div>
 <footer class="site-footer">
   <span class="brand">{star}<b>Brian Weisberg</b> &middot; Strategic finance for companies that are scaling</span>
-  <span class="links"><a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener">LinkedIn</a><a href="/contact">Contact</a><span>&copy; 2026</span></span>
+  <span class="links"><a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener">LinkedIn</a><a href="/contact">Contact</a><a href="/privacy">Privacy</a><span>&copy; 2026</span></span>
   <span style="flex-basis:100%;text-align:center;font-size:12px;color:var(--muted);">{oss_love}</span>
 </footer>
 </body></html>"""
@@ -4389,6 +4389,51 @@ async def contact_submit(request: Request):
     finally:
         lib.close()
     return RedirectResponse("/contact?submitted=1", status_code=303)
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy_page(request: Request):
+    body = """<div class="page">
+<h1>Privacy notice</h1>
+<p style="color:var(--muted);margin-top:-8px;"><em>Last updated: July 15, 2026</em></p>
+
+<p>This site (bmweis.com) is a personal project. It doesn't run ads, doesn't sell data, and doesn't share what it collects with anyone outside what's described below.</p>
+
+<h2>What this covers</h2>
+<p>This notice applies to bmweis.com and its subpages, including the CFO Toolbox, the Communities directory, and the contact form.</p>
+
+<h2>Anonymous browsing</h2>
+<p>You can browse the Communities directory and submit the "tell us where communities fall short" form without an account. To do that, the site sets one cookie:</p>
+<ul style="margin:0 0 16px;padding-left:22px;color:var(--ink-soft);">
+<li><strong>What it is:</strong> a random, unique code, not tied to your name, email, IP address, or browser fingerprint.</li>
+<li><strong>What it's for:</strong> remembering which community profile pages you've looked at and what you searched or filtered for, so that if you fill out the feedback form, it can show you what it picked up rather than asking you to repeat yourself.</li>
+<li><strong>How long it lasts:</strong> 30 days.</li>
+<li><strong>What's stored against it:</strong> the community profiles you viewed and when, plus, if you submit the feedback form, whatever you typed and the search/filter context described above.</li>
+</ul>
+<p>Nothing else is collected through this cookie. No IP address, browser, or device information is logged or stored against it.</p>
+
+<h2>If you leave an email address</h2>
+<p>The feedback form and the contact form both let you leave an email address, but it's optional. If you do, it's used only to follow up with you directly if there's something worth responding to. It isn't added to a mailing list or shared anywhere.</p>
+
+<h2>If you create an account</h2>
+<p>Some parts of the site (the research library, FP&amp;A Buddy) require a member account. Account passwords are stored using one-way hashing, never in plain text. Logging in sets a separate cookie that identifies your session; it doesn't track browsing elsewhere on the internet.</p>
+
+<h2>Contact form</h2>
+<p>Messages sent through the contact form are stored so I can respond to them, and are not used for anything else.</p>
+
+<h2>Infrastructure</h2>
+<p>This site runs on Railway for hosting and Cloudflare for content delivery, which process standard web traffic as part of running the service, the same as any site online. There's no Google Analytics or other third-party analytics or advertising tracking on this site.</p>
+
+<h2>How long data is kept</h2>
+<p>Everything described above is kept indefinitely unless you ask me to remove it. There's no automatic deletion schedule. If you want something taken down, see below.</p>
+
+<h2>Questions or requests</h2>
+<p>If you want something you submitted removed, or have questions about any of this, reach out at <a href="mailto:brian@bmweis.com">brian@bmweis.com</a> and I'll take care of it directly.</p>
+
+<hr style="border:none;border-top:1px solid var(--line);margin:32px 0;">
+<p style="font-size:13px;color:var(--muted);font-style:italic;">This is a plain-language description of what the site actually does, written by the person who built it&mdash;not a substitute for legal advice.</p>
+</div>"""
+    return HTMLResponse(_page("Privacy—Brian Weisberg", "", body, role=_role(request)))
 
 
 # ---------------------------------------------------------------------------
