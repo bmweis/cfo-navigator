@@ -124,6 +124,8 @@ Cost figures are computed from **real API token usage** at call time
 | `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content`, plus `advisor` (a direct `UPDATE`, mirroring `tools.advisor` exactly — see below) — the identical name+description+advisor contract as `tools`. Every other field (`region`, `reach`, `metros_json`, `featured`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `reach` (`Regional`\|`National`\|`Global` — a community's overall footprint), `metros_json` (JSON array from a controlled city/area vocabulary — where it has a chapter, hub, or local focus; independent of `reach`, so a National community like FEI can still carry metros), `region` (legacy free-text note, superseded by `reach`/`metros_json` — kept for any detail those two fields don't capture, no longer read by the region filter), `featured` (pin-to-top + coral badge, same pattern as `tools.promoted`; independent of `reach`/`metros_json`/`advisor`), `advisor` (⭐ marker + "Advisor" filter chip, same pattern as `tools.advisor` — discloses a personal relationship, e.g. The F Suite; independent of `featured`), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
 | `community_categories` | Controlled vocabulary of filter pills for `/tools/communities`, same shape and same reasoning as `tool_categories`. | `name` (unique), `sort_order` |
 | `community_profiles` | Deep, opinionated read per community (Community Profiles, Phase 2) — the qualitative judgment a directory row's cost/access/region fields can't carry, edited at `/admin/tools/communities/{id}/profile`. 1:1 with `communities` via `community_id` as the primary key (no SQL-level `REFERENCES`, same as `article_embeddings.article_id` — this codebase does cleanup on delete in application code, not via a declared FK; see `delete_community`). Empty/thin until Research content backfills it or an admin generates a draft. Rendered publicly at `/tools/communities/{slug}` (Phase 3) — a community with no profile row, or one whose fields are all empty, falls back to a minimal page built from the `communities` row alone rather than an error or empty-looking layout. | `community_id` (PK), `sponsor_relationship_note` (qualitative — value-add or sales funnel? — distinct from the factual `sponsor_name`/`sponsorship_type` on `communities`), `application_friction` (the real barrier to entry, not just the `access` label), `founded_year` (nullable), `notable_members`/`public_criticism` (nullable — only when verifiably public/reported), `low_confidence` |
+| `community_gap_submissions` | Gap-collection (Phase 5): the native replacement for the old `/community` page's Google Form, folded into the live directory rather than a separate parked page. Submitted at `POST /tools/communities/gap`, triaged at `/admin/community-gaps` (mirrors `/admin/ask-feedback`'s layout). No login required — anyone can submit. | `current_communities`/`gaps`/`looking_for` (free text, the visitor's own words), `search_context_json` (directory search/filter state at submission time, built client-side from JS-only filter state and carried through a hidden form field), `viewed_community_ids_json` (server-computed at submission from `community_profile_views`, not client-supplied), `closest_community_id` (nullable, no FK), `email` (nullable), `reviewed` |
+| `community_profile_views` | Session-scoped, no-login view tracking for `/tools/communities/{slug}`: which profile pages a visitor opened before (maybe) submitting the gap form above. Keyed by an anonymous `cfo_visitor` cookie (`webapp/app.py`, 30-day TTL, not signed — the first anonymous-session primitive in the codebase; everything else, e.g. `read_later`, requires a logged-in `user_id`). No cleanup job for stale sessions yet — rows are small and carry no PII. | `session_id` + `community_id` (composite PK, dedups repeat views), `viewed_at` |
 
 `POST /admin/tools/generate-description` (admin-only) drafts a description
 from just a name + URL — used by the "Generate" button on the Add Tool form,
@@ -147,6 +149,23 @@ a regenerate refines rather than starts over), grounded in the same
 same never-auto-saved review contract — the draft lands in the
 `/admin/tools/communities/{id}/profile` form fields for the admin to check
 before saving. Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
+
+**Community gap-collection** (Phase 5) is reachable three ways: the CTA card
+at the bottom of `/tools/communities`, the same CTA auto-surfaced (with a
+`zero=1` query param) when a search/filter combination returns no results,
+and a per-profile "Not quite the right fit?" mini-CTA on
+`/tools/communities/{slug}` that pre-fills `closest_community_id`. All three
+land on `GET /tools/communities/gap`, which builds a transparency note from
+whatever session state it can detect — the directory's search/filter state
+(passed via query params, since those filters are pure client-side JS state
+never otherwise posted to the server) and profiles viewed via the
+`cfo_visitor` cookie — telling the visitor what was picked up rather than
+capturing it silently. `POST /tools/communities/gap` needs no login and
+recomputes `viewed_community_ids_json` server-side from
+`community_profile_views` rather than trusting a client value. Triage lives
+at `/admin/community-gaps`, and unreviewed submissions feed the shared admin
+badge system (`webapp/tasks.py::open_task_counts`) the same way pending tool
+submissions and unread contacts do.
 
 ### Site operations
 

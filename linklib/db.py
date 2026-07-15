@@ -551,6 +551,53 @@ CREATE TABLE IF NOT EXISTS community_profiles (
     low_confidence            INTEGER NOT NULL DEFAULT 0,
     updated_at                TEXT NOT NULL DEFAULT ''
 );
+
+-- Gap-collection (Phase 5): the native replacement for the old /community
+-- waitlist page's Google Form, folded into the live directory instead of a
+-- separate parked page. current_communities/gaps/looking_for are the
+-- visitor's own words (no controlled vocabulary — this is qualitative
+-- signal for Brian, not a filter). search_context_json is a best-effort
+-- snapshot of the directory search/filter state at submission time, built
+-- client-side and carried through as a hidden form field (the filters
+-- themselves are pure client-side JS state on /tools/communities, never
+-- posted to the server otherwise) — '' when the visitor arrived via a
+-- profile page's mini-CTA rather than the directory's bottom-of-page CTA.
+-- viewed_community_ids_json is populated server-side at submission time
+-- from community_profile_views (see below), not trusted from the client.
+-- closest_community_id has no SQL REFERENCES, same as community_profiles
+-- above — nullable, so "none in particular" is representable.
+CREATE TABLE IF NOT EXISTS community_gap_submissions (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    current_communities       TEXT NOT NULL DEFAULT '',
+    gaps                      TEXT NOT NULL DEFAULT '',
+    looking_for               TEXT NOT NULL DEFAULT '',
+    search_context_json       TEXT NOT NULL DEFAULT '',
+    viewed_community_ids_json TEXT NOT NULL DEFAULT '[]',
+    closest_community_id      INTEGER,
+    email                     TEXT NOT NULL DEFAULT '',
+    reviewed                  INTEGER NOT NULL DEFAULT 0,
+    created_at                TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_community_gap_submissions_reviewed
+    ON community_gap_submissions(reviewed);
+
+-- Session-scoped view tracking, no login required: which community profile
+-- pages a visitor opened before (maybe) submitting the gap form. Keyed by an
+-- anonymous cookie (cfo_visitor in webapp/app.py), not a users.id — this is
+-- the first anonymous-session primitive in the codebase (everything else,
+-- e.g. read_later, requires a logged-in user_id). PRIMARY KEY on
+-- (session_id, community_id) dedups repeat views of the same profile;
+-- INSERT OR REPLACE refreshes viewed_at on a re-view rather than growing
+-- unbounded. No cleanup job yet for stale sessions — rows are small
+-- (two ints + a timestamp) and carry no PII, so this is deferred rather
+-- than solved here.
+CREATE TABLE IF NOT EXISTS community_profile_views (
+    session_id   TEXT NOT NULL,
+    community_id INTEGER NOT NULL,
+    viewed_at    TEXT NOT NULL,
+    PRIMARY KEY (session_id, community_id)
+);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -1897,6 +1944,83 @@ class Library:
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
              founded_year, public_criticism.strip(), verdict_summary.strip(),
              low_confidence, _now()),
+        )
+        self.conn.commit()
+
+    # -- community gap submissions (Phase 5: native gap-collection) ---------
+
+    def record_community_view(self, session_id: str, community_id: int) -> None:
+        self.conn.execute(
+            """INSERT OR REPLACE INTO community_profile_views (session_id, community_id, viewed_at)
+               VALUES (?,?,?)""",
+            (session_id, community_id, _now()),
+        )
+        self.conn.commit()
+
+    def get_viewed_community_ids(self, session_id: str, limit: int = 20) -> list[int]:
+        if not session_id:
+            return []
+        rows = self.conn.execute(
+            """SELECT community_id FROM community_profile_views
+               WHERE session_id=? ORDER BY viewed_at DESC LIMIT ?""",
+            (session_id, limit),
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def add_community_gap_submission(self, current_communities: str = "", gaps: str = "",
+                                     looking_for: str = "", search_context_json: str = "",
+                                     viewed_community_ids_json: str = "[]",
+                                     closest_community_id: Optional[int] = None,
+                                     email: str = "") -> int:
+        cur = self.conn.execute(
+            """INSERT INTO community_gap_submissions
+               (current_communities, gaps, looking_for, search_context_json,
+                viewed_community_ids_json, closest_community_id, email, reviewed, created_at)
+               VALUES (?,?,?,?,?,?,?,0,?)""",
+            (current_communities.strip(), gaps.strip(), looking_for.strip(),
+             search_context_json, viewed_community_ids_json, closest_community_id,
+             email.strip(), _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_community_gap_submissions(self, reviewed: bool | None = None,
+                                       limit: int = 200) -> list[dict]:
+        where, params = "", []
+        if reviewed is not None:
+            where = "WHERE g.reviewed=?"
+            params.append(1 if reviewed else 0)
+        rows = self.conn.execute(
+            f"""SELECT g.*, c.name AS closest_community_name
+                FROM community_gap_submissions g
+                LEFT JOIN communities c ON c.id = g.closest_community_id
+                {where}
+                ORDER BY g.created_at DESC LIMIT ?""",
+            params + [limit],
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def community_gap_counts(self, since: str = "") -> dict[str, int]:
+        """Total and unreviewed counts, each scoped to `since` if given —
+        same shape/reasoning as ask_feedback_counts, but only two buckets
+        (there's no per-rating breakdown here)."""
+        where, params = "", []
+        if since:
+            where = "WHERE created_at >= ?"
+            params = [since]
+        total = self.conn.execute(
+            f"SELECT COUNT(*) FROM community_gap_submissions {where}", params
+        ).fetchone()[0]
+        unreviewed_where = f"{where} AND reviewed=0" if where else "WHERE reviewed=0"
+        unreviewed = self.conn.execute(
+            f"SELECT COUNT(*) FROM community_gap_submissions {unreviewed_where}", params
+        ).fetchone()[0]
+        return {"total": total, "unreviewed": unreviewed}
+
+    def toggle_community_gap_reviewed(self, submission_id: int) -> None:
+        self.conn.execute(
+            "UPDATE community_gap_submissions SET reviewed = 1 - reviewed WHERE id=?",
+            (submission_id,),
         )
         self.conn.commit()
 

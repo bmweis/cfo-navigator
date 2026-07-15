@@ -205,6 +205,15 @@ ADMIN_USERNAME = (os.environ.get("LINKLIB_ADMIN_USERNAME") or "admin").strip().l
 SECRET_KEY = os.environ.get("LINKLIB_SECRET_KEY") or AUTH_PASSWORD or "dev-insecure-key"
 COOKIE_NAME = "cfo_session"
 SESSION_TTL = 30 * 24 * 3600  # 30 days
+# Anonymous, no-login session id for Community gap-collection (Phase 5):
+# tracks which /tools/communities/{slug} profile pages a visitor opened, so
+# the gap form can fold that into the submission without asking the visitor
+# to remember. First anonymous-session cookie in the codebase — everything
+# else (read_later, ask) requires an authenticated user_id. Not signed: it's
+# an opaque random id keying rows in community_profile_views, never trusted
+# for authorization the way COOKIE_NAME is.
+VISITOR_COOKIE_NAME = "cfo_visitor"
+VISITOR_SESSION_TTL = 30 * 24 * 3600  # 30 days, same horizon as COOKIE_NAME
 
 app = FastAPI(title="bmweis.com")
 
@@ -5029,6 +5038,25 @@ def tools_benchmarks(request: Request):
     return HTMLResponse(_page("Benchmarking—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
+def _visitor_session_id(request: Request) -> str:
+    """Existing cfo_visitor cookie value, or a freshly generated one if the
+    visitor doesn't have one yet. Caller is responsible for actually setting
+    the cookie on the response via _set_visitor_cookie — reading here never
+    has a side effect."""
+    return request.cookies.get(VISITOR_COOKIE_NAME) or secrets.token_urlsafe(16)
+
+
+def _set_visitor_cookie(request: Request, resp, session_id: str) -> None:
+    """Sets cfo_visitor only when the visitor doesn't already have one —
+    avoids resetting the 30-day TTL (and sending a Set-Cookie header) on
+    every single page view."""
+    if request.cookies.get(VISITOR_COOKIE_NAME):
+        return
+    secure = (request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https")
+    resp.set_cookie(VISITOR_COOKIE_NAME, session_id, max_age=VISITOR_SESSION_TTL,
+                    httponly=True, samesite="lax", secure=secure, path="/")
+
+
 @app.get("/tools/communities", response_class=HTMLResponse)
 def tools_communities(request: Request):
     lib = _lib()
@@ -5127,6 +5155,12 @@ groups, associations, and Slack channels.</p>
 
 <p id="comm-empty" style="display:none;color:var(--muted);padding:32px 0;">No communities match your search.</p>
 
+<div id="comm-gap-cta" style="margin-top:24px;padding:20px 22px;background:var(--seafoam);border-radius:12px;">
+  <p style="margin:0 0 8px;font-weight:600;color:var(--navy);">Think finance communities could be better?</p>
+  <p style="margin:0 0 14px;color:var(--navy);font-size:14px;line-height:1.5;">Tell us where they fall short: what you haven't found, or what an existing community missed.</p>
+  <a id="comm-gap-link" href="/tools/communities/gap" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;">Tell us where they fall short &rarr;</a>
+</div>
+
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
   <p style="font-size:13px;color:var(--muted);">&#9733; Formal advisor to these communities.</p>
 </div>
@@ -5151,6 +5185,7 @@ groups, associations, and Slack channels.</p>
 .comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
+.comm-gap-cta-highlight{{box-shadow:0 0 0 2px var(--coral);}}
 </style>
 
 <script>
@@ -5191,20 +5226,41 @@ function commGeoLine(c) {{
   return commEsc(line);
 }}
 
+function updateGapCtaLink(isZero) {{
+  var q = document.getElementById('comm-search').value || '';
+  var region = document.getElementById('comm-region').value || '';
+  var accessType = document.getElementById('comm-access').value || '';
+  var params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (region) params.set('region', region);
+  if (accessType) params.set('access', accessType);
+  if (activeCommCost) params.set('cost', activeCommCost);
+  if (activeCommCats.size) params.set('cats', Array.from(activeCommCats).join(','));
+  if (commAdvisorOnly) params.set('advisor', '1');
+  if (isZero) params.set('zero', '1');
+  var qs = params.toString();
+  document.getElementById('comm-gap-link').href = '/tools/communities/gap' + (qs ? '?' + qs : '');
+}}
+
 function renderCommunities(list) {{
   var grid = document.getElementById('comm-grid');
   var empty = document.getElementById('comm-empty');
   var count = document.getElementById('comm-count');
   var pagination = document.getElementById('comm-pagination');
+  var gapCta = document.getElementById('comm-gap-cta');
+  updateGapCtaLink(list.length === 0);
   if (list.length === 0) {{
     grid.innerHTML = '';
     empty.style.display = 'block';
+    empty.textContent = "No communities match your search. Tell us what you're looking for below.";
     count.textContent = '';
     pagination.style.display = 'none';
     pagination.innerHTML = '';
+    gapCta.classList.add('comm-gap-cta-highlight');
     return;
   }}
   empty.style.display = 'none';
+  gapCta.classList.remove('comm-gap-cta-highlight');
   // Featured communities first, then alphabetical within each group.
   var sorted = list.slice().sort(function(a, b) {{
     if (a.featured && !b.featured) return -1;
@@ -5374,32 +5430,183 @@ _COMMUNITY_PROFILE_PUBLIC_FIELDS = [
 ]
 
 
-# Stub for the Phase 5 gap-collection flow: for now it just routes the
-# visitor into /contact with the community pre-filled as context, so the
-# "Tell us why" CTA on each profile page is live rather than a dead link.
-# Phase 5 replaces the redirect target with the real gap-collection form
-# without changing this URL, so nothing upstream needs to change. Registered
-# before /tools/communities/{slug} below so "gap" isn't swallowed as a slug.
-@app.get("/tools/communities/gap")
-def tools_community_gap(request: Request, community_id: int = 0):
+# Native gap-collection form (Phase 5): replaces the old /community
+# waitlist page's Google Form, folded into the live directory. Reachable
+# three ways: the CTA card at the bottom of /tools/communities (search
+# context carried via query params, built client-side from the current
+# filter state — those filters are pure JS state, never posted to the
+# server otherwise), the same CTA auto-surfaced on a zero-result search
+# (marked with zero=1 so the copy can say "that search came up empty"
+# instead of a generic "we noticed"), and the per-profile "Not quite the
+# right fit?" mini-CTA (community_id only). Registered before
+# /tools/communities/{slug} below so "gap" isn't swallowed as a slug.
+#
+# Transparency decision (flagged to and confirmed by Brian): the form tells
+# the visitor what was picked up from their session — search filters,
+# profiles viewed, closest-match pick — rather than capturing it silently.
+def _gap_search_summary(ctx: dict) -> str:
+    """Human-readable fragment describing a directory search/filter state,
+    e.g. 'searching for "tax", filtered to Boston'. '' if ctx is empty."""
+    bits = []
+    if ctx.get("q"):
+        bits.append(f'searching for &ldquo;{_esc(ctx["q"])}&rdquo;')
+    if ctx.get("region"):
+        bits.append(f'filtered to {_esc(ctx["region"])}')
+    if ctx.get("access"):
+        bits.append(f'{_esc(ctx["access"])} access')
+    if ctx.get("cost"):
+        bits.append(f'the {_esc(ctx["cost"])} cost band')
+    if ctx.get("categories"):
+        cats_list = ctx["categories"]
+        noun = "category" if len(cats_list) == 1 else "categories"
+        bits.append(f'the {", ".join(_esc(c) for c in cats_list)} {noun}')
+    if ctx.get("advisor_only"):
+        bits.append("Advisor communities only")
+    return ", ".join(bits)
+
+
+@app.get("/tools/communities/gap", response_class=HTMLResponse)
+def tools_community_gap(request: Request, community_id: int = 0, q: str = "", region: str = "",
+                        access: str = "", cost: str = "", cats: str = "", advisor: str = "",
+                        zero: str = "", submitted: str = ""):
+    session_id = request.cookies.get(VISITOR_COOKIE_NAME) or ""
     lib = _lib()
     try:
-        community = lib.get_community(community_id) if community_id else None
+        communities = lib.list_communities(approved_only=True)
+        viewed_ids = lib.get_viewed_community_ids(session_id) if session_id else []
     finally:
         lib.close()
-    name = community["name"] if community else ""
-    message = f"Re: {name}: this community wasn't quite the right fit because " if name else ""
-    return RedirectResponse(f"/contact?message={quote(message)}", status_code=303)
+
+    search_context: dict = {}
+    if q:
+        search_context["q"] = q
+    if region:
+        search_context["region"] = region
+    if access:
+        search_context["access"] = access
+    if cost:
+        search_context["cost"] = cost
+    if cats:
+        search_context["categories"] = [c for c in cats.split(",") if c]
+    if advisor:
+        search_context["advisor_only"] = True
+    search_context_json = json.dumps(search_context) if search_context else ""
+
+    if submitted:
+        body = """<div class="page">
+<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
+<h1>Thanks, that&rsquo;s genuinely useful.</h1>
+<p style="color:var(--muted);margin:8px 0 0;line-height:1.6;">I read every one of these. If you left an email and there&rsquo;s something worth following up on, I&rsquo;ll be in touch.</p>
+</div>"""
+        return HTMLResponse(_page("Thanks—Communities", "CFO Toolbox", body, role=_role(request)))
+
+    by_id = {c["id"]: c["name"] for c in communities}
+    closest_name = by_id.get(community_id, "")
+
+    options = '<option value="">Not sure / none in particular</option>' + "".join(
+        f'<option value="{c["id"]}"{" selected" if c["id"] == community_id else ""}>{_esc(c["name"])}</option>'
+        for c in communities
+    )
+
+    intro = (
+        f'<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Re: <strong>{_esc(closest_name)}</strong> '
+        f'wasn&rsquo;t quite the right fit. What would have made it work, or what else should we know?</p>'
+        if closest_name else ""
+    )
+
+    # 4 transparency states: zero-result search, non-zero search (with or
+    # without viewed profiles), profiles viewed with no active search, and
+    # the fallback with nothing detected (no cookie yet, or a direct landing
+    # on this URL) — that last one shows no note at all rather than guessing.
+    viewed_names = [by_id[vid] for vid in viewed_ids if vid != community_id and vid in by_id]
+    viewed_clause = ""
+    if viewed_names:
+        shown = viewed_names[:2]
+        extra = len(viewed_names) - len(shown)
+        names_str = " and ".join(_esc(n) for n in shown) + (f", plus {extra} more" if extra > 0 else "")
+        viewed_clause = f"looked at {names_str}"
+    search_summary = _gap_search_summary(search_context)
+
+    note = ""
+    if zero and search_summary:
+        note = f"That search came up empty: you were {search_summary}."
+        if viewed_clause:
+            note += f" You also {viewed_clause} before landing here."
+        note += " Tell us what you were hoping to find instead, so we don&rsquo;t have to ask you to repeat it below."
+    elif search_summary or viewed_clause:
+        parts = [p for p in [f"were {search_summary} on the directory" if search_summary else "", viewed_clause] if p]
+        note = "We noticed you " + " and ".join(parts) + " before landing here. We&rsquo;ll use that context, so feel free to skip repeating it below."
+
+    note_block = (
+        f'<div style="background:var(--seafoam);border-radius:10px;padding:12px 16px;margin:0 0 20px;">'
+        f'<p style="margin:0;color:var(--navy);font-size:13.5px;line-height:1.5;">{note}</p></div>'
+        if note else ""
+    )
+
+    body = f"""<div class="page">
+<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
+<h1 style="margin:0;">Tell us where communities fall short</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Every field here is optional. The goal is simple:
+find out what's missing from the finance community landscape so this directory (and maybe a future community) can
+actually close the gap.</p>
+{note_block}
+{intro}
+<form method="post" action="/tools/communities/gap" style="display:flex;flex-direction:column;gap:16px;max-width:520px;">
+  <input type="hidden" name="search_context_json" value="{_esc(search_context_json)}">
+  <label style="font-size:14px;font-weight:600;color:var(--navy);">What communities are you already in, if any?
+    <textarea name="current_communities" rows="2" style="display:block;width:100%;margin-top:6px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;"></textarea>
+  </label>
+  <label style="font-size:14px;font-weight:600;color:var(--navy);">What have existing communities missed?
+    <textarea name="gaps" rows="3" style="display:block;width:100%;margin-top:6px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;"></textarea>
+  </label>
+  <label style="font-size:14px;font-weight:600;color:var(--navy);">What haven't you found yet?
+    <textarea name="looking_for" rows="3" style="display:block;width:100%;margin-top:6px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;"></textarea>
+  </label>
+  <label style="font-size:14px;font-weight:600;color:var(--navy);">Which community came closest?
+    <select name="closest_community_id" style="display:block;width:100%;margin-top:6px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;">{options}</select>
+  </label>
+  <label style="font-size:14px;font-weight:600;color:var(--navy);">Email, only if you want a reply (optional)
+    <input type="email" name="email" style="display:block;width:100%;margin-top:6px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;">
+  </label>
+  <button type="submit" class="btn" style="align-self:flex-start;">Submit</button>
+</form>
+</div>"""
+    return HTMLResponse(_page("Tell us where communities fall short—Communities", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.post("/tools/communities/gap")
+async def tools_community_gap_submit(request: Request):
+    form = await request.form()
+    session_id = request.cookies.get(VISITOR_COOKIE_NAME) or ""
+    closest_raw = (form.get("closest_community_id") or "").strip()
+    closest_community_id = int(closest_raw) if closest_raw.isdigit() else None
+    lib = _lib()
+    try:
+        viewed_ids = lib.get_viewed_community_ids(session_id)
+        lib.add_community_gap_submission(
+            current_communities=(form.get("current_communities") or ""),
+            gaps=(form.get("gaps") or ""),
+            looking_for=(form.get("looking_for") or ""),
+            search_context_json=(form.get("search_context_json") or ""),
+            viewed_community_ids_json=json.dumps(viewed_ids),
+            closest_community_id=closest_community_id,
+            email=(form.get("email") or ""),
+        )
+    finally:
+        lib.close()
+    return RedirectResponse("/tools/communities/gap?submitted=1", status_code=303)
 
 
 @app.get("/tools/communities/{slug}", response_class=HTMLResponse)
 def tools_community_profile(request: Request, slug: str):
+    session_id = _visitor_session_id(request)
     lib = _lib()
     try:
         community = lib.get_community_by_slug(slug)
         if not community:
             raise HTTPException(status_code=404, detail="Community not found")
         profile = lib.get_community_profile(community["id"]) or {}
+        lib.record_community_view(session_id, community["id"])
     finally:
         lib.close()
 
@@ -5486,7 +5693,9 @@ def tools_community_profile(request: Request, slug: str):
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:4px 10px;white-space:nowrap;}}
 </style>"""
-    return HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request)))
+    _set_visitor_cookie(request, resp, session_id)
+    return resp
 
 
 def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None = None) -> str:
@@ -9409,6 +9618,7 @@ _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
         ("/admin/tools/leads",  "Toolbox intros",          "Warm Intro requests from readers—name, email, company, and which tool they want an intro to."),
+        ("/admin/community-gaps", "Community gaps",        "Where visitors say finance communities fall short—what they're missing, and which community came closest."),
         ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
@@ -11505,6 +11715,152 @@ def admin_ask_feedback(request: Request, rating: str = ""):
 <p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 200{' matching' if rating else ''} ratings.</p>
 </div>"""
     return HTMLResponse(_page("FP&A Buddy feedback—Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/community-gaps", response_class=HTMLResponse)
+def admin_community_gaps(request: Request, reviewed: str = ""):
+    """Triage view for the native gap-collection form on /tools/communities
+    (Phase 5), mirroring /admin/ask-feedback's layout exactly: 3-stat summary
+    row, single-select GET filter that auto-submits, card list newest-first
+    with collapsible long text, metadata footer."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if reviewed not in ("", "yes", "no"):
+        reviewed = ""
+    lib = _lib()
+    try:
+        reviewed_filter = None if reviewed == "" else (reviewed == "yes")
+        rows = lib.list_community_gap_submissions(reviewed=reviewed_filter, limit=200)
+        month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
+        counts_all = lib.community_gap_counts()
+        counts_month = lib.community_gap_counts(since=month_start)
+    finally:
+        lib.close()
+
+    def _search_context_line(r: dict) -> str:
+        try:
+            ctx = json.loads(r.get("search_context_json") or "{}")
+        except (TypeError, ValueError):
+            ctx = {}
+        if not ctx:
+            return ""
+        bits = []
+        if ctx.get("q"):
+            bits.append(f'search "{ctx["q"]}"')
+        if ctx.get("region"):
+            bits.append(f'region: {ctx["region"]}')
+        if ctx.get("access"):
+            bits.append(f'access: {ctx["access"]}')
+        if ctx.get("cost"):
+            bits.append(f'cost: {ctx["cost"]}')
+        if ctx.get("categories"):
+            bits.append(f'categories: {", ".join(ctx["categories"])}')
+        if ctx.get("advisor_only"):
+            bits.append("advisor only")
+        return " &middot; ".join(_esc(b) for b in bits)
+
+    def _text_block(label: str, text: str) -> str:
+        text = (text or "").strip()
+        if not text:
+            return ""
+        body_html = (
+            f'<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">'
+            f'{_esc(label)} ({len(text):,} chars)&mdash;expand</summary>'
+            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:6px 0 0;">{_esc(text)}</p></details>'
+            if len(text) > 300 else
+            f'<div style="margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;">{_esc(label)}</div>'
+            f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:0;">{_esc(text)}</p></div>'
+        )
+        return body_html
+
+    def _card(r: dict) -> str:
+        is_reviewed = bool(r["reviewed"])
+        badge = (
+            '<span style="font-size:12px;font-weight:700;color:var(--seafoam-deep);background:var(--seafoam-wash);border-radius:999px;padding:3px 12px;white-space:nowrap;">Reviewed</span>'
+            if is_reviewed else
+            '<span style="font-size:12px;font-weight:700;color:var(--alert);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">New</span>'
+        )
+        try:
+            viewed_ids = json.loads(r.get("viewed_community_ids_json") or "[]")
+        except (TypeError, ValueError):
+            viewed_ids = []
+        meta_bits = [f'closest match: {_esc(r["closest_community_name"])}' if r.get("closest_community_name") else "closest match: none given"]
+        ctx_line = _search_context_line(r)
+        if ctx_line:
+            meta_bits.append(ctx_line)
+        meta_bits.append(f"{len(viewed_ids)} profile{'s' if len(viewed_ids) != 1 else ''} viewed this session")
+        text_blocks = "".join([
+            _text_block("What communities are you already in", r.get("current_communities") or ""),
+            _text_block("What existing communities missed", r.get("gaps") or ""),
+            _text_block("What they haven't found yet", r.get("looking_for") or ""),
+        ]) or '<p style="font-size:13.5px;color:var(--muted);margin:10px 0 0;">No written response, just a closest-match pick.</p>'
+        back_qs = f"?reviewed={reviewed}" if reviewed else ""
+        return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    {badge}
+    <span style="font-size:12.5px;color:var(--muted);">{_esc((r["created_at"] or "")[:10])}{' &middot; ' + _esc(r["email"]) if r.get("email") else ''}</span>
+    <form method="post" action="/admin/community-gaps/{r['id']}/toggle-reviewed{back_qs}" style="margin-left:auto;">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">{"Mark unreviewed" if is_reviewed else "Mark reviewed"}</button>
+    </form>
+  </div>
+  {text_blocks}
+  <div style="font-size:12px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">{" &middot; ".join(meta_bits)}</div>
+</div>"""
+
+    cards = "".join(_card(r) for r in rows) or \
+        '<div style="padding:24px;text-align:center;color:var(--muted);border:1px solid var(--line);border-radius:12px;background:var(--surface);">No gap submissions yet.</div>'
+
+    stat_cards = "".join(
+        f"""<div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{n:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">{label}</div>
+  </div>"""
+        for n, label in [
+            (counts_all["total"], "Total submissions"),
+            (counts_all["unreviewed"], "Unreviewed"),
+            (counts_month["total"], "This calendar month"),
+        ]
+    )
+
+    filter_options = "".join(
+        f'<option value="{key}"{" selected" if reviewed == key else ""}>{label}</option>'
+        for key, label in [("no", "Unreviewed"), ("yes", "Reviewed")]
+    )
+
+    body = f"""<div class="page">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Community gaps</h1>
+<p style="color:var(--muted);margin:-6px 0 20px;">What visitors say the finance community landscape is missing&mdash;capture and triage only, folded in from the retired /community waitlist page.</p>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
+  {stat_cards}
+</div>
+
+<form method="get" action="/admin/community-gaps" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+  <label style="font-size:13px;color:var(--muted);">Filter:</label>
+  <select name="reviewed" onchange="this.form.submit()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);">
+    <option value="">All submissions</option>
+    {filter_options}
+  </select>
+</form>
+
+{cards}
+<p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 200{' matching' if reviewed else ''} submissions.</p>
+</div>"""
+    return HTMLResponse(_page("Community gaps—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/community-gaps/{submission_id}/toggle-reviewed")
+def admin_community_gap_toggle(request: Request, submission_id: int, reviewed: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        lib.toggle_community_gap_reviewed(submission_id)
+    finally:
+        lib.close()
+    qs = f"?reviewed={reviewed}" if reviewed else ""
+    return RedirectResponse(f"/admin/community-gaps{qs}", status_code=303)
 
 
 @app.get("/admin/users", response_class=HTMLResponse)
