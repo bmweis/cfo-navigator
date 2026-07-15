@@ -40,7 +40,8 @@ def _admin_client(appmod):
 
 
 def _configure_email(monkeypatch, fake_notification=None, fake_welcome=None,
-                      fake_tool_submission_confirmation=None, fake_contact_confirmation=None):
+                      fake_tool_submission_confirmation=None, fake_contact_confirmation=None,
+                      fake_community_submission_confirmation=None):
     from linklib import email_utils
     monkeypatch.setattr(email_utils, "is_configured", lambda: True)
     # notify_to falls back to LINKLIB_CONTACT_EMAIL or default_notify_email()
@@ -60,6 +61,8 @@ def _configure_email(monkeypatch, fake_notification=None, fake_welcome=None,
                          fake_tool_submission_confirmation or (lambda *a, **k: True))
     monkeypatch.setattr(email_utils, "send_contact_confirmation_email",
                          fake_contact_confirmation or (lambda *a, **k: True))
+    monkeypatch.setattr(email_utils, "send_community_submission_confirmation_email",
+                         fake_community_submission_confirmation or (lambda *a, **k: True))
 
 
 def _past_ts() -> str:
@@ -197,6 +200,73 @@ def test_tool_submission_confirmation_failure_is_logged_not_silent(env, monkeypa
     try:
         failures = lib.list_email_failures()
         assert any(f["context"] == "tool_submission_confirmation" for f in failures)
+    finally:
+        lib.close()
+
+
+# --- community submission ------------------------------------------------------
+
+def test_community_submission_notifies_brian(env, monkeypatch):
+    calls = []
+    _configure_email(monkeypatch, fake_notification=lambda to, subject, body, **kw: calls.append((to, subject, body)) or True)
+    c = _admin_client(env)   # /tools/communities/submit is member-gated (spam control)
+    r = c.post("/tools/communities/submit", data={
+        "name": "Test Community", "url": "https://example.com",
+        "submitted_by": "user@example.com",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert len(calls) == 1 and "Test Community" in calls[0][1]
+    lib = env._lib()
+    try:
+        communities = [c for c in lib.list_communities(approved_only=False) if c["submitted_by"]]
+        assert len(communities) == 1 and communities[0]["approved"] == 0
+    finally:
+        lib.close()
+
+
+def test_community_submission_failure_is_logged(env, monkeypatch):
+    def _boom(to, subject, body, **kw):
+        raise RuntimeError("smtp down")
+    _configure_email(monkeypatch, fake_notification=_boom)
+    c = _admin_client(env)
+    c.post("/tools/communities/submit", data={
+        "name": "Test Community", "url": "https://example.com",
+        "submitted_by": "user@example.com",
+    })
+    lib = env._lib()
+    try:
+        failures = lib.list_email_failures()
+        assert len(failures) == 1 and failures[0]["context"] == "community_submission"
+    finally:
+        lib.close()
+
+
+def test_community_submission_sends_submitter_confirmation(env, monkeypatch):
+    calls = []
+    _configure_email(monkeypatch, fake_community_submission_confirmation=lambda to, community_name, community_url, **kw:
+                      calls.append((to, community_name, community_url)) or True)
+    c = _admin_client(env)
+    c.post("/tools/communities/submit", data={
+        "name": "Test Community", "url": "https://example.com",
+        "submitted_by": "user@example.com",
+    }, follow_redirects=False)
+    assert len(calls) == 1
+    assert calls[0] == ("user@example.com", "Test Community", "https://example.com")
+
+
+def test_community_submission_confirmation_failure_is_logged_not_silent(env, monkeypatch):
+    def _boom(to, community_name, community_url, **kw):
+        raise RuntimeError("mailer down")
+    _configure_email(monkeypatch, fake_community_submission_confirmation=_boom)
+    c = _admin_client(env)
+    c.post("/tools/communities/submit", data={
+        "name": "Test Community", "url": "https://example.com",
+        "submitted_by": "user@example.com",
+    }, follow_redirects=False)
+    lib = env._lib()
+    try:
+        failures = lib.list_email_failures()
+        assert any(f["context"] == "community_submission_confirmation" for f in failures)
     finally:
         lib.close()
 

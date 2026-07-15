@@ -40,6 +40,7 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/contacts": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
         "/admin/tools": lib.count_pending_tools(),
         "/admin/tools/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
+        "/admin/tools/communities": lib.count_pending_communities(),
         "/admin/community-gaps": lib.community_gap_counts()["unreviewed"],
         "/admin/checks": _failing_checks_count(),
         "/admin/users": lib.count_pending_password_resets(),
