@@ -1,0 +1,159 @@
+"""Communities Recommender (/tools/communities/find, Phase 7): a short quiz
+that filters the directory by role/budget/access/focus, reusing the same
+filter semantics as the directory's own client-side filtering, and logs
+every completed quiz into community_gap_submissions with
+submission_type='recommender' (a zero/thin result is the same kind of gap
+signal as a zero-result directory search).
+"""
+import pathlib
+import sys
+import tempfile, os
+
+import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+
+@pytest.fixture
+def env(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    yield appmod
+    if os.path.exists(db):
+        os.remove(db)
+
+
+def _client(appmod):
+    from fastapi.testclient import TestClient
+    return TestClient(appmod.app, raise_server_exceptions=True)
+
+
+def _seed(lib):
+    cfo = lib.add_community("CFO Guild", "https://example.com", "", "CFOs at high-growth companies",
+                             "Free", ["CFO-specific invite-only"], access="Invite-only", approved=1)
+    controller = lib.add_community("Controller Circle", "https://example.com", "", "Controllers",
+                                    "<$1k/yr", ["Controller/accounting"], access="Open", approved=1)
+    return cfo, controller
+
+
+def test_quiz_form_renders_all_four_questions(env):
+    c = _client(env)
+    r = c.get("/tools/communities/find")
+    assert r.status_code == 200
+    assert "What best describes your role?" in r.text
+    assert "What's your budget for dues?" in r.text
+    assert "What kind of access are you looking for?" in r.text
+    assert "Anything more specific you&#x27;re looking for?" in r.text or \
+        "Anything more specific you're looking for?" in r.text
+
+
+def test_quiz_submission_filters_to_matching_community(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    cfo, controller = _seed(lib)
+    lib.close()
+
+    c = _client(env)
+    r = c.post("/tools/communities/find", data={
+        "role": "cfo", "budget": "any", "access": "invite", "focus": "none",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    location = r.headers["location"]
+    assert location.startswith("/tools/communities/find/results?")
+
+    results = c.get(location)
+    assert results.status_code == 200
+    assert "CFO Guild" in results.text
+    assert "Controller Circle" not in results.text
+
+
+def test_quiz_submission_logs_recommender_row(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    _seed(lib)
+    lib.close()
+
+    c = _client(env)
+    c.post("/tools/communities/find", data={
+        "role": "controller", "budget": "under1k", "access": "open", "focus": "none",
+    }, follow_redirects=False)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    rows = lib.list_community_gap_submissions()
+    lib.close()
+    assert len(rows) == 1
+    assert rows[0]["submission_type"] == "recommender"
+    import json
+    ctx = json.loads(rows[0]["search_context_json"])
+    assert ctx["quiz"] is True
+    assert ctx["result_count"] == 1
+    assert ctx["role"] == "Controller or accounting team leader"
+
+
+def test_quiz_zero_results_shows_gap_cta_and_is_logged(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    _seed(lib)
+    lib.close()
+
+    c = _client(env)
+    # A CFO-only community exists, but demanding "Open" access rules it out —
+    # no community satisfies role=cfo AND access=open in the seed data.
+    r = c.post("/tools/communities/find", data={
+        "role": "cfo", "budget": "any", "access": "open", "focus": "none",
+    }, follow_redirects=False)
+    results = c.get(r.headers["location"])
+    assert results.status_code == 200
+    assert "Nothing in the directory matched" in results.text
+    assert "/tools/communities/gap" in results.text
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    rows = lib.list_community_gap_submissions()
+    lib.close()
+    assert len(rows) == 1
+    import json
+    ctx = json.loads(rows[0]["search_context_json"])
+    assert ctx["result_count"] == 0
+
+
+def test_quiz_results_page_is_idempotent_get_no_double_logging(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    _seed(lib)
+    lib.close()
+
+    c = _client(env)
+    r = c.post("/tools/communities/find", data={
+        "role": "cfo", "budget": "any", "access": "any", "focus": "none",
+    }, follow_redirects=False)
+    location = r.headers["location"]
+    c.get(location)
+    c.get(location)
+    c.get(location)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    rows = lib.list_community_gap_submissions()
+    lib.close()
+    assert len(rows) == 1
+
+
+def test_quiz_works_with_answers_missing_or_set_to_no_preference(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    _seed(lib)
+    lib.close()
+
+    c = _client(env)
+    # role/access omitted entirely; budget/focus explicitly "no preference" —
+    # none of these contribute a filter, so both seeded communities match.
+    r = c.post("/tools/communities/find", data={"budget": "any", "focus": "none"},
+                follow_redirects=False)
+    assert r.status_code == 303
+    results = c.get(r.headers["location"])
+    assert results.status_code == 200
+    assert "CFO Guild" in results.text
+    assert "Controller Circle" in results.text

@@ -566,6 +566,12 @@ CREATE TABLE IF NOT EXISTS community_profiles (
 -- from community_profile_views (see below), not trusted from the client.
 -- closest_community_id has no SQL REFERENCES, same as community_profiles
 -- above — nullable, so "none in particular" is representable.
+-- submission_type (added by migration, see Library.__init__) distinguishes
+-- this row shape from a Recommender quiz completion (Phase 7): 'gap' is
+-- every field above, used as documented; 'recommender' reuses
+-- search_context_json for the quiz answers + result count instead, and
+-- leaves current_communities/gaps/looking_for '' since the quiz collects no
+-- free text.
 CREATE TABLE IF NOT EXISTS community_gap_submissions (
     id                        INTEGER PRIMARY KEY AUTOINCREMENT,
     current_communities       TEXT NOT NULL DEFAULT '',
@@ -779,6 +785,13 @@ class Library:
             # _seed_toolbox), same as name/notes — not purely admin-owned like
             # featured/reach/metros_json.
             "ALTER TABLE communities ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
+            # Recommender (Phase 7): distinguishes a quiz submission from a
+            # hand-written gap-form submission in the same table rather than a
+            # separate one. 'gap' preserves the meaning of every pre-existing
+            # row. A recommender row reuses search_context_json for the quiz
+            # answers + result count instead of current_communities/gaps/
+            # looking_for, which stay '' for that submission_type.
+            "ALTER TABLE community_gap_submissions ADD COLUMN submission_type TEXT NOT NULL DEFAULT 'gap'",
             # business_model is deliberately separate from
             # sponsor_relationship_note above: that field judges whether a
             # sponsor's presence feels value-add or a sales funnel, this one
@@ -1982,15 +1995,16 @@ class Library:
                                      looking_for: str = "", search_context_json: str = "",
                                      viewed_community_ids_json: str = "[]",
                                      closest_community_id: Optional[int] = None,
-                                     email: str = "") -> int:
+                                     email: str = "", submission_type: str = "gap") -> int:
         cur = self.conn.execute(
             """INSERT INTO community_gap_submissions
                (current_communities, gaps, looking_for, search_context_json,
-                viewed_community_ids_json, closest_community_id, email, reviewed, created_at)
-               VALUES (?,?,?,?,?,?,?,0,?)""",
+                viewed_community_ids_json, closest_community_id, email, reviewed,
+                created_at, submission_type)
+               VALUES (?,?,?,?,?,?,?,0,?,?)""",
             (current_communities.strip(), gaps.strip(), looking_for.strip(),
              search_context_json, viewed_community_ids_json, closest_community_id,
-             email.strip(), _now()),
+             email.strip(), _now(), submission_type),
         )
         self.conn.commit()
         return cur.lastrowid
