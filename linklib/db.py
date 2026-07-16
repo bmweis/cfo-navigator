@@ -779,6 +779,16 @@ class Library:
             # _seed_toolbox), same as name/notes — not purely admin-owned like
             # featured/reach/metros_json.
             "ALTER TABLE communities ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
+            # business_model is deliberately separate from
+            # sponsor_relationship_note above: that field judges whether a
+            # sponsor's presence feels value-add or a sales funnel, this one
+            # describes the structural way the community sustains itself —
+            # e.g. a gated, subscription-funded peer group insulated from a
+            # sales pitch by design, vs. a wide-funnel free-to-join community
+            # monetized via paid tiers, events, or sponsorships. A community
+            # can be non-salesy on one axis and a wide-funnel business on the
+            # other, so the two judgments are captured independently.
+            "ALTER TABLE community_profiles ADD COLUMN business_model TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1915,7 +1925,7 @@ class Library:
                                  application_friction: str = "", cost_value_verdict: str = "",
                                  notable_members: str = "", founded_year: Optional[int] = None,
                                  public_criticism: str = "", verdict_summary: str = "",
-                                 low_confidence: int = 0) -> None:
+                                 low_confidence: int = 0, business_model: str = "") -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
         edit form always submits every field, generated or hand-written."""
@@ -1924,8 +1934,8 @@ class Library:
                (community_id, ideal_member, anti_fit, value_prop, format_reality,
                 engagement_level, sponsor_relationship_note, application_friction,
                 cost_value_verdict, notable_members, founded_year, public_criticism,
-                verdict_summary, low_confidence, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                verdict_summary, low_confidence, updated_at, business_model)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(community_id) DO UPDATE SET
                  ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
                  value_prop=excluded.value_prop, format_reality=excluded.format_reality,
@@ -1938,12 +1948,13 @@ class Library:
                  public_criticism=excluded.public_criticism,
                  verdict_summary=excluded.verdict_summary,
                  low_confidence=excluded.low_confidence,
-                 updated_at=excluded.updated_at""",
+                 updated_at=excluded.updated_at,
+                 business_model=excluded.business_model""",
             (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
              format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
              founded_year, public_criticism.strip(), verdict_summary.strip(),
-             low_confidence, _now()),
+             low_confidence, _now(), business_model.strip()),
         )
         self.conn.commit()
 

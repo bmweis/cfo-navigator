@@ -5200,6 +5200,17 @@ groups, associations, and Slack channels.
 
 <div id="comm-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
 
+<div id="comm-compare-bar" style="display:none;position:sticky;bottom:16px;margin-top:20px;background:var(--navy);
+  border-radius:12px;padding:14px 20px;align-items:center;gap:14px;flex-wrap:wrap;box-shadow:0 4px 16px rgba(0,0,0,.18);">
+  <span id="comm-compare-count" style="color:#fff;font-size:14px;font-weight:600;"></span>
+  <span id="comm-compare-msg" style="color:var(--seafoam);font-size:13px;"></span>
+  <span style="flex:1;"></span>
+  <button type="button" onclick="clearCompareSelection()" class="btn btn-ghost"
+    style="font-size:13px;padding:6px 14px;background:transparent;color:#fff;border-color:rgba(255,255,255,.4);">Clear</button>
+  <a id="comm-compare-link" href="/tools/communities/compare" class="btn"
+    style="font-size:13px;padding:6px 16px;background:var(--seafoam);color:var(--navy);border-color:var(--seafoam);">Compare &rarr;</a>
+</div>
+
 <p id="comm-empty" style="display:none;color:var(--muted);padding:32px 0;">No communities match your search.</p>
 
 <div id="comm-gap-cta" style="margin-top:24px;padding:20px 22px;background:var(--seafoam);border-radius:12px;">
@@ -5235,6 +5246,8 @@ groups, associations, and Slack channels.
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
 .comm-gap-cta-highlight{{box-shadow:0 0 0 2px var(--coral);}}
+.comm-compare-label{{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;}}
+.comm-compare-label input{{cursor:pointer;}}
 </style>
 
 <script>
@@ -5244,6 +5257,8 @@ var activeCommCost = '';
 var commAdvisorOnly = false;
 var COMM_PAGE_SIZE = 10;
 var commCurrentPage = 0;
+var COMPARE_MAX = 3;
+var compareSelected = [];
 
 function commEsc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -5352,6 +5367,8 @@ function renderCommunities(list) {{
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
     var advisorStar = c.advisor ? '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' : '';
+    var compareChecked = compareSelected.indexOf(c.id) !== -1;
+    var compareDisabled = !compareChecked && compareSelected.length >= COMPARE_MAX;
     return '<article class="comm-card' + (c.featured ? ' comm-card-featured' : '') + '" data-comm-id="' + c.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
@@ -5363,7 +5380,13 @@ function renderCommunities(list) {{
       + '<p class="comm-meta">' + metaParts.join(' &middot; ') + '</p>'
       + '<p class="comm-demo">' + commEsc(c.demographic) + '</p>'
       + notesLine
+      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
       + '<div class="comm-cats">' + cats + '</div>'
+      + '<label class="comm-compare-label"' + (compareDisabled ? ' style="opacity:.45;"' : '') + '>'
+      + '<input type="checkbox" class="comm-compare-cb" data-id="' + c.id + '"'
+      + (compareChecked ? ' checked' : '') + (compareDisabled ? ' disabled' : '')
+      + ' onchange="toggleCompareSelect(this)"> Compare</label>'
+      + '</div>'
       + '</article>';
   }}).join('');
 }}
@@ -5435,6 +5458,56 @@ function filterCommCost(btn) {{
 
 function filterCommunities() {{ commCurrentPage = 0; renderCommunities(commFiltered()); }}
 
+function updateCompareBar() {{
+  var bar = document.getElementById('comm-compare-bar');
+  var count = document.getElementById('comm-compare-count');
+  var link = document.getElementById('comm-compare-link');
+  if (compareSelected.length === 0) {{
+    bar.style.display = 'none';
+    return;
+  }}
+  bar.style.display = 'flex';
+  count.textContent = compareSelected.length + ' of ' + COMPARE_MAX + ' selected';
+  link.href = '/tools/communities/compare?ids=' + compareSelected.join(',');
+  if (compareSelected.length < 2) {{
+    link.classList.add('comm-compare-link-disabled');
+    link.style.pointerEvents = 'none';
+    link.style.opacity = '.5';
+  }} else {{
+    link.classList.remove('comm-compare-link-disabled');
+    link.style.pointerEvents = '';
+    link.style.opacity = '';
+  }}
+}}
+
+function toggleCompareSelect(cb) {{
+  var id = parseInt(cb.dataset.id, 10);
+  var msg = document.getElementById('comm-compare-msg');
+  if (cb.checked) {{
+    if (compareSelected.length >= COMPARE_MAX) {{
+      cb.checked = false;
+      return;
+    }}
+    compareSelected.push(id);
+    msg.textContent = '';
+  }} else {{
+    compareSelected = compareSelected.filter(function(x) {{ return x !== id; }});
+    msg.textContent = '';
+  }}
+  updateCompareBar();
+  renderCommunities(commFiltered());
+  if (compareSelected.length >= COMPARE_MAX) {{
+    document.getElementById('comm-compare-msg').textContent = 'You can compare up to ' + COMPARE_MAX + ' communities at once. Remove one to add another.';
+  }}
+}}
+
+function clearCompareSelection() {{
+  compareSelected = [];
+  document.getElementById('comm-compare-msg').textContent = '';
+  updateCompareBar();
+  renderCommunities(commFiltered());
+}}
+
 function goToCommPage(page) {{
   commCurrentPage = page;
   renderCommunities(commFiltered());
@@ -5474,6 +5547,7 @@ _COMMUNITY_PROFILE_PUBLIC_FIELDS = [
     ("Cost vs. value", "cost_value_verdict"),
     ("Application friction", "application_friction"),
     ("Sponsor relationship", "sponsor_relationship_note"),
+    ("Business model", "business_model"),
     ("Notable members", "notable_members"),
     ("Public criticism", "public_criticism"),
 ]
@@ -5727,6 +5801,121 @@ async def tools_communities_submit(request: Request):
     return RedirectResponse("/tools/communities/submit?submitted=1", status_code=303)
 
 
+# Compare view (Phase 6): side-by-side read of the same profile fields shown
+# on /tools/communities/{slug}, for 2-3 communities picked via checkboxes on
+# the directory. ids is a plain comma-separated query param (no session
+# state server-side — the selection itself lives only in the directory
+# page's JS) so a compare URL is copy/paste-able and bookmarkable. Registered
+# before /tools/communities/{slug} below so "compare" isn't swallowed as a
+# slug (same reasoning as /tools/communities/gap and /submit above).
+@app.get("/tools/communities/compare", response_class=HTMLResponse)
+def tools_communities_compare(request: Request, ids: str = ""):
+    id_list: list[int] = []
+    for part in ids.split(","):
+        part = part.strip()
+        if part.isdigit() and int(part) not in id_list:
+            id_list.append(int(part))
+    id_list = id_list[:3]
+
+    lib = _lib()
+    try:
+        communities = []
+        for cid in id_list:
+            c = lib.get_community(cid)
+            if c and c.get("approved"):
+                communities.append(c)
+        profiles = {c["id"]: (lib.get_community_profile(c["id"]) or {}) for c in communities}
+    finally:
+        lib.close()
+
+    back_link = '<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>'
+
+    if len(communities) < 2:
+        body = f"""<div class="page">
+{back_link}
+<h1 style="margin:0;">Compare communities</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Pick at least two communities from the directory
+to compare them side by side. Check the box on any card, then use the compare bar at the bottom of the page.</p>
+<a href="/tools/communities" class="btn btn-ghost">Back to Communities</a>
+</div>"""
+        return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+    def _cell(text: str) -> str:
+        text = (text or "").strip()
+        if not text:
+            return '<td class="cc-cell cc-empty">Not available yet</td>'
+        return f'<td class="cc-cell">{_esc(text)}</td>'
+
+    header_cells = "".join(
+        f'''<th class="cc-cell">
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
+    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if c.get('featured') else ''}
+    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' if c.get('advisor') else ''}
+  </div>
+  <a href="/tools/communities/{_esc(c['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(c['name'])}</a>
+  <span class="comm-cost" style="display:inline-block;margin-top:6px;">{_esc(c['cost_band'])}</span>
+</th>'''
+        for c in communities
+    )
+
+    def _row(label: str, values: list[str]) -> str:
+        if not any((v or "").strip() for v in values):
+            return ""
+        return f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>' + "".join(_cell(v) for v in values) + "</tr>"
+
+    directory_rows = (
+        _row("Region", [_community_geo_line(c) for c in communities])
+        + _row("Access", [c.get("access", "") for c in communities])
+        + _row("Sponsor", [
+            (c["sponsorship_type"] + (f" ({c['sponsor_name']})" if c.get("sponsor_name") else ""))
+            if c.get("sponsorship_type") else ""
+            for c in communities
+        ])
+        + _row("Cost detail", [c.get("cost_note", "") for c in communities])
+    )
+
+    profile_rows = "".join(
+        _row(label, [profiles.get(c["id"], {}).get(key, "") for c in communities])
+        for label, key in _COMMUNITY_PROFILE_PUBLIC_FIELDS
+    )
+    founded_row = _row("Founded", [
+        str(profiles.get(c["id"], {}).get("founded_year") or "") for c in communities
+    ])
+
+    body = f"""<div class="page page-wide">
+{back_link}
+<h1 style="margin:0;">Compare communities</h1>
+<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Side by side, the same fields you'd see on each
+community's own profile page.</p>
+
+<div style="overflow-x:auto;">
+<table class="cc-table">
+<thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
+<tbody>
+{directory_rows}
+{profile_rows}
+{founded_row}
+</tbody>
+</table>
+</div>
+</div>
+
+<style>
+.cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
+.cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
+  color:#3a352e;line-height:1.55;min-width:200px;}}
+.cc-label{{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
+  min-width:140px;white-space:nowrap;background:var(--bg);}}
+.cc-empty{{color:var(--muted);font-style:italic;}}
+thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
+.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
+.comm-name:hover{{color:var(--navy);}}
+.comm-star{{font-size:14px;color:#b8860b;}}
+.comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
+</style>"""
+    return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
 @app.get("/tools/communities/{slug}", response_class=HTMLResponse)
 def tools_community_profile(request: Request, slug: str):
     session_id = _visitor_session_id(request)
@@ -5866,13 +6055,13 @@ async function generateDescription(name, url, descId, statusId) {
 }
 """
 
-# The Community Profile draft has 12 fields rather than one description
+# The Community Profile draft has 13 fields rather than one description
 # string, so it can't reuse generateDescription's single-field contract above
 # — same fetch/status pattern, but fills every "cp-<field>" input by id and
 # feeds back whatever's already on the form as context for a regenerate.
 _COMMUNITY_PROFILE_FIELD_IDS = [
     "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
-    "sponsor_relationship_note", "application_friction", "cost_value_verdict",
+    "sponsor_relationship_note", "business_model", "application_friction", "cost_value_verdict",
     "notable_members", "founded_year", "public_criticism", "verdict_summary",
 ]
 _GENERATE_PROFILE_JS = """
@@ -6853,6 +7042,7 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
 {_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual')}
 {_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards')}
 {_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.")}
+{_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.")}
 {_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label')}
 {_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting')}
 {_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.')}
@@ -7311,6 +7501,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             format_reality=(form.get("format_reality") or "").strip(),
             engagement_level=(form.get("engagement_level") or "").strip(),
             sponsor_relationship_note=(form.get("sponsor_relationship_note") or "").strip(),
+            business_model=(form.get("business_model") or "").strip(),
             application_friction=(form.get("application_friction") or "").strip(),
             cost_value_verdict=(form.get("cost_value_verdict") or "").strip(),
             notable_members=(form.get("notable_members") or "").strip(),
@@ -7362,6 +7553,7 @@ async def admin_communities_generate_profile(request: Request):
         "format_reality": draft.format_reality,
         "engagement_level": draft.engagement_level,
         "sponsor_relationship_note": draft.sponsor_relationship_note,
+        "business_model": draft.business_model,
         "application_friction": draft.application_friction,
         "cost_value_verdict": draft.cost_value_verdict,
         "notable_members": draft.notable_members,

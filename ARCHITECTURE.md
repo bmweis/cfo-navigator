@@ -123,7 +123,7 @@ Cost figures are computed from **real API token usage** at call time
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
 | `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content`, plus `advisor` (a direct `UPDATE`, mirroring `tools.advisor` exactly — see below) — the identical name+description+advisor contract as `tools`. Every other field (`region`, `reach`, `metros_json`, `featured`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `reach` (`Regional`\|`National`\|`Global` — a community's overall footprint), `metros_json` (JSON array from a controlled city/area vocabulary — where it has a chapter, hub, or local focus; independent of `reach`, so a National community like FEI can still carry metros), `region` (legacy free-text note, superseded by `reach`/`metros_json` — kept for any detail those two fields don't capture, no longer read by the region filter), `featured` (pin-to-top + coral badge, same pattern as `tools.promoted`; independent of `reach`/`metros_json`/`advisor`), `advisor` (⭐ marker + "Advisor" filter chip, same pattern as `tools.advisor` — discloses a personal relationship, e.g. The F Suite; independent of `featured`), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
 | `community_categories` | Controlled vocabulary of filter pills for `/tools/communities`, same shape and same reasoning as `tool_categories`. | `name` (unique), `sort_order` |
-| `community_profiles` | Deep, opinionated read per community (Community Profiles, Phase 2) — the qualitative judgment a directory row's cost/access/region fields can't carry, edited at `/admin/tools/communities/{id}/profile`. 1:1 with `communities` via `community_id` as the primary key (no SQL-level `REFERENCES`, same as `article_embeddings.article_id` — this codebase does cleanup on delete in application code, not via a declared FK; see `delete_community`). Empty/thin until Research content backfills it or an admin generates a draft. Rendered publicly at `/tools/communities/{slug}` (Phase 3) — a community with no profile row, or one whose fields are all empty, falls back to a minimal page built from the `communities` row alone rather than an error or empty-looking layout. | `community_id` (PK), `sponsor_relationship_note` (qualitative — value-add or sales funnel? — distinct from the factual `sponsor_name`/`sponsorship_type` on `communities`), `application_friction` (the real barrier to entry, not just the `access` label), `founded_year` (nullable), `notable_members`/`public_criticism` (nullable — only when verifiably public/reported), `low_confidence` |
+| `community_profiles` | Deep, opinionated read per community (Community Profiles, Phase 2) — the qualitative judgment a directory row's cost/access/region fields can't carry, edited at `/admin/tools/communities/{id}/profile`. 1:1 with `communities` via `community_id` as the primary key (no SQL-level `REFERENCES`, same as `article_embeddings.article_id` — this codebase does cleanup on delete in application code, not via a declared FK; see `delete_community`). Empty/thin until Research content backfills it or an admin generates a draft. Rendered publicly at `/tools/communities/{slug}` (Phase 3) and side by side at `/tools/communities/compare` (Phase 6) — a community with no profile row, or one whose fields are all empty, falls back to a minimal page (or, on Compare, a "Not available yet" cell) rather than an error or empty-looking layout. | `community_id` (PK), `sponsor_relationship_note` (qualitative — value-add or sales funnel? — distinct from the factual `sponsor_name`/`sponsorship_type` on `communities`), `business_model` (added post-launch — how the community structurally sustains itself, e.g. a gated dues-funded peer group vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships; distinct from `sponsor_relationship_note`, which judges whether a *sponsor's* presence feels salesy, not how the community itself makes money), `application_friction` (the real barrier to entry, not just the `access` label), `founded_year` (nullable), `notable_members`/`public_criticism` (nullable — only when verifiably public/reported), `low_confidence` |
 | `community_gap_submissions` | Gap-collection (Phase 5): the native replacement for the old `/community` page's Google Form, folded into the live directory rather than a separate parked page. Submitted at `POST /tools/communities/gap`, triaged at `/admin/community-gaps` (mirrors `/admin/ask-feedback`'s layout). No login required — anyone can submit. | `current_communities`/`gaps`/`looking_for` (free text, the visitor's own words), `search_context_json` (directory search/filter state at submission time, built client-side from JS-only filter state and carried through a hidden form field), `viewed_community_ids_json` (server-computed at submission from `community_profile_views`, not client-supplied), `closest_community_id` (nullable, no FK), `email` (nullable), `reviewed` |
 | `community_profile_views` | Session-scoped, no-login view tracking for `/tools/communities/{slug}`: which profile pages a visitor opened before (maybe) submitting the gap form above. Keyed by an anonymous `cfo_visitor` cookie (`webapp/app.py`, 30-day TTL, not signed — the first anonymous-session primitive in the codebase; everything else, e.g. `read_later`, requires a logged-in `user_id`). No cleanup job for stale sessions yet — rows are small and carry no PII. | `session_id` + `community_id` (composite PK, dedups repeat views), `viewed_at` |
 
@@ -142,7 +142,7 @@ enrichment (`article_id=NULL`) — overhead, not a user-facing budget.
 `POST /admin/tools/communities/generate-profile` (admin-only) mirrors that
 exact contract for `community_profiles`, sized up for a much larger field
 count: one Claude call (`linklib/enrich.py::generate_community_profile`)
-drafts all twelve qualitative fields as structured JSON from a community's
+drafts all thirteen qualitative fields as structured JSON from a community's
 name + URL (plus whatever's already on the edit form, fed back as context so
 a regenerate refines rather than starts over), grounded in the same
 `linklib/extract.py` page fetch, with the same `low_confidence` rule and the
@@ -186,6 +186,26 @@ recomputes `viewed_community_ids_json` server-side from
 at `/admin/community-gaps`, and unreviewed submissions feed the shared admin
 badge system (`webapp/tasks.py::open_task_counts`) the same way pending tool
 submissions and unread contacts do.
+
+**Community compare** (Phase 6). `GET /tools/communities/compare?ids=<id>,<id>,<id>`
+renders 2-3 selected communities side by side, reusing the same directory-card
+fields (region/access/sponsor/cost) and `_COMMUNITY_PROFILE_PUBLIC_FIELDS`
+profile fields as the single profile page. `ids` is a plain comma-separated
+query param — deduped and capped at 3 server-side, with unapproved/unknown
+ids silently dropped — and carries no session or server-side selection state,
+so a compare URL is copy/paste-able and bookmarkable on its own. The
+selection itself lives only in the directory page's JS (`compareSelected`, a
+capped array persisted across re-renders as the visitor filters/paginates);
+a sticky compare bar surfaces the count and the link once 1+ communities are
+checked, and disables further checkboxes with an inline message (not a
+browser alert) once the cap of 3 is reached. Rows in the comparison table are
+per-field: a row renders only if at least one selected community has content
+for that field, and any still-empty cell in a rendered row shows "Not
+available yet" rather than leaving a blank or erroring — the same
+degrade-gracefully contract as a thin/profile-less community on the single
+profile page, just applied per cell instead of to a whole page. Registered
+before `/tools/communities/{slug}` so "compare" isn't swallowed as a slug,
+same reasoning as `/gap` and `/submit`.
 
 ### Site operations
 
