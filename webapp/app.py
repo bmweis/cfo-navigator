@@ -43,7 +43,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -5160,6 +5160,7 @@ def tools_communities(request: Request):
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
 groups, associations, and Slack channels.
+<a href="/tools/communities/find" style="margin-left:12px;font-size:14px;font-weight:500;">Not sure where to start? Take the quiz &rarr;</a>
 {'<a href="/tools/communities/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Suggest a community</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to suggest a community</a>'}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
@@ -5553,6 +5554,120 @@ _COMMUNITY_PROFILE_PUBLIC_FIELDS = [
 ]
 
 
+# Recommender (Phase 7): a 4-question quiz at /tools/communities/find that
+# routes to a filtered subset of the directory. Each answer maps onto one of
+# the directory's existing filterable dimensions (community_categories,
+# cost_band, the access bucket already computed client-side by
+# accessBucket() in JS) rather than a parallel scoring system — see
+# _recommender_filter below, a Python port of the directory's commFiltered()
+# semantics (categories OR-matched against each other, every dimension
+# AND-matched against the others). This is filtering, not ranking: results
+# come back in the same featured-first/alphabetical order as the directory,
+# with no per-community fit score. A true ranked score would need a metric
+# per community per dimension that the schema doesn't carry today (e.g. a
+# per-category relevance weight) — flagged as a possible follow-up rather
+# than built here, since the 4 quiz answers already narrow to a short,
+# usable list in practice.
+#
+# (value, label, category|None, cost_band|None, access_bucket|None) — a
+# "none of the above"/"no preference" option always has category=cost_band=
+# access_bucket=None, contributing no filter.
+_RECOMMENDER_QUESTIONS = [
+    {
+        "key": "role",
+        "label": "What best describes your role?",
+        "options": [
+            ("cfo", "CFO or VP Finance at a venture-backed or high-growth company", "CFO-specific invite-only", None, None),
+            ("fractional", "Fractional or part-time CFO building my own practice", "Fractional CFO", None, None),
+            ("controller", "Controller or accounting team leader", "Controller/accounting", None, None),
+            ("treasury", "Treasury or cash management focus", "Treasury", None, None),
+        ],
+    },
+    {
+        "key": "budget",
+        "label": "What's your budget for dues?",
+        "options": [
+            ("free", "Free only", None, "Free", None),
+            ("under1k", "Up to $1,000/year", None, "<$1k/yr", None),
+            ("under2500", "Up to $2,500/year", None, "<$2,500/yr", None),
+            ("any", "Budget isn't the deciding factor", None, None, None),
+        ],
+    },
+    {
+        "key": "access",
+        "label": "What kind of access are you looking for?",
+        "options": [
+            ("invite", "A tight, vetted peer group", None, None, "Invite-only"),
+            ("open", "Open, low friction to join", None, None, "Open"),
+            ("application", "A structured application process is fine", None, None, "Application"),
+            ("any", "No preference", None, None, None),
+        ],
+    },
+    {
+        "key": "focus",
+        "label": "Anything more specific you're looking for?",
+        "options": [
+            ("none", "Nothing specific", None, None, None),
+            ("dei", "Women- or DEI-focused", "Women/DEI", None, None),
+            ("industry", "Industry-specific (healthcare, nonprofit, life sciences, tech...)", "Industry-specific", None, None),
+            ("broad", "A broad association open to many finance titles, not just CFOs", "Broad paid association", None, None),
+        ],
+    },
+]
+
+
+def _recommender_option_map() -> dict[str, dict[str, tuple]]:
+    """{question_key: {answer_value: (label, category, cost_band, access_bucket)}}."""
+    return {
+        q["key"]: {opt[0]: opt[1:] for opt in q["options"]}
+        for q in _RECOMMENDER_QUESTIONS
+    }
+
+
+def _recommender_access_bucket(access: str) -> str:
+    """Python port of the directory's accessBucket() JS helper."""
+    a = access or ""
+    if a.startswith("Invite"):
+        return "Invite-only"
+    if "Application" in a or "Qualification" in a:
+        return "Application"
+    if a.startswith("Open"):
+        return "Open"
+    return "Other"
+
+
+def _recommender_filter(communities: list[dict], answers: dict[str, str]) -> list[dict]:
+    """Filters the directory by the quiz answers, using the same AND-across-
+    dimensions / OR-within-categories semantics as commFiltered() in JS."""
+    opt_map = _recommender_option_map()
+    categories: set[str] = set()
+    cost_band = None
+    access_bucket = None
+    for key, value in answers.items():
+        opt = opt_map.get(key, {}).get(value)
+        if not opt:
+            continue
+        label, cat, cb, ab = opt
+        if cat:
+            categories.add(cat)
+        if cb:
+            cost_band = cb
+        if ab:
+            access_bucket = ab
+
+    out = []
+    for c in communities:
+        if cost_band and c.get("cost_band") != cost_band:
+            continue
+        if access_bucket and _recommender_access_bucket(c.get("access", "")) != access_bucket:
+            continue
+        if categories and not (set(c.get("categories") or []) & categories):
+            continue
+        out.append(c)
+    out.sort(key=lambda c: (0 if c.get("featured") else 1, c["name"].lower()))
+    return out
+
+
 # Native gap-collection form (Phase 5): replaces the old /community
 # waitlist page's Google Form, folded into the live directory. Reachable
 # three ways: the CTA card at the bottom of /tools/communities (search
@@ -5914,6 +6029,172 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
 </style>"""
     return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+# Recommender (Phase 7): a short quiz that routes to a filtered subset of
+# the directory (_recommender_filter, defined above near the question data).
+# GET renders the form; POST logs the completed quiz (every completion, zero
+# or thin results included — the same kind of gap signal as a zero-result
+# directory search, see community_gap_submissions.submission_type) and
+# redirects to a plain, bookmarkable GET results page so a refresh or a
+# shared link never re-logs. Registered before /tools/communities/{slug} so
+# "find" isn't swallowed as a slug, same reasoning as /gap, /submit, and
+# /compare above.
+@app.get("/tools/communities/find", response_class=HTMLResponse)
+def tools_communities_find(request: Request):
+    fieldsets = "".join(
+        f'''<fieldset style="border:none;padding:0;margin:0 0 24px;">
+  <legend style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:10px;padding:0;">{_esc(q["label"])}</legend>
+  <div style="display:flex;flex-direction:column;gap:8px;">
+    {"".join(
+        f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#3a352e;cursor:pointer;">'
+        f'<input type="radio" name="{q["key"]}" value="{_esc(val)}" required> {_esc(opt_label)}</label>'
+        for val, opt_label, *_rest in q["options"]
+    )}
+  </div>
+</fieldset>'''
+        for q in _RECOMMENDER_QUESTIONS
+    )
+    body = f"""<div class="page page-narrow">
+<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
+<h1 style="margin:0;">Find your community</h1>
+<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Four quick questions, then we'll point you to the
+communities in the directory that fit.</p>
+<form method="post" action="/tools/communities/find">
+{fieldsets}
+<button type="submit" class="btn">Get recommendations</button>
+</form>
+</div>"""
+    return HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.post("/tools/communities/find")
+async def tools_communities_find_submit(request: Request):
+    form = await request.form()
+    session_id = request.cookies.get(VISITOR_COOKIE_NAME) or ""
+    answers = {}
+    for q in _RECOMMENDER_QUESTIONS:
+        val = (form.get(q["key"]) or "").strip()
+        if val:
+            answers[q["key"]] = val
+
+    opt_map = _recommender_option_map()
+    lib = _lib()
+    try:
+        communities = lib.list_communities(approved_only=True)
+        results = _recommender_filter(communities, answers)
+        context = {"quiz": True, "result_count": len(results)}
+        for key, value in answers.items():
+            opt = opt_map.get(key, {}).get(value)
+            context[key] = opt[0] if opt else value
+        viewed_ids = lib.get_viewed_community_ids(session_id) if session_id else []
+        lib.add_community_gap_submission(
+            search_context_json=json.dumps(context),
+            viewed_community_ids_json=json.dumps(viewed_ids),
+            submission_type="recommender",
+        )
+    finally:
+        lib.close()
+
+    return RedirectResponse(f"/tools/communities/find/results?{urlencode(answers)}", status_code=303)
+
+
+def _recommender_result_card(c: dict) -> str:
+    """Non-interactive read of a directory card for the results page — same
+    fields as the /tools/communities grid, minus the compare checkbox (this
+    page has no client-side filter/pagination state to persist a selection
+    across)."""
+    cats = "".join(f'<span class="comm-cat">{_esc(x)}</span>' for x in c.get("categories") or [])
+    meta_parts = [_community_geo_line(c)]
+    if c.get("access"):
+        meta_parts.append(c["access"])
+    if c.get("sponsorship_type"):
+        sp = c["sponsorship_type"]
+        if c.get("sponsor_name"):
+            sp += f" ({c['sponsor_name']})"
+        meta_parts.append(sp)
+    meta_line = " &middot; ".join(_esc(p) for p in meta_parts)
+    notes_line = ""
+    if c.get("notes") or c.get("cost_note"):
+        notes_line = f'<p class="comm-notes">{_esc(" ".join(filter(None, [c.get("notes"), c.get("cost_note")])))}</p>'
+    featured_badge = (
+        '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
+        'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
+        if c.get("featured") else ""
+    )
+    advisor_star = (
+        '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>'
+        if c.get("advisor") else ""
+    )
+    return f"""<article class="comm-card{' comm-card-featured' if c.get('featured') else ''}">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">
+    <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
+      {featured_badge}{advisor_star}
+      <a class="comm-name" href="/tools/communities/{_esc(c['slug'])}" target="_blank" rel="noopener">{_esc(c['name'])}</a>
+    </div>
+    <span class="comm-cost">{_esc(c['cost_band'])}</span>
+  </div>
+  <p class="comm-meta">{meta_line}</p>
+  <p class="comm-demo">{_esc(c['demographic'])}</p>
+  {notes_line}
+  <div class="comm-cats">{cats}</div>
+</article>"""
+
+
+@app.get("/tools/communities/find/results", response_class=HTMLResponse)
+def tools_communities_find_results(request: Request, role: str = "", budget: str = "",
+                                   access: str = "", focus: str = ""):
+    answers = {k: v for k, v in {"role": role, "budget": budget, "access": access, "focus": focus}.items() if v}
+    lib = _lib()
+    try:
+        communities = lib.list_communities(approved_only=True)
+    finally:
+        lib.close()
+    results = _recommender_filter(communities, answers)
+
+    back_link = '<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>'
+    retake_link = '<a href="/tools/communities/find" style="font-size:13px;color:var(--muted);">Retake the quiz</a>'
+
+    if not results:
+        body = f"""<div class="page">
+{back_link}
+<h1 style="margin:0;">Find your community</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Nothing in the directory matched all four answers.
+That's useful to know&mdash;we've noted it as a gap.</p>
+<div style="padding:20px 22px;background:var(--seafoam);border-radius:12px;margin-bottom:20px;">
+  <p style="margin:0 0 8px;font-weight:600;color:var(--navy);">Want to tell us more about what you're looking for?</p>
+  <a href="/tools/communities/gap" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;">Tell us more &rarr;</a>
+</div>
+<p>{retake_link} &middot; <a href="/tools/communities" style="font-size:13px;color:var(--muted);">Browse the full directory &rarr;</a></p>
+</div>"""
+        return HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+    cards = "".join(_recommender_result_card(c) for c in results)
+    body = f"""<div class="page page-wide">
+{back_link}
+<h1 style="margin:0;">Find your community</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Based on your answers, here's what fits: {len(results)}
+communit{'y' if len(results) == 1 else 'ies'}.</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;margin-bottom:24px;">
+  {cards}
+</div>
+<p>{retake_link} &middot; <a href="/tools/communities" style="font-size:13px;color:var(--muted);">Browse the full directory &rarr;</a></p>
+</div>
+
+<style>
+.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
+.comm-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
+.comm-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
+.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
+.comm-name:hover{{color:var(--navy);}}
+.comm-meta{{font-size:13px;color:var(--muted);margin:0 0 8px;line-height:1.5;}}
+.comm-demo{{font-size:14px;color:#3a352e;margin:0 0 10px;line-height:1.5;}}
+.comm-notes{{font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5;}}
+.comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
+.comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
+.comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
+</style>"""
+    return HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
 @app.get("/tools/communities/{slug}", response_class=HTMLResponse)
@@ -12137,6 +12418,19 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
         if not ctx:
             return ""
         bits = []
+        if ctx.get("quiz"):
+            # Recommender submission (Phase 7) — search_context_json carries
+            # the quiz answers + result count instead of directory filters.
+            if ctx.get("role"):
+                bits.append(f'role: {ctx["role"]}')
+            if ctx.get("budget"):
+                bits.append(f'budget: {ctx["budget"]}')
+            if ctx.get("access"):
+                bits.append(f'access: {ctx["access"]}')
+            if ctx.get("focus"):
+                bits.append(f'focus: {ctx["focus"]}')
+            bits.append(f'{ctx.get("result_count", 0)} result{"s" if ctx.get("result_count", 0) != 1 else ""}')
+            return " &middot; ".join(_esc(b) for b in bits)
         if ctx.get("q"):
             bits.append(f'search "{ctx["q"]}"')
         if ctx.get("region"):
@@ -12172,24 +12466,36 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
             if is_reviewed else
             '<span style="font-size:12px;font-weight:700;color:var(--alert);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">New</span>'
         )
+        is_recommender = r.get("submission_type") == "recommender"
+        type_badge = (
+            '<span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:999px;padding:3px 12px;white-space:nowrap;">Recommender quiz</span>'
+            if is_recommender else ""
+        )
         try:
             viewed_ids = json.loads(r.get("viewed_community_ids_json") or "[]")
         except (TypeError, ValueError):
             viewed_ids = []
-        meta_bits = [f'closest match: {_esc(r["closest_community_name"])}' if r.get("closest_community_name") else "closest match: none given"]
+        meta_bits = [] if is_recommender else [
+            f'closest match: {_esc(r["closest_community_name"])}' if r.get("closest_community_name") else "closest match: none given"
+        ]
         ctx_line = _search_context_line(r)
         if ctx_line:
             meta_bits.append(ctx_line)
         meta_bits.append(f"{len(viewed_ids)} profile{'s' if len(viewed_ids) != 1 else ''} viewed this session")
+        no_text_fallback = (
+            '<p style="font-size:13.5px;color:var(--muted);margin:10px 0 0;">Recommender quiz completion, no free text. See the criteria above.</p>'
+            if is_recommender else
+            '<p style="font-size:13.5px;color:var(--muted);margin:10px 0 0;">No written response, just a closest-match pick.</p>'
+        )
         text_blocks = "".join([
             _text_block("What communities are you already in", r.get("current_communities") or ""),
             _text_block("What existing communities missed", r.get("gaps") or ""),
             _text_block("What they haven't found yet", r.get("looking_for") or ""),
-        ]) or '<p style="font-size:13.5px;color:var(--muted);margin:10px 0 0;">No written response, just a closest-match pick.</p>'
+        ]) or no_text_fallback
         back_qs = f"?reviewed={reviewed}" if reviewed else ""
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-    {badge}
+    {badge}{type_badge}
     <span style="font-size:12.5px;color:var(--muted);">{_esc((r["created_at"] or "")[:10])}{' &middot; ' + _esc(r["email"]) if r.get("email") else ''}</span>
     <form method="post" action="/admin/community-gaps/{r['id']}/toggle-reviewed{back_qs}" style="margin-left:auto;">
       <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">{"Mark unreviewed" if is_reviewed else "Mark reviewed"}</button>
