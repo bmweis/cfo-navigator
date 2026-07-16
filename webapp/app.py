@@ -1163,6 +1163,15 @@ def homepage(request: Request):
                'leader should have in their back pocket? <a href="/library/submit">Suggest a piece for '
                'the archive &rarr;</a></p>') if _is_member(request) else ''
 
+    # Same member-gated pattern as the "suggest a piece" line above, but with
+    # more visual weight (bolded) since it's pointing at the newer Communities
+    # gap-collection CTA rather than the archive.
+    community_gap_teaser = (
+        '<p style="margin:14px 0 0;font-size:14px;color:var(--muted);"><strong style="color:var(--ink);">'
+        'Think finance communities could be better?</strong> <a href="/tools/communities/gap">Tell us where '
+        'they fall short &rarr;</a></p>'
+    ) if _is_member(request) else ''
+
     body = f"""<div class="page">
 <div style="max-width:680px;">
   <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO for CFOs</div>
@@ -1183,6 +1192,7 @@ def homepage(request: Request):
 {_fpa_buddy_announcement("16px 0 0")}
 
 {suggest}
+{community_gap_teaser}
 
 <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
   <a href="/contact" class="btn">Get in Touch</a>
