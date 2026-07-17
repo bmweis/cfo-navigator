@@ -298,6 +298,18 @@ docs honest, **in the same PR as the change** (never a follow-up):
    `/admin/voice*` route or changes what's editable there must update §9 by
    hand** in the same PR, the same way ARCHITECTURE.md gets updated for other
    route changes.
+4. **The Communities feature reference** — a collapsible "How this works"
+   block at the top of `/admin/tools/communities` (`_COMMUNITIES_REFERENCE_HTML`
+   in `webapp/app.py`) documents every user-facing prompt/CTA/copy block
+   across the Communities feature plus how the `cfo_visitor` anonymous
+   tracking mechanism works. It's static reference content, not a DB-backed
+   editable field, same reasoning as why BRAND.md §9 stays hand-edited prose.
+   **Any PR that changes Communities-feature copy** (new CTA wording, new
+   form states) **or tracking mechanics** (new cookie fields, new tables,
+   retention changes) **must update this block in the same PR** — this is
+   the same discipline as rules 1-3 above, so a forgotten prompt or a
+   drifted tracking description doesn't become the next thing this rule set
+   has to fix retroactively.
 
 ## Voice — em dash policy
 

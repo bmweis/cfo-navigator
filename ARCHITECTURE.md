@@ -187,6 +187,15 @@ at `/admin/community-gaps`, and unreviewed submissions feed the shared admin
 badge system (`webapp/tasks.py::open_task_counts`) the same way pending tool
 submissions and unread contacts do.
 
+**Feature reference.** A collapsible "How this works" block at the top of
+`/admin/tools/communities` (`_COMMUNITIES_REFERENCE_HTML` in `webapp/app.py`)
+is the durable, in-admin record of every user-facing prompt/CTA across the
+feature and how the `cfo_visitor` anonymous-tracking mechanism works —
+static reference content, not a DB-backed editable field, since it documents
+what the code does rather than something Brian tunes. Any PR that changes
+Communities-feature copy or tracking mechanics must update it in the same
+PR (see the Documentation rules in `CLAUDE.md`).
+
 **Community compare** (Phase 6). `GET /tools/communities/compare?ids=<id>,<id>,<id>`
 renders 2-3 selected communities side by side, reusing the same directory-card
 fields (region/access/sponsor/cost) and `_COMMUNITY_PROFILE_PUBLIC_FIELDS`
