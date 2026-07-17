@@ -7353,6 +7353,101 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
   </div>"""
 
 
+# Reference content for the "How this works" block on /admin/tools/communities
+# (added after Brian noticed the Communities feature's prompts/CTAs and its
+# anonymous-tracking mechanism were scattered across build history with no
+# durable, in-app record). Static — this documents what the code does rather
+# than an editable setting, so unlike /admin/voice it's plain HTML, not
+# DB-backed. See the "Documentation" section of CLAUDE.md for the update rule:
+# any PR that changes Communities-feature copy or tracking mechanics must
+# update this block in the same PR.
+_COMMUNITIES_REFERENCE_HTML = """
+<div style="display:grid;gap:20px;">
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Zero-result state:</strong> &ldquo;No communities match your search. Tell us what you're looking for below.&rdquo; &mdash; auto-highlights the gap-collection CTA card.</li>
+<li><strong>Gap-collection CTA card</strong> (bottom of page, always visible): &ldquo;Think finance communities could be better?&rdquo; / &ldquo;Tell us where they fall short: what you haven't found, or what an existing community missed.&rdquo; &rarr; button &ldquo;Tell us where they fall short &rarr;&rdquo;.</li>
+<li><strong>Advisor legend:</strong> &ldquo;&#9733; Formal advisor to these communities.&rdquo;</li>
+<li><strong>Suggest-a-community links</strong> (top of page and footer): &ldquo;+ Suggest a community&rdquo; / &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to suggest a community&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
+<li><strong>Recommender link:</strong> &ldquo;Not sure where to start? Take the quiz &rarr;&rdquo;.</li>
+</ul>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Profile pages (/tools/communities/&lt;slug&gt;)</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Per-profile mini-CTA:</strong> &ldquo;Not quite the right fit? Tell us why &rarr;&rdquo; &mdash; links to the gap form pre-filled with <code>closest_community_id</code>; the &ldquo;Re: [Name] wasn't quite the right fit&hellip;&rdquo; line itself renders on the gap form, not here (see below).</li>
+<li><strong>Empty-profile fallback:</strong> when a community has no <code>community_profiles</code> row, only the directory-card fields render (name, cost, region, access, sponsor, &ldquo;Visit website&rdquo; button) &mdash; no verdict/deep-profile sections.</li>
+<li><strong>Suggest-a-correction:</strong> not built. Scoped as a future public, low-friction, free-text mechanism for factual accuracy (&ldquo;this specific field is wrong&rdquo;), distinct from the gap form's fit-feedback purpose &mdash; would land in a review queue, never auto-apply.</li>
+</ul>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Gap form (/tools/communities/gap)</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Always-shown heading:</strong> &ldquo;Tell us where communities fall short&rdquo; / &ldquo;Every field here is optional. We just want to know what's missing from the finance community landscape, so this directory (and maybe a future community) can actually close the gap.&rdquo;</li>
+<li><strong>Transparency note</strong> (seafoam box), built from whatever session state is detected:
+  <ul style="margin:4px 0 0;padding-left:18px;">
+    <li><em>Zero-result search:</em> &ldquo;That search came up empty. You were {search summary}. [You also {viewed profiles} before landing here.] Tell us what you were hoping to find instead, so we don't have to ask you to repeat it below.&rdquo;</li>
+    <li><em>Non-zero search and/or viewed profiles:</em> &ldquo;We noticed you {were {search summary} on the directory} and/or {viewed profiles} before landing here. We'll use that context, so feel free to skip repeating it below.&rdquo;</li>
+    <li><em>No session detected:</em> no note block at all &mdash; only the always-shown heading.</li>
+  </ul>
+</li>
+<li><strong>Per-profile-only intro</strong> (renders independently of, and alongside, the note block above when arrived via a profile's mini-CTA): &ldquo;Re: <strong>[Community Name]</strong> wasn't quite the right fit. What would have made it work, or what else should we know?&rdquo;</li>
+<li><strong>Success/confirmation page:</strong> &ldquo;Thanks, that's genuinely useful.&rdquo; / &ldquo;I read every one of these. If you left an email and there's something worth following up on, I'll be in touch.&rdquo;</li>
+</ul>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Suggest-a-community (/tools/communities/submit)</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Member-gated</strong> (redirects to <code>/login</code> if signed out) &mdash; not a public form. Three required fields: community name, URL, submitter email.</li>
+<li>Confirmation email via <code>COMMUNITY_SUBMISSION_*</code> templates, admin-editable at <a href="/admin/emails">/admin/emails</a>, plus an internal notification email to Brian on each submission.</li>
+</ul>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Compare view (/tools/communities/compare)</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Fewer than 2 selected:</strong> &ldquo;Pick at least two communities from the directory to compare them side by side. Check the box on any card, then use the compare bar at the bottom of the page.&rdquo;</li>
+<li><strong>Cap-reached message</strong> (max 3 communities, shown inline in the sticky compare bar when a 4th selection is attempted): &ldquo;You can compare up to 3 communities at once. Remove one to add another.&rdquo;</li>
+</ul>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Recommender (/tools/communities/find)</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Heading:</strong> &ldquo;Find your community&rdquo; / &ldquo;Four quick questions, then we'll point you to the communities in the directory that fit.&rdquo; Submit button: &ldquo;Get recommendations&rdquo;.</li>
+<li><strong>Four questions:</strong> role (&ldquo;What best describes your role?&rdquo;), budget (&ldquo;What's your budget for dues?&rdquo;), access (&ldquo;What kind of access are you looking for?&rdquo;), and a catch-all (&ldquo;Anything more specific you're looking for?&rdquo;) &mdash; each option maps onto an existing directory filter (category, cost band, or access bucket) rather than a parallel scoring system.</li>
+<li><strong>Zero-result results page:</strong> &ldquo;Nothing in the directory matched all four answers. That's useful to know&mdash;we've noted it as a gap.&rdquo; with a CTA box (&ldquo;Want to tell us more about what you're looking for?&rdquo; / &ldquo;Tell us more &rarr;&rdquo;) linking to the gap form.</li>
+<li><strong>Results found:</strong> &ldquo;Based on your answers, here's what fits: N communit(y/ies).&rdquo; plus &ldquo;Retake the quiz&rdquo; and &ldquo;Browse the full directory &rarr;&rdquo; links.</li>
+<li>Every completed quiz is logged &mdash; including a zero/thin result &mdash; as a <code>community_gap_submissions</code> row with <code>submission_type='recommender'</code>, the same gap signal as a zero-result directory search.</li>
+</ul>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Homepage</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Member-gated teaser</strong> (shown only when signed in &mdash; not visible to public visitors): &ldquo;<strong>Think finance communities could be better?</strong> Tell us where they fall short &rarr;&rdquo;.</li>
+</ul>
+</section>
+
+<section style="padding-top:6px;border-top:1px solid var(--line);">
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:14px 0 8px;">How the anonymous tracking works</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong><code>cfo_visitor</code> cookie:</strong> unsigned, <code>httponly</code>, <code>samesite=lax</code>, 30-day TTL, value is <code>secrets.token_urlsafe(16)</code> &mdash; a random token with no IP, user agent, or fingerprint embedded. Set only once per visitor (never re-set on an existing cookie), so it never resets its own TTL on every page view.</li>
+<li><strong><code>community_profile_views</code> table:</strong> records <code>(session_id, community_id, viewed_at)</code> &mdash; which profile pages a session viewed, and when. Composite primary key on <code>(session_id, community_id)</code> dedups repeat views; a re-view just refreshes <code>viewed_at</code>.</li>
+<li><strong><code>community_gap_submissions</code> table:</strong> stores the free-text fields (current communities, gaps, looking-for), <code>search_context_json</code> (the search/filter state, or quiz answers, at submission time), <code>viewed_community_ids_json</code> (computed server-side from <code>community_profile_views</code>, never trusted from the client), <code>closest_community_id</code>, optional email, a <code>reviewed</code> flag for admin triage, and <code>submission_type</code> (<code>'gap'</code> or <code>'recommender'</code>) distinguishing gap-form submissions from logged recommender-quiz completions.</li>
+<li><strong>No PII is collected</strong> &mdash; nothing reads or stores IP address, user agent, or <code>X-Forwarded-For</code>. The only header touched is <code>x-forwarded-proto</code>, used once to set the cookie's <code>secure</code> flag, never persisted.</li>
+<li><strong>Retention:</strong> everything is kept indefinitely, no automatic deletion &mdash; documented publicly at <a href="/privacy">/privacy</a>.</li>
+<li><strong>Admin visibility:</strong> submissions are triaged at <a href="/admin/community-gaps">/admin/community-gaps</a>, mirroring the <code>/admin/ask-feedback</code> layout, and feed a badge in the CFO Toolbox admin nav group via <code>community_gap_counts()</code>.</li>
+</ul>
+</section>
+</div>
+"""
+
+
 @app.get("/admin/tools/communities", response_class=HTMLResponse)
 def admin_communities(request: Request):
     if not _is_authed(request):
@@ -7421,6 +7516,13 @@ def admin_communities(request: Request):
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/communities/categories" style="font-size:13px;color:var(--muted);">Manage categories →</a>
 </p>
+
+<details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
+  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);">How this works: every prompt/CTA across the feature, and the anonymous tracking behind it</summary>
+  <div style="margin-top:16px;">
+    {_COMMUNITIES_REFERENCE_HTML}
+  </div>
+</details>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
 <div style="overflow-x:auto;margin-bottom:40px;">
