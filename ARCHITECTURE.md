@@ -74,14 +74,33 @@ Notes on the edges:
   domain has SPF and DKIM in place, plus DMARC in `p=none` monitoring mode —
   collecting reports, not yet enforcing.
 
-## 2. Database schema
+## 2. Database
 
-Everything is in one SQLite file, defined and migrated in `linklib/db.py`.
-The `Library` class is the only write path; the schema script runs on every
-boot (`CREATE TABLE IF NOT EXISTS`) followed by an **additive-only migration
-list** of `ALTER TABLE ADD COLUMN` statements that ignore "already exists"
-errors. There are no declared foreign-key constraints — relationships below
-are by convention (`user_id`, `tool_id`, `item_id` columns), enforced in code.
+**There is exactly one database for the whole app: a single SQLite file,
+`library.db`** (path configurable via `LINKLIB_DB`), containing every table
+the app uses — content archive, FP&A Buddy, accounts, the entire CFO Toolbox
+(including Communities), site operations, and the `/play` game. There is no
+separate database for any one feature — in particular, **Communities
+(`communities`, `community_categories`, `community_profiles`,
+`community_gap_submissions`, `community_profile_views`) lives in this same
+`library.db` file, in the same tables list below, not a database of its own.**
+Every table in the file, grouped by feature area:
+
+| Group | Tables |
+|---|---|
+| Content spine | `articles`, `articles_fts`, `articles_vec`, `article_embeddings`, `enrichment_cost`, `library_queue`, `dedupe_decisions`, `read_later` |
+| FP&A Buddy (Ask) | `ask_questions`, `ask_feedback` |
+| Accounts | `users`, `password_reset_requests` |
+| CFO Toolbox | `tools`, `tool_categories`, `benchmarks`, `tool_leads`, `communities`, `community_categories`, `community_profiles`, `community_gap_submissions`, `community_profile_views` |
+| Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log` |
+| "Sail, Don't Row" (`/play`) | `game_rank_settings`, `game_runs` |
+
+`linklib/db.py` defines and migrates all of it — the `Library` class is the
+only write path. The schema script runs on every boot (`CREATE TABLE IF NOT
+EXISTS`) followed by an **additive-only migration list** of `ALTER TABLE ADD
+COLUMN` statements that ignore "already exists" errors. There are no declared
+foreign-key constraints — relationships below are by convention (`user_id`,
+`tool_id`, `item_id` columns), enforced in code.
 
 ### Content spine
 
@@ -123,7 +142,7 @@ Cost figures are computed from **real API token usage** at call time
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
 | `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content`, plus `advisor` (a direct `UPDATE`, mirroring `tools.advisor` exactly — see below) — the identical name+description+advisor contract as `tools`. Every other field (`region`, `reach`, `metros_json`, `featured`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `reach` (`Regional`\|`National`\|`Global` — a community's overall footprint), `metros_json` (JSON array from a controlled city/area vocabulary — where it has a chapter, hub, or local focus; independent of `reach`, so a National community like FEI can still carry metros), `region` (legacy free-text note, superseded by `reach`/`metros_json` — kept for any detail those two fields don't capture, no longer read by the region filter), `featured` (pin-to-top + coral badge, same pattern as `tools.promoted`; independent of `reach`/`metros_json`/`advisor`), `advisor` (⭐ marker + "Advisor" filter chip, same pattern as `tools.advisor` — discloses a personal relationship, e.g. The F Suite; independent of `featured`), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
 | `community_categories` | Controlled vocabulary of filter pills for `/tools/communities`, same shape and same reasoning as `tool_categories`. | `name` (unique), `sort_order` |
-| `community_profiles` | Deep, opinionated read per community (Community Profiles, Phase 2) — the qualitative judgment a directory row's cost/access/region fields can't carry, edited at `/admin/tools/communities/{id}/profile`. 1:1 with `communities` via `community_id` as the primary key (no SQL-level `REFERENCES`, same as `article_embeddings.article_id` — this codebase does cleanup on delete in application code, not via a declared FK; see `delete_community`). Empty/thin until Research content backfills it or an admin generates a draft. Rendered publicly at `/tools/communities/{slug}` (Phase 3) and side by side at `/tools/communities/compare` (Phase 6) — a community with no profile row, or one whose fields are all empty, falls back to a minimal page (or, on Compare, a "Not available yet" cell) rather than an error or empty-looking layout. | `community_id` (PK), `sponsor_relationship_note` (qualitative — value-add or sales funnel? — distinct from the factual `sponsor_name`/`sponsorship_type` on `communities`), `business_model` (added post-launch — how the community structurally sustains itself, e.g. a gated dues-funded peer group vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships; distinct from `sponsor_relationship_note`, which judges whether a *sponsor's* presence feels salesy, not how the community itself makes money), `application_friction` (the real barrier to entry, not just the `access` label), `founded_year` (nullable), `notable_members`/`public_criticism` (nullable — only when verifiably public/reported), `low_confidence` |
+| `community_profiles` | Deep, opinionated read per community (Community Profiles, Phase 2) — the qualitative judgment a directory row's cost/access/region fields can't carry, edited at `/admin/tools/communities/{id}/profile`. 1:1 with `communities` via `community_id` as the primary key (no SQL-level `REFERENCES`, same as `article_embeddings.article_id` — this codebase does cleanup on delete in application code, not via a declared FK; see `delete_community`). Empty/thin until Research content backfills it or an admin generates a draft. Rendered publicly at `/tools/communities/{slug}` (Phase 3) and side by side at `/tools/communities/compare` (Phase 6) — a community with no profile row, or one whose fields are all empty, falls back to a minimal page (or, on Compare, a "Not available yet" cell) rather than an error or empty-looking layout. | `community_id` (PK), `sponsor_relationship_note` (qualitative — value-add or sales funnel? — distinct from the factual `sponsor_name`/`sponsorship_type` on `communities`), `business_model` (added post-launch — how the community structurally sustains itself, e.g. a gated dues-funded peer group vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships; distinct from `sponsor_relationship_note`, which judges whether a *sponsor's* presence feels salesy, not how the community itself makes money), `application_friction` (the real barrier to entry, not just the `access` label), `founded_year` (nullable), `notable_members`/`public_criticism` (nullable — only when verifiably public/reported), `low_confidence`, `primary_purpose`/`cpe_eligible`/`platform_type`/`meeting_format`/`event_style`/`seniority_band`/`resources_included` (added for the bulk community-profile import below — short factual/categorical research fields, deliberately `TEXT` rather than a strict boolean/enum since the source research carries qualifiers like "Yes (NASBA-approved sponsor)"; excluded from the voice-rewrite pass since they're not prose), `needs_review` (added by the same import — flags a profile as imported/edited but not yet personally read and approved by Brian; admin-only, independent of `communities.approved`, which controls public visibility rather than content review) |
 | `community_gap_submissions` | Gap-collection (Phase 5): the native replacement for the old `/community` page's Google Form, folded into the live directory rather than a separate parked page. Submitted at `POST /tools/communities/gap`, triaged at `/admin/community-gaps` (mirrors `/admin/ask-feedback`'s layout). No login required — anyone can submit. Also doubles (Phase 7) as the log for every completed Recommender quiz at `/tools/communities/find` — same table, distinguished by `submission_type` rather than a second table, since a zero/thin recommender result is the same kind of gap signal as a zero-result directory search. | `current_communities`/`gaps`/`looking_for` (free text, the visitor's own words — always `''` on a `submission_type='recommender'` row, since the quiz collects no free text), `search_context_json` (on a `'gap'` row: directory search/filter state at submission time, built client-side from JS-only filter state and carried through a hidden form field; on a `'recommender'` row: the quiz answers plus `result_count`), `viewed_community_ids_json` (server-computed at submission from `community_profile_views`, not client-supplied), `closest_community_id` (nullable, no FK — always `NULL` on a recommender row), `email` (nullable), `reviewed`, `submission_type` (added by migration — `'gap'`\|`'recommender'`, defaults `'gap'` so every pre-existing row keeps its meaning) |
 | `community_profile_views` | Session-scoped, no-login view tracking for `/tools/communities/{slug}`: which profile pages a visitor opened before (maybe) submitting the gap form above. Keyed by an anonymous `cfo_visitor` cookie (`webapp/app.py`, 30-day TTL, not signed — the first anonymous-session primitive in the codebase; everything else, e.g. `read_later`, requires a logged-in `user_id`). No cleanup job for stale sessions yet — rows are small and carry no PII. | `session_id` + `community_id` (composite PK, dedups repeat views), `viewed_at` |
 
@@ -149,6 +168,27 @@ a regenerate refines rather than starts over), grounded in the same
 same never-auto-saved review contract — the draft lands in the
 `/admin/tools/communities/{id}/profile` form fields for the admin to check
 before saving. Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
+
+**Bulk community-profile import** (`scripts/import_community_profiles.py`,
+one-time). Unlike the single-community generate-profile flow above (which
+drafts fields from a live page fetch), this imports pre-researched profiles
+for many communities at once from `scripts/_community_profile_data.py` — a
+static module of researched field values, reconciled against manual
+corrections. For each community it runs the 11 narrative fields
+(`linklib.enrich.VOICE_REWRITE_FIELDS` — everything except `notable_members`
+and the 8 short factual/categorical fields) through one Claude call per
+community (`linklib.enrich.voice_rewrite_community_fields`), using the live
+`voice_core` setting as the style guide: a **style pass only** — every number,
+date, dollar figure, and specific claim must survive unchanged, only tone and
+sentence structure are rewritten. Cost lands in the same `enrichment_cost`
+ledger as the flows above (`article_id=NULL`). Every imported row is saved
+with `needs_review=1`, so the profile is live on its public page immediately
+(the directory isn't left thin while Brian works through reviews) but flagged
+on the admin communities list — a badge plus a `?filter=needs_review` link,
+and a per-row "Mark reviewed" action that clears the flag — until he's
+personally read and approved it. The count also folds into the shared admin
+badge system (`webapp/tasks.py::open_task_counts`) alongside pending
+submissions on the same `/admin/tools/communities` href.
 
 **Community submissions.** `GET/POST /tools/communities/submit` mirrors the
 tool-submission flow (`/tools/submit`) exactly, deliberately trimmed to just
@@ -361,6 +401,8 @@ erDiagram
         text notable_members "nullable — only if verifiably public"
         text public_criticism "nullable"
         int low_confidence "drafted without a successful page fetch"
+        text cpe_eligible "short factual field, not voice-rewritten"
+        int needs_review "imported/edited, not yet personally reviewed"
     }
     game_runs {
         int id PK

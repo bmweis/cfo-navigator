@@ -384,3 +384,106 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
         )
     except Exception:
         return None
+
+
+# The 11 narrative community-profile fields eligible for a voice-rewrite pass
+# (scripts/import_community_profiles.py) — a style pass only, never a content
+# edit. Deliberately excludes `notable_members` (a name list, not prose) and
+# the 8 short factual/categorical fields (founded_year, low_confidence,
+# primary_purpose, cpe_eligible, platform_type, meeting_format, event_style,
+# seniority_band, resources_included) alongside it — none of those are prose
+# that benefits from a tone pass.
+VOICE_REWRITE_FIELDS = [
+    "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
+    "engagement_level", "sponsor_relationship_note", "application_friction",
+    "cost_value_verdict", "public_criticism", "verdict_summary",
+]
+
+_VOICE_REWRITE_PROMPT = """You are rewriting research copy for the CFO Toolbox's Communities
+directory so it matches a specific author's voice. Here is the voice guide:
+
+{voice_core}
+
+Below are researched, factually-accurate field values describing a peer
+community, written in a generic research-report style. Rewrite EACH field for
+tone and sentence structure to match the voice guide above. This is a STYLE
+pass only, not a content edit:
+
+- Do not change, drop, soften, or add any factual detail: preserve every
+  number, date, dollar figure, percentage, proper name, and specific claim
+  exactly as given.
+- Do not shorten a field to the point of losing information, and don't pad
+  one out with new claims not present in the source.
+- If a field is empty, return it empty — do not invent content for it.
+
+Return STRICT JSON only (no prose, no markdown fences), with exactly these
+keys, one rewritten string per field:
+
+{field_list}
+
+Community name: {name}
+
+Source fields (JSON):
+{fields_json}
+"""
+
+
+@dataclass
+class VoiceRewriteResult:
+    fields: dict            # field name -> rewritten text
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def voice_rewrite_community_fields(name: str, fields: dict, voice_core: str,
+                                    model: str = DEFAULT_MODEL) -> "VoiceRewriteResult | None":
+    """Rewrite the narrative community-profile fields in `fields` (a subset of
+    VOICE_REWRITE_FIELDS -> source text) to match `voice_core`'s tone, in one
+    Claude call covering every field at once — cheaper and easier to spot-check
+    than one call per field. Facts must survive unchanged; only style is
+    rewritten. Returns None if the SDK/key is unavailable or the call fails,
+    same never-auto-saved contract as generate_community_profile — the caller
+    persists the result and logs cost via Library.record_enrichment_cost."""
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    present = {k: v for k, v in fields.items() if k in VOICE_REWRITE_FIELDS and str(v or "").strip()}
+    if not present:
+        return VoiceRewriteResult(fields={})
+
+    field_list = "\n".join(f'  "{k}": rewritten text for {k}' for k in present)
+    prompt = _VOICE_REWRITE_PROMPT.format(
+        voice_core=voice_core.strip(), field_list=field_list,
+        name=name, fields_json=json.dumps(present, indent=2),
+    )
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model,
+            max_tokens=3000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+
+        from .pricing import compute_cost
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
+        rewritten = {k: str(data.get(k, present[k])).strip() for k in present}
+        return VoiceRewriteResult(fields=rewritten, model=model,
+                                  input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost)
+    except Exception:
+        return None
