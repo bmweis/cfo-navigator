@@ -190,6 +190,22 @@ personally read and approved it. The count also folds into the shared admin
 badge system (`webapp/tasks.py::open_task_counts`) alongside pending
 submissions on the same `/admin/tools/communities` href.
 
+`--only NAME` restricts a run to a single community (exact `name` match) —
+for a community whose research lands after the original batch (e.g. a later
+research round covering one new addition), so it can be imported without
+re-voice-rewriting (and re-spending on) every community already done.
+
+**Targeted research updates** (`scripts/patch_round3_community_profiles.py`,
+and any similar later-round script following the same shape) handle the
+other case: a later research round that only deepens a handful of fields on
+an *already-imported* community, not the whole profile. These use
+`Library.update_community_profile_research_fields` — a genuine partial
+`UPDATE` (only the columns actually passed are touched) — rather than
+`upsert_community_profile`'s full-row replace, so fields outside that
+round's scope are never disturbed. The voice-rewrite pass, when one runs, is
+scoped the same way: only the specific narrative fields the round actually
+re-researched go through `voice_rewrite_community_fields`, not all 11.
+
 **Community submissions.** `GET/POST /tools/communities/submit` mirrors the
 tool-submission flow (`/tools/submit`) exactly, deliberately trimmed to just
 name + URL (no description/categories, since a pending community is thin

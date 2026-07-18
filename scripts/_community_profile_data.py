@@ -24,9 +24,9 @@ REMOVALS = [
     "Females and Finance",
 ]
 
-# Explicitly not imported — a distinct organization from "Senior Executive
-# Network" above, no deep research yet. Leave its profile empty if the row exists.
-DO_NOT_IMPORT = ["SENG-NE (Senior Executive Networking Group of New England)"]
+# Nothing pending here as of Round 3 — SENG-NE's research landed (see
+# COMMUNITY_PROFILES below) and it's no longer held back.
+DO_NOT_IMPORT: list[str] = []
 
 COMMUNITY_PROFILES = [
     {
@@ -929,5 +929,33 @@ COMMUNITY_PROFILES = [
         "event_style": "Webinars/panels/AMAs plus occasional in-person partner events",
         "seniority_band": "Mixed/all levels",
         "resources_included": "Yes: curated automation-solutions directory, webinars, resources",
+    },
+    {
+        # Round 3 research (first profile — SENG-NE was previously held back
+        # in DO_NOT_IMPORT, see corrections-and-overrides.md's original note:
+        # a distinct organization from "Senior Executive Network" elsewhere
+        # in this file, despite the similar name).
+        "name": "SENG-NE (Senior Executive Networking Group of New England)",
+        "ideal_member": "A Director, VP, or C-level executive in greater Boston/New England, especially one in or anticipating a job transition, who wants structured, high-trust networking and career development across functions. Eligibility: 5+ years at director level or above, a six-figure income history, and a reputation for generosity with colleagues.",
+        "anti_fit": "Not a finance-exclusive community. Finance is one pillar among many; members span general management, operations, marketing, technology, sales, engineering, R&D, HR, and legal (same disclosure treatment as other multi-function communities in this directory). Also not a peer advisory for sitting CFOs working operating problems: the center of gravity is career transition, job search, and professional development. Referral-gated admission and a New England anchor make it a poor fit for someone outside the region or without a connection in.",
+        "value_prop": "Structured morning networking meetings plus proprietary workshops (Executive Presence, Shorten Your Search, Branding, A-Player, Mastering Intractable Negotiations) under a \"networking for life\" ethos, with an alumni network that members report actively responds with referrals and connections during searches.",
+        "business_model": "Member-funded (a \"SENG Gold Membership\" tier exists) plus paid workshops and coaching delivered by leadership. Exact dues not published; member testimonials describe the cost as low. Public information on pricing is limited.",
+        "format_reality": "Structured morning networking meetings (historically breakfasts, heavily Zoom since 2020) with pre-submitted \"networking briefs,\" plus scheduled Zoom workshops with registration deadlines and required prep work. Online events since 2020 have extended membership beyond New England.",
+        "engagement_level": "High-touch and structured. Meetings and workshops require registration and advance prep, which filters for committed members. Roughly 90% of members over the group's lifetime have been VPs, Directors, or CXOs per the organization.",
+        "sponsor_relationship_note": "Longstanding non-solicitation policy; members do not pitch products or services at meetings. Note that leadership itself sells workshops and coaching (current chair Raleigh Ormerod teaches the Executive Presence course), so there is an internal paid-services component even though outside vendors are kept out.",
+        "application_friction": "High. Admission historically by referral from members and alumni only, with select industry partners also able to nominate. Self-described as \"one of the best kept secrets in New England,\" which is marketing language for a deliberately small referral funnel.",
+        "cost_value_verdict": "For a New England exec in transition, testimonials consistently describe outsized return relative to modest cost, and one member (an executive coach referring clients) calls the results quantifiable. Unverifiable from the outside since dues aren't published, but the risk is time commitment more than money.",
+        "notable_members": "Founder Gordon (identified by first name on SENG's site; ran the group April 2001 to April 2021, previously a principal at Snowden Associates, a NH executive search firm, likely Gordon Woodfall though SENG's own materials don't confirm the surname). Raleigh Ormerod, an original member, has led it since April 2021. Testimonial members include Kevin Young (COO, Polyonics), Eric Lundquist (Sr Director, Kronos), Ed Weisberg (Managing Partner, eCommerce Expertise), and John Moore (COO, Darwin Scientific).",
+        "founded_year": 2001,
+        "public_criticism": "None found. Given the referral-only model and tiny public footprint, the absence of criticism reflects genuine scarcity of third-party commentary rather than a clean bill of health; almost everything knowable about SENG comes from SENG.",
+        "verdict_summary": "A 20+ year-old, referral-gated, cross-functional executive networking group anchored in greater Boston, strongest as a career-transition and professional-development vehicle rather than a CFO peer group. Public information on this community is limited; nearly all available detail is self-published, so treat specifics as the organization's own characterization.",
+        "confidence": "medium",
+        "primary_purpose": "Career transition, job search, and executive professional development via structured networking",
+        "cpe_eligible": "No evidence of CPE credit offered; assume no",
+        "platform_type": "Regional membership organization (in-person + Zoom), not a Slack/forum",
+        "meeting_format": "Structured morning networking meetings with pre-submitted briefs; scheduled Zoom workshops with prep-work requirements",
+        "event_style": "Small-group structured networking, multi-part workshops, coaching; no conference-style events found",
+        "seniority_band": "Director / VP / C-level / board (also GMs, principals, founders, controllers, attorneys)",
+        "resources_included": "Networking meetings, Ascendancy workshop series, coaching, alumni network, job leads shared member-to-member",
     },
 ]
