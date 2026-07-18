@@ -802,6 +802,30 @@ class Library:
             # can be non-salesy on one axis and a wide-funnel business on the
             # other, so the two judgments are captured independently.
             "ALTER TABLE community_profiles ADD COLUMN business_model TEXT NOT NULL DEFAULT ''",
+            # The 8-field backfill (bulk community-profile import): factual/
+            # categorical data researched alongside the 13 narrative fields
+            # above but arriving later, once these columns existed. Deliberately
+            # TEXT rather than a strict boolean/enum — the source research
+            # carries qualifiers ("Yes (NASBA-approved sponsor)", "Unclear"),
+            # which a bare 0/1 or fixed enum would lose. Unlike the narrative
+            # fields, these are short factual/categorical data, not prose, so
+            # they're excluded from the bulk import's voice-rewrite pass (see
+            # scripts/import_community_profiles.py).
+            "ALTER TABLE community_profiles ADD COLUMN primary_purpose TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE community_profiles ADD COLUMN cpe_eligible TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE community_profiles ADD COLUMN platform_type TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE community_profiles ADD COLUMN meeting_format TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE community_profiles ADD COLUMN event_style TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE community_profiles ADD COLUMN seniority_band TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE community_profiles ADD COLUMN resources_included TEXT NOT NULL DEFAULT ''",
+            # Marks a profile row as imported/edited but not yet personally
+            # reviewed by Brian (bulk community-profile import) — distinct from
+            # `communities.approved` (directory visibility): a `needs_review`
+            # profile is already live on its public profile page, this flag is
+            # purely an admin-side triage signal, same spirit as `approved` on
+            # tools/communities submissions but for content review rather than
+            # publication.
+            "ALTER TABLE community_profiles ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1938,7 +1962,11 @@ class Library:
                                  application_friction: str = "", cost_value_verdict: str = "",
                                  notable_members: str = "", founded_year: Optional[int] = None,
                                  public_criticism: str = "", verdict_summary: str = "",
-                                 low_confidence: int = 0, business_model: str = "") -> None:
+                                 low_confidence: int = 0, business_model: str = "",
+                                 primary_purpose: str = "", cpe_eligible: str = "",
+                                 platform_type: str = "", meeting_format: str = "",
+                                 event_style: str = "", seniority_band: str = "",
+                                 resources_included: str = "", needs_review: int = 0) -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
         edit form always submits every field, generated or hand-written."""
@@ -1947,8 +1975,10 @@ class Library:
                (community_id, ideal_member, anti_fit, value_prop, format_reality,
                 engagement_level, sponsor_relationship_note, application_friction,
                 cost_value_verdict, notable_members, founded_year, public_criticism,
-                verdict_summary, low_confidence, updated_at, business_model)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                verdict_summary, low_confidence, updated_at, business_model,
+                primary_purpose, cpe_eligible, platform_type, meeting_format,
+                event_style, seniority_band, resources_included, needs_review)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(community_id) DO UPDATE SET
                  ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
                  value_prop=excluded.value_prop, format_reality=excluded.format_reality,
@@ -1962,14 +1992,48 @@ class Library:
                  verdict_summary=excluded.verdict_summary,
                  low_confidence=excluded.low_confidence,
                  updated_at=excluded.updated_at,
-                 business_model=excluded.business_model""",
+                 business_model=excluded.business_model,
+                 primary_purpose=excluded.primary_purpose,
+                 cpe_eligible=excluded.cpe_eligible,
+                 platform_type=excluded.platform_type,
+                 meeting_format=excluded.meeting_format,
+                 event_style=excluded.event_style,
+                 seniority_band=excluded.seniority_band,
+                 resources_included=excluded.resources_included,
+                 needs_review=excluded.needs_review""",
             (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
              format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
              founded_year, public_criticism.strip(), verdict_summary.strip(),
-             low_confidence, _now(), business_model.strip()),
+             low_confidence, _now(), business_model.strip(),
+             primary_purpose.strip(), cpe_eligible.strip(), platform_type.strip(),
+             meeting_format.strip(), event_style.strip(), seniority_band.strip(),
+             resources_included.strip(), needs_review),
         )
         self.conn.commit()
+
+    def mark_community_profile_reviewed(self, community_id: int) -> None:
+        """Clear `needs_review` once Brian has personally read/approved a
+        profile — the admin list's "Mark reviewed" action. A no-op (not an
+        error) if the profile row doesn't exist yet."""
+        self.conn.execute(
+            "UPDATE community_profiles SET needs_review=0, updated_at=? WHERE community_id=?",
+            (_now(), community_id),
+        )
+        self.conn.commit()
+
+    def count_communities_needing_review(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM community_profiles WHERE needs_review=1"
+        ).fetchone()[0]
+
+    def community_profile_needs_review_ids(self) -> set[int]:
+        """Which community_ids currently have needs_review=1 — used by the
+        admin communities list to badge/filter rows without joining the full
+        community_profiles row per community."""
+        return {r[0] for r in self.conn.execute(
+            "SELECT community_id FROM community_profiles WHERE needs_review=1"
+        ).fetchall()}
 
     # -- community gap submissions (Phase 5: native gap-collection) ---------
 

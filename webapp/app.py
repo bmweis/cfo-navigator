@@ -7318,6 +7318,19 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(p.get(key, ''))}</textarea>
   </div>"""
 
+    def _short_field(key: str, label: str, placeholder: str = "") -> str:
+        """A single-line variant of _field for the short factual/categorical
+        fields (backfilled alongside the 13 narrative fields, not part of the
+        voice-rewrite pass) — a plain input, not a textarea, since these are
+        short values, not prose."""
+        ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
+        return f"""  <div>
+    <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}</label>
+    <input id="cp-{key}" name="{key}" type="text" maxlength="300"{ph}
+      value="{_esc(p.get(key, ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>"""
+
     return f"""  <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;">
     <p style="color:var(--muted);margin:0;max-width:520px;">The deep, opinionated read behind the directory listing: who it's for, what it's actually like, and whether it's worth it. Empty is fine until this is written or generated.</p>
     <span style="white-space:nowrap;">
@@ -7345,10 +7358,25 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
   </div>
 {_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.')}
 {_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True)}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+{_short_field('primary_purpose', 'Primary purpose', 'e.g. networking, learning, both')}
+{_short_field('cpe_eligible', 'CPE eligible', 'Yes / No / Unclear, with any qualifier')}
+{_short_field('platform_type', 'Platform type', 'Slack, proprietary app, in-person only, …')}
+{_short_field('meeting_format', 'Meeting format', 'In-person / virtual / hybrid')}
+{_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
+{_short_field('seniority_band', 'Seniority band', 'Who it targets by seniority')}
+  </div>
+{_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc. — or "No".', rows=2)}
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" id="cp-low_confidence" name="low_confidence" value="1"{' checked' if p.get('low_confidence') else ''}>
       <span>Low confidence: drafted without a successful page fetch or verified grounding. Needs a human check before it's trusted.</span>
+    </label>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" id="cp-needs_review" name="needs_review" value="1"{' checked' if p.get('needs_review') else ''}>
+      <span>Needs review: flagged for Brian to personally read and approve before treating this profile as final.</span>
     </label>
   </div>"""
 
@@ -7449,17 +7477,22 @@ _COMMUNITIES_REFERENCE_HTML = """
 
 
 @app.get("/admin/tools/communities", response_class=HTMLResponse)
-def admin_communities(request: Request):
+def admin_communities(request: Request, filter: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
     try:
         all_communities = lib.list_communities(approved_only=False)
+        needs_review_ids = lib.community_profile_needs_review_ids()
     finally:
         lib.close()
 
     pending = [c for c in all_communities if not c["approved"]]
     approved = [c for c in all_communities if c["approved"]]
+    for c in approved:
+        c["needs_review"] = c["id"] in needs_review_ids
+    if filter == "needs_review":
+        approved = [c for c in approved if c["needs_review"]]
 
     def _pending_row(c: dict) -> str:
         cats = ", ".join(c["categories"]) or "—"
@@ -7484,8 +7517,13 @@ def admin_communities(request: Request):
     def _approved_row(c: dict) -> str:
         cats = ", ".join(c["categories"]) or "—"
         featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if c.get("featured") else ""
+        review_badge = ('<span style="font-size:11px;font-weight:700;background:var(--caution);color:#fff;border-radius:4px;'
+                         'padding:1px 6px;margin-left:6px;">Needs review</span>') if c.get("needs_review") else ""
+        mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="display:inline;">'
+                         f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;margin-left:4px;">Mark reviewed</button></form>'
+                         ) if c.get("needs_review") else ""
         return f"""<tr style="border-top:1px solid var(--line);">
-  <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}</td>
+  <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}{review_badge}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['region'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
@@ -7493,6 +7531,7 @@ def admin_communities(request: Request):
   <td style="padding:10px 12px;white-space:nowrap;">
     <a href="/admin/tools/communities/{c['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
     <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="margin-left:4px;">Profile</a>
+    {mark_reviewed}
     <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="display:inline;"
           onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
       <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
@@ -7503,7 +7542,19 @@ def admin_communities(request: Request):
     pending_rows = "".join(_pending_row(c) for c in pending) or \
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
     approved_rows = "".join(_approved_row(c) for c in approved) or \
-        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>'
+        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>' if filter != "needs_review" else \
+        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
+
+    n_needs_review = len(needs_review_ids)
+    review_filter_link = (
+        f'&nbsp;&middot;&nbsp;<a href="/admin/tools/communities?filter=needs_review" style="font-size:13px;color:var(--muted);">'
+        f'{n_needs_review} need{"s" if n_needs_review == 1 else ""} review →</a>'
+        if n_needs_review else ""
+    )
+    clear_filter_link = (
+        '&nbsp;&middot;&nbsp;<a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">Show all →</a>'
+        if filter == "needs_review" else ""
+    )
 
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -7515,6 +7566,7 @@ def admin_communities(request: Request):
   <a href="/tools/communities" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/communities/categories" style="font-size:13px;color:var(--muted);">Manage categories →</a>
+  {review_filter_link}{clear_filter_link}
 </p>
 
 <details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
@@ -7540,7 +7592,7 @@ def admin_communities(request: Request):
 </table>
 </div>
 
-<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved communities</h2>
+<h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved communities{' needing review' if filter == 'needs_review' else ''}</h2>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -7809,6 +7861,18 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
     return RedirectResponse("/admin/tools/communities", status_code=303)
 
 
+@app.post("/admin/tools/communities/{community_id}/mark-reviewed")
+def admin_communities_mark_reviewed(request: Request, community_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.mark_community_profile_reviewed(community_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/tools/communities", status_code=303)
+
+
 @app.post("/admin/tools/communities/{community_id}/delete")
 def admin_communities_delete(request: Request, community_id: int):
     if not _is_authed(request):
@@ -7902,6 +7966,14 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             public_criticism=(form.get("public_criticism") or "").strip(),
             verdict_summary=(form.get("verdict_summary") or "").strip(),
             low_confidence=1 if form.get("low_confidence") == "1" else 0,
+            primary_purpose=(form.get("primary_purpose") or "").strip(),
+            cpe_eligible=(form.get("cpe_eligible") or "").strip(),
+            platform_type=(form.get("platform_type") or "").strip(),
+            meeting_format=(form.get("meeting_format") or "").strip(),
+            event_style=(form.get("event_style") or "").strip(),
+            seniority_band=(form.get("seniority_band") or "").strip(),
+            resources_included=(form.get("resources_included") or "").strip(),
+            needs_review=1 if form.get("needs_review") == "1" else 0,
         )
     finally:
         lib.close()
