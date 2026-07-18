@@ -2012,6 +2012,41 @@ class Library:
         )
         self.conn.commit()
 
+    def update_community_profile_research_fields(
+        self, community_id: int, *, founded_year: Optional[int] = None,
+        notable_members: Optional[str] = None, low_confidence: Optional[int] = None,
+        anti_fit: Optional[str] = None, sponsor_relationship_note: Optional[str] = None,
+        public_criticism: Optional[str] = None, needs_review: Optional[int] = None,
+    ) -> None:
+        """Narrow, partial update for a deepened-research pass on a subset of
+        fields (e.g. a later research round that only re-covers a few fields
+        rather than the whole profile) — unlike upsert_community_profile,
+        which always fully replaces every column, this only SETs the columns
+        whose keyword argument was actually passed (not None), leaving every
+        other field on the row untouched. A no-op on a field is "omit the
+        argument," not "pass None" — every parameter here is a column that
+        can legitimately hold NULL/empty (`founded_year` in particular), so
+        there's no way to distinguish "leave alone" from "set to null" other
+        than by omission. Caller is responsible for not passing None for a
+        field it actually wants nulled out; today's only caller
+        (scripts/patch_round3_community_profiles.py) never needs to."""
+        fields = {
+            "founded_year": founded_year, "notable_members": notable_members,
+            "low_confidence": low_confidence, "anti_fit": anti_fit,
+            "sponsor_relationship_note": sponsor_relationship_note,
+            "public_criticism": public_criticism, "needs_review": needs_review,
+        }
+        fields = {k: v for k, v in fields.items() if v is not None}
+        if not fields:
+            return
+        set_clause = ", ".join(f"{col}=?" for col in fields)
+        values = [v.strip() if isinstance(v, str) else v for v in fields.values()]
+        self.conn.execute(
+            f"UPDATE community_profiles SET {set_clause}, updated_at=? WHERE community_id=?",
+            (*values, _now(), community_id),
+        )
+        self.conn.commit()
+
     def mark_community_profile_reviewed(self, community_id: int) -> None:
         """Clear `needs_review` once Brian has personally read/approved a
         profile — the admin list's "Mark reviewed" action. A no-op (not an

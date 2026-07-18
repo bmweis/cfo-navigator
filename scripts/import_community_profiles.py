@@ -25,6 +25,13 @@ Usage:
     export ANTHROPIC_API_KEY=...
     python -m scripts.import_community_profiles --db library.db
     python -m scripts.import_community_profiles --db library.db --dry-run
+    python -m scripts.import_community_profiles --db library.db --only "SENG-NE (Senior Executive Networking Group of New England)"
+
+`--only NAME` restricts the run to a single community (exact `name` match) —
+for a community whose research landed later than the original batch (e.g. a
+Round 3 addition), so it can be voice-rewritten and imported without
+re-running (and re-spending) voice-rewrite on every community already done.
+Removals still run either way (cheap, idempotent, no API cost).
 """
 from __future__ import annotations
 
@@ -48,6 +55,9 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print what would happen without writing anything or "
                          "calling the API")
+    ap.add_argument("--only", default=None,
+                    help="restrict the import to a single community (exact name match), "
+                         "so a later addition doesn't re-voice-rewrite everything already done")
     args = ap.parse_args()
 
     if not args.dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
@@ -73,12 +83,22 @@ def main() -> int:
     for name in DO_NOT_IMPORT:
         print(f"  Leaving alone (no research yet, do not import): {name}")
 
-    print(f"\n== Importing {len(COMMUNITY_PROFILES)} community profiles ==")
+    profiles_to_import = COMMUNITY_PROFILES
+    if args.only:
+        profiles_to_import = [e for e in COMMUNITY_PROFILES if e["name"] == args.only]
+        if not profiles_to_import:
+            print(f"\nERROR: --only {args.only!r} matched no entry in COMMUNITY_PROFILES "
+                  f"(check the name matches exactly).", file=sys.stderr)
+            lib.close()
+            return 2
+
+    print(f"\n== Importing {len(profiles_to_import)} community profile(s) =="
+          + (f" (--only {args.only!r})" if args.only else ""))
     total_cost = 0.0
     imported = 0
     spot_check: list[tuple[str, dict, dict]] = []
 
-    for entry in COMMUNITY_PROFILES:
+    for entry in profiles_to_import:
         name = entry["name"]
         row = lib.conn.execute("SELECT id FROM communities WHERE name=?", (name,)).fetchone()
         if not row:
@@ -135,7 +155,7 @@ def main() -> int:
         )
         imported += 1
 
-    print(f"\nImported {imported}/{len(COMMUNITY_PROFILES)} profiles. Total voice-rewrite spend: ${total_cost:.4f}")
+    print(f"\nImported {imported}/{len(profiles_to_import)} profile(s). Total voice-rewrite spend: ${total_cost:.4f}")
 
     if spot_check and not args.dry_run:
         print("\n== Spot-check: source vs. rewritten (first 3) ==")
