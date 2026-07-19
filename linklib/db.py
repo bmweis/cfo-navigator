@@ -826,6 +826,41 @@ class Library:
             # tools/communities submissions but for content review rather than
             # publication.
             "ALTER TABLE community_profiles ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0",
+            # Recommender best-fit weighting (Communities Recommender ranking):
+            # a short controlled-vocabulary tag list per dimension, alongside
+            # (not replacing) the free-text research columns above — the raw
+            # research prose is too inconsistent for reliable keyword/substring
+            # matching (see the Phase 0 investigation: e.g. a platform_type of
+            # "not a Slack/forum" would false-match a naive "Slack" keyword
+            # check). scripts/backfill_community_weight_tags.py is the one-off
+            # pass that hand-classifies the existing 38 rows into these tags;
+            # new communities get theirs set via the admin profile edit form's
+            # checkbox groups (_community_profile_form_fields), same as any
+            # other profile field. JSON list of values from the fixed
+            # vocabulary in webapp/app.py's _WEIGHT_DIMENSIONS (e.g.
+            # seniority_band_tags: ["senior","mixed"]) — a list, not a single
+            # value, because a community can genuinely span more than one
+            # bucket (e.g. AFP serves "senior" execs and "controller"-level
+            # staff and is explicitly "mixed"). cpe_eligible_tags and
+            # resources_included_tags are effectively booleans (["yes"] or
+            # []) since their quiz checkbox is a single "Yes" option per
+            # Phase 0's proposed vocabulary.
+            "ALTER TABLE community_profiles ADD COLUMN seniority_band_tags TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE community_profiles ADD COLUMN cpe_eligible_tags TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE community_profiles ADD COLUMN primary_purpose_tags TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE community_profiles ADD COLUMN platform_type_tags TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE community_profiles ADD COLUMN meeting_format_tags TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE community_profiles ADD COLUMN event_style_tags TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE community_profiles ADD COLUMN resources_included_tags TEXT NOT NULL DEFAULT '[]'",
+            # Three placeholder factual/categorical columns, same pattern as
+            # business_model when it was first added: nullable/empty-default,
+            # visible in the admin edit form and the generate-profile-draft
+            # prompt, but empty until a future research round backfills them.
+            # Not part of the Recommender's quiz weighting yet — there's no
+            # data to weight on until Research fills these in.
+            "ALTER TABLE community_profiles ADD COLUMN stage_focus TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE community_profiles ADD COLUMN jobs_program TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE community_profiles ADD COLUMN team_or_individual TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1949,11 +1984,22 @@ class Library:
     # 1:1 with communities via community_id; see the CREATE TABLE comment in
     # _SCHEMA for why this stays an upsert-by-PK rather than a SQL FK.
 
+    _WEIGHT_TAG_COLUMNS = (
+        "seniority_band_tags", "cpe_eligible_tags", "primary_purpose_tags",
+        "platform_type_tags", "meeting_format_tags", "event_style_tags",
+        "resources_included_tags",
+    )
+
     def get_community_profile(self, community_id: int) -> dict | None:
         row = self.conn.execute(
             "SELECT * FROM community_profiles WHERE community_id=?", (community_id,)
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        for col in self._WEIGHT_TAG_COLUMNS:
+            d[col] = json.loads(d.get(col) or "[]")
+        return d
 
     def upsert_community_profile(self, community_id: int, ideal_member: str = "",
                                  anti_fit: str = "", value_prop: str = "",
@@ -1966,10 +2012,22 @@ class Library:
                                  primary_purpose: str = "", cpe_eligible: str = "",
                                  platform_type: str = "", meeting_format: str = "",
                                  event_style: str = "", seniority_band: str = "",
-                                 resources_included: str = "", needs_review: int = 0) -> None:
+                                 resources_included: str = "", needs_review: int = 0,
+                                 seniority_band_tags: list[str] | None = None,
+                                 cpe_eligible_tags: list[str] | None = None,
+                                 primary_purpose_tags: list[str] | None = None,
+                                 platform_type_tags: list[str] | None = None,
+                                 meeting_format_tags: list[str] | None = None,
+                                 event_style_tags: list[str] | None = None,
+                                 resources_included_tags: list[str] | None = None,
+                                 stage_focus: str = "", jobs_program: str = "",
+                                 team_or_individual: str = "") -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
-        edit form always submits every field, generated or hand-written."""
+        edit form always submits every field, generated or hand-written. The
+        *_tags params are the Recommender weighting's controlled-vocabulary
+        matches (see the ALTER TABLE comment in _SCHEMA), distinct from and
+        alongside the free-text column of the same base name."""
         self.conn.execute(
             """INSERT INTO community_profiles
                (community_id, ideal_member, anti_fit, value_prop, format_reality,
@@ -1977,8 +2035,11 @@ class Library:
                 cost_value_verdict, notable_members, founded_year, public_criticism,
                 verdict_summary, low_confidence, updated_at, business_model,
                 primary_purpose, cpe_eligible, platform_type, meeting_format,
-                event_style, seniority_band, resources_included, needs_review)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                event_style, seniority_band, resources_included, needs_review,
+                seniority_band_tags, cpe_eligible_tags, primary_purpose_tags,
+                platform_type_tags, meeting_format_tags, event_style_tags,
+                resources_included_tags, stage_focus, jobs_program, team_or_individual)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(community_id) DO UPDATE SET
                  ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
                  value_prop=excluded.value_prop, format_reality=excluded.format_reality,
@@ -2000,7 +2061,16 @@ class Library:
                  event_style=excluded.event_style,
                  seniority_band=excluded.seniority_band,
                  resources_included=excluded.resources_included,
-                 needs_review=excluded.needs_review""",
+                 needs_review=excluded.needs_review,
+                 seniority_band_tags=excluded.seniority_band_tags,
+                 cpe_eligible_tags=excluded.cpe_eligible_tags,
+                 primary_purpose_tags=excluded.primary_purpose_tags,
+                 platform_type_tags=excluded.platform_type_tags,
+                 meeting_format_tags=excluded.meeting_format_tags,
+                 event_style_tags=excluded.event_style_tags,
+                 resources_included_tags=excluded.resources_included_tags,
+                 stage_focus=excluded.stage_focus, jobs_program=excluded.jobs_program,
+                 team_or_individual=excluded.team_or_individual""",
             (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
              format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
@@ -2008,7 +2078,12 @@ class Library:
              low_confidence, _now(), business_model.strip(),
              primary_purpose.strip(), cpe_eligible.strip(), platform_type.strip(),
              meeting_format.strip(), event_style.strip(), seniority_band.strip(),
-             resources_included.strip(), needs_review),
+             resources_included.strip(), needs_review,
+             json.dumps(seniority_band_tags or []), json.dumps(cpe_eligible_tags or []),
+             json.dumps(primary_purpose_tags or []), json.dumps(platform_type_tags or []),
+             json.dumps(meeting_format_tags or []), json.dumps(event_style_tags or []),
+             json.dumps(resources_included_tags or []),
+             stage_focus.strip(), jobs_program.strip(), team_or_individual.strip()),
         )
         self.conn.commit()
 
@@ -2041,6 +2116,25 @@ class Library:
             return
         set_clause = ", ".join(f"{col}=?" for col in fields)
         values = [v.strip() if isinstance(v, str) else v for v in fields.values()]
+        self.conn.execute(
+            f"UPDATE community_profiles SET {set_clause}, updated_at=? WHERE community_id=?",
+            (*values, _now(), community_id),
+        )
+        self.conn.commit()
+
+    def update_community_weight_tags(self, community_id: int, **tags: list[str]) -> None:
+        """Narrow, partial update for the Recommender weighting *_tags columns
+        only — used by scripts/backfill_community_weight_tags.py's one-off
+        classification pass so it doesn't have to round-trip every other
+        profile field through upsert_community_profile. Keys are column names
+        from Library._WEIGHT_TAG_COLUMNS (e.g. seniority_band_tags=[...]);
+        unknown keys are ignored. Requires an existing community_profiles row
+        (upsert_community_profile creates the row; this only updates it)."""
+        fields = {k: v for k, v in tags.items() if k in self._WEIGHT_TAG_COLUMNS}
+        if not fields:
+            return
+        set_clause = ", ".join(f"{col}=?" for col in fields)
+        values = [json.dumps(v or []) for v in fields.values()]
         self.conn.execute(
             f"UPDATE community_profiles SET {set_clause}, updated_at=? WHERE community_id=?",
             (*values, _now(), community_id),
