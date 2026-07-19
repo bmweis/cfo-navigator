@@ -10423,6 +10423,7 @@ _ADMIN_GROUPS = [
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost—Brian's operating cost, separate from any user's FP&A Buddy cap."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
+        ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
     ]),
 ]
 
@@ -10600,6 +10601,143 @@ def admin_open_source(request: Request):
 {love}
 </div>"""
     return HTMLResponse(_page("Open source—Admin", "Admin", body, authed=True))
+
+
+# Informal foreign-key map for /admin/system/database. This schema declares no
+# SQL FOREIGN KEY constraints anywhere — PRAGMA foreign_key_list returns empty
+# for every table in library.db — so relationships only exist by column-naming
+# convention. Update this list in the same PR as any new column that
+# references another table's id (same "update alongside the change"
+# discipline as ARCHITECTURE.md). Each entry is (table, column, references_table).
+_DB_RELATIONSHIPS = [
+    ("read_later", "user_id", "users"),
+    ("password_reset_requests", "user_id", "users"),
+    ("ask_questions", "user_id", "users"),
+    ("game_runs", "user_id", "users"),
+    ("archive_audit_log", "admin_id", "users"),
+    ("contact_audit_log", "admin_id", "users"),
+    ("archive_audit_log", "item_id", "articles"),
+    ("contact_audit_log", "item_id", "contacts"),
+    ("tool_leads", "tool_id", "tools"),
+    ("article_embeddings", "article_id", "articles"),
+    ("enrichment_cost", "article_id", "articles"),
+    ("ask_feedback", "question_id", "ask_questions"),
+    ("community_profiles", "community_id", "communities"),
+    ("community_profile_views", "community_id", "communities"),
+    ("community_gap_submissions", "closest_community_id", "communities"),
+    ("articles_fts", "rowid", "articles"),
+    ("articles_vec", "rowid", "articles"),
+]
+
+
+def _db_schema_snapshot() -> dict:
+    """Introspect the live library.db schema at request time: table names,
+    columns, and row counts, straight from sqlite_master/PRAGMA table_info —
+    never from ARCHITECTURE.md or any other doc, and never cached, so this
+    can't go stale. Filters out the shadow tables SQLite generates for a
+    virtual table (FTS5's articles_fts_data/_idx/_docsize/_config, sqlite-vec's
+    equivalents for articles_vec) — they all follow the
+    "{virtual_table_name}_*" naming convention, so the filter is generic
+    rather than a hardcoded suffix list, and keeps working if a future
+    SQLite/sqlite-vec version adds a new shadow table.
+    """
+    lib = _lib()
+    try:
+        conn = lib.conn
+        rows = conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+        virtual = {r["name"] for r in rows if (r["sql"] or "").upper().startswith("CREATE VIRTUAL")}
+        schema: dict = {}
+        for r in rows:
+            name = r["name"]
+            if name not in virtual and any(name.startswith(v + "_") for v in virtual):
+                continue  # shadow table of a virtual table above
+            cols = conn.execute(f"PRAGMA table_info('{name}')").fetchall()
+            count = conn.execute(f"SELECT COUNT(*) FROM '{name}'").fetchone()[0]
+            schema[name] = {
+                "columns": [(c["name"], c["type"] or "TEXT", bool(c["pk"])) for c in cols],
+                "virtual": name in virtual,
+                "row_count": count,
+            }
+        return schema
+    finally:
+        lib.close()
+
+
+def _mermaid_er_diagram(schema: dict) -> str:
+    """Summary-level Mermaid erDiagram syntax: table names, key columns
+    (primary/foreign keys, not every column), and relationship lines — not an
+    exhaustive ER diagram. Real FK constraints don't exist in this schema (see
+    _DB_RELATIONSHIPS above), so every relationship line comes from that map."""
+    fk_cols = {(t, c) for t, c, _ in _DB_RELATIONSHIPS}
+    lines = ["erDiagram"]
+    for name, info in schema.items():
+        lines.append(f"    {name} {{")
+        shown = [col for col in info["columns"] if col[2] or (name, col[0]) in fk_cols]
+        if not shown:
+            shown = info["columns"][:3]
+        for col_name, col_type, is_pk in shown:
+            key = "PK" if is_pk else ("FK" if (name, col_name) in fk_cols else "")
+            safe_type = re.sub(r"[^A-Za-z0-9_]", "_", col_type) or "TEXT"
+            lines.append(f"        {safe_type} {col_name}" + (f" {key}" if key else ""))
+        lines.append("    }")
+    for table, column, ref in _DB_RELATIONSHIPS:
+        if table in schema and ref in schema:
+            lines.append(f'    {ref} ||--o{{ {table} : "{column}"')
+    return "\n".join(lines)
+
+
+@app.get("/admin/system/database", response_class=HTMLResponse)
+def admin_system_database(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    schema = _db_schema_snapshot()
+    diagram = _mermaid_er_diagram(schema)
+
+    stat_cards = "".join(
+        f'<div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;'
+        f'padding:10px 14px;">'
+        f'<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">'
+        f'{_esc(name)}{" (index)" if info["virtual"] else ""}</div>'
+        f'<div style="font-size:20px;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;">'
+        f'{info["row_count"]:,}</div></div>'
+        for name, info in sorted(schema.items())
+    )
+
+    body = f"""<div class="page page-wide">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Database</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, and row counts, introspected from the schema on every page load. This schema declares no SQL foreign keys, so relationship lines below come from a small hand-maintained map (see <code>_DB_RELATIONSHIPS</code> in <code>webapp/app.py</code>) rather than the database itself. Summary-level by design&mdash;see <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for full schema detail.</p>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px;">
+{stat_cards}
+</div>
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;overflow-x:auto;">
+<pre class="mermaid" style="margin:0;">
+{diagram}
+</pre>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+mermaid.initialize({{
+  startOnLoad: true,
+  theme: 'base',
+  themeVariables: {{
+    primaryColor: '#EAF7F2',
+    primaryBorderColor: '#1F7A66',
+    primaryTextColor: '#002975',
+    lineColor: '#6F6A60',
+    tertiaryColor: '#F5F4EF'
+  }}
+}});
+</script>
+</div>"""
+    return HTMLResponse(_page("Database—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/checks", response_class=HTMLResponse)
