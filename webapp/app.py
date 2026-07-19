@@ -5678,6 +5678,56 @@ def _recommender_filter(communities: list[dict], answers: dict[str, str]) -> lis
     return out
 
 
+def _recommender_effective_weights_and_values(
+    visitor_values: dict[str, list[str]], default_weights: dict[str, float], default_values: dict[str, list[str]],
+) -> tuple[dict[str, float], dict[str, list[str]]]:
+    """Merges a visitor's own checked preferences (if any) with Brian's admin
+    defaults, per dimension independently — not an all-or-nothing choice
+    between "visitor" and "default." A dimension the visitor left unchecked
+    falls through to Brian's default value+weight for THAT dimension only;
+    a dimension the visitor checked uses their chosen value(s) with Brian's
+    weight (visitors set a target value, not a numeric weight — see the
+    Recommender weighting design note in CLAUDE.md/ARCHITECTURE.md). The two
+    derived dimensions (local_presence, paid_free) have no admin default —
+    they only ever contribute when the visitor opts in, at a fixed weight."""
+    weights: dict[str, float] = {}
+    target_values: dict[str, list[str]] = {}
+    for dim in _WEIGHT_DIMENSIONS:
+        key = dim["key"]
+        picked = visitor_values.get(key) or []
+        if picked:
+            target_values[key] = picked
+            weights[key] = default_weights.get(key, 1.0) if dim["profile_field"] else _DERIVED_DIMENSION_WEIGHT
+        elif dim["profile_field"]:
+            target_values[key] = default_values.get(key, [])
+            weights[key] = default_weights.get(key, 1.0)
+        else:
+            target_values[key] = []
+            weights[key] = 0.0
+    return weights, target_values
+
+
+def _recommender_score(community: dict, profile: dict | None, weights: dict[str, float],
+                       target_values: dict[str, list[str]]) -> float:
+    """Weighted match score for one filtered community: sums weights[dim] for
+    every dimension whose target value(s) intersect the community's
+    controlled-vocabulary tag(s) for that dimension (see
+    _community_weight_tags). A dimension with no target value (never
+    customized by the visitor, and no admin default picked yet) simply
+    contributes nothing — it doesn't penalize or reward any community."""
+    score = 0.0
+    for dim_key, values in target_values.items():
+        if not values:
+            continue
+        weight = weights.get(dim_key, 0)
+        if not weight:
+            continue
+        tags = set(_community_weight_tags(dim_key, community, profile))
+        if tags & set(values):
+            score += weight
+    return score
+
+
 # Native gap-collection form (Phase 5): replaces the old /community
 # waitlist page's Google Form, folded into the live directory. Reachable
 # three ways: the CTA card at the bottom of /tools/communities (search
@@ -6050,6 +6100,23 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 # shared link never re-logs. Registered before /tools/communities/{slug} so
 # "find" isn't swallowed as a slug, same reasoning as /gap, /submit, and
 # /compare above.
+def _recommender_weight_fieldset(dim: dict) -> str:
+    """One checkbox group in the quiz's optional 'What matters most to you?'
+    step — name is 'w_<dim key>' so the POST handler can read every checked
+    value per dimension with form.getlist(). Left entirely unchecked (the
+    default), this dimension falls through to Brian's admin default at
+    scoring time — see _recommender_effective_weights_and_values."""
+    boxes = "".join(
+        f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#3a352e;cursor:pointer;">'
+        f'<input type="checkbox" class="rw-check" name="w_{dim["key"]}" value="{_esc(val)}"> {_esc(label)}</label>'
+        for val, label in dim["options"]
+    )
+    return f'''<div>
+  <p style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 8px;">{_esc(dim["quiz_label"])}</p>
+  <div style="display:flex;flex-direction:column;gap:6px;">{boxes}</div>
+</div>'''
+
+
 @app.get("/tools/communities/find", response_class=HTMLResponse)
 def tools_communities_find(request: Request):
     fieldsets = "".join(
@@ -6065,6 +6132,7 @@ def tools_communities_find(request: Request):
 </fieldset>'''
         for q in _RECOMMENDER_QUESTIONS
     )
+    weight_groups = "".join(_recommender_weight_fieldset(dim) for dim in _WEIGHT_DIMENSIONS)
     body = f"""<div class="page page-narrow">
 <p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <h1 style="margin:0;">Find your community</h1>
@@ -6072,6 +6140,16 @@ def tools_communities_find(request: Request):
 communities in the directory that fit.</p>
 <form method="post" action="/tools/communities/find">
 {fieldsets}
+<fieldset style="border-top:1px solid var(--line);padding-top:20px;margin:0 0 24px;">
+  <legend style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:4px;padding:0;">What matters most to you? <span style="font-weight:400;color:var(--muted);">(optional)</span></legend>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Check anything that matters to you and results will be ranked with that in mind. Leave a section blank
+    and we'll rank it using Brian's own default priorities instead. Skip this whole step and every result is ranked by Brian's defaults.</p>
+  <div id="rw-groups" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px;margin-bottom:12px;">
+    {weight_groups}
+  </div>
+  <button type="button" onclick="document.querySelectorAll('.rw-check').forEach(function(el){{el.checked=false;}});"
+    class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">Clear my choices</button>
+</fieldset>
 <button type="submit" class="btn">Get recommendations</button>
 </form>
 </div>"""
@@ -6088,6 +6166,16 @@ async def tools_communities_find_submit(request: Request):
         if val:
             answers[q["key"]] = val
 
+    # Optional weighting step: only values from each dimension's own fixed
+    # vocabulary are kept, so a tampered/stray form value can't smuggle
+    # anything into scoring or the logged submission.
+    weight_prefs: dict[str, list[str]] = {}
+    for dim in _WEIGHT_DIMENSIONS:
+        valid = {v for v, _ in dim["options"]}
+        picked = [v for v in form.getlist(f"w_{dim['key']}") if v in valid]
+        if picked:
+            weight_prefs[dim["key"]] = picked
+
     opt_map = _recommender_option_map()
     lib = _lib()
     try:
@@ -6103,10 +6191,46 @@ async def tools_communities_find_submit(request: Request):
             viewed_community_ids_json=json.dumps(viewed_ids),
             submission_type="recommender",
         )
+        # Logged only when the visitor actually set a preference, never on a
+        # skip — separate row (not folded into the 'recommender' row above)
+        # so Brian can look at weight-preference signal on its own without
+        # every quiz completion (most of which won't set any) diluting it.
+        if weight_prefs:
+            lib.add_community_gap_submission(
+                search_context_json=json.dumps({"weights": weight_prefs}),
+                viewed_community_ids_json=json.dumps(viewed_ids),
+                submission_type="weight_preferences",
+            )
     finally:
         lib.close()
 
-    return RedirectResponse(f"/tools/communities/find/results?{urlencode(answers)}", status_code=303)
+    redirect_params = dict(answers)
+    redirect_params.update({f"w_{key}": values for key, values in weight_prefs.items()})
+    return RedirectResponse(f"/tools/communities/find/results?{urlencode(redirect_params, doseq=True)}", status_code=303)
+
+
+def _recommender_disclosure_html(visitor_values: dict[str, list[str]]) -> str:
+    """States plainly which weights ranked these results: the visitor's own
+    choices, restated back, if they set any; Brian's default priorities
+    otherwise. No separate methodology page needed — whichever weights are
+    in effect (custom or default) ARE the explanation."""
+    if not visitor_values:
+        return ('<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">'
+                'Ranked using Brian&rsquo;s default priorities. '
+                '<a href="/tools/communities/find">Set your own</a> to rank these results by what matters most to you.</p>')
+    dims_by_key = {dim["key"]: dim for dim in _WEIGHT_DIMENSIONS}
+    parts = []
+    for key, values in visitor_values.items():
+        dim = dims_by_key.get(key)
+        if not dim:
+            continue
+        labels = [label for val, label in dim["options"] if val in values]
+        if labels:
+            parts.append(f"{dim['quiz_label']}: {', '.join(labels)}")
+    stated = "; ".join(parts)
+    return (f'<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">'
+            f'You told us what matters to you ({_esc(stated)}), so results below are ranked with that in mind. '
+            f'Anything you didn&rsquo;t weigh in on still uses Brian&rsquo;s default priorities.</p>')
 
 
 def _recommender_result_card(c: dict) -> str:
@@ -6155,12 +6279,36 @@ def _recommender_result_card(c: dict) -> str:
 def tools_communities_find_results(request: Request, role: str = "", budget: str = "",
                                    access: str = "", focus: str = ""):
     answers = {k: v for k, v in {"role": role, "budget": budget, "access": access, "focus": focus}.items() if v}
+
+    # Optional weighting step's chosen values, carried through the redirect
+    # from POST /tools/communities/find as repeated query params (w_<dim
+    # key>=<value>) so this plain GET page stays bookmarkable/shareable on
+    # its own, same reasoning as the 4 filter answers above. Only values
+    # from each dimension's own fixed vocabulary are kept.
+    visitor_values: dict[str, list[str]] = {}
+    for dim in _WEIGHT_DIMENSIONS:
+        valid = {v for v, _ in dim["options"]}
+        picked = [v for v in request.query_params.getlist(f"w_{dim['key']}") if v in valid]
+        if picked:
+            visitor_values[dim["key"]] = picked
+
     lib = _lib()
     try:
         communities = lib.list_communities(approved_only=True)
+        default_weights = _get_default_community_weights(lib)
+        default_values = _get_default_community_weight_values(lib)
+        results = _recommender_filter(communities, answers)
+        profiles = {c["id"]: lib.get_community_profile(c["id"]) for c in results}
     finally:
         lib.close()
-    results = _recommender_filter(communities, answers)
+
+    weights, target_values = _recommender_effective_weights_and_values(
+        visitor_values, default_weights, default_values)
+    for c in results:
+        c["_score"] = _recommender_score(c, profiles.get(c["id"]), weights, target_values)
+    results.sort(key=lambda c: (-c["_score"], 0 if c.get("featured") else 1, c["name"].lower()))
+
+    disclosure = _recommender_disclosure_html(visitor_values)
 
     back_link = '<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>'
     retake_link = '<a href="/tools/communities/find" style="font-size:13px;color:var(--muted);">Retake the quiz</a>'
@@ -6181,14 +6329,20 @@ That's useful to know&mdash;we've noted it as a gap.</p>
 
     cards = "".join(_recommender_result_card(c) for c in results)
     body = f"""<div class="page page-wide">
+<div class="rf-noprint">
 {back_link}
-<h1 style="margin:0;">Find your community</h1>
+</div>
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+  <h1 style="margin:0;">Find your community</h1>
+  <button type="button" onclick="window.print();" class="btn btn-ghost rf-noprint" style="font-size:13px;padding:7px 16px;">Print your results</button>
+</div>
 <p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Based on your answers, here's what fits: {len(results)}
 communit{'y' if len(results) == 1 else 'ies'}.</p>
+{disclosure}
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;margin-bottom:24px;">
   {cards}
 </div>
-<p>{retake_link} &middot; <a href="/tools/communities" style="font-size:13px;color:var(--muted);">Browse the full directory &rarr;</a></p>
+<p class="rf-noprint">{retake_link} &middot; <a href="/tools/communities" style="font-size:13px;color:var(--muted);">Browse the full directory &rarr;</a></p>
 </div>
 
 <style>
@@ -6203,6 +6357,12 @@ communit{'y' if len(results) == 1 else 'ies'}.</p>
 .comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
+@media print {{
+  .site-header, .site-nav, .site-footer, .rf-noprint {{ display: none !important; }}
+  .page {{ max-width: 100%; padding: 0; margin: 0; }}
+  .comm-card {{ break-inside: avoid; box-shadow: none !important; }}
+  a[href]:after {{ content: ""; }}
+}}
 </style>"""
     return HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
@@ -6354,6 +6514,7 @@ _COMMUNITY_PROFILE_FIELD_IDS = [
     "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
     "sponsor_relationship_note", "business_model", "application_friction", "cost_value_verdict",
     "notable_members", "founded_year", "public_criticism", "verdict_summary",
+    "stage_focus", "jobs_program", "team_or_individual",
 ]
 _GENERATE_PROFILE_JS = """
 var COMMUNITY_PROFILE_FIELDS = """ + json.dumps(_COMMUNITY_PROFILE_FIELD_IDS) + """;
@@ -7161,6 +7322,146 @@ _COMMUNITY_METROS = [
 ]
 
 
+# Communities Recommender best-fit weighting: the controlled vocabulary each
+# of the 7 community_profiles "tags" columns (added alongside the free-text
+# research columns of the same base name — see the ALTER TABLE comment in
+# linklib/db.py's _SCHEMA) draws from, plus two directory-level dimensions
+# (local_presence, paid_free) derived on the fly from communities.metros/
+# cost_band rather than a community_profiles column. Shared by three
+# consumers: the admin default-weight settings (Phase 1, profile_field=True
+# rows only — Brian never sets a default for the two derived rows, see
+# _DERIVED_DIMENSION_WEIGHT below), the admin profile-edit checkboxes that
+# keep *_tags populated for new/edited communities, and the visitor-facing
+# "What matters most to you?" quiz step. `admin_label` reflects the UI label
+# pass from the Communities feature request; where no relabel was specified
+# (or Brian asked to keep the live label), it matches the pre-existing text.
+_WEIGHT_DIMENSIONS = [
+    {"key": "seniority_band", "admin_label": "Level", "quiz_label": "Seniority level",
+     "profile_field": True,
+     "options": [("senior", "Senior / CFO-level"), ("controller", "Controller / accounting-focused"),
+                 ("mixed", "Mixed / all levels")]},
+    {"key": "cpe_eligible", "admin_label": "CPE", "quiz_label": "CPE credit",
+     "profile_field": True,
+     "options": [("yes", "Offers CPE credit")]},
+    {"key": "primary_purpose", "admin_label": "Primary purpose", "quiz_label": "What it's mainly for",
+     "profile_field": True,
+     "options": [("networking", "Peer networking"), ("learning", "Learning / education"),
+                 ("career_transition", "Career transition / professional development"),
+                 ("both", "Both / multiple")]},
+    {"key": "platform_type", "admin_label": "Platform", "quiz_label": "Platform",
+     "profile_field": True,
+     "options": [("chat", "Slack / chat-based"), ("in_person", "In-person only"),
+                 ("mix", "Mix (online + in-person)")]},
+    {"key": "meeting_format", "admin_label": "Programming", "quiz_label": "Meeting format",
+     "profile_field": True,
+     "options": [("in_person", "In-person"), ("online", "Online"), ("hybrid", "Hybrid")]},
+    {"key": "event_style", "admin_label": "Event style", "quiz_label": "Event style",
+     "profile_field": True,
+     "options": [("intimate", "Small / intimate gatherings"), ("large_format", "Large-format conferences"),
+                 ("mix", "Mix of both")]},
+    {"key": "resources_included", "admin_label": "Resources included", "quiz_label": "Resources",
+     "profile_field": True,
+     "options": [("yes", "Includes templates, benchmarking, or a resource library")]},
+    # Derived, not community_profiles columns — computed per-community from
+    # existing directory fields at scoring time (see _community_weight_tags
+    # below). No admin default weight: these only affect ranking when a
+    # visitor actively opts into them (see _DERIVED_DIMENSION_WEIGHT).
+    {"key": "local_presence", "quiz_label": "Local presence", "profile_field": False,
+     "options": [("yes", "Has a local chapter / metro presence")]},
+    {"key": "paid_free", "quiz_label": "Cost", "profile_field": False,
+     "options": [("free", "Free only"), ("paid", "Paid is fine")]},
+]
+
+# Fixed weight applied to local_presence/paid_free when a visitor checks them
+# — matches the starting default for the 7 admin-editable weights below, so
+# an opted-into derived dimension carries the same influence as an
+# unmodified profile-field dimension. Not admin-editable (see comment above):
+# these are structural directory facts, not a qualitative research judgment
+# Brian would tune a default priority for.
+_DERIVED_DIMENSION_WEIGHT = 1.0
+
+_COMMUNITY_WEIGHT_SETTING_PREFIX = "community_weight_"
+_COMMUNITY_WEIGHT_VALUES_SETTING_PREFIX = "community_weight_values_"
+
+
+def _community_weight_setting_key(dim_key: str) -> str:
+    return f"{_COMMUNITY_WEIGHT_SETTING_PREFIX}{dim_key}"
+
+
+def _community_weight_values_setting_key(dim_key: str) -> str:
+    return f"{_COMMUNITY_WEIGHT_VALUES_SETTING_PREFIX}{dim_key}"
+
+
+def _get_default_community_weights(lib) -> dict[str, float]:
+    """Brian's admin-set default weight per profile_field dimension (Phase 1),
+    applied on every dimension a visitor doesn't state their own preference
+    for (including, at the extreme, every dimension when the visitor skips
+    the optional quiz step entirely). All 7 default to equal weight (1.0)
+    until adjusted."""
+    weights = {}
+    for dim in _WEIGHT_DIMENSIONS:
+        if not dim["profile_field"]:
+            continue
+        raw = lib.get_setting(_community_weight_setting_key(dim["key"]), "1")
+        try:
+            weights[dim["key"]] = float(raw)
+        except ValueError:
+            weights[dim["key"]] = 1.0
+    return weights
+
+
+def _get_default_community_weight_values(lib) -> dict[str, list[str]]:
+    """Brian's admin-set default TARGET VALUE(S) per profile_field dimension —
+    a weight alone has nothing to match a community's tags against, so this
+    is the other half of Phase 1's default (same checkbox control the
+    visitor's quiz step uses; see _community_weight_setting_key's sibling).
+    Empty (no default value picked yet) is a valid state: that dimension
+    simply doesn't differentiate results until Brian picks one."""
+    values = {}
+    for dim in _WEIGHT_DIMENSIONS:
+        if not dim["profile_field"]:
+            continue
+        raw = lib.get_setting(_community_weight_values_setting_key(dim["key"]), "[]")
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            parsed = []
+        valid = {v for v, _ in dim["options"]}
+        values[dim["key"]] = [v for v in parsed if v in valid] if isinstance(parsed, list) else []
+    return values
+
+
+def _community_weight_tags(dim_key: str, community: dict, profile: dict | None) -> list[str]:
+    """The controlled-vocabulary tag(s) that apply to this community for one
+    weighting dimension — from community_profiles's *_tags column for the 7
+    researched dimensions, or derived on the fly from directory fields for
+    local_presence/paid_free."""
+    if dim_key == "local_presence":
+        return ["yes"] if community.get("metros") else []
+    if dim_key == "paid_free":
+        return ["free"] if community.get("cost_band") == "Free" else ["paid"]
+    if not profile:
+        return []
+    return profile.get(f"{dim_key}_tags") or []
+
+
+def _community_profile_checkbox_group(dim: dict, selected: list[str] | None = None) -> str:
+    """Checkbox group for one _WEIGHT_DIMENSIONS entry, used on the admin
+    profile-edit form to keep a community's *_tags columns current."""
+    selected = selected or []
+    name = f"{dim['key']}_tags"
+    boxes = "".join(
+        f'<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">'
+        f'<input type="checkbox" name="{name}" value="{_esc(val)}"'
+        f'{" checked" if val in selected else ""}> {_esc(label)}</label>'
+        for val, label in dim["options"]
+    )
+    return f"""  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(dim['admin_label'])} (Recommender weighting)</label>
+    <div style="display:flex;flex-direction:column;gap:6px;">{boxes}</div>
+  </div>"""
+
+
 def _community_category_checkboxes(categories: list[dict], selected: list[str] | None = None) -> str:
     selected = selected or []
     return "".join(
@@ -7360,13 +7661,27 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
 {_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True)}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
 {_short_field('primary_purpose', 'Primary purpose', 'e.g. networking, learning, both')}
-{_short_field('cpe_eligible', 'CPE eligible', 'Yes / No / Unclear, with any qualifier')}
-{_short_field('platform_type', 'Platform type', 'Slack, proprietary app, in-person only, …')}
-{_short_field('meeting_format', 'Meeting format', 'In-person / virtual / hybrid')}
+{_short_field('cpe_eligible', 'CPE', 'Yes / No / Unclear, with any qualifier')}
+{_short_field('platform_type', 'Platform', 'Slack, proprietary app, in-person only, …')}
+{_short_field('meeting_format', 'Programming', 'In-person / virtual / hybrid')}
 {_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
-{_short_field('seniority_band', 'Seniority band', 'Who it targets by seniority')}
+{_short_field('seniority_band', 'Level', 'Who it targets by seniority')}
   </div>
 {_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc. — or "No".', rows=2)}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+{_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus. Placeholder, not yet researched or weighted.')}
+{_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any. Placeholder, not yet researched or weighted.')}
+{_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both. Placeholder, not yet researched or weighted.')}
+  </div>
+  <div style="border-top:1px solid var(--line);padding-top:18px;margin-top:4px;">
+    <p style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 4px;">Recommender weighting</p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Controlled-vocabulary tags the visitor-facing quiz matches against,
+      separate from the free-text fields above (see CLAUDE.md's Phase 0 note on why the raw research prose isn't reliable for matching).
+      Check every value that genuinely applies; a community can span more than one.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+{"".join(_community_profile_checkbox_group(dim, p.get(f"{dim['key']}_tags")) for dim in _WEIGHT_DIMENSIONS if dim["profile_field"])}
+    </div>
+  </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" id="cp-low_confidence" name="low_confidence" value="1"{' checked' if p.get('low_confidence') else ''}>
@@ -7447,10 +7762,22 @@ _COMMUNITIES_REFERENCE_HTML = """
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Recommender (/tools/communities/find)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong>Heading:</strong> &ldquo;Find your community&rdquo; / &ldquo;Four quick questions, then we'll point you to the communities in the directory that fit.&rdquo; Submit button: &ldquo;Get recommendations&rdquo;.</li>
-<li><strong>Four questions:</strong> role (&ldquo;What best describes your role?&rdquo;), budget (&ldquo;What's your budget for dues?&rdquo;), access (&ldquo;What kind of access are you looking for?&rdquo;), and a catch-all (&ldquo;Anything more specific you're looking for?&rdquo;) &mdash; each option maps onto an existing directory filter (category, cost band, or access bucket) rather than a parallel scoring system.</li>
-<li><strong>Zero-result results page:</strong> &ldquo;Nothing in the directory matched all four answers. That's useful to know&mdash;we've noted it as a gap.&rdquo; with a CTA box (&ldquo;Want to tell us more about what you're looking for?&rdquo; / &ldquo;Tell us more &rarr;&rdquo;) linking to the gap form.</li>
-<li><strong>Results found:</strong> &ldquo;Based on your answers, here's what fits: N communit(y/ies).&rdquo; plus &ldquo;Retake the quiz&rdquo; and &ldquo;Browse the full directory &rarr;&rdquo; links.</li>
-<li>Every completed quiz is logged &mdash; including a zero/thin result &mdash; as a <code>community_gap_submissions</code> row with <code>submission_type='recommender'</code>, the same gap signal as a zero-result directory search.</li>
+<li><strong>Four required questions:</strong> role (&ldquo;What best describes your role?&rdquo;), budget (&ldquo;What's your budget for dues?&rdquo;), access (&ldquo;What kind of access are you looking for?&rdquo;), and a catch-all (&ldquo;Anything more specific you're looking for?&rdquo;) &mdash; each option maps onto an existing directory filter (category, cost band, or access bucket). This filtering step is unchanged by the weighting step below and is the sole gate on which communities appear at all.</li>
+<li><strong>Fifth, optional step &mdash; &ldquo;What matters most to you? (optional)&rdquo;:</strong> a checkbox group per weighting dimension (9 total: the 7 <code>community_profiles</code> dimensions plus Local presence and Cost), letting a visitor check every value they'd accept per dimension. Intro copy: &ldquo;Check anything that matters to you and results will be ranked with that in mind. Leave a section blank and we'll rank it using Brian's own default priorities instead. Skip this whole step and every result is ranked by Brian's defaults.&rdquo; A &ldquo;Clear my choices&rdquo; button unchecks every box client-side.</li>
+<li><strong>Zero-result results page:</strong> &ldquo;Nothing in the directory matched all four answers. That's useful to know&mdash;we've noted it as a gap.&rdquo; with a CTA box (&ldquo;Want to tell us more about what you're looking for?&rdquo; / &ldquo;Tell us more &rarr;&rdquo;) linking to the gap form. Not weighted/ranked (nothing to rank).</li>
+<li><strong>Results found:</strong> &ldquo;Based on your answers, here's what fits: N communit(y/ies).&rdquo; followed by the weighting disclosure line, then &ldquo;Retake the quiz&rdquo; and &ldquo;Browse the full directory &rarr;&rdquo; links. Results are sorted by weighted match score, <code>featured</code> breaking ties (same convention as the rest of the directory) &mdash; no separate methodology page, since the disclosure line below states the weights in effect. A &ldquo;Print your results&rdquo; button (<code>window.print()</code>, no PDF library) sits next to the heading; a <code>@media print</code> stylesheet hides the site header/nav/footer and the back/retake/browse links (<code>.rf-noprint</code>) so only the matched-community cards print.</li>
+<li><strong>Weighting disclosure line, visitor set at least one preference:</strong> &ldquo;You told us what matters to you (&lt;dimension: chosen values&gt;), so results below are ranked with that in mind. Anything you didn't weigh in on still uses Brian's default priorities.&rdquo;</li>
+<li><strong>Weighting disclosure line, nothing set (skip, or admin defaults only):</strong> &ldquo;Ranked using Brian's default priorities. Set your own to rank these results by what matters most to you.&rdquo; (links back to the quiz)</li>
+<li>Every completed quiz is logged &mdash; including a zero/thin result &mdash; as a <code>community_gap_submissions</code> row with <code>submission_type='recommender'</code>, the same gap signal as a zero-result directory search. When the visitor checked at least one weighting box (never on a skip), a <em>second</em>, separate row is logged with <code>submission_type='weight_preferences'</code>, storing the chosen values as JSON &mdash; kept apart from the <code>'recommender'</code> row so this signal isn't diluted by the majority of completions that set no preference.</li>
+</ul>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Recommender best-fit weighting admin (/admin/tools/communities)</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>&ldquo;Recommender ranking weights&rdquo; panel:</strong> one card per <code>community_profiles</code> dimension (Level, CPE, Primary purpose, Platform, Programming, Event style, Resources included) with a 0&ndash;5 weight number and a checkbox group of that dimension's own controlled-vocabulary values. Both are required together for a dimension to actually rank anything &mdash; a weight alone has nothing to match a community's tags against. Saved together, no page reload, mirroring <code>/admin/voice</code>'s pattern.</li>
+<li>The two derived dimensions (Local presence, Cost) have no admin default here &mdash; they only ever affect ranking when a visitor opts in on the quiz, at a fixed weight, since they're structural directory facts (whether <code>metros</code> is non-empty; whether <code>cost_band</code> is <code>Free</code>) rather than a research judgment to tune a default for.</li>
+<li><strong>Profile edit form (&ldquo;Recommender weighting&rdquo; section):</strong> the same 7 checkbox groups, per-community, keep each community's <code>*_tags</code> columns current for new/edited communities &mdash; separate from the free-text research fields of the same base name, since that prose was found too inconsistent for reliable keyword matching (see <code>scripts/backfill_community_weight_tags.py</code>'s docstring for the specific false-positive example that ruled it out).</li>
 </ul>
 </section>
 
@@ -7466,7 +7793,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong><code>cfo_visitor</code> cookie:</strong> unsigned, <code>httponly</code>, <code>samesite=lax</code>, 30-day TTL, value is <code>secrets.token_urlsafe(16)</code> &mdash; a random token with no IP, user agent, or fingerprint embedded. Set only once per visitor (never re-set on an existing cookie), so it never resets its own TTL on every page view.</li>
 <li><strong><code>community_profile_views</code> table:</strong> records <code>(session_id, community_id, viewed_at)</code> &mdash; which profile pages a session viewed, and when. Composite primary key on <code>(session_id, community_id)</code> dedups repeat views; a re-view just refreshes <code>viewed_at</code>.</li>
-<li><strong><code>community_gap_submissions</code> table:</strong> stores the free-text fields (current communities, gaps, looking-for), <code>search_context_json</code> (the search/filter state, or quiz answers, at submission time), <code>viewed_community_ids_json</code> (computed server-side from <code>community_profile_views</code>, never trusted from the client), <code>closest_community_id</code>, optional email, a <code>reviewed</code> flag for admin triage, and <code>submission_type</code> (<code>'gap'</code> or <code>'recommender'</code>) distinguishing gap-form submissions from logged recommender-quiz completions.</li>
+<li><strong><code>community_gap_submissions</code> table:</strong> stores the free-text fields (current communities, gaps, looking-for), <code>search_context_json</code> (the search/filter state, quiz answers, or the quiz's optional weighting-step choices, at submission time), <code>viewed_community_ids_json</code> (computed server-side from <code>community_profile_views</code>, never trusted from the client), <code>closest_community_id</code>, optional email, a <code>reviewed</code> flag for admin triage, and <code>submission_type</code> (<code>'gap'</code>, <code>'recommender'</code>, or <code>'weight_preferences'</code>) distinguishing gap-form submissions, logged recommender-quiz completions, and a visitor's own weighting choices (logged only when they set at least one, never on a skip) from each other.</li>
 <li><strong>No PII is collected</strong> &mdash; nothing reads or stores IP address, user agent, or <code>X-Forwarded-For</code>. The only header touched is <code>x-forwarded-proto</code>, used once to set the cookie's <code>secure</code> flag, never persisted.</li>
 <li><strong>Retention:</strong> everything is kept indefinitely, no automatic deletion &mdash; documented publicly at <a href="/privacy">/privacy</a>.</li>
 <li><strong>Admin visibility:</strong> submissions are triaged at <a href="/admin/community-gaps">/admin/community-gaps</a>, mirroring the <code>/admin/ask-feedback</code> layout, and feed a badge in the CFO Toolbox admin nav group via <code>community_gap_counts()</code>.</li>
@@ -7484,6 +7811,8 @@ def admin_communities(request: Request, filter: str = ""):
     try:
         all_communities = lib.list_communities(approved_only=False)
         needs_review_ids = lib.community_profile_needs_review_ids()
+        current_weights = _get_default_community_weights(lib)
+        current_weight_values = _get_default_community_weight_values(lib)
     finally:
         lib.close()
 
@@ -7576,6 +7905,61 @@ def admin_communities(request: Request, filter: str = ""):
   </div>
 </details>
 
+<details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--surface);" open>
+  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);">Recommender ranking weights</summary>
+  <div style="margin-top:14px;">
+    <p style="font-size:13px;color:var(--muted);margin:0 0 14px;max-width:640px;">Your own default priorities for ranking
+      <a href="/tools/communities/find">/tools/communities/find</a> results: for each dimension, check the value(s) you'd prefer and
+      set how much it matters (0&ndash;5). Used for any dimension a visitor doesn't state their own preference for, including every
+      dimension when they skip the quiz's optional weighting step entirely. Leave a dimension's checkboxes empty to let it sit out of
+      ranking until you pick a default.</p>
+    <div id="cw-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px 20px;margin-bottom:14px;">
+      {"".join(
+          f'''<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;">
+    <label for="cw-{dim['key']}" style="display:block;font-size:13px;font-weight:600;color:var(--navy);margin-bottom:6px;">{_esc(dim['admin_label'])}</label>
+    <input id="cw-{dim['key']}" type="number" min="0" max="5" step="0.5" value="{current_weights.get(dim['key'], 1.0)}"
+      style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;margin-bottom:8px;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      {"".join(
+          f'<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">'
+          f'<input type="checkbox" class="cw-value-{dim["key"]}" value="{_esc(val)}"'
+          f'{" checked" if val in current_weight_values.get(dim["key"], []) else ""}> {_esc(label)}</label>'
+          for val, label in dim["options"]
+      )}
+    </div>
+  </div>'''
+          for dim in _WEIGHT_DIMENSIONS if dim["profile_field"]
+      )}
+    </div>
+    <button id="cw-save-btn" onclick="saveCommunityWeights()" class="btn" style="font-size:14px;padding:9px 22px;">Save weights</button>
+    <span id="cw-status" style="font-size:13px;color:var(--muted);margin-left:10px;"></span>
+  </div>
+</details>
+
+<script>
+var CW_DIMENSIONS = {json.dumps([dim["key"] for dim in _WEIGHT_DIMENSIONS if dim["profile_field"]])};
+async function saveCommunityWeights() {{
+  var btn = document.getElementById('cw-save-btn'), status = document.getElementById('cw-status');
+  var weights = {{}}, values = {{}};
+  CW_DIMENSIONS.forEach(function(k) {{
+    var v = parseFloat(document.getElementById('cw-' + k).value);
+    weights[k] = isNaN(v) ? 1.0 : v;
+    values[k] = Array.prototype.slice.call(document.querySelectorAll('.cw-value-' + k + ':checked')).map(function(el) {{ return el.value; }});
+  }});
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/tools/communities/weights', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{weights: weights, values: values}})
+    }});
+    if (!r.ok) throw new Error();
+    status.textContent = 'Saved.'; status.style.color = '#065f46';
+    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+  }} catch (e) {{
+    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = 'Save weights'; }}
+}}
+</script>
+
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
 <div style="overflow-x:auto;margin-bottom:40px;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
@@ -7614,6 +7998,37 @@ def admin_communities(request: Request, filter: str = ""):
 </p>
 </div>"""
     return HTMLResponse(_page("Communities—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.post("/admin/tools/communities/weights")
+async def admin_communities_save_weights(request: Request):
+    """Save the 7 Recommender default weight+value pairs in one call, same
+    no-reload settings pattern as /admin/voice/core (two settings keys per
+    dimension: the weight number and its default target value(s) — see
+    _community_weight_setting_key/_community_weight_values_setting_key)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    weights = payload.get("weights")
+    values = payload.get("values")
+    if not isinstance(weights, dict) or not isinstance(values, dict):
+        return JSONResponse({"ok": False, "error": "Invalid payload"}, status_code=400)
+    dims_by_key = {dim["key"]: dim for dim in _WEIGHT_DIMENSIONS if dim["profile_field"]}
+    lib = _lib()
+    try:
+        for key, dim in dims_by_key.items():
+            if key in weights:
+                try:
+                    lib.set_setting(_community_weight_setting_key(key), str(float(weights[key])))
+                except (TypeError, ValueError):
+                    pass
+            if key in values and isinstance(values[key], list):
+                valid = {v for v, _ in dim["options"]}
+                picked = [v for v in values[key] if v in valid]
+                lib.set_setting(_community_weight_values_setting_key(key), json.dumps(picked))
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
 
 
 @app.get("/admin/tools/communities/categories", response_class=HTMLResponse)
@@ -7974,6 +8389,16 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             seniority_band=(form.get("seniority_band") or "").strip(),
             resources_included=(form.get("resources_included") or "").strip(),
             needs_review=1 if form.get("needs_review") == "1" else 0,
+            stage_focus=(form.get("stage_focus") or "").strip(),
+            jobs_program=(form.get("jobs_program") or "").strip(),
+            team_or_individual=(form.get("team_or_individual") or "").strip(),
+            seniority_band_tags=form.getlist("seniority_band_tags"),
+            cpe_eligible_tags=form.getlist("cpe_eligible_tags"),
+            primary_purpose_tags=form.getlist("primary_purpose_tags"),
+            platform_type_tags=form.getlist("platform_type_tags"),
+            meeting_format_tags=form.getlist("meeting_format_tags"),
+            event_style_tags=form.getlist("event_style_tags"),
+            resources_included_tags=form.getlist("resources_included_tags"),
         )
     finally:
         lib.close()
@@ -8025,6 +8450,9 @@ async def admin_communities_generate_profile(request: Request):
         "founded_year": draft.founded_year,
         "public_criticism": draft.public_criticism,
         "verdict_summary": draft.verdict_summary,
+        "stage_focus": draft.stage_focus,
+        "jobs_program": draft.jobs_program,
+        "team_or_individual": draft.team_or_individual,
     })
 
 

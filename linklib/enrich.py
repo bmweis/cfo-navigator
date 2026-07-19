@@ -226,6 +226,7 @@ COMMUNITY_PROFILE_FIELDS = [
     "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
     "sponsor_relationship_note", "business_model", "application_friction", "cost_value_verdict",
     "notable_members", "founded_year", "public_criticism", "verdict_summary",
+    "stage_focus", "jobs_program", "team_or_individual",
 ]
 
 _COMMUNITY_PROFILE_PROMPT = """You are drafting a deep, opinionated profile of a peer community for the
@@ -273,6 +274,13 @@ Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
   "founded_year": four-digit year, or null.
   "public_criticism": any visible/reported drawback, or null.
   "verdict_summary": one short "best for X, not for Y" line.
+  "stage_focus": whether the community targets growth-stage, late-stage, or
+     public companies, or has no particular stage focus — or null if unclear.
+  "jobs_program": whether there's a FORMAL job-placement/transition program
+     (not just informal networking that happens to help with job searches) —
+     or null if unclear.
+  "team_or_individual": whether membership is individual-only, team/company-
+     based, or supports both — or null if unclear.
 
 Community name: {name}
 Community URL: {url}
@@ -296,6 +304,9 @@ class CommunityProfileDraft:
     founded_year: int | None = None
     public_criticism: str = ""
     verdict_summary: str = ""
+    stage_focus: str = ""
+    jobs_program: str = ""
+    team_or_individual: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
     model: str = ""
     input_tokens: int = 0
@@ -379,6 +390,9 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             founded_year=founded_year,
             public_criticism=str(data.get("public_criticism") or "").strip(),
             verdict_summary=str(data.get("verdict_summary", "")).strip(),
+            stage_focus=str(data.get("stage_focus") or "").strip(),
+            jobs_program=str(data.get("jobs_program") or "").strip(),
+            team_or_individual=str(data.get("team_or_individual") or "").strip(),
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
@@ -397,6 +411,7 @@ VOICE_REWRITE_FIELDS = [
     "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
     "engagement_level", "sponsor_relationship_note", "application_friction",
     "cost_value_verdict", "public_criticism", "verdict_summary",
+    "stage_focus", "jobs_program", "team_or_individual",
 ]
 
 _VOICE_REWRITE_PROMPT = """You are rewriting research copy for the CFO Toolbox's Communities
