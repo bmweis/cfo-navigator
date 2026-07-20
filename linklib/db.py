@@ -917,6 +917,20 @@ class Library:
             # from its current cost_band (preserving today's behavior)
             # before applying the known freemium overrides.
             "ALTER TABLE community_profiles ADD COLUMN paid_free_tags TEXT NOT NULL DEFAULT '[]'",
+            # Industry (Recommender weighting redesign, PR 6): a new
+            # dimension, no free-text sibling column — Life sciences /
+            # Healthcare / Private equity/funds / Industry-neutral, drawn
+            # from the natural categories that emerged from the
+            # "Industry-specific"-tagged communities' research text (see the
+            # Phase 0 investigation). Deliberately narrower than that
+            # category's own framing (which also mentions nonprofit and
+            # tech) — no community in the current 38 is nonprofit-focused
+            # (the one candidate was removed via corrections-and-
+            # overrides.md's REMOVALS before this Recommender build even
+            # started), and "tech" overlaps the stage_focus placeholder's
+            # in-flight Research Round 4 work, so both are left out rather
+            # than added as options with zero or contested matches.
+            "ALTER TABLE community_profiles ADD COLUMN industry_tags TEXT NOT NULL DEFAULT '[]'",
             # Three placeholder factual/categorical columns, same pattern as
             # business_model when it was first added: nullable/empty-default,
             # visible in the admin edit form and the generate-profile-draft
@@ -2058,6 +2072,7 @@ class Library:
     _WEIGHT_TAG_COLUMNS = (
         "seniority_band_tags", "cpe_eligible_tags", "platform_type_tags",
         "function_tags", "looking_for_tags", "programming_tags", "paid_free_tags",
+        "industry_tags",
     )
 
     def get_community_profile(self, community_id: int) -> dict | None:
@@ -2091,7 +2106,8 @@ class Library:
                                  function_tags: list[str] | None = None,
                                  looking_for_tags: list[str] | None = None,
                                  programming_tags: list[str] | None = None,
-                                 paid_free_tags: list[str] | None = None) -> None:
+                                 paid_free_tags: list[str] | None = None,
+                                 industry_tags: list[str] | None = None) -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
         edit form always submits every field, generated or hand-written. The
@@ -2116,8 +2132,9 @@ class Library:
                 event_style, seniority_band, resources_included, needs_review,
                 seniority_band_tags, cpe_eligible_tags, platform_type_tags,
                 stage_focus, jobs_program, team_or_individual,
-                function_tags, looking_for_tags, programming_tags, paid_free_tags)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                function_tags, looking_for_tags, programming_tags, paid_free_tags,
+                industry_tags)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(community_id) DO UPDATE SET
                  ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
                  value_prop=excluded.value_prop, format_reality=excluded.format_reality,
@@ -2148,7 +2165,8 @@ class Library:
                  function_tags=excluded.function_tags,
                  looking_for_tags=excluded.looking_for_tags,
                  programming_tags=excluded.programming_tags,
-                 paid_free_tags=excluded.paid_free_tags""",
+                 paid_free_tags=excluded.paid_free_tags,
+                 industry_tags=excluded.industry_tags""",
             (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
              format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
@@ -2161,7 +2179,8 @@ class Library:
              json.dumps(platform_type_tags or []),
              stage_focus.strip(), jobs_program.strip(), team_or_individual.strip(),
              json.dumps(function_tags or []), json.dumps(looking_for_tags or []),
-             json.dumps(programming_tags or []), json.dumps(paid_free_tags or [])),
+             json.dumps(programming_tags or []), json.dumps(paid_free_tags or []),
+             json.dumps(industry_tags or [])),
         )
         self.conn.commit()
 

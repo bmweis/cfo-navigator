@@ -155,7 +155,7 @@ Cost figures are computed from **real API token usage** at call time
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
 | `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content`, plus `advisor` (a direct `UPDATE`, mirroring `tools.advisor` exactly — see below) — the identical name+description+advisor contract as `tools`. Every other field (`region`, `reach`, `metros_json`, `featured`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `reach` (`Regional`\|`National`\|`Global` — a community's overall footprint), `metros_json` (JSON array from a controlled city/area vocabulary — where it has a chapter, hub, or local focus; independent of `reach`, so a National community like FEI can still carry metros), `region` (legacy free-text note, superseded by `reach`/`metros_json` — kept for any detail those two fields don't capture, no longer read by the region filter), `featured` (pin-to-top + coral badge, same pattern as `tools.promoted`; independent of `reach`/`metros_json`/`advisor`), `advisor` (⭐ marker + "Advisor" filter chip, same pattern as `tools.advisor` — discloses a personal relationship, e.g. The F Suite; independent of `featured`), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `approved` |
 | `community_categories` | Controlled vocabulary of filter pills for `/tools/communities`, same shape and same reasoning as `tool_categories`. | `name` (unique), `sort_order` |
-| `community_profiles` | Deep, opinionated read per community (Community Profiles, Phase 2) — the qualitative judgment a directory row's cost/access/region fields can't carry, edited at `/admin/tools/communities/{id}/profile`. 1:1 with `communities` via `community_id` as the primary key (no SQL-level `REFERENCES`, same as `article_embeddings.article_id` — this codebase does cleanup on delete in application code, not via a declared FK; see `delete_community`). Empty/thin until Research content backfills it or an admin generates a draft. Rendered publicly at `/tools/communities/{slug}` (Phase 3) and side by side at `/tools/communities/compare` (Phase 6) — a community with no profile row, or one whose fields are all empty, falls back to a minimal page (or, on Compare, a "Not available yet" cell) rather than an error or empty-looking layout. | `community_id` (PK), `sponsor_relationship_note` (qualitative — value-add or sales funnel? — distinct from the factual `sponsor_name`/`sponsorship_type` on `communities`), `business_model` (added post-launch — how the community structurally sustains itself, e.g. a gated dues-funded peer group vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships; distinct from `sponsor_relationship_note`, which judges whether a *sponsor's* presence feels salesy, not how the community itself makes money), `application_friction` (the real barrier to entry, not just the `access` label), `founded_year` (nullable), `notable_members`/`public_criticism` (nullable — only when verifiably public/reported), `low_confidence`, `primary_purpose`/`cpe_eligible`/`platform_type`/`meeting_format`/`event_style`/`seniority_band`/`resources_included` (added for the bulk community-profile import below — short factual/categorical research fields, deliberately `TEXT` rather than a strict boolean/enum since the source research carries qualifiers like "Yes (NASBA-approved sponsor)"; excluded from the voice-rewrite pass since they're not prose), `needs_review` (added by the same import — flags a profile as imported/edited but not yet personally read and approved by Brian; admin-only, independent of `communities.approved`, which controls public visibility rather than content review), `seniority_band_tags`/`cpe_eligible_tags`/`platform_type_tags` (Recommender best-fit weighting — a JSON array of controlled-vocabulary values per dimension, edited via checkbox groups alongside the free-text field of the same base name; kept separate from that free-text column rather than parsed from it because the research prose is too inconsistent for reliable keyword matching, e.g. a `platform_type` of "not a Slack/forum" would false-match a naive "Slack" substring check — see `webapp/app.py`'s `_WEIGHT_DIMENSIONS` for the fixed vocabulary per dimension and `scripts/backfill_community_weight_tags.py` for the one-off pass that classified the existing corpus), `function_tags` (post-#159 addition, no free-text sibling column — Overall finance org/FP&A/Accounting/Treasury), `looking_for_tags` (post-#159 addition merging the old `primary_purpose_tags`/`resources_included_tags` into one multi-select — Peer discussions/Networking/Learning & education/Vendor connections/Resources & templates), `programming_tags` (post-#159 addition merging the old `meeting_format_tags`/`event_style_tags` into one multi-select, reusing the "Programming" label — Meals/Conferences/Retreats/Virtual Panels — the four retired `*_tags` columns and their free-text siblings still exist on the table but are frozen historical data, no longer written by `upsert_community_profile` or read by `_WEIGHT_TAG_COLUMNS`), `paid_free_tags` (post-#159 addition — Dues moved here from a `communities.cost_band`-derived computation so a freemium community can carry both Free and Paid, independently of the single-value `cost_band`), `stage_focus`/`jobs_program`/`team_or_individual` (placeholder factual/categorical columns, same pattern as `business_model` when it was first added — empty until a future research round backfills them; visible in the admin edit form and the generate-profile-draft prompt, but not yet part of the Recommender's weighting) |
+| `community_profiles` | Deep, opinionated read per community (Community Profiles, Phase 2) — the qualitative judgment a directory row's cost/access/region fields can't carry, edited at `/admin/tools/communities/{id}/profile`. 1:1 with `communities` via `community_id` as the primary key (no SQL-level `REFERENCES`, same as `article_embeddings.article_id` — this codebase does cleanup on delete in application code, not via a declared FK; see `delete_community`). Empty/thin until Research content backfills it or an admin generates a draft. Rendered publicly at `/tools/communities/{slug}` (Phase 3) and side by side at `/tools/communities/compare` (Phase 6) — a community with no profile row, or one whose fields are all empty, falls back to a minimal page (or, on Compare, a "Not available yet" cell) rather than an error or empty-looking layout. | `community_id` (PK), `sponsor_relationship_note` (qualitative — value-add or sales funnel? — distinct from the factual `sponsor_name`/`sponsorship_type` on `communities`), `business_model` (added post-launch — how the community structurally sustains itself, e.g. a gated dues-funded peer group vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships; distinct from `sponsor_relationship_note`, which judges whether a *sponsor's* presence feels salesy, not how the community itself makes money), `application_friction` (the real barrier to entry, not just the `access` label), `founded_year` (nullable), `notable_members`/`public_criticism` (nullable — only when verifiably public/reported), `low_confidence`, `primary_purpose`/`cpe_eligible`/`platform_type`/`meeting_format`/`event_style`/`seniority_band`/`resources_included` (added for the bulk community-profile import below — short factual/categorical research fields, deliberately `TEXT` rather than a strict boolean/enum since the source research carries qualifiers like "Yes (NASBA-approved sponsor)"; excluded from the voice-rewrite pass since they're not prose), `needs_review` (added by the same import — flags a profile as imported/edited but not yet personally read and approved by Brian; admin-only, independent of `communities.approved`, which controls public visibility rather than content review), `seniority_band_tags`/`cpe_eligible_tags`/`platform_type_tags` (Recommender best-fit weighting — a JSON array of controlled-vocabulary values per dimension, edited via checkbox groups alongside the free-text field of the same base name; kept separate from that free-text column rather than parsed from it because the research prose is too inconsistent for reliable keyword matching, e.g. a `platform_type` of "not a Slack/forum" would false-match a naive "Slack" substring check — see `webapp/app.py`'s `_WEIGHT_DIMENSIONS` for the fixed vocabulary per dimension and `scripts/backfill_community_weight_tags.py` for the one-off pass that classified the existing corpus), `function_tags` (post-#159 addition, no free-text sibling column — Overall finance org/FP&A/Accounting/Treasury), `looking_for_tags` (post-#159 addition merging the old `primary_purpose_tags`/`resources_included_tags` into one multi-select — Peer discussions/Networking/Learning & education/Vendor connections/Resources & templates), `programming_tags` (post-#159 addition merging the old `meeting_format_tags`/`event_style_tags` into one multi-select, reusing the "Programming" label — Meals/Conferences/Retreats/Virtual Panels — the four retired `*_tags` columns and their free-text siblings still exist on the table but are frozen historical data, no longer written by `upsert_community_profile` or read by `_WEIGHT_TAG_COLUMNS`), `paid_free_tags` (post-#159 addition — Dues moved here from a `communities.cost_band`-derived computation so a freemium community can carry both Free and Paid, independently of the single-value `cost_band`), `industry_tags` (post-#159 addition, no free-text sibling column — Life sciences/Healthcare/Private equity/funds/Industry-neutral), `stage_focus`/`jobs_program`/`team_or_individual` (placeholder factual/categorical columns, same pattern as `business_model` when it was first added — empty until a future research round backfills them; visible in the admin edit form and the generate-profile-draft prompt, but not yet part of the Recommender's weighting) |
 | `community_gap_submissions` | Gap-collection (Phase 5): the native replacement for the old `/community` page's Google Form, folded into the live directory rather than a separate parked page. Submitted at `POST /tools/communities/gap`, triaged at `/admin/community-gaps` (mirrors `/admin/ask-feedback`'s layout). No login required — anyone can submit. Also doubles (Phase 7) as the log for every completed Recommender quiz at `/tools/communities/find` — same table, distinguished by `submission_type` rather than a second table, since a zero/thin recommender result is the same kind of gap signal as a zero-result directory search. Doubles a third way (best-fit weighting) for the quiz's optional "What matters most to you?" step: a visitor's checked values, logged only when they set at least one (never on a skip), for Brian's own aggregate insight into what finance leaders say matters most — not shown to other visitors. | `current_communities`/`gaps`/`looking_for` (free text, the visitor's own words — always `''` on a `submission_type='recommender'` or `'weight_preferences'` row, since neither collects free text), `search_context_json` (on a `'gap'` row: directory search/filter state at submission time, built client-side from JS-only filter state and carried through a hidden form field; on a `'recommender'` row: the quiz answers plus `result_count`; on a `'weight_preferences'` row: `{"weights": {dimension_key: [chosen values]}}`), `viewed_community_ids_json` (server-computed at submission from `community_profile_views`, not client-supplied), `closest_community_id` (nullable, no FK — always `NULL` on a recommender/weight_preferences row), `email` (nullable), `reviewed`, `submission_type` (added by migration — `'gap'`\|`'recommender'`\|`'weight_preferences'`, defaults `'gap'` so every pre-existing row keeps its meaning) |
 | `community_profile_views` | Session-scoped, no-login view tracking for `/tools/communities/{slug}`: which profile pages a visitor opened before (maybe) submitting the gap form above. Keyed by an anonymous `cfo_visitor` cookie (`webapp/app.py`, 30-day TTL, not signed — the first anonymous-session primitive in the codebase; everything else, e.g. `read_later`, requires a logged-in `user_id`). No cleanup job for stale sessions yet — rows are small and carry no PII. | `session_id` + `community_id` (composite PK, dedups repeat views), `viewed_at` |
 
@@ -312,10 +312,10 @@ isn't swallowed as a slug, same reasoning as `/gap`, `/submit`, and
 results are sorted by a per-community weighted match score, `featured`
 breaking ties same as everywhere else in the directory — replacing the
 plain featured-first/alphabetical order the filter alone produced before
-this. Scoring runs over 9 dimensions, defined once in `webapp/app.py`'s
+this. Scoring runs over 10 dimensions, defined once in `webapp/app.py`'s
 `_WEIGHT_DIMENSIONS` (each with a fixed controlled vocabulary, an admin
 label, a quiz label, and a `source`):
-- 7 are `source: "profile"` — 3 of them correspond to a `community_profiles`
+- 8 are `source: "profile"` — 3 of them correspond to a `community_profiles`
   column (`seniority_band`, `cpe_eligible`, `platform_type`) and read from
   that column's sibling `*_tags` JSON column (`seniority_band_tags`, etc.)
   — a controlled-vocabulary classification kept separate from the
@@ -376,6 +376,20 @@ label, a quiz label, and a `source`):
     that its free tier (forums, webinars) is the actual community/product,
     and its paid CPE courses are an add-on purchase, not a membership gate
     the way the freemium four's paid tiers are.
+  - `industry` (Life sciences / Healthcare / Private equity/funds /
+    Industry-neutral, stored in `industry_tags`) is a wholly new dimension,
+    no free-text sibling column. Vocabulary drawn from the natural
+    categories that emerged from the "Industry-specific"-tagged
+    communities' research text during Phase 0 — deliberately narrower than
+    that category's own framing (which also gestures at nonprofit and
+    tech): no community in the current 38 is nonprofit-focused (the one
+    candidate was already removed via `REMOVALS` before this Recommender
+    build started), and "tech" overlaps the `stage_focus` placeholder's
+    in-flight Research Round 4 work, so neither was added as an option with
+    zero or contested matches. Only 4 of the 38 communities get a
+    non-neutral tag (Finance & Accounting for Bioscience → life sciences;
+    HFMA → healthcare; PECFOA and Private Funds CFO Network → PE/funds);
+    the other 34 are `industry_neutral`.
 
   All four retired `*_tags` columns (`primary_purpose_tags`,
   `resources_included_tags`, `meeting_format_tags`, `event_style_tags`) and
@@ -408,8 +422,9 @@ label, a quiz label, and a `source`):
   into its new vocabulary; `scripts/recategorize_programming.py` classified
   `programming_tags` for the first time; `scripts/recategorize_dues.py`
   seeded `paid_free_tags` from `cost_band` and applied the freemium
-  overrides. New communities get theirs set via checkbox groups on the
-  admin profile edit form (`/admin/tools/communities/{id}/profile`),
+  overrides; `scripts/recategorize_industry.py` classified `industry_tags`
+  for the first time. New communities get theirs set via checkbox groups on
+  the admin profile edit form (`/admin/tools/communities/{id}/profile`),
   alongside the free-text fields where one exists.
 - 2 are `source: "derived"` — computed on the fly from an existing
   `communities` column instead of a stored `*_tags` column: `local_presence`
@@ -417,7 +432,7 @@ label, a quiz label, and a `source`):
   `communities.sponsorship_type`, already a fixed 3-value enum —
   `Independent`/`Vendor-sponsored`/`Investor-sponsored` map onto the
   dimension's own `independent`/`vendor`/`investor` vocabulary).
-  `_community_weight_tags` computes all 9 dimensions' tags uniformly
+  `_community_weight_tags` computes all 10 dimensions' tags uniformly
   regardless of source; `source` only changes two things — how that function
   derives the tag, and whether the dimension gets a checkbox group on the
   admin profile-edit form (only `"profile"` ones do, since a `"derived"`
@@ -425,7 +440,7 @@ label, a quiz label, and a `source`):
   `sponsorship_type`'s existing dropdown, so a second control there would
   just invite drift between the two).
 
-For **all 9** dimensions — `"profile"` and `"derived"` alike, no
+For **all 10** dimensions — `"profile"` and `"derived"` alike, no
 distinction — Brian sets a default **weight** (0–5, a
 `community_weight_<dim>` setting) AND a default **target value** (one or
 more of that dimension's vocabulary, a `community_weight_values_<dim>`
@@ -439,21 +454,21 @@ dimensions no admin default at all, on the theory that they're structural
 directory facts rather than a research judgment — that shipped as a bug:
 Local presence and Cost were silently missing from the admin panel
 entirely, and a weight with nothing to match against can't rank anything
-regardless of source. Corrected so all 9 dimensions get the identical
+regardless of source. Corrected so all 10 dimensions get the identical
 default-weight-and-value treatment.)
 
 The quiz's `GET /tools/communities/find` page adds one further optional
 step after the 4 filter questions: "What matters most to you?", a checkbox
-group per dimension (all 9) letting a visitor check every value they'd
+group per dimension (all 10) letting a visitor check every value they'd
 accept — not a single-choice control, since e.g. a visitor might find both
 "CFO" and "Open to all" acceptable for `seniority_band`.
 Skipping the whole step (simply not checking anything) is the same action
 as leaving any individual dimension's boxes unchecked: **resolution is
 per-dimension, not all-or-nothing** — `_recommender_effective_weights_and_
 values` merges a visitor's checked values with Brian's admin default
-independently for each of the 9 dimensions, so a visitor who only weighs
+independently for each of the 10 dimensions, so a visitor who only weighs
 in on 2 dimensions gets their own preference on those 2 and Brian's
-defaults on the other 7. The visitor never sets a numeric weight directly —
+defaults on the other 8. The visitor never sets a numeric weight directly —
 only a target value — the weight applied is always Brian's admin weight for
 that dimension, regardless of which side (visitor or admin default)
 supplied the target value. `_recommender_score` then sums the weight for
