@@ -899,6 +899,24 @@ class Library:
             # _WEIGHT_DIMENSIONS/_WEIGHT_TAG_COLUMNS and from
             # upsert_community_profile's own column list.
             "ALTER TABLE community_profiles ADD COLUMN programming_tags TEXT NOT NULL DEFAULT '[]'",
+            # Dues dual-tagging (Recommender weighting redesign, PR 5): the
+            # "Dues" dimension (key paid_free, admin_label "Dues") moves from
+            # source: "derived" (computed on the fly as a single value —
+            # ["free"] if communities.cost_band == 'Free' else ["paid"]) to
+            # source: "profile", backed by this new dedicated paid_free_tags
+            # column, so a freemium community with both a free tier and a
+            # paid tier (e.g. Finance Alliance, GaapSavvy, Startup CFO, CFO
+            # Connect) can carry both tags at once — something a single
+            # communities.cost_band column can never represent. This is a
+            # deliberate divergence from cost_band, not a bug: cost_band
+            # stays the single-value directory-listing fact (still shown/
+            # edited on the community's own edit form), while
+            # paid_free_tags is the weighting-specific, independently
+            # editable value that can be dual-tagged. scripts/
+            # recategorize_dues.py seeds every community's paid_free_tags
+            # from its current cost_band (preserving today's behavior)
+            # before applying the known freemium overrides.
+            "ALTER TABLE community_profiles ADD COLUMN paid_free_tags TEXT NOT NULL DEFAULT '[]'",
             # Three placeholder factual/categorical columns, same pattern as
             # business_model when it was first added: nullable/empty-default,
             # visible in the admin edit form and the generate-profile-draft
@@ -2039,7 +2057,7 @@ class Library:
     # weighting today.
     _WEIGHT_TAG_COLUMNS = (
         "seniority_band_tags", "cpe_eligible_tags", "platform_type_tags",
-        "function_tags", "looking_for_tags", "programming_tags",
+        "function_tags", "looking_for_tags", "programming_tags", "paid_free_tags",
     )
 
     def get_community_profile(self, community_id: int) -> dict | None:
@@ -2072,7 +2090,8 @@ class Library:
                                  team_or_individual: str = "",
                                  function_tags: list[str] | None = None,
                                  looking_for_tags: list[str] | None = None,
-                                 programming_tags: list[str] | None = None) -> None:
+                                 programming_tags: list[str] | None = None,
+                                 paid_free_tags: list[str] | None = None) -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
         edit form always submits every field, generated or hand-written. The
@@ -2097,8 +2116,8 @@ class Library:
                 event_style, seniority_band, resources_included, needs_review,
                 seniority_band_tags, cpe_eligible_tags, platform_type_tags,
                 stage_focus, jobs_program, team_or_individual,
-                function_tags, looking_for_tags, programming_tags)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                function_tags, looking_for_tags, programming_tags, paid_free_tags)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(community_id) DO UPDATE SET
                  ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
                  value_prop=excluded.value_prop, format_reality=excluded.format_reality,
@@ -2128,7 +2147,8 @@ class Library:
                  team_or_individual=excluded.team_or_individual,
                  function_tags=excluded.function_tags,
                  looking_for_tags=excluded.looking_for_tags,
-                 programming_tags=excluded.programming_tags""",
+                 programming_tags=excluded.programming_tags,
+                 paid_free_tags=excluded.paid_free_tags""",
             (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
              format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
@@ -2141,7 +2161,7 @@ class Library:
              json.dumps(platform_type_tags or []),
              stage_focus.strip(), jobs_program.strip(), team_or_individual.strip(),
              json.dumps(function_tags or []), json.dumps(looking_for_tags or []),
-             json.dumps(programming_tags or [])),
+             json.dumps(programming_tags or []), json.dumps(paid_free_tags or [])),
         )
         self.conn.commit()
 

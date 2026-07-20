@@ -201,6 +201,18 @@ def test_quiz_weight_step_renders_merged_programming_dimension(env):
     assert "Event style" not in r.text
 
 
+def test_quiz_weight_step_renders_dues_as_profile_sourced(env):
+    """Recommender weighting redesign PR 5: Dues (paid_free) moves from a
+    derived-from-cost_band single value to a profile-sourced, independently
+    dual-taggable dimension, so it now also gets a checkbox group on the
+    admin profile edit form (verified in test_community_profiles.py's
+    admin-save regression test) in addition to rendering on the quiz."""
+    c = _client(env)
+    r = c.get("/tools/communities/find")
+    assert r.status_code == 200
+    assert "Dues" in r.text or "Cost" in r.text
+
+
 def test_quiz_works_with_answers_missing_or_set_to_no_preference(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
