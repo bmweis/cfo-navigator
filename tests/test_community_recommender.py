@@ -185,6 +185,22 @@ def test_quiz_weight_step_renders_new_platform_vocabulary(env):
     assert "In-person only" not in r.text
 
 
+def test_quiz_weight_step_renders_merged_programming_dimension(env):
+    """Recommender weighting redesign PR 4: meeting_format and event_style
+    retire in favor of one merged multi-select reusing the "Programming"
+    label. Demo Days is deliberately left out (no supporting research
+    text), so it should never appear."""
+    c = _client(env)
+    r = c.get("/tools/communities/find")
+    assert r.status_code == 200
+    assert "Meals (dinners, etc.)" in r.text
+    assert "Conferences" in r.text
+    assert "Retreats" in r.text
+    assert "Virtual Panels" in r.text
+    assert "Demo Days" not in r.text
+    assert "Event style" not in r.text
+
+
 def test_quiz_works_with_answers_missing_or_set_to_no_preference(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
