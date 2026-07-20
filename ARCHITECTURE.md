@@ -347,15 +347,29 @@ label, a quiz label, and a `source`):
     but are excluded from `Library._WEIGHT_TAG_COLUMNS` and no longer drive
     any scoring — historical data, not live.
 
+  `platform_type`'s own vocabulary was also re-derived post-#159, from
+  Slack/chat-based, In-person only, Mix to naming the actual platform:
+  Slack / Circle / Email / LinkedIn / Proprietary. A community with no
+  matching platform — pure in-person, or coordinating only over a tool
+  like Zoom/Luma that isn't itself a community hub — gets an empty
+  `platform_type_tags` list rather than a forced fit (the schema and
+  scoring already support a dimension with no tags for a given community).
+  `linkedin` was added specifically for Modern Finance Forum for CFOs,
+  whose actual platform is a LinkedIn group — flagged during the initial
+  pass as a real vocabulary gap rather than left untagged or force-fit into
+  Proprietary.
+
   `scripts/backfill_community_weight_tags.py` hand-classified the original
   38 communities into the first 7 (now 5 of the current 7, since 2 were
   retired); `scripts/recategorize_level_function.py` re-classified
   `seniority_band_tags` into its narrowed vocabulary and classified
   `function_tags` for the first time; `scripts/
   recategorize_purpose_resources.py` classified `looking_for_tags` for the
-  first time. New communities get theirs set via checkbox groups on the
-  admin profile edit form (`/admin/tools/communities/{id}/profile`),
-  alongside the free-text fields where one exists.
+  first time; `scripts/recategorize_platform.py` re-classified
+  `platform_type_tags` into its new vocabulary. New communities get theirs
+  set via checkbox groups on the admin profile edit form
+  (`/admin/tools/communities/{id}/profile`), alongside the free-text fields
+  where one exists.
 - 3 are `source: "derived"` — computed on the fly from an existing
   `communities` column instead of a stored `*_tags` column: `local_presence`
   (`metros_json` non-empty), `paid_free` (`cost_band == 'Free'`), and

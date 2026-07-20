@@ -4,12 +4,17 @@ post-#159 vocabulary overhaul.
 
 Platform (`platform_type_tags`) narrows from its original 3-value vocabulary
 (chat | in_person | mix) to naming the actual platform a community runs on:
-slack | circle | email | proprietary. A community with no persistent digital
-hub (pure in-person, or a coordination tool like Zoom/LinkedIn/Luma that
-isn't itself a community platform) gets an empty tag list rather than being
-force-fit into one of the four — the schema and scoring already support a
-dimension with no tags for a given community (several already carry `[]`
-for other dimensions; see the Phase 0 investigation).
+slack | circle | email | linkedin | proprietary. A community with no
+persistent digital hub (pure in-person, or a coordination tool like Zoom/
+Luma that isn't itself a community platform) gets an empty tag list rather
+than being force-fit into one of the five — the schema and scoring already
+support a dimension with no tags for a given community (several already
+carry `[]` for other dimensions; see the Phase 0 investigation). `linkedin`
+was added after the initial pass specifically for Modern Finance Forum for
+CFOs, whose actual platform is a LinkedIn group — the Phase 0 report had
+flagged this as a vocabulary gap (a community on a real, named platform that
+just wasn't in the original 4-option list) rather than force-fitting it into
+Proprietary or leaving it untagged.
 
 Read straight from scripts/_community_profile_data.py's platform_type prose
 per community (same reading process as the other recategorize_*.py
@@ -41,7 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from linklib.db import Library
 
 # name -> platform_type tags
-# vocabulary: slack | circle | email | proprietary
+# vocabulary: slack | circle | email | linkedin | proprietary
 PLATFORM_TAGS: dict[str, list[str]] = {
     "The F Suite": ["proprietary", "slack", "email"],
     "Operators Guild": ["circle"],
@@ -80,10 +85,7 @@ PLATFORM_TAGS: dict[str, list[str]] = {
     # "online communities" — vague, no named platform; judgment call,
     # flagged for review.
     "Healthcare Financial Management Association (HFMA)": ["proprietary"],
-    # LinkedIn isn't in this vocabulary — the community's actual platform
-    # (a LinkedIn group) has no matching option, so this gets no tag rather
-    # than a forced fit.
-    "Modern Finance Forum for CFOs": [],
+    "Modern Finance Forum for CFOs": ["linkedin"],
     # "confidential online community" — vague, no named platform; judgment
     # call, flagged for review.
     "NeuGroup": ["proprietary"],

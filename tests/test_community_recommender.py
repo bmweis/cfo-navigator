@@ -171,12 +171,15 @@ def test_quiz_weight_step_renders_merged_looking_for_dimension(env):
 def test_quiz_weight_step_renders_new_platform_vocabulary(env):
     """Recommender weighting redesign PR 3: Platform narrows from
     Slack/chat-based, In-person only, Mix to naming the actual platform
-    (Slack, Circle, Email, Proprietary)."""
+    (Slack, Circle, Email, LinkedIn, Proprietary). LinkedIn was added after
+    the initial pass specifically for Modern Finance Forum for CFOs, whose
+    actual platform is a LinkedIn group."""
     c = _client(env)
     r = c.get("/tools/communities/find")
     assert r.status_code == 200
     assert "Slack" in r.text
     assert "Circle" in r.text
+    assert "LinkedIn" in r.text
     assert "Proprietary" in r.text
     assert "Slack / chat-based" not in r.text
     assert "In-person only" not in r.text

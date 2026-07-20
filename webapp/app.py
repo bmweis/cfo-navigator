@@ -7357,7 +7357,7 @@ _WEIGHT_DIMENSIONS = [
     {"key": "platform_type", "admin_label": "Platform", "quiz_label": "Platform",
      "source": "profile",
      "options": [("slack", "Slack"), ("circle", "Circle"), ("email", "Email"),
-                 ("proprietary", "Proprietary")]},
+                 ("linkedin", "LinkedIn"), ("proprietary", "Proprietary")]},
     {"key": "meeting_format", "admin_label": "Programming", "quiz_label": "Meeting format",
      "source": "profile",
      "options": [("in_person", "In-person"), ("online", "Online"), ("hybrid", "Hybrid")]},
