@@ -312,29 +312,38 @@ isn't swallowed as a slug, same reasoning as `/gap`, `/submit`, and
 results are sorted by a per-community weighted match score, `featured`
 breaking ties same as everywhere else in the directory — replacing the
 plain featured-first/alphabetical order the filter alone produced before
-this. Scoring runs over 10 dimensions, defined once in `webapp/app.py`'s
+this. Scoring runs over 11 dimensions, defined once in `webapp/app.py`'s
 `_WEIGHT_DIMENSIONS` (each with a fixed controlled vocabulary, an admin
 label, a quiz label, and a `source`):
-- 7 are `source: "profile"` — they correspond to `community_profiles`
-  columns (`seniority_band`, `cpe_eligible`, `primary_purpose`,
+- 8 are `source: "profile"` — 7 of them correspond to a `community_profiles`
+  column (`seniority_band`, `cpe_eligible`, `primary_purpose`,
   `platform_type`, `meeting_format`, `event_style`, `resources_included`)
   and read from that column's sibling `*_tags` JSON column
   (`seniority_band_tags`, etc.) — a controlled-vocabulary classification
   kept separate from the free-text research column of the same base name,
   because that prose was investigated and found too inconsistent for
   reliable keyword/substring matching (e.g. a `platform_type` of "not a
-  Slack/forum" would false-match a naive "Slack" check).
-  `scripts/backfill_community_weight_tags.py` hand-classified the existing
-  38 communities into this vocabulary; new communities get theirs set via
-  checkbox groups on the admin profile edit form
-  (`/admin/tools/communities/{id}/profile`), alongside the free-text fields.
+  Slack/forum" would false-match a naive "Slack" check). `function` is the
+  8th and has no free-text sibling column of its own — it's a post-#159
+  addition classified straight from `ideal_member`/`value_prop`/
+  `categories` into `function_tags` (Overall finance org / FP&A /
+  Accounting / Treasury), splitting out the controller/accounting-focused
+  distinction that `seniority_band` used to carry before its own vocabulary
+  narrowed to a pure seniority read (CFO / Senior Exec (VP+) / Open to
+  all). `scripts/backfill_community_weight_tags.py` hand-classified the
+  original 38 communities into the first 7; `scripts/
+  recategorize_level_function.py` re-classified `seniority_band_tags` into
+  its narrowed vocabulary and classified `function_tags` for the first
+  time. New communities get theirs set via checkbox groups on the admin
+  profile edit form (`/admin/tools/communities/{id}/profile`), alongside
+  the free-text fields where one exists.
 - 3 are `source: "derived"` — computed on the fly from an existing
   `communities` column instead of a stored `*_tags` column: `local_presence`
   (`metros_json` non-empty), `paid_free` (`cost_band == 'Free'`), and
   `sponsorship_type` (straight off `communities.sponsorship_type`, already a
   fixed 3-value enum — `Independent`/`Vendor-sponsored`/`Investor-sponsored`
   map onto the dimension's own `independent`/`vendor`/`investor` vocabulary).
-  `_community_weight_tags` computes all 10 dimensions' tags uniformly
+  `_community_weight_tags` computes all 11 dimensions' tags uniformly
   regardless of source; `source` only changes two things — how that function
   derives the tag, and whether the dimension gets a checkbox group on the
   admin profile-edit form (only `"profile"` ones do, since a `"derived"`
@@ -342,7 +351,7 @@ label, a quiz label, and a `source`):
   `sponsorship_type`'s existing dropdown, so a second control there would
   just invite drift between the two).
 
-For **all 10** dimensions — `"profile"` and `"derived"` alike, no
+For **all 11** dimensions — `"profile"` and `"derived"` alike, no
 distinction — Brian sets a default **weight** (0–5, a
 `community_weight_<dim>` setting) AND a default **target value** (one or
 more of that dimension's vocabulary, a `community_weight_values_<dim>`
@@ -356,21 +365,21 @@ dimensions no admin default at all, on the theory that they're structural
 directory facts rather than a research judgment — that shipped as a bug:
 Local presence and Cost were silently missing from the admin panel
 entirely, and a weight with nothing to match against can't rank anything
-regardless of source. Corrected so all 10 dimensions get the identical
+regardless of source. Corrected so all 11 dimensions get the identical
 default-weight-and-value treatment.)
 
 The quiz's `GET /tools/communities/find` page adds one further optional
 step after the 4 filter questions: "What matters most to you?", a checkbox
-group per dimension (all 10) letting a visitor check every value they'd
+group per dimension (all 11) letting a visitor check every value they'd
 accept — not a single-choice control, since e.g. a visitor might find both
-"Senior/CFO-level" and "Mixed/all levels" acceptable for `seniority_band`.
+"CFO" and "Open to all" acceptable for `seniority_band`.
 Skipping the whole step (simply not checking anything) is the same action
 as leaving any individual dimension's boxes unchecked: **resolution is
 per-dimension, not all-or-nothing** — `_recommender_effective_weights_and_
 values` merges a visitor's checked values with Brian's admin default
-independently for each of the 10 dimensions, so a visitor who only weighs
+independently for each of the 11 dimensions, so a visitor who only weighs
 in on 2 dimensions gets their own preference on those 2 and Brian's
-defaults on the other 8. The visitor never sets a numeric weight directly —
+defaults on the other 9. The visitor never sets a numeric weight directly —
 only a target value — the weight applied is always Brian's admin weight for
 that dimension, regardless of which side (visitor or admin default)
 supplied the target value. `_recommender_score` then sums the weight for

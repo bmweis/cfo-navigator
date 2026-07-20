@@ -141,6 +141,19 @@ def test_quiz_results_page_is_idempotent_get_no_double_logging(env):
     assert len(rows) == 1
 
 
+def test_quiz_weight_step_renders_function_dimension_and_cpe_rename(env):
+    """Recommender weighting redesign PR 1: Function is a new dimension
+    alongside the narrowed Level vocabulary, and CPE's admin/quiz label is
+    "CPE eligible events" rather than the old bare "CPE"."""
+    c = _client(env)
+    r = c.get("/tools/communities/find")
+    assert r.status_code == 200
+    assert "Function" in r.text
+    assert "Overall finance org" in r.text
+    assert "Senior Exec (VP+)" in r.text
+    assert "CPE eligible events" in r.text
+
+
 def test_quiz_works_with_answers_missing_or_set_to_no_preference(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
