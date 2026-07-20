@@ -213,6 +213,19 @@ def test_quiz_weight_step_renders_dues_as_profile_sourced(env):
     assert "Dues" in r.text or "Cost" in r.text
 
 
+def test_quiz_weight_step_renders_new_industry_dimension(env):
+    """Recommender weighting redesign PR 6: Industry is a wholly new
+    dimension (Life sciences / Healthcare / Private equity/funds /
+    Industry-neutral) with no free-text sibling column."""
+    c = _client(env)
+    r = c.get("/tools/communities/find")
+    assert r.status_code == 200
+    assert "Industry" in r.text
+    assert "Life sciences" in r.text
+    assert "Private equity/funds" in r.text
+    assert "Industry-neutral" in r.text
+
+
 def test_quiz_works_with_answers_missing_or_set_to_no_preference(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])

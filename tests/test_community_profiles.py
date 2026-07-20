@@ -89,6 +89,7 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
         "looking_for_tags": ["peer_discussions", "vendor_connections"],
         "programming_tags": ["meals", "conferences"],
         "paid_free_tags": ["free", "paid"],
+        "industry_tags": ["life_sciences"],
     }, follow_redirects=False)
     assert r.status_code == 303
 
@@ -102,6 +103,7 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
     assert profile["looking_for_tags"] == ["peer_discussions", "vendor_connections"]
     assert profile["programming_tags"] == ["meals", "conferences"]
     assert profile["paid_free_tags"] == ["free", "paid"]
+    assert profile["industry_tags"] == ["life_sciences"]
 
 
 def test_profile_page_falls_back_to_minimal_when_no_profile(env):
