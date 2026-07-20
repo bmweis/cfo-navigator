@@ -88,6 +88,7 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
         "platform_type_tags": ["slack"],
         "looking_for_tags": ["peer_discussions", "vendor_connections"],
         "programming_tags": ["meals", "conferences"],
+        "paid_free_tags": ["free", "paid"],
     }, follow_redirects=False)
     assert r.status_code == 303
 
@@ -100,6 +101,7 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
     assert profile["platform_type_tags"] == ["slack"]
     assert profile["looking_for_tags"] == ["peer_discussions", "vendor_connections"]
     assert profile["programming_tags"] == ["meals", "conferences"]
+    assert profile["paid_free_tags"] == ["free", "paid"]
 
 
 def test_profile_page_falls_back_to_minimal_when_no_profile(env):
