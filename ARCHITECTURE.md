@@ -312,57 +312,70 @@ isn't swallowed as a slug, same reasoning as `/gap`, `/submit`, and
 results are sorted by a per-community weighted match score, `featured`
 breaking ties same as everywhere else in the directory — replacing the
 plain featured-first/alphabetical order the filter alone produced before
-this. Scoring runs over 9 dimensions, defined once in `webapp/app.py`'s
+this. Scoring runs over 10 dimensions, defined once in `webapp/app.py`'s
 `_WEIGHT_DIMENSIONS` (each with a fixed controlled vocabulary, an admin
-label, and a quiz label):
-- 7 correspond to `community_profiles` columns (`seniority_band`,
-  `cpe_eligible`, `primary_purpose`, `platform_type`, `meeting_format`,
-  `event_style`, `resources_included`) and read from that column's sibling
-  `*_tags` JSON column (`seniority_band_tags`, etc.) — a controlled-
-  vocabulary classification kept separate from the free-text research column
-  of the same base name, because that prose was investigated and found too
-  inconsistent for reliable keyword/substring matching (e.g. a
-  `platform_type` of "not a Slack/forum" would false-match a naive "Slack"
-  check). `scripts/backfill_community_weight_tags.py` hand-classified the
-  existing 38 communities into this vocabulary; new communities get theirs
-  set via checkbox groups on the admin profile edit form
+label, a quiz label, and a `source`):
+- 7 are `source: "profile"` — they correspond to `community_profiles`
+  columns (`seniority_band`, `cpe_eligible`, `primary_purpose`,
+  `platform_type`, `meeting_format`, `event_style`, `resources_included`)
+  and read from that column's sibling `*_tags` JSON column
+  (`seniority_band_tags`, etc.) — a controlled-vocabulary classification
+  kept separate from the free-text research column of the same base name,
+  because that prose was investigated and found too inconsistent for
+  reliable keyword/substring matching (e.g. a `platform_type` of "not a
+  Slack/forum" would false-match a naive "Slack" check).
+  `scripts/backfill_community_weight_tags.py` hand-classified the existing
+  38 communities into this vocabulary; new communities get theirs set via
+  checkbox groups on the admin profile edit form
   (`/admin/tools/communities/{id}/profile`), alongside the free-text fields.
-- 2 (`local_presence`, `paid_free`) are derived on the fly from existing
-  `communities` columns (`metros_json` non-empty; `cost_band == 'Free'`)
-  rather than stored — `_community_weight_tags` computes all 9 dimensions'
-  tags uniformly regardless of source.
+- 3 are `source: "derived"` — computed on the fly from an existing
+  `communities` column instead of a stored `*_tags` column: `local_presence`
+  (`metros_json` non-empty), `paid_free` (`cost_band == 'Free'`), and
+  `sponsorship_type` (straight off `communities.sponsorship_type`, already a
+  fixed 3-value enum — `Independent`/`Vendor-sponsored`/`Investor-sponsored`
+  map onto the dimension's own `independent`/`vendor`/`investor` vocabulary).
+  `_community_weight_tags` computes all 10 dimensions' tags uniformly
+  regardless of source; `source` only changes two things — how that function
+  derives the tag, and whether the dimension gets a checkbox group on the
+  admin profile-edit form (only `"profile"` ones do, since a `"derived"`
+  dimension's value already lives on the directory-listing edit form, e.g.
+  `sponsorship_type`'s existing dropdown, so a second control there would
+  just invite drift between the two).
 
-For each of the 7 `community_profiles` dimensions, Brian sets a default
-**weight** (0–5, a `community_weight_<dim>` setting) AND a default **target
-value** (one or more of that dimension's vocabulary, a
-`community_weight_values_<dim>` setting storing a JSON array) at
-`/admin/tools/communities` — both are required for a default to actually
-rank anything: a weight alone has nothing to match a community's tags
-against. The admin UI edits both together (`_get_default_community_weights`/
+For **all 10** dimensions — `"profile"` and `"derived"` alike, no
+distinction — Brian sets a default **weight** (0–5, a
+`community_weight_<dim>` setting) AND a default **target value** (one or
+more of that dimension's vocabulary, a `community_weight_values_<dim>`
+setting storing a JSON array) at `/admin/tools/communities` — both are
+required for a default to actually rank anything: a weight alone has
+nothing to match a community's tags against. The admin UI edits both
+together (`_get_default_community_weights`/
 `_get_default_community_weight_values`), same no-reload settings pattern as
-`/admin/voice`. The 2 derived dimensions have no admin default — they only
-ever affect ranking when a visitor opts in (see below), at a fixed weight
-(`_DERIVED_DIMENSION_WEIGHT`), since they're structural directory facts, not
-a qualitative research judgment Brian would tune a default priority for.
+`/admin/voice`. (An earlier revision of this feature gave the 3 derived
+dimensions no admin default at all, on the theory that they're structural
+directory facts rather than a research judgment — that shipped as a bug:
+Local presence and Cost were silently missing from the admin panel
+entirely, and a weight with nothing to match against can't rank anything
+regardless of source. Corrected so all 10 dimensions get the identical
+default-weight-and-value treatment.)
 
 The quiz's `GET /tools/communities/find` page adds one further optional
 step after the 4 filter questions: "What matters most to you?", a checkbox
-group per dimension (all 9) letting a visitor check every value they'd
+group per dimension (all 10) letting a visitor check every value they'd
 accept — not a single-choice control, since e.g. a visitor might find both
 "Senior/CFO-level" and "Mixed/all levels" acceptable for `seniority_band`.
 Skipping the whole step (simply not checking anything) is the same action
 as leaving any individual dimension's boxes unchecked: **resolution is
 per-dimension, not all-or-nothing** — `_recommender_effective_weights_and_
 values` merges a visitor's checked values with Brian's admin default
-independently for each of the 9 dimensions, so a visitor who only weighs in
-on 2 dimensions gets their own preference on those 2 and Brian's defaults on
-the other 5 (community_profiles ones; the 2 derived ones simply don't
-contribute if left unchecked). The visitor never sets a numeric weight
-directly — only a target value — the weight applied to a visitor-checked
-dimension is Brian's admin weight for that dimension (or the fixed derived
-weight). `_recommender_score` then sums the weight for every dimension whose
-effective target value(s) intersect the community's tag(s) for that
-dimension.
+independently for each of the 10 dimensions, so a visitor who only weighs
+in on 2 dimensions gets their own preference on those 2 and Brian's
+defaults on the other 8. The visitor never sets a numeric weight directly —
+only a target value — the weight applied is always Brian's admin weight for
+that dimension, regardless of which side (visitor or admin default)
+supplied the target value. `_recommender_score` then sums the weight for
+every dimension whose effective target value(s) intersect the community's
+tag(s) for that dimension.
 
 `POST /tools/communities/find` carries the visitor's checked values through
 to the results page as repeated query params (`w_<dim key>=<value>`, same
