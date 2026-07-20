@@ -168,6 +168,20 @@ def test_quiz_weight_step_renders_merged_looking_for_dimension(env):
     assert "Resources included" not in r.text
 
 
+def test_quiz_weight_step_renders_new_platform_vocabulary(env):
+    """Recommender weighting redesign PR 3: Platform narrows from
+    Slack/chat-based, In-person only, Mix to naming the actual platform
+    (Slack, Circle, Email, Proprietary)."""
+    c = _client(env)
+    r = c.get("/tools/communities/find")
+    assert r.status_code == 200
+    assert "Slack" in r.text
+    assert "Circle" in r.text
+    assert "Proprietary" in r.text
+    assert "Slack / chat-based" not in r.text
+    assert "In-person only" not in r.text
+
+
 def test_quiz_works_with_answers_missing_or_set_to_no_preference(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
