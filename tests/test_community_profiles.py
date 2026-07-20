@@ -85,10 +85,9 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
         "seniority_band_tags": ["cfo", "senior_exec"],
         "function_tags": ["fpa"],
         "cpe_eligible_tags": ["yes"],
-        "platform_type_tags": ["chat"],
-        "meeting_format_tags": ["online"],
-        "event_style_tags": ["intimate"],
+        "platform_type_tags": ["slack"],
         "looking_for_tags": ["peer_discussions", "vendor_connections"],
+        "programming_tags": ["meals", "conferences"],
     }, follow_redirects=False)
     assert r.status_code == 303
 
@@ -98,10 +97,9 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
     assert profile["seniority_band_tags"] == ["cfo", "senior_exec"]
     assert profile["function_tags"] == ["fpa"]
     assert profile["cpe_eligible_tags"] == ["yes"]
-    assert profile["platform_type_tags"] == ["chat"]
-    assert profile["meeting_format_tags"] == ["online"]
-    assert profile["event_style_tags"] == ["intimate"]
+    assert profile["platform_type_tags"] == ["slack"]
     assert profile["looking_for_tags"] == ["peer_discussions", "vendor_connections"]
+    assert profile["programming_tags"] == ["meals", "conferences"]
 
 
 def test_profile_page_falls_back_to_minimal_when_no_profile(env):

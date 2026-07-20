@@ -5689,7 +5689,7 @@ def _recommender_effective_weights_and_values(
     (visitors set a target value, not a numeric weight — see the Recommender
     weighting design note in CLAUDE.md/ARCHITECTURE.md). The weight applied
     is always Brian's admin weight for that dimension, regardless of which
-    side supplied the target value — all 10 dimensions (both "profile"- and
+    side supplied the target value — all 9 dimensions (both "profile"- and
     "derived"-sourced, see _WEIGHT_DIMENSIONS) get the same admin default
     weight+value treatment, so there's no special-casing here by source."""
     weights: dict[str, float] = {}
@@ -7318,7 +7318,7 @@ _COMMUNITY_METROS = [
 
 
 # Communities Recommender best-fit weighting: the controlled vocabulary each
-# weighting dimension draws from. `source` is "profile" for the 7 that read
+# weighting dimension draws from. `source` is "profile" for the 6 that read
 # their tags from a community_profiles.*_tags column (added alongside the
 # free-text research column of the same base name — see the ALTER TABLE
 # comment in linklib/db.py's _SCHEMA), or "derived" for the 3 computed on the
@@ -7358,13 +7358,10 @@ _WEIGHT_DIMENSIONS = [
      "source": "profile",
      "options": [("slack", "Slack"), ("circle", "Circle"), ("email", "Email"),
                  ("linkedin", "LinkedIn"), ("proprietary", "Proprietary")]},
-    {"key": "meeting_format", "admin_label": "Programming", "quiz_label": "Meeting format",
+    {"key": "programming", "admin_label": "Programming", "quiz_label": "Programming",
      "source": "profile",
-     "options": [("in_person", "In-person"), ("online", "Online"), ("hybrid", "Hybrid")]},
-    {"key": "event_style", "admin_label": "Event style", "quiz_label": "Event style",
-     "source": "profile",
-     "options": [("intimate", "Small / intimate gatherings"), ("large_format", "Large-format conferences"),
-                 ("mix", "Mix of both")]},
+     "options": [("meals", "Meals (dinners, etc.)"), ("conferences", "Conferences"),
+                 ("retreats", "Retreats"), ("virtual_panels", "Virtual Panels")]},
     {"key": "local_presence", "admin_label": "Local Presence", "quiz_label": "Local presence",
      "source": "derived",
      "options": [("yes", "Has a local chapter / metro presence")]},
@@ -7389,7 +7386,7 @@ def _community_weight_values_setting_key(dim_key: str) -> str:
 
 
 def _get_default_community_weights(lib) -> dict[str, float]:
-    """Brian's admin-set default weight per dimension (all 10 — see
+    """Brian's admin-set default weight per dimension (all 9 — see
     _WEIGHT_DIMENSIONS' `source` note; "derived" dimensions get the exact
     same admin default treatment as "profile" ones), applied on every
     dimension a visitor doesn't state their own preference for (including,
@@ -7406,7 +7403,7 @@ def _get_default_community_weights(lib) -> dict[str, float]:
 
 
 def _get_default_community_weight_values(lib) -> dict[str, list[str]]:
-    """Brian's admin-set default TARGET VALUE(S) per dimension (all 10) — a
+    """Brian's admin-set default TARGET VALUE(S) per dimension (all 9) — a
     weight alone has nothing to match a community's tags against, so this is
     the other half of Phase 1's default (same checkbox control the visitor's
     quiz step uses; see _community_weight_setting_key's sibling). Empty (no
@@ -7431,7 +7428,7 @@ _SPONSORSHIP_TYPE_WEIGHT_TAGS = {
 
 def _community_weight_tags(dim_key: str, community: dict, profile: dict | None) -> list[str]:
     """The controlled-vocabulary tag(s) that apply to this community for one
-    weighting dimension — from community_profiles's *_tags column for the 7
+    weighting dimension — from community_profiles's *_tags column for the 6
     "profile"-sourced dimensions, or derived on the fly from directory fields
     for the 3 "derived" ones (local_presence, paid_free, sponsorship_type)."""
     if dim_key == "local_presence":
@@ -7766,7 +7763,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong>Heading:</strong> &ldquo;Find your community&rdquo; / &ldquo;Four quick questions, then we'll point you to the communities in the directory that fit.&rdquo; Submit button: &ldquo;Get recommendations&rdquo;.</li>
 <li><strong>Four required questions:</strong> role (&ldquo;What best describes your role?&rdquo;), budget (&ldquo;What's your budget for dues?&rdquo;), access (&ldquo;What kind of access are you looking for?&rdquo;), and a catch-all (&ldquo;Anything more specific you're looking for?&rdquo;) &mdash; each option maps onto an existing directory filter (category, cost band, or access bucket). This filtering step is unchanged by the weighting step below and is the sole gate on which communities appear at all.</li>
-<li><strong>Fifth, optional step &mdash; &ldquo;What matters most to you? (optional)&rdquo;:</strong> a checkbox group per weighting dimension (10 total: the 7 <code>community_profiles</code> dimensions plus Local presence, Cost, and Organization &mdash; the last three derived from existing directory fields, not a new research pass), letting a visitor check every value they'd accept per dimension. Intro copy: &ldquo;Check anything that matters to you and results will be ranked with that in mind. Leave a section blank and we'll rank it using Brian's own default priorities instead. Skip this whole step and every result is ranked by Brian's defaults.&rdquo; A &ldquo;Clear my choices&rdquo; button unchecks every box client-side.</li>
+<li><strong>Fifth, optional step &mdash; &ldquo;What matters most to you? (optional)&rdquo;:</strong> a checkbox group per weighting dimension (9 total: the 6 <code>community_profiles</code> dimensions plus Local presence, Cost, and Organization &mdash; the last three derived from existing directory fields, not a new research pass), letting a visitor check every value they'd accept per dimension. Intro copy: &ldquo;Check anything that matters to you and results will be ranked with that in mind. Leave a section blank and we'll rank it using Brian's own default priorities instead. Skip this whole step and every result is ranked by Brian's defaults.&rdquo; A &ldquo;Clear my choices&rdquo; button unchecks every box client-side.</li>
 <li><strong>Zero-result results page:</strong> &ldquo;Nothing in the directory matched all four answers. That's useful to know&mdash;we've noted it as a gap.&rdquo; with a CTA box (&ldquo;Want to tell us more about what you're looking for?&rdquo; / &ldquo;Tell us more &rarr;&rdquo;) linking to the gap form. Not weighted/ranked (nothing to rank).</li>
 <li><strong>Results found:</strong> &ldquo;Based on your answers, here's what fits: N communit(y/ies).&rdquo; followed by the weighting disclosure line, then &ldquo;Retake the quiz&rdquo; and &ldquo;Browse the full directory &rarr;&rdquo; links. Results are sorted by weighted match score, <code>featured</code> breaking ties (same convention as the rest of the directory) &mdash; no separate methodology page, since the disclosure line below states the weights in effect. A &ldquo;Print your results&rdquo; button (<code>window.print()</code>, no PDF library) sits next to the heading; a <code>@media print</code> stylesheet hides the site header/nav/footer and the back/retake/browse links (<code>.rf-noprint</code>) so only the matched-community cards print.</li>
 <li><strong>Weighting disclosure line, visitor set at least one preference:</strong> &ldquo;You told us what matters to you (&lt;dimension: chosen values&gt;), so results below are ranked with that in mind. Anything you didn't weigh in on still uses Brian's default priorities.&rdquo;</li>
@@ -7778,8 +7775,8 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Recommender best-fit weighting admin (/admin/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li><strong>&ldquo;Recommender ranking weights&rdquo; panel:</strong> one card per weighting dimension, all 10 (Level, Function, CPE eligible events, What you're looking for, Platform, Programming, Event style, Local Presence, Dues, Organization) with a 0&ndash;5 weight number and a checkbox group of that dimension's own controlled-vocabulary values. Both are required together for a dimension to actually rank anything &mdash; a weight alone has nothing to match a community's tags against. Saved together, no page reload, mirroring <code>/admin/voice</code>'s pattern. Local Presence, Dues, and Organization get the identical admin default weight+value treatment as the 7 <code>community_profiles</code> dimensions, even though their tags are computed on the fly from an existing <code>communities</code> column (<code>metros_json</code>, <code>cost_band</code>, <code>sponsorship_type</code>) rather than stored in a dedicated <code>*_tags</code> column.</li>
-<li><strong>Profile edit form (&ldquo;Recommender weighting&rdquo; section):</strong> checkbox groups for the 7 <code>community_profiles</code>-sourced dimensions only, per-community, keep each community's <code>*_tags</code> columns current for new/edited communities &mdash; separate from the free-text research fields of the same base name, since that prose was found too inconsistent for reliable keyword matching (see <code>scripts/backfill_community_weight_tags.py</code>'s docstring for the specific false-positive example that ruled it out). Local Presence, Dues, and Organization don't get a checkbox group here &mdash; each already has its own single-value control elsewhere on this same edit form (the Metros checkboxes, the Cost band select, and the Sponsorship select), and duplicating it as a second control would just invite the two to drift apart.</li>
+<li><strong>&ldquo;Recommender ranking weights&rdquo; panel:</strong> one card per weighting dimension, all 9 (Level, Function, CPE eligible events, What you're looking for, Platform, Programming, Local Presence, Dues, Organization) with a 0&ndash;5 weight number and a checkbox group of that dimension's own controlled-vocabulary values. Both are required together for a dimension to actually rank anything &mdash; a weight alone has nothing to match a community's tags against. Saved together, no page reload, mirroring <code>/admin/voice</code>'s pattern. Local Presence, Dues, and Organization get the identical admin default weight+value treatment as the 6 <code>community_profiles</code> dimensions, even though their tags are computed on the fly from an existing <code>communities</code> column (<code>metros_json</code>, <code>cost_band</code>, <code>sponsorship_type</code>) rather than stored in a dedicated <code>*_tags</code> column.</li>
+<li><strong>Profile edit form (&ldquo;Recommender weighting&rdquo; section):</strong> checkbox groups for the 6 <code>community_profiles</code>-sourced dimensions only, per-community, keep each community's <code>*_tags</code> columns current for new/edited communities &mdash; separate from the free-text research fields of the same base name, since that prose was found too inconsistent for reliable keyword matching (see <code>scripts/backfill_community_weight_tags.py</code>'s docstring for the specific false-positive example that ruled it out). Local Presence, Dues, and Organization don't get a checkbox group here &mdash; each already has its own single-value control elsewhere on this same edit form (the Metros checkboxes, the Cost band select, and the Sponsorship select), and duplicating it as a second control would just invite the two to drift apart.</li>
 </ul>
 </section>
 
@@ -8397,10 +8394,9 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             seniority_band_tags=form.getlist("seniority_band_tags"),
             cpe_eligible_tags=form.getlist("cpe_eligible_tags"),
             platform_type_tags=form.getlist("platform_type_tags"),
-            meeting_format_tags=form.getlist("meeting_format_tags"),
-            event_style_tags=form.getlist("event_style_tags"),
             function_tags=form.getlist("function_tags"),
             looking_for_tags=form.getlist("looking_for_tags"),
+            programming_tags=form.getlist("programming_tags"),
         )
     finally:
         lib.close()

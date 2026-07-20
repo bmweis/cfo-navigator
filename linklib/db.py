@@ -879,6 +879,26 @@ class Library:
             # stays frozen rather than getting silently zeroed out the next
             # time an admin saves an unrelated profile field.
             "ALTER TABLE community_profiles ADD COLUMN looking_for_tags TEXT NOT NULL DEFAULT '[]'",
+            # Programming+Event style merge (Recommender weighting redesign,
+            # PR 4): meeting_format_tags and event_style_tags retire in favor
+            # of one merged multi-select reusing the "Programming" admin
+            # label that used to belong to meeting_format alone — a
+            # deliberate repurposing of that label to a new vocabulary, not
+            # a naming collision to preserve. New vocabulary: Meals /
+            # Conferences / Retreats / Virtual Panels — derived from
+            # format_reality (the narrative field describing actual
+            # programming), not from meeting_format/event_style, since
+            # that's where this level of detail actually lives. "Demo Days"
+            # (part of the originally proposed vocabulary) has no supporting
+            # text anywhere in the current research corpus and is
+            # deliberately left out rather than force-fit — same treatment
+            # as the stage_focus placeholder below, a candidate for a future
+            # research round. Same retirement pattern as PR 2's
+            # looking_for_tags: the two retired *_tags columns and their
+            # free-text siblings stay in the schema, but are dropped from
+            # _WEIGHT_DIMENSIONS/_WEIGHT_TAG_COLUMNS and from
+            # upsert_community_profile's own column list.
+            "ALTER TABLE community_profiles ADD COLUMN programming_tags TEXT NOT NULL DEFAULT '[]'",
             # Three placeholder factual/categorical columns, same pattern as
             # business_model when it was first added: nullable/empty-default,
             # visible in the admin edit form and the generate-profile-draft
@@ -2018,9 +2038,8 @@ class Library:
     # get_community_profile only JSON-decodes the columns actually used for
     # weighting today.
     _WEIGHT_TAG_COLUMNS = (
-        "seniority_band_tags", "cpe_eligible_tags",
-        "platform_type_tags", "meeting_format_tags", "event_style_tags",
-        "function_tags", "looking_for_tags",
+        "seniority_band_tags", "cpe_eligible_tags", "platform_type_tags",
+        "function_tags", "looking_for_tags", "programming_tags",
     )
 
     def get_community_profile(self, community_id: int) -> dict | None:
@@ -2049,22 +2068,23 @@ class Library:
                                  seniority_band_tags: list[str] | None = None,
                                  cpe_eligible_tags: list[str] | None = None,
                                  platform_type_tags: list[str] | None = None,
-                                 meeting_format_tags: list[str] | None = None,
-                                 event_style_tags: list[str] | None = None,
                                  stage_focus: str = "", jobs_program: str = "",
                                  team_or_individual: str = "",
                                  function_tags: list[str] | None = None,
-                                 looking_for_tags: list[str] | None = None) -> None:
+                                 looking_for_tags: list[str] | None = None,
+                                 programming_tags: list[str] | None = None) -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
         edit form always submits every field, generated or hand-written. The
         *_tags params are the Recommender weighting's controlled-vocabulary
         matches (see the ALTER TABLE comment in _SCHEMA), distinct from and
         alongside the free-text column of the same base name. Deliberately no
-        primary_purpose_tags/resources_included_tags params — those two
-        weighting dimensions retired in favor of looking_for_tags (see the
-        ALTER TABLE comment), so this upsert no longer touches those two
-        columns at all, leaving whatever was last written there (by
+        primary_purpose_tags/resources_included_tags/meeting_format_tags/
+        event_style_tags params — those four retired as weighting dimensions
+        (primary_purpose_tags/resources_included_tags into looking_for_tags,
+        meeting_format_tags/event_style_tags into programming_tags — see the
+        ALTER TABLE comments), so this upsert no longer touches those columns
+        at all, leaving whatever was last written there (by
         scripts/backfill_community_weight_tags.py) as a frozen historical
         artifact rather than silently zeroing it out on every future save."""
         self.conn.execute(
@@ -2075,11 +2095,10 @@ class Library:
                 verdict_summary, low_confidence, updated_at, business_model,
                 primary_purpose, cpe_eligible, platform_type, meeting_format,
                 event_style, seniority_band, resources_included, needs_review,
-                seniority_band_tags, cpe_eligible_tags,
-                platform_type_tags, meeting_format_tags, event_style_tags,
+                seniority_band_tags, cpe_eligible_tags, platform_type_tags,
                 stage_focus, jobs_program, team_or_individual,
-                function_tags, looking_for_tags)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                function_tags, looking_for_tags, programming_tags)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(community_id) DO UPDATE SET
                  ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
                  value_prop=excluded.value_prop, format_reality=excluded.format_reality,
@@ -2105,12 +2124,11 @@ class Library:
                  seniority_band_tags=excluded.seniority_band_tags,
                  cpe_eligible_tags=excluded.cpe_eligible_tags,
                  platform_type_tags=excluded.platform_type_tags,
-                 meeting_format_tags=excluded.meeting_format_tags,
-                 event_style_tags=excluded.event_style_tags,
                  stage_focus=excluded.stage_focus, jobs_program=excluded.jobs_program,
                  team_or_individual=excluded.team_or_individual,
                  function_tags=excluded.function_tags,
-                 looking_for_tags=excluded.looking_for_tags""",
+                 looking_for_tags=excluded.looking_for_tags,
+                 programming_tags=excluded.programming_tags""",
             (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
              format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
@@ -2121,9 +2139,9 @@ class Library:
              resources_included.strip(), needs_review,
              json.dumps(seniority_band_tags or []), json.dumps(cpe_eligible_tags or []),
              json.dumps(platform_type_tags or []),
-             json.dumps(meeting_format_tags or []), json.dumps(event_style_tags or []),
              stage_focus.strip(), jobs_program.strip(), team_or_individual.strip(),
-             json.dumps(function_tags or []), json.dumps(looking_for_tags or [])),
+             json.dumps(function_tags or []), json.dumps(looking_for_tags or []),
+             json.dumps(programming_tags or [])),
         )
         self.conn.commit()
 
