@@ -16,11 +16,16 @@ and a paid tier. This script:
   2. Applies the known-freemium override — Finance Alliance, GaapSavvy,
      Startup CFO, and CFO Connect — to `["free", "paid"]`, per their
      business_model research text (a free tier plus a separate paid Pro/
-     team tier).
-  3. Deliberately leaves Proformative single-tagged (whatever its cost_band
-     derives to) even though its own research text ("Free and premium
-     content...") reads similarly ambiguous — per Brian's instruction, this
-     one gets a manual review rather than an automatic dual-tag.
+     team tier that gates real community access — Slack, events, deeper
+     content).
+  3. Leaves Proformative single-tagged as `["free"]` — confirmed, not
+     pending. Its research text ("Free and premium content...") reads
+     similarly to the freemium four at a glance, but Brian's read is that
+     the pattern is actually different: the free tier (forums, webinars) IS
+     the community/product itself, and the paid CPE courses are an add-on
+     purchase on top of it, not a membership gate the way Finance Alliance/
+     GaapSavvy/Startup CFO/CFO Connect's paid tiers are. Single-tagging
+     reflects that distinction rather than a data gap.
 
 Usage:
     python -m scripts.recategorize_dues --db library.db
@@ -46,10 +51,12 @@ FREEMIUM_DUAL_TAG = {
     "CFO Connect",
 }
 
-# Deliberately excluded from FREEMIUM_DUAL_TAG despite similarly ambiguous
-# freemium language in its own research text — Brian wants to review this
-# one manually before it gets dual-tagged.
-LEAVE_SINGLE_TAG_PENDING_REVIEW = {"Proformative"}
+# Deliberately excluded from FREEMIUM_DUAL_TAG despite similarly-worded
+# freemium language in its own research text — confirmed by Brian as a
+# different pattern from the freemium four: Proformative's free tier is the
+# actual community/forum, and its paid CPE courses are an add-on purchase,
+# not a membership gate. Single-tagged as Free only.
+CONFIRMED_SINGLE_TAG = {"Proformative"}
 
 
 def main() -> None:
@@ -76,8 +83,8 @@ def main() -> None:
                 tags = ["free"] if cost_band == "Free" else ["paid"]
             matched += 1
             note = " [known freemium, dual-tagged]" if name in FREEMIUM_DUAL_TAG else ""
-            note += " [ambiguous freemium text, left single-tagged pending manual review]" \
-                if name in LEAVE_SINGLE_TAG_PENDING_REVIEW else ""
+            note += " [confirmed single-tag: free tier is the product, paid CPE is an add-on]" \
+                if name in CONFIRMED_SINGLE_TAG else ""
             print(f"  {name} (cost_band={cost_band!r}): {tags}{note}")
             if not args.dry_run:
                 lib.update_community_weight_tags(r["id"], paid_free_tags=tags)

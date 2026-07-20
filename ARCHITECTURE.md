@@ -370,9 +370,12 @@ label, a quiz label, and a `source`):
     "Free" while `paid_free_tags` is `["free","paid"]` for a freemium org).
     `scripts/recategorize_dues.py` seeded every community's `paid_free_tags`
     from its current `cost_band` (preserving the prior derived behavior)
-    before applying the freemium overrides; Proformative was deliberately
-    left single-tagged despite ambiguous freemium language in its own
-    research prose, pending Brian's manual review.
+    before applying the freemium overrides; Proformative is confirmed
+    single-tagged (`["free"]`) rather than dual-tagged despite similarly-
+    worded freemium language in its own research prose — Brian's read is
+    that its free tier (forums, webinars) is the actual community/product,
+    and its paid CPE courses are an add-on purchase, not a membership gate
+    the way the freemium four's paid tiers are.
 
   All four retired `*_tags` columns (`primary_purpose_tags`,
   `resources_included_tags`, `meeting_format_tags`, `event_style_tags`) and
