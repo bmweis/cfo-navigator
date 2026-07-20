@@ -88,6 +88,7 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
         "platform_type_tags": ["chat"],
         "meeting_format_tags": ["online"],
         "event_style_tags": ["intimate"],
+        "looking_for_tags": ["peer_discussions", "vendor_connections"],
     }, follow_redirects=False)
     assert r.status_code == 303
 
@@ -100,6 +101,7 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
     assert profile["platform_type_tags"] == ["chat"]
     assert profile["meeting_format_tags"] == ["online"]
     assert profile["event_style_tags"] == ["intimate"]
+    assert profile["looking_for_tags"] == ["peer_discussions", "vendor_connections"]
 
 
 def test_profile_page_falls_back_to_minimal_when_no_profile(env):
