@@ -2092,6 +2092,8 @@ class Library:
         notable_members: Optional[str] = None, low_confidence: Optional[int] = None,
         anti_fit: Optional[str] = None, sponsor_relationship_note: Optional[str] = None,
         public_criticism: Optional[str] = None, needs_review: Optional[int] = None,
+        stage_focus: Optional[str] = None, jobs_program: Optional[str] = None,
+        team_or_individual: Optional[str] = None,
     ) -> None:
         """Narrow, partial update for a deepened-research pass on a subset of
         fields (e.g. a later research round that only re-covers a few fields
@@ -2110,6 +2112,8 @@ class Library:
             "low_confidence": low_confidence, "anti_fit": anti_fit,
             "sponsor_relationship_note": sponsor_relationship_note,
             "public_criticism": public_criticism, "needs_review": needs_review,
+            "stage_focus": stage_focus, "jobs_program": jobs_program,
+            "team_or_individual": team_or_individual,
         }
         fields = {k: v for k, v in fields.items() if v is not None}
         if not fields:
