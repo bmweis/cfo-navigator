@@ -154,6 +154,20 @@ def test_quiz_weight_step_renders_function_dimension_and_cpe_rename(env):
     assert "CPE eligible events" in r.text
 
 
+def test_quiz_weight_step_renders_merged_looking_for_dimension(env):
+    """Recommender weighting redesign PR 2: primary_purpose and
+    resources_included retire in favor of one merged multi-select, "What
+    you're looking for", with Vendor connections as a wholly new option."""
+    c = _client(env)
+    r = c.get("/tools/communities/find")
+    assert r.status_code == 200
+    assert "What you&#x27;re looking for" in r.text or "What you're looking for" in r.text
+    assert "Peer discussions" in r.text
+    assert "Vendor connections" in r.text
+    assert "Resources &amp; templates" in r.text or "Resources & templates" in r.text
+    assert "Resources included" not in r.text
+
+
 def test_quiz_works_with_answers_missing_or_set_to_no_preference(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
