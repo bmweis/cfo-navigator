@@ -8404,6 +8404,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             meeting_format_tags=form.getlist("meeting_format_tags"),
             event_style_tags=form.getlist("event_style_tags"),
             resources_included_tags=form.getlist("resources_included_tags"),
+            function_tags=form.getlist("function_tags"),
         )
     finally:
         lib.close()
