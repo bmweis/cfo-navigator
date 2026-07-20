@@ -852,6 +852,16 @@ class Library:
             "ALTER TABLE community_profiles ADD COLUMN meeting_format_tags TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE community_profiles ADD COLUMN event_style_tags TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE community_profiles ADD COLUMN resources_included_tags TEXT NOT NULL DEFAULT '[]'",
+            # Function (Recommender weighting redesign, post-#159 Phase 1): a
+            # new dimension splitting the old seniority_band's controller/
+            # accounting-focused bucket out into its own axis (Overall finance
+            # org / FP&A / Accounting / Treasury), alongside seniority_band
+            # narrowing to a pure CFO/Senior-Exec/Open-to-all seniority read.
+            # No sibling free-text `function` column — unlike the original 7
+            # profile dimensions, this one has no researched narrative field
+            # of its own; it's classified straight from ideal_member/
+            # value_prop/categories (see scripts/recategorize_level_function.py).
+            "ALTER TABLE community_profiles ADD COLUMN function_tags TEXT NOT NULL DEFAULT '[]'",
             # Three placeholder factual/categorical columns, same pattern as
             # business_model when it was first added: nullable/empty-default,
             # visible in the admin edit form and the generate-profile-draft
@@ -1987,7 +1997,7 @@ class Library:
     _WEIGHT_TAG_COLUMNS = (
         "seniority_band_tags", "cpe_eligible_tags", "primary_purpose_tags",
         "platform_type_tags", "meeting_format_tags", "event_style_tags",
-        "resources_included_tags",
+        "resources_included_tags", "function_tags",
     )
 
     def get_community_profile(self, community_id: int) -> dict | None:
@@ -2021,7 +2031,8 @@ class Library:
                                  event_style_tags: list[str] | None = None,
                                  resources_included_tags: list[str] | None = None,
                                  stage_focus: str = "", jobs_program: str = "",
-                                 team_or_individual: str = "") -> None:
+                                 team_or_individual: str = "",
+                                 function_tags: list[str] | None = None) -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
         edit form always submits every field, generated or hand-written. The
@@ -2038,8 +2049,9 @@ class Library:
                 event_style, seniority_band, resources_included, needs_review,
                 seniority_band_tags, cpe_eligible_tags, primary_purpose_tags,
                 platform_type_tags, meeting_format_tags, event_style_tags,
-                resources_included_tags, stage_focus, jobs_program, team_or_individual)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                resources_included_tags, stage_focus, jobs_program, team_or_individual,
+                function_tags)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(community_id) DO UPDATE SET
                  ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
                  value_prop=excluded.value_prop, format_reality=excluded.format_reality,
@@ -2070,7 +2082,8 @@ class Library:
                  event_style_tags=excluded.event_style_tags,
                  resources_included_tags=excluded.resources_included_tags,
                  stage_focus=excluded.stage_focus, jobs_program=excluded.jobs_program,
-                 team_or_individual=excluded.team_or_individual""",
+                 team_or_individual=excluded.team_or_individual,
+                 function_tags=excluded.function_tags""",
             (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
              format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
@@ -2083,7 +2096,8 @@ class Library:
              json.dumps(primary_purpose_tags or []), json.dumps(platform_type_tags or []),
              json.dumps(meeting_format_tags or []), json.dumps(event_style_tags or []),
              json.dumps(resources_included_tags or []),
-             stage_focus.strip(), jobs_program.strip(), team_or_individual.strip()),
+             stage_focus.strip(), jobs_program.strip(), team_or_individual.strip(),
+             json.dumps(function_tags or [])),
         )
         self.conn.commit()
 

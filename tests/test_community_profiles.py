@@ -60,6 +60,48 @@ def test_profile_page_renders_full_profile(env):
     assert "Business model" in r.text
 
 
+def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
+    """Regression test: the admin profile edit POST handler hardcodes one
+    form.getlist(...) line per Recommender weighting *_tags dimension (see
+    webapp/app.py's admin_communities_profile_save-equivalent handler) —
+    unlike the checkbox groups above it, which render generically off
+    _WEIGHT_DIMENSIONS. A new dimension (e.g. function_tags, added in the
+    Level/Function PR) is silently dropped on every save until its own
+    getlist line is added, even though its checkbox renders and its column
+    exists. Catches that class of bug for every current *_tags dimension."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    cid = lib.add_community(
+        "Test CFO Guild", "https://example.com", "", "Seed-stage finance leaders",
+        "Free", ["Peer group"], access="Invite-only", approved=1,
+    )
+    lib.upsert_community_profile(cid, ideal_member="Solo CFOs at Series A/B")
+    lib.close()
+
+    c = _client(env)
+    c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    r = c.post(f"/admin/tools/communities/{cid}/profile", data={
+        "ideal_member": "Solo CFOs at Series A/B",
+        "seniority_band_tags": ["cfo", "senior_exec"],
+        "function_tags": ["fpa"],
+        "cpe_eligible_tags": ["yes"],
+        "platform_type_tags": ["chat"],
+        "meeting_format_tags": ["online"],
+        "event_style_tags": ["intimate"],
+    }, follow_redirects=False)
+    assert r.status_code == 303
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    profile = lib.get_community_profile(cid)
+    lib.close()
+    assert profile["seniority_band_tags"] == ["cfo", "senior_exec"]
+    assert profile["function_tags"] == ["fpa"]
+    assert profile["cpe_eligible_tags"] == ["yes"]
+    assert profile["platform_type_tags"] == ["chat"]
+    assert profile["meeting_format_tags"] == ["online"]
+    assert profile["event_style_tags"] == ["intimate"]
+
+
 def test_profile_page_falls_back_to_minimal_when_no_profile(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
