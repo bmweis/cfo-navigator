@@ -845,7 +845,7 @@ _CARD_ICON_STYLES = (
 
 
 def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
-             right: str | None = "14px", left: str | None = None, size: int = 13) -> str:
+             right: str | None = "14px", left: str | None = None, size: int = 15) -> str:
     """Rotated Caveat-font sticker badge — white bg, 2px graffiti-ink border,
     hard 2px/2px drop-shadow (no blur). Absolutely positioned; wrap the target
     (a hero image or card) in `position:relative` so it has something to pin
@@ -861,19 +861,31 @@ def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
     )
 
 
+def _underline_dims(stroke: float) -> tuple[int, int]:
+    """(SVG height, padding-bottom to reserve for it) for a given stroke
+    width — shared by `_marker_underline` and `_underline_last_word` so the
+    reserved space always matches what the SVG actually draws."""
+    h = max(10, round(stroke * 3.5))
+    return h, h + 4
+
+
 def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Hand-drawn wavy SVG underline for one hero heading word. Stretches to
     fill its parent's width (`preserveAspectRatio="none"`, a fixed viewBox),
     so it works regardless of the word's actual rendered length — wrap the
-    target word in `position:relative;display:inline-block` and append this
-    call's output inside it. Max one per page. See also `_underline_last_word`,
-    which handles the wrapping for arbitrary (e.g. admin-edited) text."""
-    h = max(10, round(stroke * 3.5))
+    target word in `position:relative;display:inline-block` with
+    `padding-bottom` equal to this function's reserved space (see
+    `_underline_dims`) and append this call's output inside it, flush to the
+    bottom of that padding. Without the reserved padding the squiggle
+    overlaps whatever follows — margins/line-height alone don't leave enough
+    room. Max one per page. See also `_underline_last_word`, which handles
+    the wrapping for arbitrary (e.g. admin-edited) text."""
+    h, _ = _underline_dims(stroke)
     mid = h - 6
     d = f"M2,{mid} Q15,{max(2, mid - 6)} 30,{mid + 2} T60,{mid} T98,{mid + 3}"
     return (
         f'<svg width="100%" height="{h}" viewBox="0 0 100 {h}" preserveAspectRatio="none" '
-        f'aria-hidden="true" style="position:absolute;left:0;bottom:-{h - 4}px;">'
+        f'aria-hidden="true" style="position:absolute;left:0;bottom:0;">'
         f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" '
         f'stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>'
     )
@@ -882,9 +894,13 @@ def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -
 def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Wrap the last word of `text` (raw, unescaped) in a marker-underline —
     the safe way to accent one word of arbitrary/admin-edited heading copy,
-    since it doesn't require knowing the word in advance."""
+    since it doesn't require knowing the word in advance. Reserves vertical
+    space via padding-bottom (see `_underline_dims`) so the squiggle never
+    overlaps the content that follows, regardless of the heading's own
+    margin or line-height."""
+    _, pad = _underline_dims(stroke)
     head, sep, last = text.rstrip().rpartition(" ")
-    underlined = (f'<span style="position:relative;display:inline-block;">'
+    underlined = (f'<span style="position:relative;display:inline-block;padding-bottom:{pad}px;">'
                   f'{_esc(last)}{_marker_underline(stroke, color)}</span>')
     return f"{_esc(head)} {underlined}" if sep else underlined
 
@@ -1244,7 +1260,7 @@ def homepage(request: Request):
                "blogs. Also home to FP&amp;A Buddy, a research agent for questions on frameworks, metrics, "
                "and more. Sign-in required, still being built out.",
                icon_html=_card_icon(2, _ICON_LIBRARY),
-               sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=12)),
+               sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=14)),
     ])
 
     # The "suggest a piece" prompt is shown only to signed-in members — submissions

@@ -180,9 +180,10 @@ undecorated).
    in `webapp/app.py`.
 2. **Sticker badge** — a small rotated callout: white background, 2px graffiti-ink
    (`#0d0d0d`) border, 4–6° rotation, hard drop-shadow `2px 2px 0 #0d0d0d` (no blur),
-   Caveat 700 text. Lives in a header/hero corner or a card corner only — never
-   inline in body copy. Max **one or two per page**. Helper: `_sticker()` in
-   `webapp/app.py`.
+   Caveat 700 text at **15px** (hero/header stickers) or **14px** (smaller card-corner
+   stickers, e.g. a WIP flag) — Caveat's script letterforms read small at anything
+   below that. Lives in a header/hero corner or a card corner only — never inline in
+   body copy. Max **one or two per page**. Helper: `_sticker()` in `webapp/app.py`.
 3. **Card category icons** — 2px-stroke line icons (not flat color squares) inside
    the small badge on a 3-up card row. Fixed background order: seafoam-wash
    `#EAF7F2` → navy-wash `#EEF1F7` → coral-wash `#FBEAE3`, reused for every 3-up card
