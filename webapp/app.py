@@ -9482,6 +9482,7 @@ def reader(request: Request, url: str = "", id: int = 0):
         return HTMLResponse(_READER_TMPL.format(
             title="Reader", css=_READER_CSS, back_url=back_url, back_label=back_label,
             orig_url="#", byline="", body=body_html,
+            article_controls="", tags_block="", article_script="",
         ))
 
     # Fetch content — use cached DB content if available and non-empty
