@@ -861,20 +861,32 @@ def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
     )
 
 
-def _marker_underline(width: int = 220, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
-    """Hand-drawn wavy SVG underline for one hero heading word. Absolutely
-    positioned under the word — wrap the target word in
-    `position:relative;display:inline-block` and append this call's output
-    inside it. Max one per page."""
-    h = max(12, round(width / 15))
+def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
+    """Hand-drawn wavy SVG underline for one hero heading word. Stretches to
+    fill its parent's width (`preserveAspectRatio="none"`, a fixed viewBox),
+    so it works regardless of the word's actual rendered length — wrap the
+    target word in `position:relative;display:inline-block` and append this
+    call's output inside it. Max one per page. See also `_underline_last_word`,
+    which handles the wrapping for arbitrary (e.g. admin-edited) text."""
+    h = max(10, round(stroke * 3.5))
     mid = h - 6
-    d = (f"M2,{mid} Q{width * 0.15:.0f},{max(2, mid - 6)} {width * 0.3:.0f},{mid + 2} "
-         f"T{width * 0.6:.0f},{mid} T{width - 2},{mid + 3}")
+    d = f"M2,{mid} Q15,{max(2, mid - 6)} 30,{mid + 2} T60,{mid} T98,{mid + 3}"
     return (
-        f'<svg viewBox="0 0 {width} {h}" width="{width}" height="{h}" aria-hidden="true" '
-        f'style="position:absolute;left:0;bottom:-{h - 4}px;">'
-        f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" stroke-linecap="round"/></svg>'
+        f'<svg width="100%" height="{h}" viewBox="0 0 100 {h}" preserveAspectRatio="none" '
+        f'aria-hidden="true" style="position:absolute;left:0;bottom:-{h - 4}px;">'
+        f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" '
+        f'stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>'
     )
+
+
+def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
+    """Wrap the last word of `text` (raw, unescaped) in a marker-underline —
+    the safe way to accent one word of arbitrary/admin-edited heading copy,
+    since it doesn't require knowing the word in advance."""
+    head, sep, last = text.rstrip().rpartition(" ")
+    underlined = (f'<span style="position:relative;display:inline-block;">'
+                  f'{_esc(last)}{_marker_underline(stroke, color)}</span>')
+    return f"{_esc(head)} {underlined}" if sep else underlined
 
 
 def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
@@ -890,6 +902,14 @@ def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
         f'<svg viewBox="0 0 24 24" width="{inner}" height="{inner}" fill="none" stroke="{stroke}" '
         f'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{svg_path}</svg></div>'
     )
+
+
+# 2px-stroke, 24x24-viewBox icon paths for _card_icon() — reused across every
+# 3-up card row sitewide (homepage, CFO Toolbox).
+_ICON_BOOK_OPEN = ('<path d="M4 4.5h7a3 3 0 0 1 3 3V20a2.5 2.5 0 0 0-2.5-2.5H4z"/>'
+                    '<path d="M20 4.5h-7a3 3 0 0 0-3 3V20a2.5 2.5 0 0 1 2.5-2.5H20z"/>')
+_ICON_TOOL = '<path d="M14.5 4.5l5 5L8 21H3v-5z"/><path d="M13 6l5 5"/>'
+_ICON_LIBRARY = '<path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M4 17h16"/>'
 
 
 # ---------------------------------------------------------------------------
@@ -1156,7 +1176,8 @@ def _avatar(size: int = 140) -> str:
 # bio — admin-editable at /admin/copy (settings keys below); these are the
 # fallback used when no override has been saved.
 _HOMEPAGE_HEADLINE_DEFAULT = "Be the strategic partner your leadership team leans on—not just the scorekeeper."
-_HOMEPAGE_SUBHEAD_DEFAULT = ("This is where I share the writing, tools, and hard-won lessons that help finance "
+_HOMEPAGE_SUBHEAD_DEFAULT = ("A thought partner for founders and finance leaders making well-informed decisions. "
+                              "Here's where I share the writing, tools, and hard-won lessons that help finance "
                               "leaders at high-growth tech companies step into that role: GTM efficiency, "
                               "headcount and org design, mentorship, and the cross-functional calls finance "
                               "gets pulled into as a company scales.")
@@ -1183,18 +1204,6 @@ def _copy_paragraphs_html(text: str) -> str:
     return "".join(f"<p>{_esc(p)}</p>" for p in paras)
 
 
-def _fpa_buddy_announcement(margin: str = "20px 0") -> str:
-    return (
-        f'<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;'
-        f'padding:14px 18px;margin:{margin};">'
-        '<p style="margin:0;font-size:14px;color:var(--ink-soft);line-height:1.55;">'
-        '<strong style="font-family:var(--font-head);font-weight:600;color:var(--navy);">&#x1F6A7; Under '
-        'development</strong>&mdash;A curated digital library that includes my personal feed of finance and '
-        'technology blogs, searchable digital archive of content, and the FP&amp;A Buddy to ask all '
-        'of your pressing questions about frameworks, metrics, and more.</p></div>'
-    )
-
-
 @app.get("/", response_class=HTMLResponse)
 def homepage(request: Request):
     lib = _lib()
@@ -1205,11 +1214,14 @@ def homepage(request: Request):
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
     finally:
         lib.close()
-    def _rcard(href, title, desc, external=False):
+
+    def _rcard(href, title, desc, icon_html="", sticker_html="", external=False):
         attrs = ' target="_blank" rel="noopener"' if external else ''
+        pos = "position:relative;" if sticker_html else ""
         return (
-            f'<a href="{href}"{attrs} style="display:block;background:var(--surface);border:1px solid var(--line);'
+            f'<a href="{href}"{attrs} style="{pos}display:block;background:var(--surface);border:1px solid var(--line);'
             f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
+            f'{sticker_html}{icon_html}'
             f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
             f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
@@ -1220,11 +1232,19 @@ def homepage(request: Request):
         _rcard("/thought-leadership", "Thought Leadership",
                "Frameworks and playbooks worth keeping: the Growth Engine Ratio for pressure-testing GTM "
                "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
-               "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press."),
+               "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press.",
+               icon_html=_card_icon(0, _ICON_BOOK_OPEN)),
         _rcard("/tools", "CFO Toolbox",
                "Software, benchmarking, and communities for the Office of the CFO&mdash;the vendors "
                "high-growth finance teams actually use, the benchmarking sources I rely on, and the peer "
-               "groups worth joining."),
+               "groups worth joining.",
+               icon_html=_card_icon(1, _ICON_TOOL)),
+        _rcard("/library", "Digital Library",
+               "The Reading Room: a searchable archive plus my personal feed of finance and technology "
+               "blogs. Also home to FP&amp;A Buddy, a research agent for questions on frameworks, metrics, "
+               "and more. Sign-in required, still being built out.",
+               icon_html=_card_icon(2, _ICON_LIBRARY),
+               sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=12)),
     ])
 
     # The "suggest a piece" prompt is shown only to signed-in members — submissions
@@ -1242,14 +1262,31 @@ def homepage(request: Request):
         'they fall short &rarr;</a></p>'
     ) if _is_member(request) else ''
 
-    body = f"""<div class="page">
-<div style="max-width:680px;">
-  <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO for CFOs</div>
-  <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">{_esc(homepage_headline)}</h1>
-  <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);">{_esc(homepage_subhead)}</p>
+    body = f"""<div class="page page-full">
+<style>
+.home-hero{{display:flex;flex-direction:column;gap:28px;align-items:flex-start;}}
+.home-hero-copy{{max-width:640px;}}
+.home-hero-photo{{position:relative;flex-shrink:0;align-self:center;}}
+.home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;}}
+@media(min-width:760px){{
+  .home-hero{{flex-direction:row;align-items:center;gap:56px;}}
+  .home-hero-photo{{align-self:flex-start;}}
+  .home-cards{{grid-template-columns:repeat(3,1fr);}}
+}}
+</style>
+<div class="home-hero">
+  <div class="home-hero-copy">
+    <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
+    <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">{_underline_last_word(homepage_headline)}</h1>
+    <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p>
+  </div>
+  <div class="home-hero-photo">
+    {_avatar(200)}
+    {_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="-14px", right="-18px")}
+  </div>
 </div>
 
-<div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;">
+<div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;max-width:680px;">
   {_avatar(64)}
   <div style="flex:1;min-width:240px;">
     <p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_esc(homepage_teaser)}</p>
@@ -1257,17 +1294,10 @@ def homepage(request: Request):
   </div>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;">{cards}</div>
-
-{_fpa_buddy_announcement("16px 0 0")}
+<div class="home-cards">{cards}</div>
 
 {suggest}
 {community_gap_teaser}
-
-<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
-  <a href="/contact" class="btn">Get in Touch</a>
-  <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
-</div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
 
@@ -1279,12 +1309,13 @@ def about_page(request: Request):
         about_copy = lib.get_setting("about_page_copy") or _ABOUT_COPY_DEFAULT
     finally:
         lib.close()
-    body = f"""<div class="page">
+    body = f"""<div class="page page-full">
+<div style="max-width:760px;">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
   {_avatar(140)}
   <div>
     <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">CFO &middot; Boston, MA</div>
-    <h1 style="margin:0 0 4px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">Brian Weisberg</h1>
+    <h1 style="margin:0 0 4px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">{_underline_last_word("Brian Weisberg")}</h1>
   </div>
 </div>
 
@@ -1302,6 +1333,7 @@ def about_page(request: Request):
   <a href="/thought-leadership" class="btn">Thought Leadership</a>
   <a href="/contact" class="btn btn-ghost">Get in Touch</a>
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
+</div>
 </div>
 </div>"""
     return HTMLResponse(_page("About—Brian Weisberg", "About", body, role=_role(request)))
@@ -14596,7 +14628,7 @@ def admin_brand(request: Request):
     motif = (
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;">'
         '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Marker-underline&mdash;a hand-drawn wavy stroke under one hero word, seafoam-deep, max one per page.</div>'
-        f'<div style="position:relative;display:inline-block;font:700 32px var(--font-head);color:var(--ink);">Brian Weisberg{_marker_underline(220, 4)}</div>'
+        f'<div style="font:700 32px var(--font-head);color:var(--ink);">{_underline_last_word("Brian Weisberg", 4)}</div>'
         '<div style="height:30px;"></div>'
         '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Sticker badge&mdash;white bg, 2px graffiti-ink border, 4&ndash;6&deg; rotation, hard drop-shadow, Caveat 700. Max one or two per page, header/hero or card corner only.</div>'
         f'<div style="position:relative;display:inline-block;width:170px;height:50px;">'
