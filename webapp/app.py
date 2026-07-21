@@ -925,6 +925,11 @@ _ICON_BOOK_OPEN = ('<path d="M4 4.5h7a3 3 0 0 1 3 3V20a2.5 2.5 0 0 0-2.5-2.5H4z"
                     '<path d="M20 4.5h-7a3 3 0 0 0-3 3V20a2.5 2.5 0 0 1 2.5-2.5H20z"/>')
 _ICON_TOOL = '<path d="M14.5 4.5l5 5L8 21H3v-5z"/><path d="M13 6l5 5"/>'
 _ICON_LIBRARY = '<path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M4 17h16"/>'
+_ICON_GRID = ('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/>'
+              '<rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>')
+_ICON_CHART = '<path d="M4 20V14M12 20V4M20 20v-10"/>'
+_ICON_PEOPLE = ('<circle cx="9" cy="8" r="3.2"/><path d="M3.2 20c0-3.6 2.7-6.2 5.8-6.2s5.8 2.6 5.8 6.2"/>'
+                '<circle cx="17.5" cy="9" r="2.4"/><path d="M15.3 14.3c2.4 .2 4.5 2 5.1 4.4"/>')
 
 
 # ---------------------------------------------------------------------------
@@ -4658,10 +4663,11 @@ async def library_submit(request: Request):
 @app.get("/tools", response_class=HTMLResponse)
 def tools_landing(request: Request):
     """CFO Toolbox landing page: three pillars, each its own subpage."""
-    def _hcard(href, title, desc):
+    def _hcard(href, title, desc, icon_html):
         return (
-            f'<a href="{href}" style="display:block;border:1px solid var(--line);background:var(--surface);'
+            f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
             f'border-radius:14px;padding:22px 24px;text-decoration:none;">'
+            f'{icon_html}'
             f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
             f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
@@ -4669,15 +4675,28 @@ def tools_landing(request: Request):
         )
 
     cards = "".join([
-        _hcard("/tools/software", "Software", "A curated directory of the software high-growth finance teams actually use&mdash;searchable, filterable, with a Warm Intro button for the vendors I know well."),
-        _hcard("/tools/benchmarks", "Benchmarking", "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks help and where they mislead."),
-        _hcard("/tools/communities", "Communities", "CFO and finance communities worth joining: peer groups, associations, and Slack channels, searchable and filterable."),
+        _hcard("/tools/software", "Software",
+               "A curated directory of the software high-growth finance teams actually use&mdash;searchable, "
+               "filterable, with a Warm Intro button for the vendors I know well.",
+               _card_icon(0, _ICON_GRID)),
+        _hcard("/tools/benchmarks", "Benchmarking",
+               "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks "
+               "help and where they mislead.",
+               _card_icon(1, _ICON_CHART)),
+        _hcard("/tools/communities", "Communities",
+               "CFO and finance communities worth joining: peer groups, associations, and Slack channels, "
+               "searchable and filterable.",
+               _card_icon(2, _ICON_PEOPLE)),
     ])
 
-    body = f"""<div class="page">
-<h1 style="margin:0 0 6px;">CFO Toolbox</h1>
+    body = f"""<div class="page page-grid">
+<style>
+.toolbox-cards{{display:grid;grid-template-columns:1fr;gap:14px;}}
+@media(min-width:760px){{.toolbox-cards{{grid-template-columns:repeat(3,1fr);}}}}
+</style>
+<h1 style="margin:0 0 6px;">{_underline_last_word("CFO Toolbox")}</h1>
 <p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO.</p>
-<div style="display:grid;gap:14px;">{cards}</div>
+<div class="toolbox-cards">{cards}</div>
 </div>"""
     return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
@@ -4727,10 +4746,10 @@ def tools_directory(request: Request):
         for c in categories
     )
 
-    body = f"""<div class="page page-wide">
+    body = f"""<div class="page page-grid">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-  <h1 style="margin:0;">Software</h1>
+  <h1 style="margin:0;">{_underline_last_word("Software")}</h1>
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
