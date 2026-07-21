@@ -10194,7 +10194,7 @@ def ask_page(request: Request, q: str = ""):
         '<li><strong>Gets sharper.</strong> Every rating feeds a real eval set that improves retrieval and answer quality over time.</li>'
     )
 
-    body = f"""<div class="page">
+    body = f"""<div class="page page-tool">
 <p style="margin:0 0 12px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
@@ -10244,7 +10244,7 @@ def ask_page(request: Request, q: str = ""):
 
 <style>
 .ask-eyebrow{{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}}
-.ask-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:0;}}
+.ask-card{{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:0;}}
 
 .ask-value{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:16px;}}
 .ask-value-list{{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}}
@@ -10302,7 +10302,7 @@ def ask_page(request: Request, q: str = ""):
 .ask-cost-num{{font-weight:700;font-size:14.5px;color:var(--ink);}}
 .ask-cost-label{{font-size:11px;color:var(--muted);margin-top:1px;}}
 
-.ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 24px;font-size:15px;line-height:1.7;}}
+.ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px 14px 14px 2px;max-width:88%;padding:20px 24px;font-size:15px;line-height:1.7;}}
 .ask-answer p{{margin:0 0 14px;}}
 .ask-answer h3,.ask-answer h4,.ask-answer h5,.ask-answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:18px 0 8px;letter-spacing:-0.01em;}}
 .ask-answer h3:first-child,.ask-answer h4:first-child{{margin-top:0;}}
@@ -10313,10 +10313,19 @@ def ask_page(request: Request, q: str = ""):
 .ask-answer sup.cite{{line-height:0;}}
 .ask-answer sup.cite a{{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}}
 .ask-answer sup.cite a:hover{{color:var(--accent);}}
-.ask-q-bubble{{background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--navy);margin-bottom:8px;}}
-.ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-direction:column;gap:6px;}}
-.ask-src-list li{{font-size:13px;}}
-.ask-src-list a{{color:var(--accent);}}
+.ask-q-bubble{{background:var(--navy);color:#fff;border-radius:14px 14px 2px 14px;padding:12px 18px;font-size:14px;font-weight:500;margin:0 0 8px auto;max-width:80%;width:fit-content;}}
+.ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-wrap:wrap;gap:6px;}}
+.ask-src-list li{{font-size:12px;}}
+.ask-src-list a{{display:inline-flex;align-items:center;gap:5px;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
+.ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}
+
+.ask-loading{{display:flex;align-items:center;gap:10px;padding:2px 0;}}
+.ask-loading .dots{{display:flex;gap:5px;}}
+.ask-loading .dots span{{width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.3;animation:ask-dot-pulse 1.1s ease-in-out infinite;}}
+.ask-loading .dots span:nth-child(2){{animation-delay:.15s;}}
+.ask-loading .dots span:nth-child(3){{animation-delay:.3s;}}
+@keyframes ask-dot-pulse{{0%,80%,100%{{opacity:.3;transform:scale(.85);}}40%{{opacity:1;transform:scale(1);}}}}
+.ask-loading-label{{font-size:13px;color:var(--muted);}}
 
 .ask-fb{{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}}
 .ask-fb-btn{{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line-strong);
@@ -10606,7 +10615,8 @@ async function doAsk() {{
   var turn = document.createElement('div');
   turn.style.marginTop = '18px';
   turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(q) + '</div>' +
-                   '<div class="ask-answer"><em style="color:var(--muted);">Querying sources…</em></div>';
+                   '<div class="ask-answer"><div class="ask-loading"><span class="dots"><span></span><span></span><span></span></span>' +
+                   '<span class="ask-loading-label">Querying sources&hellip;</span></div></div>';
   thread.appendChild(turn);
   document.getElementById('ask-recent').style.display = 'none';
   var answerEl = turn.querySelector('.ask-answer');
