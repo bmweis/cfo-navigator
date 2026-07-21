@@ -845,7 +845,7 @@ _CARD_ICON_STYLES = (
 
 
 def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
-             right: str | None = "14px", left: str | None = None, size: int = 13) -> str:
+             right: str | None = "14px", left: str | None = None, size: int = 15) -> str:
     """Rotated Caveat-font sticker badge — white bg, 2px graffiti-ink border,
     hard 2px/2px drop-shadow (no blur). Absolutely positioned; wrap the target
     (a hero image or card) in `position:relative` so it has something to pin
@@ -861,19 +861,31 @@ def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
     )
 
 
+def _underline_dims(stroke: float) -> tuple[int, int]:
+    """(SVG height, padding-bottom to reserve for it) for a given stroke
+    width — shared by `_marker_underline` and `_underline_last_word` so the
+    reserved space always matches what the SVG actually draws."""
+    h = max(10, round(stroke * 3.5))
+    return h, h + 4
+
+
 def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Hand-drawn wavy SVG underline for one hero heading word. Stretches to
     fill its parent's width (`preserveAspectRatio="none"`, a fixed viewBox),
     so it works regardless of the word's actual rendered length — wrap the
-    target word in `position:relative;display:inline-block` and append this
-    call's output inside it. Max one per page. See also `_underline_last_word`,
-    which handles the wrapping for arbitrary (e.g. admin-edited) text."""
-    h = max(10, round(stroke * 3.5))
+    target word in `position:relative;display:inline-block` with
+    `padding-bottom` equal to this function's reserved space (see
+    `_underline_dims`) and append this call's output inside it, flush to the
+    bottom of that padding. Without the reserved padding the squiggle
+    overlaps whatever follows — margins/line-height alone don't leave enough
+    room. Max one per page. See also `_underline_last_word`, which handles
+    the wrapping for arbitrary (e.g. admin-edited) text."""
+    h, _ = _underline_dims(stroke)
     mid = h - 6
     d = f"M2,{mid} Q15,{max(2, mid - 6)} 30,{mid + 2} T60,{mid} T98,{mid + 3}"
     return (
         f'<svg width="100%" height="{h}" viewBox="0 0 100 {h}" preserveAspectRatio="none" '
-        f'aria-hidden="true" style="position:absolute;left:0;bottom:-{h - 4}px;">'
+        f'aria-hidden="true" style="position:absolute;left:0;bottom:0;">'
         f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" '
         f'stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>'
     )
@@ -882,9 +894,13 @@ def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -
 def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Wrap the last word of `text` (raw, unescaped) in a marker-underline —
     the safe way to accent one word of arbitrary/admin-edited heading copy,
-    since it doesn't require knowing the word in advance."""
+    since it doesn't require knowing the word in advance. Reserves vertical
+    space via padding-bottom (see `_underline_dims`) so the squiggle never
+    overlaps the content that follows, regardless of the heading's own
+    margin or line-height."""
+    _, pad = _underline_dims(stroke)
     head, sep, last = text.rstrip().rpartition(" ")
-    underlined = (f'<span style="position:relative;display:inline-block;">'
+    underlined = (f'<span style="position:relative;display:inline-block;padding-bottom:{pad}px;">'
                   f'{_esc(last)}{_marker_underline(stroke, color)}</span>')
     return f"{_esc(head)} {underlined}" if sep else underlined
 
@@ -1244,7 +1260,7 @@ def homepage(request: Request):
                "blogs. Also home to FP&amp;A Buddy, a research agent for questions on frameworks, metrics, "
                "and more. Sign-in required, still being built out.",
                icon_html=_card_icon(2, _ICON_LIBRARY),
-               sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=12)),
+               sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=14)),
     ])
 
     # The "suggest a piece" prompt is shown only to signed-in members — submissions
@@ -1399,7 +1415,7 @@ def thought_leadership(request: Request):
     )
 
     body = (
-        '<div class="page">'
+        '<div class="page page-full">'
         '<style>'
         '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
         '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'
@@ -1428,15 +1444,16 @@ def thought_leadership(request: Request):
         '@media(max-width:560px){.tl-row-photos{grid-template-columns:1fr;}.tl-row-photos img{height:170px;}'
         '.tl-row-top{flex-direction:column;gap:2px;}}'
         '</style>'
-        '<h1>Thought Leadership</h1>'
-        '<p style="color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
+        f'<h1>{_underline_last_word("Thought Leadership")}</h1>'
+        '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
         + featured
+        + '<div style="max-width:760px;">'
     )
 
     for section_title, emoji, items in TL_SECTIONS:
         body += section(section_title, emoji, items)
 
-    body += "</div>"
+    body += "</div></div>"
     return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
@@ -9346,8 +9363,9 @@ function saveCustomFilters() {{
 
 
 _READER_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap');
-:root{--ink:#1a1a1a;--muted:#6F6A60;--line:#E4E0D6;--bg:#F5F4EF;--surface:#FFFFFF;--accent:#002975;}
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap');
+:root{--ink:#1a1a1a;--muted:#6F6A60;--line:#E4E0D6;--bg:#F5F4EF;--surface:#FFFFFF;--accent:#002975;
+  --seafoam-deep:#1F7A66;--coral:#E8704F;--coral-wash:#FBEAE3;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--ink);font:18px/1.75 'Source Serif 4',Georgia,serif;}
 a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
@@ -9363,10 +9381,22 @@ a:hover{opacity:.8;}
   padding:4px 8px;border-radius:6px;font-size:13px;}
 .reader-controls button:hover{background:var(--line);}
 
-.reader-wrap{max-width:680px;margin:0 auto;padding:56px 24px 100px;}
+/* Full-width tier (BRAND.md §5) — main column keeps a readable measure, the
+   "On this page" TOC sits at the true right edge of the wide canvas. */
+.reader-layout{display:flex;justify-content:space-between;gap:40px;max-width:1900px;margin:0 auto;padding:56px 24px 100px;}
+.reader-main{max-width:760px;min-width:0;}
+.reader-toc{width:220px;flex-shrink:0;position:sticky;top:64px;align-self:flex-start;}
+.reader-toc-title{font:700 11px 'DM Sans',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
+.reader-toc a{display:block;font:14px 'DM Sans',sans-serif;color:#3F5C9A;line-height:2.2;text-decoration:none;}
+.reader-toc a:hover{text-decoration:underline;}
+@media(max-width:1100px){
+  .reader-toc{display:none;}
+  .reader-layout{justify-content:center;}
+  .reader-main{margin:0 auto;}
+}
 
 .reader-meta{margin-bottom:40px;padding-bottom:32px;border-bottom:1px solid var(--line);}
-.reader-meta h1{font-size:clamp(22px,4vw,32px);font-weight:600;line-height:1.25;letter-spacing:-.02em;
+.reader-meta h1{font-family:'Outfit',sans-serif;font-size:clamp(22px,4vw,32px);font-weight:600;line-height:1.25;letter-spacing:-.02em;
   margin-bottom:16px;}
 .reader-meta .byline{font-family:'DM Sans',sans-serif;font-size:14px;color:var(--muted);line-height:1.5;}
 .reader-meta .source-link{color:var(--accent);}
@@ -9380,8 +9410,8 @@ a:hover{opacity:.8;}
 .reader-body h3{font-size:1.1em;}
 .reader-body ul,.reader-body ol{padding-left:1.5em;margin-bottom:1.4em;}
 .reader-body li{margin-bottom:.4em;}
-.reader-body blockquote{border-left:3px solid var(--line);padding-left:1.2em;color:var(--muted);
-  font-style:italic;margin:1.5em 0;}
+.reader-body blockquote{background:var(--coral-wash);border-left:4px solid var(--coral);border-radius:0 10px 10px 0;
+  padding:18px 22px;color:var(--accent);font-style:italic;margin:1.5em 0;}
 .reader-body img{max-width:100%;height:auto;border-radius:8px;margin:1.5em 0;}
 .reader-body figure{margin:1.5em 0;}
 .reader-body figcaption{font-size:.85em;color:var(--muted);font-family:'DM Sans',sans-serif;margin-top:.4em;}
@@ -9415,13 +9445,19 @@ _READER_TMPL = """<!doctype html><html lang="en"><head>
     <a href="{orig_url}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:13px;">Original &rarr;</a>
   </div>
 </div>
-<div class="reader-wrap">
-  <div class="reader-meta">
-    <h1>{title}</h1>
-    <div class="byline">{byline}</div>
-    {tags_block}
+<div class="reader-layout">
+  <div class="reader-main">
+    <div class="reader-meta">
+      <h1>{heading}</h1>
+      <div class="byline">{byline}</div>
+      {tags_block}
+    </div>
+    <div class="reader-body">{body}</div>
   </div>
-  <div class="reader-body">{body}</div>
+  <div class="reader-toc" id="reader-toc">
+    <div class="reader-toc-title">On this page</div>
+    <div id="reader-toc-list"></div>
+  </div>
 </div>
 {article_script}
 <script>
@@ -9432,6 +9468,25 @@ function adj(d) {{
   document.documentElement.style.setProperty('--fs', fs + 'px');
   localStorage.setItem('reader-fs', fs);
 }}
+(function() {{
+  var toc = document.getElementById('reader-toc');
+  var headings = Array.prototype.filter.call(document.querySelectorAll('.reader-body h2'), function(h) {{
+    return !h.closest('.reader-empty');
+  }});
+  if (!toc || !headings.length) {{ if (toc) toc.style.display = 'none'; return; }}
+  var list = document.getElementById('reader-toc-list');
+  var used = {{}};
+  headings.forEach(function(h, i) {{
+    var slug = (h.textContent || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || ('section-' + i);
+    while (used[slug]) {{ slug = slug + '-' + i; }}
+    used[slug] = true;
+    h.id = slug;
+    var a = document.createElement('a');
+    a.href = '#' + slug;
+    a.textContent = h.textContent;
+    list.appendChild(a);
+  }});
+}})();
 </script>
 </body></html>"""
 
@@ -9480,8 +9535,9 @@ def reader(request: Request, url: str = "", id: int = 0):
   </form>
 </div>"""
         return HTMLResponse(_READER_TMPL.format(
-            title="Reader", css=_READER_CSS, back_url=back_url, back_label=back_label,
+            title="Reader", heading="Reader", css=_READER_CSS, back_url=back_url, back_label=back_label,
             orig_url="#", byline="", body=body_html,
+            article_controls="", tags_block="", article_script="",
         ))
 
     # Fetch content — use cached DB content if available and non-empty
@@ -9606,7 +9662,7 @@ async function deleteArticle(id) {{
 </script>"""
 
     return HTMLResponse(_READER_TMPL.format(
-        title=_esc(title), css=_READER_CSS,
+        title=_esc(title), heading=_underline_last_word(title), css=_READER_CSS,
         back_url=back_url, back_label=back_label,
         orig_url=_esc(url), byline=byline,
         body=body_html,
