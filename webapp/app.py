@@ -692,12 +692,18 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(163,229,212,.55);}
 
 /* Footer — navy background sitewide (BRAND.md §4) */
-.site-footer{padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:13px;background:var(--navy);color:rgba(255,255,255,.55);}
-.site-footer .brand{display:flex;align-items:center;gap:10px;}
+.site-footer{padding:24px 28px;display:flex;align-items:center;gap:14px;font-size:13px;background:var(--navy);color:rgba(255,255,255,.55);}
+.site-footer .brand{flex:1;display:flex;align-items:center;gap:10px;}
 .site-footer .brand b{font-family:var(--font-head);font-weight:600;color:#fff;font-size:14px;}
-.site-footer .links{display:flex;gap:10px;align-items:center;}
+.site-footer .center{flex:1;text-align:center;font-size:12px;white-space:nowrap;}
+.site-footer .links{flex:1;display:flex;gap:10px;align-items:center;justify-content:flex-end;}
 .site-footer a{color:rgba(255,255,255,.55);}
 .site-footer a:hover{color:#fff;}
+@media(max-width:640px){
+  .site-footer{flex-wrap:wrap;justify-content:center;text-align:center;}
+  .site-footer .brand,.site-footer .center,.site-footer .links{flex:none;}
+  .site-footer .links{justify-content:center;}
+}
 
 /* Mobile: nav collapses to a navy hamburger drawer */
 @media(max-width:760px){
@@ -800,10 +806,11 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     else:
         nav += f'<a href="/login" class="nav-cta {"active" if active == "Sign in" else ""}">Sign in</a>'
 
-    # "Built with open-source love" — links to the showcase for admins, plain for visitors.
-    _love = 'Built with open-source love <span style="color:var(--coral-light);">&#9829;</span>'
-    oss_love = (f'<a href="/admin/open-source">{_love}</a>' if role == "admin"
-                else f'<span>{_love}</span>')
+    # "Built with open source love" — the showcase page is public (no auth
+    # gate despite the /admin/ path — it's a credits page, not admin tooling)
+    # so this links for every visitor, not just admins.
+    _love = 'Built with open source love <span style="color:var(--coral-light);">&#9829;</span>'
+    oss_love = f'<a href="/admin/open-source">{_love}</a>'
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -824,8 +831,8 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 {body}
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
+  <span class="center">{oss_love}</span>
   <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a></span>
-  <span style="flex-basis:100%;text-align:center;font-size:12px;">{oss_love}</span>
 </footer>
 </body></html>"""
 
@@ -11201,8 +11208,9 @@ _OPEN_SOURCE = [
 
 @app.get("/admin/open-source", response_class=HTMLResponse)
 def admin_open_source(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
+    # Public by design, despite the /admin/ path — it's a credits page (open-
+    # source dependency names/licenses/versions), not admin tooling, and the
+    # footer links to it for every visitor.
     from importlib.metadata import version as _pkg_version
     import sqlite3 as _sql
     import platform as _platform
@@ -11271,7 +11279,7 @@ def admin_open_source(request: Request):
 {groups_html}
 {love}
 </div>"""
-    return HTMLResponse(_page("Open source—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Open source", "Admin", body, role=_role(request)))
 
 
 # Informal foreign-key map for /admin/system/database. This schema declares no
