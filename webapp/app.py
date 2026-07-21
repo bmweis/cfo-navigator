@@ -4219,7 +4219,10 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
     return """<div class="page page-wide" id="sdrRoot">
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
-<h1 style="margin:0 0 6px;">Sail, Don&rsquo;t Row</h1>
+<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;">
+  <h1 style="margin:0;">""" + _underline_last_word("Sail, Don’t Row") + """</h1>
+  <div style="background:#fff;border:2px solid var(--ink-graffiti);border-radius:6px;padding:4px 12px;transform:rotate(-4deg);font:700 15px var(--font-sticker);color:var(--ink-graffiti);box-shadow:2px 2px 0 var(--ink-graffiti);white-space:nowrap;">arcade</div>
+</div>
 <p class="sdr-sub">Pick your boat. Sail and you might catch a free gust. Row and you&rsquo;ll move fast at first&mdash;but it&rsquo;s harder work, and you&rsquo;ll fade over the long haul.</p>
 <p class="sdr-sub">Make it all the way from Boston to the Cape, past Martha&rsquo;s Vineyard, and all the way to Nantucket&mdash;safely.</p>
 <p class="sdr-sub">Watch out for the rocks, steer clear of Wally the Whale, and outrun Susan the Shark.</p>
