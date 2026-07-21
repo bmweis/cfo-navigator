@@ -177,14 +177,23 @@ undecorated).
 1. **Marker-underline** — a single hand-drawn wavy SVG stroke under one word of a
    hero heading. Color `#1F7A66` (seafoam-deep), 3.5–5px stroke depending on heading
    size, `stroke-linecap:round`. Max **one per page**. Helper: `_marker_underline()`
-   in `webapp/app.py`.
-2. **Sticker badge** — a small rotated callout: white background, 2px graffiti-ink
+   in `webapp/app.py`. Currently used **only on the homepage hero** — it's not a
+   sitewide heading treatment; don't extrapolate it onto other pages' H1s without an
+   explicit call to do so (a past over-extrapolation onto About/Thought
+   Leadership/CFO Toolbox landings was reverted).
+2. **Marker-circle** — a single hand-drawn wavy ellipse, stretched to hug whatever
+   block it's called out around (a card, a callout box), the way you'd circle a
+   paragraph with a marker. Same seafoam-deep stroke as the underline (~3px), and
+   like a real quick marker gesture, the path deliberately doesn't close cleanly —
+   it overshoots its own start point. Max **one per page**. Helper: `_marker_circle()`
+   in `webapp/app.py`. First use: the homepage bio box.
+3. **Sticker badge** — a small rotated callout: white background, 2px graffiti-ink
    (`#0d0d0d`) border, 4–6° rotation, hard drop-shadow `2px 2px 0 #0d0d0d` (no blur),
    Caveat 700 text at **15px** (hero/header stickers) or **14px** (smaller card-corner
    stickers, e.g. a WIP flag) — Caveat's script letterforms read small at anything
    below that. Lives in a header/hero corner or a card corner only — never inline in
    body copy. Max **one or two per page**. Helper: `_sticker()` in `webapp/app.py`.
-3. **Card category icons** — 2px-stroke line icons (not flat color squares) inside
+4. **Card category icons** — 2px-stroke line icons (not flat color squares) inside
    the small badge on a 3-up card row. Fixed background order: seafoam-wash
    `#EAF7F2` → navy-wash `#EEF1F7` → coral-wash `#FBEAE3`, reused for every 3-up card
    row sitewide. Helper: `_card_icon()` in `webapp/app.py`.
