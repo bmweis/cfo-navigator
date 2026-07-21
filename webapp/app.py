@@ -692,12 +692,18 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(163,229,212,.55);}
 
 /* Footer — navy background sitewide (BRAND.md §4) */
-.site-footer{padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:13px;background:var(--navy);color:rgba(255,255,255,.55);}
-.site-footer .brand{display:flex;align-items:center;gap:10px;}
+.site-footer{padding:24px 28px;display:flex;align-items:center;gap:14px;font-size:13px;background:var(--navy);color:rgba(255,255,255,.55);}
+.site-footer .brand{flex:1;display:flex;align-items:center;gap:10px;}
 .site-footer .brand b{font-family:var(--font-head);font-weight:600;color:#fff;font-size:14px;}
-.site-footer .links{display:flex;gap:10px;align-items:center;}
+.site-footer .center{flex:1;text-align:center;font-size:12px;white-space:nowrap;}
+.site-footer .links{flex:1;display:flex;gap:10px;align-items:center;justify-content:flex-end;}
 .site-footer a{color:rgba(255,255,255,.55);}
 .site-footer a:hover{color:#fff;}
+@media(max-width:640px){
+  .site-footer{flex-wrap:wrap;justify-content:center;text-align:center;}
+  .site-footer .brand,.site-footer .center,.site-footer .links{flex:none;}
+  .site-footer .links{justify-content:center;}
+}
 
 /* Mobile: nav collapses to a navy hamburger drawer */
 @media(max-width:760px){
@@ -800,10 +806,11 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     else:
         nav += f'<a href="/login" class="nav-cta {"active" if active == "Sign in" else ""}">Sign in</a>'
 
-    # "Built with open-source love" — links to the showcase for admins, plain for visitors.
-    _love = 'Built with open-source love <span style="color:var(--coral-light);">&#9829;</span>'
-    oss_love = (f'<a href="/admin/open-source">{_love}</a>' if role == "admin"
-                else f'<span>{_love}</span>')
+    # "Built with open source love" — the showcase page is public (no auth
+    # gate despite the /admin/ path — it's a credits page, not admin tooling)
+    # so this links for every visitor, not just admins.
+    _love = 'Built with open source love <span style="color:var(--coral-light);">&#9829;</span>'
+    oss_love = f'<a href="/admin/open-source">{_love}</a>'
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -824,8 +831,8 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 {body}
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
+  <span class="center">{oss_love}</span>
   <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a></span>
-  <span style="flex-basis:100%;text-align:center;font-size:12px;">{oss_love}</span>
 </footer>
 </body></html>"""
 
@@ -861,31 +868,20 @@ def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
     )
 
 
-def _underline_dims(stroke: float) -> tuple[int, int]:
-    """(SVG height, padding-bottom to reserve for it) for a given stroke
-    width — shared by `_marker_underline` and `_underline_last_word` so the
-    reserved space always matches what the SVG actually draws."""
-    h = max(10, round(stroke * 3.5))
-    return h, h + 4
-
-
 def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Hand-drawn wavy SVG underline for one hero heading word. Stretches to
-    fill its parent's width (`preserveAspectRatio="none"`, a fixed viewBox),
-    so it works regardless of the word's actual rendered length — wrap the
-    target word in `position:relative;display:inline-block` with
-    `padding-bottom` equal to this function's reserved space (see
-    `_underline_dims`) and append this call's output inside it, flush to the
-    bottom of that padding. Without the reserved padding the squiggle
-    overlaps whatever follows — margins/line-height alone don't leave enough
-    room. Max one per page. See also `_underline_last_word`, which handles
-    the wrapping for arbitrary (e.g. admin-edited) text."""
-    h, _ = _underline_dims(stroke)
+    fill its parent's width (`preserveAspectRatio="none"`, a fixed viewBox).
+    Rendered as a normal block-flow sibling of the word (see
+    `_underline_last_word`) rather than absolutely positioned, so its height
+    is always counted as real, in-flow space — no reliance on a parent's
+    padding/line-height/inline-block quirks to avoid overlapping whatever
+    follows. Max one per page."""
+    h = max(10, round(stroke * 3.5))
     mid = h - 6
     d = f"M2,{mid} Q15,{max(2, mid - 6)} 30,{mid + 2} T60,{mid} T98,{mid + 3}"
     return (
         f'<svg width="100%" height="{h}" viewBox="0 0 100 {h}" preserveAspectRatio="none" '
-        f'aria-hidden="true" style="position:absolute;left:0;bottom:0;">'
+        f'aria-hidden="true" style="display:block;margin-top:4px;">'
         f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" '
         f'stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>'
     )
@@ -894,14 +890,17 @@ def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -
 def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Wrap the last word of `text` (raw, unescaped) in a marker-underline —
     the safe way to accent one word of arbitrary/admin-edited heading copy,
-    since it doesn't require knowing the word in advance. Reserves vertical
-    space via padding-bottom (see `_underline_dims`) so the squiggle never
-    overlaps the content that follows, regardless of the heading's own
-    margin or line-height."""
-    _, pad = _underline_dims(stroke)
+    since it doesn't require knowing the word in advance. The word and its
+    underline are stacked with `display:inline-flex;flex-direction:column`
+    instead of the word alone with an absolutely-positioned SVG underneath —
+    a flex column's height is always the sum of its children, so the
+    reserved space can't come up short the way an inline-block's line-box
+    contribution can in edge cases (that was the bug: the original
+    padding-bottom-on-inline-block approach checked out in computed-style
+    spot checks but still overlapped in some real renders)."""
     head, sep, last = text.rstrip().rpartition(" ")
-    underlined = (f'<span style="position:relative;display:inline-block;padding-bottom:{pad}px;">'
-                  f'{_esc(last)}{_marker_underline(stroke, color)}</span>')
+    underlined = (f'<span style="display:inline-flex;flex-direction:column;align-items:stretch;">'
+                  f'<span>{_esc(last)}</span>{_marker_underline(stroke, color)}</span>')
     return f"{_esc(head)} {underlined}" if sep else underlined
 
 
@@ -10194,7 +10193,7 @@ def ask_page(request: Request, q: str = ""):
         '<li><strong>Gets sharper.</strong> Every rating feeds a real eval set that improves retrieval and answer quality over time.</li>'
     )
 
-    body = f"""<div class="page">
+    body = f"""<div class="page page-tool">
 <p style="margin:0 0 12px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
@@ -10244,7 +10243,7 @@ def ask_page(request: Request, q: str = ""):
 
 <style>
 .ask-eyebrow{{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}}
-.ask-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:0;}}
+.ask-card{{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:0;}}
 
 .ask-value{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:16px;}}
 .ask-value-list{{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}}
@@ -10302,7 +10301,7 @@ def ask_page(request: Request, q: str = ""):
 .ask-cost-num{{font-weight:700;font-size:14.5px;color:var(--ink);}}
 .ask-cost-label{{font-size:11px;color:var(--muted);margin-top:1px;}}
 
-.ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 24px;font-size:15px;line-height:1.7;}}
+.ask-answer{{background:#fff;border:1px solid var(--line);border-radius:14px 14px 14px 2px;max-width:88%;padding:20px 24px;font-size:15px;line-height:1.7;}}
 .ask-answer p{{margin:0 0 14px;}}
 .ask-answer h3,.ask-answer h4,.ask-answer h5,.ask-answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:18px 0 8px;letter-spacing:-0.01em;}}
 .ask-answer h3:first-child,.ask-answer h4:first-child{{margin-top:0;}}
@@ -10313,10 +10312,19 @@ def ask_page(request: Request, q: str = ""):
 .ask-answer sup.cite{{line-height:0;}}
 .ask-answer sup.cite a{{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}}
 .ask-answer sup.cite a:hover{{color:var(--accent);}}
-.ask-q-bubble{{background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--navy);margin-bottom:8px;}}
-.ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-direction:column;gap:6px;}}
-.ask-src-list li{{font-size:13px;}}
-.ask-src-list a{{color:var(--accent);}}
+.ask-q-bubble{{background:var(--navy);color:#fff;border-radius:14px 14px 2px 14px;padding:12px 18px;font-size:14px;font-weight:500;margin:0 0 8px auto;max-width:80%;width:fit-content;}}
+.ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-wrap:wrap;gap:6px;}}
+.ask-src-list li{{font-size:12px;}}
+.ask-src-list a{{display:inline-flex;align-items:center;gap:5px;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
+.ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}
+
+.ask-loading{{display:flex;align-items:center;gap:10px;padding:2px 0;}}
+.ask-loading .dots{{display:flex;gap:5px;}}
+.ask-loading .dots span{{width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.3;animation:ask-dot-pulse 1.1s ease-in-out infinite;}}
+.ask-loading .dots span:nth-child(2){{animation-delay:.15s;}}
+.ask-loading .dots span:nth-child(3){{animation-delay:.3s;}}
+@keyframes ask-dot-pulse{{0%,80%,100%{{opacity:.3;transform:scale(.85);}}40%{{opacity:1;transform:scale(1);}}}}
+.ask-loading-label{{font-size:13px;color:var(--muted);}}
 
 .ask-fb{{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}}
 .ask-fb-btn{{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line-strong);
@@ -10606,7 +10614,8 @@ async function doAsk() {{
   var turn = document.createElement('div');
   turn.style.marginTop = '18px';
   turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(q) + '</div>' +
-                   '<div class="ask-answer"><em style="color:var(--muted);">Querying sources…</em></div>';
+                   '<div class="ask-answer"><div class="ask-loading"><span class="dots"><span></span><span></span><span></span></span>' +
+                   '<span class="ask-loading-label">Querying sources&hellip;</span></div></div>';
   thread.appendChild(turn);
   document.getElementById('ask-recent').style.display = 'none';
   var answerEl = turn.querySelector('.ask-answer');
@@ -11199,8 +11208,9 @@ _OPEN_SOURCE = [
 
 @app.get("/admin/open-source", response_class=HTMLResponse)
 def admin_open_source(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
+    # Public by design, despite the /admin/ path — it's a credits page (open-
+    # source dependency names/licenses/versions), not admin tooling, and the
+    # footer links to it for every visitor.
     from importlib.metadata import version as _pkg_version
     import sqlite3 as _sql
     import platform as _platform
@@ -11269,7 +11279,7 @@ def admin_open_source(request: Request):
 {groups_html}
 {love}
 </div>"""
-    return HTMLResponse(_page("Open source—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Open source", "Admin", body, role=_role(request)))
 
 
 # Informal foreign-key map for /admin/system/database. This schema declares no
