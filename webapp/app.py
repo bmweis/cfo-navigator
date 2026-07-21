@@ -904,27 +904,6 @@ def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--sea
     return f"{_esc(head)} {underlined}" if sep else underlined
 
 
-def _marker_circle(stroke: float = 3.0, color: str = "var(--seafoam-deep)", inset: int = 14) -> str:
-    """Hand-drawn wavy ellipse — the third graffiti primitive (BRAND.md §4),
-    for calling out a whole block the way you'd circle a paragraph with a
-    marker. Stretches to fill its container's shape (`preserveAspectRatio=
-    "none"`, a square viewBox distorted to match), extending past the
-    container's edges by `inset` px on every side via absolute positioning —
-    wrap the target block in `position:relative` and append this call's
-    output as its last child. The path deliberately doesn't close cleanly
-    (it overshoots its own start point), like a real quick marker gesture.
-    Max one per page."""
-    d = ("M10,55 C4,30 22,6 52,5 C80,4 97,20 95,48 C93,78 70,96 45,94 "
-         "C20,92 4,76 7,54 C8,46 12,48 15,50")
-    return (
-        f'<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" '
-        f'style="position:absolute;top:-{inset}px;left:-{inset}px;'
-        f'width:calc(100% + {inset * 2}px);height:calc(100% + {inset * 2}px);pointer-events:none;">'
-        f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" '
-        f'stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>'
-    )
-
-
 def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
     """2px-stroke line-icon badge for a 3-up card row. Cycles seafoam-wash ->
     navy-wash -> coral-wash by `index`, the fixed order reused for every 3-up
@@ -1217,12 +1196,14 @@ def _avatar(size: int = 140) -> str:
 # bio — admin-editable at /admin/copy (settings keys below); these are the
 # fallback used when no override has been saved.
 _HOMEPAGE_HEADLINE_DEFAULT = "Be the strategic partner your leadership team leans on—not just the scorekeeper."
-_HOMEPAGE_SUBHEAD_DEFAULT = ("A thought partner for founders and finance leaders making well-informed decisions. "
-                              "Here's where I share the writing, tools, and hard-won lessons that help finance "
-                              "leaders at high-growth tech companies step into that role: GTM efficiency, "
-                              "headcount and org design, mentorship, and the cross-functional calls finance "
-                              "gets pulled into as a company scales.")
-_HOMEPAGE_TEASER_DEFAULT = "Brian Weisberg—CFO who builds finance functions from scratch, not inherits them."
+_HOMEPAGE_SUBHEAD_DEFAULT = ("Finance used to mean keeping score: close the books, build the model, report what "
+                              "happened. The job now is building something solid enough to trust and flexible "
+                              "enough to move fast on—GTM efficiency, headcount and org design, mentorship, and "
+                              "the cross-functional calls finance gets pulled into as a company scales. This is "
+                              "where I share what building that's taught me, plus the CFO Toolbox and Digital "
+                              "Library I built along the way.")
+_HOMEPAGE_TEASER_DEFAULT = ("Brian Weisberg—CFO who builds and invests in finance functions designed to scale "
+                             "past the next 10x, not just the next quarter.")
 _HOMEPAGE_EXPANDED_DEFAULT = """I'm wrapping up my time at Mux over the next couple of weeks and actively exploring what's next—early stage, growth stage, or something I haven't done yet.
 
 If you're building something and think I could help, let's talk."""
@@ -1327,10 +1308,10 @@ def homepage(request: Request):
   </div>
 </div>
 
-<div style="position:relative;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;max-width:680px;">
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;max-width:680px;">
+  <div style="font:700 15px var(--font-sticker);color:var(--seafoam-deep);margin-bottom:8px;">STATUS:</div>
   <p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_esc(homepage_teaser)}</p>
   <div style="font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
-  {_marker_circle()}
 </div>
 
 <div class="home-cards">{cards}</div>
@@ -15135,7 +15116,7 @@ def admin_copy_page(request: Request):
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Homepage &mdash; bio box</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The marker-circled card below the hero, above the 3-card row&mdash;a short lead line, then the rest of your bio, both always visible.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The card below the hero, above the 3-card row&mdash;a short lead line, then the rest of your bio, both always visible (under a fixed "STATUS:" label that isn't editable here).</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Lead line</label>
 <textarea id="home-teaser" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_teaser)}</textarea>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Rest of the bio</label>
