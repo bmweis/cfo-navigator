@@ -1,8 +1,10 @@
 # Brand Standards — bmweis.com / CFO Navigator
 
-*New England nautical, restrained. An editorial system for a senior-finance-executive
-audience: warm, structured, credible. Cool navy and seafoam, a single warm coral pop,
-geometric sans typography, and exactly one nautical motif.*
+*A graffiti/street-art personality layer over a restrained finance-tool base. An
+editorial system for a senior-finance-executive audience: warm, structured, credible.
+Cool navy and seafoam, a single warm coral pop, geometric sans typography — with a
+hand-drawn marker-underline and small rotated sticker badges as the one decorative
+accent layer, used sparingly and never on data-dense surfaces.*
 
 ---
 
@@ -12,7 +14,7 @@ geometric sans typography, and exactly one nautical motif.*
 |---|---|
 | Editorial, structured, considered | Flashy, trendy, startup-loud |
 | Warm and human (off-white, not cold white) | Sterile / corporate-blue SaaS |
-| Quietly nautical (one motif, used sparingly) | Anchors, ropes-everywhere, boats, clip-art |
+| A restrained graffiti accent layer (marker-underline, one or two stickers) | Illustration-heavy, an all-over graffiti aesthetic, clip-art |
 | Confident in whitespace | Busy, gradient-heavy, decorative |
 
 The whole system runs on **restraint**. Navy carries the structure, seafoam is a frequent-but-quiet
@@ -67,7 +69,7 @@ measured on the `#F5F4EF` canvas.
 | `--ink-soft` | `#3a3833` | Body copy |
 | `--muted` | `#6F6A60` | Meta, captions, kickers |
 | `--line` | `#E4E0D6` | Warm hairline |
-| `--line-strong` | `#D6D1C4` | Heavier divider / top line of the rope rule |
+| `--line-strong` | `#D6D1C4` | Heavier divider — section rules, table borders |
 | `--good` / `--caution` / `--alert` | `#002975` / `#9A6B12` / `#9E3B30` | **Status only** — GER tiers, form errors |
 
 > **Semantic ≠ brand.** The alert red `#9E3B30` means *error/danger*. Coral is decorative and
@@ -84,7 +86,6 @@ Coral is the **warm counterweight** to a cool palette. Use it as a graphic/displ
 - Data-viz **third series** (e.g. the R&D lane in the GER contribution diagram)
 - Large display numerals or stat call-outs (≥ 24px)
 - A coral-wash (`#FBEAE3`) callout/quote block — put **navy** text on it (11:1 contrast)
-- A coral variant of the compass-star for a special landing/section header
 
 **🚫 Never coral**
 - Body text or any text under ~18px (use `--coral-deep` only if unavoidable)
@@ -127,13 +128,18 @@ states, soft panels), ~10% — really less — coral (one highlight per screen).
 
 ## 3. Typography
 
-Three families, one combined Google Fonts import in `<head>`. No serif anywhere except the reader.
+Three content families, one combined Google Fonts import in `<head>`. No serif anywhere
+except the reader. **Caveat** is a fourth, accent-only font — the one approved
+dependency exception for the graffiti refresh — restricted to small rotated sticker
+text and never used for headings or body copy (that's still Outfit/DM Sans/Source
+Serif 4, unchanged).
 
 | Family | Role | Weights |
 |---|---|---|
 | **Outfit** | Headings, wordmark, display | 600 / 700 |
 | **DM Sans** | Body copy, UI, labels, eyebrows | 400 / 500 / 600 |
 | **Source Serif 4** | Long-form reading (`/read` only) | 400 / 500 / 600 |
+| **Caveat** | Sticker badges only — never headings or body | 700 |
 
 ### 3.1 Scale (as shipped)
 
@@ -155,14 +161,39 @@ with wide tracking and `--muted` or `--navy`; the serif is *exclusively* for rea
 
 ---
 
-## 4. The nautical motif (use exactly two, sparingly)
+## 4. The graffiti/street-art accent layer (restrained — accents only)
 
-1. **Rope rule** — a double hairline: 1px `--line-strong` over 1px `--line`, 3px tall (`.rule`).
-   Use it to frame the header and footer, or to separate major sections. Not as a decorative repeat.
-2. **Compass star** — a single 8-point star mark (navy by default; coral for special headers).
-   Lives in the footer beside the wordmark. One per page, maximum.
+The previous "restrained New England nautical" motif (rope rule, compass star) is
+**retired completely, everywhere, including the footer** — with one deliberate
+exception: **the favicon stays the existing compass star.** Brian likes it as-is; it
+is not part of the retirement and must never be changed, deleted, or redesigned as
+part of this system or any future refresh.
 
-That's the entire nautical vocabulary. **No anchors, ropes, boats, waves, knots, or clip-art.**
+In its place, a graffiti/street-art personality layer sits on top of the same
+functional navy/seafoam/coral base — accents only, never a new illustration style,
+and never on data-dense surfaces (admin tables, forms, chat UI stay completely
+undecorated).
+
+1. **Marker-underline** — a single hand-drawn wavy SVG stroke under one word of a
+   hero heading. Color `#1F7A66` (seafoam-deep), 3.5–5px stroke depending on heading
+   size, `stroke-linecap:round`. Max **one per page**. Helper: `_marker_underline()`
+   in `webapp/app.py`.
+2. **Sticker badge** — a small rotated callout: white background, 2px graffiti-ink
+   (`#0d0d0d`) border, 4–6° rotation, hard drop-shadow `2px 2px 0 #0d0d0d` (no blur),
+   Caveat 700 text. Lives in a header/hero corner or a card corner only — never
+   inline in body copy. Max **one or two per page**. Helper: `_sticker()` in
+   `webapp/app.py`.
+3. **Card category icons** — 2px-stroke line icons (not flat color squares) inside
+   the small badge on a 3-up card row. Fixed background order: seafoam-wash
+   `#EAF7F2` → navy-wash `#EEF1F7` → coral-wash `#FBEAE3`, reused for every 3-up card
+   row sitewide. Helper: `_card_icon()` in `webapp/app.py`.
+
+**New tokens** (see §7 for the generated block): `--ink-graffiti:#0d0d0d` (sticker
+borders/shadows only — never a fill or text color elsewhere) and
+`--font-sticker:'Caveat',cursive` (sticker-only).
+
+That's the entire graffiti vocabulary. No broader illustration style, no all-over
+pattern, no graffiti marks on admin tables, forms, or the chat UI.
 
 ---
 
@@ -188,8 +219,26 @@ That's the entire nautical vocabulary. **No anchors, ropes, boats, waves, knots,
 `999px` filter pills.
 
 ### Layout
-Reading measure **780px** (820px for the calculator, 860px for the Toolbox grid).
-Generous page padding (≈48px top). Whitespace before density.
+
+Five width tiers, keyed to content shape rather than one global reading measure —
+replacing the old three-tier system (`.page` 780px / `.page-narrow` 480px /
+`.page-wide` 960px) page-by-page as each page's own refresh phase lands. (The old
+`.page` measure had drifted from its documented values — this table is the
+correction: the GER calculator was never actually 820px, it used plain 780px; 860px
+belonged to `/library/feed`, not the Toolbox grid.)
+
+| Tier | CSS class | Width | Pages |
+|---|---|---|---|
+| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing, Library landing, article reader (`/read`) |
+| Card grids | `.page-grid` | ~1200–1400px | CFO Toolbox landing |
+| Functional tools | `.page-tool` | ~900–1000px | FP&A Buddy chat, Growth Engine Ratio calculator |
+| Forms | `.page-form` | ~600–700px | Contact, admin edit forms |
+| Admin data tables | `.page-admin` | ~1400–1600px | Admin communities list |
+
+Combine with `.page` for its margin/padding (e.g. `class="page page-full"`), the same
+pattern already used for `.page.page-wide`. Generous page padding (≈48px top).
+Whitespace before density. Admin/data pages get the width bump for scannability, not
+decoration — they never get any part of the graffiti layer (§4).
 
 ---
 
@@ -201,7 +250,7 @@ Generous page padding (≈48px top). Whitespace before density.
 | Use coral once per screen, as a pop | Spread coral across a layout |
 | Keep status colors for status only | Use alert red as a highlight, or coral as a warning |
 | Headings in Outfit, reading in Source Serif 4 | Mix the serif into UI, or set body in Outfit |
-| One rope rule / one compass star per page | Repeat the motif decoratively |
+| One marker-underline, one or two stickers per page, in a header/hero or card corner | Repeat the graffiti kit decoratively, or put it on admin/data surfaces |
 | Buttons navy or ghost | Make a seafoam or coral button |
 
 ---
@@ -247,6 +296,10 @@ Generous page padding (≈48px top). Whitespace before density.
   /* Type */
   --font-head:'Outfit',system-ui,-apple-system,'Segoe UI',sans-serif;
   --font-body:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  /* Graffiti/street-art accent layer (BRAND.md §4) — sticker borders/shadows and
+     the marker-underline only. Never a fill, never body/heading text. */
+  --ink-graffiti:#0d0d0d;
+  --font-sticker:'Caveat',cursive;
 }
 ```
 <!-- END GENERATED TOKENS -->

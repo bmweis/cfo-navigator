@@ -627,14 +627,15 @@ _CSS = """
   /* Type */
   --font-head:'Outfit',system-ui,-apple-system,'Segoe UI',sans-serif;
   --font-body:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  /* Graffiti/street-art accent layer (BRAND.md §4) — sticker borders/shadows and
+     the marker-underline only. Never a fill, never body/heading text. */
+  --ink-graffiti:#0d0d0d;
+  --font-sticker:'Caveat',cursive;
 }
 *{box-sizing:border-box;}
 body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;}
 a{color:var(--navy);text-decoration:none;}
 a:hover{text-decoration:underline;}
-
-/* Rope rule — the one nautical motif: a double hairline */
-.rule{border-top:1px solid var(--line-strong);border-bottom:1px solid var(--line);height:3px;}
 
 /* Header / nav */
 .site-header{padding:18px 28px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:relative;}
@@ -644,6 +645,9 @@ a:hover{text-decoration:underline;}
 .site-nav a:hover{color:var(--ink);text-decoration:none;}
 .site-nav a.active{color:var(--ink);font-weight:600;border-bottom:2px solid var(--seafoam);padding-bottom:3px;}
 .site-nav .sep{width:1px;height:15px;background:var(--line-strong);}
+/* "Sign in" reads as a distinct pill CTA, not just another nav link */
+.site-nav a.nav-cta{background:var(--navy);color:#fff;padding:9px 18px;border-radius:10px;font-weight:600;}
+.site-nav a.nav-cta:hover{background:var(--navy-deep);color:#fff;text-decoration:none;}
 /* iOS-style presence dot — no count, just "something needs you" */
 .task-dot{position:absolute;top:-3px;right:-9px;width:8px;height:8px;border-radius:50%;background:var(--coral);border:1.5px solid var(--bg);}
 
@@ -661,16 +665,22 @@ h2{font-family:var(--font-head);font-size:21px;font-weight:600;letter-spacing:-0
 h3{font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin:0 0 4px;}
 p{margin:0 0 16px;color:var(--ink-soft);}
 
-/* Three width tiers, used consistently across every page rather than
-   ad hoc per-page pixel values: narrow for single-purpose forms (login,
-   contact, one-record admin edits), the .page default for reading-width
-   content (marketing pages, articles, most admin list/detail views), and
-   wide for data-dense grids/tables (which scroll horizontally via their own
-   overflow-x:auto wrapper, so narrowing them here never clips a column)
-   and the game stage. */
+/* Width tiers. The original three (.page/.page-narrow/.page-wide) are being
+   replaced page-by-page, in the same PR that reskins each page, by five tiers
+   keyed to content shape rather than one global reading measure — see
+   BRAND.md §5. Combine with .page for its margin/padding, e.g.
+   class="page page-full"; the later class wins the max-width tie, same
+   pattern the old .page.page-wide combo already used. Untouched pages keep
+   their original tier class until their own phase lands. */
 .page{max-width:780px;margin:0 auto;padding:48px 24px 72px;}
 .page-narrow{max-width:480px;}
 .page-wide{max-width:960px;}
+
+.page-full{max-width:1900px;}   /* full-width content — homepage/about, TL landing, library landing, reader */
+.page-grid{max-width:1300px;}   /* card grids — CFO Toolbox landing */
+.page-tool{max-width:960px;}    /* functional tools — FP&A Buddy chat, GER calculator */
+.page-form{max-width:640px;}    /* forms — contact, admin edit forms */
+.page-admin{max-width:1500px;} /* admin data tables — communities list */
 
 /* Buttons — primary navy fill, ghost navy outline. Seafoam is NEVER a button. */
 .btn{display:inline-block;padding:11px 22px;background:var(--navy);color:#fff;border-radius:10px;font:600 15px var(--font-body);border:1px solid var(--navy);cursor:pointer;}
@@ -681,12 +691,13 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 /* Inputs — navy focus border + soft seafoam ring */
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(163,229,212,.55);}
 
-/* Footer */
-.site-footer{padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);}
+/* Footer — navy background sitewide (BRAND.md §4) */
+.site-footer{padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:13px;background:var(--navy);color:rgba(255,255,255,.55);}
 .site-footer .brand{display:flex;align-items:center;gap:10px;}
-.site-footer .brand b{font-family:var(--font-head);font-weight:600;color:var(--navy);font-size:14px;}
-.site-footer .links{display:flex;gap:18px;align-items:center;}
-.site-footer a{color:var(--muted);}
+.site-footer .brand b{font-family:var(--font-head);font-weight:600;color:#fff;font-size:14px;}
+.site-footer .links{display:flex;gap:10px;align-items:center;}
+.site-footer a{color:rgba(255,255,255,.55);}
+.site-footer a:hover{color:#fff;}
 
 /* Mobile: nav collapses to a navy hamburger drawer */
 @media(max-width:760px){
@@ -697,6 +708,10 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
   .site-nav a:hover{color:#fff;background:rgba(255,255,255,.06);text-decoration:none;}
   .site-nav a.active{color:#fff;font-weight:600;border-bottom:none;border-left:3px solid var(--seafoam);background:rgba(255,255,255,.06);padding-bottom:13px;}
   .site-nav .sep{display:none;}
+  /* The navy hamburger drawer is already navy — a navy pill CTA would vanish
+     into it, so "Sign in" reverts to a plain row like every other link here. */
+  .site-nav a.nav-cta{background:transparent;color:rgba(255,255,255,.82);padding:13px 24px;border-radius:0;font-weight:400;}
+  .site-nav a.nav-cta:hover{background:rgba(255,255,255,.06);color:#fff;}
 }
 """
 
@@ -783,15 +798,10 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     elif role == "user":
         nav += '<a href="/logout">Log out</a>'
     else:
-        nav += f'<a href="/login" class="{"active" if active == "Sign in" else ""}">Sign in</a>'
-
-    star = ('<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">'
-            '<path d="M 8.00 0.00 L 8.55 6.66 L 10.76 5.24 L 9.34 7.45 L 16.00 8.00 L 9.34 8.55 '
-            'L 10.76 10.76 L 8.55 9.34 L 8.00 16.00 L 7.45 9.34 L 5.24 10.76 L 6.66 8.55 L 0.00 8.00 '
-            'L 6.66 7.45 L 5.24 5.24 L 7.45 6.66 Z" fill="#002975"/></svg>')
+        nav += f'<a href="/login" class="nav-cta {"active" if active == "Sign in" else ""}">Sign in</a>'
 
     # "Built with open-source love" — links to the showcase for admins, plain for visitors.
-    _love = 'Built with open-source love <span style="color:var(--coral-deep);">&#9829;</span>'
+    _love = 'Built with open-source love <span style="color:var(--coral-light);">&#9829;</span>'
     oss_love = (f'<a href="/admin/open-source">{_love}</a>' if role == "admin"
                 else f'<span>{_love}</span>')
 
@@ -804,22 +814,82 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Caveat:wght@700&display=swap" rel="stylesheet">
 <style>{_CSS}</style></head><body>
 <header class="site-header">
   <a class="logo" href="/">Brian Weisberg</a>
   <button class="nav-toggle" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">&#9776;</button>
   <nav class="site-nav" id="nav">{nav}</nav>
 </header>
-<div class="rule"></div>
 {body}
-<div class="rule"></div>
 <footer class="site-footer">
-  <span class="brand">{star}<b>Brian Weisberg</b> &middot; Strategic finance for companies that are scaling</span>
-  <span class="links"><a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener">LinkedIn</a><a href="/contact">Contact</a><a href="/privacy">Privacy</a><span>&copy; 2026</span></span>
-  <span style="flex-basis:100%;text-align:center;font-size:12px;color:var(--muted);">{oss_love}</span>
+  <span class="brand"><b>CFO Navigator</b></span>
+  <span class="links"><a href="/contact">Contact</a><span>&middot;</span><a href="/privacy">Privacy</a></span>
+  <span style="flex-basis:100%;text-align:center;font-size:12px;">{oss_love}</span>
 </footer>
 </body></html>"""
+
+
+# ---------------------------------------------------------------------------
+# Graffiti/street-art accent primitives (BRAND.md §4)
+#
+# Restrained, accent-only decoration on top of the functional navy/seafoam/
+# coral base — never on data-dense surfaces (admin tables, forms, chat UI).
+# ---------------------------------------------------------------------------
+
+_CARD_ICON_STYLES = (
+    ("var(--seafoam-wash)", "var(--seafoam-deep)"),
+    ("var(--navy-wash)", "var(--navy)"),
+    ("var(--coral-wash)", "var(--coral-deep)"),
+)
+
+
+def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
+             right: str | None = "14px", left: str | None = None, size: int = 13) -> str:
+    """Rotated Caveat-font sticker badge — white bg, 2px graffiti-ink border,
+    hard 2px/2px drop-shadow (no blur). Absolutely positioned; wrap the target
+    (a hero image or card) in `position:relative` so it has something to pin
+    to. Max one or two per page, in a header/hero or card corner only — never
+    inline in body copy or admin/data UI."""
+    pos = f"right:{right};" if right is not None else f"left:{left};"
+    return (
+        f'<div style="position:absolute;top:{top};{pos}background:#fff;'
+        f'border:2px solid var(--ink-graffiti);border-radius:6px;padding:4px 12px;'
+        f'transform:rotate({rotate}deg);font:700 {size}px var(--font-sticker);'
+        f'color:var(--ink-graffiti);box-shadow:2px 2px 0 var(--ink-graffiti);'
+        f'white-space:nowrap;">{text}</div>'
+    )
+
+
+def _marker_underline(width: int = 220, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
+    """Hand-drawn wavy SVG underline for one hero heading word. Absolutely
+    positioned under the word — wrap the target word in
+    `position:relative;display:inline-block` and append this call's output
+    inside it. Max one per page."""
+    h = max(12, round(width / 15))
+    mid = h - 6
+    d = (f"M2,{mid} Q{width * 0.15:.0f},{max(2, mid - 6)} {width * 0.3:.0f},{mid + 2} "
+         f"T{width * 0.6:.0f},{mid} T{width - 2},{mid + 3}")
+    return (
+        f'<svg viewBox="0 0 {width} {h}" width="{width}" height="{h}" aria-hidden="true" '
+        f'style="position:absolute;left:0;bottom:-{h - 4}px;">'
+        f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" stroke-linecap="round"/></svg>'
+    )
+
+
+def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
+    """2px-stroke line-icon badge for a 3-up card row. Cycles seafoam-wash ->
+    navy-wash -> coral-wash by `index`, the fixed order reused for every 3-up
+    card row sitewide (homepage, CFO Toolbox). `svg_path` is the inner SVG
+    markup (path/rect/etc.) for a 24x24 viewBox icon."""
+    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    inner = size - 16
+    return (
+        f'<div style="width:{size}px;height:{size}px;border-radius:8px;background:{bg};'
+        f'margin-bottom:14px;display:flex;align-items:center;justify-content:center;">'
+        f'<svg viewBox="0 0 24 24" width="{inner}" height="{inner}" fill="none" stroke="{stroke}" '
+        f'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{svg_path}</svg></div>'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -14457,9 +14527,6 @@ def admin_brand(request: Request):
         return (f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));'
                 f'gap:14px;margin:0 0 20px;">{cards}</div>')
 
-    star = lambda c: ('<svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">'
-                      f'<path d="M8 0 L9.4 6.6 L16 8 L9.4 9.4 L8 16 L6.6 9.4 L0 8 L6.6 6.6 Z" fill="{c}"/></svg>')
-
     def ramp_label(text: str) -> str:
         return (f'<div style="font:600 12px var(--font-body);letter-spacing:.1em;'
                 f'text-transform:uppercase;color:var(--navy);margin:0 0 10px;">{text}</div>')
@@ -14499,7 +14566,7 @@ def admin_brand(request: Request):
         + swatch("#3a3833", "ink-soft", "Body copy.")
         + swatch("#6F6A60", "muted", "Meta, captions, kickers.")
         + swatch("#E4E0D6", "line", "Warm hairline.", border=True)
-        + swatch("#D6D1C4", "line-strong", "Heavier divider / top of the rope rule.", border=True)
+        + swatch("#D6D1C4", "line-strong", "Heavier divider — section rules, table borders.", border=True)
     )
 
     semantic_row = grid(
@@ -14528,12 +14595,13 @@ def admin_brand(request: Request):
 
     motif = (
         '<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 18px;">'
-        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Rope rule—the double hairline. Frames the header/footer or separates major sections. Never repeated decoratively.</div>'
-        '<div class="rule"></div>'
-        '<div style="height:26px;"></div>'
-        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Compass star—one per page, in the footer. Navy by default; a coral variant is reserved for special headers.</div>'
-        f'<div style="display:flex;align-items:center;gap:20px;">{star("#002975")}{star(CORAL)}</div>'
-        '<div style="margin-top:14px;font:500 13px var(--font-body);color:var(--alert);">No anchors, ropes-everywhere, boats, waves, knots, or clip-art. These two marks are the entire nautical vocabulary.</div>'
+        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Marker-underline&mdash;a hand-drawn wavy stroke under one hero word, seafoam-deep, max one per page.</div>'
+        f'<div style="position:relative;display:inline-block;font:700 32px var(--font-head);color:var(--ink);">Brian Weisberg{_marker_underline(220, 4)}</div>'
+        '<div style="height:30px;"></div>'
+        '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Sticker badge&mdash;white bg, 2px graffiti-ink border, 4&ndash;6&deg; rotation, hard drop-shadow, Caveat 700. Max one or two per page, header/hero or card corner only.</div>'
+        f'<div style="position:relative;display:inline-block;width:170px;height:50px;">'
+        f'{_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="4px", right="0")}</div>'
+        '<div style="margin-top:10px;font:500 13px var(--font-body);color:var(--alert);">Nautical motifs (rope rule, compass star) are retired sitewide. The compass-star favicon is the one intentional exception&mdash;left as-is by design.</div>'
         '</div>'
     )
 
@@ -14573,7 +14641,7 @@ def admin_brand(request: Request):
         '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart—keep it that way.</li>'
         '<li><strong>Coral is display-only.</strong> It\'s too light for body text (2.8:1); use coral-deep, or navy-on-coral-wash, when text is involved.</li>'
         '<li><strong>Buttons are navy or ghost</strong>—never a seafoam or coral fill.</li>'
-        '<li><strong>One rope rule, one compass star</strong> per page. Outfit for headings, DM Sans for everything, Source Serif 4 for reading only.</li>'
+        '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings, DM Sans for everything, Source Serif 4 for reading only, Caveat for stickers only.</li>'
         '</ul>'
     )
 
@@ -14608,8 +14676,8 @@ def admin_brand(request: Request):
     body = f"""<div class="page page-wide">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Brand standards</h1>
-<p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com—New England nautical, restrained.
-The full written reference is <code>BRAND.md</code> in the repo; an automated check
+<p style="color:var(--muted);margin:4px 0 30px;">The living style guide for bmweis.com—a graffiti/street-art accent layer over a
+navy/seafoam/coral finance-tool base. The full written reference is <code>BRAND.md</code> in the repo; an automated check
 (<code>tests/test_brand_standards.py</code>) keeps new content on-palette.</p>
 
 {avatar_section}
@@ -14630,7 +14698,7 @@ Deep shades are text-capable; base/mid are for graphics and large display; light
 <h2>Typography</h2>
 {type_specimens}
 
-<h2>The nautical motif</h2>
+<h2>The graffiti kit</h2>
 {motif}
 
 <h2>Components</h2>
