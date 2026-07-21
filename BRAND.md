@@ -177,7 +177,10 @@ undecorated).
 1. **Marker-underline** — a single hand-drawn wavy SVG stroke under one word of a
    hero heading. Color `#1F7A66` (seafoam-deep), 3.5–5px stroke depending on heading
    size, `stroke-linecap:round`. Max **one per page**. Helper: `_marker_underline()`
-   in `webapp/app.py`.
+   in `webapp/app.py`. Currently used **only on the homepage hero** — it's not a
+   sitewide heading treatment; don't extrapolate it onto other pages' H1s without an
+   explicit call to do so (a past over-extrapolation onto About/Thought
+   Leadership/CFO Toolbox landings was reverted).
 2. **Sticker badge** — a small rotated callout: white background, 2px graffiti-ink
    (`#0d0d0d`) border, 4–6° rotation, hard drop-shadow `2px 2px 0 #0d0d0d` (no blur),
    Caveat 700 text at **15px** (hero/header stickers) or **14px** (smaller card-corner
