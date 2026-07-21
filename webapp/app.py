@@ -861,31 +861,20 @@ def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
     )
 
 
-def _underline_dims(stroke: float) -> tuple[int, int]:
-    """(SVG height, padding-bottom to reserve for it) for a given stroke
-    width — shared by `_marker_underline` and `_underline_last_word` so the
-    reserved space always matches what the SVG actually draws."""
-    h = max(10, round(stroke * 3.5))
-    return h, h + 4
-
-
 def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Hand-drawn wavy SVG underline for one hero heading word. Stretches to
-    fill its parent's width (`preserveAspectRatio="none"`, a fixed viewBox),
-    so it works regardless of the word's actual rendered length — wrap the
-    target word in `position:relative;display:inline-block` with
-    `padding-bottom` equal to this function's reserved space (see
-    `_underline_dims`) and append this call's output inside it, flush to the
-    bottom of that padding. Without the reserved padding the squiggle
-    overlaps whatever follows — margins/line-height alone don't leave enough
-    room. Max one per page. See also `_underline_last_word`, which handles
-    the wrapping for arbitrary (e.g. admin-edited) text."""
-    h, _ = _underline_dims(stroke)
+    fill its parent's width (`preserveAspectRatio="none"`, a fixed viewBox).
+    Rendered as a normal block-flow sibling of the word (see
+    `_underline_last_word`) rather than absolutely positioned, so its height
+    is always counted as real, in-flow space — no reliance on a parent's
+    padding/line-height/inline-block quirks to avoid overlapping whatever
+    follows. Max one per page."""
+    h = max(10, round(stroke * 3.5))
     mid = h - 6
     d = f"M2,{mid} Q15,{max(2, mid - 6)} 30,{mid + 2} T60,{mid} T98,{mid + 3}"
     return (
         f'<svg width="100%" height="{h}" viewBox="0 0 100 {h}" preserveAspectRatio="none" '
-        f'aria-hidden="true" style="position:absolute;left:0;bottom:0;">'
+        f'aria-hidden="true" style="display:block;margin-top:4px;">'
         f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" '
         f'stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>'
     )
@@ -894,14 +883,17 @@ def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -
 def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Wrap the last word of `text` (raw, unescaped) in a marker-underline —
     the safe way to accent one word of arbitrary/admin-edited heading copy,
-    since it doesn't require knowing the word in advance. Reserves vertical
-    space via padding-bottom (see `_underline_dims`) so the squiggle never
-    overlaps the content that follows, regardless of the heading's own
-    margin or line-height."""
-    _, pad = _underline_dims(stroke)
+    since it doesn't require knowing the word in advance. The word and its
+    underline are stacked with `display:inline-flex;flex-direction:column`
+    instead of the word alone with an absolutely-positioned SVG underneath —
+    a flex column's height is always the sum of its children, so the
+    reserved space can't come up short the way an inline-block's line-box
+    contribution can in edge cases (that was the bug: the original
+    padding-bottom-on-inline-block approach checked out in computed-style
+    spot checks but still overlapped in some real renders)."""
     head, sep, last = text.rstrip().rpartition(" ")
-    underlined = (f'<span style="position:relative;display:inline-block;padding-bottom:{pad}px;">'
-                  f'{_esc(last)}{_marker_underline(stroke, color)}</span>')
+    underlined = (f'<span style="display:inline-flex;flex-direction:column;align-items:stretch;">'
+                  f'<span>{_esc(last)}</span>{_marker_underline(stroke, color)}</span>')
     return f"{_esc(head)} {underlined}" if sep else underlined
 
 
