@@ -921,12 +921,18 @@ def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
 
 # 2px-stroke, 24x24-viewBox icon paths for _card_icon() — reused across every
 # 3-up card row sitewide (homepage, CFO Toolbox).
-_ICON_BOOK_OPEN = ('<path d="M4 4.5h7a3 3 0 0 1 3 3V20a2.5 2.5 0 0 0-2.5-2.5H4z"/>'
-                    '<path d="M20 4.5h-7a3 3 0 0 0-3 3V20a2.5 2.5 0 0 1 2.5-2.5H20z"/>')
-_ICON_TOOL = '<path d="M14.5 4.5l5 5L8 21H3v-5z"/><path d="M13 6l5 5"/>'
-_ICON_LIBRARY = '<path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M4 17h16"/>'
-_ICON_GRID = ('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/>'
-              '<rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>')
+_ICON_BRAIN = ('<path d="M9.5 4.5c-1.7 0-3 1.3-3.2 3C5 8 4 9.3 4 10.8c0 .9.4 1.7 1 2.3-.6.6-1 1.4-1 2.3 '
+               '0 1.5 1.1 2.8 2.5 3.1.2 1.6 1.6 2.8 3.3 2.8.5 0 1-.1 1.4-.3V5.7c-.4-.7-1-1.2-1.7-1.2z"/>'
+               '<path d="M14.5 4.5c1.7 0 3 1.3 3.2 3C18.9 8 20 9.3 20 10.8c0 .9-.4 1.7-1 2.3.6.6 1 1.4 1 2.3 '
+               '0 1.5-1.1 2.8-2.5 3.1-.2 1.6-1.6 2.8-3.3 2.8-.5 0-1-.1-1.4-.3V5.7c.4-.7 1-1.2 1.7-1.2z"/>')
+_ICON_TOOLBOX = ('<rect x="3" y="9" width="18" height="10" rx="1.5"/>'
+                 '<path d="M8 9V6.5A2.5 2.5 0 0 1 10.5 4h3A2.5 2.5 0 0 1 16 6.5V9"/>'
+                 '<line x1="3" y1="13.5" x2="21" y2="13.5"/>')
+_ICON_BOOKS_STACK = ('<rect x="4" y="15" width="16" height="4" rx="1"/>'
+                      '<rect x="5" y="10.5" width="14" height="4" rx="1"/>'
+                      '<rect x="6" y="6" width="12" height="4" rx="1"/>')
+_ICON_WRENCH = ('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94'
+                'l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>')
 _ICON_CHART = '<path d="M4 20V14M12 20V4M20 20v-10"/>'
 _ICON_PEOPLE = ('<circle cx="9" cy="8" r="3.2"/><path d="M3.2 20c0-3.6 2.7-6.2 5.8-6.2s5.8 2.6 5.8 6.2"/>'
                 '<circle cx="17.5" cy="9" r="2.4"/><path d="M15.3 14.3c2.4 .2 4.5 2 5.1 4.4"/>')
@@ -1255,17 +1261,17 @@ def homepage(request: Request):
                "Frameworks and playbooks worth keeping: the Growth Engine Ratio for pressure-testing GTM "
                "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
                "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press.",
-               icon_html=_card_icon(0, _ICON_BOOK_OPEN)),
+               icon_html=_card_icon(0, _ICON_BRAIN)),
         _rcard("/tools", "CFO Toolbox",
                "Software, benchmarking, and communities for the Office of the CFO&mdash;the vendors "
                "high-growth finance teams actually use, the benchmarking sources I rely on, and the peer "
                "groups worth joining.",
-               icon_html=_card_icon(1, _ICON_TOOL)),
+               icon_html=_card_icon(1, _ICON_TOOLBOX)),
         _rcard("/library", "Digital Library",
                "The Reading Room: a searchable archive plus my personal feed of finance and technology "
                "blogs. Also home to FP&amp;A Buddy, a research agent for questions on frameworks, metrics, "
                "and more. Sign-in required, still being built out.",
-               icon_html=_card_icon(2, _ICON_LIBRARY),
+               icon_html=_card_icon(2, _ICON_BOOKS_STACK),
                sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=14)),
     ])
 
@@ -1335,7 +1341,7 @@ def about_page(request: Request):
   {_avatar(140)}
   <div>
     <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">CFO &middot; Boston, MA</div>
-    <h1 style="margin:0 0 4px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">{_underline_last_word("Brian Weisberg")}</h1>
+    <h1 style="margin:0 0 4px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">Brian Weisberg</h1>
   </div>
 </div>
 
@@ -1448,7 +1454,7 @@ def thought_leadership(request: Request):
         '@media(max-width:560px){.tl-row-photos{grid-template-columns:1fr;}.tl-row-photos img{height:170px;}'
         '.tl-row-top{flex-direction:column;gap:2px;}}'
         '</style>'
-        f'<h1>{_underline_last_word("Thought Leadership")}</h1>'
+        '<h1>Thought Leadership</h1>'
         '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
         + featured
         + '<div style="max-width:760px;">'
@@ -4678,7 +4684,7 @@ def tools_landing(request: Request):
         _hcard("/tools/software", "Software",
                "A curated directory of the software high-growth finance teams actually use&mdash;searchable, "
                "filterable, with a Warm Intro button for the vendors I know well.",
-               _card_icon(0, _ICON_GRID)),
+               _card_icon(0, _ICON_WRENCH)),
         _hcard("/tools/benchmarks", "Benchmarking",
                "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks "
                "help and where they mislead.",
@@ -4694,7 +4700,7 @@ def tools_landing(request: Request):
 .toolbox-cards{{display:grid;grid-template-columns:1fr;gap:14px;}}
 @media(min-width:760px){{.toolbox-cards{{grid-template-columns:repeat(3,1fr);}}}}
 </style>
-<h1 style="margin:0 0 6px;">{_underline_last_word("CFO Toolbox")}</h1>
+<h1 style="margin:0 0 6px;">CFO Toolbox</h1>
 <p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO.</p>
 <div class="toolbox-cards">{cards}</div>
 </div>"""
@@ -4749,7 +4755,7 @@ def tools_directory(request: Request):
     body = f"""<div class="page page-grid">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-  <h1 style="margin:0;">{_underline_last_word("Software")}</h1>
+  <h1 style="margin:0;">Software</h1>
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
