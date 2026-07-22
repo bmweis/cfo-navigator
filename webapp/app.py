@@ -9689,7 +9689,7 @@ async function deleteArticle(id) {{
 </script>"""
 
     return HTMLResponse(_READER_TMPL.format(
-        title=_esc(title), heading=_underline_last_word(title), css=_READER_CSS,
+        title=_esc(title), heading=_esc(title), css=_READER_CSS,
         back_url=back_url, back_label=back_label,
         orig_url=_esc(url), byline=byline,
         body=body_html,
