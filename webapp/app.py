@@ -893,15 +893,20 @@ def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--sea
     """Wrap the last word of `text` (raw, unescaped) in a marker-underline —
     the safe way to accent one word of arbitrary/admin-edited heading copy,
     since it doesn't require knowing the word in advance. The word and its
-    underline are stacked with `display:inline-flex;flex-direction:column`
-    instead of the word alone with an absolutely-positioned SVG underneath —
-    a flex column's height is always the sum of its children, so the
-    reserved space can't come up short the way an inline-block's line-box
-    contribution can in edge cases (that was the bug: the original
-    padding-bottom-on-inline-block approach checked out in computed-style
-    spot checks but still overlapped in some real renders)."""
+    underline are stacked in a single-column `display:inline-grid` (not
+    `inline-flex`) — a grid's height is always the sum of its rows the same
+    way a flex column's is (fixing the old padding-bottom-on-inline-block
+    bug where reserved space could come up short), but a flex column with an
+    indefinite (shrink-to-fit) cross size can't resolve the SVG's
+    `width:100%` against its sibling's text width — the browser falls back
+    to the SVG's own intrinsic aspect-ratio size instead, so the underline
+    renders far short of the word (only visible with real font metrics
+    loaded, not in a computed-style check). Grid does a two-pass track-size
+    resolution built for exactly this: the column sizes to the widest
+    non-percentage item (the word) first, then percentage-sized items
+    stretch to fill it."""
     head, sep, last = text.rstrip().rpartition(" ")
-    underlined = (f'<span style="display:inline-flex;flex-direction:column;align-items:stretch;">'
+    underlined = (f'<span style="display:inline-grid;justify-items:stretch;">'
                   f'<span>{_esc(last)}</span>{_marker_underline(stroke, color)}</span>')
     return f"{_esc(head)} {underlined}" if sep else underlined
 
@@ -1296,8 +1301,7 @@ def homepage(request: Request):
 <style>
 .home-hero{{display:flex;flex-direction:column;gap:28px;align-items:stretch;}}
 .home-hero-copy{{min-width:0;}}
-.home-hero-subhead{{max-width:740px;}}
-.home-hero-side{{display:flex;flex-direction:column;gap:20px;align-items:center;}}
+.home-hero-side{{display:flex;flex-direction:column;gap:32px;align-items:center;}}
 .home-hero-photo{{position:relative;flex-shrink:0;}}
 .home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
 .home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;}}
@@ -1314,7 +1318,7 @@ def homepage(request: Request):
   <div class="home-hero-copy">
     <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
     <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">{_underline_last_word(homepage_headline)}</h1>
-    <div class="home-hero-subhead"><p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p></div>
+    <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p>
   </div>
   <div class="home-hero-side">
     <div class="home-hero-photo">
