@@ -92,6 +92,16 @@ def test_bottom_submit_link_auth_aware_on_communities_page(env):
     assert "Submit it for review" in r.text
 
 
+def test_zero_result_message_links_inline_to_gap_form(env):
+    c = _client(env)
+    r = c.get("/tools/communities")
+    assert r.status_code == 200
+    assert "Tell us what you're looking for below" not in r.text
+    assert "No communities match." in r.text
+    assert "gapFormHref" in r.text
+    assert "comm-gap-cta-highlight" not in r.text
+
+
 def test_suggest_a_piece_hidden_from_anonymous_visitors_on_library_page(env):
     c = _client(env)
     r = c.get("/library", follow_redirects=False)
