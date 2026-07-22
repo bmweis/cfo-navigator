@@ -631,6 +631,9 @@ _CSS = """
      the marker-underline only. Never a fill, never body/heading text. */
   --ink-graffiti:#0d0d0d;
   --font-sticker:'Caveat',cursive;
+  /* Sitewide wordmark treatment — nav + footer "CFO Navigator"/logo mark only,
+     never body or heading text. */
+  --font-wordmark:'Permanent Marker',cursive;
 }
 *{box-sizing:border-box;}
 body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;}
@@ -639,7 +642,7 @@ a:hover{text-decoration:underline;}
 
 /* Header / nav */
 .site-header{padding:18px 28px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:relative;}
-.site-header .logo{font-family:var(--font-head);font-size:19px;font-weight:600;letter-spacing:-0.01em;color:var(--navy);}
+.site-header .logo{font-family:var(--font-wordmark);font-weight:400;font-size:17px;letter-spacing:normal;color:var(--navy);}
 .site-nav{display:flex;align-items:center;gap:22px;font-size:14px;}
 .site-nav a{color:var(--muted);position:relative;}
 .site-nav a:hover{color:var(--ink);text-decoration:none;}
@@ -691,7 +694,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
 /* Footer — navy background sitewide (BRAND.md §4) */
 .site-footer{padding:24px 28px;display:flex;align-items:center;gap:14px;font-size:13px;background:var(--navy);color:rgba(255,255,255,.55);}
 .site-footer .brand{flex:1;display:flex;align-items:center;gap:10px;}
-.site-footer .brand b{font-family:var(--font-head);font-weight:600;color:#fff;font-size:14px;}
+.site-footer .brand b{font-family:var(--font-wordmark);font-weight:400;color:#fff;font-size:12px;}
 .site-footer .center{flex:1;text-align:center;font-size:12px;white-space:nowrap;}
 .site-footer .links{flex:1;display:flex;gap:10px;align-items:center;justify-content:flex-end;}
 .site-footer a{color:rgba(255,255,255,.55);}
@@ -818,7 +821,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Caveat:wght@700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Caveat:wght@700&family=Permanent+Marker&display=swap" rel="stylesheet">
 <style>{_CSS}</style></head><body>
 <header class="site-header">
   <a class="logo" href="/">Brian Weisberg</a>

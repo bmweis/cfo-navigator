@@ -155,11 +155,13 @@ BANNED_COLORS = {
 }
 
 # Fonts allowed to be named in quotes within a font declaration.
-# "Caveat" is the one approved dependency exception for the graffiti/street-art
+# "Caveat" is an approved dependency exception for the graffiti/street-art
 # refresh (BRAND.md §4) — weight 700 only, sticker badges only, never headings
-# or body copy. This check can't enforce that placement rule mechanically; it
-# only confirms Caveat itself isn't an off-brand-font regression.
-ALLOWED_FONTS = {"Outfit", "DM Sans", "Source Serif 4", "Segoe UI", "Caveat"}
+# or body copy. "Permanent Marker" is a second approved exception — weight 400
+# only, the sitewide "CFO Navigator"/logo wordmark only, never headings or body
+# copy. This check can't enforce those placement rules mechanically; it only
+# confirms neither font itself is an off-brand-font regression.
+ALLOWED_FONTS = {"Outfit", "DM Sans", "Source Serif 4", "Segoe UI", "Caveat", "Permanent Marker"}
 # Off-brand fonts that must never be referenced.
 BANNED_FONTS = {
     "Inter", "Lora", "Arial", "Helvetica", "Times New Roman",

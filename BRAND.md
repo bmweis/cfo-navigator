@@ -129,23 +129,25 @@ states, soft panels), ~10% — really less — coral (one highlight per screen).
 ## 3. Typography
 
 Three content families, one combined Google Fonts import in `<head>`. No serif anywhere
-except the reader. **Caveat** is a fourth, accent-only font — the one approved
-dependency exception for the graffiti refresh — restricted to small rotated sticker
-text and never used for headings or body copy (that's still Outfit/DM Sans/Source
-Serif 4, unchanged).
+except the reader. **Caveat** and **Permanent Marker** are accent-only fonts — approved
+dependency exceptions for the graffiti refresh — each restricted to one specific use
+and never used for headings or body copy (that's still Outfit/DM Sans/Source Serif 4,
+unchanged).
 
 | Family | Role | Weights |
 |---|---|---|
-| **Outfit** | Headings, wordmark, display | 600 / 700 |
+| **Outfit** | Headings, display | 600 / 700 |
 | **DM Sans** | Body copy, UI, labels, eyebrows | 400 / 500 / 600 |
 | **Source Serif 4** | Long-form reading (`/read` only) | 400 / 500 / 600 |
 | **Caveat** | Sticker badges only — never headings or body | 700 |
+| **Permanent Marker** | Sitewide wordmark (nav + footer logo) only — never headings or body | 400 |
 
 ### 3.1 Scale (as shipped)
 
 | Element | Font | Size / line | Weight | Tracking |
 |---|---|---|---|---|
-| Wordmark | Outfit | 19px | 600 | -0.01em |
+| Wordmark (nav) | Permanent Marker | 17px | 400 | normal |
+| Wordmark (footer) | Permanent Marker | 12px | 400 | normal |
 | Home masthead (H1) | Outfit | 42px / 1.05 | 600 | -0.025em |
 | Page title (H1) | Outfit | 30px | 600 | -0.02em |
 | Section (H2) | Outfit | 21px | 600 | -0.01em |
@@ -193,9 +195,16 @@ undecorated).
    coral-wash `#FBEAE3`, cycling in that order regardless of column count and reused
    for every card-row grid sitewide. Helper: `_card_icon()` in `webapp/app.py`.
 
+4. **Spray-tag wordmark** — the sitewide "CFO Navigator"/logo mark, nav header and
+   navy footer alike, renders in Permanent Marker instead of Outfit. Color unchanged
+   (navy in the nav, white in the footer) — only the font swaps. No rotation, no
+   halo, no separate decorative stamp elsewhere on the page; this reskins the
+   wordmark text in place, sitewide, every page and breakpoint.
+
 **New tokens** (see §7 for the generated block): `--ink-graffiti:#0d0d0d` (sticker
-borders/shadows only — never a fill or text color elsewhere) and
-`--font-sticker:'Caveat',cursive` (sticker-only).
+borders/shadows only — never a fill or text color elsewhere), `--font-sticker:
+'Caveat',cursive` (sticker-only), and `--font-wordmark:'Permanent Marker',cursive`
+(wordmark-only).
 
 That's the entire graffiti vocabulary. No broader illustration style, no all-over
 pattern, no graffiti marks on admin tables, forms, or the chat UI.
@@ -309,6 +318,9 @@ place rather than forced into a tier that doesn't fit their structure.
      the marker-underline only. Never a fill, never body/heading text. */
   --ink-graffiti:#0d0d0d;
   --font-sticker:'Caveat',cursive;
+  /* Sitewide wordmark treatment — nav + footer "CFO Navigator"/logo mark only,
+     never body or heading text. */
+  --font-wordmark:'Permanent Marker',cursive;
 }
 ```
 <!-- END GENERATED TOKENS -->
