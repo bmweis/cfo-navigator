@@ -638,7 +638,10 @@ _CSS = """
   --font-wordmark:'Permanent Marker',cursive;
 }
 *{box-sizing:border-box;}
-body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;}
+html,body{height:100%;}
+body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;
+  min-height:100vh;display:flex;flex-direction:column;}
+.site-main{flex:1 0 auto;display:flex;flex-direction:column;}
 a{color:var(--navy);text-decoration:none;}
 a:hover{text-decoration:underline;}
 
@@ -830,7 +833,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
   <button class="nav-toggle" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">&#9776;</button>
   <nav class="site-nav" id="nav">{nav}</nav>
 </header>
-{body}
+<main class="site-main">{body}</main>
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
@@ -893,15 +896,20 @@ def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--sea
     """Wrap the last word of `text` (raw, unescaped) in a marker-underline —
     the safe way to accent one word of arbitrary/admin-edited heading copy,
     since it doesn't require knowing the word in advance. The word and its
-    underline are stacked with `display:inline-flex;flex-direction:column`
-    instead of the word alone with an absolutely-positioned SVG underneath —
-    a flex column's height is always the sum of its children, so the
-    reserved space can't come up short the way an inline-block's line-box
-    contribution can in edge cases (that was the bug: the original
-    padding-bottom-on-inline-block approach checked out in computed-style
-    spot checks but still overlapped in some real renders)."""
+    underline are stacked in a single-column `display:inline-grid` (not
+    `inline-flex`) — a grid's height is always the sum of its rows the same
+    way a flex column's is (fixing the old padding-bottom-on-inline-block
+    bug where reserved space could come up short), but a flex column with an
+    indefinite (shrink-to-fit) cross size can't resolve the SVG's
+    `width:100%` against its sibling's text width — the browser falls back
+    to the SVG's own intrinsic aspect-ratio size instead, so the underline
+    renders far short of the word (only visible with real font metrics
+    loaded, not in a computed-style check). Grid does a two-pass track-size
+    resolution built for exactly this: the column sizes to the widest
+    non-percentage item (the word) first, then percentage-sized items
+    stretch to fill it."""
     head, sep, last = text.rstrip().rpartition(" ")
-    underlined = (f'<span style="display:inline-flex;flex-direction:column;align-items:stretch;">'
+    underlined = (f'<span style="display:inline-grid;justify-items:stretch;">'
                   f'<span>{_esc(last)}</span>{_marker_underline(stroke, color)}</span>')
     return f"{_esc(head)} {underlined}" if sep else underlined
 
@@ -953,6 +961,9 @@ _TL_COLUMN_ICONS = (_ICON_PENCIL, _ICON_MIC, _ICON_HEADPHONES, _ICON_NEWSPAPER)
 _ICON_BOOK_OPEN = ('<path d="M12,4.8 C8.4,3.6 4.8,4.2 4.8,4.2 V18 C4.8,18 8.4,17.4 12,18.6 '
                    'C15.6,17.4 19.2,18 19.2,18 V4.2 C19.2,4.2 15.6,3.6 12,4.8 Z"/>'
                    '<line x1="12" y1="4.8" x2="12" y2="18.6"/>')
+_ICON_CHAT_QUESTION = ('<path d="M4 5.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4.5 4v-4H6a2 2 0 0 1-2-2z"/>'
+                        '<path d="M9.5 9.3a2.3 2.3 0 1 1 3.4 2c-.7.5-1.15 1-1.15 1.9"/>'
+                        '<circle cx="11.9" cy="16" r=".01" stroke-width="2.2"/>')
 
 
 # ---------------------------------------------------------------------------
@@ -1296,8 +1307,7 @@ def homepage(request: Request):
 <style>
 .home-hero{{display:flex;flex-direction:column;gap:28px;align-items:stretch;}}
 .home-hero-copy{{min-width:0;}}
-.home-hero-subhead{{max-width:740px;}}
-.home-hero-side{{display:flex;flex-direction:column;gap:20px;align-items:center;}}
+.home-hero-side{{display:flex;flex-direction:column;gap:32px;align-items:center;}}
 .home-hero-photo{{position:relative;flex-shrink:0;}}
 .home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
 .home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;}}
@@ -1314,7 +1324,7 @@ def homepage(request: Request):
   <div class="home-hero-copy">
     <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
     <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">{_underline_last_word(homepage_headline)}</h1>
-    <div class="home-hero-subhead"><p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p></div>
+    <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p>
   </div>
   <div class="home-hero-side">
     <div class="home-hero-photo">
@@ -1373,27 +1383,6 @@ def about_page(request: Request):
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
 def thought_leadership(request: Request):
-    def row(it: TLItem) -> str:
-        title_html = (f'<a href="{_esc(it.url)}" target="_blank" rel="noopener" class="tl-row-title">{_esc(it.title)}</a>'
-                       if it.url else f'<span class="tl-row-title tl-row-title-plain">{_esc(it.title)}</span>')
-        meta_bits = [b for b in (it.venue, it.date_label) if b]
-        meta_html = f'<span class="tl-row-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</span>' if meta_bits else ''
-
-        if it.description:
-            desc_html = f'<p class="tl-row-desc">{_esc(it.description)}</p>'
-        elif it.needs_synopsis:
-            desc_html = '<p class="tl-row-desc"><span class="tl-row-pending">Synopsis pending</span></p>'
-        else:
-            desc_html = ''
-
-        photos_html = ''
-        if it.photos:
-            imgs = "".join(f'<img src="{_esc(p.src)}" alt="{_esc(p.alt)}">' for p in it.photos)
-            cap = f'<p class="tl-row-photo-cap">{_esc(it.photo_caption)}</p>' if it.photo_caption else ''
-            photos_html = f'<div class="tl-row-photos">{imgs}</div>{cap}'
-
-        return f'<div class="tl-row"><div class="tl-row-top">{title_html}{meta_html}</div>{desc_html}{photos_html}</div>'
-
     def ordered_items(items: list[TLItem]) -> list[TLItem]:
         # Undated items (sort_key == "") float to the top of their section — a
         # standing "full feed" link or similar; everything else sorts newest first.
@@ -1401,34 +1390,35 @@ def thought_leadership(request: Request):
         undated = [it for it in items if not it.sort_key]
         return undated + dated
 
-    def section(title: str, emoji: str, items: list[TLItem], anchor_id: str = "") -> str:
-        rows = "".join(row(it) for it in ordered_items(items))
-        id_attr = f' id="{anchor_id}"' if anchor_id else ""
-        return f'<h2 class="tl-section-head"{id_attr}>{emoji} {_esc(title)}</h2>{rows}'
-
-    def col_preview_item(it: TLItem) -> str:
+    def col_preview_item(it: TLItem, hidden: bool = False) -> str:
         meta_bits = [b for b in (it.venue, it.date_label) if b]
         meta_html = (f'<div class="tl-col-item-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</div>'
                      if meta_bits else "")
         title_html = (f'<a href="{_esc(it.url)}" target="_blank" rel="noopener" class="tl-col-item-title">{_esc(it.title)}</a>'
                       if it.url else f'<div class="tl-col-item-title">{_esc(it.title)}</div>')
-        return f'<div class="tl-col-item">{title_html}{meta_html}</div>'
+        cls = "tl-col-item tl-col-item-extra" if hidden else "tl-col-item"
+        return f'<div class="{cls}">{title_html}{meta_html}</div>'
 
-    _TL_COL_CAP = 4
+    _TL_COL_CAP = 6
 
-    def column(index: int, icon_svg: str, title: str, items: list[TLItem], anchor_id: str) -> str:
+    def column(index: int, icon_svg: str, title: str, items: list[TLItem]) -> str:
         # Press collapses to nothing (not an empty card) when there's nothing to
-        # show — cap each column at ~4 items with a "Show all N" link to the full
-        # list further down the page, so the overview stays scannable.
+        # show — cap each column at ~6 items with a "Show all N" toggle that
+        # expands the rest in place, so the overview stays scannable without
+        # depending on a separate full list elsewhere on the page.
         if not items:
             return ""
         ordered = ordered_items(items)
         preview = ordered[:_TL_COL_CAP]
+        extra = ordered[_TL_COL_CAP:]
         rows = "".join(col_preview_item(it) for it in preview)
-        more = (f'<a href="#{anchor_id}" class="tl-col-more">Show all {len(ordered)} &rarr;</a>'
-                if len(ordered) > len(preview) else "")
+        rows += "".join(col_preview_item(it, hidden=True) for it in extra)
+        col_id = f"tl-col-{index}"
+        more = (f'<a href="#" class="tl-col-more" onclick="toggleTLCol(event,\'{col_id}\')" '
+                f'data-more-label="Show all {len(ordered)} &rarr;">Show all {len(ordered)} &rarr;</a>'
+                if extra else "")
         return (
-            f'<div class="tl-col">'
+            f'<div class="tl-col" id="{col_id}">'
             f'<div class="tl-col-head">{_card_icon(index, icon_svg)}<div class="tl-col-title">{_esc(title)}</div></div>'
             f'{rows}{more}</div>'
         )
@@ -1472,24 +1462,6 @@ def thought_leadership(request: Request):
         '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
         '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
         '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
-        '.tl-section-head{font:700 13px var(--font-body);letter-spacing:.1em;text-transform:uppercase;'
-        'color:var(--navy);margin:38px 0 2px;display:flex;align-items:center;gap:8px;}'
-        '.tl-section-head:first-of-type{margin-top:30px;}'
-        '.tl-row{border-top:1px solid var(--line);padding:15px 10px;margin:0 -10px;border-radius:8px;transition:background-color .15s;}'
-        '.tl-row:hover{background:var(--navy-wash);}'
-        '.tl-row-top{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;}'
-        '.tl-row-title{font:600 16px var(--font-body);color:var(--ink);line-height:1.4;text-decoration:none;}'
-        '.tl-row-title:hover{color:var(--navy);text-decoration:underline;}'
-        '.tl-row-title-plain{color:var(--ink-soft);}'
-        '.tl-row-meta{font:500 12px var(--font-body);color:var(--muted);white-space:nowrap;letter-spacing:.02em;}'
-        '.tl-row-desc{font-size:14px;color:var(--ink-soft);line-height:1.5;margin:6px 0 0;}'
-        '.tl-row-pending{font-style:italic;color:var(--muted);border:1px dashed var(--line-strong);'
-        'border-radius:6px;padding:3px 10px;display:inline-block;background:var(--bg);font-size:13px;}'
-        '.tl-row-photos{display:grid;grid-template-columns:2fr 3fr;gap:10px;margin:12px 0 6px;}'
-        '.tl-row-photos img{width:100%;height:200px;object-fit:cover;border-radius:10px;display:block;}'
-        '.tl-row-photo-cap{font-size:12px;color:var(--muted);margin:0;font-style:italic;}'
-        '@media(max-width:560px){.tl-row-photos{grid-template-columns:1fr;}.tl-row-photos img{height:170px;}'
-        '.tl-row-top{flex-direction:column;gap:2px;}}'
         '.tl-cols{display:flex;gap:24px;margin:8px 0 12px;}'
         '.tl-col{flex:1;min-width:0;}'
         '.tl-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}'
@@ -1501,6 +1473,7 @@ def thought_leadership(request: Request):
         'a.tl-col-item-title:hover{color:var(--navy);text-decoration:underline;}'
         '.tl-col-item-meta{font:400 11px var(--font-body);color:var(--muted);}'
         '.tl-col-more{display:inline-block;margin-top:2px;font:600 12px var(--font-body);color:var(--navy);}'
+        '.tl-col-item-extra{display:none;}'
         '@media(max-width:900px){.tl-cols{flex-wrap:wrap;}.tl-col{flex:1 1 calc(50% - 12px);}}'
         '@media(max-width:560px){.tl-col{flex:1 1 100%;}}'
         '</style>'
@@ -1509,18 +1482,25 @@ def thought_leadership(request: Request):
         + featured
     )
 
-    tl_anchor_ids = [f"tl-full-{items[0].type if items else i}" for i, (_, _, items) in enumerate(TL_SECTIONS)]
-
     columns_html = "".join(
-        column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], section_title, items, tl_anchor_ids[i])
+        column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], section_title, items)
         for i, (section_title, emoji, items) in enumerate(TL_SECTIONS)
     )
     body += f'<div class="tl-cols">{columns_html}</div>'
-
-    body += '<div style="max-width:760px;">'
-    for i, (section_title, emoji, items) in enumerate(TL_SECTIONS):
-        body += section(section_title, emoji, items, anchor_id=tl_anchor_ids[i])
-    body += "</div></div>"
+    body += """<script>
+function toggleTLCol(e, colId) {
+  e.preventDefault();
+  var col = document.getElementById(colId);
+  var btn = col.querySelector('.tl-col-more');
+  var expanded = btn.dataset.expanded === '1';
+  col.querySelectorAll('.tl-col-item-extra').forEach(function(el) {
+    el.style.display = expanded ? 'none' : 'block';
+  });
+  btn.innerHTML = expanded ? btn.dataset.moreLabel : 'Show less';
+  btn.dataset.expanded = expanded ? '0' : '1';
+}
+</script>"""
+    body += "</div>"
     return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
@@ -5368,24 +5348,13 @@ def tools_communities(request: Request):
         for b in cost_bands
     )
 
-    # Same member-gated pattern as the "suggest a piece" teaser on /library, but
-    # with more visual weight (bolded) since it's pointing at the gap-collection
-    # CTA card further down this same page. Relocated here from the homepage.
-    community_gap_teaser = (
-        '<p style="margin:0 0 24px;font-size:14px;color:var(--muted);"><strong style="color:var(--ink);">'
-        'Think finance communities could be better?</strong> <a href="/tools/communities/gap">Tell us where '
-        'they fall short &rarr;</a></p>'
-    ) if is_member else ''
-
     body = f"""<div class="page page-grid">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
 groups, associations, and Slack channels.
-<a href="/tools/communities/find" style="margin-left:12px;font-size:14px;font-weight:500;">Not sure where to start? Take the quiz &rarr;</a>
-{'<a href="/tools/communities/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Suggest a community</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to suggest a community</a>'}</p>
+<a href="/tools/communities/find" style="margin-left:12px;font-size:14px;font-weight:500;">Not sure where to start? Take the quiz &rarr;</a></p>
 
-{community_gap_teaser}
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"
     oninput="filterCommunities()"
@@ -5441,6 +5410,7 @@ groups, associations, and Slack channels.
   <p style="margin:0 0 8px;font-weight:600;color:var(--navy);">Think finance communities could be better?</p>
   <p style="margin:0 0 14px;color:var(--navy);font-size:14px;line-height:1.5;">Tell us where they fall short: what you haven't found, or what an existing community missed.</p>
   <a id="comm-gap-link" href="/tools/communities/gap" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;">Tell us where they fall short &rarr;</a>
+  {'<a href="/tools/communities/submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;margin-left:10px;">Suggest a community &rarr;</a>' if is_member else '<a href="/login" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;margin-left:10px;">Sign in to suggest a community &rarr;</a>'}
 </div>
 
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
@@ -7934,11 +7904,10 @@ _COMMUNITIES_REFERENCE_HTML = """
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong>Zero-result state:</strong> &ldquo;No communities match your search. Tell us what you're looking for below.&rdquo; &mdash; auto-highlights the gap-collection CTA card.</li>
-<li><strong>Member-gated teaser</strong> (top of page, shown only when signed in &mdash; not visible to public visitors; relocated here from the homepage): &ldquo;<strong>Think finance communities could be better?</strong> Tell us where they fall short &rarr;&rdquo;.</li>
-<li><strong>Gap-collection CTA card</strong> (bottom of page, always visible): &ldquo;Think finance communities could be better?&rdquo; / &ldquo;Tell us where they fall short: what you haven't found, or what an existing community missed.&rdquo; &rarr; button &ldquo;Tell us where they fall short &rarr;&rdquo;.</li>
+<li><strong>Gap-collection CTA card</strong> (bottom of page, always visible, two buttons): &ldquo;Think finance communities could be better?&rdquo; / &ldquo;Tell us where they fall short: what you haven't found, or what an existing community missed.&rdquo; &rarr; buttons &ldquo;Tell us where they fall short &rarr;&rdquo; and &ldquo;Suggest a community &rarr;&rdquo; (the latter reads &ldquo;Sign in to suggest a community &rarr;&rdquo; and links to <code>/login</code> for signed-out visitors). The top-of-page member-gated teaser that duplicated the feedback prompt was removed &mdash; the quiz link is the only thing left up there.</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#9733; Formal advisor to these communities.&rdquo;</li>
-<li><strong>Suggest-a-community links</strong> (top of page and footer): &ldquo;+ Suggest a community&rdquo; / &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to suggest a community&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
-<li><strong>Recommender link:</strong> &ldquo;Not sure where to start? Take the quiz &rarr;&rdquo;.</li>
+<li><strong>Suggest-a-community links</strong> (footer, plus the gap-collection CTA card above): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to suggest a community&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
+<li><strong>Recommender link:</strong> (top of page) &ldquo;Not sure where to start? Take the quiz &rarr;&rdquo;.</li>
 </ul>
 </section>
 
@@ -10044,8 +10013,10 @@ def library(request: Request):
                'the archive &rarr;</a></p>') if _is_member(request) else ''
 
     fpa_buddy = "".join([
-        _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive&mdash;a cited answer drawn from the Archive plus trusted web sources."),
-        _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
+        _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive&mdash;a cited answer drawn from the Archive plus trusted web sources.",
+               icon_html=_card_icon(0, _ICON_BRAIN)),
+        _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one.",
+               icon_html=_card_icon(1, _ICON_CHAT_QUESTION)),
     ])
 
     body = f"""<div class="page page-full">
