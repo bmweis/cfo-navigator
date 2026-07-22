@@ -274,7 +274,7 @@ def _seed_toolbox():
     never touched here. Communities follow the identical name+description+
     advisor contract: name/notes/advisor re-sync from
     scripts/seed_communities.py's COMMUNITIES on every restart (advisor the
-    same way tools.advisor does, just below); every other field — region,
+    same way tools.advisor does, just below); every other field —
     reach, metros_json, featured, cost_band, cost_note, sponsorship_type,
     sponsor_name, access, format, categories_json, approved — is admin-owned,
     edited at /admin/tools/communities, and never touched here."""
@@ -295,7 +295,7 @@ def _seed_toolbox():
             ).fetchone()
             if not crow:
                 lib.add_community(
-                    name=c["name"], url=c["url"], region=c["region"],
+                    name=c["name"], url=c["url"],
                     demographic=c["demographic"], cost_band=c["cost_band"],
                     categories=c["categories"], cost_note=c.get("cost_note", ""),
                     sponsorship_type=c.get("sponsorship_type", "Independent"),
@@ -7807,12 +7807,6 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
       {_community_metro_checkboxes(c.get('metros') or [])}
     </div>
   </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Region note</label>
-    <input name="region" maxlength="200" value="{_esc(c.get('region', ''))}"
-      placeholder="Legacy free-text note — no longer used for filtering"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost band</label>
@@ -8141,7 +8135,6 @@ def admin_communities(request: Request, filter: str = ""):
                          ) if c.get("needs_review") else ""
         return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}{review_badge}{gap_badge}</td>
-  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['region'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
@@ -8269,7 +8262,6 @@ async function saveCommunityWeights() {{
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Region</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
@@ -8477,7 +8469,6 @@ async def admin_communities_new_submit(request: Request):
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
-    region = (form.get("region") or "").strip()
     demographic = (form.get("demographic") or "").strip()
     cost_band = (form.get("cost_band") or "Undisclosed dues").strip()
     cost_note = (form.get("cost_note") or "").strip()
@@ -8495,7 +8486,7 @@ async def admin_communities_new_submit(request: Request):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
     try:
-        lib.add_community(name=name, url=url, region=region, demographic=demographic,
+        lib.add_community(name=name, url=url, demographic=demographic,
                           cost_band=cost_band, categories=categories, cost_note=cost_note,
                           sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                           access=access, format=format_, notes=notes, approved=1,
@@ -8538,7 +8529,6 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
-    region = (form.get("region") or "").strip()
     demographic = (form.get("demographic") or "").strip()
     cost_band = (form.get("cost_band") or "Undisclosed dues").strip()
     cost_note = (form.get("cost_note") or "").strip()
@@ -8556,7 +8546,7 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
     try:
-        lib.update_community(community_id, name=name, url=url, region=region, demographic=demographic,
+        lib.update_community(community_id, name=name, url=url, demographic=demographic,
                              cost_band=cost_band, categories=categories, cost_note=cost_note,
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                              access=access, format=format_, notes=notes,

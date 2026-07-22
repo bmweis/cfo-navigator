@@ -232,7 +232,7 @@ COMMUNITY_PROFILE_FIELDS = [
 _COMMUNITY_PROFILE_PROMPT = """You are drafting a deep, opinionated profile of a peer community for the
 CFO Toolbox's Communities directory, read by finance leaders deciding whether a
 community is worth their time and money. This is not directory metadata (cost,
-region, access are handled elsewhere) — it's the qualitative read: who it's
+access are handled elsewhere) — it's the qualitative read: who it's
 actually for, what it's actually like, and whether it delivers.
 
 Write about the community named below. Follow these rules exactly:
@@ -409,7 +409,7 @@ NEEDS_VERIFICATION = "Needs verification"
 
 _COMMUNITY_LISTING_PROMPT = """You are drafting the basic directory-listing fields for a peer community in
 the CFO Toolbox's Communities directory — factual metadata (cost, access,
-region, categories), distinct from the deeper qualitative profile handled
+categories), distinct from the deeper qualitative profile handled
 elsewhere.
 
 Ground every answer in the page content provided below (or your own knowledge,

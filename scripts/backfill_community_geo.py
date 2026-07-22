@@ -4,9 +4,8 @@ from the migration mapping Brian approved (the Communities geography model
 rework). Matches by URL — the same natural key `seed_communities.py`
 uses — so it's safe to re-run; any row not in MAPPING is left untouched.
 
-The old `region` column is untouched by this script and by the app going
-forward — it's kept in place as a free-text admin note, not read by the new
-region filter.
+The old `region` column was untouched by this script — it was later dropped
+entirely once confirmed unused for any public filtering/display.
 
 Usage:
     python -m scripts.backfill_community_geo [--db library.db] [--dry-run]

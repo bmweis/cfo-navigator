@@ -229,7 +229,7 @@ def test_needs_verification_sentinel_never_reaches_public_directory(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     lib.add_community(
-        "Gap Community", "https://example.com", "", enrich.NEEDS_VERIFICATION,
+        "Gap Community", "https://example.com", enrich.NEEDS_VERIFICATION,
         enrich.NEEDS_VERIFICATION, [], access=enrich.NEEDS_VERIFICATION,
         format=enrich.NEEDS_VERIFICATION, reach=enrich.NEEDS_VERIFICATION,
         sponsorship_type=enrich.NEEDS_VERIFICATION, approved=1,
@@ -246,7 +246,7 @@ def test_needs_verification_sentinel_visible_on_admin_table(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     lib.add_community(
-        "Gap Community", "https://example.com", "", enrich.NEEDS_VERIFICATION,
+        "Gap Community", "https://example.com", enrich.NEEDS_VERIFICATION,
         enrich.NEEDS_VERIFICATION, [], access=enrich.NEEDS_VERIFICATION,
         format=enrich.NEEDS_VERIFICATION, reach=enrich.NEEDS_VERIFICATION,
         sponsorship_type=enrich.NEEDS_VERIFICATION, approved=1,

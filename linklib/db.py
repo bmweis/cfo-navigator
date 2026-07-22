@@ -480,17 +480,14 @@ CREATE INDEX IF NOT EXISTS idx_enrichment_cost_article ON enrichment_cost(articl
 -- $495->$545 in Jan 2026), so a band is the durable fact and cost_note is
 -- free text for anything more specific (e.g. a multi-seat corporate rate).
 -- sponsorship_type is 'Independent'|'Vendor-sponsored'|'Investor-sponsored'.
--- region is legacy: an admin free-text note field, no longer the filter key
--- (see reach/metros_json, added by migration below — kept here in the
--- CREATE TABLE only for column order/documentation; a fresh DB still gets
--- reach/metros_json from the ALTER TABLE loop in Library.__init__, same as
--- every other post-launch communities column).
+-- The legacy `region` free-text column (superseded by reach/metros_json,
+-- added by migration below) was dropped entirely once confirmed unused for
+-- any public filtering/display — see the DROP COLUMN migration below.
 CREATE TABLE IF NOT EXISTS communities (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT NOT NULL DEFAULT '',
     slug             TEXT NOT NULL UNIQUE DEFAULT '',
     url              TEXT NOT NULL DEFAULT '',
-    region           TEXT NOT NULL DEFAULT '',
     demographic      TEXT NOT NULL DEFAULT '',
     cost_band        TEXT NOT NULL DEFAULT 'Undisclosed dues',
     cost_note        TEXT NOT NULL DEFAULT '',
@@ -769,12 +766,11 @@ class Library:
             "ALTER TABLE ask_questions ADD COLUMN embed_input_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE ask_questions ADD COLUMN embed_cost_usd REAL NOT NULL DEFAULT 0",
             # Communities geography model: replaces the free-text `region`
-            # column (kept in place as an admin note field, no longer filterable)
-            # with a controlled `reach` value plus a `metros` tag list, so the
-            # region filter can match a metro against national/global communities
-            # with a local chapter there, not just purely-regional ones.
-            # scripts/backfill_community_geo.py is the one-off pass that
-            # populates these for the existing corpus.
+            # column with a controlled `reach` value plus a `metros` tag list,
+            # so the region filter can match a metro against national/global
+            # communities with a local chapter there, not just purely-regional
+            # ones. scripts/backfill_community_geo.py is the one-off pass that
+            # populated these for the existing corpus.
             "ALTER TABLE communities ADD COLUMN reach TEXT NOT NULL DEFAULT 'National'",
             "ALTER TABLE communities ADD COLUMN metros_json TEXT NOT NULL DEFAULT '[]'",
             # Featured pinning, mirroring tools.promoted exactly (coral badge +
@@ -940,6 +936,11 @@ class Library:
             "ALTER TABLE community_profiles ADD COLUMN stage_focus TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE community_profiles ADD COLUMN jobs_program TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE community_profiles ADD COLUMN team_or_individual TEXT NOT NULL DEFAULT ''",
+            # `region` (legacy free-text note, superseded by reach/metros_json
+            # above) confirmed unused for any public filtering/display —
+            # dropped entirely rather than left as dead weight. A no-op
+            # OperationalError (caught below) on every boot after the first.
+            "ALTER TABLE communities DROP COLUMN region",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1950,7 +1951,7 @@ class Library:
     # many-to-many relationship inline (no join table), community_categories
     # is just the controlled vocabulary of pills.
 
-    def add_community(self, name: str, url: str, region: str, demographic: str,
+    def add_community(self, name: str, url: str, demographic: str,
                       cost_band: str, categories: list[str], cost_note: str = "",
                       sponsorship_type: str = "Independent", sponsor_name: str = "",
                       access: str = "", format: str = "", notes: str = "",
@@ -1965,12 +1966,12 @@ class Library:
             suffix += 1
         now = _now()
         cur = self.conn.execute(
-            """INSERT INTO communities (name, slug, url, region, demographic, cost_band,
+            """INSERT INTO communities (name, slug, url, demographic, cost_band,
                cost_note, sponsorship_type, sponsor_name, access, format, notes,
                categories_json, approved, submitted_by, created_at, updated_at,
                reach, metros_json, featured, advisor)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (name.strip(), slug, url.strip(), region.strip(), demographic.strip(),
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (name.strip(), slug, url.strip(), demographic.strip(),
              cost_band, cost_note.strip(), sponsorship_type, sponsor_name.strip(),
              access.strip(), format.strip(), notes.strip(), json.dumps(categories),
              approved, submitted_by.strip(), now, now,
@@ -2003,7 +2004,7 @@ class Library:
         ).fetchone()
         return self._community_to_dict(row) if row else None
 
-    def update_community(self, community_id: int, name: str, url: str, region: str,
+    def update_community(self, community_id: int, name: str, url: str,
                          demographic: str, cost_band: str, categories: list[str],
                          cost_note: str = "", sponsorship_type: str = "Independent",
                          sponsor_name: str = "", access: str = "", format: str = "",
@@ -2011,11 +2012,11 @@ class Library:
                          metros: list[str] | None = None, featured: int = 0,
                          advisor: int = 0) -> None:
         self.conn.execute(
-            """UPDATE communities SET name=?, url=?, region=?, demographic=?, cost_band=?,
+            """UPDATE communities SET name=?, url=?, demographic=?, cost_band=?,
                cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
                notes=?, categories_json=?, updated_at=?, reach=?, metros_json=?,
                featured=?, advisor=? WHERE id=?""",
-            (name.strip(), url.strip(), region.strip(), demographic.strip(), cost_band,
+            (name.strip(), url.strip(), demographic.strip(), cost_band,
              cost_note.strip(), sponsorship_type, sponsor_name.strip(), access.strip(),
              format.strip(), notes.strip(), json.dumps(categories), _now(),
              reach, json.dumps(metros or []), featured, advisor, community_id),
@@ -2029,7 +2030,7 @@ class Library:
         `advisor` re-syncs from the same COMMUNITIES source list too, mirroring
         tools.advisor exactly, but via a separate direct UPDATE in the caller
         (webapp/app.py's _seed_toolbox, scripts/seed_communities.py's main) —
-        not through this method. region/demographic/cost_band/cost_note/
+        not through this method. demographic/cost_band/cost_note/
         sponsorship_type/sponsor_name/access/format/categories_json/approved/
         reach/metros_json/featured are admin-owned, edited at
         /admin/tools/communities, and never touched here — otherwise an admin's edit
