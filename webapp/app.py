@@ -53,6 +53,7 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 from linklib.db import Library
+from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.pipeline import ingest_url
 from linklib import backup
 from webapp.thought_leadership_data import SECTIONS as TL_SECTIONS, TLItem
@@ -5300,7 +5301,7 @@ def tools_communities(request: Request):
     is_member = _is_member(request)  # submit is account-only
     lib = _lib()
     try:
-        communities = lib.list_communities(approved_only=True)
+        communities = [_public_community(c) for c in lib.list_communities(approved_only=True)]
         categories = lib.list_community_categories()
     finally:
         lib.close()
@@ -6176,7 +6177,7 @@ def tools_communities_compare(request: Request, ids: str = ""):
         for cid in id_list:
             c = lib.get_community(cid)
             if c and c.get("approved"):
-                communities.append(c)
+                communities.append(_public_community(c))
         profiles = {c["id"]: (lib.get_community_profile(c["id"]) or {}) for c in communities}
     finally:
         lib.close()
@@ -6472,7 +6473,7 @@ def tools_communities_find_results(request: Request, role: str = "", budget: str
 
     lib = _lib()
     try:
-        communities = lib.list_communities(approved_only=True)
+        communities = [_public_community(c) for c in lib.list_communities(approved_only=True)]
         default_weights = _get_default_community_weights(lib)
         default_values = _get_default_community_weight_values(lib)
         results = _recommender_filter(communities, answers)
@@ -6553,6 +6554,7 @@ def tools_community_profile(request: Request, slug: str):
         community = lib.get_community_by_slug(slug)
         if not community:
             raise HTTPException(status_code=404, detail="Community not found")
+        community = _public_community(community)
         profile = lib.get_community_profile(community["id"]) or {}
         lib.record_community_view(session_id, community["id"])
     finally:
@@ -6725,6 +6727,46 @@ async function generateCommunityProfile(name, url, statusId) {
       : 'Drafted. Review before saving.';
   } catch (e) {
     status.textContent = e.message || 'Generation failed. Write the profile by hand.';
+  }
+}
+"""
+
+# Shared by /admin/tools/communities/new and /{id}/edit — auto-fills the
+# basic directory-listing fields (distinct from _GENERATE_PROFILE_JS above,
+# which fills the deeper qualitative Community Profile). Text/select fields
+# are addressed by their `name` attribute rather than an id, since there's
+# only ever one such form on the page; metros/categories are checkbox groups
+# so they're synced by checking membership in the returned list instead.
+_GENERATE_LISTING_JS = """
+async function generateCommunityListing(name, url, statusId) {
+  name = (name || '').trim();
+  url = (url || '').trim();
+  var status = document.getElementById(statusId);
+  if (!name || !url) { status.textContent = 'Enter a name and URL first.'; return; }
+  status.textContent = 'Generating…';
+  try {
+    var r = await fetch('/admin/tools/communities/generate-listing', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, url: url})
+    });
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
+    ['demographic', 'reach', 'cost_band', 'cost_note', 'sponsorship_type',
+     'sponsor_name', 'access', 'format'].forEach(function(k) {
+      var el = document.querySelector('[name="' + k + '"]');
+      if (el && d[k]) el.value = d[k];
+    });
+    document.querySelectorAll('input[name="metros"]').forEach(function(cb) {
+      cb.checked = (d.metros || []).indexOf(cb.value) !== -1;
+    });
+    document.querySelectorAll('input[name="categories"]').forEach(function(cb) {
+      cb.checked = (d.categories || []).indexOf(cb.value) !== -1;
+    });
+    status.textContent = d.low_confidence
+      ? 'Drafted. Could not fetch the page, so verify facts before saving.'
+      : 'Drafted. Review before saving — anything marked "Needs verification" needs a manual check.';
+  } catch (e) {
+    status.textContent = e.message || 'Generation failed. Fill in the form by hand.';
   }
 }
 """
@@ -7499,6 +7541,28 @@ _COMMUNITY_METROS = [
     "Washington DC",
 ]
 
+# Fields the "Auto-fill from URL" draft (generate_community_listing) can mark
+# with the _NEEDS_VERIFICATION sentinel instead of guessing. Every public
+# route that renders a community must pass it through _public_community first
+# so an unreviewed gap never reaches a visitor.
+_COMMUNITY_VERIFIABLE_FIELDS = (
+    "reach", "demographic", "cost_band", "cost_note",
+    "sponsorship_type", "sponsor_name", "access", "format",
+)
+
+
+def _public_community(c: dict) -> dict:
+    """Shallow-copy a community dict with any _NEEDS_VERIFICATION sentinel
+    values blanked out. Admin pages show the sentinel as-is (that's the whole
+    point — a visible gap to fix); this is the one choke point every
+    public-facing route must call before rendering a community, so an
+    unreviewed auto-fill gap never leaks to a visitor."""
+    c = dict(c)
+    for field_name in _COMMUNITY_VERIFIABLE_FIELDS:
+        if c.get(field_name) == _NEEDS_VERIFICATION:
+            c[field_name] = ""
+    return c
+
 
 # Communities Recommender best-fit weighting: the controlled vocabulary each
 # weighting dimension draws from. `source` is "profile" for the 8 that read
@@ -7680,28 +7744,38 @@ def _community_metro_checkboxes(selected: list[str] | None = None) -> str:
 def _community_form_fields(c: dict | None = None, categories: list[dict] | None = None) -> str:
     c = c or {}
     categories = categories or []
+    # _NEEDS_VERIFICATION is appended as a literal, selectable option on every
+    # enum field — distinct from each select's real default — so the
+    # generate-listing draft (see generateCommunityListing JS below) has a
+    # way to flag "the page didn't make this clear" instead of silently
+    # landing on a real-looking value. _public_community strips it back out
+    # before any of these fields reach a public page.
     cost_opts = "".join(
         f'<option value="{_esc(b)}"{" selected" if c.get("cost_band", "Undisclosed dues") == b else ""}>{_esc(b)}</option>'
-        for b in _COMMUNITY_COST_BANDS
+        for b in _COMMUNITY_COST_BANDS + [_NEEDS_VERIFICATION]
     )
     sponsor_opts = "".join(
         f'<option value="{_esc(s)}"{" selected" if c.get("sponsorship_type", "Independent") == s else ""}>{_esc(s)}</option>'
-        for s in _COMMUNITY_SPONSORSHIP_TYPES
+        for s in _COMMUNITY_SPONSORSHIP_TYPES + [_NEEDS_VERIFICATION]
     )
     reach_opts = "".join(
         f'<option value="{_esc(r)}"{" selected" if c.get("reach", "National") == r else ""}>{_esc(r)}</option>'
-        for r in _COMMUNITY_REACH
+        for r in _COMMUNITY_REACH + [_NEEDS_VERIFICATION]
     )
     return f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
-    <input name="name" required maxlength="200" value="{_esc(c.get('name', ''))}"
+    <input id="comm-name" name="name" required maxlength="200" value="{_esc(c.get('name', ''))}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL</label>
-    <input name="url" type="url" maxlength="500" value="{_esc(c.get('url', ''))}"
+    <input id="comm-url" name="url" type="url" maxlength="500" value="{_esc(c.get('url', ''))}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…">
+  </div>
+  <div>
+    <button type="button" class="tool-admin-btn" onclick="generateCommunityListing(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'comm-gen-status')">Auto-fill from URL</button>
+    <span id="comm-gen-status" class="qe-status"></span>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
@@ -7974,6 +8048,16 @@ _COMMUNITIES_REFERENCE_HTML = """
 </ul>
 </section>
 
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Auto-fill from URL (/admin/tools/communities/new and /{id}/edit)</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, next to Name/URL on the Add/Edit Community form &mdash; drafts the basic directory-listing fields (demographic, reach, metros, cost band, cost note, sponsorship, sponsor name, access, format, categories) from one Claude call grounded in a fetch of the entered URL. Distinct from the &ldquo;Generate&rdquo; button on the Community Profile edit page, which drafts the deeper qualitative fields instead.</li>
+<li><strong>Status line while running:</strong> &ldquo;Generating&hellip;&rdquo;, then either &ldquo;Drafted. Review before saving &mdash; anything marked &lsquo;Needs verification&rsquo; needs a manual check.&rdquo; or, if the page fetch failed, &ldquo;Drafted. Could not fetch the page, so verify facts before saving.&rdquo; On failure: the request's own error message, or &ldquo;Generation failed. Fill in the form by hand.&rdquo;</li>
+<li><strong>&ldquo;Needs verification&rdquo; sentinel:</strong> when the model can't confidently determine a field, it drafts the literal string &ldquo;Needs verification&rdquo; into that field rather than guessing &mdash; a selectable option on the Reach/Cost band/Sponsorship selects, or the field's literal text otherwise. Deliberately a different label from the &ldquo;Needs review&rdquo; badge below (that one is Brian's own manual sign-off on the whole Community Profile; this one is a machine-set, per-field gap on the basic listing) so the two never get confused in the same admin table.</li>
+<li><strong>&ldquo;N fields need verification&rdquo; badge</strong> on the admin communities table: a passive count, not a save blocker &mdash; a nudge toward Edit for any community still carrying the sentinel on one or more fields. The sentinel is stripped back out to blank on every public-facing page (directory, profile, compare, recommender results) before a visitor ever sees it.</li>
+</ul>
+</section>
+
 <section style="padding-top:6px;border-top:1px solid var(--line);">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:14px 0 8px;">How the anonymous tracking works</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
@@ -8034,11 +8118,20 @@ def admin_communities(request: Request, filter: str = ""):
         featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if c.get("featured") else ""
         review_badge = ('<span style="font-size:11px;font-weight:700;background:var(--caution);color:#fff;border-radius:4px;'
                          'padding:1px 6px;margin-left:6px;">Needs review</span>') if c.get("needs_review") else ""
+        # Distinct from review_badge above: that one is Brian's manual
+        # whole-profile sign-off (community_profiles.needs_review). This one
+        # is a passive count of per-field auto-fill gaps left by "Auto-fill
+        # from URL" (the _NEEDS_VERIFICATION sentinel) — not a save blocker,
+        # just a nudge toward Edit for anyone who forgets to check the field.
+        n_gaps = sum(1 for f in _COMMUNITY_VERIFIABLE_FIELDS if c.get(f) == _NEEDS_VERIFICATION)
+        gap_badge = (f'<span style="font-size:11px;font-weight:700;background:var(--muted);color:#fff;border-radius:4px;'
+                     f'padding:1px 6px;margin-left:6px;">{n_gaps} field{"s" if n_gaps != 1 else ""} '
+                     f'need{"s" if n_gaps == 1 else ""} verification</span>') if n_gaps else ""
         mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="display:inline;">'
                          f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;margin-left:4px;">Mark reviewed</button></form>'
                          ) if c.get("needs_review") else ""
         return f"""<tr style="border-top:1px solid var(--line);">
-  <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}{review_badge}</td>
+  <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}{review_badge}{gap_badge}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['region'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
@@ -8363,7 +8456,8 @@ def admin_communities_new(request: Request):
     <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
-</div>"""
+</div>
+<script>{_GENERATE_LISTING_JS}</script>"""
     return HTMLResponse(_page("Add community—CFO Toolbox Admin", "", body, authed=True))
 
 
@@ -8423,7 +8517,8 @@ def admin_communities_edit(request: Request, community_id: int):
     <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
-</div>"""
+</div>
+<script>{_GENERATE_LISTING_JS}</script>"""
     return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
 
 
@@ -8640,6 +8735,59 @@ async def admin_communities_generate_profile(request: Request):
         "stage_focus": draft.stage_focus,
         "jobs_program": draft.jobs_program,
         "team_or_individual": draft.team_or_individual,
+    })
+
+
+@app.post("/admin/tools/communities/generate-listing")
+async def admin_communities_generate_listing(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    name = (body.get("name") or "").strip()
+    url = (body.get("url") or "").strip()
+    if not (name and url):
+        return JSONResponse({"ok": False, "error": "Name and URL are required."}, status_code=400)
+
+    lib = _lib()
+    try:
+        category_names = [cat["name"] for cat in lib.list_community_categories()]
+    finally:
+        lib.close()
+
+    from linklib.enrich import generate_community_listing
+    draft = generate_community_listing(
+        name, url,
+        reach_options=_COMMUNITY_REACH, cost_band_options=_COMMUNITY_COST_BANDS,
+        sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES, metro_options=_COMMUNITY_METROS,
+        category_options=category_names,
+    )
+    if draft is None:
+        return JSONResponse({"ok": False, "error": "Listing generation is unavailable right now "
+                                                     "(missing ANTHROPIC_API_KEY, or the request failed). "
+                                                     "Fill in the form by hand."}, status_code=503)
+
+    lib = _lib()
+    try:
+        lib.record_enrichment_cost(None, draft.model, draft.input_tokens, draft.output_tokens, draft.cost_usd)
+    finally:
+        lib.close()
+
+    return JSONResponse({
+        "ok": True,
+        "low_confidence": draft.low_confidence,
+        "demographic": draft.demographic,
+        "reach": draft.reach,
+        "metros": draft.metros,
+        "cost_band": draft.cost_band,
+        "cost_note": draft.cost_note,
+        "sponsorship_type": draft.sponsorship_type,
+        "sponsor_name": draft.sponsor_name,
+        "access": draft.access,
+        "format": draft.format,
+        "categories": draft.categories,
     })
 
 
