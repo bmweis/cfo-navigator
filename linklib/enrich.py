@@ -232,7 +232,7 @@ COMMUNITY_PROFILE_FIELDS = [
 _COMMUNITY_PROFILE_PROMPT = """You are drafting a deep, opinionated profile of a peer community for the
 CFO Toolbox's Communities directory, read by finance leaders deciding whether a
 community is worth their time and money. This is not directory metadata (cost,
-region, access are handled elsewhere) — it's the qualitative read: who it's
+access are handled elsewhere) — it's the qualitative read: who it's
 actually for, what it's actually like, and whether it delivers.
 
 Write about the community named below. Follow these rules exactly:
@@ -409,7 +409,7 @@ NEEDS_VERIFICATION = "Needs verification"
 
 _COMMUNITY_LISTING_PROMPT = """You are drafting the basic directory-listing fields for a peer community in
 the CFO Toolbox's Communities directory — factual metadata (cost, access,
-region, categories), distinct from the deeper qualitative profile handled
+categories), distinct from the deeper qualitative profile handled
 elsewhere.
 
 Ground every answer in the page content provided below (or your own knowledge,
@@ -438,10 +438,10 @@ Fields:
      {sponsorship_options}. "{needs_verification}" if unclear.
   "sponsor_name": the sponsor's name, only if sponsorship_type indicates one
      and it's named on the page — else an empty string.
-  "access": a short phrase describing how someone joins, e.g. "Invite-only",
-     "Application", "Open to all". "{needs_verification}" if unclear.
-  "format": a short phrase describing format/cadence, e.g. "Hybrid: quarterly
-     in-person + Slack". "{needs_verification}" if unclear.
+  "access": exactly one value from this list, verbatim: {access_options}.
+     "{needs_verification}" if unclear.
+  "format": exactly one value from this list, verbatim: {format_options}.
+     "{needs_verification}" if unclear.
   "categories": a JSON list of zero or more values from exactly this list,
      verbatim: {category_options}. Only include a category that clearly
      applies — never a value outside this list.
@@ -478,6 +478,7 @@ class CommunityListingDraft:
 
 def generate_community_listing(name: str, url: str, *, reach_options: list[str],
                                 cost_band_options: list[str], sponsorship_options: list[str],
+                                access_options: list[str], format_options: list[str],
                                 metro_options: list[str], category_options: list[str],
                                 model: str = DEFAULT_MODEL) -> CommunityListingDraft | None:
     """Draft the basic directory-listing fields (distinct from the deeper
@@ -485,13 +486,13 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
     mirroring generate_tool_description's fetch/prompt/cost-tracking pattern.
     The enum/list fields are constrained to caller-supplied controlled
     vocabularies (webapp/app.py owns those lists — reach/cost_band/
-    sponsorship_type options and the metro/category checklists) rather than
-    free text, and validated against them again on the way out in case the
-    model drifts. Any field it isn't confident about is drafted as the
-    literal NEEDS_VERIFICATION sentinel (or left empty for list fields)
-    instead of a guess. Never auto-saved — same review contract as the other
-    generate_* helpers. Returns None if the SDK/key is unavailable or the
-    call fails."""
+    sponsorship_type/access/format options and the metro/category
+    checklists) rather than free text, and validated against them again on
+    the way out in case the model drifts. Any field it isn't confident about
+    is drafted as the literal NEEDS_VERIFICATION sentinel (or left empty for
+    list fields) instead of a guess. Never auto-saved — same review contract
+    as the other generate_* helpers. Returns None if the SDK/key is
+    unavailable or the call fails."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -514,6 +515,8 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
         metro_options=json.dumps(metro_options),
         cost_band_options=json.dumps(cost_band_options),
         sponsorship_options=json.dumps(sponsorship_options),
+        access_options=json.dumps(access_options),
+        format_options=json.dumps(format_options),
         category_options=json.dumps(category_options),
         name=name, url=url, content_block=content_block,
     )
@@ -555,8 +558,8 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
             cost_note=str(data.get("cost_note", "")).strip(),
             sponsorship_type=_one_of(data.get("sponsorship_type"), sponsorship_options),
             sponsor_name=str(data.get("sponsor_name", "")).strip(),
-            access=str(data.get("access", "")).strip(),
-            format=str(data.get("format", "")).strip(),
+            access=_one_of(data.get("access"), access_options),
+            format=_one_of(data.get("format"), format_options),
             categories=_subset_of(data.get("categories"), category_options),
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,

@@ -35,7 +35,7 @@ def test_profile_page_renders_full_profile(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     cid = lib.add_community(
-        "Test CFO Guild", "https://example.com", "", "Seed-stage finance leaders",
+        "Test CFO Guild", "https://example.com", "Seed-stage finance leaders",
         "Free", ["Peer group"], access="Invite-only", approved=1,
     )
     lib.upsert_community_profile(
@@ -72,7 +72,7 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     cid = lib.add_community(
-        "Test CFO Guild", "https://example.com", "", "Seed-stage finance leaders",
+        "Test CFO Guild", "https://example.com", "Seed-stage finance leaders",
         "Free", ["Peer group"], access="Invite-only", approved=1,
     )
     lib.upsert_community_profile(cid, ideal_member="Solo CFOs at Series A/B")
@@ -110,7 +110,7 @@ def test_profile_page_falls_back_to_minimal_when_no_profile(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     cid = lib.add_community(
-        "Bare Community", "https://example.com", "", "Finance leaders",
+        "Bare Community", "https://example.com", "Finance leaders",
         "Free", [], approved=1,
     )
     community = lib.get_community(cid)
@@ -127,7 +127,7 @@ def test_profile_page_falls_back_when_profile_row_all_blank(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     cid = lib.add_community(
-        "Empty Profile Row", "https://example.com", "", "Finance leaders",
+        "Empty Profile Row", "https://example.com", "Finance leaders",
         "Free", [], approved=1,
     )
     lib.upsert_community_profile(cid)  # all fields default to empty
@@ -149,7 +149,7 @@ def test_profile_page_404_for_unapproved_community(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     cid = lib.add_community(
-        "Pending Community", "https://example.com", "", "Finance leaders",
+        "Pending Community", "https://example.com", "Finance leaders",
         "Free", [], approved=0,
     )
     community = lib.get_community(cid)
@@ -163,7 +163,7 @@ def test_directory_card_links_to_profile_page_in_new_tab(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     lib.add_community(
-        "Linked Community", "https://example.com", "", "Finance leaders",
+        "Linked Community", "https://example.com", "Finance leaders",
         "Free", [], approved=1,
     )
     lib.close()
@@ -179,7 +179,7 @@ def test_gap_form_prefills_closest_match_from_community_id(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     cid = lib.add_community(
-        "Gap Community", "https://example.com", "", "Finance leaders",
+        "Gap Community", "https://example.com", "Finance leaders",
         "Free", [], approved=1,
     )
     lib.close()
@@ -218,7 +218,7 @@ def test_gap_form_mentions_viewed_profile_after_visiting_one(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     cid = lib.add_community(
-        "Viewed Community", "https://example.com", "", "Finance leaders",
+        "Viewed Community", "https://example.com", "Finance leaders",
         "Free", [], approved=1,
     )
     lib.close()
@@ -252,11 +252,11 @@ def test_gap_form_closest_match_and_transparency_note_render_together(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     closest_id = lib.add_community(
-        "Closest Match Community", "https://example.com", "", "Finance leaders",
+        "Closest Match Community", "https://example.com", "Finance leaders",
         "Free", [], approved=1,
     )
     other_id = lib.add_community(
-        "Other Viewed Community", "https://example.com", "", "Finance leaders",
+        "Other Viewed Community", "https://example.com", "Finance leaders",
         "Free", [], approved=1,
     )
     lib.close()
@@ -286,7 +286,7 @@ def test_gap_form_submission_persists_and_records_server_side_viewed_ids(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     cid = lib.add_community(
-        "Submit Target", "https://example.com", "", "Finance leaders",
+        "Submit Target", "https://example.com", "Finance leaders",
         "Free", [], approved=1,
     )
     lib.close()

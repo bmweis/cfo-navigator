@@ -32,9 +32,9 @@ def test_count_pending_tools(lib):
 
 def test_count_pending_communities(lib):
     assert lib.count_pending_communities() == 0
-    lib.add_community(name="A", url="https://a.example", region="", demographic="CFOs",
+    lib.add_community(name="A", url="https://a.example", demographic="CFOs",
                        cost_band="Free", categories=[], approved=0)
-    lib.add_community(name="B", url="https://b.example", region="", demographic="CFOs",
+    lib.add_community(name="B", url="https://b.example", demographic="CFOs",
                        cost_band="Free", categories=[], approved=1)
     assert lib.count_pending_communities() == 1
 
@@ -107,7 +107,7 @@ def test_open_task_counts_reflects_pending_tool(lib):
 
 def test_open_task_counts_reflects_pending_community(lib):
     from webapp import tasks
-    lib.add_community(name="A", url="https://a.example", region="", demographic="CFOs",
+    lib.add_community(name="A", url="https://a.example", demographic="CFOs",
                        cost_band="Free", categories=[], approved=0)
     counts = tasks.open_task_counts(lib)
     assert counts["/admin/tools/communities"] == 1
@@ -295,7 +295,7 @@ def test_pending_community_badge_clears_on_approval(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
-    community_id = lib.add_community(name="A", url="https://a.example", region="",
+    community_id = lib.add_community(name="A", url="https://a.example",
                                       demographic="CFOs", cost_band="Free", categories=[], approved=0)
     lib.close()
 
@@ -320,7 +320,7 @@ def test_reject_community_deletes_pending_submission(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
-    community_id = lib.add_community(name="A", url="https://a.example", region="",
+    community_id = lib.add_community(name="A", url="https://a.example",
                                       demographic="CFOs", cost_band="Free", categories=[], approved=0)
     lib.close()
 

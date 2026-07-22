@@ -5,7 +5,7 @@ and CFO peer communities, associations, and Slack groups.
 Safe to run multiple times — adds any community missing by URL and syncs
 name/notes on existing rows (same contract as tools/benchmarks' name+
 description re-sync), plus advisor (mirroring tools.advisor: bumped True
-here if the source says so, never demoted). Every other field — region,
+here if the source says so, never demoted). Every other field —
 reach, metros, featured, cost_band, cost_note, sponsorship_type,
 sponsor_name, access, format, categories, approved — is admin-owned once
 seeded, edited at /admin/tools/communities, and never touched by a re-run.
@@ -40,7 +40,6 @@ COMMUNITIES = [
     {
         "name": "The F Suite",
         "url": "https://www.fsuite.co",
-        "region": "National/Global (US)",
         "demographic": "CFOs & VP Finance at high-growth tech companies and VC funds",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -54,7 +53,6 @@ COMMUNITIES = [
     {
         "name": "Operators Guild",
         "url": "https://operators-guild.com",
-        "region": "National/Global (20+ cities)",
         "demographic": "Finance & operations leaders (CFO/COO/VP Finance) at high-growth companies",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -66,7 +64,6 @@ COMMUNITIES = [
     {
         "name": "NeuGroup",
         "url": "https://www.neugroup.com",
-        "region": "National/Global",
         "demographic": "Senior corporate treasury & finance professionals at large/mega-cap firms",
         "cost_band": "Undisclosed dues",
         "cost_note": "Annual per-seat fees, not published.",
@@ -79,7 +76,6 @@ COMMUNITIES = [
     {
         "name": "The Circle (Founders Circle Capital)",
         "url": "https://thecircle.founderscircle.com",
-        "region": "National/Global",
         "demographic": "CEOs & CFOs at growth-stage companies scaling to IPO",
         "cost_band": "Free",
         "sponsorship_type": "Investor-sponsored",
@@ -92,7 +88,6 @@ COMMUNITIES = [
     {
         "name": "CFO Executive Forum (Open Future Forum)",
         "url": "https://openfutureforum.com",
-        "region": "National/Global",
         "demographic": "CFOs & senior finance executives",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -104,7 +99,6 @@ COMMUNITIES = [
     {
         "name": "Evanta CFO Community",
         "url": "https://www.evanta.com/cfo",
-        "region": "National/Global",
         "demographic": "CFOs at large enterprises",
         "cost_band": "Free",
         "cost_note": "Free to qualified members; Gartner-funded.",
@@ -118,7 +112,6 @@ COMMUNITIES = [
     {
         "name": "Private Funds CFO Network",
         "url": "https://www.peievents.com",
-        "region": "National/Global (regional events)",
         "demographic": "CFOs, COOs, and CCOs at PE/private-credit firms",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -132,7 +125,6 @@ COMMUNITIES = [
     {
         "name": "CFO Leadership Council",
         "url": "https://www.cfoleadershipcouncil.com",
-        "region": "National/Global",
         "demographic": "CFOs, SVP/VP Finance, Directors of FP&A, CAO, Controllers",
         "cost_band": "<$1k/yr",
         "cost_note": "$475/yr.",
@@ -146,7 +138,6 @@ COMMUNITIES = [
     {
         "name": "CFO Alliance",
         "url": "https://www.cfoalliance.com",
-        "region": "National/Global",
         "demographic": "CFOs & senior finance executives at middle-market/emerging enterprises",
         "cost_band": "Undisclosed dues",
         "cost_note": "Subscription-based, rate not published.",
@@ -159,7 +150,6 @@ COMMUNITIES = [
     {
         "name": "Controllers Council",
         "url": "https://www.controllerscouncil.org",
-        "region": "National (North America)",
         "demographic": "Controllers, CFOs, and corporate accounting/finance professionals",
         "cost_band": "<$1k/yr",
         "cost_note": "$300/yr individual; $750/yr corporate plan covers 3 seats.",
@@ -173,7 +163,6 @@ COMMUNITIES = [
     {
         "name": "Financial Executives International (FEI)",
         "url": "https://www.financialexecutives.org",
-        "region": "National (55+ US chapters) + international",
         "demographic": "Senior financial executives (CFO, CAO, Controller, Treasurer, VP Finance)",
         "cost_band": "<$1k/yr",
         "cost_note": "$309/yr Professional Membership. Eligibility requires $2M+ net worth, $6M+ capital, or $10M+ annual revenue.",
@@ -186,7 +175,6 @@ COMMUNITIES = [
     {
         "name": "Association for Financial Professionals (AFP)",
         "url": "https://www.financialprofessionals.org",
-        "region": "National/Global",
         "demographic": "Treasury & corporate finance professionals",
         "cost_band": "<$1k/yr",
         "cost_note": "$545/yr, raised from $495 on January 1, 2026.",
@@ -199,7 +187,6 @@ COMMUNITIES = [
     {
         "name": "Modern Finance Forum for CFOs",
         "url": "https://www.fsn.co.uk",
-        "region": "National/Global",
         "demographic": "Senior finance professionals/CFOs",
         "cost_band": "Free",
         "sponsorship_type": "Independent",
@@ -212,7 +199,6 @@ COMMUNITIES = [
     {
         "name": "CFO Circle (Blueprint for Growth)",
         "url": "https://www.cfo-circle.com",
-        "region": "National/Global (multiple US chapters)",
         "demographic": "CFOs & senior finance leaders at companies with $5M+ annual revenue",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -226,7 +212,6 @@ COMMUNITIES = [
     {
         "name": "Off The Ledger",
         "url": "https://www.airbase.com/off-the-ledger",
-        "region": "National/Global",
         "demographic": "Finance, accounting & procurement professionals",
         "cost_band": "Free",
         "sponsorship_type": "Vendor-sponsored",
@@ -239,7 +224,6 @@ COMMUNITIES = [
     {
         "name": "Close Club",
         "url": "https://www.rillet.com/community",
-        "region": "National/Global",
         "demographic": "CFOs, Controllers, and finance practitioners",
         "cost_band": "Free",
         "sponsorship_type": "Vendor-sponsored",
@@ -252,7 +236,6 @@ COMMUNITIES = [
     {
         "name": "CFO Connect",
         "url": "https://cfoconnect.eu",
-        "region": "National/Global (London, Paris, Berlin hubs)",
         "demographic": "CFOs & senior finance leaders",
         "cost_band": "Free",
         "cost_note": "Pro tier is €625/yr (free to Spendesk customers).",
@@ -266,7 +249,6 @@ COMMUNITIES = [
     {
         "name": "FP&A Community (Datarails)",
         "url": "https://www.datarails.com/community",
-        "region": "National/Global",
         "demographic": "FP&A professionals & finance leaders",
         "cost_band": "Free",
         "sponsorship_type": "Vendor-sponsored",
@@ -279,7 +261,6 @@ COMMUNITIES = [
     {
         "name": "Finance Alliance",
         "url": "https://www.financealliance.io",
-        "region": "National/Global",
         "demographic": "CFOs, VPs Finance, and Finance Directors/Managers",
         "cost_band": "Free",
         "sponsorship_type": "Independent",
@@ -291,7 +272,6 @@ COMMUNITIES = [
     {
         "name": "CFO Chat",
         "url": "https://cfo.chat",
-        "region": "National/Global",
         "demographic": "CFOs, full-time and fractional",
         "cost_band": "Free",
         "sponsorship_type": "Vendor-sponsored",
@@ -304,7 +284,6 @@ COMMUNITIES = [
     {
         "name": "Proformative",
         "url": "https://www.proformative.com",
-        "region": "National/Global",
         "demographic": "Corporate finance & accounting professionals",
         "cost_band": "Free",
         "sponsorship_type": "Vendor-sponsored",
@@ -318,7 +297,6 @@ COMMUNITIES = [
     {
         "name": "FIF Collective (Females in Finance)",
         "url": "https://www.fifcollective.com",
-        "region": "National/Global (NYC-centered)",
         "demographic": "Women & allies: CFOs, VP Finance, VC partners, founders",
         "cost_band": "<$1k/yr",
         "cost_note": "$1,000/yr for members; $2,000/yr for allies (since Jan 2025).",
@@ -332,7 +310,6 @@ COMMUNITIES = [
     {
         "name": "Financial Women's Association (FWA)",
         "url": "https://www.fwa.org",
-        "region": "NYC",
         "demographic": "Women (& allies) in financial services & finance roles",
         "cost_band": "<$1k/yr",
         "cost_note": "Full membership <$1/day; Associate <50 cents/day; Student <15 cents/day.",
@@ -346,7 +323,6 @@ COMMUNITIES = [
     {
         "name": "CFOMeet",
         "url": "https://www.cfomeet.org",
-        "region": "National (chapters incl. Boston, Chicago, Toronto)",
         "demographic": "CFOs, Chief Accounting Officers, Chief Procurement Officers, Chief Audit Executives, Treasurers, Controllers, VPs of Finance, and senior finance leaders from mid-market and enterprise organizations",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -359,7 +335,6 @@ COMMUNITIES = [
     {
         "name": "Boston Corporate Finance Community (BCFC)",
         "url": "https://www.bostoncorporatefinancecommunity.com",
-        "region": "Boston",
         "demographic": "Corporate finance, banking, PE, and specialty-finance professionals & advisors",
         "cost_band": "Undisclosed dues",
         "cost_note": "Event-based, cost not published.",
@@ -372,7 +347,6 @@ COMMUNITIES = [
     {
         "name": "Private Equity CFO Association (PECFOA)",
         "url": "https://www.privateequitycfo.org",
-        "region": "National (chapters incl. Boston, NY, DC/Baltimore, Midwest/Chicago, Dallas-Fort Worth, Houston, LA)",
         "demographic": "PE fund CFOs",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -384,7 +358,6 @@ COMMUNITIES = [
     {
         "name": "CFO Mastermind Group",
         "url": "https://www.cfomastermindgroup.com",
-        "region": "Chicago",
         "demographic": "CFOs & finance executives",
         "cost_band": "$2,500+/yr",
         "cost_note": "$3,000/yr, or $1,750 semi-annual; $500 discount after 5 consecutive years.",
@@ -396,7 +369,6 @@ COMMUNITIES = [
     {
         "name": "Senior Executive Network (CFO/VP Finance)",
         "url": "https://www.seniorexecutivenetwork.com",
-        "region": "National (facilitated regional peer groups)",
         "demographic": "CFOs & VPs of Finance",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -409,7 +381,6 @@ COMMUNITIES = [
     {
         "name": "Healthcare Financial Management Association (HFMA)",
         "url": "https://www.hfma.org",
-        "region": "National/Global",
         "demographic": "Healthcare finance professionals & hospital/health-system CFOs",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -421,7 +392,6 @@ COMMUNITIES = [
     {
         "name": "Startup CFO",
         "url": "https://www.startupcfo.tech",
-        "region": "National/Global (UK-founded)",
         "demographic": "CFOs & FDs at high-growth tech businesses",
         "cost_band": "Undisclosed dues",
         "cost_note": "Private membership, rate not published.",
@@ -434,7 +404,6 @@ COMMUNITIES = [
     {
         "name": "Finance & Accounting for Bioscience (Informa Connect)",
         "url": "https://informaconnect.com/finance-bioscience-east",
-        "region": "Boston",
         "demographic": "Life-sciences finance & accounting leaders",
         "cost_band": "Undisclosed dues",
         "cost_note": "Paid conference registration.",
@@ -449,7 +418,6 @@ COMMUNITIES = [
     {
         "name": "The CFO Accelerator Inner Circle",
         "url": "https://www.thecfoaccelerator.com/innercircle",
-        "region": "National/Global",
         "demographic": "Fractional CFOs building/scaling their own firms",
         "cost_band": "Undisclosed dues",
         "sponsorship_type": "Independent",
@@ -462,7 +430,6 @@ COMMUNITIES = [
     {
         "name": "Fractionals United",
         "url": "https://www.fractionalsunited.com",
-        "region": "National/Global",
         "demographic": "Fractional executives, including fractional CFOs",
         "cost_band": "<$1k/yr",
         "cost_note": "$10/mo or $100/yr, 15-day free trial.",
@@ -477,7 +444,6 @@ COMMUNITIES = [
     {
         "name": "Association of Corporate Treasurers (ACT)",
         "url": "https://www.treasurers.org",
-        "region": "National/Global (UK-based, 80+ countries)",
         "demographic": "Corporate treasury professionals",
         "cost_band": "<$1k/yr",
         "cost_note": "AMCT membership is £424/yr; other tiers vary.",
@@ -490,7 +456,6 @@ COMMUNITIES = [
     {
         "name": "The Conference Board Corporate Treasurers Council",
         "url": "https://www.conference-board.org/councils/corporate-treasurers",
-        "region": "National/Global",
         "demographic": "Senior corporate treasurers",
         "cost_band": "Undisclosed dues",
         "cost_note": "Requires Conference Board membership.",
@@ -524,7 +489,7 @@ def main():
                 "SELECT * FROM communities WHERE url = ?", (c["url"],)
             ).fetchone()
             fields = dict(
-                name=c["name"], url=c["url"], region=c["region"],
+                name=c["name"], url=c["url"],
                 demographic=c["demographic"], cost_band=c["cost_band"],
                 categories=c["categories"], cost_note=c.get("cost_note", ""),
                 sponsorship_type=c.get("sponsorship_type", "Independent"),
@@ -532,7 +497,7 @@ def main():
                 format=c.get("format", ""), notes=c.get("notes", ""),
             )
             if existing:
-                # name/notes/advisor re-sync — region/cost_band/access/categories/
+                # name/notes/advisor re-sync — cost_band/access/categories/
                 # featured/etc. are admin-owned once seeded (edited at
                 # /admin/tools/communities), same contract as tools/benchmarks'
                 # name+description re-sync (advisor mirrors tools.advisor: only

@@ -6,3 +6,6 @@ __pycache__/
 *.pyo
 .DS_Store
 .venv/
+
+# Claude Code browser-preview dev server config (local tooling, not app code)
+.claude/launch.json

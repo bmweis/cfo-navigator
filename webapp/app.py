@@ -274,7 +274,7 @@ def _seed_toolbox():
     never touched here. Communities follow the identical name+description+
     advisor contract: name/notes/advisor re-sync from
     scripts/seed_communities.py's COMMUNITIES on every restart (advisor the
-    same way tools.advisor does, just below); every other field — region,
+    same way tools.advisor does, just below); every other field —
     reach, metros_json, featured, cost_band, cost_note, sponsorship_type,
     sponsor_name, access, format, categories_json, approved — is admin-owned,
     edited at /admin/tools/communities, and never touched here."""
@@ -295,7 +295,7 @@ def _seed_toolbox():
             ).fetchone()
             if not crow:
                 lib.add_community(
-                    name=c["name"], url=c["url"], region=c["region"],
+                    name=c["name"], url=c["url"],
                     demographic=c["demographic"], cost_band=c["cost_band"],
                     categories=c["categories"], cost_note=c.get("cost_note", ""),
                     sponsorship_type=c.get("sponsorship_type", "Independent"),
@@ -6140,7 +6140,7 @@ async def tools_communities_submit(request: Request):
     from linklib.email_utils import send_notification_email, send_community_submission_confirmation_email, default_notify_email
     lib = _lib()
     try:
-        lib.add_community(name=name, url=url, region="", demographic="", cost_band="Undisclosed dues",
+        lib.add_community(name=name, url=url, demographic="", cost_band="Undisclosed dues",
                            categories=[], submitted_by=submitted_by, approved=0)
         notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
         if notify_to:
@@ -7534,6 +7534,16 @@ def admin_benchmarks_delete(request: Request, benchmark_id: int):
 
 _COMMUNITY_COST_BANDS = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
 _COMMUNITY_SPONSORSHIP_TYPES = ["Independent", "Vendor-sponsored", "Investor-sponsored"]
+# Derived from the actual access/format values across the existing 35
+# communities (each value's own leading word/phrase), not invented — every
+# existing entry maps cleanly onto one of these with no lossy leftover, so
+# the one-off reconciliation script (scripts/backfill_community_access_format.py)
+# needed no "Needs verification" fallback for any pre-existing row. Converting
+# these from free text drops each entry's qualifier detail (e.g. "Invite-only
+# (~10% acceptance, ~95% referral rate)" -> "Invite-only") by design — a
+# deliberate, accepted loss, not an oversight.
+_COMMUNITY_ACCESS = ["Open", "Application", "Invite-only", "Qualification-based"]
+_COMMUNITY_FORMAT = ["Hybrid", "In-person", "Slack", "Online", "LinkedIn group"]
 # reach describes a community's overall footprint; metros (below) is the
 # separate list of cities/areas where it has a chapter, hub, or local focus —
 # a National/Global community can still carry metros (e.g. FEI has 55+ US
@@ -7771,6 +7781,14 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
         f'<option value="{_esc(r)}"{" selected" if c.get("reach", "National") == r else ""}>{_esc(r)}</option>'
         for r in _COMMUNITY_REACH + [_NEEDS_VERIFICATION]
     )
+    access_opts = "".join(
+        f'<option value="{_esc(a)}"{" selected" if c.get("access", "") == a else ""}>{_esc(a)}</option>'
+        for a in _COMMUNITY_ACCESS + [_NEEDS_VERIFICATION]
+    )
+    format_opts = "".join(
+        f'<option value="{_esc(fm)}"{" selected" if c.get("format", "") == fm else ""}>{_esc(fm)}</option>'
+        for fm in _COMMUNITY_FORMAT + [_NEEDS_VERIFICATION]
+    )
     return f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
     <input id="comm-name" name="name" required maxlength="200" value="{_esc(c.get('name', ''))}"
@@ -7807,12 +7825,6 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
       {_community_metro_checkboxes(c.get('metros') or [])}
     </div>
   </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Region note</label>
-    <input name="region" maxlength="200" value="{_esc(c.get('region', ''))}"
-      placeholder="Legacy free-text note — no longer used for filtering"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost band</label>
@@ -7843,15 +7855,15 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Access</label>
-      <input name="access" maxlength="200" value="{_esc(c.get('access', ''))}"
-        placeholder="e.g. Invite-only, Application, Open"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      <select name="access" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {access_opts}
+      </select>
     </div>
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Format</label>
-      <input name="format" maxlength="200" value="{_esc(c.get('format', ''))}"
-        placeholder="e.g. Hybrid, Slack, In-person"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      <select name="format" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {format_opts}
+      </select>
     </div>
   </div>
   <div>
@@ -8141,7 +8153,6 @@ def admin_communities(request: Request, filter: str = ""):
                          ) if c.get("needs_review") else ""
         return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}{review_badge}{gap_badge}</td>
-  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['region'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
@@ -8269,7 +8280,6 @@ async function saveCommunityWeights() {{
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Region</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
@@ -8477,7 +8487,6 @@ async def admin_communities_new_submit(request: Request):
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
-    region = (form.get("region") or "").strip()
     demographic = (form.get("demographic") or "").strip()
     cost_band = (form.get("cost_band") or "Undisclosed dues").strip()
     cost_note = (form.get("cost_note") or "").strip()
@@ -8495,7 +8504,7 @@ async def admin_communities_new_submit(request: Request):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
     try:
-        lib.add_community(name=name, url=url, region=region, demographic=demographic,
+        lib.add_community(name=name, url=url, demographic=demographic,
                           cost_band=cost_band, categories=categories, cost_note=cost_note,
                           sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                           access=access, format=format_, notes=notes, approved=1,
@@ -8538,7 +8547,6 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
-    region = (form.get("region") or "").strip()
     demographic = (form.get("demographic") or "").strip()
     cost_band = (form.get("cost_band") or "Undisclosed dues").strip()
     cost_note = (form.get("cost_note") or "").strip()
@@ -8556,7 +8564,7 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
     try:
-        lib.update_community(community_id, name=name, url=url, region=region, demographic=demographic,
+        lib.update_community(community_id, name=name, url=url, demographic=demographic,
                              cost_band=cost_band, categories=categories, cost_note=cost_note,
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                              access=access, format=format_, notes=notes,
@@ -8770,7 +8778,9 @@ async def admin_communities_generate_listing(request: Request):
     draft = generate_community_listing(
         name, url,
         reach_options=_COMMUNITY_REACH, cost_band_options=_COMMUNITY_COST_BANDS,
-        sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES, metro_options=_COMMUNITY_METROS,
+        sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES,
+        access_options=_COMMUNITY_ACCESS, format_options=_COMMUNITY_FORMAT,
+        metro_options=_COMMUNITY_METROS,
         category_options=category_names,
     )
     if draft is None:
