@@ -4440,14 +4440,14 @@ visible at a glance, side by side.</p>
 @app.get("/contact", response_class=HTMLResponse)
 def contact_page(request: Request, submitted: str = "", message: str = ""):
     if submitted == "1":
-        body = """<div class="page page-narrow">
+        body = """<div class="page page-form">
 <h1>Thanks for reaching out.</h1>
 <p>I'll get back to you shortly.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
         return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request)))
 
-    body = f"""<div class="page page-narrow">
+    body = f"""<div class="page page-form">
 <h1>Get in Touch</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">I'm always happy to connect with finance leaders, founders, and operators.</p>
 <form method="post" action="/contact" style="display:grid;gap:16px;">
