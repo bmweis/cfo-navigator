@@ -961,6 +961,9 @@ _TL_COLUMN_ICONS = (_ICON_PENCIL, _ICON_MIC, _ICON_HEADPHONES, _ICON_NEWSPAPER)
 _ICON_BOOK_OPEN = ('<path d="M12,4.8 C8.4,3.6 4.8,4.2 4.8,4.2 V18 C4.8,18 8.4,17.4 12,18.6 '
                    'C15.6,17.4 19.2,18 19.2,18 V4.2 C19.2,4.2 15.6,3.6 12,4.8 Z"/>'
                    '<line x1="12" y1="4.8" x2="12" y2="18.6"/>')
+_ICON_CHAT_QUESTION = ('<path d="M4 5.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4.5 4v-4H6a2 2 0 0 1-2-2z"/>'
+                        '<path d="M9.5 9.3a2.3 2.3 0 1 1 3.4 2c-.7.5-1.15 1-1.15 1.9"/>'
+                        '<circle cx="11.9" cy="16" r=".01" stroke-width="2.2"/>')
 
 
 # ---------------------------------------------------------------------------
@@ -10010,8 +10013,10 @@ def library(request: Request):
                'the archive &rarr;</a></p>') if _is_member(request) else ''
 
     fpa_buddy = "".join([
-        _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive&mdash;a cited answer drawn from the Archive plus trusted web sources."),
-        _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
+        _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive&mdash;a cited answer drawn from the Archive plus trusted web sources.",
+               icon_html=_card_icon(0, _ICON_BRAIN)),
+        _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one.",
+               icon_html=_card_icon(1, _ICON_CHAT_QUESTION)),
     ])
 
     body = f"""<div class="page page-full">
