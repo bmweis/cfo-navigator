@@ -1255,10 +1255,17 @@ None of that's abstract. I led finance through two acquisitions—Ansible to Red
 I'm looking for the next place to put that to work. Could be early stage. Could be growth. Could be something I haven't done yet."""
 
 
-def _copy_paragraphs_html(text: str) -> str:
-    """Render admin-edited plain-text copy (blank-line-separated paragraphs) as escaped <p> tags."""
+def _copy_paragraphs_html(text: str, style: str = "") -> str:
+    """Render admin-edited plain-text copy (blank-line-separated paragraphs) as escaped <p>
+    tags — the one place admin copy fields should ever reach the page, so a field that's
+    supposed to support multiple paragraphs doesn't get silently flattened to one block by
+    a raw {_esc(text)} interpolation (blank lines survive in the textarea and in the DB, but
+    HTML collapses raw newlines, so without this split they render as a single run-on line).
+    `style` is applied to every generated <p>, for callers that need more than the global
+    `p{{}}` default (e.g. a specific font-size/line-height for the hero subhead)."""
     paras = [p.strip() for p in text.strip().split("\n\n") if p.strip()]
-    return "".join(f"<p>{_esc(p)}</p>" for p in paras)
+    attr = f' style="{style}"' if style else ""
+    return "".join(f"<p{attr}>{_esc(p)}</p>" for p in paras)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1327,7 +1334,7 @@ def homepage(request: Request):
   <div class="home-hero-copy">
     <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
     <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">{_underline_last_word(homepage_headline)}</h1>
-    <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p>
+    {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0 0 12px;")}
   </div>
   <div class="home-hero-side">
     <div class="home-hero-photo">
@@ -1336,7 +1343,7 @@ def homepage(request: Request):
     </div>
     <div class="home-status">
       <div style="font:700 15px var(--font-sticker);color:var(--seafoam-deep);margin-bottom:8px;">STATUS:</div>
-      <p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_esc(homepage_teaser)}</p>
+      {_copy_paragraphs_html(homepage_teaser, style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;")}
       <div style="font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
     </div>
   </div>
