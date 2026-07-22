@@ -8041,7 +8041,7 @@ def admin_communities(request: Request, filter: str = ""):
         if filter == "needs_review" else ""
     )
 
-    body = f"""<div class="page page-wide">
+    body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Communities</h1>
@@ -8324,7 +8324,7 @@ def admin_communities_new(request: Request):
         categories = lib.list_community_categories()
     finally:
         lib.close()
-    body = f"""<div class="page page-narrow">
+    body = f"""<div class="page page-form">
 <h1>Add a community</h1>
 <form method="post" action="/admin/tools/communities/new" style="display:grid;gap:20px;">
 {_community_form_fields(categories=categories)}
@@ -8384,7 +8384,7 @@ def admin_communities_edit(request: Request, community_id: int):
         lib.close()
     if not c:
         raise HTTPException(status_code=404, detail="Community not found")
-    body = f"""<div class="page page-narrow">
+    body = f"""<div class="page page-form">
 <h1>Edit community</h1>
 <form method="post" action="/admin/tools/communities/{community_id}/edit" style="display:grid;gap:20px;">
 {_community_form_fields(c, categories)}
