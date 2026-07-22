@@ -224,25 +224,29 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
 
 ### Layout
 
-Five width tiers, keyed to content shape rather than one global reading measure —
-replacing the old three-tier system (`.page` 780px / `.page-narrow` 480px /
-`.page-wide` 960px) page-by-page as each page's own refresh phase lands. (The old
-`.page` measure had drifted from its documented values — this table is the
-correction: the GER calculator was never actually 820px, it used plain 780px; 860px
-belonged to `/library/feed`, not the Toolbox grid.)
+Five width tiers, keyed to content shape rather than one global reading measure.
+Fully migrated as of the Phase 9 route sweep — every page-rendering route carries one
+of the five tiers below; the old three-tier system (`.page` 780px / `.page-narrow`
+480px / `.page-wide` 960px) is retired and those two classes no longer exist in the
+CSS. (The old `.page` measure had drifted from its documented values before this
+system landed — the GER calculator was never actually 820px, it used plain 780px;
+860px belonged to `/library/feed`, not the Toolbox grid; both since corrected.)
 
 | Tier | CSS class | Width | Pages |
 |---|---|---|---|
-| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing, Library landing, article reader (`/read`) |
-| Card grids | `.page-grid` | ~1200–1400px | CFO Toolbox landing |
-| Functional tools | `.page-tool` | ~900–1000px | FP&A Buddy chat, Growth Engine Ratio calculator |
-| Forms | `.page-form` | ~600–700px | Contact, admin edit forms |
-| Admin data tables | `.page-admin` | ~1400–1600px | Admin communities list |
+| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), Library landing (+ past questions, ask history), article reader (`/read`), CFO Toolbox community profile pages |
+| Card grids | `.page-grid` | ~1200–1400px | CFO Toolbox landing + Software directory, Benchmarks directory, Communities directory (+ compare, find-results), `/admin/open-source` |
+| Functional tools | `.page-tool` | ~900–1000px | FP&A Buddy chat, Growth Engine Ratio calculator, Sail Don't Row (+ its leaderboard) |
+| Forms | `.page-form` | ~600–700px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit), admin single-record add/edit forms |
+| Admin data tables | `.page-admin` | ~1400–1600px | All remaining `/admin/*` list, dashboard, and report pages |
 
-Combine with `.page` for its margin/padding (e.g. `class="page page-full"`), the same
-pattern already used for `.page.page-wide`. Generous page padding (≈48px top).
-Whitespace before density. Admin/data pages get the width bump for scannability, not
-decoration — they never get any part of the graffiti layer (§4).
+Combine with `.page` for its margin/padding (e.g. `class="page page-full"`). Generous
+page padding (≈48px top). Whitespace before density. Admin/data pages get the width
+bump for scannability, not decoration — they never get any part of the graffiti layer
+(§4). Two pages (`/library/archive`, `/library/feed`) use a bespoke full-bleed layout
+outside the `.page` system entirely and aren't part of this tier table — their own
+internal content widths (960px and 860px respectively) were left alone or adjusted in
+place rather than forced into a tier that doesn't fit their structure.
 
 ---
 
