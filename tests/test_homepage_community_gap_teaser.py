@@ -64,29 +64,32 @@ def test_top_of_page_teaser_removed_as_duplicate_of_bottom_cta(env):
         r = client.get("/tools/communities")
         assert r.status_code == 200
         assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' not in r.text
-        assert "Not sure where to start? Take the quiz" in r.text
+        assert "Not sure which community's for you? " in r.text
+        assert '<a href="/tools/communities/find"' in r.text
 
 
-def test_gap_cta_card_shown_on_communities_page(env):
+def test_top_of_page_links_shown_on_communities_page(env):
     c = _client(env)
     r = c.get("/tools/communities")
     assert r.status_code == 200
-    assert "Think finance communities could be better?" in r.text
-    assert "Tell us where they fall short" in r.text
+    assert "Think finance communities could be better?" not in r.text
+    assert "Don't see the right fit? " in r.text
     assert '<a id="comm-gap-link" href="/tools/communities/gap"' in r.text
 
 
-def test_gap_cta_card_has_suggest_a_community_button(env):
+def test_bottom_submit_link_auth_aware_on_communities_page(env):
     c = _client(env)
     r = c.get("/tools/communities")
     assert r.status_code == 200
-    assert "Sign in to suggest a community" in r.text
+    assert "Know a community that belongs here?" in r.text
+    assert "Sign in to submit" in r.text
+    assert "Suggest a community" not in r.text
 
     m = _member_client(env)
     r = m.get("/tools/communities")
     assert r.status_code == 200
     assert 'href="/tools/communities/submit"' in r.text
-    assert "Suggest a community" in r.text
+    assert "Submit it for review" in r.text
 
 
 def test_suggest_a_piece_hidden_from_anonymous_visitors_on_library_page(env):

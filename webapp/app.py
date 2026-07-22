@@ -4809,7 +4809,6 @@ def tools_directory(request: Request):
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
-{'<a href="/tools/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Submit a tool</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to submit a tool</a>'}
 {'<a href="/admin/tools/categories" style="margin-left:12px;font-size:14px;font-weight:500;">Manage categories →</a>' if authed else ''}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
@@ -4833,7 +4832,7 @@ def tools_directory(request: Request):
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
   <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these companies.</p>
   <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
-    {'<a href="/tools/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit a tool →</a>'}</p>
+    {'<a href="/tools/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit →</a>'}</p>
 </div>
 </div>
 
@@ -5402,17 +5401,15 @@ groups, associations, and Slack channels.
 
 <p id="comm-empty" style="display:none;color:var(--muted);padding:32px 0;">No communities match your search.</p>
 
-<div id="comm-gap-cta" style="margin-top:24px;padding:20px 22px;background:var(--seafoam);border-radius:12px;">
-  <p style="margin:0 0 8px;font-weight:600;color:var(--navy);">Think finance communities could be better?</p>
-  <p style="margin:0 0 14px;color:var(--navy);font-size:14px;line-height:1.5;">Tell us where they fall short: what you haven't found, or what an existing community missed.</p>
-  <a id="comm-gap-link" href="/tools/communities/gap" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;">Tell us where they fall short &rarr;</a>
-  {'<a href="/tools/communities/submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;margin-left:10px;">Suggest a community &rarr;</a>' if is_member else '<a href="/login" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;margin-left:10px;">Sign in to suggest a community &rarr;</a>'}
+<div style="margin-top:24px;">
+  <p style="margin:0 0 6px;font-size:15px;color:var(--muted);">Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Take the quiz &rarr;</a></p>
+  <p style="margin:0;font-size:15px;color:var(--muted);">Don't see the right fit? <a id="comm-gap-link" href="/tools/communities/gap" style="font-weight:500;">Tell me what's missing &rarr;</a></p>
 </div>
 
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
   <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these communities.</p>
   <p style="font-size:15px;color:var(--muted);">Know a community that belongs here?
-    {'<a href="/tools/communities/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to suggest a community →</a>'}</p>
+    {'<a href="/tools/communities/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit →</a>'}</p>
 </div>
 </div>
 
@@ -5435,7 +5432,6 @@ groups, associations, and Slack channels.
 .comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
-.comm-gap-cta-highlight{{box-shadow:0 0 0 2px var(--coral);}}
 .comm-compare-label{{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;}}
 .comm-compare-label input{{cursor:pointer;}}
 </style>
@@ -5496,7 +5492,6 @@ function renderCommunities(list) {{
   var empty = document.getElementById('comm-empty');
   var count = document.getElementById('comm-count');
   var pagination = document.getElementById('comm-pagination');
-  var gapCta = document.getElementById('comm-gap-cta');
   updateGapCtaLink(list.length === 0);
   if (list.length === 0) {{
     grid.innerHTML = '';
@@ -5505,11 +5500,9 @@ function renderCommunities(list) {{
     count.textContent = '';
     pagination.style.display = 'none';
     pagination.innerHTML = '';
-    gapCta.classList.add('comm-gap-cta-highlight');
     return;
   }}
   empty.style.display = 'none';
-  gapCta.classList.remove('comm-gap-cta-highlight');
   // Featured communities first, then alphabetical within each group.
   var sorted = list.slice().sort(function(a, b) {{
     if (a.featured && !b.featured) return -1;
@@ -7947,11 +7940,10 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li><strong>Zero-result state:</strong> &ldquo;No communities match your search. Tell us what you're looking for below.&rdquo; &mdash; auto-highlights the gap-collection CTA card.</li>
-<li><strong>Gap-collection CTA card</strong> (bottom of page, always visible, two buttons): &ldquo;Think finance communities could be better?&rdquo; / &ldquo;Tell us where they fall short: what you haven't found, or what an existing community missed.&rdquo; &rarr; buttons &ldquo;Tell us where they fall short &rarr;&rdquo; and &ldquo;Suggest a community &rarr;&rdquo; (the latter reads &ldquo;Sign in to suggest a community &rarr;&rdquo; and links to <code>/login</code> for signed-out visitors). The top-of-page member-gated teaser that duplicated the feedback prompt was removed &mdash; the quiz link is the only thing left up there.</li>
+<li><strong>Zero-result state:</strong> &ldquo;No communities match your search. Tell us what you're looking for below.&rdquo; The gap form's link href still gets a <code>?zero=1</code> query param appended client-side so the gap form can tailor its transparency note (see below) &mdash; there's no more visual highlight to go with it, since the CTA is now a plain text link, not a card.</li>
+<li><strong>Two subtle text links</strong> (top of page, no box/button chrome, same inline style as the footer links below): &ldquo;Not sure which community's for you? Take the quiz &rarr;&rdquo; (links to the recommender) and &ldquo;Don't see the right fit? Tell me what's missing &rarr;&rdquo; (links to the gap form). The seafoam CTA card that used to carry this prompt plus a &ldquo;Suggest a community&rdquo; button was removed &mdash; suggesting a community now lives only in the footer link below.</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#9733; Formal advisor to these communities.&rdquo;</li>
-<li><strong>Suggest-a-community links</strong> (footer, plus the gap-collection CTA card above): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to suggest a community&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
-<li><strong>Recommender link:</strong> (top of page) &ldquo;Not sure where to start? Take the quiz &rarr;&rdquo;.</li>
+<li><strong>Suggest-a-community link</strong> (footer): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to submit &rarr;&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
 </ul>
 </section>
 

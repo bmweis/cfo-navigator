@@ -305,7 +305,11 @@ re-researched go through `voice_rewrite_community_fields`, not all 11.
 tool-submission flow (`/tools/submit`) exactly, deliberately trimmed to just
 name + URL (no description/categories, since a pending community is thin
 until Brian writes or generates its profile). It's member-gated like the
-tool form (`_is_member`). The submission lands via `add_community(...,
+tool form (`_is_member`), and is reachable from a single subtle text link at
+the bottom of `/tools/communities` ("Know a community that belongs here?
+Submit it for review →", or "Sign in to submit →" signed out) — the same
+auth-aware footer-link pattern used at the bottom of `/tools/software`. The
+submission lands via `add_community(...,
 submitted_by=..., approved=0)`, fires the internal notification email plus a
 `COMMUNITY_SUBMISSION_*`-templated confirmation to the submitter (both
 admin-editable at `/admin/emails`, same `_send_email_safely` best-effort
@@ -321,10 +325,15 @@ tools. Pending-count badging (`lib.count_pending_communities()`) feeds
 `webapp/tasks.py::open_task_counts` at `/admin/tools/communities`, the same
 mechanism as pending tool submissions.
 
-**Community gap-collection** (Phase 5) is reachable three ways: the CTA card
-at the bottom of `/tools/communities`, the same CTA auto-surfaced (with a
-`zero=1` query param) when a search/filter combination returns no results,
-and a per-profile "Not quite the right fit?" mini-CTA on
+**Community gap-collection** (Phase 5) is reachable three ways: a subtle text
+link at the top of `/tools/communities` ("Don't see the right fit? Tell me
+what's missing →", alongside a second plain-text link to the recommender
+quiz — "Not sure which community's for you? Take the quiz →"; the two
+replaced an earlier seafoam CTA card that also carried a "Suggest a
+community" button, now covered by the bottom-of-page submission link
+above), the same link with a `zero=1` query param appended client-side when
+a search/filter combination returns no results, and a per-profile "Not quite
+the right fit?" mini-CTA on
 `/tools/communities/{slug}` that pre-fills `closest_community_id`. All three
 land on `GET /tools/communities/gap`, which builds a transparency note from
 whatever session state it can detect — the directory's search/filter state
