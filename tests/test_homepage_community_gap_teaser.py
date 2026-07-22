@@ -1,6 +1,8 @@
-"""Homepage Communities gap-collection teaser (Phase 8): a bolded, member-gated
-line under the CFO Toolbox card pointing at the Phase 5 gap-collection CTA,
-same pattern as the existing "Suggest a piece for the archive" line.
+"""Community gap-collection teaser and "Suggest a piece" prompt (Phase 8,
+relocated in the homepage hero restructure): both are bolded/plain,
+member-gated lines that used to sit at the bottom of the homepage and now
+live on the pages they actually point at — Communities (gap CTA) and Library
+(Archive submission).
 """
 import pathlib
 import sys
@@ -39,16 +41,34 @@ def _member_client(appmod):
     return c
 
 
-def test_teaser_hidden_from_anonymous_visitors(env):
+def test_homepage_no_longer_shows_either_prompt_anonymous(env):
     c = _client(env)
     r = c.get("/")
     assert r.status_code == 200
     assert "Think finance communities could be better?" not in r.text
+    assert "Suggest a piece for the archive" not in r.text
 
 
-def test_teaser_shown_to_members_and_links_to_gap_cta(env):
+def test_homepage_no_longer_shows_either_prompt_member(env):
     c = _member_client(env)
     r = c.get("/")
+    assert r.status_code == 200
+    assert "Think finance communities could be better?" not in r.text
+    assert "Suggest a piece for the archive" not in r.text
+
+
+def test_gap_teaser_hidden_from_anonymous_visitors_on_communities_page(env):
+    c = _client(env)
+    r = c.get("/tools/communities")
+    assert r.status_code == 200
+    # The always-visible gap CTA card still says this too, so just check the
+    # bolded member-gated teaser specifically isn't present.
+    assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' not in r.text
+
+
+def test_gap_teaser_shown_to_members_on_communities_page(env):
+    c = _member_client(env)
+    r = c.get("/tools/communities")
     assert r.status_code == 200
     assert "Think finance communities could be better?" in r.text
     assert "Tell us where they fall short" in r.text
@@ -57,8 +77,15 @@ def test_teaser_shown_to_members_and_links_to_gap_cta(env):
     assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' in r.text
 
 
-def test_suggest_a_piece_line_still_renders_alongside_teaser(env):
+def test_suggest_a_piece_hidden_from_anonymous_visitors_on_library_page(env):
+    c = _client(env)
+    r = c.get("/library", follow_redirects=False)
+    assert r.status_code in (302, 303)  # /library redirects signed-out visitors to /login
+
+
+def test_suggest_a_piece_shown_to_members_on_library_page(env):
     c = _member_client(env)
-    r = c.get("/")
+    r = c.get("/library")
+    assert r.status_code == 200
     assert "Suggest a piece for the archive" in r.text
-    assert "Think finance communities could be better?" in r.text
+    assert '<a href="/library/submit">' in r.text
