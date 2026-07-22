@@ -937,6 +937,17 @@ _ICON_WRENCH = ('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77
 _ICON_CHART = '<path d="M4 20V14M12 20V4M20 20v-10"/>'
 _ICON_PEOPLE = ('<circle cx="9" cy="8" r="3.2"/><path d="M3.2 20c0-3.6 2.7-6.2 5.8-6.2s5.8 2.6 5.8 6.2"/>'
                 '<circle cx="17.5" cy="9" r="2.4"/><path d="M15.3 14.3c2.4 .2 4.5 2 5.1 4.4"/>')
+_ICON_PENCIL = ('<path d="M4 20l1-4.5L15.5 5 19 8.5 8.5 19z"/>'
+                '<path d="M13.5 6.5l3.5 3.5"/><path d="M5 15.5l3.5 3.5"/>')
+_ICON_MIC = ('<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M6,11 a6,6 0 0 0 12,0"/>'
+             '<line x1="12" y1="17" x2="12" y2="21"/><line x1="8" y1="21" x2="16" y2="21"/>')
+_ICON_HEADPHONES = ('<path d="M4,13 a8,8 0 0 1 16,0"/>'
+                     '<rect x="2.5" y="13" width="4.5" height="7" rx="2"/><rect x="17" y="13" width="4.5" height="7" rx="2"/>')
+_ICON_NEWSPAPER = ('<path d="M3 6h13v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
+                    '<path d="M16 9h4a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2h-3"/>'
+                    '<line x1="6" y1="9.5" x2="12" y2="9.5"/><line x1="6" y1="12.5" x2="12" y2="12.5"/>'
+                    '<line x1="6" y1="15.5" x2="10" y2="15.5"/>')
+_TL_COLUMN_ICONS = (_ICON_PENCIL, _ICON_MIC, _ICON_HEADPHONES, _ICON_NEWSPAPER)
 
 
 # ---------------------------------------------------------------------------
@@ -1389,13 +1400,44 @@ def thought_leadership(request: Request):
 
         return f'<div class="tl-row"><div class="tl-row-top">{title_html}{meta_html}</div>{desc_html}{photos_html}</div>'
 
-    def section(title: str, emoji: str, items: list[TLItem]) -> str:
+    def ordered_items(items: list[TLItem]) -> list[TLItem]:
         # Undated items (sort_key == "") float to the top of their section — a
         # standing "full feed" link or similar; everything else sorts newest first.
         dated = sorted((it for it in items if it.sort_key), key=lambda it: it.sort_key, reverse=True)
         undated = [it for it in items if not it.sort_key]
-        rows = "".join(row(it) for it in undated + dated)
-        return f'<h2 class="tl-section-head">{emoji} {_esc(title)}</h2>{rows}'
+        return undated + dated
+
+    def section(title: str, emoji: str, items: list[TLItem], anchor_id: str = "") -> str:
+        rows = "".join(row(it) for it in ordered_items(items))
+        id_attr = f' id="{anchor_id}"' if anchor_id else ""
+        return f'<h2 class="tl-section-head"{id_attr}>{emoji} {_esc(title)}</h2>{rows}'
+
+    def col_preview_item(it: TLItem) -> str:
+        meta_bits = [b for b in (it.venue, it.date_label) if b]
+        meta_html = (f'<div class="tl-col-item-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</div>'
+                     if meta_bits else "")
+        title_html = (f'<a href="{_esc(it.url)}" target="_blank" rel="noopener" class="tl-col-item-title">{_esc(it.title)}</a>'
+                      if it.url else f'<div class="tl-col-item-title">{_esc(it.title)}</div>')
+        return f'<div class="tl-col-item">{title_html}{meta_html}</div>'
+
+    _TL_COL_CAP = 4
+
+    def column(index: int, icon_svg: str, title: str, items: list[TLItem], anchor_id: str) -> str:
+        # Press collapses to nothing (not an empty card) when there's nothing to
+        # show — cap each column at ~4 items with a "Show all N" link to the full
+        # list further down the page, so the overview stays scannable.
+        if not items:
+            return ""
+        ordered = ordered_items(items)
+        preview = ordered[:_TL_COL_CAP]
+        rows = "".join(col_preview_item(it) for it in preview)
+        more = (f'<a href="#{anchor_id}" class="tl-col-more">Show all {len(ordered)} &rarr;</a>'
+                if len(ordered) > len(preview) else "")
+        return (
+            f'<div class="tl-col">'
+            f'<div class="tl-col-head">{_card_icon(index, icon_svg)}<div class="tl-col-title">{_esc(title)}</div></div>'
+            f'{rows}{more}</div>'
+        )
 
     # Featured: three flagship pieces, one consistent card treatment. The only
     # per-card variation is the small category tag colour — no full-colour floods,
@@ -1454,16 +1496,36 @@ def thought_leadership(request: Request):
         '.tl-row-photo-cap{font-size:12px;color:var(--muted);margin:0;font-style:italic;}'
         '@media(max-width:560px){.tl-row-photos{grid-template-columns:1fr;}.tl-row-photos img{height:170px;}'
         '.tl-row-top{flex-direction:column;gap:2px;}}'
+        '.tl-cols{display:flex;gap:24px;margin:8px 0 12px;}'
+        '.tl-col{flex:1;min-width:0;}'
+        '.tl-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}'
+        '.tl-col-head>div:first-child{margin-bottom:0;}'
+        '.tl-col-title{font:700 15px var(--font-head);color:var(--ink);}'
+        '.tl-col-item{margin-bottom:12px;}'
+        '.tl-col-item-title{display:block;font:600 13px var(--font-head);color:var(--ink);'
+        'margin:0 0 3px;line-height:1.35;text-decoration:none;}'
+        'a.tl-col-item-title:hover{color:var(--navy);text-decoration:underline;}'
+        '.tl-col-item-meta{font:400 11px var(--font-body);color:var(--muted);}'
+        '.tl-col-more{display:inline-block;margin-top:2px;font:600 12px var(--font-body);color:var(--navy);}'
+        '@media(max-width:900px){.tl-cols{flex-wrap:wrap;}.tl-col{flex:1 1 calc(50% - 12px);}}'
+        '@media(max-width:560px){.tl-col{flex:1 1 100%;}}'
         '</style>'
         '<h1>Thought Leadership</h1>'
         '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
         + featured
-        + '<div style="max-width:760px;">'
     )
 
-    for section_title, emoji, items in TL_SECTIONS:
-        body += section(section_title, emoji, items)
+    tl_anchor_ids = [f"tl-full-{items[0].type if items else i}" for i, (_, _, items) in enumerate(TL_SECTIONS)]
 
+    columns_html = "".join(
+        column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], section_title, items, tl_anchor_ids[i])
+        for i, (section_title, emoji, items) in enumerate(TL_SECTIONS)
+    )
+    body += f'<div class="tl-cols">{columns_html}</div>'
+
+    body += '<div style="max-width:760px;">'
+    for i, (section_title, emoji, items) in enumerate(TL_SECTIONS):
+        body += section(section_title, emoji, items, anchor_id=tl_anchor_ids[i])
     body += "</div></div>"
     return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
