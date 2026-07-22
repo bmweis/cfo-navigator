@@ -1316,7 +1316,7 @@ def homepage(request: Request):
   .home-hero{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start;}}
   .home-hero-copy{{grid-column:1 / 3;}}
   .home-hero-side{{grid-column:3 / 4;align-items:flex-end;gap:0;}}
-  .home-hero-photo{{margin-bottom:-36px;}}
+  .home-hero-photo{{margin-bottom:-74px;}}
   .home-status{{padding-top:44px;}}
 }}
 @media(min-width:760px){{
