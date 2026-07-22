@@ -201,10 +201,10 @@ def test_gap_form_with_no_session_state_shows_no_transparency_note(env):
 
 def test_gap_form_search_context_shows_transparency_note(env):
     c = _client(env)
-    r = c.get("/tools/communities/gap?q=tax&region=Boston")
+    r = c.get("/tools/communities/gap?q=tax&access=Open")
     assert r.status_code == 200
     assert "We noticed" in r.text
-    assert "Boston" in r.text
+    assert "Open" in r.text
 
 
 def test_gap_form_zero_result_shows_empty_search_framing(env):
@@ -268,7 +268,7 @@ def test_gap_form_closest_match_and_transparency_note_render_together(env):
     cookie = profile_resp.cookies.get("cfo_visitor")
     c.cookies.set("cfo_visitor", cookie)
 
-    r = c.get(f"/tools/communities/gap?community_id={closest_id}&q=tax&region=Boston")
+    r = c.get(f"/tools/communities/gap?community_id={closest_id}&q=tax&access=Open")
     assert r.status_code == 200
 
     # The per-profile "Re: X" line renders.
@@ -278,7 +278,7 @@ def test_gap_form_closest_match_and_transparency_note_render_together(env):
     # The session transparency note renders too, unsuppressed, mentioning
     # both the search context and the other viewed profile.
     assert "We noticed" in r.text
-    assert "Boston" in r.text
+    assert "Open" in r.text
     assert "Other Viewed Community" in r.text
 
 

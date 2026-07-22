@@ -6,7 +6,7 @@ Safe to run multiple times — adds any community missing by URL and syncs
 name/notes on existing rows (same contract as tools/benchmarks' name+
 description re-sync), plus advisor (mirroring tools.advisor: bumped True
 here if the source says so, never demoted). Every other field —
-reach, metros, featured, cost_band, cost_note, sponsorship_type,
+reach, local_markets, featured, cost_band, cost_note, sponsorship_type,
 sponsor_name, access, format, categories, approved — is admin-owned once
 seeded, edited at /admin/tools/communities, and never touched by a re-run.
 

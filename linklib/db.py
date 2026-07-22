@@ -773,13 +773,24 @@ class Library:
             # populated these for the existing corpus.
             "ALTER TABLE communities ADD COLUMN reach TEXT NOT NULL DEFAULT 'National'",
             "ALTER TABLE communities ADD COLUMN metros_json TEXT NOT NULL DEFAULT '[]'",
+            # Metros checkbox grid -> free text (Local markets): the fixed
+            # 18-city vocabulary was too narrow (couldn't express a chapter in
+            # a city not on the list) and blocked entirely on Brian curating
+            # new options. `local_markets` replaces it as the admin-owned
+            # field going forward; `metros_json` is frozen in place rather
+            # than dropped (same no-destructive-migration precedent as the
+            # retired *_tags columns below) and backfilled into
+            # `local_markets` once by _migrate_community_local_markets, since
+            # turning its JSON array into readable text needs Python, not a
+            # bare ALTER TABLE.
+            "ALTER TABLE communities ADD COLUMN local_markets TEXT NOT NULL DEFAULT ''",
             # Featured pinning, mirroring tools.promoted exactly (coral badge +
             # pin-to-top; independent of the advisor flag below).
             "ALTER TABLE communities ADD COLUMN featured INTEGER NOT NULL DEFAULT 0",
             # Advisor disclosure, mirroring tools.advisor exactly: syncs from
             # scripts/seed_communities.py's COMMUNITIES on every startup (see
             # _seed_toolbox), same as name/notes — not purely admin-owned like
-            # featured/reach/metros_json.
+            # featured/reach/local_markets.
             "ALTER TABLE communities ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
             # Recommender (Phase 7): distinguishes a quiz submission from a
             # hand-written gap-form submission in the same table rather than a
@@ -953,6 +964,7 @@ class Library:
         # migration rather than a line in the loop above. Must run before
         # _POST_MIGRATION_INDEXES, which assumes user_id already exists.
         self._migrate_read_later_user_scope()
+        self._migrate_community_local_markets()
         # Indexes on any column added by the ALTER TABLE loop above must be
         # created here, never inside _SCHEMA — see the NOTE above the
         # password_reset_requests table in _SCHEMA for why (a real incident:
@@ -1043,6 +1055,30 @@ class Library:
         )
         self.conn.execute("DROP TABLE read_later_legacy")
         self.conn.commit()
+
+    def _migrate_community_local_markets(self) -> None:
+        """One-time backfill of `local_markets` from the retired `metros_json`
+        column, for every existing community that has metros but no
+        local_markets yet (idempotent — a no-op on every boot after the
+        first, and on any row an admin has already edited post-migration).
+        Turning a JSON array into readable comma-separated text needs Python,
+        so this can't be a plain ALTER TABLE line in the loop above."""
+        rows = self.conn.execute(
+            "SELECT id, metros_json FROM communities WHERE local_markets = '' AND metros_json != '[]'"
+        ).fetchall()
+        for row in rows:
+            try:
+                metros = json.loads(row["metros_json"]) or []
+            except (ValueError, TypeError):
+                continue
+            if not metros:
+                continue
+            self.conn.execute(
+                "UPDATE communities SET local_markets=? WHERE id=?",
+                (", ".join(metros), row["id"]),
+            )
+        if rows:
+            self.conn.commit()
 
     # -- writes -------------------------------------------------------------
 
@@ -1956,7 +1992,7 @@ class Library:
                       sponsorship_type: str = "Independent", sponsor_name: str = "",
                       access: str = "", format: str = "", notes: str = "",
                       submitted_by: str = "", approved: int = 0,
-                      reach: str = "National", metros: list[str] | None = None,
+                      reach: str = "National", local_markets: str = "",
                       featured: int = 0, advisor: int = 0) -> int:
         base = _slugify(name)
         slug = base
@@ -1969,13 +2005,13 @@ class Library:
             """INSERT INTO communities (name, slug, url, demographic, cost_band,
                cost_note, sponsorship_type, sponsor_name, access, format, notes,
                categories_json, approved, submitted_by, created_at, updated_at,
-               reach, metros_json, featured, advisor)
+               reach, local_markets, featured, advisor)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, url.strip(), demographic.strip(),
              cost_band, cost_note.strip(), sponsorship_type, sponsor_name.strip(),
              access.strip(), format.strip(), notes.strip(), json.dumps(categories),
              approved, submitted_by.strip(), now, now,
-             reach, json.dumps(metros or []), featured, advisor),
+             reach, local_markets.strip(), featured, advisor),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -2009,17 +2045,17 @@ class Library:
                          cost_note: str = "", sponsorship_type: str = "Independent",
                          sponsor_name: str = "", access: str = "", format: str = "",
                          notes: str = "", reach: str = "National",
-                         metros: list[str] | None = None, featured: int = 0,
+                         local_markets: str = "", featured: int = 0,
                          advisor: int = 0) -> None:
         self.conn.execute(
             """UPDATE communities SET name=?, url=?, demographic=?, cost_band=?,
                cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
-               notes=?, categories_json=?, updated_at=?, reach=?, metros_json=?,
+               notes=?, categories_json=?, updated_at=?, reach=?, local_markets=?,
                featured=?, advisor=? WHERE id=?""",
             (name.strip(), url.strip(), demographic.strip(), cost_band,
              cost_note.strip(), sponsorship_type, sponsor_name.strip(), access.strip(),
              format.strip(), notes.strip(), json.dumps(categories), _now(),
-             reach, json.dumps(metros or []), featured, advisor, community_id),
+             reach, local_markets.strip(), featured, advisor, community_id),
         )
         self.conn.commit()
 
@@ -2032,7 +2068,7 @@ class Library:
         (webapp/app.py's _seed_toolbox, scripts/seed_communities.py's main) —
         not through this method. demographic/cost_band/cost_note/
         sponsorship_type/sponsor_name/access/format/categories_json/approved/
-        reach/metros_json/featured are admin-owned, edited at
+        reach/local_markets/featured are admin-owned, edited at
         /admin/tools/communities, and never touched here — otherwise an admin's edit
         would get silently reverted on the next deploy's re-sync."""
         self.conn.execute(
@@ -2057,7 +2093,6 @@ class Library:
     def _community_to_dict(r: sqlite3.Row) -> dict:
         d = dict(r)
         d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
-        d["metros"] = json.loads(d.pop("metros_json", "[]") or "[]")
         return d
 
     # -- community profiles (deep qualitative read per community) -----------
