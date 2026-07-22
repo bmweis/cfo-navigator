@@ -1272,30 +1272,21 @@ def homepage(request: Request):
                sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=14)),
     ])
 
-    # The "suggest a piece" prompt is shown only to signed-in members — submissions
-    # are account-only now, to keep public spam out.
-    suggest = ('<p style="margin:14px 0 0;font-size:14px;color:var(--muted);">Read something a finance '
-               'leader should have in their back pocket? <a href="/library/submit">Suggest a piece for '
-               'the archive &rarr;</a></p>') if _is_member(request) else ''
-
-    # Same member-gated pattern as the "suggest a piece" line above, but with
-    # more visual weight (bolded) since it's pointing at the newer Communities
-    # gap-collection CTA rather than the archive.
-    community_gap_teaser = (
-        '<p style="margin:14px 0 0;font-size:14px;color:var(--muted);"><strong style="color:var(--ink);">'
-        'Think finance communities could be better?</strong> <a href="/tools/communities/gap">Tell us where '
-        'they fall short &rarr;</a></p>'
-    ) if _is_member(request) else ''
-
     body = f"""<div class="page page-full">
 <style>
-.home-hero{{display:flex;flex-direction:column;gap:28px;align-items:flex-start;}}
-.home-hero-copy{{max-width:640px;}}
-.home-hero-photo{{position:relative;flex-shrink:0;align-self:center;}}
+.home-hero{{display:flex;flex-direction:column;gap:28px;align-items:stretch;}}
+.home-hero-copy{{min-width:0;}}
+.home-hero-subhead{{max-width:740px;}}
+.home-hero-side{{display:flex;flex-direction:column;gap:20px;align-items:center;}}
+.home-hero-photo{{position:relative;flex-shrink:0;}}
+.home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
 .home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;}}
+@media(min-width:900px){{
+  .home-hero{{flex-direction:row;align-items:flex-start;gap:56px;}}
+  .home-hero-copy{{flex:1 1 auto;}}
+  .home-hero-side{{flex:0 0 340px;width:340px;align-items:flex-start;}}
+}}
 @media(min-width:760px){{
-  .home-hero{{flex-direction:row;align-items:center;gap:56px;}}
-  .home-hero-photo{{align-self:flex-start;}}
   .home-cards{{grid-template-columns:repeat(3,1fr);}}
 }}
 </style>
@@ -1303,24 +1294,22 @@ def homepage(request: Request):
   <div class="home-hero-copy">
     <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
     <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">{_underline_last_word(homepage_headline)}</h1>
-    <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p>
+    <div class="home-hero-subhead"><p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p></div>
   </div>
-  <div class="home-hero-photo">
-    {_avatar(200)}
-    {_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="-14px", right="-18px")}
+  <div class="home-hero-side">
+    <div class="home-hero-photo">
+      {_avatar(200)}
+      {_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="-14px", right="-18px")}
+    </div>
+    <div class="home-status">
+      <div style="font:700 15px var(--font-sticker);color:var(--seafoam-deep);margin-bottom:8px;">STATUS:</div>
+      <p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_esc(homepage_teaser)}</p>
+      <div style="font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
+    </div>
   </div>
-</div>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:28px;max-width:680px;">
-  <div style="font:700 15px var(--font-sticker);color:var(--seafoam-deep);margin-bottom:8px;">STATUS:</div>
-  <p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_esc(homepage_teaser)}</p>
-  <div style="font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
 </div>
 
 <div class="home-cards">{cards}</div>
-
-{suggest}
-{community_gap_teaser}
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
 
@@ -5308,6 +5297,15 @@ def tools_communities(request: Request):
         for b in cost_bands
     )
 
+    # Same member-gated pattern as the "suggest a piece" teaser on /library, but
+    # with more visual weight (bolded) since it's pointing at the gap-collection
+    # CTA card further down this same page. Relocated here from the homepage.
+    community_gap_teaser = (
+        '<p style="margin:0 0 24px;font-size:14px;color:var(--muted);"><strong style="color:var(--ink);">'
+        'Think finance communities could be better?</strong> <a href="/tools/communities/gap">Tell us where '
+        'they fall short &rarr;</a></p>'
+    ) if is_member else ''
+
     body = f"""<div class="page page-grid">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
@@ -5316,6 +5314,7 @@ groups, associations, and Slack channels.
 <a href="/tools/communities/find" style="margin-left:12px;font-size:14px;font-weight:500;">Not sure where to start? Take the quiz &rarr;</a>
 {'<a href="/tools/communities/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Suggest a community</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to suggest a community</a>'}</p>
 
+{community_gap_teaser}
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"
     oninput="filterCommunities()"
@@ -7864,6 +7863,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong>Zero-result state:</strong> &ldquo;No communities match your search. Tell us what you're looking for below.&rdquo; &mdash; auto-highlights the gap-collection CTA card.</li>
+<li><strong>Member-gated teaser</strong> (top of page, shown only when signed in &mdash; not visible to public visitors; relocated here from the homepage): &ldquo;<strong>Think finance communities could be better?</strong> Tell us where they fall short &rarr;&rdquo;.</li>
 <li><strong>Gap-collection CTA card</strong> (bottom of page, always visible): &ldquo;Think finance communities could be better?&rdquo; / &ldquo;Tell us where they fall short: what you haven't found, or what an existing community missed.&rdquo; &rarr; button &ldquo;Tell us where they fall short &rarr;&rdquo;.</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#9733; Formal advisor to these communities.&rdquo;</li>
 <li><strong>Suggest-a-community links</strong> (top of page and footer): &ldquo;+ Suggest a community&rdquo; / &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to suggest a community&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
@@ -7931,13 +7931,6 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong>&ldquo;Recommender ranking weights&rdquo; panel:</strong> one card per weighting dimension, all 10 (Level, Function, CPE eligible events, What you're looking for, Platform, Programming, Dues, Industry, Local Presence, Organization) with a 0&ndash;5 weight number and a checkbox group of that dimension's own controlled-vocabulary values. Both are required together for a dimension to actually rank anything &mdash; a weight alone has nothing to match a community's tags against. Saved together, no page reload, mirroring <code>/admin/voice</code>'s pattern. Local Presence and Organization get the identical admin default weight+value treatment as the 8 <code>community_profiles</code> dimensions, even though their tags are computed on the fly from an existing <code>communities</code> column (<code>metros_json</code>, <code>sponsorship_type</code>) rather than stored in a dedicated <code>*_tags</code> column.</li>
 <li><strong>Profile edit form (&ldquo;Recommender weighting&rdquo; section):</strong> checkbox groups for the 8 <code>community_profiles</code>-sourced dimensions only, per-community, keep each community's <code>*_tags</code> columns current for new/edited communities &mdash; separate from the free-text research fields of the same base name, since that prose was found too inconsistent for reliable keyword matching (see <code>scripts/backfill_community_weight_tags.py</code>'s docstring for the specific false-positive example that ruled it out). Dues moved into this group in PR 5 (<code>paid_free_tags</code>) so a freemium community can carry both Free and Paid, independently of the single-value Cost band select on the community's own edit form. Local Presence and Organization don't get a checkbox group here &mdash; each already has its own single-value control elsewhere on this same edit form (the Metros checkboxes and the Sponsorship select), and duplicating it as a second control would just invite the two to drift apart.</li>
-</ul>
-</section>
-
-<section>
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Homepage</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li><strong>Member-gated teaser</strong> (shown only when signed in &mdash; not visible to public visitors): &ldquo;<strong>Think finance communities could be better?</strong> Tell us where they fall short &rarr;&rdquo;.</li>
 </ul>
 </section>
 
@@ -9967,6 +9960,14 @@ def library(request: Request):
         _hcard("/library/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag&mdash;your curated reading history."),
         _hcard("/library/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive."),
     ])
+
+    # The "suggest a piece" prompt is shown only to signed-in members — submissions
+    # are account-only now, to keep public spam out. Relocated here (from the
+    # homepage) to sit alongside the Archive it feeds.
+    suggest = ('<p style="margin:-14px 0 28px;font-size:14px;color:var(--muted);">Read something a finance '
+               'leader should have in their back pocket? <a href="/library/submit">Suggest a piece for '
+               'the archive &rarr;</a></p>') if _is_member(request) else ''
+
     fpa_buddy = "".join([
         _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive&mdash;a cited answer drawn from the Archive plus trusted web sources."),
         _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
@@ -9982,6 +9983,7 @@ def library(request: Request):
 <h1 style="margin:0 0 6px;">Library</h1>
 <p style="color:var(--muted);margin:0 0 26px;">Your private workspace&mdash;the curated archive, the live feed, and the FP&amp;A assistant.</p>
 {_section("Reading Room", reading_room)}
+{suggest}
 {_section("FP&amp;A Buddy", fpa_buddy)}
 </div>
 </div>"""
