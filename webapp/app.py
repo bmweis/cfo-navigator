@@ -1380,27 +1380,6 @@ def about_page(request: Request):
 
 @app.get("/thought-leadership", response_class=HTMLResponse)
 def thought_leadership(request: Request):
-    def row(it: TLItem) -> str:
-        title_html = (f'<a href="{_esc(it.url)}" target="_blank" rel="noopener" class="tl-row-title">{_esc(it.title)}</a>'
-                       if it.url else f'<span class="tl-row-title tl-row-title-plain">{_esc(it.title)}</span>')
-        meta_bits = [b for b in (it.venue, it.date_label) if b]
-        meta_html = f'<span class="tl-row-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</span>' if meta_bits else ''
-
-        if it.description:
-            desc_html = f'<p class="tl-row-desc">{_esc(it.description)}</p>'
-        elif it.needs_synopsis:
-            desc_html = '<p class="tl-row-desc"><span class="tl-row-pending">Synopsis pending</span></p>'
-        else:
-            desc_html = ''
-
-        photos_html = ''
-        if it.photos:
-            imgs = "".join(f'<img src="{_esc(p.src)}" alt="{_esc(p.alt)}">' for p in it.photos)
-            cap = f'<p class="tl-row-photo-cap">{_esc(it.photo_caption)}</p>' if it.photo_caption else ''
-            photos_html = f'<div class="tl-row-photos">{imgs}</div>{cap}'
-
-        return f'<div class="tl-row"><div class="tl-row-top">{title_html}{meta_html}</div>{desc_html}{photos_html}</div>'
-
     def ordered_items(items: list[TLItem]) -> list[TLItem]:
         # Undated items (sort_key == "") float to the top of their section — a
         # standing "full feed" link or similar; everything else sorts newest first.
@@ -1408,34 +1387,35 @@ def thought_leadership(request: Request):
         undated = [it for it in items if not it.sort_key]
         return undated + dated
 
-    def section(title: str, emoji: str, items: list[TLItem], anchor_id: str = "") -> str:
-        rows = "".join(row(it) for it in ordered_items(items))
-        id_attr = f' id="{anchor_id}"' if anchor_id else ""
-        return f'<h2 class="tl-section-head"{id_attr}>{emoji} {_esc(title)}</h2>{rows}'
-
-    def col_preview_item(it: TLItem) -> str:
+    def col_preview_item(it: TLItem, hidden: bool = False) -> str:
         meta_bits = [b for b in (it.venue, it.date_label) if b]
         meta_html = (f'<div class="tl-col-item-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</div>'
                      if meta_bits else "")
         title_html = (f'<a href="{_esc(it.url)}" target="_blank" rel="noopener" class="tl-col-item-title">{_esc(it.title)}</a>'
                       if it.url else f'<div class="tl-col-item-title">{_esc(it.title)}</div>')
-        return f'<div class="tl-col-item">{title_html}{meta_html}</div>'
+        cls = "tl-col-item tl-col-item-extra" if hidden else "tl-col-item"
+        return f'<div class="{cls}">{title_html}{meta_html}</div>'
 
-    _TL_COL_CAP = 4
+    _TL_COL_CAP = 6
 
-    def column(index: int, icon_svg: str, title: str, items: list[TLItem], anchor_id: str) -> str:
+    def column(index: int, icon_svg: str, title: str, items: list[TLItem]) -> str:
         # Press collapses to nothing (not an empty card) when there's nothing to
-        # show — cap each column at ~4 items with a "Show all N" link to the full
-        # list further down the page, so the overview stays scannable.
+        # show — cap each column at ~6 items with a "Show all N" toggle that
+        # expands the rest in place, so the overview stays scannable without
+        # depending on a separate full list elsewhere on the page.
         if not items:
             return ""
         ordered = ordered_items(items)
         preview = ordered[:_TL_COL_CAP]
+        extra = ordered[_TL_COL_CAP:]
         rows = "".join(col_preview_item(it) for it in preview)
-        more = (f'<a href="#{anchor_id}" class="tl-col-more">Show all {len(ordered)} &rarr;</a>'
-                if len(ordered) > len(preview) else "")
+        rows += "".join(col_preview_item(it, hidden=True) for it in extra)
+        col_id = f"tl-col-{index}"
+        more = (f'<a href="#" class="tl-col-more" onclick="toggleTLCol(event,\'{col_id}\')" '
+                f'data-more-label="Show all {len(ordered)} &rarr;">Show all {len(ordered)} &rarr;</a>'
+                if extra else "")
         return (
-            f'<div class="tl-col">'
+            f'<div class="tl-col" id="{col_id}">'
             f'<div class="tl-col-head">{_card_icon(index, icon_svg)}<div class="tl-col-title">{_esc(title)}</div></div>'
             f'{rows}{more}</div>'
         )
@@ -1479,24 +1459,6 @@ def thought_leadership(request: Request):
         '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
         '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
         '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
-        '.tl-section-head{font:700 13px var(--font-body);letter-spacing:.1em;text-transform:uppercase;'
-        'color:var(--navy);margin:38px 0 2px;display:flex;align-items:center;gap:8px;}'
-        '.tl-section-head:first-of-type{margin-top:30px;}'
-        '.tl-row{border-top:1px solid var(--line);padding:15px 10px;margin:0 -10px;border-radius:8px;transition:background-color .15s;}'
-        '.tl-row:hover{background:var(--navy-wash);}'
-        '.tl-row-top{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;}'
-        '.tl-row-title{font:600 16px var(--font-body);color:var(--ink);line-height:1.4;text-decoration:none;}'
-        '.tl-row-title:hover{color:var(--navy);text-decoration:underline;}'
-        '.tl-row-title-plain{color:var(--ink-soft);}'
-        '.tl-row-meta{font:500 12px var(--font-body);color:var(--muted);white-space:nowrap;letter-spacing:.02em;}'
-        '.tl-row-desc{font-size:14px;color:var(--ink-soft);line-height:1.5;margin:6px 0 0;}'
-        '.tl-row-pending{font-style:italic;color:var(--muted);border:1px dashed var(--line-strong);'
-        'border-radius:6px;padding:3px 10px;display:inline-block;background:var(--bg);font-size:13px;}'
-        '.tl-row-photos{display:grid;grid-template-columns:2fr 3fr;gap:10px;margin:12px 0 6px;}'
-        '.tl-row-photos img{width:100%;height:200px;object-fit:cover;border-radius:10px;display:block;}'
-        '.tl-row-photo-cap{font-size:12px;color:var(--muted);margin:0;font-style:italic;}'
-        '@media(max-width:560px){.tl-row-photos{grid-template-columns:1fr;}.tl-row-photos img{height:170px;}'
-        '.tl-row-top{flex-direction:column;gap:2px;}}'
         '.tl-cols{display:flex;gap:24px;margin:8px 0 12px;}'
         '.tl-col{flex:1;min-width:0;}'
         '.tl-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}'
@@ -1508,6 +1470,7 @@ def thought_leadership(request: Request):
         'a.tl-col-item-title:hover{color:var(--navy);text-decoration:underline;}'
         '.tl-col-item-meta{font:400 11px var(--font-body);color:var(--muted);}'
         '.tl-col-more{display:inline-block;margin-top:2px;font:600 12px var(--font-body);color:var(--navy);}'
+        '.tl-col-item-extra{display:none;}'
         '@media(max-width:900px){.tl-cols{flex-wrap:wrap;}.tl-col{flex:1 1 calc(50% - 12px);}}'
         '@media(max-width:560px){.tl-col{flex:1 1 100%;}}'
         '</style>'
@@ -1516,18 +1479,25 @@ def thought_leadership(request: Request):
         + featured
     )
 
-    tl_anchor_ids = [f"tl-full-{items[0].type if items else i}" for i, (_, _, items) in enumerate(TL_SECTIONS)]
-
     columns_html = "".join(
-        column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], section_title, items, tl_anchor_ids[i])
+        column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], section_title, items)
         for i, (section_title, emoji, items) in enumerate(TL_SECTIONS)
     )
     body += f'<div class="tl-cols">{columns_html}</div>'
-
-    body += '<div style="max-width:760px;">'
-    for i, (section_title, emoji, items) in enumerate(TL_SECTIONS):
-        body += section(section_title, emoji, items, anchor_id=tl_anchor_ids[i])
-    body += "</div></div>"
+    body += """<script>
+function toggleTLCol(e, colId) {
+  e.preventDefault();
+  var col = document.getElementById(colId);
+  var btn = col.querySelector('.tl-col-more');
+  var expanded = btn.dataset.expanded === '1';
+  col.querySelectorAll('.tl-col-item-extra').forEach(function(el) {
+    el.style.display = expanded ? 'none' : 'block';
+  });
+  btn.innerHTML = expanded ? btn.dataset.moreLabel : 'Show less';
+  btn.dataset.expanded = expanded ? '0' : '1';
+}
+</script>"""
+    body += "</div>"
     return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
