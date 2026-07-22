@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-4-8")
 
@@ -393,6 +393,171 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             stage_focus=str(data.get("stage_focus") or "").strip(),
             jobs_program=str(data.get("jobs_program") or "").strip(),
             team_or_individual=str(data.get("team_or_individual") or "").strip(),
+            low_confidence=low_confidence, model=model,
+            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+        )
+    except Exception:
+        return None
+
+
+# Sentinel drafted into a listing field the model isn't confident about,
+# instead of guessing — distinct from community_profiles.needs_review (a
+# whole-profile, human-toggled sign-off flag): this is a per-field, machine-set
+# gap marker on the basic directory listing. webapp/app.py strips it back out
+# before any field reaches a public page (see _public_community).
+NEEDS_VERIFICATION = "Needs verification"
+
+_COMMUNITY_LISTING_PROMPT = """You are drafting the basic directory-listing fields for a peer community in
+the CFO Toolbox's Communities directory — factual metadata (cost, access,
+region, categories), distinct from the deeper qualitative profile handled
+elsewhere.
+
+Ground every answer in the page content provided below (or your own knowledge,
+if the page content is unavailable) — never invent a specific you can't
+support. For any field where the real value genuinely isn't clear from that
+material, use the literal string "{needs_verification}" for that field (or
+leave a list field empty) rather than guessing — a wrong answer in this
+directory is worse than a flagged gap. Only use "{needs_verification}" when
+the field plausibly applies but the specific value is unclear; if a field
+clearly does not apply at all (e.g. there is no sponsor), use an empty string
+instead of the sentinel.
+
+Fields:
+  "demographic": who this community is for, e.g. "CFOs & VP Finance at
+     Series B+ SaaS companies" — one short phrase. "{needs_verification}" if unclear.
+  "reach": exactly one value from this list, verbatim: {reach_options}.
+     "{needs_verification}" if unclear.
+  "metros": a JSON list of zero or more values from exactly this list,
+     verbatim: {metro_options}. Only include a metro if the page names a
+     specific chapter/hub there — never a value outside this list.
+  "cost_band": exactly one value from this list, verbatim: {cost_band_options}.
+     "{needs_verification}" if unclear.
+  "cost_note": a short free-text note on pricing specifics (exact dues,
+     multi-seat pricing) if known, else an empty string.
+  "sponsorship_type": exactly one value from this list, verbatim:
+     {sponsorship_options}. "{needs_verification}" if unclear.
+  "sponsor_name": the sponsor's name, only if sponsorship_type indicates one
+     and it's named on the page — else an empty string.
+  "access": a short phrase describing how someone joins, e.g. "Invite-only",
+     "Application", "Open to all". "{needs_verification}" if unclear.
+  "format": a short phrase describing format/cadence, e.g. "Hybrid: quarterly
+     in-person + Slack". "{needs_verification}" if unclear.
+  "categories": a JSON list of zero or more values from exactly this list,
+     verbatim: {category_options}. Only include a category that clearly
+     applies — never a value outside this list.
+
+Return STRICT JSON only (no prose, no markdown fences) with exactly these
+keys: demographic, reach, metros, cost_band, cost_note, sponsorship_type,
+sponsor_name, access, format, categories.
+
+Community name: {name}
+Community URL: {url}
+
+{content_block}
+"""
+
+
+@dataclass
+class CommunityListingDraft:
+    demographic: str = ""
+    reach: str = ""
+    metros: list[str] = field(default_factory=list)
+    cost_band: str = ""
+    cost_note: str = ""
+    sponsorship_type: str = ""
+    sponsor_name: str = ""
+    access: str = ""
+    format: str = ""
+    categories: list[str] = field(default_factory=list)
+    low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def generate_community_listing(name: str, url: str, *, reach_options: list[str],
+                                cost_band_options: list[str], sponsorship_options: list[str],
+                                metro_options: list[str], category_options: list[str],
+                                model: str = DEFAULT_MODEL) -> CommunityListingDraft | None:
+    """Draft the basic directory-listing fields (distinct from the deeper
+    generate_community_profile above) for a community from its name + URL,
+    mirroring generate_tool_description's fetch/prompt/cost-tracking pattern.
+    The enum/list fields are constrained to caller-supplied controlled
+    vocabularies (webapp/app.py owns those lists — reach/cost_band/
+    sponsorship_type options and the metro/category checklists) rather than
+    free text, and validated against them again on the way out in case the
+    model drifts. Any field it isn't confident about is drafted as the
+    literal NEEDS_VERIFICATION sentinel (or left empty for list fields)
+    instead of a guess. Never auto-saved — same review contract as the other
+    generate_* helpers. Returns None if the SDK/key is unavailable or the
+    call fails."""
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    from . import extract
+    page = extract.fetch_page(url)
+    low_confidence = not bool(page.content.strip())
+    content_block = (
+        f"Page content (fetched from the URL):\n{page.content[:6000]}" if not low_confidence
+        else "(Could not fetch page content — draft from your own knowledge of this "
+             "community if you have it, keeping to the rules above.)"
+    )
+
+    prompt = _COMMUNITY_LISTING_PROMPT.format(
+        needs_verification=NEEDS_VERIFICATION,
+        reach_options=json.dumps(reach_options),
+        metro_options=json.dumps(metro_options),
+        cost_band_options=json.dumps(cost_band_options),
+        sponsorship_options=json.dumps(sponsorship_options),
+        category_options=json.dumps(category_options),
+        name=name, url=url, content_block=content_block,
+    )
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model,
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+
+        from .pricing import compute_cost
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
+        def _one_of(value, options: list[str]) -> str:
+            value = str(value or "").strip()
+            return value if (value in options or value == NEEDS_VERIFICATION) else ""
+
+        def _subset_of(values, options: list[str]) -> list[str]:
+            if not isinstance(values, list):
+                return []
+            allowed = set(options)
+            return [v for v in values if isinstance(v, str) and v in allowed]
+
+        return CommunityListingDraft(
+            demographic=str(data.get("demographic", "")).strip(),
+            reach=_one_of(data.get("reach"), reach_options),
+            metros=_subset_of(data.get("metros"), metro_options),
+            cost_band=_one_of(data.get("cost_band"), cost_band_options),
+            cost_note=str(data.get("cost_note", "")).strip(),
+            sponsorship_type=_one_of(data.get("sponsorship_type"), sponsorship_options),
+            sponsor_name=str(data.get("sponsor_name", "")).strip(),
+            access=str(data.get("access", "")).strip(),
+            format=str(data.get("format", "")).strip(),
+            categories=_subset_of(data.get("categories"), category_options),
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )

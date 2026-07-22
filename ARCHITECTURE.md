@@ -199,6 +199,42 @@ same never-auto-saved review contract — the draft lands in the
 `/admin/tools/communities/{id}/profile` form fields for the admin to check
 before saving. Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
+`POST /admin/tools/communities/generate-listing` (admin-only) is the "Auto-fill
+from URL" button on the Add/Edit Community form — the equivalent of
+`generate-description` above, but for `communities`' basic directory-listing
+fields (`demographic`, `reach`, `metros_json`, `cost_band`, `cost_note`,
+`sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`)
+rather than `community_profiles`' qualitative deep-dive. One Claude call
+(`linklib/enrich.py::generate_community_listing`), same page-fetch grounding
+and `low_confidence` rule as the other `generate_*` helpers. The three enum
+fields (`reach`, `cost_band`, `sponsorship_type`) and the two controlled-list
+fields (`metros_json`, `categories_json`) are constrained to the caller-
+supplied vocabularies the admin form itself uses (`webapp/app.py`'s
+`_COMMUNITY_REACH`/`_COMMUNITY_COST_BANDS`/`_COMMUNITY_SPONSORSHIP_TYPES`/
+`_COMMUNITY_METROS` plus the live `community_categories` list) and re-validated
+against them on the way back, since a directory Brian vets personally can't
+tolerate a hallucinated value. Any field the model isn't confident about is
+drafted as the literal sentinel string `"Needs verification"`
+(`linklib.enrich.NEEDS_VERIFICATION`) instead of a guess — deliberately a
+different mechanism from `community_profiles.needs_review` above (that one is
+Brian's manual whole-profile sign-off; this one is a machine-set, per-field
+gap marker on the basic listing, so the two get distinct labels rather than
+sharing the "Needs review" text). Each of the three enum `<select>`s carries
+`"Needs verification"` as a literal, selectable option, distinct from that
+field's real default, so a drafted gap is visually a value, not just an
+empty/default-looking field. `webapp/app.py::_public_community` is the single
+choke point every public-facing community route (`/tools/communities`,
+`/tools/communities/compare`, `/tools/communities/{slug}`,
+`/tools/communities/find/results`) runs a community dict through before
+rendering — it blanks any field still carrying the sentinel, so an unreviewed
+auto-fill gap never reaches a visitor. On `/admin/tools/communities`, a
+community with any gap gets a passive "N fields need verification" badge
+(distinct styling and text from the "Needs review" badge) — a nudge toward
+Edit, not a save blocker; there's no dedicated free-text search across the
+admin communities table today; the table isn't paginated, so the sentinel
+text is reachable with a browser find until/unless pagination is added later.
+Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
+
 **Bulk community-profile import** (`scripts/import_community_profiles.py`,
 one-time). Unlike the single-community generate-profile flow above (which
 drafts fields from a live page fetch), this imports pre-researched profiles
