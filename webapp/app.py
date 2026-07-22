@@ -9963,7 +9963,7 @@ def library(request: Request):
         return (
             f'<h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);'
             f'margin:0 0 12px;">{title}</h2>'
-            f'<div style="display:grid;gap:14px;margin-bottom:28px;">{cards}</div>'
+            f'<div class="lib-card-row">{cards}</div>'
         )
 
     reading_room = "".join([
@@ -9975,11 +9975,18 @@ def library(request: Request):
         _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
     ])
 
-    body = f"""<div class="page">
+    body = f"""<div class="page page-full">
+<style>
+.lib-wrap{{max-width:900px;}}
+.lib-card-row{{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:28px;}}
+@media(min-width:760px){{.lib-card-row{{grid-template-columns:1fr 1fr;}}}}
+</style>
+<div class="lib-wrap">
 <h1 style="margin:0 0 6px;">Library</h1>
 <p style="color:var(--muted);margin:0 0 26px;">Your private workspace&mdash;the curated archive, the live feed, and the FP&amp;A assistant.</p>
 {_section("Reading Room", reading_room)}
 {_section("FP&amp;A Buddy", fpa_buddy)}
+</div>
 </div>"""
     return HTMLResponse(_page("Library—Brian Weisberg", "Library", body, role=_role(request)))
 
