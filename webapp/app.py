@@ -9112,7 +9112,8 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
             items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
         except Exception as e:
             return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Library",
-                f'<div class="page"><h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
+                f'<div style="max-width:860px;margin:0 auto;padding:48px 24px 72px;">'
+                f'<h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
                 role=_role(request)))
 
     # Tab bar
