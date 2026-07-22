@@ -4440,14 +4440,14 @@ visible at a glance, side by side.</p>
 @app.get("/contact", response_class=HTMLResponse)
 def contact_page(request: Request, submitted: str = "", message: str = ""):
     if submitted == "1":
-        body = """<div class="page page-narrow">
+        body = """<div class="page page-form">
 <h1>Thanks for reaching out.</h1>
 <p>I'll get back to you shortly.</p>
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
         return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request)))
 
-    body = f"""<div class="page page-narrow">
+    body = f"""<div class="page page-form">
 <h1>Get in Touch</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">I'm always happy to connect with finance leaders, founders, and operators.</p>
 <form method="post" action="/contact" style="display:grid;gap:16px;">
@@ -8041,7 +8041,7 @@ def admin_communities(request: Request, filter: str = ""):
         if filter == "needs_review" else ""
     )
 
-    body = f"""<div class="page page-wide">
+    body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Communities</h1>
@@ -8324,7 +8324,7 @@ def admin_communities_new(request: Request):
         categories = lib.list_community_categories()
     finally:
         lib.close()
-    body = f"""<div class="page page-narrow">
+    body = f"""<div class="page page-form">
 <h1>Add a community</h1>
 <form method="post" action="/admin/tools/communities/new" style="display:grid;gap:20px;">
 {_community_form_fields(categories=categories)}
@@ -8384,7 +8384,7 @@ def admin_communities_edit(request: Request, community_id: int):
         lib.close()
     if not c:
         raise HTTPException(status_code=404, detail="Community not found")
-    body = f"""<div class="page page-narrow">
+    body = f"""<div class="page page-form">
 <h1>Edit community</h1>
 <form method="post" action="/admin/tools/communities/{community_id}/edit" style="display:grid;gap:20px;">
 {_community_form_fields(c, categories)}
@@ -9963,7 +9963,7 @@ def library(request: Request):
         return (
             f'<h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);'
             f'margin:0 0 12px;">{title}</h2>'
-            f'<div style="display:grid;gap:14px;margin-bottom:28px;">{cards}</div>'
+            f'<div class="lib-card-row">{cards}</div>'
         )
 
     reading_room = "".join([
@@ -9975,11 +9975,18 @@ def library(request: Request):
         _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one."),
     ])
 
-    body = f"""<div class="page">
+    body = f"""<div class="page page-full">
+<style>
+.lib-wrap{{max-width:900px;}}
+.lib-card-row{{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:28px;}}
+@media(min-width:760px){{.lib-card-row{{grid-template-columns:1fr 1fr;}}}}
+</style>
+<div class="lib-wrap">
 <h1 style="margin:0 0 6px;">Library</h1>
 <p style="color:var(--muted);margin:0 0 26px;">Your private workspace&mdash;the curated archive, the live feed, and the FP&amp;A assistant.</p>
 {_section("Reading Room", reading_room)}
 {_section("FP&amp;A Buddy", fpa_buddy)}
+</div>
 </div>"""
     return HTMLResponse(_page("Library—Brian Weisberg", "Library", body, role=_role(request)))
 
