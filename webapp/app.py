@@ -1309,13 +1309,15 @@ def homepage(request: Request):
 .home-hero{{display:flex;flex-direction:column;gap:28px;align-items:stretch;}}
 .home-hero-copy{{min-width:0;}}
 .home-hero-side{{display:flex;flex-direction:column;gap:32px;align-items:center;}}
-.home-hero-photo{{position:relative;flex-shrink:0;}}
+.home-hero-photo{{position:relative;z-index:2;flex-shrink:0;}}
 .home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
 .home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;}}
 @media(min-width:900px){{
-  .home-hero{{flex-direction:row;align-items:flex-start;gap:56px;}}
-  .home-hero-copy{{flex:1 1 auto;}}
-  .home-hero-side{{flex:0 0 340px;width:340px;align-items:flex-start;}}
+  .home-hero{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start;}}
+  .home-hero-copy{{grid-column:1 / 3;}}
+  .home-hero-side{{grid-column:3 / 4;align-items:flex-end;gap:0;}}
+  .home-hero-photo{{margin-bottom:-36px;}}
+  .home-status{{padding-top:44px;}}
 }}
 @media(min-width:760px){{
   .home-cards{{grid-template-columns:repeat(3,1fr);}}
@@ -1329,7 +1331,7 @@ def homepage(request: Request):
   </div>
   <div class="home-hero-side">
     <div class="home-hero-photo">
-      {_avatar(200)}
+      {_avatar(220)}
       {_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="-14px", right="-18px")}
     </div>
     <div class="home-status">
