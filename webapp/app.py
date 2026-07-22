@@ -948,6 +948,9 @@ _ICON_NEWSPAPER = ('<path d="M3 6h13v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
                     '<line x1="6" y1="9.5" x2="12" y2="9.5"/><line x1="6" y1="12.5" x2="12" y2="12.5"/>'
                     '<line x1="6" y1="15.5" x2="10" y2="15.5"/>')
 _TL_COLUMN_ICONS = (_ICON_PENCIL, _ICON_MIC, _ICON_HEADPHONES, _ICON_NEWSPAPER)
+_ICON_BOOK_OPEN = ('<path d="M12,4.8 C8.4,3.6 4.8,4.2 4.8,4.2 V18 C4.8,18 8.4,17.4 12,18.6 '
+                   'C15.6,17.4 19.2,18 19.2,18 V4.2 C19.2,4.2 15.6,3.6 12,4.8 Z"/>'
+                   '<line x1="12" y1="4.8" x2="12" y2="18.6"/>')
 
 
 # ---------------------------------------------------------------------------
@@ -10012,10 +10015,11 @@ def library(request: Request):
     finally:
         lib.close()
 
-    def _hcard(href, title, desc):
+    def _hcard(href, title, desc, icon_html=""):
         return (
             f'<a href="{href}" style="display:block;border:1px solid var(--line);background:var(--surface);'
             f'border-radius:14px;padding:22px 24px;text-decoration:none;">'
+            f'{icon_html}'
             f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
             f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
@@ -10030,8 +10034,10 @@ def library(request: Request):
         )
 
     reading_room = "".join([
-        _hcard("/library/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag&mdash;your curated reading history."),
-        _hcard("/library/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive."),
+        _hcard("/library/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag&mdash;your curated reading history.",
+               icon_html=_card_icon(0, _ICON_BOOKS_STACK)),
+        _hcard("/library/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive.",
+               icon_html=_card_icon(1, _ICON_BOOK_OPEN)),
     ])
     fpa_buddy = "".join([
         _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive&mdash;a cited answer drawn from the Archive plus trusted web sources."),
