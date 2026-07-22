@@ -5368,24 +5368,13 @@ def tools_communities(request: Request):
         for b in cost_bands
     )
 
-    # Same member-gated pattern as the "suggest a piece" teaser on /library, but
-    # with more visual weight (bolded) since it's pointing at the gap-collection
-    # CTA card further down this same page. Relocated here from the homepage.
-    community_gap_teaser = (
-        '<p style="margin:0 0 24px;font-size:14px;color:var(--muted);"><strong style="color:var(--ink);">'
-        'Think finance communities could be better?</strong> <a href="/tools/communities/gap">Tell us where '
-        'they fall short &rarr;</a></p>'
-    ) if is_member else ''
-
     body = f"""<div class="page page-grid">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
 groups, associations, and Slack channels.
-<a href="/tools/communities/find" style="margin-left:12px;font-size:14px;font-weight:500;">Not sure where to start? Take the quiz &rarr;</a>
-{'<a href="/tools/communities/submit" style="margin-left:12px;font-size:14px;font-weight:500;">+ Suggest a community</a>' if is_member else '<a href="/login" style="margin-left:12px;font-size:14px;font-weight:500;color:var(--muted);">Sign in to suggest a community</a>'}</p>
+<a href="/tools/communities/find" style="margin-left:12px;font-size:14px;font-weight:500;">Not sure where to start? Take the quiz &rarr;</a></p>
 
-{community_gap_teaser}
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"
     oninput="filterCommunities()"
@@ -5441,6 +5430,7 @@ groups, associations, and Slack channels.
   <p style="margin:0 0 8px;font-weight:600;color:var(--navy);">Think finance communities could be better?</p>
   <p style="margin:0 0 14px;color:var(--navy);font-size:14px;line-height:1.5;">Tell us where they fall short: what you haven't found, or what an existing community missed.</p>
   <a id="comm-gap-link" href="/tools/communities/gap" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;">Tell us where they fall short &rarr;</a>
+  {'<a href="/tools/communities/submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;margin-left:10px;">Suggest a community &rarr;</a>' if is_member else '<a href="/login" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;margin-left:10px;">Sign in to suggest a community &rarr;</a>'}
 </div>
 
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
@@ -7934,11 +7924,10 @@ _COMMUNITIES_REFERENCE_HTML = """
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong>Zero-result state:</strong> &ldquo;No communities match your search. Tell us what you're looking for below.&rdquo; &mdash; auto-highlights the gap-collection CTA card.</li>
-<li><strong>Member-gated teaser</strong> (top of page, shown only when signed in &mdash; not visible to public visitors; relocated here from the homepage): &ldquo;<strong>Think finance communities could be better?</strong> Tell us where they fall short &rarr;&rdquo;.</li>
-<li><strong>Gap-collection CTA card</strong> (bottom of page, always visible): &ldquo;Think finance communities could be better?&rdquo; / &ldquo;Tell us where they fall short: what you haven't found, or what an existing community missed.&rdquo; &rarr; button &ldquo;Tell us where they fall short &rarr;&rdquo;.</li>
+<li><strong>Gap-collection CTA card</strong> (bottom of page, always visible, two buttons): &ldquo;Think finance communities could be better?&rdquo; / &ldquo;Tell us where they fall short: what you haven't found, or what an existing community missed.&rdquo; &rarr; buttons &ldquo;Tell us where they fall short &rarr;&rdquo; and &ldquo;Suggest a community &rarr;&rdquo; (the latter reads &ldquo;Sign in to suggest a community &rarr;&rdquo; and links to <code>/login</code> for signed-out visitors). The top-of-page member-gated teaser that duplicated the feedback prompt was removed &mdash; the quiz link is the only thing left up there.</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#9733; Formal advisor to these communities.&rdquo;</li>
-<li><strong>Suggest-a-community links</strong> (top of page and footer): &ldquo;+ Suggest a community&rdquo; / &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to suggest a community&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
-<li><strong>Recommender link:</strong> &ldquo;Not sure where to start? Take the quiz &rarr;&rdquo;.</li>
+<li><strong>Suggest-a-community links</strong> (footer, plus the gap-collection CTA card above): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to suggest a community&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
+<li><strong>Recommender link:</strong> (top of page) &ldquo;Not sure where to start? Take the quiz &rarr;&rdquo;.</li>
 </ul>
 </section>
 

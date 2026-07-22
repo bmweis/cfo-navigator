@@ -57,24 +57,36 @@ def test_homepage_no_longer_shows_either_prompt_member(env):
     assert "Suggest a piece for the archive" not in r.text
 
 
-def test_gap_teaser_hidden_from_anonymous_visitors_on_communities_page(env):
+def test_top_of_page_teaser_removed_as_duplicate_of_bottom_cta(env):
+    # The bolded top-of-page teaser duplicated the always-visible bottom CTA
+    # card, so it was removed; only the quiz link remains up top.
+    for client in (_client(env), _member_client(env)):
+        r = client.get("/tools/communities")
+        assert r.status_code == 200
+        assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' not in r.text
+        assert "Not sure where to start? Take the quiz" in r.text
+
+
+def test_gap_cta_card_shown_on_communities_page(env):
     c = _client(env)
-    r = c.get("/tools/communities")
-    assert r.status_code == 200
-    # The always-visible gap CTA card still says this too, so just check the
-    # bolded member-gated teaser specifically isn't present.
-    assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' not in r.text
-
-
-def test_gap_teaser_shown_to_members_on_communities_page(env):
-    c = _member_client(env)
     r = c.get("/tools/communities")
     assert r.status_code == 200
     assert "Think finance communities could be better?" in r.text
     assert "Tell us where they fall short" in r.text
-    assert '<a href="/tools/communities/gap">' in r.text
-    # Bolded (more visual weight than the plain "Suggest a piece" line).
-    assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' in r.text
+    assert '<a id="comm-gap-link" href="/tools/communities/gap"' in r.text
+
+
+def test_gap_cta_card_has_suggest_a_community_button(env):
+    c = _client(env)
+    r = c.get("/tools/communities")
+    assert r.status_code == 200
+    assert "Sign in to suggest a community" in r.text
+
+    m = _member_client(env)
+    r = m.get("/tools/communities")
+    assert r.status_code == 200
+    assert 'href="/tools/communities/submit"' in r.text
+    assert "Suggest a community" in r.text
 
 
 def test_suggest_a_piece_hidden_from_anonymous_visitors_on_library_page(env):
