@@ -33,8 +33,10 @@ Private routes (require login cookie; API routes also accept a token):
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import hmac
+import inspect
 import json
 import os
 import re
@@ -11209,6 +11211,7 @@ _ADMIN_GROUPS = [
         ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost—Brian's operating cost, separate from any user's FP&A Buddy cap."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
+        ("/admin/system/page-index", "Page Index",        "A live, self-updating map of every route and its width tier."),
     ]),
 ]
 
@@ -11524,6 +11527,137 @@ mermaid.initialize({{
 </script>
 </div>"""
     return HTMLResponse(_page("Database—Admin", "Admin", body, authed=True))
+
+
+_PAGE_TIER_RE = re.compile(r"page-(full|grid|tool|form|admin)\b")
+_PAGE_TIER_LABELS = {"full": "page-full", "grid": "page-grid", "tool": "page-tool",
+                      "form": "page-form", "admin": "page-admin"}
+# Two bespoke full-bleed layouts documented in BRAND.md §5 as living outside
+# the .page tier system entirely — not part of the tier table by design, so
+# they're recognized rather than flagged.
+_PAGE_INDEX_CUSTOM_EXCEPTIONS = {"/library/archive", "/library/feed"}
+
+
+def _page_index_response_class_name(route) -> str:
+    rc = route.response_class
+    return getattr(rc, "__name__", None) or type(rc).__name__
+
+
+def _page_index_called_names(src: str) -> list[str]:
+    """Top-level function names a route body calls directly (e.g.
+    `_sdr_build_body(...)`) — one hop, so a route that builds its markup via
+    a single shared helper (rather than inline) still resolves to that
+    helper's tier class."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []
+    return [node.func.id for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+
+
+def _page_index_tier_for(route) -> str:
+    """The width tier a page route actually renders with, read live from its
+    own source (and one hop into any helper it calls directly) — not a
+    maintained list. Empty string means no recognized tier class was found."""
+    try:
+        src = inspect.getsource(route.endpoint)
+    except (OSError, TypeError):
+        src = ""
+    tiers = set(_PAGE_TIER_RE.findall(src))
+    if not tiers:
+        for name in _page_index_called_names(src):
+            fn = globals().get(name)
+            if inspect.isfunction(fn):
+                try:
+                    helper_src = inspect.getsource(fn)
+                except (OSError, TypeError):
+                    continue
+                tiers |= set(_PAGE_TIER_RE.findall(helper_src))
+    return ",".join(sorted(_PAGE_TIER_LABELS[t] for t in tiers))
+
+
+def _page_index_snapshot() -> list[dict]:
+    """Every distinct HTML page route, its width tier, and whether it's
+    missing one — introspected from `app.routes` on every page load, the
+    same live-source pattern as /admin/system/database's schema snapshot.
+    Skips non-page endpoints: POST/PUT/DELETE-only routes (form/API
+    actions), and GET routes that don't render HTMLResponse (redirects,
+    JSON/AJAX APIs, file downloads, health checks, static assets)."""
+    from fastapi.routing import APIRoute
+    rows = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if "GET" not in route.methods:
+            continue
+        if _page_index_response_class_name(route) != "HTMLResponse":
+            continue
+        tier = "custom exception" if route.path in _PAGE_INDEX_CUSTOM_EXCEPTIONS else _page_index_tier_for(route)
+        rows.append({"path": route.path, "tier": tier, "flagged": not tier})
+    rows.sort(key=lambda r: r["path"])
+    return rows
+
+
+@app.get("/admin/system/page-index", response_class=HTMLResponse)
+def admin_system_page_index(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    rows = _page_index_snapshot()
+    flagged = [r for r in rows if r["flagged"]]
+
+    stat_cards = "".join(
+        f'<div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;'
+        f'padding:10px 14px;">'
+        f'<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">{label}</div>'
+        f'<div style="font-size:20px;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;">{count}</div></div>'
+        for label, count in (("Pages", len(rows)), ("Flagged", len(flagged)))
+    )
+
+    if flagged:
+        summary = (f'<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
+                   f'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">{len(flagged)} route'
+                   f'{"s" if len(flagged) != 1 else ""} missing a recognized width tier&mdash;see below.</p>')
+    else:
+        summary = ('<p style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;border-radius:10px;'
+                   'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">&#10003; Every page carries a recognized width tier.</p>')
+
+    def _tier_cell(r):
+        if r["flagged"]:
+            return '<span style="color:var(--alert);font-weight:600;">&#9888; No tier assigned</span>'
+        return f'<code>{_esc(r["tier"])}</code>'
+
+    rows_html = "".join(
+        f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);'
+        f'font-family:ui-monospace,monospace;font-size:13px;">{_esc(r["path"])}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{_tier_cell(r)}</td></tr>'
+        for r in rows
+    )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Page Index</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every route and its width tier&mdash;introspected from <code>app.routes</code> on every page load, not a maintained list. Skips non-page endpoints (redirects, JSON/AJAX APIs, file downloads); flags any page route that doesn't carry a recognized width tier, so a newly added page that never got tiered doesn't go unnoticed. See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for the tier system itself.</p>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
+{stat_cards}
+</div>
+{summary}
+
+<div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+<table style="width:100%;border-collapse:collapse;font-size:14px;">
+<thead><tr style="background:var(--bg);">
+<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Route</th>
+<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Width tier</th>
+</tr></thead>
+<tbody>
+{rows_html}
+</tbody>
+</table>
+</div>
+</div>"""
+    return HTMLResponse(_page("Page Index—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/checks", response_class=HTMLResponse)
