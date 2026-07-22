@@ -1312,10 +1312,9 @@ def homepage(request: Request):
 .home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
 .home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;}}
 @media(min-width:900px){{
-  .home-hero{{flex-direction:row;align-items:flex-start;gap:56px;}}
-  .home-hero-copy{{flex:1 1 auto;}}
-  .home-hero-subhead{{max-width:426px;}}
-  .home-hero-side{{flex:0 0 460px;width:460px;align-items:flex-end;gap:0;}}
+  .home-hero{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start;}}
+  .home-hero-copy{{grid-column:1 / 3;}}
+  .home-hero-side{{grid-column:3 / 4;align-items:flex-end;gap:0;}}
   .home-hero-photo{{margin-bottom:-36px;}}
   .home-status{{padding-top:44px;}}
 }}
@@ -1327,7 +1326,7 @@ def homepage(request: Request):
   <div class="home-hero-copy">
     <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
     <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">{_underline_last_word(homepage_headline)}</h1>
-    <div class="home-hero-subhead"><p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p></div>
+    <p style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0;">{_esc(homepage_subhead)}</p>
   </div>
   <div class="home-hero-side">
     <div class="home-hero-photo">
