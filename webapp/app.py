@@ -902,10 +902,11 @@ def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--sea
 
 
 def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
-    """2px-stroke line-icon badge for a 3-up card row. Cycles seafoam-wash ->
-    navy-wash -> coral-wash by `index`, the fixed order reused for every 3-up
-    card row sitewide (homepage, CFO Toolbox). `svg_path` is the inner SVG
-    markup (path/rect/etc.) for a 24x24 viewBox icon."""
+    """2px-stroke line-icon badge for a card-row grid (2-up, 3-up, or 4-up).
+    Cycles seafoam-wash -> navy-wash -> coral-wash by `index`, the fixed
+    order reused for every card-row grid sitewide (homepage, CFO Toolbox,
+    Library, Thought Leadership). `svg_path` is the inner SVG markup
+    (path/rect/etc.) for a 24x24 viewBox icon."""
     bg, stroke = _CARD_ICON_STYLES[index % 3]
     inner = size - 16
     return (
@@ -917,7 +918,7 @@ def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
 
 
 # 2px-stroke, 24x24-viewBox icon paths for _card_icon() — reused across every
-# 3-up card row sitewide (homepage, CFO Toolbox).
+# card-row grid sitewide (homepage, CFO Toolbox, Library, Thought Leadership).
 _ICON_BRAIN = ('<path d="M9.5 4.5c-1.7 0-3 1.3-3.2 3C5 8 4 9.3 4 10.8c0 .9.4 1.7 1 2.3-.6.6-1 1.4-1 2.3 '
                '0 1.5 1.1 2.8 2.5 3.1.2 1.6 1.6 2.8 3.3 2.8.5 0 1-.1 1.4-.3V5.7c-.4-.7-1-1.2-1.7-1.2z"/>'
                '<path d="M14.5 4.5c1.7 0 3 1.3 3.2 3C18.9 8 20 9.3 20 10.8c0 .9-.4 1.7-1 2.3.6.6 1 1.4 1 2.3 '

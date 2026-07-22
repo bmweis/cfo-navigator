@@ -188,9 +188,10 @@ undecorated).
    below that. Lives in a header/hero corner or a card corner only — never inline in
    body copy. Max **one or two per page**. Helper: `_sticker()` in `webapp/app.py`.
 3. **Card category icons** — 2px-stroke line icons (not flat color squares) inside
-   the small badge on a 3-up card row. Fixed background order: seafoam-wash
-   `#EAF7F2` → navy-wash `#EEF1F7` → coral-wash `#FBEAE3`, reused for every 3-up card
-   row sitewide. Helper: `_card_icon()` in `webapp/app.py`.
+   the small badge on a card-row grid — 2-up, 3-up, or 4-up alike, not restricted to
+   3-up rows. Fixed background order: seafoam-wash `#EAF7F2` → navy-wash `#EEF1F7` →
+   coral-wash `#FBEAE3`, cycling in that order regardless of column count and reused
+   for every card-row grid sitewide. Helper: `_card_icon()` in `webapp/app.py`.
 
 **New tokens** (see §7 for the generated block): `--ink-graffiti:#0d0d0d` (sticker
 borders/shadows only — never a fill or text color elsewhere) and
