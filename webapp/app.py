@@ -638,7 +638,10 @@ _CSS = """
   --font-wordmark:'Permanent Marker',cursive;
 }
 *{box-sizing:border-box;}
-body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;}
+html,body{height:100%;}
+body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;
+  min-height:100vh;display:flex;flex-direction:column;}
+.site-main{flex:1 0 auto;display:flex;flex-direction:column;}
 a{color:var(--navy);text-decoration:none;}
 a:hover{text-decoration:underline;}
 
@@ -830,7 +833,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
   <button class="nav-toggle" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">&#9776;</button>
   <nav class="site-nav" id="nav">{nav}</nav>
 </header>
-{body}
+<main class="site-main">{body}</main>
 <footer class="site-footer">
   <span class="brand"><b>CFO Navigator</b></span>
   <span class="center">{oss_love}</span>
