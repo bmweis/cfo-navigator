@@ -5473,7 +5473,7 @@ function commGeoLine(c) {{
   return commEsc(reach + ' · ' + localMarkets);
 }}
 
-function updateGapCtaLink(isZero) {{
+function gapFormHref(isZero) {{
   var q = document.getElementById('comm-search').value || '';
   var accessType = document.getElementById('comm-access').value || '';
   var params = new URLSearchParams();
@@ -5484,7 +5484,11 @@ function updateGapCtaLink(isZero) {{
   if (commAdvisorOnly) params.set('advisor', '1');
   if (isZero) params.set('zero', '1');
   var qs = params.toString();
-  document.getElementById('comm-gap-link').href = '/tools/communities/gap' + (qs ? '?' + qs : '');
+  return '/tools/communities/gap' + (qs ? '?' + qs : '');
+}}
+
+function updateGapCtaLink(isZero) {{
+  document.getElementById('comm-gap-link').href = gapFormHref(isZero);
 }}
 
 function renderCommunities(list) {{
@@ -5496,7 +5500,7 @@ function renderCommunities(list) {{
   if (list.length === 0) {{
     grid.innerHTML = '';
     empty.style.display = 'block';
-    empty.textContent = "No communities match your search. Tell us what you're looking for below.";
+    empty.innerHTML = 'No communities match. <a href="' + gapFormHref(true) + '" style="font-weight:500;">Tell me what\'s missing &rarr;</a>';
     count.textContent = '';
     pagination.style.display = 'none';
     pagination.innerHTML = '';
@@ -6516,6 +6520,64 @@ communit{'y' if len(results) == 1 else 'ies'}.</p>
     return HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
+@app.get("/tools/communities/correct", response_class=HTMLResponse)
+def tools_community_correct(request: Request, community_id: int = 0, submitted: str = ""):
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id) if community_id else None
+    finally:
+        lib.close()
+    if not community:
+        raise HTTPException(status_code=404, detail="Community not found")
+
+    if submitted:
+        body = """<div class="page page-form">
+<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
+<h1>Thanks, that&rsquo;s genuinely useful.</h1>
+<p style="color:var(--muted);margin:8px 0 0;line-height:1.6;">I&rsquo;ll check it against the source and fix what needs fixing. If you left an email and there&rsquo;s something worth following up on, I&rsquo;ll be in touch.</p>
+</div>"""
+        return HTMLResponse(_page("Thanks—Communities", "CFO Toolbox", body, role=_role(request)))
+
+    body = f"""<div class="page page-form">
+<p style="margin:0 0 4px;"><a href="/tools/communities/{_esc(community['slug'])}" style="font-size:13px;color:var(--muted);">&larr; {_esc(community['name'])}</a></p>
+<h1 style="margin:0;">Suggest a correction</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">What's wrong or out of date on <strong>{_esc(community['name'])}</strong>'s listing? A specific field is most useful, but anything helps.</p>
+<form method="post" action="/tools/communities/correct" style="display:flex;flex-direction:column;gap:16px;max-width:520px;">
+  <input type="hidden" name="community_id" value="{community['id']}">
+  <label style="font-size:14px;font-weight:600;color:var(--navy);">What's incorrect or out of date?
+    <textarea name="correction" rows="4" required style="display:block;width:100%;margin-top:6px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;"></textarea>
+  </label>
+  <label style="font-size:14px;font-weight:600;color:var(--navy);">Email, only if you want a reply (optional)
+    <input type="email" name="email" style="display:block;width:100%;margin-top:6px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;">
+  </label>
+  <button type="submit" class="btn" style="align-self:flex-start;">Submit</button>
+</form>
+</div>"""
+    return HTMLResponse(_page(f"Suggest a correction—{community['name']}", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.post("/tools/communities/correct")
+async def tools_community_correct_submit(request: Request):
+    form = await request.form()
+    community_id_raw = (form.get("community_id") or "").strip()
+    community_id = int(community_id_raw) if community_id_raw.isdigit() else None
+    if not community_id:
+        raise HTTPException(status_code=400, detail="Missing community_id")
+    correction = (form.get("correction") or "").strip()
+    email = (form.get("email") or "").strip()
+    lib = _lib()
+    try:
+        lib.add_community_gap_submission(
+            gaps=correction,
+            closest_community_id=community_id,
+            email=email,
+            submission_type="correction",
+        )
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/communities/correct?community_id={community_id}&submitted=1", status_code=303)
+
+
 @app.get("/tools/communities/{slug}", response_class=HTMLResponse)
 def tools_community_profile(request: Request, slug: str):
     session_id = _visitor_session_id(request)
@@ -6603,7 +6665,8 @@ def tools_community_profile(request: Request, slug: str):
 {profile_sections}
 
 <div style="margin-top:36px;padding-top:20px;border-top:1px solid var(--line);">
-  <a href="/tools/communities/gap?community_id={community['id']}" style="font-size:13px;color:var(--muted);">Not quite the right fit? Tell us why &rarr;</a>
+  <p style="margin:0 0 6px;"><a href="/tools/communities/gap?community_id={community['id']}" style="font-size:13px;color:var(--muted);">Not quite the right fit? Tell us why &rarr;</a></p>
+  <p style="margin:0;"><a href="/tools/communities/correct?community_id={community['id']}" style="font-size:13px;color:var(--muted);">Something here out of date? Suggest a correction &rarr;</a></p>
 </div>
 </div>
 
@@ -7940,7 +8003,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li><strong>Zero-result state:</strong> &ldquo;No communities match your search. Tell us what you're looking for below.&rdquo; The gap form's link href still gets a <code>?zero=1</code> query param appended client-side so the gap form can tailor its transparency note (see below) &mdash; there's no more visual highlight to go with it, since the CTA is now a plain text link, not a card.</li>
+<li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;, the link inline in the message itself rather than pointing the visitor to a separate CTA elsewhere on the page. Its href (and the top-of-page gap link's href) still carries the live search/filter state plus <code>?zero=1</code>, computed client-side by <code>gapFormHref()</code>, so the gap form can tailor its transparency note (see below).</li>
 <li><strong>Two subtle text links</strong> (top of page, no box/button chrome, same inline style as the footer links below): &ldquo;Not sure which community's for you? Take the quiz &rarr;&rdquo; (links to the recommender) and &ldquo;Don't see the right fit? Tell me what's missing &rarr;&rdquo; (links to the gap form). The seafoam CTA card that used to carry this prompt plus a &ldquo;Suggest a community&rdquo; button was removed &mdash; suggesting a community now lives only in the footer link below.</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#9733; Formal advisor to these communities.&rdquo;</li>
 <li><strong>Suggest-a-community link</strong> (footer): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to submit &rarr;&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
@@ -7952,7 +8015,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong>Per-profile mini-CTA:</strong> &ldquo;Not quite the right fit? Tell us why &rarr;&rdquo; &mdash; links to the gap form pre-filled with <code>closest_community_id</code>; the &ldquo;Re: [Name] wasn't quite the right fit&hellip;&rdquo; line itself renders on the gap form, not here (see below).</li>
 <li><strong>Empty-profile fallback:</strong> when a community has no <code>community_profiles</code> row, only the directory-card fields render (name, cost, region, access, sponsor, &ldquo;Visit website&rdquo; button) &mdash; no verdict/deep-profile sections.</li>
-<li><strong>Suggest-a-correction:</strong> not built. Scoped as a future public, low-friction, free-text mechanism for factual accuracy (&ldquo;this specific field is wrong&rdquo;), distinct from the gap form's fit-feedback purpose &mdash; would land in a review queue, never auto-apply.</li>
+<li><strong>Suggest-a-correction</strong> (<code>/tools/communities/correct?community_id=&lt;id&gt;</code>): &ldquo;Something here out of date? Suggest a correction &rarr;&rdquo; &mdash; a public, no-login, single free-text field ("What's incorrect or out of date?") plus optional email, distinct from the gap form's fit-feedback purpose. Requires a known <code>community_id</code> (404s otherwise, since a correction is always about one specific listing, unlike the gap form's "none in particular" option). Lands in the same <code>community_gap_submissions</code> table as gap/recommender rows, tagged <code>submission_type='correction'</code>, and is reviewed alongside them at <code>/admin/community-gaps</code> &mdash; it lands in a review queue and is never auto-applied to the listing.</li>
 </ul>
 </section>
 
@@ -8025,7 +8088,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong><code>cfo_visitor</code> cookie:</strong> unsigned, <code>httponly</code>, <code>samesite=lax</code>, 30-day TTL, value is <code>secrets.token_urlsafe(16)</code> &mdash; a random token with no IP, user agent, or fingerprint embedded. Set only once per visitor (never re-set on an existing cookie), so it never resets its own TTL on every page view.</li>
 <li><strong><code>community_profile_views</code> table:</strong> records <code>(session_id, community_id, viewed_at)</code> &mdash; which profile pages a session viewed, and when. Composite primary key on <code>(session_id, community_id)</code> dedups repeat views; a re-view just refreshes <code>viewed_at</code>.</li>
-<li><strong><code>community_gap_submissions</code> table:</strong> stores the free-text fields (current communities, gaps, looking-for), <code>search_context_json</code> (the search/filter state, quiz answers, or the quiz's optional weighting-step choices, at submission time), <code>viewed_community_ids_json</code> (computed server-side from <code>community_profile_views</code>, never trusted from the client), <code>closest_community_id</code>, optional email, a <code>reviewed</code> flag for admin triage, and <code>submission_type</code> (<code>'gap'</code>, <code>'recommender'</code>, or <code>'weight_preferences'</code>) distinguishing gap-form submissions, logged recommender-quiz completions, and a visitor's own weighting choices (logged only when they set at least one, never on a skip) from each other.</li>
+<li><strong><code>community_gap_submissions</code> table:</strong> stores the free-text fields (current communities, gaps, looking-for), <code>search_context_json</code> (the search/filter state, quiz answers, or the quiz's optional weighting-step choices, at submission time), <code>viewed_community_ids_json</code> (computed server-side from <code>community_profile_views</code>, never trusted from the client), <code>closest_community_id</code>, optional email, a <code>reviewed</code> flag for admin triage, and <code>submission_type</code> (<code>'gap'</code>, <code>'recommender'</code>, <code>'weight_preferences'</code>, or <code>'correction'</code>) distinguishing gap-form submissions, logged recommender-quiz completions, a visitor's own weighting choices (logged only when they set at least one, never on a skip), and per-profile correction reports (which reuse just <code>gaps</code> for the free text and <code>closest_community_id</code> for the listing being corrected) from each other.</li>
 <li><strong>No PII is collected</strong> &mdash; nothing reads or stores IP address, user agent, or <code>X-Forwarded-For</code>. The only header touched is <code>x-forwarded-proto</code>, used once to set the cookie's <code>secure</code> flag, never persisted.</li>
 <li><strong>Retention:</strong> everything is kept indefinitely, no automatic deletion &mdash; documented publicly at <a href="/privacy">/privacy</a>.</li>
 <li><strong>Admin visibility:</strong> submissions are triaged at <a href="/admin/community-gaps">/admin/community-gaps</a>, mirroring the <code>/admin/ask-feedback</code> layout, and feed a badge in the CFO Toolbox admin nav group via <code>community_gap_counts()</code>.</li>
@@ -13715,31 +13778,41 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
             '<span style="font-size:12px;font-weight:700;color:var(--alert);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">New</span>'
         )
         is_recommender = r.get("submission_type") == "recommender"
+        is_correction = r.get("submission_type") == "correction"
         type_badge = (
             '<span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:999px;padding:3px 12px;white-space:nowrap;">Recommender quiz</span>'
-            if is_recommender else ""
+            if is_recommender else
+            '<span style="font-size:12px;font-weight:600;color:var(--ink);background:var(--surface-2);border-radius:999px;padding:3px 12px;white-space:nowrap;">Correction</span>'
+            if is_correction else ""
         )
         try:
             viewed_ids = json.loads(r.get("viewed_community_ids_json") or "[]")
         except (TypeError, ValueError):
             viewed_ids = []
         meta_bits = [] if is_recommender else [
-            f'closest match: {_esc(r["closest_community_name"])}' if r.get("closest_community_name") else "closest match: none given"
+            f'community: {_esc(r["closest_community_name"])}' if is_correction and r.get("closest_community_name")
+            else f'closest match: {_esc(r["closest_community_name"])}' if r.get("closest_community_name")
+            else "closest match: none given"
         ]
         ctx_line = _search_context_line(r)
         if ctx_line:
             meta_bits.append(ctx_line)
-        meta_bits.append(f"{len(viewed_ids)} profile{'s' if len(viewed_ids) != 1 else ''} viewed this session")
+        if not is_correction:
+            meta_bits.append(f"{len(viewed_ids)} profile{'s' if len(viewed_ids) != 1 else ''} viewed this session")
         no_text_fallback = (
             '<p style="font-size:13.5px;color:var(--muted);margin:10px 0 0;">Recommender quiz completion, no free text. See the criteria above.</p>'
             if is_recommender else
             '<p style="font-size:13.5px;color:var(--muted);margin:10px 0 0;">No written response, just a closest-match pick.</p>'
         )
-        text_blocks = "".join([
-            _text_block("What communities are you already in", r.get("current_communities") or ""),
-            _text_block("What existing communities missed", r.get("gaps") or ""),
-            _text_block("What they haven't found yet", r.get("looking_for") or ""),
-        ]) or no_text_fallback
+        text_blocks = (
+            _text_block("What's incorrect or out of date", r.get("gaps") or "") or no_text_fallback
+            if is_correction else
+            "".join([
+                _text_block("What communities are you already in", r.get("current_communities") or ""),
+                _text_block("What existing communities missed", r.get("gaps") or ""),
+                _text_block("What they haven't found yet", r.get("looking_for") or ""),
+            ]) or no_text_fallback
+        )
         back_qs = f"?reviewed={reviewed}" if reviewed else ""
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">

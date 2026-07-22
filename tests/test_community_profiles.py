@@ -56,6 +56,8 @@ def test_profile_page_renders_full_profile(env):
     assert "2019" in r.text
     assert "Tell us why" in r.text
     assert f"/tools/communities/gap?community_id={cid}" in r.text
+    assert "Suggest a correction" in r.text
+    assert f"/tools/communities/correct?community_id={cid}" in r.text
     assert "Gated subscription, insulated by design." in r.text
     assert "Business model" in r.text
 
@@ -364,3 +366,101 @@ def test_unreviewed_community_gap_feeds_admin_badge(env):
     counts = _tasks.open_task_counts(lib)
     lib.close()
     assert counts.get("/admin/community-gaps") == 1
+
+
+def test_correction_form_renders_for_known_community(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    cid = lib.add_community(
+        "Correction Target", "https://example.com", "Finance leaders",
+        "Free", [], approved=1,
+    )
+    lib.close()
+
+    c = _client(env)
+    r = c.get(f"/tools/communities/correct?community_id={cid}")
+    assert r.status_code == 200
+    assert "Correction Target" in r.text
+    assert "Suggest a correction" in r.text
+    assert f'value="{cid}"' in r.text
+
+
+def test_correction_form_404_for_unknown_community_id(env):
+    c = _client(env)
+    r = c.get("/tools/communities/correct?community_id=999999")
+    assert r.status_code == 404
+
+    r2 = c.get("/tools/communities/correct")
+    assert r2.status_code == 404
+
+
+def test_correction_submission_persists_with_submission_type(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    cid = lib.add_community(
+        "Correction Target", "https://example.com", "Finance leaders",
+        "Free", [], approved=1,
+    )
+    lib.close()
+
+    c = _client(env)
+    r = c.post("/tools/communities/correct", data={
+        "community_id": str(cid),
+        "correction": "The cost band should be Paid, not Free.",
+        "email": "visitor@example.com",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/tools/communities/correct?community_id={cid}&submitted=1"
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    rows = lib.list_community_gap_submissions()
+    lib.close()
+    assert len(rows) == 1
+    assert rows[0]["submission_type"] == "correction"
+    assert rows[0]["gaps"] == "The cost band should be Paid, not Free."
+    assert rows[0]["closest_community_id"] == cid
+    assert rows[0]["current_communities"] == ""
+    assert rows[0]["looking_for"] == ""
+    assert rows[0]["email"] == "visitor@example.com"
+
+
+def test_correction_submission_requires_community_id(env):
+    c = _client(env)
+    r = c.post("/tools/communities/correct", data={"correction": "Something is wrong"})
+    assert r.status_code == 400
+
+
+def test_correction_submitted_confirmation_page(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    cid = lib.add_community(
+        "Correction Target", "https://example.com", "Finance leaders",
+        "Free", [], approved=1,
+    )
+    lib.close()
+
+    c = _client(env)
+    r = c.get(f"/tools/communities/correct?community_id={cid}&submitted=1")
+    assert r.status_code == 200
+    assert "genuinely useful" in r.text
+
+
+def test_admin_community_gaps_shows_correction_badge(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    cid = lib.add_community(
+        "Correction Target", "https://example.com", "Finance leaders",
+        "Free", [], approved=1,
+    )
+    lib.add_community_gap_submission(
+        gaps="The URL is dead.", closest_community_id=cid, submission_type="correction",
+    )
+    lib.close()
+
+    c = _client(env)
+    c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    r = c.get("/admin/community-gaps")
+    assert r.status_code == 200
+    assert "Correction" in r.text
+    assert "The URL is dead." in r.text
+    assert "Correction Target" in r.text
