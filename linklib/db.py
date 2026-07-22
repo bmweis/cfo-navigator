@@ -564,11 +564,15 @@ CREATE TABLE IF NOT EXISTS community_profiles (
 -- closest_community_id has no SQL REFERENCES, same as community_profiles
 -- above — nullable, so "none in particular" is representable.
 -- submission_type (added by migration, see Library.__init__) distinguishes
--- this row shape from a Recommender quiz completion (Phase 7): 'gap' is
--- every field above, used as documented; 'recommender' reuses
--- search_context_json for the quiz answers + result count instead, and
--- leaves current_communities/gaps/looking_for '' since the quiz collects no
--- free text.
+-- this row shape from a Recommender quiz completion (Phase 7) or a
+-- profile-page correction report: 'gap' is every field above, used as
+-- documented; 'recommender' reuses search_context_json for the quiz
+-- answers + result count instead (leaving current_communities/gaps/
+-- looking_for '' since the quiz collects no free text), and 'correction'
+-- reuses just gaps (the free-text report) and closest_community_id (the
+-- community being corrected), leaving current_communities/looking_for/
+-- search_context_json empty since a correction isn't about a directory
+-- search.
 CREATE TABLE IF NOT EXISTS community_gap_submissions (
     id                        INTEGER PRIMARY KEY AUTOINCREMENT,
     current_communities       TEXT NOT NULL DEFAULT '',
