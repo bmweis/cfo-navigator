@@ -1,0 +1,134 @@
+"""Page Index (/admin/system/page-index): a live map of every HTML page route
+and its width tier, introspected from `app.routes` rather than a maintained
+list — see webapp/app.py's `_page_index_snapshot()`.
+"""
+import pathlib
+import sys
+import tempfile
+import os
+
+import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+
+@pytest.fixture
+def env(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    yield appmod
+    if os.path.exists(db):
+        os.remove(db)
+
+
+def _client(appmod):
+    from fastapi.testclient import TestClient
+    return TestClient(appmod.app, raise_server_exceptions=True)
+
+
+def _admin_client(appmod):
+    c = _client(appmod)
+    c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    return c
+
+
+def _member_client(appmod):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.create_user("member1", "supersecret", role="user")
+    lib.close()
+    c = _client(appmod)
+    c.post("/login", data={"username": "member1", "password": "supersecret"}, follow_redirects=False)
+    return c
+
+
+def test_page_index_requires_admin(env):
+    anon = _client(env)
+    r = anon.get("/admin/system/page-index", follow_redirects=False)
+    assert r.status_code == 303 and "/login" in r.headers["location"]
+
+    member = _member_client(env)
+    r = member.get("/admin/system/page-index", follow_redirects=False)
+    assert r.status_code == 303 and "/login" in r.headers["location"]
+
+
+def test_page_index_loads_for_admin(env):
+    c = _admin_client(env)
+    r = c.get("/admin/system/page-index")
+    assert r.status_code == 200
+    assert "Page Index" in r.text
+    assert "app.routes" in r.text
+
+
+def test_page_index_excludes_non_page_endpoints(env):
+    """Redirect stubs, JSON/AJAX APIs, and POST-only action routes are not
+    HTML pages and shouldn't appear in the snapshot."""
+    rows = env._page_index_snapshot()
+    paths = {r["path"] for r in rows}
+    non_pages = [
+        "/health",            # health check, plain dict/JSON
+        "/api/search",        # JSON search API
+        "/growth-engine-ratio",  # legacy redirect stub
+        "/questions",            # legacy redirect stub
+        "/logout",               # redirects to /
+        "/bookmarklet",          # PlainTextResponse, not a page
+        "/static/{filename}",    # static asset serving
+    ]
+    for path in non_pages:
+        assert path not in paths, f"{path} should be filtered out as a non-page endpoint"
+
+
+def test_page_index_includes_known_pages(env):
+    rows = env._page_index_snapshot()
+    paths = {r["path"] for r in rows}
+    for path in ["/", "/thought-leadership", "/library", "/admin", "/admin/system/page-index"]:
+        assert path in paths
+
+
+def test_page_index_recognizes_custom_exceptions(env):
+    rows = {r["path"]: r for r in env._page_index_snapshot()}
+    for path in ("/library/archive", "/library/feed"):
+        assert rows[path]["tier"] == "custom exception"
+        assert rows[path]["flagged"] is False
+
+
+def test_page_index_flags_route_with_no_recognized_tier(env):
+    """A page route whose rendered markup carries no `page-*` tier class (and
+    isn't one of the two documented custom exceptions) must be flagged —
+    this is the drift-detection the feature exists for."""
+    rows = {r["path"]: r for r in env._page_index_snapshot()}
+    assert rows["/read"]["flagged"] is True
+    assert rows["/read"]["tier"] == ""
+
+
+def test_page_index_flags_a_newly_added_untiered_route(env):
+    """Simulates someone adding a new page and forgetting to tier it —
+    added and removed on the live app object, no source file changes."""
+    from fastapi.responses import HTMLResponse
+
+    @env.app.get("/test-temp-untiered-route", response_class=HTMLResponse)
+    def _temp_route():
+        return HTMLResponse('<div class="page">no tier here</div>')
+
+    try:
+        rows = {r["path"]: r for r in env._page_index_snapshot()}
+        assert "/test-temp-untiered-route" in rows
+        assert rows["/test-temp-untiered-route"]["flagged"] is True
+    finally:
+        env.app.router.routes = [
+            r for r in env.app.router.routes
+            if getattr(r, "path", None) != "/test-temp-untiered-route"
+        ]
+
+
+def test_page_index_recognized_tiers_are_valid(env):
+    valid = {"page-full", "page-grid", "page-tool", "page-form", "page-admin", "custom exception"}
+    for row in env._page_index_snapshot():
+        if row["flagged"]:
+            continue
+        for tier in row["tier"].split(","):
+            assert tier in valid, f"{row['path']} has unrecognized tier value {tier!r}"

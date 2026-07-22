@@ -115,6 +115,23 @@ sqlite-vec's shadow tables (`articles_fts_data`/`_idx`/`_docsize`/`_config`,
 `articles_vec`'s equivalents) are filtered out of the diagram since they're
 SQLite implementation detail, not schema.
 
+**`/admin/system/page-index`** (System nav group) is the same live-introspection
+pattern applied to routes instead of tables: on every page load it walks
+`app.routes`, keeps GET routes whose `response_class` is `HTMLResponse`
+(skipping POST-only action routes, redirect stubs, JSON/AJAX APIs, file
+downloads, and other non-page endpoints), and reads each page's width tier
+(`page-full`/`page-grid`/`page-tool`/`page-form`/`page-admin`, or "custom
+exception" for `/library/archive` and `/library/feed` — see BRAND.md §5 for
+the tier system itself) straight from that route's own source via
+`inspect.getsource` (following one hop into a directly-called helper function
+when a route builds its body that way, e.g. `/play` via `_sdr_build_body`).
+Any page route whose source carries no recognized tier class is flagged —
+this is the actual point of the feature: it turns "did every page get
+tiered," a one-time manual audit (Phase 9), into something that catches a
+newly added, never-tiered page automatically. `_page_index_snapshot()` in
+`webapp/app.py` is the single source; no maintained list of pages or tiers
+exists elsewhere.
+
 ### Content spine
 
 | Table | Purpose | Columns that carry meaning |
