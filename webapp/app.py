@@ -275,7 +275,7 @@ def _seed_toolbox():
     advisor contract: name/notes/advisor re-sync from
     scripts/seed_communities.py's COMMUNITIES on every restart (advisor the
     same way tools.advisor does, just below); every other field —
-    reach, metros_json, featured, cost_band, cost_note, sponsorship_type,
+    reach, local_markets, featured, cost_band, cost_note, sponsorship_type,
     sponsor_name, access, format, categories_json, approved — is admin-owned,
     edited at /admin/tools/communities, and never touched here."""
     from scripts.seed_tools import TOOLS
@@ -5324,7 +5324,7 @@ def tools_communities(request: Request):
             "url": c["url"],
             "slug": c["slug"],
             "reach": c.get("reach") or "National",
-            "metros": c.get("metros") or [],
+            "local_markets": c.get("local_markets") or "",
             "demographic": c["demographic"],
             "cost_band": c["cost_band"],
             "cost_note": c.get("cost_note") or "",
@@ -5339,14 +5339,6 @@ def tools_communities(request: Request):
         }
 
     communities_json = _json.dumps([_community_entry(c) for c in communities])
-    # Only metros that actually have at least one community — matches
-    # regardless of reach (a National community with a Boston chapter still
-    # surfaces under "Boston"), alphabetized. "Online / National" is a
-    # separate sentinel value, not a metro, since it groups by reach instead.
-    used_metros = sorted({m for c in communities for m in (c.get("metros") or [])})
-    region_options = "".join(
-        f'<option value="{_esc(m)}">{_esc(m)}</option>' for m in used_metros
-    )
     cat_buttons = "".join(
         f'<button class="ccat-btn" data-cat="{_esc(c["name"])}" onclick="filterCommCat(this)"'
         f' title="{_esc(c["description"])}">{_esc(c["name"])}</button>'
@@ -5370,12 +5362,6 @@ groups, associations, and Slack channels.
     oninput="filterCommunities()"
     style="flex:1;min-width:200px;max-width:400px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   <button id="comm-advisor-btn" class="ccat-btn" onclick="toggleCommAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#9733; Advisor</button>
-  <select id="comm-region" onchange="filterCommunities()"
-    style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink);">
-    <option value="">All regions</option>
-    <option value="__national__">Online / National</option>
-    {region_options}
-  </select>
   <select id="comm-access" onchange="filterCommunities()"
     style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink);">
     <option value="">All access types</option>
@@ -5476,31 +5462,26 @@ function accessBucket(access) {{
   return 'Other';
 }}
 
-// Regional: just the metro(s) (usually one). National/Global with metros:
-// "<reach> · <up to 3 metros> +N". National/Global with none: "Global" or
-// "National · online".
+// Regional: just the local markets text (usually one place). National/Global
+// with local markets: "<reach> · <local markets>". National/Global with none:
+// "Global" or "National · online".
 function commGeoLine(c) {{
-  var metros = c.metros || [];
+  var localMarkets = c.local_markets || '';
   var reach = c.reach || 'National';
   if (reach === 'Regional') {{
-    return commEsc(metros.length ? metros.join(', ') : 'Regional');
+    return commEsc(localMarkets || 'Regional');
   }}
-  if (metros.length === 0) {{
+  if (!localMarkets) {{
     return commEsc(reach === 'Global' ? 'Global' : 'National · online');
   }}
-  var shown = metros.slice(0, 3);
-  var extra = metros.length - shown.length;
-  var line = reach + ' · ' + shown.join(', ') + (extra > 0 ? ' +' + extra : '');
-  return commEsc(line);
+  return commEsc(reach + ' · ' + localMarkets);
 }}
 
 function updateGapCtaLink(isZero) {{
   var q = document.getElementById('comm-search').value || '';
-  var region = document.getElementById('comm-region').value || '';
   var accessType = document.getElementById('comm-access').value || '';
   var params = new URLSearchParams();
   if (q) params.set('q', q);
-  if (region) params.set('region', region);
   if (accessType) params.set('access', accessType);
   if (activeCommCost) params.set('cost', activeCommCost);
   if (activeCommCats.size) params.set('cats', Array.from(activeCommCats).join(','));
@@ -5597,14 +5578,8 @@ function renderCommunities(list) {{
 
 function commFiltered() {{
   var q = (document.getElementById('comm-search').value || '').toLowerCase();
-  var region = document.getElementById('comm-region').value;
   var accessType = document.getElementById('comm-access').value;
   return ALL_COMMUNITIES.filter(function(c) {{
-    if (region === '__national__') {{
-      if (c.reach !== 'National' && c.reach !== 'Global') return false;
-    }} else if (region) {{
-      if ((c.metros || []).indexOf(region) === -1) return false;
-    }}
     if (accessType && accessBucket(c.access) !== accessType) return false;
     if (activeCommCost && c.cost_band !== activeCommCost) return false;
     if (commAdvisorOnly && !c.advisor) return false;
@@ -5615,7 +5590,7 @@ function commFiltered() {{
       if (!hit) return false;
     }}
     if (!q) return true;
-    return (c.name + ' ' + c.demographic + ' ' + c.notes + ' ' + (c.metros || []).join(' ') + ' ' + (c.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
+    return (c.name + ' ' + c.demographic + ' ' + c.notes + ' ' + (c.local_markets || '') + ' ' + (c.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
   }});
 }}
 
@@ -5726,16 +5701,13 @@ renderCommunities(ALL_COMMUNITIES);
 def _community_geo_line(c: dict) -> str:
     """Python mirror of the /tools/communities card's commGeoLine JS helper,
     for server-rendering the same geography summary on the profile page."""
-    metros = c.get("metros") or []
+    local_markets = (c.get("local_markets") or "").strip()
     reach = c.get("reach") or "National"
     if reach == "Regional":
-        return ", ".join(metros) if metros else "Regional"
-    if not metros:
+        return local_markets if local_markets else "Regional"
+    if not local_markets:
         return "Global" if reach == "Global" else "National · online"
-    shown = metros[:3]
-    extra = len(metros) - len(shown)
-    line = f"{reach} · {', '.join(shown)}"
-    return line + (f" +{extra}" if extra > 0 else "")
+    return f"{reach} · {local_markets}"
 
 
 # The deep profile fields, in the order the public page presents them —
@@ -5936,8 +5908,6 @@ def _gap_search_summary(ctx: dict) -> str:
     bits = []
     if ctx.get("q"):
         bits.append(f'searching for &ldquo;{_esc(ctx["q"])}&rdquo;')
-    if ctx.get("region"):
-        bits.append(f'filtered to {_esc(ctx["region"])}')
     if ctx.get("access"):
         bits.append(f'{_esc(ctx["access"])} access')
     if ctx.get("cost"):
@@ -5952,7 +5922,7 @@ def _gap_search_summary(ctx: dict) -> str:
 
 
 @app.get("/tools/communities/gap", response_class=HTMLResponse)
-def tools_community_gap(request: Request, community_id: int = 0, q: str = "", region: str = "",
+def tools_community_gap(request: Request, community_id: int = 0, q: str = "",
                         access: str = "", cost: str = "", cats: str = "", advisor: str = "",
                         zero: str = "", submitted: str = ""):
     session_id = request.cookies.get(VISITOR_COOKIE_NAME) or ""
@@ -5966,8 +5936,6 @@ def tools_community_gap(request: Request, community_id: int = 0, q: str = "", re
     search_context: dict = {}
     if q:
         search_context["q"] = q
-    if region:
-        search_context["region"] = region
     if access:
         search_context["access"] = access
     if cost:
@@ -6743,9 +6711,10 @@ async function generateCommunityProfile(name, url, statusId) {
 # Shared by /admin/tools/communities/new and /{id}/edit — auto-fills the
 # basic directory-listing fields (distinct from _GENERATE_PROFILE_JS above,
 # which fills the deeper qualitative Community Profile). Text/select fields
-# are addressed by their `name` attribute rather than an id, since there's
-# only ever one such form on the page; metros/categories are checkbox groups
-# so they're synced by checking membership in the returned list instead.
+# (including local_markets, now a plain text input) are addressed by their
+# `name` attribute rather than an id, since there's only ever one such form
+# on the page; categories is the one remaining checkbox group, synced by
+# checking membership in the returned list instead.
 _GENERATE_LISTING_JS = """
 async function generateCommunityListing(name, url, statusId) {
   name = (name || '').trim();
@@ -6760,13 +6729,10 @@ async function generateCommunityListing(name, url, statusId) {
     });
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
-    ['demographic', 'reach', 'cost_band', 'cost_note', 'sponsorship_type',
+    ['demographic', 'reach', 'local_markets', 'cost_band', 'cost_note', 'sponsorship_type',
      'sponsor_name', 'access', 'format'].forEach(function(k) {
       var el = document.querySelector('[name="' + k + '"]');
       if (el && d[k]) el.value = d[k];
-    });
-    document.querySelectorAll('input[name="metros"]').forEach(function(cb) {
-      cb.checked = (d.metros || []).indexOf(cb.value) !== -1;
     });
     document.querySelectorAll('input[name="categories"]').forEach(function(cb) {
       cb.checked = (d.categories || []).indexOf(cb.value) !== -1;
@@ -7544,21 +7510,14 @@ _COMMUNITY_SPONSORSHIP_TYPES = ["Independent", "Vendor-sponsored", "Investor-spo
 # deliberate, accepted loss, not an oversight.
 _COMMUNITY_ACCESS = ["Open", "Application", "Invite-only", "Qualification-based"]
 _COMMUNITY_FORMAT = ["Hybrid", "In-person", "Slack", "Online", "LinkedIn group"]
-# reach describes a community's overall footprint; metros (below) is the
-# separate list of cities/areas where it has a chapter, hub, or local focus —
-# a National/Global community can still carry metros (e.g. FEI has 55+ US
-# chapters), and the /tools/communities region filter matches a metro against
-# `metros` regardless of `reach`, so a city search surfaces both purely-local
-# and national-with-a-local-chapter communities.
+# reach describes a community's overall footprint; local_markets (below) is
+# the free-text list of cities/areas where it has a chapter, hub, or local
+# focus — a National/Global community can still carry local markets (e.g.
+# FEI has 55+ US chapters). Visitors find a specific city via the public
+# search bar (comm-search), which indexes local_markets alongside name/
+# demographic/notes/categories — there's no dedicated click-to-filter control
+# for it (see the Metros -> free text migration in ARCHITECTURE.md).
 _COMMUNITY_REACH = ["Regional", "National", "Global"]
-# Controlled metro vocabulary. California and UK are broad tags for a
-# statewide/countrywide footprint that doesn't reduce to one metro area.
-_COMMUNITY_METROS = [
-    "Atlanta", "Baltimore", "Berlin", "Boston", "California", "Chicago",
-    "Dallas–Fort Worth", "Denver", "Houston", "London", "Los Angeles",
-    "New York", "Paris", "SF Bay Area", "Seattle", "Toronto", "UK",
-    "Washington DC",
-]
 
 # Fields the "Auto-fill from URL" draft (generate_community_listing) can mark
 # with the _NEEDS_VERIFICATION sentinel instead of guessing. Every public
@@ -7589,7 +7548,7 @@ def _public_community(c: dict) -> dict:
 # free-text research column of the same base name where one exists — see the
 # ALTER TABLE comment in linklib/db.py's _SCHEMA), or "derived" for the 2
 # computed on the fly from an existing `communities` column instead of a
-# stored *_tags column (local_presence from metros_json, sponsorship_type
+# stored *_tags column (local_presence from local_markets, sponsorship_type
 # straight off the communities.sponsorship_type value already on every
 # directory row). Dues (paid_free) used to be the 3rd derived dimension
 # (["free"] if cost_band=='Free' else ["paid"]) but moved to "profile" in PR 5
@@ -7711,7 +7670,7 @@ def _community_weight_tags(dim_key: str, community: dict, profile: dict | None) 
     community can carry both tags — a single cost_band column can't
     represent "has both"; see paid_free_tags in _SCHEMA."""
     if dim_key == "local_presence":
-        return ["yes"] if community.get("metros") else []
+        return ["yes"] if (community.get("local_markets") or "").strip() else []
     if dim_key == "sponsorship_type":
         tag = _SPONSORSHIP_TYPE_WEIGHT_TAGS.get(community.get("sponsorship_type") or "")
         return [tag] if tag else []
@@ -7748,16 +7707,6 @@ def _community_category_checkboxes(categories: list[dict], selected: list[str] |
         for c in categories
     ) or '<p style="grid-column:1/-1;font-size:13px;color:var(--muted);margin:0;">' \
          'No categories yet. <a href="/admin/tools/communities/categories">Add one</a> first.</p>'
-
-
-def _community_metro_checkboxes(selected: list[str] | None = None) -> str:
-    selected = selected or []
-    return "".join(
-        f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">'
-        f'<input type="checkbox" name="metros" value="{_esc(m)}"'
-        f'{" checked" if m in selected else ""}> {_esc(m)}</label>'
-        for m in _COMMUNITY_METROS
-    )
 
 
 def _community_form_fields(c: dict | None = None, categories: list[dict] | None = None) -> str:
@@ -7819,11 +7768,11 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
     </div>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:8px;">Metros</label>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Cities/areas where this community has a chapter, hub, or local focus. Leave empty for a purely online/national community with no local footprint.</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 16px;">
-      {_community_metro_checkboxes(c.get('metros') or [])}
-    </div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Local markets</label>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Cities/areas where this community has a chapter, hub, or local focus, e.g. "Boston, New York, SF Bay Area". Leave empty for a purely online/national community with no local footprint.</p>
+    <input name="local_markets" maxlength="300" value="{_esc(c.get('local_markets', ''))}"
+      placeholder="e.g. Boston, New York, SF Bay Area"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
@@ -8064,15 +8013,15 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Recommender best-fit weighting admin (/admin/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li><strong>&ldquo;Recommender ranking weights&rdquo; panel:</strong> one card per weighting dimension, all 10 (Level, Function, CPE eligible events, What you're looking for, Platform, Programming, Dues, Industry, Local Presence, Organization) with a 0&ndash;5 weight number and a checkbox group of that dimension's own controlled-vocabulary values. Both are required together for a dimension to actually rank anything &mdash; a weight alone has nothing to match a community's tags against. Saved together, no page reload, mirroring <code>/admin/voice</code>'s pattern. Local Presence and Organization get the identical admin default weight+value treatment as the 8 <code>community_profiles</code> dimensions, even though their tags are computed on the fly from an existing <code>communities</code> column (<code>metros_json</code>, <code>sponsorship_type</code>) rather than stored in a dedicated <code>*_tags</code> column.</li>
-<li><strong>Profile edit form (&ldquo;Recommender weighting&rdquo; section):</strong> checkbox groups for the 8 <code>community_profiles</code>-sourced dimensions only, per-community, keep each community's <code>*_tags</code> columns current for new/edited communities &mdash; separate from the free-text research fields of the same base name, since that prose was found too inconsistent for reliable keyword matching (see <code>scripts/backfill_community_weight_tags.py</code>'s docstring for the specific false-positive example that ruled it out). Dues moved into this group in PR 5 (<code>paid_free_tags</code>) so a freemium community can carry both Free and Paid, independently of the single-value Cost band select on the community's own edit form. Local Presence and Organization don't get a checkbox group here &mdash; each already has its own single-value control elsewhere on this same edit form (the Metros checkboxes and the Sponsorship select), and duplicating it as a second control would just invite the two to drift apart.</li>
+<li><strong>&ldquo;Recommender ranking weights&rdquo; panel:</strong> one card per weighting dimension, all 10 (Level, Function, CPE eligible events, What you're looking for, Platform, Programming, Dues, Industry, Local Presence, Organization) with a 0&ndash;5 weight number and a checkbox group of that dimension's own controlled-vocabulary values. Both are required together for a dimension to actually rank anything &mdash; a weight alone has nothing to match a community's tags against. Saved together, no page reload, mirroring <code>/admin/voice</code>'s pattern. Local Presence and Organization get the identical admin default weight+value treatment as the 8 <code>community_profiles</code> dimensions, even though their tags are computed on the fly from an existing <code>communities</code> column (<code>local_markets</code>, <code>sponsorship_type</code>) rather than stored in a dedicated <code>*_tags</code> column.</li>
+<li><strong>Profile edit form (&ldquo;Recommender weighting&rdquo; section):</strong> checkbox groups for the 8 <code>community_profiles</code>-sourced dimensions only, per-community, keep each community's <code>*_tags</code> columns current for new/edited communities &mdash; separate from the free-text research fields of the same base name, since that prose was found too inconsistent for reliable keyword matching (see <code>scripts/backfill_community_weight_tags.py</code>'s docstring for the specific false-positive example that ruled it out). Dues moved into this group in PR 5 (<code>paid_free_tags</code>) so a freemium community can carry both Free and Paid, independently of the single-value Cost band select on the community's own edit form. Local Presence and Organization don't get a checkbox group here &mdash; each already has its own single-value control elsewhere on this same edit form (the Local markets text field and the Sponsorship select), and duplicating it as a second control would just invite the two to drift apart.</li>
 </ul>
 </section>
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Auto-fill from URL (/admin/tools/communities/new and /{id}/edit)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, next to Name/URL on the Add/Edit Community form &mdash; drafts the basic directory-listing fields (demographic, reach, metros, cost band, cost note, sponsorship, sponsor name, access, format, categories) from one Claude call grounded in a fetch of the entered URL. Distinct from the &ldquo;Generate&rdquo; button on the Community Profile edit page, which drafts the deeper qualitative fields instead.</li>
+<li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, next to Name/URL on the Add/Edit Community form &mdash; drafts the basic directory-listing fields (demographic, reach, local markets, cost band, cost note, sponsorship, sponsor name, access, format, categories) from one Claude call grounded in a fetch of the entered URL. Distinct from the &ldquo;Generate&rdquo; button on the Community Profile edit page, which drafts the deeper qualitative fields instead.</li>
 <li><strong>Status line while running:</strong> &ldquo;Generating&hellip;&rdquo;, then either &ldquo;Drafted. Review before saving &mdash; anything marked &lsquo;Needs verification&rsquo; needs a manual check.&rdquo; or, if the page fetch failed, &ldquo;Drafted. Could not fetch the page, so verify facts before saving.&rdquo; On failure: the request's own error message, or &ldquo;Generation failed. Fill in the form by hand.&rdquo;</li>
 <li><strong>&ldquo;Needs verification&rdquo; sentinel:</strong> when the model can't confidently determine a field, it drafts the literal string &ldquo;Needs verification&rdquo; into that field rather than guessing &mdash; a selectable option on the Reach/Cost band/Sponsorship selects, or the field's literal text otherwise. Deliberately a different label from the &ldquo;Needs review&rdquo; badge below (that one is Brian's own manual sign-off on the whole Community Profile; this one is a machine-set, per-field gap on the basic listing) so the two never get confused in the same admin table.</li>
 <li><strong>&ldquo;N fields need verification&rdquo; badge</strong> on the admin communities table: a passive count, not a save blocker &mdash; a nudge toward Edit for any community still carrying the sentinel on one or more fields. The sentinel is stripped back out to blank on every public-facing page (directory, profile, compare, recommender results) before a visitor ever sees it.</li>
@@ -8497,7 +8446,7 @@ async def admin_communities_new_submit(request: Request):
     notes = (form.get("notes") or "").strip()
     categories = form.getlist("categories")
     reach = (form.get("reach") or "National").strip()
-    metros = form.getlist("metros")
+    local_markets = (form.get("local_markets") or "").strip()
     featured = 1 if form.get("featured") == "1" else 0
     advisor = 1 if form.get("advisor") == "1" else 0
     if not (name and demographic):
@@ -8508,7 +8457,7 @@ async def admin_communities_new_submit(request: Request):
                           cost_band=cost_band, categories=categories, cost_note=cost_note,
                           sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                           access=access, format=format_, notes=notes, approved=1,
-                          reach=reach, metros=metros, featured=featured, advisor=advisor)
+                          reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -8557,7 +8506,7 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
     notes = (form.get("notes") or "").strip()
     categories = form.getlist("categories")
     reach = (form.get("reach") or "National").strip()
-    metros = form.getlist("metros")
+    local_markets = (form.get("local_markets") or "").strip()
     featured = 1 if form.get("featured") == "1" else 0
     advisor = 1 if form.get("advisor") == "1" else 0
     if not (name and demographic):
@@ -8568,7 +8517,7 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
                              cost_band=cost_band, categories=categories, cost_note=cost_note,
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                              access=access, format=format_, notes=notes,
-                             reach=reach, metros=metros, featured=featured, advisor=advisor)
+                             reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -8780,7 +8729,6 @@ async def admin_communities_generate_listing(request: Request):
         reach_options=_COMMUNITY_REACH, cost_band_options=_COMMUNITY_COST_BANDS,
         sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES,
         access_options=_COMMUNITY_ACCESS, format_options=_COMMUNITY_FORMAT,
-        metro_options=_COMMUNITY_METROS,
         category_options=category_names,
     )
     if draft is None:
@@ -8799,7 +8747,7 @@ async def admin_communities_generate_listing(request: Request):
         "low_confidence": draft.low_confidence,
         "demographic": draft.demographic,
         "reach": draft.reach,
-        "metros": draft.metros,
+        "local_markets": draft.local_markets,
         "cost_band": draft.cost_band,
         "cost_note": draft.cost_note,
         "sponsorship_type": draft.sponsorship_type,

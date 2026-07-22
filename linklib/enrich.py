@@ -427,9 +427,11 @@ Fields:
      Series B+ SaaS companies" — one short phrase. "{needs_verification}" if unclear.
   "reach": exactly one value from this list, verbatim: {reach_options}.
      "{needs_verification}" if unclear.
-  "metros": a JSON list of zero or more values from exactly this list,
-     verbatim: {metro_options}. Only include a metro if the page names a
-     specific chapter/hub there — never a value outside this list.
+  "local_markets": a short comma-separated list of city/region names where
+     this community has a specific chapter, hub, or local in-person focus,
+     e.g. "Boston, New York, SF Bay Area" — empty string if it's purely
+     online/national with no specific local footprint mentioned on the page.
+     Never invent a city the page doesn't name.
   "cost_band": exactly one value from this list, verbatim: {cost_band_options}.
      "{needs_verification}" if unclear.
   "cost_note": a short free-text note on pricing specifics (exact dues,
@@ -447,7 +449,7 @@ Fields:
      applies — never a value outside this list.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly these
-keys: demographic, reach, metros, cost_band, cost_note, sponsorship_type,
+keys: demographic, reach, local_markets, cost_band, cost_note, sponsorship_type,
 sponsor_name, access, format, categories.
 
 Community name: {name}
@@ -461,7 +463,7 @@ Community URL: {url}
 class CommunityListingDraft:
     demographic: str = ""
     reach: str = ""
-    metros: list[str] = field(default_factory=list)
+    local_markets: str = ""
     cost_band: str = ""
     cost_note: str = ""
     sponsorship_type: str = ""
@@ -479,20 +481,22 @@ class CommunityListingDraft:
 def generate_community_listing(name: str, url: str, *, reach_options: list[str],
                                 cost_band_options: list[str], sponsorship_options: list[str],
                                 access_options: list[str], format_options: list[str],
-                                metro_options: list[str], category_options: list[str],
+                                category_options: list[str],
                                 model: str = DEFAULT_MODEL) -> CommunityListingDraft | None:
     """Draft the basic directory-listing fields (distinct from the deeper
     generate_community_profile above) for a community from its name + URL,
     mirroring generate_tool_description's fetch/prompt/cost-tracking pattern.
-    The enum/list fields are constrained to caller-supplied controlled
+    The enum fields are constrained to caller-supplied controlled
     vocabularies (webapp/app.py owns those lists — reach/cost_band/
-    sponsorship_type/access/format options and the metro/category
-    checklists) rather than free text, and validated against them again on
-    the way out in case the model drifts. Any field it isn't confident about
-    is drafted as the literal NEEDS_VERIFICATION sentinel (or left empty for
-    list fields) instead of a guess. Never auto-saved — same review contract
-    as the other generate_* helpers. Returns None if the SDK/key is
-    unavailable or the call fails."""
+    sponsorship_type/access/format options and the category checklist)
+    rather than free text, and validated against them again on the way out
+    in case the model drifts. local_markets is free text (no controlled
+    vocabulary — see the Metros checkbox grid -> free text migration) so it's
+    only trimmed, not validated against a list. Any field it isn't confident
+    about is drafted as the literal NEEDS_VERIFICATION sentinel (or left
+    empty for list fields) instead of a guess. Never auto-saved — same
+    review contract as the other generate_* helpers. Returns None if the
+    SDK/key is unavailable or the call fails."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -512,7 +516,6 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
     prompt = _COMMUNITY_LISTING_PROMPT.format(
         needs_verification=NEEDS_VERIFICATION,
         reach_options=json.dumps(reach_options),
-        metro_options=json.dumps(metro_options),
         cost_band_options=json.dumps(cost_band_options),
         sponsorship_options=json.dumps(sponsorship_options),
         access_options=json.dumps(access_options),
@@ -553,7 +556,7 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
         return CommunityListingDraft(
             demographic=str(data.get("demographic", "")).strip(),
             reach=_one_of(data.get("reach"), reach_options),
-            metros=_subset_of(data.get("metros"), metro_options),
+            local_markets=str(data.get("local_markets", "")).strip(),
             cost_band=_one_of(data.get("cost_band"), cost_band_options),
             cost_note=str(data.get("cost_note", "")).strip(),
             sponsorship_type=_one_of(data.get("sponsorship_type"), sponsorship_options),

@@ -7,6 +7,13 @@ uses — so it's safe to re-run; any row not in MAPPING is left untouched.
 The old `region` column was untouched by this script — it was later dropped
 entirely once confirmed unused for any public filtering/display.
 
+Historical: `metros_json` (which this script populates) was later retired in
+favor of a free-text `local_markets` column — see
+Library._migrate_community_local_markets, which backfilled local_markets from
+whatever metros_json already held. Re-running this script would update
+metros_json only, not local_markets, so it's kept for the historical record
+rather than as a script to run again.
+
 Usage:
     python -m scripts.backfill_community_geo [--db library.db] [--dry-run]
 """
