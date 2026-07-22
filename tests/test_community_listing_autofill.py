@@ -45,6 +45,8 @@ REACH = ["Regional", "National", "Global"]
 COST_BANDS = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
 SPONSORSHIP = ["Independent", "Vendor-sponsored", "Investor-sponsored"]
 METROS = ["Boston", "New York", "SF Bay Area"]
+ACCESS = ["Open", "Application", "Invite-only", "Qualification-based"]
+FORMAT = ["Hybrid", "In-person", "Slack", "Online", "LinkedIn group"]
 CATEGORIES = ["FP&A", "Treasury"]
 
 
@@ -59,13 +61,14 @@ def test_generate_listing_fills_confident_fields(monkeypatch):
         "sponsorship_type": "Independent",
         "sponsor_name": "",
         "access": "Invite-only",
-        "format": "Slack + monthly virtual meetup",
+        "format": "Slack",
         "categories": ["FP&A"]
     }""")
     draft = enrich.generate_community_listing(
         "Test Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
-        sponsorship_options=SPONSORSHIP, metro_options=METROS,
+        sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
+        metro_options=METROS,
         category_options=CATEGORIES,
     )
     assert draft is not None
@@ -74,6 +77,7 @@ def test_generate_listing_fills_confident_fields(monkeypatch):
     assert draft.metros == ["Boston"]
     assert draft.cost_band == "Free"
     assert draft.access == "Invite-only"
+    assert draft.format == "Slack"
     assert draft.categories == ["FP&A"]
     assert draft.low_confidence is False
     assert draft.cost_usd > 0
@@ -96,7 +100,8 @@ def test_generate_listing_uses_needs_verification_sentinel_for_unclear_fields(mo
     draft = enrich.generate_community_listing(
         "Obscure Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
-        sponsorship_options=SPONSORSHIP, metro_options=METROS,
+        sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
+        metro_options=METROS,
         category_options=CATEGORIES,
     )
     assert draft is not None
@@ -130,13 +135,15 @@ def test_generate_listing_rejects_hallucinated_enum_values(monkeypatch):
     draft = enrich.generate_community_listing(
         "Test Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
-        sponsorship_options=SPONSORSHIP, metro_options=METROS,
+        sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
+        metro_options=METROS,
         category_options=CATEGORIES,
     )
     assert draft is not None
     assert draft.reach == ""
     assert draft.cost_band == ""
     assert draft.sponsorship_type == ""
+    assert draft.access == ""
     assert draft.metros == []
     assert draft.categories == []
 
@@ -151,7 +158,8 @@ def test_generate_listing_low_confidence_when_fetch_fails(monkeypatch):
     draft = enrich.generate_community_listing(
         "Test Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
-        sponsorship_options=SPONSORSHIP, metro_options=METROS,
+        sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
+        metro_options=METROS,
         category_options=CATEGORIES,
     )
     assert draft is not None
@@ -163,7 +171,8 @@ def test_generate_listing_without_api_key_returns_none(monkeypatch):
     draft = enrich.generate_community_listing(
         "Test Community", "https://example.com",
         reach_options=REACH, cost_band_options=COST_BANDS,
-        sponsorship_options=SPONSORSHIP, metro_options=METROS,
+        sponsorship_options=SPONSORSHIP, access_options=ACCESS, format_options=FORMAT,
+        metro_options=METROS,
         category_options=CATEGORIES,
     )
     assert draft is None

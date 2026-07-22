@@ -6140,7 +6140,7 @@ async def tools_communities_submit(request: Request):
     from linklib.email_utils import send_notification_email, send_community_submission_confirmation_email, default_notify_email
     lib = _lib()
     try:
-        lib.add_community(name=name, url=url, region="", demographic="", cost_band="Undisclosed dues",
+        lib.add_community(name=name, url=url, demographic="", cost_band="Undisclosed dues",
                            categories=[], submitted_by=submitted_by, approved=0)
         notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
         if notify_to:
@@ -7534,6 +7534,16 @@ def admin_benchmarks_delete(request: Request, benchmark_id: int):
 
 _COMMUNITY_COST_BANDS = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
 _COMMUNITY_SPONSORSHIP_TYPES = ["Independent", "Vendor-sponsored", "Investor-sponsored"]
+# Derived from the actual access/format values across the existing 35
+# communities (each value's own leading word/phrase), not invented — every
+# existing entry maps cleanly onto one of these with no lossy leftover, so
+# the one-off reconciliation script (scripts/backfill_community_access_format.py)
+# needed no "Needs verification" fallback for any pre-existing row. Converting
+# these from free text drops each entry's qualifier detail (e.g. "Invite-only
+# (~10% acceptance, ~95% referral rate)" -> "Invite-only") by design — a
+# deliberate, accepted loss, not an oversight.
+_COMMUNITY_ACCESS = ["Open", "Application", "Invite-only", "Qualification-based"]
+_COMMUNITY_FORMAT = ["Hybrid", "In-person", "Slack", "Online", "LinkedIn group"]
 # reach describes a community's overall footprint; metros (below) is the
 # separate list of cities/areas where it has a chapter, hub, or local focus —
 # a National/Global community can still carry metros (e.g. FEI has 55+ US
@@ -7771,6 +7781,14 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
         f'<option value="{_esc(r)}"{" selected" if c.get("reach", "National") == r else ""}>{_esc(r)}</option>'
         for r in _COMMUNITY_REACH + [_NEEDS_VERIFICATION]
     )
+    access_opts = "".join(
+        f'<option value="{_esc(a)}"{" selected" if c.get("access", "") == a else ""}>{_esc(a)}</option>'
+        for a in _COMMUNITY_ACCESS + [_NEEDS_VERIFICATION]
+    )
+    format_opts = "".join(
+        f'<option value="{_esc(fm)}"{" selected" if c.get("format", "") == fm else ""}>{_esc(fm)}</option>'
+        for fm in _COMMUNITY_FORMAT + [_NEEDS_VERIFICATION]
+    )
     return f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
     <input id="comm-name" name="name" required maxlength="200" value="{_esc(c.get('name', ''))}"
@@ -7837,15 +7855,15 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Access</label>
-      <input name="access" maxlength="200" value="{_esc(c.get('access', ''))}"
-        placeholder="e.g. Invite-only, Application, Open"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      <select name="access" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {access_opts}
+      </select>
     </div>
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Format</label>
-      <input name="format" maxlength="200" value="{_esc(c.get('format', ''))}"
-        placeholder="e.g. Hybrid, Slack, In-person"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      <select name="format" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        {format_opts}
+      </select>
     </div>
   </div>
   <div>
@@ -8760,7 +8778,9 @@ async def admin_communities_generate_listing(request: Request):
     draft = generate_community_listing(
         name, url,
         reach_options=_COMMUNITY_REACH, cost_band_options=_COMMUNITY_COST_BANDS,
-        sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES, metro_options=_COMMUNITY_METROS,
+        sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES,
+        access_options=_COMMUNITY_ACCESS, format_options=_COMMUNITY_FORMAT,
+        metro_options=_COMMUNITY_METROS,
         category_options=category_names,
     )
     if draft is None:
