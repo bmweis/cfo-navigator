@@ -5353,8 +5353,7 @@ def tools_communities(request: Request):
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
-groups, associations, and Slack channels.
-<a href="/tools/communities/find" style="margin-left:12px;font-size:14px;font-weight:500;">Not sure where to start? Take the quiz &rarr;</a></p>
+groups, associations, and Slack channels. Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Take the quiz &rarr;</a></p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"
@@ -5401,15 +5400,11 @@ groups, associations, and Slack channels.
 
 <p id="comm-empty" style="display:none;color:var(--muted);padding:32px 0;">No communities match your search.</p>
 
-<div style="margin-top:24px;">
-  <p style="margin:0 0 6px;font-size:15px;color:var(--muted);">Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Take the quiz &rarr;</a></p>
-  <p style="margin:0;font-size:15px;color:var(--muted);">Can't find the right one for you? The one you're a part of has you looking for more? <a id="comm-gap-link" href="/tools/communities/gap" style="font-weight:500;">I'd love to know what's missing &rarr;</a></p>
-</div>
-
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
   <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these communities.</p>
   <p style="font-size:15px;color:var(--muted);">Know a community that belongs here?
     {'<a href="/tools/communities/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit →</a>'}</p>
+  <p style="margin:8px 0 0;font-size:15px;color:var(--muted);">Can't find the right one, or the one you're in isn't quite enough? <a id="comm-gap-link" href="/tools/communities/gap" style="font-weight:500;">I'd love to know what's missing &rarr;</a></p>
 </div>
 </div>
 
@@ -8003,10 +7998,10 @@ _COMMUNITIES_REFERENCE_HTML = """
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;, the link inline in the message itself rather than pointing the visitor to a separate CTA elsewhere on the page. Its href (and the top-of-page gap link's href) still carries the live search/filter state plus <code>?zero=1</code>, computed client-side by <code>gapFormHref()</code>, so the gap form can tailor its transparency note (see below).</li>
-<li><strong>Two subtle text links</strong> (top of page, no box/button chrome, same inline style as the footer links below): &ldquo;Not sure which community's for you? Take the quiz &rarr;&rdquo; (links to the recommender) and &ldquo;Can't find the right one for you? The one you're a part of has you looking for more? I'd love to know what's missing &rarr;&rdquo; (links to the gap form). The seafoam CTA card that used to carry this prompt plus a &ldquo;Suggest a community&rdquo; button was removed &mdash; suggesting a community now lives only in the footer link below.</li>
+<li><strong>Quiz mention</strong> (inline at the end of the subtitle paragraph, top of page): &ldquo;...Slack channels. Not sure which community's for you? Take the quiz &rarr;&rdquo; &mdash; links to the recommender. Plain inline text link, not a separate CTA block.</li>
+<li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;, the link inline in the message itself rather than pointing the visitor to a separate CTA elsewhere on the page. Its href (and the bottom-of-page gap link's href) still carries the live search/filter state plus <code>?zero=1</code>, computed client-side by <code>gapFormHref()</code>, so the gap form can tailor its transparency note (see below).</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#9733; Formal advisor to these communities.&rdquo;</li>
-<li><strong>Suggest-a-community link</strong> (footer): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members; &ldquo;Sign in to submit &rarr;&rdquo; for everyone else &mdash; submission is member-gated, not public.</li>
+<li><strong>Footer</strong> (bottom of page, no box/button chrome): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members, &ldquo;Sign in to submit &rarr;&rdquo; for everyone else (submission is member-gated, not public), directly followed by &ldquo;Can't find the right one, or the one you're in isn't quite enough? I'd love to know what's missing &rarr;&rdquo; (links to the gap form, public, no login required). The seafoam CTA card that used to carry both prompts plus a &ldquo;Suggest a community&rdquo; button was removed; these two lines used to sit together below the filters as a separate top-of-page block before moving to the footer.</li>
 </ul>
 </section>
 

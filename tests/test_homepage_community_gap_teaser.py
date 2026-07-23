@@ -57,26 +57,33 @@ def test_homepage_no_longer_shows_either_prompt_member(env):
     assert "Suggest a piece for the archive" not in r.text
 
 
-def test_top_of_page_teaser_removed_as_duplicate_of_bottom_cta(env):
-    # The bolded top-of-page teaser duplicated the always-visible bottom CTA
-    # card, so it was removed; only the quiz link remains up top.
+def test_quiz_line_inline_in_subtitle_not_a_separate_block(env):
+    # The quiz mention lives inline at the end of the subtitle paragraph now,
+    # not as a separate CTA block further down the page.
     for client in (_client(env), _member_client(env)):
         r = client.get("/tools/communities")
         assert r.status_code == 200
         assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' not in r.text
-        assert "Not sure which community's for you? " in r.text
-        assert '<a href="/tools/communities/find"' in r.text
+        assert "Slack channels. Not sure which community's for you? " in r.text
+        assert '<a href="/tools/communities/find" style="font-weight:500;">Take the quiz' in r.text
+        # The old two-line top-of-page CTA block is gone entirely.
+        assert '<div style="margin-top:24px;">' not in r.text
 
 
-def test_top_of_page_links_shown_on_communities_page(env):
+def test_gap_feedback_line_moved_to_bottom_of_page(env):
     c = _client(env)
     r = c.get("/tools/communities")
     assert r.status_code == 200
     assert "Think finance communities could be better?" not in r.text
     assert "Don't see the right fit?" not in r.text
-    assert "Can't find the right one for you? The one you're a part of has you looking for more?" in r.text
+    assert "Can't find the right one for you? The one you're a part of has you looking for more?" not in r.text
+    assert "Can't find the right one, or the one you're in isn't quite enough?" in r.text
     assert '<a id="comm-gap-link" href="/tools/communities/gap"' in r.text
     assert "I'd love to know what's missing" in r.text
+    # Sits directly below the bottom-of-page submit-for-review line.
+    submit_idx = r.text.index("Know a community that belongs here?")
+    gap_idx = r.text.index("Can't find the right one, or the one you're in isn't quite enough?")
+    assert gap_idx > submit_idx
 
 
 def test_bottom_submit_link_auth_aware_on_communities_page(env):
