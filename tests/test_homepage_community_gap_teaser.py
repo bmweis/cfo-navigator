@@ -73,8 +73,10 @@ def test_top_of_page_links_shown_on_communities_page(env):
     r = c.get("/tools/communities")
     assert r.status_code == 200
     assert "Think finance communities could be better?" not in r.text
-    assert "Don't see the right fit? " in r.text
+    assert "Don't see the right fit?" not in r.text
+    assert "Can't find the right one for you? The one you're a part of has you looking for more?" in r.text
     assert '<a id="comm-gap-link" href="/tools/communities/gap"' in r.text
+    assert "I'd love to know what's missing" in r.text
 
 
 def test_bottom_submit_link_auth_aware_on_communities_page(env):
