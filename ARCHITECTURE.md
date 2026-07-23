@@ -326,8 +326,9 @@ tools. Pending-count badging (`lib.count_pending_communities()`) feeds
 mechanism as pending tool submissions.
 
 **Community gap-collection** (Phase 5) is reachable three ways: a subtle text
-link at the top of `/tools/communities` ("Don't see the right fit? Tell me
-what's missing →", alongside a second plain-text link to the recommender
+link at the top of `/tools/communities` ("Can't find the right one for you?
+The one you're a part of has you looking for more? I'd love to know what's
+missing →", alongside a second plain-text link to the recommender
 quiz — "Not sure which community's for you? Take the quiz →"; the two
 replaced an earlier seafoam CTA card that also carried a "Suggest a
 community" button, now covered by the bottom-of-page submission link
