@@ -684,9 +684,22 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 
 .page-full{max-width:1900px;}   /* full-width content — homepage/about, TL landing, library landing, reader */
 .page-grid{max-width:1300px;}   /* card grids — CFO Toolbox landing */
-.page-tool{max-width:960px;}    /* functional tools — FP&A Buddy chat, GER calculator */
 .page-form{max-width:640px;}    /* forms — contact, admin edit forms */
 .page-admin{max-width:1500px;} /* admin data tables — communities list */
+
+/* Functional tools (FP&A Buddy, GER calculator, Sail Don't Row + leaderboard)
+   used to sit in their own narrow .page-tool tier (960px), which read as
+   visibly boxed-in next to every other content page — .page/.page-full only
+   render as wide as their content actually wants (a flex-shrink quirk of
+   .site-main, not a hard stretch), so a lone 960px card was the one thing
+   forcing those pages to stay narrow even on a wide monitor. Phase 9b moved
+   them to .page-full and widened their working width to card-grid scale
+   (1300px, .tool-inner) so the calculator/chat/game card actually gets to
+   use the room. .tool-prose (760px) is for GER's long-form paragraphs only,
+   nested inside .tool-inner — full 1300px is too wide a text measure to
+   read comfortably, but the calculator itself benefits from the extra room. */
+.tool-inner{max-width:1300px;margin:0 auto;}
+.tool-prose{max-width:760px;margin:0 auto;}
 
 /* Buttons — primary navy fill, ghost navy outline. Seafoam is NEVER a button. */
 .btn{display:inline-block;padding:11px 22px;background:var(--navy);color:#fff;border-radius:10px;font:600 15px var(--font-body);border:1px solid var(--navy);cursor:pointer;}
@@ -1302,7 +1315,8 @@ def homepage(request: Request):
                "Software, benchmarking, and communities for the Office of the CFO&mdash;the vendors "
                "high-growth finance teams actually use, the benchmarking sources I rely on, and the peer "
                "groups worth joining.",
-               icon_html=_card_icon(1, _ICON_TOOLBOX)),
+               icon_html=_card_icon(1, _ICON_TOOLBOX),
+               sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=14)),
         _rcard("/library", "Digital Library",
                "The Reading Room: a searchable archive plus my personal feed of finance and technology "
                "blogs. Also home to FP&amp;A Buddy, a research agent for questions on frameworks, metrics, "
@@ -1524,7 +1538,8 @@ def growth_engine_ratio_redirect(request: Request):
 
 @app.get("/thought-leadership/growth-engine-ratio", response_class=HTMLResponse)
 def growth_engine_ratio(request: Request):
-    body = """<div class="page page-tool">
+    body = """<div class="page page-full">
+<div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -1558,6 +1573,7 @@ def growth_engine_ratio(request: Request):
   }
 </style>
 
+<div class="tool-prose">
 <p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Framework</p>
 <h1 style="margin:0 0 8px;">The Growth Engine Ratio</h1>
 <p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
@@ -1657,6 +1673,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     </tbody>
   </table>
 </div>
+</div><!-- /tool-prose -->
 
 <h2>Calculate Your Ratio</h2>
 <p style="color:var(--muted);font-size:15px;margin:-6px 0 18px;">
@@ -1786,6 +1803,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
   </div>
 </div><!-- /ger-card -->
 
+<div class="tool-prose">
 <p style="font-size:13px;color:var(--muted);margin:-20px 0 40px;">
   <strong>Methodology note:</strong> GTM = Sales &amp; Marketing expense (GAAP including SBC).
   R&D = Research &amp; Development expense. Use either GAAP or non-GAAP consistently—don't mix. Benchmarks in the full guide use GAAP. Every ratio needs 6 consecutive quarters for the
@@ -1822,7 +1840,9 @@ with The F Suite.</p>
   title="The Growth Engine Ratio (song)"></iframe>
 <p style="font-size:13px;color:var(--muted);margin-top:8px;">Player not loading? <a href="/static/growth-engine-ratio.mp3" download>Download the MP3</a> or <a href="https://suno.com/song/608201fd-d2b9-4774-af56-b65d477f3528" target="_blank" rel="noopener">listen on Suno</a>.</p>
 
-</div>
+</div><!-- /tool-prose -->
+</div><!-- /tool-inner -->
+</div><!-- /page -->
 
 <script>
 function v(id) { return parseFloat(document.getElementById(id).value) || 0; }
@@ -4263,7 +4283,8 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
           .replace("__COURSE_LENGTH__", str(_SDR_COURSE_LENGTH))
           .replace("__SIGNED_IN__", "true" if signed_in else "false"))
 
-    return """<div class="page page-tool" id="sdrRoot">
+    return """<div class="page page-full">
+<div class="tool-inner" id="sdrRoot">
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
 <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;">
@@ -4350,6 +4371,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
 <p class="sdr-hint">Signed-in runs save automatically to the <a href="/play/leaderboard">leaderboard</a>.""" + (
     ' Rank pace/difficulty is tunable at <code>/admin/game-settings</code>.' if is_admin else ''
 ) + """</p>
+</div>
 </div>
 <script>""" + js + """</script>"""
 
@@ -4455,7 +4477,8 @@ def play_leaderboard(request: Request, scope: str = "week"):
         rows_html = ('<p style="padding:24px;text-align:center;color:var(--muted);">'
                      'No runs yet—be the first to set a Score.</p>')
 
-    body = """<div class="page page-tool">
+    body = """<div class="page page-full">
+<div class="tool-inner">
 <style>""" + _SDR_PILL_CSS + """
 .sdr-lb-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;}
 .sdr-lb-tab{font:700 12px var(--font-head);padding:7px 14px;border-radius:8px;border:1px solid var(--line);
@@ -4480,6 +4503,7 @@ rank and difficulty it was played on, so a Storm-Warning Skipper run and a Fair-
 visible at a glance, side by side.</p>
 <div class="sdr-lb-tabs">""" + scope_tabs + """</div>
 <div class="sdr-leaderboard">""" + rows_html + """</div>
+</div>
 </div>"""
     return HTMLResponse(_page("Leaderboard—Sail, Don't Row", "Sail, Don't Row", body, role=_role(request)))
 
@@ -4750,8 +4774,11 @@ def tools_landing(request: Request):
 .toolbox-cards{{display:grid;grid-template-columns:1fr;gap:14px;}}
 @media(min-width:760px){{.toolbox-cards{{grid-template-columns:repeat(3,1fr);}}}}
 </style>
-<h1 style="margin:0 0 6px;">CFO Toolbox</h1>
-<p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO.</p>
+<div style="position:relative;display:inline-block;">
+  <h1 style="margin:0 0 6px;">CFO Toolbox</h1>
+  {_sticker("🚧 building", rotate=-4, top="-14px", right="-52px", size=14)}
+</div>
+<p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO&mdash;still being built out.</p>
 <div class="toolbox-cards">{cards}</div>
 </div>"""
     return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
@@ -10191,7 +10218,10 @@ def library(request: Request):
 @media(min-width:760px){{.lib-card-row{{grid-template-columns:1fr 1fr;}}}}
 </style>
 <div class="lib-wrap">
-<h1 style="margin:0 0 6px;">Library</h1>
+<div style="position:relative;display:inline-block;">
+  <h1 style="margin:0 0 6px;">Library</h1>
+  {_sticker("🚧 building", rotate=-4, top="-14px", right="-52px", size=14)}
+</div>
 <p style="color:var(--muted);margin:0 0 26px;">Your private workspace&mdash;the curated archive, the live feed, and the FP&amp;A assistant.</p>
 {_section("Reading Room", reading_room)}
 {suggest}
@@ -10438,7 +10468,8 @@ def ask_page(request: Request, q: str = ""):
         '<li><strong>Gets sharper.</strong> Every rating feeds a real eval set that improves retrieval and answer quality over time.</li>'
     )
 
-    body = f"""<div class="page page-tool">
+    body = f"""<div class="page page-full">
+<div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
@@ -10483,6 +10514,7 @@ def ask_page(request: Request, q: str = ""):
 <div id="ask-thread"></div>
 <div id="ask-capped" style="display:none;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:14px;color:var(--muted);">
   You&rsquo;ve reached the limit for this conversation. <a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.
+</div>
 </div>
 </div>
 
@@ -11665,8 +11697,8 @@ mermaid.initialize({{
     return HTMLResponse(_page("Database—Admin", "Admin", body, authed=True))
 
 
-_PAGE_TIER_RE = re.compile(r"page-(full|grid|tool|form|admin)\b")
-_PAGE_TIER_LABELS = {"full": "page-full", "grid": "page-grid", "tool": "page-tool",
+_PAGE_TIER_RE = re.compile(r"page-(full|grid|form|admin)\b")
+_PAGE_TIER_LABELS = {"full": "page-full", "grid": "page-grid",
                       "form": "page-form", "admin": "page-admin"}
 # Two bespoke full-bleed layouts documented in BRAND.md §5 as living outside
 # the .page tier system entirely — not part of the tier table by design, so
@@ -11955,13 +11987,12 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
                          f"Build, curate, enrich, and back up your archive&mdash;{len(_LIBRARY_TOOLS)} tools.",
                          _group_badge(task_counts, [href for href, _, _ in _LIBRARY_TOOLS]))
 
-    groups_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
-    for i, (gname, gdesc, items) in enumerate(_ADMIN_GROUPS):
+    def _group_html(gname, gdesc, items):
         cards = "".join(_card(href, title, desc, _badge_for_href(href, task_counts.get(href, 0)))
                         for href, title, desc in items)
         group_badge_html = _group_badge(task_counts, [href for href, _, _ in items])
         open_attr = " open" if gname == "Inbox" else ""   # Inbox starts expanded — everything else is click-to-expand
-        groups_html += (
+        return (
             f'<details class="admin-group"{open_attr} style="margin-bottom:14px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
             f'<summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
@@ -11978,12 +12009,29 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'</details>'
         )
 
+    # Two columns on wide viewports: left carries the Archive card plus the
+    # groups Brian triages often (Inbox, CFO Toolbox); right carries the
+    # lower-cadence settings/reference groups (Features, Brand & voice,
+    # System). Below the breakpoint both stacks concatenate into the
+    # original single-column order — unchanged from before this split.
+    _LEFT_GROUPS = {"Inbox", "CFO Toolbox"}
+    left_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
+    right_html = ""
+    for gname, gdesc, items in _ADMIN_GROUPS:
+        html = _group_html(gname, gdesc, items)
+        if gname in _LEFT_GROUPS:
+            left_html += html
+        else:
+            right_html += html
+
     body = f"""<div class="page page-admin">
 <style>
 .admin-group summary::-webkit-details-marker{{display:none;}}
 .admin-group[open] .admin-chevron{{transform:rotate(180deg);}}
 .admin-group summary:hover{{background:var(--surface);}}
 .admin-group[open] .group-badge{{display:none;}}
+.admin-cols{{display:grid;grid-template-columns:1fr;}}
+@media(min-width:1024px){{.admin-cols{{grid-template-columns:1fr 1fr;gap:20px;align-items:start;}}}}
 </style>
 <h1>Admin</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
@@ -11997,7 +12045,10 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
     <li>Tighten <code>agent.py</code> so an answer can never fall back to raw <code>content</code> when a summary is missing (today it can, at <code>_build_source_documents</code> via <code>_ground_body</code>).</li>
   </ul>
 </div>
-{groups_html}
+<div class="admin-cols">
+<div>{left_html}</div>
+<div>{right_html}</div>
+</div>
 </div>"""
     return HTMLResponse(_page("Admin—Brian Weisberg", "Admin", body, authed=True))
 
