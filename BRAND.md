@@ -234,9 +234,9 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
 
 ### Layout
 
-Five width tiers, keyed to content shape rather than one global reading measure.
+Four width tiers, keyed to content shape rather than one global reading measure.
 Fully migrated as of the Phase 9 route sweep — every page-rendering route carries one
-of the five tiers below; the old three-tier system (`.page` 780px / `.page-narrow`
+of the tiers below; the old three-tier system (`.page` 780px / `.page-narrow`
 480px / `.page-wide` 960px) is retired and those two classes no longer exist in the
 CSS. (The old `.page` measure had drifted from its documented values before this
 system landed — the GER calculator was never actually 820px, it used plain 780px;
@@ -244,9 +244,8 @@ system landed — the GER calculator was never actually 820px, it used plain 780
 
 | Tier | CSS class | Width | Pages |
 |---|---|---|---|
-| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), Library landing (+ past questions, ask history), article reader (`/read`), CFO Toolbox community profile pages |
+| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), Library landing (+ past questions, ask history), article reader (`/read`), CFO Toolbox community profile pages, FP&A Buddy chat, Growth Engine Ratio calculator, Sail Don't Row (+ its leaderboard) |
 | Card grids | `.page-grid` | ~1200–1400px | CFO Toolbox landing + Software directory, Benchmarks directory, Communities directory (+ compare, find-results), `/admin/open-source` |
-| Functional tools | `.page-tool` | ~900–1000px | FP&A Buddy chat, Growth Engine Ratio calculator, Sail Don't Row (+ its leaderboard) |
 | Forms | `.page-form` | ~600–700px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit), admin single-record add/edit forms |
 | Admin data tables | `.page-admin` | ~1400–1600px | All remaining `/admin/*` list, dashboard, and report pages |
 
@@ -257,6 +256,15 @@ bump for scannability, not decoration — they never get any part of the graffit
 outside the `.page` system entirely and aren't part of this tier table — their own
 internal content widths (960px and 860px respectively) were left alone or adjusted in
 place rather than forced into a tier that doesn't fit their structure.
+
+The former `.page-tool` tier (960px, "functional tools") was retired in Phase 9b —
+those pages (FP&A Buddy, GER calculator, Sail Don't Row + leaderboard) now sit on
+`.page-full` like every other content page, so they no longer feel visually cramped
+next to it. Each wraps its actual working content (chat, calculator, game canvas) in
+`.tool-inner` (1300px, centered, card-grid scale) so the widget gets real room instead
+of the old 960px box. The Growth Engine Ratio's long-form paragraphs nest a narrower
+`.tool-prose` (760px) inside that wrapper — 1300px is too wide a text measure to read
+comfortably, but the calculator itself benefits from the extra width.
 
 ---
 

@@ -120,7 +120,7 @@ pattern applied to routes instead of tables: on every page load it walks
 `app.routes`, keeps GET routes whose `response_class` is `HTMLResponse`
 (skipping POST-only action routes, redirect stubs, JSON/AJAX APIs, file
 downloads, and other non-page endpoints), and reads each page's width tier
-(`page-full`/`page-grid`/`page-tool`/`page-form`/`page-admin`, or "custom
+(`page-full`/`page-grid`/`page-form`/`page-admin`, or "custom
 exception" for `/library/archive` and `/library/feed` — see BRAND.md §5 for
 the tier system itself) straight from that route's own source via
 `inspect.getsource` (following one hop into a directly-called helper function
