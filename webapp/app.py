@@ -7289,6 +7289,124 @@ def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], ca
 </div>"""
 
 
+# Client-side sort/filter for the same two approved-rows tables — no new route,
+# since both tables already render in full (no pagination) and the column
+# picker above proved the client-only, no-reload approach works fine for this
+# admin audience. Sort/filter targets are read off data-* attributes stamped
+# on each <tr> (see _admin_row_data_attrs) rather than the visible <td> text,
+# so filtering doesn't break when a column is hidden by the picker.
+_ADMIN_SORT_FILTER_JS = """
+function applySortFilter(tableKey) {
+  var tbody = document.getElementById(tableKey + '-approved-tbody');
+  if (!tbody) return;
+  var rows = Array.prototype.filter.call(tbody.querySelectorAll('tr[data-name]'), function() { return true; });
+  if (!rows.length) return;
+
+  var activeFilters = {};
+  document.querySelectorAll('#' + tableKey + '-filter-scalars select').forEach(function(sel) {
+    if (sel.value) activeFilters[sel.getAttribute('data-filter-field')] = sel.value;
+  });
+  var catBoxes = document.querySelectorAll('#' + tableKey + '-filter-categories input:checked');
+  var activeCats = Array.prototype.map.call(catBoxes, function(c) { return c.value.toLowerCase(); });
+
+  var visible = 0;
+  rows.forEach(function(row) {
+    var ok = true;
+    Object.keys(activeFilters).forEach(function(field) {
+      if ((row.getAttribute('data-' + field) || '') !== activeFilters[field]) ok = false;
+    });
+    if (ok && activeCats.length) {
+      var rowCats = (row.getAttribute('data-categories') || '').split('|');
+      if (!activeCats.some(function(c) { return rowCats.indexOf(c) !== -1; })) ok = false;
+    }
+    row.style.display = ok ? '' : 'none';
+    if (ok) visible++;
+  });
+
+  var sortSel = document.getElementById(tableKey + '-sort-field');
+  var dirBtn = document.getElementById(tableKey + '-sort-dir');
+  if (sortSel) {
+    var field = sortSel.value;
+    var dir = dirBtn ? dirBtn.getAttribute('data-dir') : 'asc';
+    rows.sort(function(a, b) {
+      var av = (a.getAttribute('data-' + field) || '').toLowerCase();
+      var bv = (b.getAttribute('data-' + field) || '').toLowerCase();
+      var cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return dir === 'desc' ? -cmp : cmp;
+    });
+    rows.forEach(function(row) { tbody.appendChild(row); });
+  }
+
+  var countEl = document.getElementById(tableKey + '-sort-filter-count');
+  if (countEl) countEl.textContent = 'Showing ' + visible + ' of ' + rows.length;
+}
+function toggleSortDir(tableKey) {
+  var btn = document.getElementById(tableKey + '-sort-dir');
+  var next = btn.getAttribute('data-dir') === 'asc' ? 'desc' : 'asc';
+  btn.setAttribute('data-dir', next);
+  btn.textContent = next === 'asc' ? 'Ascending' : 'Descending';
+  applySortFilter(tableKey);
+}
+function resetSortFilter(tableKey) {
+  document.querySelectorAll('#' + tableKey + '-filter-scalars select').forEach(function(sel) { sel.value = ''; });
+  document.querySelectorAll('#' + tableKey + '-filter-categories input').forEach(function(cb) { cb.checked = false; });
+  var sortSel = document.getElementById(tableKey + '-sort-field');
+  if (sortSel) sortSel.value = sortSel.options[0].value;
+  var dirBtn = document.getElementById(tableKey + '-sort-dir');
+  if (dirBtn) { dirBtn.setAttribute('data-dir', 'asc'); dirBtn.textContent = 'A \\u2192 Z'; }
+  applySortFilter(tableKey);
+}
+"""
+
+
+def _admin_row_data_attrs(fields: dict[str, str]) -> str:
+    """fields: {attr_suffix: raw_value}. Renders data-{suffix}="{value}" pairs,
+    lowercased for case-insensitive sort/filter comparison in _ADMIN_SORT_FILTER_JS.
+    Category lists are passed pre-joined with '|'."""
+    return " ".join(f'data-{k}="{_esc(v.lower())}"' for k, v in fields.items())
+
+
+def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str, str]],
+                                     scalar_filters: list[dict], category_options: list[dict] | None = None) -> str:
+    """sort_fields: (field_key, label) pairs, first is the default (Name, matching
+    the tables' existing server-side ORDER BY). scalar_filters: [{key, label, options}].
+    category_options: if given, adds an OR-matched category filter alongside the
+    scalar (AND-matched) filters."""
+    sort_options = "".join(f'<option value="{k}">{_esc(label)}</option>' for k, label in sort_fields)
+    scalar_html = "".join(
+        f'<select data-filter-field="{f["key"]}" onchange="applySortFilter(\'{table_key}\')" '
+        f'style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;">'
+        f'<option value="">{_esc(f["label"])}: All</option>'
+        + "".join(f'<option value="{_esc(o.lower())}">{_esc(o)}</option>' for o in f["options"])
+        + '</select>'
+        for f in scalar_filters
+    )
+    category_html = ""
+    if category_options:
+        boxes = "".join(
+            f'<label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;white-space:nowrap;">'
+            f'<input type="checkbox" value="{_esc(c["name"])}" onchange="applySortFilter(\'{table_key}\')"> {_esc(c["name"])}</label>'
+            for c in category_options
+        )
+        category_html = (f'<details style="display:inline-block;"><summary style="cursor:pointer;font-size:13px;'
+                          f'color:var(--muted);display:inline-block;">Categories &#9662;</summary>'
+                          f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:6px 12px;'
+                          f'margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;'
+                          f'background:var(--surface);max-width:420px;">{boxes}</div></details>')
+    return f"""<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 12px;">
+  <label style="font-size:13px;color:var(--muted);">Sort by</label>
+  <select id="{table_key}-sort-field" onchange="applySortFilter('{table_key}')"
+    style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;">{sort_options}</select>
+  <button type="button" id="{table_key}-sort-dir" data-dir="asc" onclick="toggleSortDir('{table_key}')"
+    class="btn btn-ghost" style="font-size:13px;padding:5px 12px;">Ascending</button>
+  <span style="width:1px;height:20px;background:var(--line);"></span>
+  <div id="{table_key}-filter-scalars" style="display:flex;flex-wrap:wrap;gap:10px;">{scalar_html}</div>
+  {category_html}
+  <button type="button" onclick="resetSortFilter('{table_key}')" class="btn btn-ghost" style="font-size:13px;padding:5px 12px;">Reset</button>
+  <span id="{table_key}-sort-filter-count" style="font-size:13px;color:var(--muted);margin-left:auto;"></span>
+</div>"""
+
+
 @app.get("/admin/software", response_class=HTMLResponse)
 def admin_software(request: Request):
     if not _is_authed(request):
@@ -7331,7 +7449,11 @@ def admin_software(request: Request):
                       f'{n_leads} intro{"s" if n_leads != 1 else ""}</a>') if n_leads else \
                      '<span style="font-size:12px;color:var(--muted);">0 intros</span>'
         featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if t.get("promoted") else ""
-        return f"""<tr>
+        row_attrs = _admin_row_data_attrs({
+            "name": t["name"], "promoted": "1" if t.get("promoted") else "0",
+            "categories": "|".join(t["categories"]),
+        })
+        return f"""<tr {row_attrs}>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(t['name'])}{featured_badge}</td>
           <td data-col="software:url" style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(t['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(t['url'][:50])}{'…' if len(t['url']) > 50 else ''}</a></td>
@@ -7361,8 +7483,9 @@ def admin_software(request: Request):
         {"key": "promoted", "label": "Featured", "kind": "checkbox"},
         {"key": "warm_intro_enabled", "label": "Warm Intro enabled", "kind": "checkbox"},
     ]
+    software_sort_fields = [("name", "Name"), ("promoted", "Featured")]
 
-    body = f"""<script>{_ADMIN_BULK_EDIT_JS}</script>
+    body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
@@ -7393,6 +7516,7 @@ def admin_software(request: Request):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software</h2>
 {_admin_column_picker_html("software", software_cols)}
+{_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories)}
 {_admin_bulk_panel_html("software", "/admin/software/bulk-edit", software_bulk_fields, category_options=tool_categories)}
 <div style="overflow-x:auto;">
 <form id="software-approved-form">
@@ -7406,12 +7530,13 @@ def admin_software(request: Request):
   <th data-col="software:vendor_name" style="padding:10px 12px;text-align:left;font-size:13px;">Vendor name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
-<tbody>{approved_rows}</tbody>
+<tbody id="software-approved-tbody">{approved_rows}</tbody>
 </table>
 </form>
 </div>
 <script>
 initColPicker('software', {json.dumps([k for k, _ in software_cols])});
+applySortFilter('software');
 </script>
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
@@ -8435,7 +8560,12 @@ def admin_communities(request: Request, filter: str = ""):
         mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="display:inline;">'
                          f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;margin-left:4px;">Mark reviewed</button></form>'
                          ) if c.get("needs_review") else ""
-        return f"""<tr style="border-top:1px solid var(--line);">
+        row_attrs = _admin_row_data_attrs({
+            "name": c["name"], "cost_band": c["cost_band"], "access": c["access"] or "",
+            "sponsorship_type": c["sponsorship_type"] or "", "format": c["format"] or "",
+            "reach": c["reach"] or "", "categories": "|".join(c["categories"]),
+        })
+        return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
   <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}{review_badge}{gap_badge}</td>
   <td data-col="communities:cost_band" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
@@ -8475,6 +8605,17 @@ def admin_communities(request: Request, filter: str = ""):
         {"key": "featured", "label": "Featured", "kind": "checkbox"},
         {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
     ]
+    communities_sort_fields = [
+        ("name", "Name"), ("cost_band", "Cost band"), ("access", "Access"),
+        ("sponsorship_type", "Sponsorship type"), ("format", "Format"), ("reach", "Reach"),
+    ]
+    communities_scalar_filters = [
+        {"key": "cost_band", "label": "Cost band", "options": _COMMUNITY_COST_BANDS},
+        {"key": "access", "label": "Access", "options": _COMMUNITY_ACCESS},
+        {"key": "sponsorship_type", "label": "Sponsorship type", "options": _COMMUNITY_SPONSORSHIP_TYPES},
+        {"key": "format", "label": "Format", "options": _COMMUNITY_FORMAT},
+        {"key": "reach", "label": "Reach", "options": _COMMUNITY_REACH},
+    ]
 
     n_needs_review = len(needs_review_ids)
     review_filter_link = (
@@ -8487,7 +8628,7 @@ def admin_communities(request: Request, filter: str = ""):
         if filter == "needs_review" else ""
     )
 
-    body = f"""<script>{_ADMIN_BULK_EDIT_JS}</script>
+    body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
@@ -8581,6 +8722,7 @@ async function saveCommunityWeights() {{
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved communities{' needing review' if filter == 'needs_review' else ''}</h2>
 {_admin_column_picker_html("communities", communities_cols)}
+{_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories)}
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories)}
 <div style="overflow-x:auto;">
 <form id="communities-approved-form">
@@ -8596,12 +8738,13 @@ async function saveCommunityWeights() {{
   <th data-col="communities:reach" style="padding:10px 12px;text-align:left;font-size:13px;">Reach</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
-<tbody>{approved_rows}</tbody>
+<tbody id="communities-approved-tbody">{approved_rows}</tbody>
 </table>
 </form>
 </div>
 <script>
 initColPicker('communities', {json.dumps([k for k, _ in communities_cols])});
+applySortFilter('communities');
 </script>
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
