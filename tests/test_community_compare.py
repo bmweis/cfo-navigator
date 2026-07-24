@@ -34,9 +34,9 @@ def _client(appmod):
 def test_compare_renders_two_communities_side_by_side(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
-    c1 = lib.add_community("Community One", "https://example.com", "Finance leaders",
+    c1 = lib.add_community("Community One", "https://example.com/one", "Finance leaders",
                             "Free", [], access="Invite-only", approved=1)
-    c2 = lib.add_community("Community Two", "https://example.com", "Finance leaders",
+    c2 = lib.add_community("Community Two", "https://example.com/two", "Finance leaders",
                             "<$1k/yr", [], access="Open", approved=1)
     lib.upsert_community_profile(c1, ideal_member="Solo CFOs at Series A/B",
                                   verdict_summary="Great for scrappy operators.",
@@ -58,7 +58,7 @@ def test_compare_works_with_three_communities(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     ids = [
-        lib.add_community(f"Community {n}", "https://example.com", "Finance leaders",
+        lib.add_community(f"Community {n}", f"https://example.com/{n.lower()}", "Finance leaders",
                            "Free", [], approved=1)
         for n in ("A", "B", "C")
     ]
@@ -75,7 +75,7 @@ def test_compare_caps_at_three_even_if_more_ids_passed(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     ids = [
-        lib.add_community(f"Community {n}", "https://example.com", "Finance leaders",
+        lib.add_community(f"Community {n}", f"https://example.com/{n.lower()}", "Finance leaders",
                            "Free", [], approved=1)
         for n in ("A", "B", "C", "D")
     ]
@@ -105,9 +105,9 @@ def test_compare_requires_at_least_two_ids(env):
 def test_compare_ignores_unapproved_and_unknown_ids(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
-    approved = lib.add_community("Approved Community", "https://example.com", "Finance leaders",
+    approved = lib.add_community("Approved Community", "https://example.com/approved", "Finance leaders",
                                   "Free", [], approved=1)
-    pending = lib.add_community("Pending Community", "https://example.com", "Finance leaders",
+    pending = lib.add_community("Pending Community", "https://example.com/pending", "Finance leaders",
                                  "Free", [], approved=0)
     lib.close()
 

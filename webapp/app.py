@@ -52,7 +52,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-from linklib.db import Library
+from linklib.db import DuplicateURLError, Library
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.pipeline import ingest_url
 from linklib import backup
@@ -573,6 +573,11 @@ def _require_member(request: Request, token: str | None = None) -> None:
 
 def _esc(s) -> str:
     return (str(s) or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _duplicate_url_message(e: DuplicateURLError, edit_url: str) -> str:
+    return (f'A {e.entry_type} with this URL already exists: "{e.name}". '
+            f'Edit the existing entry instead of creating a new one: {edit_url}')
 
 
 def _send_email_safely(lib: Library, context: str, fn, *args, **kwargs) -> bool:
@@ -9020,6 +9025,8 @@ async def admin_communities_new_submit(request: Request):
                           sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                           access=access, format=format_, notes=notes, approved=1,
                           reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
+    except DuplicateURLError as e:
+        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/communities/{e.entry_id}/edit"))
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -9080,6 +9087,8 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                              access=access, format=format_, notes=notes,
                              reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
+    except DuplicateURLError as e:
+        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/communities/{e.entry_id}/edit"))
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -9425,6 +9434,8 @@ async def admin_tools_new_submit(request: Request):
         lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
                      promoted=promoted, vendor_email=vendor_email,
                      warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
+    except DuplicateURLError as e:
+        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
     finally:
         lib.close()
     return RedirectResponse("/tools/software", status_code=303)
@@ -9569,6 +9580,8 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
         lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
                         promoted=promoted, vendor_email=vendor_email,
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
+    except DuplicateURLError as e:
+        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
     finally:
         lib.close()
     return RedirectResponse("/tools/software", status_code=303)

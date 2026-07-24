@@ -665,6 +665,18 @@ def normalize_url(url: str) -> str:
     return urlunsplit(("https", host, path, urlencode(kept), ""))
 
 
+class DuplicateURLError(Exception):
+    """Raised by add_tool/update_tool/add_community/update_community when the
+    given URL normalize_url()-matches an existing row (a different row, on
+    update). Carries the conflicting row so callers can point the admin at it
+    instead of just saying "duplicate"."""
+    def __init__(self, entry_type: str, entry_id: int, name: str):
+        self.entry_type = entry_type
+        self.entry_id = entry_id
+        self.name = name
+        super().__init__(f'A {entry_type} with this URL already exists: "{name}" (id={entry_id})')
+
+
 def _slugify(name: str) -> str:
     import re
     slug = name.lower().strip()
@@ -1738,11 +1750,26 @@ class Library:
 
     # -- tools directory ---------------------------------------------------
 
+    def _find_tool_by_normalized_url(self, url: str, exclude_id: int | None = None) -> sqlite3.Row | None:
+        target = normalize_url(url)
+        if not target:
+            return None
+        rows = self.conn.execute("SELECT id, name, url FROM tools").fetchall()
+        for r in rows:
+            if r["id"] == exclude_id:
+                continue
+            if normalize_url(r["url"]) == target:
+                return r
+        return None
+
     def add_tool(self, name: str, description: str, url: str,
                  categories: list[str], submitted_by: str = "",
                  approved: int = 0, advisor: int = 0,
                  promoted: int = 0, vendor_email: str = "",
                  warm_intro_enabled: int = 0, vendor_name: str = "") -> int:
+        dup = self._find_tool_by_normalized_url(url)
+        if dup:
+            raise DuplicateURLError("software entry", dup["id"], dup["name"])
         base = _slugify(name)
         slug = base
         suffix = 2
@@ -1781,6 +1808,15 @@ class Library:
                     url: str, categories: list[str], advisor: int = 0,
                     promoted: int = 0, vendor_email: str = "",
                     warm_intro_enabled: int = 0, vendor_name: str = "") -> None:
+        # Only check when the URL is actually changing — callers that resave a
+        # row unchanged (e.g. the bulk-edit routes, which always pass the
+        # row's own current url back) must never trip on a pre-existing
+        # duplicate elsewhere in the table that has nothing to do with this edit.
+        current = self.get_tool(tool_id)
+        if current and normalize_url(url) != normalize_url(current["url"]):
+            dup = self._find_tool_by_normalized_url(url, exclude_id=tool_id)
+            if dup:
+                raise DuplicateURLError("software entry", dup["id"], dup["name"])
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
                advisor=?, promoted=?, vendor_email=?, warm_intro_enabled=?, vendor_name=?,
@@ -1991,6 +2027,18 @@ class Library:
     # many-to-many relationship inline (no join table), community_categories
     # is just the controlled vocabulary of pills.
 
+    def _find_community_by_normalized_url(self, url: str, exclude_id: int | None = None) -> sqlite3.Row | None:
+        target = normalize_url(url)
+        if not target:
+            return None
+        rows = self.conn.execute("SELECT id, name, url FROM communities").fetchall()
+        for r in rows:
+            if r["id"] == exclude_id:
+                continue
+            if normalize_url(r["url"]) == target:
+                return r
+        return None
+
     def add_community(self, name: str, url: str, demographic: str,
                       cost_band: str, categories: list[str], cost_note: str = "",
                       sponsorship_type: str = "Independent", sponsor_name: str = "",
@@ -1998,6 +2046,9 @@ class Library:
                       submitted_by: str = "", approved: int = 0,
                       reach: str = "National", local_markets: str = "",
                       featured: int = 0, advisor: int = 0) -> int:
+        dup = self._find_community_by_normalized_url(url)
+        if dup:
+            raise DuplicateURLError("community", dup["id"], dup["name"])
         base = _slugify(name)
         slug = base
         suffix = 2
@@ -2051,6 +2102,12 @@ class Library:
                          notes: str = "", reach: str = "National",
                          local_markets: str = "", featured: int = 0,
                          advisor: int = 0) -> None:
+        # Only check when the URL is actually changing — see update_tool for why.
+        current = self.get_community(community_id)
+        if current and normalize_url(url) != normalize_url(current["url"]):
+            dup = self._find_community_by_normalized_url(url, exclude_id=community_id)
+            if dup:
+                raise DuplicateURLError("community", dup["id"], dup["name"])
         self.conn.execute(
             """UPDATE communities SET name=?, url=?, demographic=?, cost_band=?,
                cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,
