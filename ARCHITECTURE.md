@@ -326,23 +326,28 @@ tools. Pending-count badging (`lib.count_pending_communities()`) feeds
 mechanism as pending tool submissions.
 
 **Community gap-collection** (Phase 5) is reachable three ways: a subtle text
-link at the top of `/tools/communities` ("Can't find the right one for you?
-The one you're a part of has you looking for more? I'd love to know what's
-missing →", alongside a second plain-text link to the recommender
-quiz — "Not sure which community's for you? Take the quiz →"; the two
-replaced an earlier seafoam CTA card that also carried a "Suggest a
-community" button, now covered by the bottom-of-page submission link
-above), a zero-result search state ("No communities match. Tell me what's
-missing →", the link inline in the message itself rather than requiring the
-visitor to notice a separate CTA elsewhere on the page), and a per-profile
-"Not quite the right fit?" mini-CTA on
-`/tools/communities/{slug}` that pre-fills `closest_community_id`. All three
+link at the bottom of `/tools/communities`, directly below the submission
+line ("Can't find the right one, or the one you're in isn't quite enough?
+I'd love to know what's missing →" — this and the submission line replaced
+an earlier seafoam CTA card that carried the same prompt plus a "Suggest a
+community" button), a zero-result search state ("No communities match. Tell
+me what's missing →", the link inline in the message itself rather than
+requiring the visitor to notice a separate CTA elsewhere on the page), and a
+per-profile "Not quite the right fit?" mini-CTA on
+`/tools/communities/{slug}` that pre-fills `closest_community_id`. The quiz
+mention ("Not sure which community's for you? Take the quiz →") is a
+separate, unrelated link now folded inline into the subtitle paragraph at
+the very top of the page, rather than paired with the gap-form link in a
+shared CTA block — the two used to sit together below the filters, but the
+gap link's natural home is bottom-of-page alongside the other submission
+prompts, while the quiz is a wayfinding aid that belongs with the intro
+copy. All three gap-collection entry points
 land on `GET /tools/communities/gap`, which builds a transparency note from
 whatever session state it can detect — the directory's search/filter state
 (passed via query params, since those filters are pure client-side JS state
 never otherwise posted to the server) and profiles viewed via the
 `cfo_visitor` cookie — telling the visitor what was picked up rather than
-capturing it silently. Both the top-of-page and zero-result gap links are
+capturing it silently. Both the bottom-of-page and zero-result gap links are
 built client-side by the same `gapFormHref(isZero)` helper, so the query
 params (search/filter state, plus `zero=1`) stay identical regardless of
 which entry point a visitor uses. `POST /tools/communities/gap` needs no
