@@ -67,53 +67,47 @@ CONTACT_TIME_TRAP_SECONDS = float(os.environ.get("LINKLIB_CONTACT_TIME_TRAP_SECO
 
 # One-time seed data for the `tool_categories` table (see _seed_toolbox).
 # Not read directly anywhere else — once seeded, the DB is the source of
-# truth and categories are managed at /admin/tools/categories.
+# truth and categories are managed at /admin/tools/categories. Consolidated
+# from a 21-tag ad hoc list to this fixed 15-tag taxonomy (#Software search
+# overhaul Phase 1) — scripts/migrate_software_tags.py carries the mapping
+# and remaps every existing tool's categories_json on a one-off run against
+# a live DB; this list only matters for a fresh DB's first-time seed. Always
+# alphabetical — that's a UI contract (the filter pills on /tools/software),
+# not just seed order, so keep new entries inserted alphabetically.
 _DEFAULT_TOOL_CATEGORIES = [
+    "Accounting",
+    "BI/Analytics",
+    "Cloud/IT Spend",
+    "Equity Management",
+    "ERP",
     "FP&A",
     "Headcount Planning",
-    "Treasury",
-    "Cash Flow Forecasting",
-    "AI Agents",
-    "ERP",
-    "Cap Table Management",
-    "Spend Management",
-    "Financial Close",
-    "Financial Reporting",
-    "Revenue Recognition",
-    "Billing",
-    "Collections",
-    "Sales Tax",
-    "Commission Calculations",
-    "Compensation Data",
-    "Contract Management",
-    "Procurement",
-    "RevOps",
-    "Cloud/IT Spend",
-    "BI & Analytics",
+    "Legal and Contracting",
+    "Neobanking",
+    "Procurement/Spend",
+    "Revenue",
+    "Revenue Operations",
+    "Tax Management",
+    "Travel Management",
+    "Treasury/Cash Management",
 ]
 
 _DEFAULT_CATEGORY_DESCRIPTIONS = {
-    "FP&A": "Business-wide financial planning, budgeting, forecasting, and management reporting.",
-    "Headcount Planning": "Standalone tools for planning and tracking headcount—open reqs, budget vs. actuals on people costs, and the finance–HR handoff.",
-    "Treasury": "Treasury management systems, FX risk, global payments infrastructure, and corporate cash investment platforms.",
-    "Cash Flow Forecasting": "Tools dedicated to predicting future cash positions and liquidity—connecting to bank feeds and ERPs to model inflows and outflows.",
-    "AI Agents": "Finance-native AI agents that operate autonomously on finance workflows, purpose-built for finance teams.",
-    "ERP": "Core accounting and enterprise resource planning—general ledger, system of record, and financial management.",
-    "Cap Table Management": "Equity management for private companies—cap table tracking, 409A valuations, and employee equity plan administration.",
-    "Spend Management": "Corporate cards, expense management, AP automation, and employee spend controls.",
-    "Financial Close": "Standalone close management platforms—checklists, reconciliations, journal entries, flux analysis, and audit readiness.",
-    "Financial Reporting": "Tools that produce and present the three core financial statements: income statement, balance sheet, and cash flow statement.",
-    "Revenue Recognition": "Standalone ASC 606 / IFRS 15 revenue recognition platforms, purchasable independently of the billing system feeding them.",
-    "Billing": "Subscription billing, usage-based billing, invoicing, and recurring payments infrastructure.",
-    "Collections": "Accounts receivable management and collections automation—dunning, cash application, and DSO reduction.",
-    "Sales Tax": "Sales tax, VAT, and GST compliance—nexus monitoring, real-time calculation, and filing.",
-    "Commission Calculations": "Incentive compensation management—commission plan design, automated calculations, and rep-facing earnings dashboards.",
-    "Compensation Data": "Compensation benchmarking surveys and data used to set and validate salary, equity, and total comp structures.",
-    "Contract Management": "Contract lifecycle management—drafting, negotiation, approvals, eSign, obligation tracking, and renewals.",
-    "Procurement": "Software and vendor procurement—purchasing workflows, price benchmarking, and renewal management.",
-    "RevOps": "Revenue operations—pipeline management, revenue forecasting, and deal intelligence for finance and sales leaders.",
+    "Accounting": "Core bookkeeping, close management, and financial reporting—reconciliations, journal entries, flux analysis, and the statements finance produces each period.",
+    "BI/Analytics": "Business intelligence, data visualization, SQL analytics, and data infrastructure CFOs own or use for reporting.",
     "Cloud/IT Spend": "Cloud cost management and SaaS management—visibility into and control over cloud infrastructure spend and software license costs.",
-    "BI & Analytics": "Business intelligence, data visualization, SQL analytics, and data infrastructure CFOs own or use for reporting.",
+    "Equity Management": "Cap table management, 409A valuations, and employee equity plan administration for private companies.",
+    "ERP": "Core accounting and enterprise resource planning—general ledger, system of record, and financial management.",
+    "FP&A": "Business-wide financial planning, budgeting, forecasting, and management reporting—including AI-native and agentic platforms built for FP&A workflows.",
+    "Headcount Planning": "Planning and tracking headcount and people costs—open reqs, budget vs. actuals, the finance-HR handoff, and the compensation benchmarking data used to set pay.",
+    "Legal and Contracting": "Contract lifecycle management—drafting, negotiation, approvals, eSign, obligation tracking, and renewals.",
+    "Neobanking": "Digital-first business banking—accounts, cards, and payments built for startups and scale-ups, without a traditional bank relationship.",
+    "Procurement/Spend": "Corporate cards, expense management, AP automation, purchasing workflows, and vendor procurement—employee and company spend controls end to end.",
+    "Revenue": "Billing, invoicing, revenue recognition, and accounts receivable/collections—the full revenue cycle from invoice to cash.",
+    "Revenue Operations": "Revenue operations—pipeline management, revenue forecasting, deal intelligence, and incentive compensation/commission management for finance and sales leaders.",
+    "Tax Management": "Sales tax, VAT, and GST compliance—nexus monitoring, real-time calculation, and filing.",
+    "Travel Management": "Corporate travel booking, policy enforcement, and expense integration for business travel programs.",
+    "Treasury/Cash Management": "Treasury management, cash flow forecasting, FX risk, global payments infrastructure, and corporate cash investment platforms.",
 }
 
 # coverage: "Private" | "Public" | "Both"
