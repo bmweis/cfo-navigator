@@ -20,7 +20,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from linklib.db import Library
+from linklib.db import DuplicateURLError, Library, normalize_url
 
 CATEGORIES = [
     ("CFO-specific invite-only", "Elite, invite-only networks for CFOs and senior finance leaders."),
@@ -484,10 +484,12 @@ def main():
                 lib.add_community_category(cat_name, cat_desc)
                 print(f"  ADDED category: {cat_name}")
 
+        # Normalized comparison (not exact string) so a trailing-slash/www/http
+        # variant of an already-seeded URL is recognized as the same community
+        # rather than tripping Library.add_community's own duplicate check below.
+        existing_by_url = {normalize_url(r["url"]): r for r in lib.conn.execute("SELECT * FROM communities").fetchall()}
         for c in COMMUNITIES:
-            existing = lib.conn.execute(
-                "SELECT * FROM communities WHERE url = ?", (c["url"],)
-            ).fetchone()
+            existing = existing_by_url.get(normalize_url(c["url"]))
             fields = dict(
                 name=c["name"], url=c["url"],
                 demographic=c["demographic"], cost_band=c["cost_band"],
@@ -514,7 +516,14 @@ def main():
                     print(f"  SKIP  {c['name']}")
                 skipped += 1
                 continue
-            community_id = lib.add_community(**fields, approved=1, advisor=int(c.get("advisor", False)))
+            try:
+                community_id = lib.add_community(**fields, approved=1, advisor=int(c.get("advisor", False)))
+            except DuplicateURLError as e:
+                # Defense in depth — the existing_by_url lookup above should already
+                # catch this, so this only fires if two COMMUNITIES entries themselves
+                # share a normalized URL. Skip rather than crash the whole run.
+                print(f"  SKIP  {c['name']} — URL collides with existing {e.entry_id} ({e.name!r})")
+                continue
             print(f"  ADDED {c['name']} (id={community_id})")
             added += 1
     finally:

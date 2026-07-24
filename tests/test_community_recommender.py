@@ -33,9 +33,9 @@ def _client(appmod):
 
 
 def _seed(lib):
-    cfo = lib.add_community("CFO Guild", "https://example.com", "CFOs at high-growth companies",
+    cfo = lib.add_community("CFO Guild", "https://example.com/cfo-guild", "CFOs at high-growth companies",
                              "Free", ["CFO-specific invite-only"], access="Invite-only", approved=1)
-    controller = lib.add_community("Controller Circle", "https://example.com", "Controllers",
+    controller = lib.add_community("Controller Circle", "https://example.com/controller-circle", "Controllers",
                                     "<$1k/yr", ["Controller/accounting"], access="Open", approved=1)
     return cfo, controller
 

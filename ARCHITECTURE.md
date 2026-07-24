@@ -298,6 +298,34 @@ already-attached node moves it rather than duplicating it, so this reorders
 in place; filtering toggles `style.display`. A `Showing N of M` counter and a
 `Reset` button read the same row set the sort/filter logic does.
 
+**Duplicate-URL blocking on save (both tables, create and edit).**
+`linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
+`_find_community_by_normalized_url` lookup on `Library` guard `add_tool`,
+`update_tool`, `add_community`, and `update_community` — each compares the
+incoming URL's `normalize_url()` value against every other row's, and raises
+if it matches. Deliberately placed at the `Library` layer rather than only in
+the admin route handlers, so any caller is covered, not just the admin form —
+this is what let `scripts/seed_tools.py`/`scripts/seed_communities.py` keep
+working: their own re-run idempotency check used to be an exact-string
+`WHERE url = ?` lookup, which would have missed a normalized-duplicate (e.g.
+a `www.` variant) and then crashed on the newly-enforced `DuplicateURLError`
+when it tried to insert it as new — both scripts' lookups were switched to
+build an `{normalize_url(url): row}` map up front and compare against that
+instead, so they now recognize the same rows `add_tool`/`add_community`
+would. On `update_tool`/`update_community`, the check only runs when the URL
+is actually changing (compared via `normalize_url()` against the row's
+current stored URL) — critical so the bulk-edit routes above, which always
+resave a row's own unchanged URL as part of every bulk update, can never trip
+on a duplicate that has nothing to do with the field they're actually
+changing. `webapp/app.py`'s four submit routes
+(`admin_tools_new_submit`/`admin_tools_edit_submit`/
+`admin_communities_new_submit`/`admin_communities_edit_submit`) catch
+`DuplicateURLError` and turn it into a `400` whose `detail` names the
+conflicting entry and links straight to its edit page
+(`_duplicate_url_message`) — same `HTTPException(400, detail=...)` mechanism
+already used for the existing required-field validation on those routes, not
+a new error-rendering pattern.
+
 **Metros -> free text migration.** The directory's geography field started as
 an 18-city checkbox grid (`_COMMUNITY_METROS`, backed by `metros_json`, a
 controlled vocabulary) with a public click-to-filter `<select>` on

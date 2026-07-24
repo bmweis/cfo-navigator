@@ -13,7 +13,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from linklib.db import Library
+from linklib.db import DuplicateURLError, Library, normalize_url
 
 TOOLS = [
     {
@@ -934,10 +934,15 @@ def main():
     lib = Library(args.db)
     added = updated = skipped = 0
     try:
+        # Normalized comparison (not exact string) so a trailing-slash/www/http
+        # variant of an already-seeded URL is recognized as the same tool rather
+        # than tripping Library.add_tool's own duplicate check below.
+        existing_by_url = {
+            normalize_url(r["url"]): r
+            for r in lib.conn.execute("SELECT id, name, description, advisor, url FROM tools").fetchall()
+        }
         for t in TOOLS:
-            existing = lib.conn.execute(
-                "SELECT id, name, description, advisor FROM tools WHERE url = ?", (t["url"],)
-            ).fetchone()
+            existing = existing_by_url.get(normalize_url(t["url"]))
             if existing:
                 if t.get("advisor") and not existing["advisor"]:
                     lib.conn.execute("UPDATE tools SET advisor=1 WHERE id=?", (existing["id"],))
@@ -951,14 +956,21 @@ def main():
                     print(f"  SKIP  {t['name']}")
                 skipped += 1
                 continue
-            tool_id = lib.add_tool(
-                name=t["name"],
-                description=t["description"],
-                url=t["url"],
-                categories=t["categories"],
-                approved=1,
-                advisor=int(t.get("advisor", False)),
-            )
+            try:
+                tool_id = lib.add_tool(
+                    name=t["name"],
+                    description=t["description"],
+                    url=t["url"],
+                    categories=t["categories"],
+                    approved=1,
+                    advisor=int(t.get("advisor", False)),
+                )
+            except DuplicateURLError as e:
+                # Defense in depth — the existing_by_url lookup above should already
+                # catch this, so this only fires if two TOOLS entries themselves
+                # share a normalized URL. Skip rather than crash the whole run.
+                print(f"  SKIP  {t['name']} — URL collides with existing {e.entry_id} ({e.name!r})")
+                continue
             print(f"  ADDED {t['name']} (id={tool_id})")
             added += 1
     finally:

@@ -254,11 +254,11 @@ def test_gap_form_closest_match_and_transparency_note_render_together(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     closest_id = lib.add_community(
-        "Closest Match Community", "https://example.com", "Finance leaders",
+        "Closest Match Community", "https://example.com/closest", "Finance leaders",
         "Free", [], approved=1,
     )
     other_id = lib.add_community(
-        "Other Viewed Community", "https://example.com", "Finance leaders",
+        "Other Viewed Community", "https://example.com/other", "Finance leaders",
         "Free", [], approved=1,
     )
     lib.close()
