@@ -1804,6 +1804,15 @@ class Library:
         row = self.conn.execute("SELECT * FROM tools WHERE id=?", (tool_id,)).fetchone()
         return self._tool_to_dict(row) if row else None
 
+    def get_tool_by_slug(self, slug: str) -> dict | None:
+        """Used by the public profile page (/tools/software/<slug>). Only
+        returns approved rows — an unapproved/pending tool has no live
+        directory listing, so its profile shouldn't be reachable either."""
+        row = self.conn.execute(
+            "SELECT * FROM tools WHERE slug=? AND approved=1", (slug,)
+        ).fetchone()
+        return self._tool_to_dict(row) if row else None
+
     def update_tool(self, tool_id: int, name: str, description: str,
                     url: str, categories: list[str], advisor: int = 0,
                     promoted: int = 0, vendor_email: str = "",
