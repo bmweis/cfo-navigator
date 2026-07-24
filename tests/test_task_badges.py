@@ -91,7 +91,7 @@ def test_open_task_counts_empty_by_default(lib):
     # Brand/voice/open-source checks run live against the real app.py — assert
     # only on the signals this test actually manipulates, not the whole dict.
     assert "/admin/queue" not in counts
-    assert "/admin/tools" not in counts
+    assert "/admin/software" not in counts
     assert "/admin/tools/communities" not in counts
     assert "/admin/contacts" not in counts
     assert tasks.has_open_tasks(lib) is (len(counts) > 0)
@@ -101,7 +101,7 @@ def test_open_task_counts_reflects_pending_tool(lib):
     from webapp import tasks
     lib.add_tool("A", "desc", "https://a.example", [], approved=0)
     counts = tasks.open_task_counts(lib)
-    assert counts["/admin/tools"] == 1
+    assert counts["/admin/software"] == 1
     assert tasks.has_open_tasks(lib) is True
 
 
@@ -177,9 +177,9 @@ def test_badge_for_href_renders_count_for_individually_actionable(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
-    assert appmod._badge_for_href("/admin/tools", 2) == '<span class="task-badge">2</span>'
+    assert appmod._badge_for_href("/admin/software", 2) == '<span class="task-badge">2</span>'
     assert appmod._badge_for_href("/admin/email-failures", 1) == '<span class="task-badge">1</span>'
-    assert appmod._badge_for_href("/admin/tools", 0) == ""
+    assert appmod._badge_for_href("/admin/software", 0) == ""
 
 
 def test_group_badge_dot_when_only_all_or_none_pending(monkeypatch):
@@ -206,7 +206,7 @@ def test_group_badge_empty_when_nothing_pending(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
-    assert appmod._group_badge({}, ["/admin/contacts", "/admin/tools"]) == ""
+    assert appmod._group_badge({}, ["/admin/contacts", "/admin/software"]) == ""
 
 
 # --- end-to-end: badge clears at every level after viewing --------------------
@@ -285,7 +285,7 @@ def test_pending_tool_badge_only_clears_on_approval_not_view(admin_client):
     r1 = client.get("/admin")
     assert '<span class="task-badge">1</span>' in r1.text
 
-    client.get("/admin/tools")   # merely viewing the pending-submissions page
+    client.get("/admin/software")   # merely viewing the pending-submissions page
 
     r2 = client.get("/admin")
     assert '<span class="task-badge">1</span>' in r2.text   # still open — viewing isn't the action

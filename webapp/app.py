@@ -7070,8 +7070,200 @@ def admin_email_failure_dismiss(request: Request, failure_id: int):
     return RedirectResponse("/admin/email-failures", status_code=303)
 
 
-@app.get("/admin/tools", response_class=HTMLResponse)
-def admin_tools(request: Request):
+# Shared column-picker + bulk-edit UI for the Communities and Software admin
+# tables. Both are plain server-rendered tables (no client framework), so the
+# picker toggles column visibility via data-col attributes and the bulk-edit
+# flow is fetch()-based against a per-table POST route — same no-reload
+# pattern as saveCommunityWeights() above. Field lists differ per table
+# (_COMMUNITY_BULK_FIELDS / _SOFTWARE_BULK_FIELDS below); the JS is generic
+# over a "table key" so both pages share one script block.
+_ADMIN_BULK_EDIT_JS = """
+function initColPicker(tableKey, cols) {
+  var stored = localStorage.getItem('cfo_admin_cols_' + tableKey);
+  if (!stored) return;
+  var active;
+  try { active = JSON.parse(stored); } catch (e) { return; }
+  cols.forEach(function(col) {
+    var visible = active.indexOf(col) !== -1;
+    document.querySelectorAll('[data-col="' + tableKey + ':' + col + '"]').forEach(function(el) {
+      el.style.display = visible ? '' : 'none';
+    });
+    var cb = document.getElementById('colpick-' + tableKey + '-' + col);
+    if (cb) cb.checked = visible;
+  });
+}
+function toggleColumn(tableKey, col, checked, allCols) {
+  document.querySelectorAll('[data-col="' + tableKey + ':' + col + '"]').forEach(function(el) {
+    el.style.display = checked ? '' : 'none';
+  });
+  var stored = localStorage.getItem('cfo_admin_cols_' + tableKey);
+  var active;
+  try { active = stored ? JSON.parse(stored) : allCols.slice(); } catch (e) { active = allCols.slice(); }
+  if (checked && active.indexOf(col) === -1) active.push(col);
+  if (!checked) active = active.filter(function(c) { return c !== col; });
+  localStorage.setItem('cfo_admin_cols_' + tableKey, JSON.stringify(active));
+}
+function updateBulkButton(tableKey) {
+  var n = document.querySelectorAll('.' + tableKey + '-row-cb:checked').length;
+  var btn = document.getElementById(tableKey + '-bulk-btn');
+  if (btn) { btn.disabled = n === 0; btn.textContent = 'Edit selected (' + n + ')'; }
+}
+function selectAllRows(tableKey, checked) {
+  document.querySelectorAll('.' + tableKey + '-row-cb').forEach(function(cb) { cb.checked = checked; });
+  updateBulkButton(tableKey);
+}
+function openBulkPanel(tableKey) {
+  if (document.querySelectorAll('.' + tableKey + '-row-cb:checked').length === 0) return;
+  document.getElementById(tableKey + '-bulk-panel').style.display = 'block';
+  document.getElementById(tableKey + '-bulk-step1').style.display = 'block';
+  document.getElementById(tableKey + '-bulk-step2').style.display = 'none';
+  bulkFieldChanged(tableKey);
+}
+function closeBulkPanel(tableKey) {
+  document.getElementById(tableKey + '-bulk-panel').style.display = 'none';
+}
+function bulkFieldChanged(tableKey) {
+  var field = document.getElementById(tableKey + '-bulk-field').value;
+  document.querySelectorAll('#' + tableKey + '-bulk-values > div').forEach(function(el) {
+    el.style.display = (el.getAttribute('data-field') === field) ? 'block' : 'none';
+  });
+}
+function bulkValueLabel(tableKey, field) {
+  var container = document.querySelector('#' + tableKey + '-bulk-values [data-field="' + field + '"]');
+  if (!container) return '';
+  var sel = container.querySelector('select');
+  if (sel) return sel.options[sel.selectedIndex].textContent;
+  var multi = container.querySelectorAll('input[data-multi]');
+  if (multi.length) {
+    var chosen = Array.prototype.filter.call(multi, function(c) { return c.checked; })
+      .map(function(c) { return c.getAttribute('data-label') || c.value; });
+    return chosen.length ? chosen.join(', ') : '(none)';
+  }
+  var cb = container.querySelector('input[type="checkbox"]');
+  if (cb) return cb.checked ? 'Yes' : 'No';
+  return '';
+}
+function reviewBulkEdit(tableKey, fieldLabels) {
+  var field = document.getElementById(tableKey + '-bulk-field').value;
+  var n = document.querySelectorAll('.' + tableKey + '-row-cb:checked').length;
+  var label = fieldLabels[field] || field;
+  var value = bulkValueLabel(tableKey, field);
+  document.getElementById(tableKey + '-bulk-summary').textContent =
+    'Set "' + label + '" = "' + value + '" on ' + n + ' row' + (n === 1 ? '' : 's') + '.';
+  document.getElementById(tableKey + '-bulk-step1').style.display = 'none';
+  document.getElementById(tableKey + '-bulk-step2').style.display = 'block';
+}
+function backToBulkEdit(tableKey) {
+  document.getElementById(tableKey + '-bulk-step1').style.display = 'block';
+  document.getElementById(tableKey + '-bulk-step2').style.display = 'none';
+}
+async function submitBulkEdit(tableKey, url) {
+  var ids = Array.prototype.map.call(document.querySelectorAll('.' + tableKey + '-row-cb:checked'), function(cb) { return parseInt(cb.value, 10); });
+  var field = document.getElementById(tableKey + '-bulk-field').value;
+  var container = document.querySelector('#' + tableKey + '-bulk-values [data-field="' + field + '"]');
+  var value;
+  var sel = container.querySelector('select');
+  var multi = container.querySelectorAll('input[data-multi]');
+  var cb = container.querySelector('input[type="checkbox"]:not([data-multi])');
+  if (sel) {
+    value = sel.value;
+  } else if (multi.length) {
+    value = Array.prototype.filter.call(multi, function(c) { return c.checked; }).map(function(c) { return c.value; });
+  } else if (cb) {
+    value = cb.checked ? '1' : '0';
+  }
+  var btn = document.getElementById(tableKey + '-bulk-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Applying…';
+  try {
+    var r = await fetch(url, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids: ids, field: field, value: value})
+    });
+    if (!r.ok) throw new Error();
+    window.location.reload();
+  } catch (e) {
+    document.getElementById(tableKey + '-bulk-summary').textContent = 'Save failed—try again.';
+    btn.disabled = false; btn.textContent = 'Apply';
+  }
+}
+"""
+
+
+def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]]) -> str:
+    """columns: (col_key, label) pairs, all default-visible. Toggled client-side
+    via data-col="{table_key}:{col_key}" on the corresponding <th>/<td>s and
+    persisted to localStorage by toggleColumn() in _ADMIN_BULK_EDIT_JS."""
+    checks = "".join(
+        f'<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">'
+        f'<input type="checkbox" id="colpick-{table_key}-{key}" checked '
+        f'onchange="toggleColumn(\'{table_key}\',\'{key}\',this.checked,{json.dumps([k for k, _ in columns])})"> {_esc(label)}</label>'
+        for key, label in columns
+    )
+    return f"""<details style="margin:0 0 12px;">
+  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-block;">Columns &#9662;</summary>
+  <div style="display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:8px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);max-width:520px;">
+    {checks}
+  </div>
+</details>"""
+
+
+def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], category_options: list[dict] | None = None) -> str:
+    """fields: [{key, label, kind: 'select'|'checkbox'|'multi', options?}, ...].
+    'multi' fields render a category_options checkbox grid and always replace
+    (not add/remove) the target rows' category set with the checked ones."""
+    field_options_html = "".join(f'<option value="{f["key"]}">{_esc(f["label"])}</option>' for f in fields)
+
+    def _value_control(f: dict) -> str:
+        if f["kind"] == "select":
+            opts = "".join(f'<option value="{_esc(o)}">{_esc(o)}</option>' for o in f["options"])
+            return (f'<div data-field="{f["key"]}" style="display:none;">'
+                    f'<select id="{table_key}-bulk-val-{f["key"]}" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;">{opts}</select></div>')
+        if f["kind"] == "checkbox":
+            return (f'<div data-field="{f["key"]}" style="display:none;">'
+                    f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">'
+                    f'<input type="checkbox" id="{table_key}-bulk-val-{f["key"]}"> {_esc(f["label"])}</label></div>')
+        if f["kind"] == "multi":
+            opts = "".join(
+                f'<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">'
+                f'<input type="checkbox" data-multi value="{_esc(c["name"])}" data-label="{_esc(c["name"])}"> {_esc(c["name"])}</label>'
+                for c in (category_options or [])
+            ) or '<p style="grid-column:1/-1;font-size:13px;color:var(--muted);margin:0;">No categories yet.</p>'
+            return f'<div data-field="{f["key"]}" style="display:none;"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">{opts}</div></div>'
+        return ""
+
+    values_html = "".join(_value_control(f) for f in fields)
+    labels_json = json.dumps({f["key"]: f["label"] for f in fields})
+    return f"""
+<div style="margin:0 0 16px;">
+  <button type="button" id="{table_key}-bulk-btn" class="btn btn-ghost" disabled
+    style="font-size:13px;padding:6px 16px;" onclick="openBulkPanel('{table_key}')">Edit selected (0)</button>
+</div>
+<div id="{table_key}-bulk-panel" style="display:none;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:0 0 20px;background:var(--surface);max-width:480px;">
+  <div id="{table_key}-bulk-step1">
+    <label style="display:block;font-size:13px;font-weight:600;color:var(--navy);margin-bottom:8px;">Field to update</label>
+    <select id="{table_key}-bulk-field" onchange="bulkFieldChanged('{table_key}')" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:12px;">
+      {field_options_html}
+    </select>
+    <div id="{table_key}-bulk-values">{values_html}</div>
+    <div style="margin-top:14px;">
+      <button type="button" class="btn" style="font-size:13px;padding:6px 16px;"
+        onclick="reviewBulkEdit('{table_key}', {labels_json})">Review changes</button>
+      <button type="button" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;margin-left:6px;"
+        onclick="closeBulkPanel('{table_key}')">Cancel</button>
+    </div>
+  </div>
+  <div id="{table_key}-bulk-step2" style="display:none;">
+    <p id="{table_key}-bulk-summary" style="font-size:14px;margin:0 0 14px;"></p>
+    <button type="button" id="{table_key}-bulk-confirm-btn" class="btn" style="font-size:13px;padding:6px 16px;"
+      onclick="submitBulkEdit('{table_key}', '{post_url}')">Apply</button>
+    <button type="button" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;margin-left:6px;"
+      onclick="backToBulkEdit('{table_key}')">Back</button>
+  </div>
+</div>"""
+
+
+@app.get("/admin/software", response_class=HTMLResponse)
+def admin_software(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -7079,6 +7271,7 @@ def admin_tools(request: Request):
         pending = [t for t in lib.list_tools(approved_only=False) if not t["approved"]]
         approved = [t for t in lib.list_tools(approved_only=True)]
         lead_counts = lib.get_tool_lead_counts()
+        tool_categories = lib.list_tool_categories()
     finally:
         lib.close()
 
@@ -7112,14 +7305,17 @@ def admin_tools(request: Request):
                      '<span style="font-size:12px;color:var(--muted);">0 intros</span>'
         featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if t.get("promoted") else ""
         return f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(t['name'])}{featured_badge}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
+          <td data-col="software:url" style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(t['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(t['url'][:50])}{'…' if len(t['url']) > 50 else ''}</a></td>
+          <td data-col="software:categories" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+          <td data-col="software:intros" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
+          <td data-col="software:vendor_name" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t.get('vendor_name') or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
             <a href="/admin/tools/{t['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
             <form method="post" action="/admin/tools/{t['id']}/delete" style="display:inline;margin-left:6px;"
                   onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
-              <input type="hidden" name="redirect_to" value="/admin/tools">
+              <input type="hidden" name="redirect_to" value="/admin/software">
               <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
             </form>
           </td>
@@ -7128,10 +7324,19 @@ def admin_tools(request: Request):
     pending_rows = "".join(_tool_row(t) for t in pending) or \
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
     approved_rows = "".join(_approved_row(t) for t in approved) or \
-        '<tr><td colspan="4" style="padding:20px;color:var(--muted);">No approved software yet.</td></tr>'
+        '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No approved software yet.</td></tr>'
     total_leads = sum(lead_counts.values())
 
-    body = f"""<div class="page page-admin">
+    software_cols = [("url", "URL"), ("categories", "Categories"), ("intros", "Intros"), ("vendor_name", "Vendor name")]
+    software_bulk_fields = [
+        {"key": "categories", "label": "Categories", "kind": "multi"},
+        {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
+        {"key": "promoted", "label": "Featured", "kind": "checkbox"},
+        {"key": "warm_intro_enabled", "label": "Warm Intro enabled", "kind": "checkbox"},
+    ]
+
+    body = f"""<script>{_ADMIN_BULK_EDIT_JS}</script>
+<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Software</h1>
@@ -7160,17 +7365,27 @@ def admin_tools(request: Request):
 </div>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software</h2>
+{_admin_column_picker_html("software", software_cols)}
+{_admin_bulk_panel_html("software", "/admin/software/bulk-edit", software_bulk_fields, category_options=tool_categories)}
 <div style="overflow-x:auto;">
+<form id="software-approved-form">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
+  <th data-col="software:url" style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
+  <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
+  <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
+  <th data-col="software:vendor_name" style="padding:10px 12px;text-align:left;font-size:13px;">Vendor name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
 <tbody>{approved_rows}</tbody>
 </table>
+</form>
 </div>
+<script>
+initColPicker('software', {json.dumps([k for k, _ in software_cols])});
+</script>
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
   Editing <code>scripts/seed_tools.py</code> updates a tool&rsquo;s <strong>name</strong> and
@@ -7180,6 +7395,48 @@ def admin_tools(request: Request):
 </p>
 </div>"""
     return HTMLResponse(_page("Software—CFO Toolbox Admin", "", body, authed=True))
+
+
+# Field allowlist for the Software bulk-edit panel — server-side gate so a
+# crafted request can't write to name/url/description/vendor contact fields,
+# which are per-record and excluded from bulk edit by design (see plan).
+_SOFTWARE_BULK_FIELDS = {"categories", "advisor", "promoted", "warm_intro_enabled"}
+
+
+@app.post("/admin/software/bulk-edit")
+async def admin_software_bulk_edit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    ids = payload.get("ids")
+    field = payload.get("field")
+    value = payload.get("value")
+    if not isinstance(ids, list) or not ids or field not in _SOFTWARE_BULK_FIELDS:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    lib = _lib()
+    try:
+        for raw_id in ids:
+            try:
+                tool_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            t = lib.get_tool(tool_id)
+            if not t:
+                continue
+            kwargs = dict(
+                name=t["name"], description=t["description"], url=t["url"],
+                categories=t["categories"], advisor=t["advisor"], promoted=t["promoted"],
+                vendor_email=t["vendor_email"], warm_intro_enabled=t["warm_intro_enabled"],
+                vendor_name=t["vendor_name"],
+            )
+            if field == "categories":
+                kwargs["categories"] = value if isinstance(value, list) else []
+            else:
+                kwargs[field] = 1 if value == "1" else 0
+            lib.update_tool(tool_id, **kwargs)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
 
 
 @app.get("/admin/tools/leads", response_class=HTMLResponse)
@@ -8103,6 +8360,7 @@ def admin_communities(request: Request, filter: str = ""):
         needs_review_ids = lib.community_profile_needs_review_ids()
         current_weights = _get_default_community_weights(lib)
         current_weight_values = _get_default_community_weight_values(lib)
+        community_categories = lib.list_community_categories()
     finally:
         lib.close()
 
@@ -8151,10 +8409,14 @@ def admin_communities(request: Request, filter: str = ""):
                          f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;margin-left:4px;">Mark reviewed</button></form>'
                          ) if c.get("needs_review") else ""
         return f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
   <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}{review_badge}{gap_badge}</td>
-  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
-  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
-  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+  <td data-col="communities:cost_band" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
+  <td data-col="communities:access" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
+  <td data-col="communities:categories" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+  <td data-col="communities:sponsorship_type" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['sponsorship_type'] or '—')}</td>
+  <td data-col="communities:format" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['format'] or '—')}</td>
+  <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
   <td style="padding:10px 12px;white-space:nowrap;">
     <a href="/admin/tools/communities/{c['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
     <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="margin-left:4px;">Profile</a>
@@ -8169,8 +8431,23 @@ def admin_communities(request: Request, filter: str = ""):
     pending_rows = "".join(_pending_row(c) for c in pending) or \
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
     approved_rows = "".join(_approved_row(c) for c in approved) or \
-        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>' if filter != "needs_review" else \
-        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
+        '<tr><td colspan="9" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>' if filter != "needs_review" else \
+        '<tr><td colspan="9" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
+
+    communities_cols = [
+        ("cost_band", "Cost band"), ("access", "Access"), ("categories", "Categories"),
+        ("sponsorship_type", "Sponsorship type"), ("format", "Format"), ("reach", "Reach"),
+    ]
+    communities_bulk_fields = [
+        {"key": "cost_band", "label": "Cost band", "kind": "select", "options": _COMMUNITY_COST_BANDS},
+        {"key": "sponsorship_type", "label": "Sponsorship type", "kind": "select", "options": _COMMUNITY_SPONSORSHIP_TYPES},
+        {"key": "access", "label": "Access", "kind": "select", "options": _COMMUNITY_ACCESS},
+        {"key": "format", "label": "Format", "kind": "select", "options": _COMMUNITY_FORMAT},
+        {"key": "reach", "label": "Reach", "kind": "select", "options": _COMMUNITY_REACH},
+        {"key": "categories", "label": "Categories", "kind": "multi"},
+        {"key": "featured", "label": "Featured", "kind": "checkbox"},
+        {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
+    ]
 
     n_needs_review = len(needs_review_ids)
     review_filter_link = (
@@ -8183,7 +8460,8 @@ def admin_communities(request: Request, filter: str = ""):
         if filter == "needs_review" else ""
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<script>{_ADMIN_BULK_EDIT_JS}</script>
+<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Communities</h1>
@@ -8275,18 +8553,29 @@ async function saveCommunityWeights() {{
 </div>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved communities{' needing review' if filter == 'needs_review' else ''}</h2>
+{_admin_column_picker_html("communities", communities_cols)}
+{_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories)}
 <div style="overflow-x:auto;">
+<form id="communities-approved-form">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
+  <th data-col="communities:cost_band" style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
+  <th data-col="communities:access" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
+  <th data-col="communities:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
+  <th data-col="communities:sponsorship_type" style="padding:10px 12px;text-align:left;font-size:13px;">Sponsorship type</th>
+  <th data-col="communities:format" style="padding:10px 12px;text-align:left;font-size:13px;">Format</th>
+  <th data-col="communities:reach" style="padding:10px 12px;text-align:left;font-size:13px;">Reach</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
 <tbody>{approved_rows}</tbody>
 </table>
+</form>
 </div>
+<script>
+initColPicker('communities', {json.dumps([k for k, _ in communities_cols])});
+</script>
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
   Editing <code>scripts/seed_communities.py</code> updates a community&rsquo;s <strong>name</strong> and
@@ -8323,6 +8612,59 @@ async def admin_communities_save_weights(request: Request):
                 valid = {v for v, _ in dim["options"]}
                 picked = [v for v in values[key] if v in valid]
                 lib.set_setting(_community_weight_values_setting_key(key), json.dumps(picked))
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
+
+
+# Field allowlist for the Communities bulk-edit panel — same server-side gate
+# as _SOFTWARE_BULK_FIELDS: name/url/demographic/notes/etc. are per-record and
+# excluded from bulk edit by design (see plan).
+_COMMUNITY_BULK_FIELDS = {"cost_band", "sponsorship_type", "access", "format", "reach", "categories", "featured", "advisor"}
+_COMMUNITY_BULK_SELECT_OPTIONS = {
+    "cost_band": _COMMUNITY_COST_BANDS,
+    "sponsorship_type": _COMMUNITY_SPONSORSHIP_TYPES,
+    "access": _COMMUNITY_ACCESS,
+    "format": _COMMUNITY_FORMAT,
+    "reach": _COMMUNITY_REACH,
+}
+
+
+@app.post("/admin/tools/communities/bulk-edit")
+async def admin_communities_bulk_edit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    ids = payload.get("ids")
+    field = payload.get("field")
+    value = payload.get("value")
+    if not isinstance(ids, list) or not ids or field not in _COMMUNITY_BULK_FIELDS:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    if field in _COMMUNITY_BULK_SELECT_OPTIONS and value not in _COMMUNITY_BULK_SELECT_OPTIONS[field]:
+        return JSONResponse({"ok": False, "error": "Invalid value"}, status_code=400)
+    lib = _lib()
+    try:
+        for raw_id in ids:
+            try:
+                community_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            c = lib.get_community(community_id)
+            if not c:
+                continue
+            kwargs = dict(
+                name=c["name"], url=c["url"], demographic=c["demographic"], cost_band=c["cost_band"],
+                categories=c["categories"], cost_note=c["cost_note"], sponsorship_type=c["sponsorship_type"],
+                sponsor_name=c["sponsor_name"], access=c["access"], format=c["format"], notes=c["notes"],
+                reach=c["reach"], local_markets=c["local_markets"], featured=c["featured"], advisor=c["advisor"],
+            )
+            if field == "categories":
+                kwargs["categories"] = value if isinstance(value, list) else []
+            elif field in ("featured", "advisor"):
+                kwargs[field] = 1 if value == "1" else 0
+            else:
+                kwargs[field] = value
+            lib.update_community(community_id, **kwargs)
     finally:
         lib.close()
     return JSONResponse({"ok": True})
@@ -8884,7 +9226,7 @@ def admin_tools_new(request: Request):
   </div>
   <div>
     <button type="submit" class="btn">Add to directory</button>
-    <a href="/admin/tools" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/admin/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>
@@ -8927,7 +9269,7 @@ def admin_tools_approve(request: Request, tool_id: int):
         lib.approve_tool(tool_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/tools", status_code=303)
+    return RedirectResponse("/admin/software", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/reject")
@@ -8939,7 +9281,7 @@ def admin_tools_reject(request: Request, tool_id: int):
         lib.delete_tool(tool_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/tools", status_code=303)
+    return RedirectResponse("/admin/software", status_code=303)
 
 
 @app.get("/admin/tools/{tool_id}/edit", response_class=HTMLResponse)
@@ -9068,10 +9410,10 @@ async def admin_tools_delete(request: Request, tool_id: int):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
     # Deleting is offered both on /tools/software (public directory, admin controls)
-    # and /admin/tools (Toolbox submissions) — return to whichever one asked,
+    # and /admin/software (Toolbox submissions) — return to whichever one asked,
     # validated against an allowlist since it echoes into a redirect.
     redirect_to = form.get("redirect_to") or "/tools/software"
-    if redirect_to not in ("/tools/software", "/admin/tools"):
+    if redirect_to not in ("/tools/software", "/admin/software"):
         redirect_to = "/tools/software"
     lib = _lib()
     try:
@@ -11311,7 +11653,7 @@ _LIBRARY_TOOLS = [
 # CFO Toolbox items, used as one of the expandable groups below (same pattern
 # as the other groups — no separate hub page).
 _TOOLBOX_TOOLS = [
-    ("/admin/tools",            "Software",             "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
+    ("/admin/software",         "Software",             "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
     ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
     ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),

@@ -243,6 +243,36 @@ admin communities table today; the table isn't paginated, so the sentinel
 text is reachable with a browser find until/unless pagination is added later.
 Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
+**Software admin rename + column picker/bulk edit (both tables).** The Software
+admin page moved from `/admin/tools` to `/admin/software` — a hard cutover, no
+redirect; the old URL now 404s. Only the bare list-page route moved — every
+`/admin/tools/*` sub-path (`/admin/tools/communities`, `/admin/tools/categories`,
+`/admin/tools/benchmarks`, `/admin/tools/leads`, `/admin/tools/{id}/edit`, etc.)
+is a distinct admin area under the historical "Toolbox" URL prefix and was
+left alone. Both the Software and Communities approved-rows tables gained a
+matching column picker and bulk-edit panel — `_admin_column_picker_html` and
+`_admin_bulk_panel_html` in `webapp/app.py` render one shared, table-key-
+parameterized UI (`_ADMIN_BULK_EDIT_JS`) reused by both pages, the same
+pattern `saveCommunityWeights()` already used for a no-reload settings save.
+The column picker persists per-table to `localStorage`
+(`cfo_admin_cols_communities` / `cfo_admin_cols_software`) and only toggles
+`<td>`/`<th>` visibility client-side — no server round-trip. Bulk edit is
+scoped to shared/categorical fields only, never the per-record unique ones
+(`name`, `url`, `description`/`notes`, vendor contact fields, `submitted_by`):
+`_COMMUNITY_BULK_FIELDS` (`cost_band`, `sponsorship_type`, `access`, `format`,
+`reach`, `categories`, `featured`, `advisor`) and `_SOFTWARE_BULK_FIELDS`
+(`categories`, `advisor`, `promoted`, `warm_intro_enabled`) are the server-side
+allowlists `POST /admin/tools/communities/bulk-edit` and
+`POST /admin/software/bulk-edit` check the requested `field` against before
+touching the DB — enum fields (`cost_band`/`sponsorship_type`/`access`/
+`format`/`reach`) are further checked against their fixed option lists
+(`_COMMUNITY_BULK_SELECT_OPTIONS`). Both routes loop the selected ids, fetch
+each row's current values, and call the existing `update_community`/
+`update_tool` with just the target field overridden — no new `Library`
+methods. The confirmation summary ("Set 'Cost band' = 'Free' on 6 rows.") is
+built client-side before the POST fires; the apply itself is a single
+`fetch()` that reloads the page on success.
+
 **Metros -> free text migration.** The directory's geography field started as
 an 18-city checkbox grid (`_COMMUNITY_METROS`, backed by `metros_json`, a
 controlled vocabulary) with a public click-to-filter `<select>` on
@@ -315,7 +345,7 @@ submitted_by=..., approved=0)`, fires the internal notification email plus a
 admin-editable at `/admin/emails`, same `_send_email_safely` best-effort
 pattern as tool submissions), and waits at `/admin/tools/communities` in a
 "Pending submissions" table above the "Approved communities" list — the same
-two-section layout as `/admin/tools`. `POST
+two-section layout as `/admin/software`. `POST
 /admin/tools/communities/{id}/approve` calls `approve_community` and redirects
 straight to `/admin/tools/communities/{id}/profile` (rather than back to the
 list) so the "Generate profile draft" button is immediately in front of
