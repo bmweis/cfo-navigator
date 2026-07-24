@@ -273,6 +273,31 @@ methods. The confirmation summary ("Set 'Cost band' = 'Free' on 6 rows.") is
 built client-side before the POST fires; the apply itself is a single
 `fetch()` that reloads the page on success.
 
+**Sort + filter (both tables).** Same client-only approach as the column
+picker above, and for the same reason — neither table paginates, so the full
+row set is already in the DOM and there's no need for a server round-trip.
+`_admin_sort_filter_toolbar_html` (`webapp/app.py`) renders a "Sort by"
+`<select>` + ascending/descending toggle, per-field filter `<select>`s for
+scalar/enum columns, and an OR-matched categories checkbox filter, reusing
+`_admin_row_data_attrs` to stamp lowercased `data-*` attributes (`data-name`,
+`data-cost_band`, `data-categories="cat-a|cat-b"`, etc.) on each `<tr>` —
+`_ADMIN_SORT_FILTER_JS`'s `applySortFilter()` reads those attributes rather
+than visible `<td>` text, so filtering still works correctly when a column is
+hidden by the picker. Default sort is Name ascending on both tables, matching
+the existing server-side `ORDER BY name` in `list_communities`/`list_tools` —
+the toolbar is a pure client-side view on top of that default, not a
+replacement for it (a no-JS load still shows the same alphabetical order).
+Sort/filter targets: Communities gets `cost_band`/`access`/`sponsorship_type`/
+`format`/`reach` (scalar `<select>`s, AND-combined) plus `categories`
+(checkbox filter, OR-combined) — the same field set the Phase 1 column picker
+already exposes. Software has no comparable enum field (Phase 0 found no
+pricing/tags column distinct from `categories_json`), so its filter is
+`categories` only, with `promoted` (Featured) added as a second sort option
+alongside Name. Sorting re-orders `<tr>`s via repeated `tbody.appendChild()` — appending an
+already-attached node moves it rather than duplicating it, so this reorders
+in place; filtering toggles `style.display`. A `Showing N of M` counter and a
+`Reset` button read the same row set the sort/filter logic does.
+
 **Metros -> free text migration.** The directory's geography field started as
 an 18-city checkbox grid (`_COMMUNITY_METROS`, backed by `metros_json`, a
 controlled vocabulary) with a public click-to-filter `<select>` on
