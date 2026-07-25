@@ -5529,6 +5529,18 @@ def tools_software_profile(request: Request, slug: str):
   <p style="margin:0;color:#3a352e;line-height:1.6;">{_esc(tool['agent_taxonomy_note'])}</p>
 </div>"""
 
+    screenshot_block = ""
+    if (tool.get("screenshot_url") or "").strip():
+        caption = (
+            "Product screenshot" if tool.get("screenshot_is_product")
+            else "Homepage screenshot — no product screenshot available yet"
+        )
+        screenshot_block = f"""<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;">
+  <img src="{_esc(tool['screenshot_url'])}" alt="{_esc(tool['name'])} screenshot"
+    style="width:100%;height:auto;border-radius:10px;display:block;object-fit:cover;">
+  <p style="margin:10px 2px 2px;font-size:12px;color:var(--muted);font-style:italic;">{_esc(caption)}</p>
+</div>"""
+
     featured_badge = (
         '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>'
@@ -5657,8 +5669,7 @@ function submitIntroForm() {{
             meta_parts.append(f"Edited {tool['updated_at'][:10]}")
     meta_line = " &middot; ".join(meta_parts)
 
-    body = f"""<div class="page page-full">
-<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
+    main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:2px;">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
     {featured_badge}{advisor_star}
@@ -5673,8 +5684,35 @@ function submitIntroForm() {{
 {differentiation_block}
 {competitors_block}
 {f'<div style="margin-bottom:24px;">{intro_btn}</div>' if intro_btn else ''}
-{f'<p style="font-size:13px;color:var(--muted);margin:0 0 20px;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}
+{f'<p style="font-size:13px;color:var(--muted);margin:0 0 20px;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}"""
+
+    # Two-column layout (content + sticky screenshot sidebar) only when
+    # there's actually a screenshot to show — most tools don't have one yet,
+    # and reserving a 320px column for nothing would waste real space on the
+    # common case. Mobile-first: stacks by default, grid kicks in at 900px+,
+    # same pattern as the homepage hero's photo column.
+    if screenshot_block:
+        page_open = f"""<div class="page page-full">
+<style>
+.tool-profile-layout{{display:flex;flex-direction:column;gap:24px;}}
+@media(min-width:900px){{
+  .tool-profile-layout{{display:grid;grid-template-columns:1fr 320px;gap:32px;align-items:start;}}
+  .tool-profile-side{{position:sticky;top:24px;}}
+}}
+</style>
+<div class="tool-profile-layout">
+<div>
+{main_content}
 </div>
+<div class="tool-profile-side">{screenshot_block}</div>
+</div>
+</div>"""
+    else:
+        page_open = f"""<div class="page page-full">
+{main_content}
+</div>"""
+
+    body = page_open + f"""
 <style>
 .tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
@@ -10083,6 +10121,16 @@ def admin_tools_edit(request: Request, tool_id: int):
       placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
   </div>
   <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(optional—shown in a bordered box on the profile page)</span></label>
+    <input name="screenshot_url" type="url" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…/screenshot.png">
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
+      <input type="checkbox" name="screenshot_is_product" value="1"{'checked' if tool.get('screenshot_is_product') else ''}>
+      This is an actual product screenshot (unchecked = homepage/other, captioned as such)
+    </label>
+  </div>
+  <div>
     <button type="submit" class="btn">Save changes</button>
     <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
@@ -10155,6 +10203,8 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     vendor_name = (form.get("vendor_name") or "").strip()
     differentiation_note = (form.get("differentiation_note") or "").strip()
     agent_taxonomy_note = (form.get("agent_taxonomy_note") or "").strip()
+    screenshot_url = (form.get("screenshot_url") or "").strip()
+    screenshot_is_product = 1 if form.get("screenshot_is_product") == "1" else 0
     if not (name and url and description):
         raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
@@ -10164,6 +10214,7 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
         lib.update_tool_differentiation(tool_id, differentiation_note)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
+        lib.update_tool_screenshot(tool_id, screenshot_url, screenshot_is_product)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
     finally:

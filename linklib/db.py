@@ -1038,6 +1038,18 @@ class Library:
             # (ALL_TOOLS in tools_directory) so it's searchable, not just
             # decorative, same requirement as everything else on that page.
             "ALTER TABLE tools ADD COLUMN agent_taxonomy_note TEXT NOT NULL DEFAULT ''",
+            # Profile-page screenshot (Phase 5 follow-up). Hotlinked external
+            # URL, same pattern as the vendor-logo <img src> already used
+            # elsewhere in this codebase — no new storage/hosting
+            # infrastructure. screenshot_is_product distinguishes an actual
+            # product UI shot from a homepage-only fallback, so the profile
+            # page can caption honestly ("no product screenshot available
+            # yet") rather than imply a homepage grab is the product.
+            # Auto-capturing screenshots (e.g. via Playwright) is a real
+            # follow-up idea but out of scope here — it needs a storage/
+            # hosting decision this field doesn't make for you.
+            "ALTER TABLE tools ADD COLUMN screenshot_url TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE tools ADD COLUMN screenshot_is_product INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1960,6 +1972,15 @@ class Library:
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, updated_at=? WHERE id=?",
             (agent_taxonomy_note.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def update_tool_screenshot(self, tool_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
+        """Narrow update for the admin full-edit form's screenshot fields —
+        same bulk-edit-safety reasoning as update_tool_differentiation."""
+        self.conn.execute(
+            "UPDATE tools SET screenshot_url=?, screenshot_is_product=?, updated_at=? WHERE id=?",
+            (screenshot_url.strip(), screenshot_is_product, _now(), tool_id),
         )
         self.conn.commit()
 
