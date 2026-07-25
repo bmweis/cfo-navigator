@@ -245,6 +245,34 @@ admin communities table today; the table isn't paginated, so the sentinel
 text is reachable with a browser find until/unless pagination is added later.
 Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
+**`scripts/enrich_tool_features.py`** (search overhaul Phase 4b) is a
+different shape from the `generate_*` web routes above: a standalone CLI
+batch job, not an admin-page button, since it's meant to run against many
+tools at once under Brian's own API credits rather than one row at a time.
+For each selected tool it makes one Claude call
+(`linklib/enrich.py::generate_tool_features`) grounded in the tool's
+homepage plus guessed `/pricing`, `/solutions`, and `/product` page fetches
+(`_fetch_feature_grounding` — reuses the existing single-page `extract.py`
+fetch three more times rather than a new capability, since bundling/tier
+info usually isn't on the homepage) to draft 5-10 `tool_features` rows:
+feature name, standalone-vs-bundled availability, and a per-feature
+`confident` flag that becomes `needs_verification` on write (`source=
+'llm_enrichment'`). Confidence here is a per-feature JSON boolean, not the
+string-sentinel pattern above — a feature row is already one semantic unit,
+so there's no per-field gap to flag inside it. Cost lands in the same
+`enrichment_cost` ledger, `article_id=NULL`, one row per tool processed.
+Re-running is safe: a tool that already has feature rows is skipped (not
+re-drafted) unless `--force`, and within a single run a feature name
+matching one already present for that tool (case-insensitive) is skipped as
+a duplicate rather than double-written. Requires explicit scope (`--tools`
+or `--limit`) — deliberately has no "run against everything" default, and
+`--dry-run` reports what would be drafted (and a projected full-catalog
+cost) without writing. Nothing written by this script is treated as
+reliable until the same admin review each `tool_features` row needs anyway
+(`/admin/tools/{id}/edit`'s Features section, or the fuller
+`/admin/tools/{id}/features/{id}/edit` page) — the Phase 5 comparison
+matrix is what actually starts reading this data, and only once reviewed.
+
 **Software admin rename + column picker/bulk edit (both tables).** The Software
 admin page moved from `/admin/tools` to `/admin/software` — a hard cutover, no
 redirect; the old URL now 404s. Only the bare list-page route moved — every

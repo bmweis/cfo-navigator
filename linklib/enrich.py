@@ -218,6 +218,175 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         return None
 
 
+# Feature comparison data (search overhaul Phase 4b) — drafts standalone-vs-
+# bundled availability rows for tool_features. Unlike the sentinel-per-field
+# NEEDS_VERIFICATION used elsewhere, confidence here is a per-feature boolean
+# in the JSON response ("confident"): a feature row is already one semantic
+# unit, so there's no need for a string sentinel embedded in a value — see
+# the tool_features table comment in linklib/db.py for the same reasoning.
+_TOOL_FEATURES_PAGE_GUESSES = ("pricing", "solutions", "product")
+
+
+def _fetch_feature_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]]:
+    """Fetches the tool's homepage plus a few guessed page paths (pricing,
+    solutions, product — feature/tier bundling info usually lives on one of
+    those, not the homepage) via the same single-page fetch generate_tool_description
+    already uses, so this needs no new capability. Returns (content_block,
+    fetched) where fetched is [(label, url, content)] for whichever guesses
+    actually returned content — a failed guess (404, empty page) is silently
+    dropped, not treated as an error, since guessing wrong is expected."""
+    from . import extract
+    base = url.rstrip("/")
+    candidates = [("Homepage", url)] + [
+        (label.capitalize(), f"{base}/{label}") for label in _TOOL_FEATURES_PAGE_GUESSES
+    ]
+    fetched = []
+    for label, page_url in candidates:
+        try:
+            page = extract.fetch_page(page_url)
+        except Exception:
+            continue
+        if page.content.strip():
+            fetched.append((label, page_url, page.content[:4000]))
+    content_block = "\n\n".join(
+        f"--- {label} ({page_url}) ---\n{content}" for label, page_url, content in fetched
+    )[:12000]
+    return content_block, fetched
+
+
+_TOOL_FEATURES_PROMPT = """You are researching feature availability for a vendor listed in the CFO
+Toolbox's Software directory, to power a side-by-side comparison matrix
+against other tools.
+
+Identify 5 to 10 of the product's most notable features or capabilities.
+For each one, classify whether it's available as a standalone purchase/
+add-on, only bundled into a broader plan or tier, or both — grounded
+strictly in the page content provided below (or your own reliable
+knowledge of the product, if the fetch came back thin). Never invent a
+specific pricing tier or feature you can't support.
+
+For each feature, set "confident" to true only if the standalone/bundled
+classification is clearly supported by the content provided or your own
+solid knowledge — set it to false if you are inferring or guessing rather
+than stating a supported fact. Leave out a feature entirely if you are not
+even confident it exists, rather than guessing at one.
+
+Return STRICT JSON only (no prose, no markdown fences) with exactly this
+shape:
+{{"features": [
+  {{"feature_name": "...", "standalone_available": true|false,
+    "bundled_only": true|false,
+    "notes": "short note, e.g. which tier it's on, or an empty string",
+    "confident": true|false}}
+]}}
+
+Product name: {name}
+Product URL: {url}
+Existing directory description: {description}
+
+{content_block}
+"""
+
+
+@dataclass
+class ToolFeatureDraft:
+    feature_name: str
+    standalone_available: bool = False
+    bundled_only: bool = False
+    notes: str = ""
+    source_url: str = ""
+    needs_verification: bool = True
+
+
+@dataclass
+class ToolFeaturesResult:
+    features: list[ToolFeatureDraft] = field(default_factory=list)
+    low_confidence: bool = False   # no page content could be fetched at all
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def generate_tool_features(name: str, url: str, description: str = "",
+                           model: str = DEFAULT_MODEL) -> ToolFeaturesResult | None:
+    """Draft standalone-vs-bundled feature rows for a Software entry, one
+    Claude call per tool. Grounds on the homepage plus guessed pricing/
+    solutions/product pages (_fetch_feature_grounding) — reuses the existing
+    single-page fetch, no new capability. Every returned feature is a first-
+    pass draft: the caller is expected to write it with needs_verification
+    set from the per-feature "confident" flag and source='llm_enrichment',
+    never auto-confirmed. Returns None if the SDK/key is unavailable or the
+    call fails — same contract as generate_tool_description."""
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    content_block, fetched = _fetch_feature_grounding(url)
+    low_confidence = not fetched
+    if not fetched:
+        content_block = (
+            f"(Could not fetch any page content for {url} — draft from your own "
+            f"knowledge of {name} if you have it, keeping to the rules above.)"
+        )
+    # Batch-level source_url: prefer whichever fetched page is most likely to
+    # actually carry tier/bundling info, pricing first.
+    priority = {"Pricing": 0, "Solutions": 1, "Product": 2, "Homepage": 3}
+    source_url = min(fetched, key=lambda t: priority.get(t[0], 9))[1] if fetched else ""
+
+    prompt = _TOOL_FEATURES_PROMPT.format(
+        name=name, url=url, description=description.strip() or "(none provided)",
+        content_block=content_block,
+    )
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model,
+            max_tokens=1200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+
+        from .pricing import compute_cost
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
+        features = []
+        raw_features = data.get("features") if isinstance(data, dict) else None
+        if isinstance(raw_features, list):
+            for item in raw_features:
+                if not isinstance(item, dict):
+                    continue
+                feature_name = str(item.get("feature_name", "")).strip()
+                if not feature_name:
+                    continue
+                features.append(ToolFeatureDraft(
+                    feature_name=feature_name,
+                    standalone_available=bool(item.get("standalone_available")),
+                    bundled_only=bool(item.get("bundled_only")),
+                    notes=str(item.get("notes") or "").strip(),
+                    source_url=source_url,
+                    needs_verification=not bool(item.get("confident")),
+                ))
+
+        return ToolFeaturesResult(
+            features=features, low_confidence=low_confidence, model=model,
+            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+        )
+    except Exception:
+        return None
+
+
 # The thirteen fields generate_community_profile drafts (excludes low_confidence,
 # which is computed from the fetch, and updated_at, which is set on save) —
 # shared with webapp/app.py so the "existing draft as context" block and the
