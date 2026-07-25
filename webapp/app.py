@@ -4846,6 +4846,7 @@ def tools_directory(request: Request):
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
+Not sure which tool's for you? <a href="/tools/software/find" style="font-weight:500;">Find your tool &rarr;</a>
 {'<a href="/admin/tools/categories" style="margin-left:12px;font-size:14px;font-weight:500;">Manage categories →</a>' if authed else ''}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
@@ -5525,6 +5526,275 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .tool-star{{font-size:14px;color:#b8860b;}}
 </style>"""
     return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
+# Chat Matchmaker (Phase 2): same pattern as the Communities matchmaker
+# (linklib/matchmaker.py), applied to Software — no existing quiz to replace,
+# so this is a new build rather than a route swap. Shares matchmaker_questions
+# (kind='software') and the same anonymous-session-then-per-user rate-limit
+# design; see the Communities matchmaker's own comment block for the full
+# rationale (this route intentionally mirrors it, not duplicates it).
+# Registered before /tools/software/{slug} so "find" isn't swallowed as a
+# slug, same reasoning as /compare above.
+@app.get("/tools/software/find", response_class=HTMLResponse)
+def tools_software_find(request: Request):
+    session_id = _visitor_session_id(request)
+    body = """<div class="page page-full">
+<div class="tool-inner">
+<p style="margin:0 0 12px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
+<span class="mm-eyebrow">CFO Toolbox</span>
+<h1 style="margin-bottom:6px;">Find your tool</h1>
+<p style="color:var(--muted);margin:0 0 24px;">Tell us what you're trying to solve and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+
+<div id="mm-thread"></div>
+
+<div class="mm-card">
+  <textarea id="mm-q" rows="3" autofocus placeholder="e.g. We're a Series B SaaS company looking for a tool to automate close checklists and reconciliations, nothing too expensive"
+    style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;"></textarea>
+  <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+    <button class="btn" onclick="doMatch()" id="mm-btn" style="padding:11px 28px;font-size:15px;">Send</button>
+  </div>
+</div>
+
+<div id="mm-capped" style="display:none;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:14px;color:var(--muted);">
+  You&rsquo;ve reached the limit for this conversation. <a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>, or <a href="/tools/software">browse the full directory</a>.
+</div>
+</div>
+</div>
+
+<style>
+.mm-eyebrow{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
+.mm-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;}
+
+.mm-answer{background:#fff;border:1px solid var(--line);border-radius:14px 14px 14px 2px;max-width:88%;padding:20px 24px;font-size:15px;line-height:1.7;margin-bottom:18px;}
+.mm-answer p{margin:0 0 14px;}
+.mm-answer ul,.mm-answer ol{margin:0 0 14px;padding-left:22px;}
+.mm-answer li{margin-bottom:5px;}
+.mm-answer a{color:var(--accent);}
+.mm-q-bubble{background:var(--navy);color:#fff;border-radius:14px 14px 2px 14px;padding:12px 18px;font-size:14px;font-weight:500;margin:0 0 8px auto;max-width:80%;width:fit-content;}
+
+.mm-loading{display:flex;align-items:center;gap:10px;padding:2px 0;}
+.mm-loading .dots{display:flex;gap:5px;}
+.mm-loading .dots span{width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.3;animation:mm-dot-pulse 1.1s ease-in-out infinite;}
+.mm-loading .dots span:nth-child(2){animation-delay:.15s;}
+.mm-loading .dots span:nth-child(3){animation-delay:.3s;}
+@keyframes mm-dot-pulse{0%,80%,100%{opacity:.3;transform:scale(.85);}40%{opacity:1;transform:scale(1);}}
+.mm-loading-label{font-size:13px;color:var(--muted);}
+
+.mm-fb{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;}
+.mm-fb-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--muted);font:600 12px var(--font-body);cursor:pointer;}
+.mm-fb-btn.sel-pos{background:var(--navy);border-color:var(--navy);color:#fff;}
+.mm-fb-btn.sel-neg{background:var(--coral-wash);border-color:var(--coral-deep);color:var(--coral-deep);}
+</style>
+
+<script>
+var convoId = null;
+var asked = false;
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Small hand-rolled markdown renderer, same zero-dependency approach as the
+// Communities matchmaker's mmToHtml — links here are /tools/software/<slug>
+// paths rather than https:// URLs, same as that page.
+function mmInline(s) {
+  s = escapeHtml(s);
+  s = s.replace(/\\[([^\\]]+)\\]\\((\\/[^\\s)]+)\\)/g, function(_, t, u) {
+    return '<a href="' + u + '">' + t + '</a>';
+  });
+  s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1<em>$2</em>');
+  return s;
+}
+function mmToHtml(raw) {
+  var lines = (raw || '').split('\\n');
+  var html = [], para = [], inList = false;
+  function closeList() { if (inList) { html.push('</ul>'); inList = false; } }
+  function flushPara() { if (para.length) { html.push('<p>' + para.join('<br>') + '</p>'); para = []; } }
+  lines.forEach(function(line) {
+    var t = line.trim();
+    var ul = t.match(/^[-*]\\s+(.*)$/);
+    if (ul) {
+      flushPara();
+      if (!inList) { html.push('<ul>'); inList = true; }
+      html.push('<li>' + mmInline(ul[1]) + '</li>');
+    } else if (t === '') {
+      flushPara(); closeList();
+    } else {
+      closeList();
+      para.push(mmInline(t));
+    }
+  });
+  flushPara(); closeList();
+  return html.join('');
+}
+
+var FB_OPTIONS = [['helpful', '&#128077;'], ['not_helpful', '&#128078;']];
+function fbRowHtml() {
+  var btns = FB_OPTIONS.map(function(o) {
+    return '<button type="button" class="mm-fb-btn" data-rating="' + o[0] + '" onclick="rateTurn(this)">' + o[1] + '</button>';
+  }).join('');
+  // Session-only: a tap just toggles the button's own selected state client-side.
+  // Nothing is sent to the server or persisted — see CLAUDE.md's matchmaker
+  // feedback decision.
+  return '<div class="mm-fb">' + btns + '</div>';
+}
+function rateTurn(el) {
+  var row = el.closest('.mm-fb');
+  row.querySelectorAll('.mm-fb-btn').forEach(function(b) { b.classList.remove('sel-pos', 'sel-neg'); });
+  el.classList.add(el.getAttribute('data-rating') === 'helpful' ? 'sel-pos' : 'sel-neg');
+}
+
+function resetConvo() {
+  convoId = null; asked = false;
+  document.getElementById('mm-capped').style.display = 'none';
+  var btn = document.getElementById('mm-btn');
+  btn.disabled = false; btn.textContent = 'Send';
+  document.getElementById('mm-q').placeholder = "e.g. We're a Series B SaaS company looking for a tool to automate close checklists and reconciliations, nothing too expensive";
+}
+
+async function doMatch() {
+  var qEl = document.getElementById('mm-q');
+  var q = qEl.value.trim();
+  if (!q) { qEl.focus(); return; }
+
+  var btn = document.getElementById('mm-btn');
+  var thread = document.getElementById('mm-thread');
+  var turn = document.createElement('div');
+  turn.style.marginTop = '18px';
+  turn.innerHTML = '<div class="mm-q-bubble">' + escapeHtml(q) + '</div>' +
+                   '<div class="mm-answer"><div class="mm-loading"><span class="dots"><span></span><span></span><span></span></span>' +
+                   '<span class="mm-loading-label">Thinking&hellip;</span></div></div>';
+  thread.appendChild(turn);
+  var answerEl = turn.querySelector('.mm-answer');
+
+  btn.disabled = true; btn.textContent = 'Thinking…';
+  qEl.value = '';
+  turn.scrollIntoView({behavior:'smooth', block:'nearest'});
+
+  try {
+    var resp = await fetch('/tools/software/find/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ question: q, conversation_id: convoId })
+    });
+    var d = await resp.json();
+    if (!resp.ok) {
+      answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(d.detail || 'Error') + '</span>';
+      btn.disabled = false; btn.textContent = asked ? 'Continue' : 'Send';
+      return;
+    }
+
+    answerEl.innerHTML = mmToHtml(d.answer) + fbRowHtml();
+
+    if (d.capped) {
+      document.getElementById('mm-capped').style.display = 'block';
+      btn.disabled = true; btn.textContent = 'Limit reached';
+      return;
+    }
+
+    convoId = d.conversation_id || convoId;
+    asked = true;
+    qEl.placeholder = 'Ask a follow-up…';
+    btn.disabled = false; btn.textContent = 'Continue';
+
+    if (d.followups_left === 0) {
+      document.getElementById('mm-capped').style.display = 'block';
+      btn.disabled = true; btn.textContent = 'Limit reached';
+    }
+  } catch(e) {
+    answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong: ' + escapeHtml(String(e)) + '</span>';
+    btn.disabled = false; btn.textContent = asked ? 'Continue' : 'Send';
+  }
+}
+
+document.addEventListener('keydown', function(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
+});
+</script>"""
+    resp = HTMLResponse(_page("Find your tool—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    _set_visitor_cookie(request, resp, session_id)
+    return resp
+
+
+@app.post("/tools/software/find/chat")
+async def tools_software_find_chat(request: Request):
+    from linklib.matchmaker import answer_software_question, MAX_FOLLOWUPS
+    payload = await request.json()
+    question = (payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question required")
+    conversation_id = (payload.get("conversation_id") or "").strip()
+    session_id = _visitor_session_id(request)
+
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+
+        history: list[dict] = []
+        prior_questions = 0
+        if conversation_id:
+            turns = lib.list_matchmaker_conversation_turns(conversation_id)
+            if not turns:
+                raise HTTPException(status_code=404, detail="unknown conversation")
+            if turns[0]["session_id"] != session_id or turns[0]["user_id"] != user_id:
+                raise HTTPException(status_code=403, detail="not your conversation")
+            prior_questions = len(turns)
+            if prior_questions >= 1 + MAX_FOLLOWUPS:
+                body = {"capped": True,
+                        "answer": "We've reached the limit for this conversation. "
+                                  "Start a new question to keep going."}
+                resp = JSONResponse(body)
+                _set_visitor_cookie(request, resp, session_id)
+                return resp
+            for t in turns:
+                history.append({"role": "user", "content": t["question"]})
+                history.append({"role": "assistant", "content": t["answer"]})
+
+        # Same shared budget as the Communities matchmaker — kind='software'
+        # rows sum into the same per-user/per-session cap (matchmaker_cost_
+        # this_month[_session] doesn't filter by kind), a deliberate design
+        # choice (see matchmaker_questions in ARCHITECTURE.md) rather than a
+        # separate budget per matchmaker.
+        if user_id is not None:
+            cap = lib.get_effective_matchmaker_cap(user_id)
+            spent = lib.matchmaker_cost_this_month(user_id)
+        else:
+            cap = lib.get_default_matchmaker_cap()
+            spent = lib.matchmaker_cost_this_month_session(session_id)
+        if spent >= cap:
+            body = {"capped": True,
+                    "answer": (f"We've used ${spent:.2f} of this month's ${cap:.2f} matchmaker "
+                               "budget. It resets at the start of next month — in the meantime, "
+                               "browse the full directory at /tools/software.")}
+            resp = JSONResponse(body)
+            _set_visitor_cookie(request, resp, session_id)
+            return resp
+
+        ans = answer_software_question(lib, question, history=history)
+
+        row_id = lib.record_matchmaker_question(
+            session_id, "software", question, ans.text, ans.model,
+            user_id=user_id, conversation_id=conversation_id, turn_index=prior_questions,
+            input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
+            cache_creation_tokens=ans.cache_creation_tokens, cache_read_tokens=ans.cache_read_tokens,
+            cost_usd=ans.cost_usd,
+        )
+        new_conversation_id = conversation_id or str(row_id)
+        followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
+
+        body = {
+            "answer": ans.text,
+            "conversation_id": new_conversation_id,
+            "followups_left": followups_left,
+        }
+        resp = JSONResponse(body)
+        _set_visitor_cookie(request, resp, session_id)
+        return resp
+    finally:
+        lib.close()
 
 
 @app.get("/tools/software/{slug}", response_class=HTMLResponse)

@@ -1,13 +1,14 @@
 """Chat Matchmaker: a conversational alternative to the old quiz-based
-Recommender at /tools/communities/find (a later phase adds a Software
-equivalent). Free-type what you're looking for, the assistant asks a few
-clarifying questions, then narrows to 2-3 best-fit suggestions.
+Recommender at /tools/communities/find, plus the same pattern applied to
+Software at /tools/software/find. Free-type what you're looking for, the
+assistant asks a few clarifying questions, then narrows to 2-3 best-fit
+suggestions.
 
 Simpler than FP&A Buddy (linklib/agent.py) in one important way: it queries
 only the existing structured Community/Software profile data, never the full
 Library — no FTS5/vector retrieval, no RSS feed, no web search, no citations.
-The dataset (~38 communities today) is small enough to hand Claude as full
-context on every turn rather than retrieve a subset of it.
+Both datasets (~38 communities, ~150 tools) are small enough to hand Claude
+as full context on every turn rather than retrieve a subset of either.
 """
 from __future__ import annotations
 
@@ -93,35 +94,88 @@ def _build_communities_context(lib: Library) -> str:
     return "\n".join(blocks)
 
 
-def _build_system(lib: Library) -> str:
+def _build_software_context(lib: Library) -> str:
+    """Every approved Software entry plus its features, formatted as compact
+    plaintext blocks — the full dataset, not a retrieved subset (see module
+    docstring). NEEDS_VERIFICATION-sentinel and empty fields are skipped,
+    same reasoning as _build_communities_context."""
+    tools = lib.list_tools(approved_only=True)
+
+    def _line(label: str, value) -> str:
+        if not value or value == NEEDS_VERIFICATION:
+            return ""
+        return f"{label}: {value}\n"
+
+    blocks = []
+    for t in tools:
+        features = lib.list_tool_features(t["id"])
+        lines = [f"### {t['name']} (slug: {t['slug']})"]
+        lines.append(_line("URL", t.get("url")))
+        lines.append(_line("Categories", ", ".join(t.get("categories") or [])))
+        lines.append(_line("What it does", t.get("summary") or t.get("description")))
+        lines.append(_line("How it differs from competitors", t.get("differentiation_note")))
+        lines.append(_line("Agent/automation taxonomy", t.get("agent_taxonomy_note")))
+        if features:
+            feature_bits = []
+            for f in features:
+                if f.get("needs_verification"):
+                    continue
+                avail = []
+                if f.get("standalone_available"):
+                    avail.append("standalone")
+                if f.get("bundled_only"):
+                    avail.append("bundled only")
+                feature_bits.append(f"{f['feature_name']} ({'/'.join(avail) or 'available'})")
+            if feature_bits:
+                lines.append(_line("Features", ", ".join(feature_bits)))
+        blocks.append("".join(l for l in lines if l))
+    return "\n".join(blocks)
+
+
+def _build_system(lib: Library, kind: str) -> str:
+    """kind: 'community' | 'software' — selects the dataset and persona copy;
+    everything else (voice layering, conversation-shape instructions) is
+    shared between the two matchmakers."""
     from .agent import VOICE_CORE_DEFAULT
 
     voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
     voice = f"{voice_core}\n\n{VOICE_MATCHMAKER_DEFAULT}"
 
-    directory = _build_communities_context(lib)
+    if kind == "software":
+        directory = _build_software_context(lib)
+        subject = "the right software tool or vendor"
+        link_form = "[Tool Name](/tools/software/<slug>)"
+        directory_label = "every approved Software entry"
+        browse_path = "/tools/software"
+        clarify_hint = "the finance function it needs to cover, must-have integrations, budget"
+    else:
+        directory = _build_communities_context(lib)
+        subject = "the right community (peer group, association, or Slack community)"
+        link_form = "[Community Name](/tools/communities/<slug>)"
+        directory_label = "every approved community"
+        browse_path = "/tools/communities"
+        clarify_hint = "role or stage, budget, what kind of access they want, anything more specific"
 
     return (
-        "You are a matchmaker helping a finance professional find the right community "
-        "(peer group, association, or Slack community) from a curated directory below. "
-        "You are NOT searching the web or any other source — only the directory text "
-        "provided here is real; never invent a community that isn't in it.\n\n"
+        f"You are a matchmaker helping a finance professional find {subject} from a "
+        "curated directory below. You are NOT searching the web or any other source — "
+        "only the directory text provided here is real; never invent an entry that isn't "
+        "in it.\n\n"
         "How to run the conversation:\n"
-        "- Ask a small number of concrete, closed-leaning clarifying questions (role or "
-        "stage, budget, what kind of access they want, anything more specific) — one or "
-        "two questions per turn, not a long list at once.\n"
+        f"- Ask a small number of concrete, closed-leaning clarifying questions ({clarify_hint}) "
+        "— one or two questions per turn, not a long list at once.\n"
         "- If the visitor's first message is already specific enough, skip straight to "
         "suggestions rather than force clarifying questions they didn't need.\n"
         "- Aim to land on 2-3 best-fit suggestions within a few turns.\n"
-        "- When you suggest communities, give a short paragraph per suggestion explaining "
+        "- When you suggest entries, give a short paragraph per suggestion explaining "
         "why it fits what THIS visitor said, then end with a compact markdown list of the "
-        "suggested communities, each as a link in the exact form "
-        "[Community Name](/tools/communities/<slug>) using that community's own slug from "
-        "the directory below — never a bare slug, never the full https:// URL.\n"
+        f"suggested entries, each as a link in the exact form {link_form} using that "
+        "entry's own slug from the directory below — never a bare slug, never the full "
+        "https:// URL.\n"
         "- If nothing in the directory is a good fit, say so plainly rather than force a "
-        "weak match, and suggest the visitor browse the full directory at "
-        "/tools/communities instead.\n\n"
-        f"DIRECTORY (every approved community, current as of this conversation):\n{directory}\n\n"
+        f"weak match, and suggest the visitor browse the full directory at {browse_path} "
+        "instead.\n\n"
+        f"DIRECTORY ({directory_label}, current as of this conversation):\n{directory}\n\n"
         "Voice — write every message this way:\n"
         f"{voice}"
     )
@@ -173,15 +227,14 @@ def _trim_history(history) -> list[dict]:
     return list(reversed(kept))
 
 
-def answer_communities_question(lib: Library, question: str,
-                                history: list[dict] | None = None) -> MatchAnswer:
-    """Answer one turn of a Communities matchmaker conversation.
-
-    The full communities directory + profiles rides in the system prompt on
-    every call (see _build_system) — cheap here since the dataset is small,
-    and cached server-side via Anthropic's prompt caching (cache_control on
-    the system block) so a multi-turn conversation only pays full price for
-    that system prompt once.
+def _answer(lib: Library, kind: str, question: str,
+           history: list[dict] | None = None) -> MatchAnswer:
+    """Answer one turn of a matchmaker conversation (kind: 'community' |
+    'software'). The full dataset for that kind rides in the system prompt
+    on every call (see _build_system) — cheap here since both datasets are
+    small, and cached server-side via Anthropic's prompt caching
+    (cache_control on the system block) so a multi-turn conversation only
+    pays full price for that system prompt once.
     """
     model = DEFAULT_MODEL
     trimmed_history = _trim_history(history)
@@ -192,7 +245,7 @@ def answer_communities_question(lib: Library, question: str,
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return MatchAnswer(text="(Set ANTHROPIC_API_KEY to enable the matchmaker.)", model=model)
 
-    system = _build_system(lib)
+    system = _build_system(lib, kind)
     messages = trimmed_history + [{"role": "user", "content": question}]
 
     try:
@@ -203,8 +256,8 @@ def answer_communities_question(lib: Library, question: str,
                 "type": "text",
                 "text": system,
                 # The directory text dominates this prompt and is identical
-                # across every turn of every visitor's conversation until a
-                # community changes — an ideal prompt-caching candidate, so a
+                # across every turn of every visitor's conversation until an
+                # entry changes — an ideal prompt-caching candidate, so a
                 # multi-turn matching conversation (or the next visitor,
                 # within the 5-minute TTL) only pays full input price once.
                 "cache_control": {"type": "ephemeral"},
@@ -225,3 +278,15 @@ def answer_communities_question(lib: Library, question: str,
                            cache_creation_tokens=cache_w, cache_read_tokens=cache_r, cost_usd=cost)
     except Exception as e:
         return MatchAnswer(text=f"(Answer call failed: {e})", model=model)
+
+
+def answer_communities_question(lib: Library, question: str,
+                                history: list[dict] | None = None) -> MatchAnswer:
+    """Answer one turn of a Communities matchmaker conversation."""
+    return _answer(lib, "community", question, history)
+
+
+def answer_software_question(lib: Library, question: str,
+                             history: list[dict] | None = None) -> MatchAnswer:
+    """Answer one turn of a Software matchmaker conversation."""
+    return _answer(lib, "software", question, history)

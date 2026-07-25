@@ -618,6 +618,30 @@ harder-to-reverse call than replacing a page), flagged in
 decision: repurpose it for a future feature, or remove it once confirmed
 unused.
 
+**Software Chat Matchmaker** (Phase 2 — same pattern, applied to Software; no
+existing quiz to replace, so this is a new build rather than a route swap).
+`GET /tools/software/find` / `POST /tools/software/find/chat` mirror the
+Communities matchmaker exactly (same chat UI, same server-rebuilds-history
+contract), with `linklib/matchmaker.py::_build_software_context` sending
+every approved Software entry's directory fields (summary,
+differentiation_note, agent_taxonomy_note) plus its `tool_features` rows as
+system-prompt context instead of the Communities dataset — the ~150-tool
+dataset is still small enough to send as full context rather than retrieve a
+subset. `_build_system(lib, kind)` shares the conversation-shape instructions
+and voice layering between both matchmakers, branching only on the dataset,
+link format (`/tools/software/<slug>` vs. `/tools/communities/<slug>`), and
+the clarifying-question hint text (finance function / integrations / budget
+vs. role / stage / access).
+
+Both matchmakers write to the same `matchmaker_questions` table with
+`kind='community'`/`kind='software'` distinguishing the rows, and — by
+design, not accident — **share one monthly dollar budget**: a session or
+user's cap is the SUM of `cost_usd` across both kinds
+(`matchmaker_cost_this_month[_session]` never filters by `kind`), rather than
+each matchmaker getting its own pool. A `/tools/software`-page CTA ("Not sure
+which tool's for you? Find your tool →") mirrors the Communities directory's
+own inline CTA.
+
 **Community recommender** (Phase 7, historical — the quiz replaced above). A
 4-question quiz at `GET /tools/communities/find` (role, budget, access, a
 catch-all "anything more specific") routed to `GET
