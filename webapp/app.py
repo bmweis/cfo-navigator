@@ -688,7 +688,9 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .page{max-width:780px;margin:0 auto;padding:48px 24px 72px;}
 
 .page-full{max-width:1900px;}   /* full-width content — homepage/about, TL landing, library landing, reader */
-.page-grid{max-width:1300px;}   /* card grids — CFO Toolbox landing */
+.page-grid{max-width:1300px;}   /* card grids (CFO Toolbox landing) and the Software
+                                    add/edit forms, which need the extra width for the
+                                    long-form description field */
 .page-form{max-width:640px;}    /* forms — contact, admin edit forms */
 .page-admin{max-width:1500px;} /* admin data tables — communities list */
 
@@ -4807,6 +4809,7 @@ def tools_directory(request: Request):
             "id": t["id"],
             "name": t["name"],
             "description": t["description"],
+            "summary": t.get("summary") or "",
             "url": t["url"],
             "slug": t["slug"],
             "categories": t["categories"],
@@ -4890,7 +4893,15 @@ def tools_directory(request: Request):
 #tool-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #tool-pagination-label{{font-size:13px;color:var(--muted);}}
 .tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
-.tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
+/* Same fixed-to-N-lines technique as .tool-desc below, applied to the title:
+   a long name (e.g. "Airbase (acquired by Paylocity)") used to wrap to a
+   second line and push that card's header row taller than its row siblings,
+   since the grid uses align-items:start rather than stretching cards to a
+   shared row height. Clamping to 2 lines with a matching min-height means
+   every card reserves the same header height regardless of name length. */
+.tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
+  line-height:1.3;min-height:44px;margin-bottom:6px;letter-spacing:-0.01em;}}
 .tool-name:hover{{color:var(--accent);}}
 /* Fixed to exactly 3 lines regardless of description length — min-height pads
    short descriptions up, -webkit-line-clamp truncates long ones down, so
@@ -5030,10 +5041,12 @@ function renderTools(tools) {{
         + '<label style="margin:0;">Description</label>'
         + '<span><button type="button" class="tool-admin-btn" onclick="generateDescription('
         + esc(JSON.stringify(t.name)) + ',' + esc(JSON.stringify(t.url))
-        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\')">Generate</button>'
+        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\')">Generate</button>'
         + ' <span id="qe-gen-status-' + t.id + '" class="qe-status"></span></span>'
         + '</div>'
-        + '<textarea id="qe-desc-' + t.id + '" rows="2">' + esc(t.description) + '</textarea>'
+        + '<textarea id="qe-desc-' + t.id + '" rows="4">' + esc(t.description) + '</textarea>'
+        + '<label style="margin:8px 0 0;">Short summary <span style="font-weight:400;color:var(--muted);">(directory card + search)</span></label>'
+        + '<textarea id="qe-summary-' + t.id + '" rows="2">' + esc(t.summary || '') + '</textarea>'
         + '<label class="qe-checkbox"><input type="checkbox" id="qe-warm-' + t.id + '"' + (t.warm_intro_enabled ? ' checked' : '') + '> Offer a Warm Intro button</label>'
         + '<div class="qe-row">'
         + '<div><label>Vendor contact name</label><input id="qe-vname-' + t.id + '" value="' + esc(t.vendor_name || '') + '" placeholder="Jane Smith"></div>'
@@ -5074,10 +5087,17 @@ function renderTools(tools) {{
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
       + '</div>'
       + adminControls + '</div>'
-      + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.description) + '</p>'
-      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:auto;">'
-      + '<div class="tool-cats">' + cats + '</div>'
-      + '<div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">' + fullProfileLink + compareCheckbox + introBtn + '</div>'
+      + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.summary || t.description) + '</p>'
+      // Categories and the profile-link/compare row used to share one flex row
+      // (justify-content:space-between) — a long category name (e.g. "Treasury/Cash
+      // Management") made that row wrap to 2 lines while a short one (e.g. "FP&A")
+      // stayed on 1, breaking the uniform card height the .tool-name/.tool-desc
+      // clamps above are meant to guarantee. Splitting them into two always-separate
+      // rows means each row's height depends only on category *count* (nearly always
+      // one badge across the catalog), not category name length.
+      + '<div style="margin-top:auto;">'
+      + '<div class="tool-cats" style="min-height:24px;margin-bottom:10px;">' + cats + '</div>'
+      + '<div style="display:flex;align-items:center;gap:12px;">' + fullProfileLink + compareCheckbox + introBtn + '</div>'
       + '</div>'
       + adminMeta + quickEditPanel + '</article>';
   }}).join('');
@@ -5092,6 +5112,7 @@ async function saveQuickEdit(id) {{
   var status = document.getElementById('qe-status-' + id);
   var payload = {{
     description: document.getElementById('qe-desc-' + id).value.trim(),
+    summary: document.getElementById('qe-summary-' + id).value.trim(),
     warm_intro_enabled: document.getElementById('qe-warm-' + id).checked,
     vendor_name: document.getElementById('qe-vname-' + id).value.trim(),
     vendor_email: document.getElementById('qe-vemail-' + id).value.trim(),
@@ -5106,6 +5127,7 @@ async function saveQuickEdit(id) {{
     var t = ALL_TOOLS.find(function(x) {{ return x.id === id; }});
     if (t) {{
       t.description = d.tool.description;
+      t.summary = d.tool.summary;
       t.warm_intro_enabled = d.tool.warm_intro_enabled;
       t.vendor_name = d.tool.vendor_name;
       t.vendor_email = d.tool.vendor_email;
@@ -5128,7 +5150,7 @@ function filtered() {{
       if (!hit) return false;
     }}
     if (!q) return true;
-    return (t.name + ' ' + t.description + ' ' + (t.categories || []).join(' ') + ' ' + (t.agent_taxonomy_note || '')).toLowerCase().indexOf(q) !== -1;
+    return (t.name + ' ' + (t.summary || '') + ' ' + t.description + ' ' + (t.categories || []).join(' ') + ' ' + (t.agent_taxonomy_note || '')).toLowerCase().indexOf(q) !== -1;
   }});
 }}
 
@@ -5412,7 +5434,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         )
 
     other_rows = (
-        _row("Description", [t.get("description", "") for t in tools])
+        _row("Description", [t.get("summary") or t.get("description", "") for t in tools])
         + _row("How this differs", [t.get("differentiation_note", "") for t in tools])
     )
 
@@ -7222,7 +7244,7 @@ def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None
 # on /tools — all three point a "Generate" button at the same stateless
 # endpoint, since it only needs a name + URL to draft a description.
 _GENERATE_DESC_JS = """
-async function generateDescription(name, url, descId, statusId) {
+async function generateDescription(name, url, descId, statusId, summaryId) {
   name = (name || '').trim();
   url = (url || '').trim();
   var status = document.getElementById(statusId);
@@ -7236,6 +7258,10 @@ async function generateDescription(name, url, descId, statusId) {
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
     document.getElementById(descId).value = d.description;
+    if (summaryId) {
+      var summaryEl = document.getElementById(summaryId);
+      if (summaryEl) summaryEl.value = d.summary || '';
+    }
     status.textContent = d.low_confidence
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
       : 'Drafted. Review before saving.';
@@ -7390,7 +7416,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
 
 
 @app.post("/tools/submit")
-async def tools_submit(request: Request):
+async def tools_submit(request: Request, background_tasks: BackgroundTasks):
     if not _is_member(request):
         return _login_redirect(request)
     form = await request.form()
@@ -7404,7 +7430,12 @@ async def tools_submit(request: Request):
     from linklib.email_utils import send_notification_email, send_tool_submission_confirmation_email, default_notify_email
     lib = _lib()
     try:
-        lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0)
+        # Member submissions are a quick 1-2 sentence pitch, not a full profile
+        # write-up — use it as the initial summary too (short text is already
+        # the right shape for the directory card) until an admin reviews and
+        # regenerates a fuller description/summary from the edit page before approving.
+        tool_id = lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0,
+                                summary=description)
         notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
         if notify_to:
             _send_email_safely(
@@ -7424,6 +7455,7 @@ async def tools_submit(request: Request):
         )
     finally:
         lib.close()
+    background_tasks.add_task(_run_tool_research, tool_id)
     return RedirectResponse("/tools/submit?submitted=1", status_code=303)
 
 
@@ -8083,7 +8115,7 @@ async def admin_software_bulk_edit(request: Request):
                 name=t["name"], description=t["description"], url=t["url"],
                 categories=t["categories"], advisor=t["advisor"], promoted=t["promoted"],
                 vendor_email=t["vendor_email"], warm_intro_enabled=t["warm_intro_enabled"],
-                vendor_name=t["vendor_name"],
+                vendor_name=t["vendor_name"], summary=t.get("summary") or "",
             )
             if field == "categories":
                 kwargs["categories"] = value if isinstance(value, list) else []
@@ -9837,7 +9869,7 @@ def admin_tools_new(request: Request):
         categories = lib.list_tool_categories()
     finally:
         lib.close()
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-grid">
 <h1>Add software</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
 <form method="post" action="/admin/tools/new" style="display:grid;gap:20px;">
@@ -9854,19 +9886,25 @@ def admin_tools_new(request: Request):
   </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Short description *</label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status')">Generate</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
-    <textarea id="tool-desc" name="description" required maxlength="400" rows="3"
+    <textarea id="tool-desc" name="description" required maxlength="2500" rows="7"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-      placeholder="What does it do? 1–2 sentences."></textarea>
+      placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences."></textarea>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
+    <textarea id="tool-summary" name="summary" required maxlength="400" rows="2"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="2-3 sentences—shown on the directory card and in search results. Filled in by Generate above, or write your own."></textarea>
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
       {_tool_category_checkboxes(categories)}
     </div>
   </div>
@@ -9912,31 +9950,88 @@ def admin_tools_new(request: Request):
     return HTMLResponse(_page("Add Software—CFO Toolbox", "", body, authed=True))
 
 
+def _run_tool_research(tool_id: int) -> bool:
+    """Automated feature + agent-taxonomy research for one Software entry —
+    the shared drafting logic behind both trigger points confirmed for the
+    search-overhaul automation follow-up: fired off-request via
+    BackgroundTasks right after a tool is added (admin add-form and the
+    public /tools/submit form), and re-run synchronously from the "Refresh AI
+    research" admin button (its return value drives that route's success/
+    failure banner; BackgroundTasks callers just ignore it). Mirrors the
+    other _*_background jobs here (off-request, best-effort, DB-open-per-call)
+    — a slow or failed research call never blocks the tool from going live.
+    Every field it writes lands via the needs_verification-flagged draft
+    paths (add_tool_feature, set_tool_agent_taxonomy_draft), never auto-
+    confirmed."""
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            return False
+        from linklib import enrich as enrich_mod
+        result = enrich_mod.generate_tool_features(tool["name"], tool["url"], tool.get("description", ""))
+        if result is None:
+            return False
+        existing = {f["feature_name"].strip().lower() for f in lib.list_tool_features(tool_id)}
+        wrote_anything = False
+        for draft in result.features:
+            if draft.feature_name.strip().lower() in existing:
+                continue
+            existing.add(draft.feature_name.strip().lower())
+            lib.add_tool_feature(
+                tool_id, draft.feature_name,
+                standalone_available=int(draft.standalone_available),
+                bundled_only=int(draft.bundled_only),
+                notes=draft.notes, source_url=draft.source_url,
+                needs_verification=int(draft.needs_verification),
+                source="llm_enrichment", model=result.model,
+            )
+            wrote_anything = True
+        if result.agent_taxonomy_note.strip():
+            lib.set_tool_agent_taxonomy_draft(
+                tool_id, result.agent_taxonomy_note,
+                needs_verification=int(result.agent_taxonomy_needs_verification),
+            )
+            wrote_anything = True
+        if wrote_anything or result.cost_usd:
+            lib.record_enrichment_cost(None, result.model, result.input_tokens,
+                                       result.output_tokens, result.cost_usd)
+        backup.maybe_backup(DB_PATH)
+        return True
+    except Exception:
+        return False
+    finally:
+        lib.close()
+
+
 @app.post("/admin/tools/new")
-async def admin_tools_new_submit(request: Request):
+async def admin_tools_new_submit(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
     description = (form.get("description") or "").strip()
+    summary = (form.get("summary") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
     advisor = 1 if form.get("advisor") == "1" else 0
     promoted = 1 if form.get("promoted") == "1" else 0
     vendor_email = (form.get("vendor_email") or "").strip()
     warm_intro_enabled = 1 if form.get("warm_intro_enabled") == "1" else 0
     vendor_name = (form.get("vendor_name") or "").strip()
-    if not (name and url and description):
-        raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
+    if not (name and url and description and summary):
+        raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     lib = _lib()
     try:
-        lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
-                     promoted=promoted, vendor_email=vendor_email,
-                     warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
+        tool_id = lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
+                                promoted=promoted, vendor_email=vendor_email,
+                                warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
+                                summary=summary)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
     finally:
         lib.close()
+    background_tasks.add_task(_run_tool_research, tool_id)
     return RedirectResponse("/tools/software", status_code=303)
 
 
@@ -9965,7 +10060,7 @@ def admin_tools_reject(request: Request, tool_id: int):
 
 
 @app.get("/admin/tools/{tool_id}/edit", response_class=HTMLResponse)
-def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = ""):
+def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = "", research_refreshed: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -10062,6 +10157,28 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
                                    'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture a screenshot—'
                                    'the site may block headless browsers or timed out. Try again, or paste a URL manually above.</p>')
 
+    _research_banner_html = ""
+    if research_refreshed == "1":
+        _research_banner_html = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
+                                 'padding:10px 16px;font-size:14px;margin:0 0 16px;">AI research refreshed—review the '
+                                 'drafted feature rows and agent taxonomy below before marking them verified.</p>')
+    elif research_refreshed == "0":
+        _research_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                                 'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t complete the research pass—'
+                                 'the site may block fetches, or the Anthropic API key/SDK is unavailable. Try again later.</p>')
+
+    _taxonomy_verify_badge = ""
+    _taxonomy_verify_action = ""
+    if tool.get("agent_taxonomy_needs_verification"):
+        _taxonomy_verify_badge = (
+            '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
+            'background:#fef3c7;color:#92400e;border-radius:5px;padding:2px 7px;margin-left:8px;">Needs verification</span>'
+        )
+        _taxonomy_verify_action = (
+            f'<form method="post" action="/admin/tools/{tool_id}/agent-taxonomy/verify" style="margin-top:8px;">'
+            f'<button type="submit" class="tool-admin-btn">Mark verified</button></form>'
+        )
+
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
         _cap_note = (f"Captured {tool['screenshot_captured_at'][:10]}" if tool.get("screenshot_captured_at")
@@ -10073,7 +10190,7 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
             f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">{_esc(_cap_note)}</p></div>'
         )
 
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-grid">
 <h1>Edit software</h1>
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form method="post" action="/admin/tools/{tool_id}/edit" style="display:grid;gap:20px;">
@@ -10089,18 +10206,25 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
   </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Short description *</label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status')">Generate</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
-    <textarea id="tool-desc" name="description" required maxlength="400" rows="3"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(tool['description'])}</textarea>
+    <textarea id="tool-desc" name="description" required maxlength="2500" rows="7"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
+    <textarea id="tool-summary" name="summary" required maxlength="400" rows="2"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
       {_tool_category_checkboxes(categories, tool['categories'])}
     </div>
   </div>
@@ -10143,10 +10267,11 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
       placeholder="Placeholder for now—hand-written copy, not auto-drafted.">{_esc(tool.get('differentiation_note') or '')}</textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(optional—standalone feature, agent-assisted, or fully independent agent; searchable)</span></label>
-    <textarea name="agent_taxonomy_note" maxlength="400" rows="2"
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(optional—standalone feature, agent-assisted, or fully independent agent; searchable)</span>{_taxonomy_verify_badge}</label>
+    <textarea name="agent_taxonomy_note" maxlength="1200" rows="4"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
+    {_taxonomy_verify_action}
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(optional—shown in a bordered box on the profile page)</span></label>
@@ -10163,6 +10288,15 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
     <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">AI research</h2>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Crawls the vendor's homepage plus its real Product/Solutions-type nav pages to draft the Agent taxonomy note above and the Feature rows below in one pass—runs automatically when a tool is added; use this to re-run it (e.g. after a vendor redesigns their site).</p>
+  {_research_banner_html}
+  <form method="post" action="/admin/tools/{tool_id}/research/refresh" style="margin-top:4px;">
+    <button type="submit" class="tool-admin-btn">&#129504; Refresh AI research</button>
+  </form>
+</div>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Screenshot</h2>
@@ -10233,6 +10367,7 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
     description = (form.get("description") or "").strip()
+    summary = (form.get("summary") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
     advisor = 1 if form.get("advisor") == "1" else 0
     promoted = 1 if form.get("promoted") == "1" else 0
@@ -10243,13 +10378,14 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     agent_taxonomy_note = (form.get("agent_taxonomy_note") or "").strip()
     screenshot_url = (form.get("screenshot_url") or "").strip()
     screenshot_is_product = 1 if form.get("screenshot_is_product") == "1" else 0
-    if not (name and url and description):
-        raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
+    if not (name and url and description and summary):
+        raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     lib = _lib()
     try:
         lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
                         promoted=promoted, vendor_email=vendor_email,
-                        warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
+                        warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
+                        summary=summary)
         lib.update_tool_differentiation(tool_id, differentiation_note)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot(tool_id, screenshot_url, screenshot_is_product)
@@ -10285,6 +10421,38 @@ def admin_tools_screenshot_recapture(request: Request, tool_id: int):
         lib.close()
     msg = "screenshot_captured=1" if ok else "screenshot_captured=0"
     return RedirectResponse(f"/admin/tools/{tool_id}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/research/refresh")
+def admin_tools_research_refresh(request: Request, tool_id: int):
+    """On-demand re-run of _run_tool_research — same drafting logic as the
+    automatic on-add trigger, run synchronously here (a manual, occasional
+    admin action) so the redirect banner can report success/failure."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    tool_exists = bool(lib.get_tool(tool_id))
+    lib.close()
+    if not tool_exists:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    ok = _run_tool_research(tool_id)
+    msg = "research_refreshed=1" if ok else "research_refreshed=0"
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/agent-taxonomy/verify")
+def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
+    """One-click "Mark verified" for the agent-taxonomy note, mirroring the
+    equivalent tool_features action — clears the needs_verification flag
+    without touching the text itself."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.mark_tool_agent_taxonomy_verified(tool_id)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/competitors/add")
@@ -10476,20 +10644,22 @@ async def admin_tools_quick_edit(request: Request, tool_id: int):
     except Exception:
         return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
     description = (body.get("description") or "").strip()
+    summary = (body.get("summary") or "").strip()
     warm_intro_enabled = 1 if body.get("warm_intro_enabled") else 0
     vendor_name = (body.get("vendor_name") or "").strip()
     vendor_email = (body.get("vendor_email") or "").strip()
-    if not description:
-        return JSONResponse({"ok": False, "error": "Description is required"}, status_code=400)
+    if not (description and summary):
+        return JSONResponse({"ok": False, "error": "Description and summary are required"}, status_code=400)
     lib = _lib()
     try:
         if not lib.get_tool(tool_id):
             return JSONResponse({"ok": False, "error": "Tool not found"}, status_code=404)
-        lib.quick_update_tool(tool_id, description, warm_intro_enabled, vendor_name, vendor_email)
+        lib.quick_update_tool(tool_id, description, warm_intro_enabled, vendor_name, vendor_email, summary=summary)
     finally:
         lib.close()
     return JSONResponse({"ok": True, "tool": {
         "description": description,
+        "summary": summary,
         "warm_intro_enabled": bool(warm_intro_enabled),
         "vendor_name": vendor_name,
         "vendor_email": vendor_email,
@@ -10523,7 +10693,8 @@ async def admin_tools_generate_description(request: Request):
     finally:
         lib.close()
 
-    return JSONResponse({"ok": True, "description": draft.description, "low_confidence": draft.low_confidence})
+    return JSONResponse({"ok": True, "description": draft.description, "summary": draft.summary,
+                         "low_confidence": draft.low_confidence})
 
 
 @app.post("/tools/{tool_id}/interest")

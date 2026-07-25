@@ -55,7 +55,7 @@ def test_admin_edit_saves_screenshot_fields(env):
     client = _client(env)
     _login(client)
     r = client.post(f"/admin/tools/{a}/edit", data={
-        "name": "Runway", "url": "https://runway.com", "description": "FP&A",
+        "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
         "screenshot_url": "https://example.com/shot.png",
         "screenshot_is_product": "1",
     }, follow_redirects=False)

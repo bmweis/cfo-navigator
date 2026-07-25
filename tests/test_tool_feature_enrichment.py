@@ -34,12 +34,16 @@ def _mock_anthropic(monkeypatch, payload_json, input_tokens=200, output_tokens=1
 
 
 def _mock_fetch_page(monkeypatch, contents: dict):
-    """contents: url -> content string. Missing urls return empty content."""
+    """contents: url -> content string. Missing urls return empty content.
+    Also stubs out _discover_nav_pages (real network via `requests.get`) so it
+    falls back to the guessed-path candidates these tests are written
+    against, instead of making a real HTTP call in the test process."""
     from linklib import extract
 
     def _fetch(url, **kw):
         return types.SimpleNamespace(content=contents.get(url, ""))
     monkeypatch.setattr(extract, "fetch_page", _fetch)
+    monkeypatch.setattr(enrich, "_discover_nav_pages", lambda base_url, max_pages=10: [])
 
 
 FEATURES_JSON = """{
@@ -163,6 +167,8 @@ def test_script_writes_features_and_skips_dupes_on_rerun(monkeypatch, db_path):
         call_count["n"] += 1
         return enrich.ToolFeaturesResult(
             features=[_draft("Scenario modeling"), _draft("Headcount planning", confident=False)],
+            agent_taxonomy_note="Uses AI-assisted scenario modeling; no named agent found.",
+            agent_taxonomy_needs_verification=True,
             low_confidence=False, model="claude-haiku-4-5-20251001",
             input_tokens=100, output_tokens=80, cost_usd=0.001,
         )
@@ -179,9 +185,11 @@ def test_script_writes_features_and_skips_dupes_on_rerun(monkeypatch, db_path):
     hc = next(f for f in features if f["feature_name"] == "Headcount planning")
     assert hc["needs_verification"] == 1
     assert hc["source"] == "llm_enrichment"
+    assert lib.get_tool(tool_id)["agent_taxonomy_note"]
     lib.close()
 
-    # Re-running without --force should skip the tool entirely (already has features)
+    # Re-running without --force should skip the tool entirely (already has an
+    # agent-taxonomy note — that's what marks it as already researched now)
     monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--tools", "Runway"])
     rc = script_mod.main()
     assert rc == 0

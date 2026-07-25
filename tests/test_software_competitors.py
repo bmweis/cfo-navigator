@@ -147,7 +147,7 @@ def test_admin_edit_saves_differentiation_note(env):
     client = _client(env)
     _login(client)
     r = client.post(f"/admin/tools/{a}/edit", data={
-        "name": "Runway", "url": "https://runway.com", "description": "FP&A",
+        "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
         "differentiation_note": "Human-readable formulas, real-time sync.",
     }, follow_redirects=False)
     assert r.status_code == 303

@@ -19,7 +19,7 @@ import json
 import os
 from dataclasses import dataclass, field
 
-DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-4-8")
+DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-5")
 
 # Version of the enrichment "rules" (the prompt below). Stored alongside each
 # article's enrichment so you can tell which ruleset produced a given summary,
@@ -110,7 +110,9 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=1000,  # room for a fuller answer-bearing summary + scope JSON
+            max_tokens=2000,  # room for a fuller answer-bearing summary + scope JSON, plus
+                              # headroom for Opus 5's on-by-default adaptive thinking (max_tokens
+                              # caps thinking + response together)
             messages=[{"role": "user", "content": _PROMPT.format(known=known, guide_block=guide_block, title=title, text=snippet)}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
@@ -137,19 +139,33 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         return None
 
 
-_TOOL_DESC_PROMPT = """You are drafting a short vendor description for the CFO Toolbox, a
-directory read by finance leaders at high-growth tech companies.
+_TOOL_DESC_PROMPT = """You are drafting a vendor profile for the CFO Toolbox, a
+directory read by finance leaders at high-growth tech companies. This has two
+surfaces: a full profile-page write-up, and a short summary shown on the
+directory card and in search results — write both.
 
-Write a description of the tool named below. Follow these rules exactly:
-1. Say what the tool does — plainly and specifically, not a tagline.
-2. Note how it differs from competitors, or its core strengths — capability-focused.
+Follow these rules exactly:
+1. Say what the tool does — plainly and specifically, not marketing copy.
+2. Cover what it does, who it's built for, and how it differs from
+   competitors or its core strengths — capability-focused, grounded in the
+   page content below wherever it supports a claim.
 3. No marketing language: no "powerful," "seamless," "game-changing," "best-in-class,"
    or similar adjective stacking. No exclamation points.
-4. 1-2 sentences, roughly 25-45 words total.
-5. Do not mention or guess whether the company has been acquired by another company —
+4. Do not mention or guess whether the company has been acquired by another company —
    leave that out entirely, even if you believe you know.
 
-Return ONLY the description as plain text — no quotes, no markdown, no preamble.
+Fields:
+  "description": the full profile-page write-up — roughly 8-12 sentences
+     (about 150-300 words). Budget and depth are not a constraint here; use
+     the page content thoroughly rather than settling for a thin summary.
+     Every sentence should carry real information, not padding.
+  "summary": a short, standalone 2-3 sentence version (about 30-60 words)
+     for the directory card and search results — a proper condensed
+     rewrite someone could read on its own and understand what the tool is
+     and does, not just the description's opening sentences copy-pasted.
+
+Return STRICT JSON only (no prose, no markdown fences) with exactly these
+keys: "description", "summary".
 
 Tool name: {name}
 Tool URL: {url}
@@ -161,6 +177,7 @@ Tool URL: {url}
 @dataclass
 class ToolDescriptionDraft:
     description: str
+    summary: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
     model: str = ""
     input_tokens: int = 0
@@ -169,12 +186,14 @@ class ToolDescriptionDraft:
 
 
 def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -> ToolDescriptionDraft | None:
-    """Draft a CFO Toolbox description for a vendor from its name + URL, or None
-    if the SDK/key is unavailable or the call fails. Fetches the URL's page text
-    (best-effort, same fetch as article extraction) as grounding; when that fetch
-    comes back empty, `low_confidence=True` flags the draft as based on the
-    model's own knowledge rather than the live page, so the caller can warn
-    whoever reviews it. Never infers acquisition status — see rule 5 above."""
+    """Draft a CFO Toolbox description (full profile-page write-up) plus a
+    short summary (directory card / search) for a vendor from its name +
+    URL, or None if the SDK/key is unavailable or the call fails. Fetches
+    the URL's page text (best-effort, same fetch as article extraction) as
+    grounding; when that fetch comes back empty, `low_confidence=True`
+    flags the draft as based on the model's own knowledge rather than the
+    live page, so the caller can warn whoever reviews it. Never infers
+    acquisition status — see rule 4 above."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -186,7 +205,7 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
     page = extract.fetch_page(url)
     low_confidence = not bool(page.content.strip())
     content_block = (
-        f"Page content (fetched from the URL):\n{page.content[:6000]}" if not low_confidence
+        f"Page content (fetched from the URL):\n{page.content[:15000]}" if not low_confidence
         else "(Could not fetch page content — draft from your own knowledge of this "
              "company/product if you have it, keeping to the rules above.)"
     )
@@ -195,12 +214,14 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=200,
+            max_tokens=1600,  # room for an 8-12 sentence description, plus headroom
+                              # for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user",
                        "content": _TOOL_DESC_PROMPT.format(name=name, url=url, content_block=content_block)}],
         )
-        text = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text").strip()
-        text = text.strip('"').strip()
+        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
 
         from .pricing import compute_cost
         usage = getattr(resp, "usage", None)
@@ -211,35 +232,86 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
         return ToolDescriptionDraft(
-            description=text, low_confidence=low_confidence, model=model,
+            description=str(data.get("description", "")).strip(),
+            summary=str(data.get("summary", "")).strip(),
+            low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception:
         return None
 
 
-# Feature comparison data (search overhaul Phase 4b) — drafts standalone-vs-
-# bundled availability rows for tool_features. Unlike the sentinel-per-field
-# NEEDS_VERIFICATION used elsewhere, confidence here is a per-feature boolean
-# in the JSON response ("confident"): a feature row is already one semantic
-# unit, so there's no need for a string sentinel embedded in a value — see
-# the tool_features table comment in linklib/db.py for the same reasoning.
-_TOOL_FEATURES_PAGE_GUESSES = ("pricing", "solutions", "product")
+# Feature comparison data (search overhaul Phase 4b, extended in the
+# automated-research follow-up to also draft agent_taxonomy_note in the same
+# call) — drafts standalone-vs-bundled availability rows for tool_features
+# plus a whole-tool agent-taxonomy summary. Unlike the sentinel-per-field
+# NEEDS_VERIFICATION used elsewhere, confidence here is a boolean in the JSON
+# response ("confident"): a feature row (or the agent-taxonomy verdict) is
+# already one semantic unit, so there's no need for a string sentinel
+# embedded in a value — see the tool_features table comment in linklib/db.py
+# for the same reasoning.
+_TOOL_FEATURES_PAGE_GUESSES = ("pricing", "solutions", "product", "products", "platform", "features", "ai", "agents")
+_NAV_LINK_KEYWORDS = ("product", "solution", "platform", "feature", "agent", "ai", "how it works", "use case")
+
+
+def _discover_nav_pages(base_url: str, max_pages: int = 10) -> list[tuple[str, str]]:
+    """Finds real Product/Solutions-type pages by parsing the homepage's own
+    nav links, rather than guessing URL paths (the original Phase 4b
+    approach: guessing /pricing, /solutions, /product often missed real
+    content — a vendor's actual agent/feature page can live at any slug).
+    Returns [(link text, absolute url)], same-domain only, deduped, capped
+    at max_pages. Returns [] on any fetch/parse failure — callers fall back
+    to the guessed-path approach, not an error."""
+    import requests
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin, urlsplit
+
+    try:
+        resp = requests.get(base_url, headers={"User-Agent": "Mozilla/5.0 (compatible; linklib/1.0)"},
+                            timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+    except Exception:
+        return []
+
+    base_host = urlsplit(base_url).netloc
+    seen: set[str] = set()
+    found: list[tuple[str, str]] = []
+    for a in soup.find_all("a", href=True):
+        text = a.get_text(strip=True)
+        if not text or len(text) > 40:
+            continue
+        text_lc = text.lower()
+        if not any(kw in text_lc for kw in _NAV_LINK_KEYWORDS):
+            continue
+        href = urljoin(base_url, a["href"]).split("#")[0].rstrip("/")
+        if urlsplit(href).netloc != base_host or href == base_url.rstrip("/") or href in seen:
+            continue
+        seen.add(href)
+        found.append((text, href))
+        if len(found) >= max_pages:
+            break
+    return found
 
 
 def _fetch_feature_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]]:
-    """Fetches the tool's homepage plus a few guessed page paths (pricing,
-    solutions, product — feature/tier bundling info usually lives on one of
-    those, not the homepage) via the same single-page fetch generate_tool_description
-    already uses, so this needs no new capability. Returns (content_block,
-    fetched) where fetched is [(label, url, content)] for whichever guesses
-    actually returned content — a failed guess (404, empty page) is silently
-    dropped, not treated as an error, since guessing wrong is expected."""
+    """Fetches the tool's homepage plus its real Product/Solutions-type nav
+    pages (_discover_nav_pages) — falling back to guessed paths (pricing,
+    solutions, product) only if nav discovery finds nothing, e.g. a blocked
+    fetch or a site with no matching nav text. Returns (content_block,
+    fetched) where fetched is [(label, url, content)] for whichever pages
+    actually returned content — a failed fetch (404, empty page, blocked) is
+    silently dropped, not treated as an error, since that's expected across
+    ~150+ external sites."""
     from . import extract
     base = url.rstrip("/")
-    candidates = [("Homepage", url)] + [
-        (label.capitalize(), f"{base}/{label}") for label in _TOOL_FEATURES_PAGE_GUESSES
-    ]
+    nav_pages = _discover_nav_pages(url)
+    if nav_pages:
+        candidates = [("Homepage", url)] + nav_pages
+    else:
+        candidates = [("Homepage", url)] + [
+            (label.capitalize(), f"{base}/{label}") for label in _TOOL_FEATURES_PAGE_GUESSES
+        ]
     fetched = []
     for label, page_url in candidates:
         try:
@@ -247,37 +319,54 @@ def _fetch_feature_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]]
         except Exception:
             continue
         if page.content.strip():
-            fetched.append((label, page_url, page.content[:4000]))
+            fetched.append((label, page_url, page.content[:10000]))
     content_block = "\n\n".join(
         f"--- {label} ({page_url}) ---\n{content}" for label, page_url, content in fetched
-    )[:12000]
+    )[:60000]
     return content_block, fetched
 
 
-_TOOL_FEATURES_PROMPT = """You are researching feature availability for a vendor listed in the CFO
-Toolbox's Software directory, to power a side-by-side comparison matrix
-against other tools.
+_TOOL_FEATURES_PROMPT = """You are researching a vendor listed in the CFO Toolbox's Software
+directory, to power a side-by-side comparison matrix against other tools. Budget
+and depth are not a constraint here — read the full page content provided below
+carefully and be as thorough and specific as the material supports.
 
-Identify 5 to 10 of the product's most notable features or capabilities.
-For each one, classify whether it's available as a standalone purchase/
-add-on, only bundled into a broader plan or tier, or both — grounded
-strictly in the page content provided below (or your own reliable
-knowledge of the product, if the fetch came back thin). Never invent a
-specific pricing tier or feature you can't support.
+PART 1 — Agent taxonomy. Write a thorough summary (aim for 3-6 sentences, more
+if there's real material to cover) of whether and how AI agents are involved in
+this product. Ground this strictly in the page content below. If the vendor
+names ANY specific agents anywhere in the content (e.g. "Aura," "Ember," a
+"Contract Review Agent," a "flux agent") — find and name ALL of them, not just
+the first one you notice; a reader comparing tools needs the complete roster
+of named agents, not a sample. For each named agent, note what it actually
+does if the content says so. Distinguish: a fully independent agent that runs
+a workflow end-to-end, an agent-assisted feature where AI helps but a human
+stays in the loop, or no real agent framing at all (generic "AI-powered"
+marketing language without actual agent behavior described doesn't count as
+agentic — say so plainly rather than overstating it). If the content gives no
+genuine signal either way, say that rather than guessing, and set
+"agent_taxonomy_confident" to false.
 
-For each feature, set "confident" to true only if the standalone/bundled
-classification is clearly supported by the content provided or your own
-solid knowledge — set it to false if you are inferring or guessing rather
-than stating a supported fact. Leave out a feature entirely if you are not
-even confident it exists, rather than guessing at one.
+PART 2 — Features. Identify 8 to 15 of the product's most notable features or
+capabilities — cast a wide net across everything the fetched pages describe
+rather than stopping at the first handful. For each one, classify whether it's
+available as a standalone purchase/add-on, only bundled into a broader plan or
+tier, or both — grounded strictly in the page content provided below (or your
+own reliable knowledge of the product, if the fetch came back thin). Write a
+substantive note for each feature (what it does, not just its name) whenever
+the content supports it. Never invent a specific pricing tier or feature you
+can't support. Set "confident" to true only if the standalone/bundled
+classification is clearly supported by the content provided or your own solid
+knowledge — false if you're inferring or guessing. Leave out a feature
+entirely if you're not even confident it exists.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly this
 shape:
-{{"features": [
-  {{"feature_name": "...", "standalone_available": true|false,
-    "bundled_only": true|false,
-    "notes": "short note, e.g. which tier it's on, or an empty string",
-    "confident": true|false}}
+{{"agent_taxonomy": {{"summary": "...", "confident": true|false}},
+  "features": [
+    {{"feature_name": "...", "standalone_available": true|false,
+      "bundled_only": true|false,
+      "notes": "short note, e.g. which tier it's on, or an empty string",
+      "confident": true|false}}
 ]}}
 
 Product name: {name}
@@ -301,6 +390,8 @@ class ToolFeatureDraft:
 @dataclass
 class ToolFeaturesResult:
     features: list[ToolFeatureDraft] = field(default_factory=list)
+    agent_taxonomy_note: str = ""
+    agent_taxonomy_needs_verification: bool = True
     low_confidence: bool = False   # no page content could be fetched at all
     model: str = ""
     input_tokens: int = 0
@@ -310,14 +401,15 @@ class ToolFeaturesResult:
 
 def generate_tool_features(name: str, url: str, description: str = "",
                            model: str = DEFAULT_MODEL) -> ToolFeaturesResult | None:
-    """Draft standalone-vs-bundled feature rows for a Software entry, one
-    Claude call per tool. Grounds on the homepage plus guessed pricing/
-    solutions/product pages (_fetch_feature_grounding) — reuses the existing
-    single-page fetch, no new capability. Every returned feature is a first-
-    pass draft: the caller is expected to write it with needs_verification
-    set from the per-feature "confident" flag and source='llm_enrichment',
-    never auto-confirmed. Returns None if the SDK/key is unavailable or the
-    call fails — same contract as generate_tool_description."""
+    """Draft standalone-vs-bundled feature rows plus an agent-taxonomy
+    summary for a Software entry, in one Claude call. Grounds on the
+    homepage plus its real Product/Solutions-type nav pages
+    (_fetch_feature_grounding — falls back to guessed paths only if nav
+    discovery finds nothing). Every returned field is a first-pass draft:
+    the caller is expected to write it with needs_verification set from the
+    "confident" flags and source='llm_enrichment', never auto-confirmed.
+    Returns None if the SDK/key is unavailable or the call fails — same
+    contract as generate_tool_description."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -346,7 +438,7 @@ def generate_tool_features(name: str, url: str, description: str = "",
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=1200,
+            max_tokens=6000,  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": prompt}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
@@ -379,8 +471,14 @@ def generate_tool_features(name: str, url: str, description: str = "",
                     needs_verification=not bool(item.get("confident")),
                 ))
 
+        agent_taxonomy = data.get("agent_taxonomy") if isinstance(data, dict) else None
+        agent_taxonomy = agent_taxonomy if isinstance(agent_taxonomy, dict) else {}
+
         return ToolFeaturesResult(
-            features=features, low_confidence=low_confidence, model=model,
+            features=features,
+            agent_taxonomy_note=str(agent_taxonomy.get("summary") or "").strip(),
+            agent_taxonomy_needs_verification=not bool(agent_taxonomy.get("confident")),
+            low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception:
@@ -417,7 +515,9 @@ Write about the community named below. Follow these rules exactly:
    from the page/your knowledge (e.g. pay-to-play concerns, inconsistent chapter
    quality) — null if you don't know of any, never a fabricated nitpick.
 6. `verdict_summary` is one short sentence in the shape "Best for X, not for Y."
-7. Every other field is 1-3 plain-prose sentences, no markdown, no quotes.
+7. Every other field is 2-5 plain-prose sentences, no markdown, no quotes —
+   budget and depth are not a constraint here, so use the page content below
+   thoroughly rather than settling for a thin one-liner.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
 
@@ -504,7 +604,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     page = extract.fetch_page(url)
     low_confidence = not bool(page.content.strip())
     content_block = (
-        f"Page content (fetched from the URL):\n{page.content[:6000]}" if not low_confidence
+        f"Page content (fetched from the URL):\n{page.content[:15000]}" if not low_confidence
         else "(Could not fetch page content — draft from your own knowledge of this "
              "community if you have it, keeping to the rules above.)"
     )
@@ -522,7 +622,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=1600,
+            max_tokens=6000,  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user",
                        "content": _COMMUNITY_PROFILE_PROMPT.format(
                            name=name, url=url, existing_block=existing_block, content_block=content_block)}],
@@ -677,7 +777,7 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
     page = extract.fetch_page(url)
     low_confidence = not bool(page.content.strip())
     content_block = (
-        f"Page content (fetched from the URL):\n{page.content[:6000]}" if not low_confidence
+        f"Page content (fetched from the URL):\n{page.content[:15000]}" if not low_confidence
         else "(Could not fetch page content — draft from your own knowledge of this "
              "community if you have it, keeping to the rules above.)"
     )
@@ -697,7 +797,7 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=500,
+            max_tokens=1200,  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": prompt}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
@@ -822,7 +922,7 @@ def voice_rewrite_community_fields(name: str, fields: dict, voice_core: str,
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=3000,
+            max_tokens=4000,  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": prompt}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
