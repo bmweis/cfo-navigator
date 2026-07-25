@@ -660,6 +660,52 @@ CREATE TABLE IF NOT EXISTS community_profile_views (
     viewed_at    TEXT NOT NULL,
     PRIMARY KEY (session_id, community_id)
 );
+
+-- Chat Matchmaker (linklib/matchmaker.py): one row per turn in a
+-- conversational matchmaker session, at /tools/communities/find (and, in a
+-- later phase, a Software equivalent) — a free-type chat that narrows to 2-3
+-- best-fit suggestions, replacing the old quiz-based Recommender. Deliberately
+-- its own table rather than folded into ask_questions: FP&A Buddy and the
+-- matchmaker(s) should track spend against independent monthly dollar caps
+-- (see users.matchmaker_cap_usd / settings['matchmaker_default_cap_usd']),
+-- since a matching conversation can run more back-and-forth turns than a
+-- typical FP&A Buddy question even though each turn is individually cheaper
+-- (no retrieval, no web search, no citations — just the full structured
+-- profile dataset as context). `kind` lets Communities and a future Software
+-- matchmaker share this one table/cap rather than forking the mechanism per
+-- kind. No feedback table — thumbs up/down here is UI-only, session-scoped,
+-- never persisted (see CLAUDE.md's matchmaker feedback decision).
+--
+-- Unlike ask_questions, `user_id` is nullable: /tools/communities/find (like
+-- the quiz it replaces) is a PUBLIC page, no login required, so most rows
+-- have no signed-in user. `session_id` (the same anonymous cfo_visitor
+-- cookie already used by community_profile_views) is the rate-limit and
+-- conversation-continuity key for those anonymous rows; a signed-in row
+-- carries both (session_id is always set — the cookie predates login state
+-- — but user_id + get_effective_matchmaker_cap is what actually governs a
+-- logged-in user's cap, mirroring ask_questions/Ask exactly).
+CREATE TABLE IF NOT EXISTS matchmaker_questions (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind                  TEXT NOT NULL DEFAULT 'community',  -- 'community' | 'software'
+    conversation_id       TEXT NOT NULL DEFAULT '',   -- groups turns; = str(id) of the first turn
+    turn_index            INTEGER NOT NULL DEFAULT 0,
+    user_id               INTEGER,                    -- NULL for anonymous (public page, no login)
+    session_id            TEXT NOT NULL DEFAULT '',    -- cfo_visitor cookie value
+    question              TEXT NOT NULL DEFAULT '',
+    answer                TEXT NOT NULL DEFAULT '',
+    model                 TEXT NOT NULL DEFAULT '',
+    input_tokens          INTEGER NOT NULL DEFAULT 0,
+    output_tokens         INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+    cost_usd              REAL NOT NULL DEFAULT 0,
+    created_at            TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_matchmaker_questions_user ON matchmaker_questions(user_id);
+CREATE INDEX IF NOT EXISTS idx_matchmaker_questions_session ON matchmaker_questions(session_id);
+CREATE INDEX IF NOT EXISTS idx_matchmaker_questions_created ON matchmaker_questions(created_at);
+CREATE INDEX IF NOT EXISTS idx_matchmaker_questions_conversation ON matchmaker_questions(conversation_id);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -1069,6 +1115,12 @@ class Library:
             # (already-short) description for every pre-existing row, so
             # cards keep showing something sensible until re-enriched.
             "ALTER TABLE tools ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
+            # Chat Matchmaker (replaces the quiz-based Recommender at
+            # /tools/communities/find): a separate dollar-cap column from
+            # ask_cap_usd, same NULL-inherits-the-default shape, so FP&A
+            # Buddy and the matchmaker(s) track spend independently rather
+            # than competing for one budget — see matchmaker_questions below.
+            "ALTER TABLE users ADD COLUMN matchmaker_cap_usd REAL",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1728,14 +1780,16 @@ class Library:
 
     def list_users(self) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT id, username, role, active, name, email, created_at, last_login_at, ask_cap_usd "
+            "SELECT id, username, role, active, name, email, created_at, last_login_at, "
+            "ask_cap_usd, matchmaker_cap_usd "
             "FROM users ORDER BY role DESC, username"
         ).fetchall()
         return [dict(r) for r in rows]
 
     def get_user(self, username: str) -> Optional[dict]:
         row = self.conn.execute(
-            "SELECT id, username, role, active, name, email, created_at, last_login_at, ask_cap_usd "
+            "SELECT id, username, role, active, name, email, created_at, last_login_at, "
+            "ask_cap_usd, matchmaker_cap_usd "
             "FROM users WHERE username=?", ((username or "").strip().lower(),)
         ).fetchone()
         return dict(row) if row else None
@@ -3244,6 +3298,100 @@ class Library:
     def set_user_ask_cap(self, user_id: int, cap_usd: float | None) -> None:
         """Set a per-user override, or pass None to clear it (inherit the default)."""
         self.conn.execute("UPDATE users SET ask_cap_usd=? WHERE id=?", (cap_usd, user_id))
+        self.conn.commit()
+
+    # -- Chat Matchmaker (Communities/Software) — a dollar cap independent of
+    # FP&A Buddy's above, same override-else-default shape. See
+    # matchmaker_questions in _SCHEMA for why this is a separate budget line. --
+
+    _DEFAULT_MATCHMAKER_CAP_USD = 2.00  # lower than Ask's $5: no retrieval/web search per turn
+
+    def record_matchmaker_question(self, session_id: str, kind: str, question: str, answer: str,
+                                   model: str, user_id: int | None = None,
+                                   conversation_id: str = "", turn_index: int = 0,
+                                   input_tokens: int = 0, output_tokens: int = 0,
+                                   cache_creation_tokens: int = 0, cache_read_tokens: int = 0,
+                                   cost_usd: float = 0.0) -> int:
+        """Record one matchmaker turn. `conversation_id` groups follow-up turns;
+        pass "" on the first turn and the caller fills it in with str(id) after
+        insert, mirroring record_ask_question. `user_id` is None for the (most
+        common) anonymous case — the public page requires no login — in which
+        case `session_id` (the cfo_visitor cookie) is what rate-limiting and
+        conversation ownership key off of."""
+        now = _now()
+        cur = self.conn.execute(
+            """INSERT INTO matchmaker_questions
+               (kind, conversation_id, turn_index, user_id, session_id, question, answer, model,
+                input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+                cost_usd, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (kind, conversation_id, turn_index, user_id, session_id, question.strip(), answer, model,
+             input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+             cost_usd, now),
+        )
+        row_id = cur.lastrowid
+        if not conversation_id:
+            self.conn.execute(
+                "UPDATE matchmaker_questions SET conversation_id=? WHERE id=?", (str(row_id), row_id)
+            )
+        self.conn.commit()
+        return row_id
+
+    def list_matchmaker_conversation_turns(self, conversation_id: str) -> list[dict]:
+        """All turns of one matchmaker conversation in conversation order —
+        the server-side source of truth POST /tools/communities/find/chat
+        rebuilds follow-up history from, mirroring list_conversation_turns."""
+        if not conversation_id:
+            return []
+        rows = self.conn.execute(
+            "SELECT * FROM matchmaker_questions WHERE conversation_id=? ORDER BY turn_index, id",
+            (conversation_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def matchmaker_cost_this_month(self, user_id: int) -> float:
+        month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) FROM matchmaker_questions WHERE user_id=? AND created_at >= ?",
+            (user_id, month_start),
+        ).fetchone()
+        return float(row[0])
+
+    def matchmaker_cost_this_month_session(self, session_id: str) -> float:
+        """Same as matchmaker_cost_this_month but keyed by the anonymous
+        cfo_visitor session cookie rather than a logged-in user_id — the cap
+        that actually applies on the public, no-login /tools/communities/find
+        page for the common case of an unauthenticated visitor."""
+        month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) FROM matchmaker_questions "
+            "WHERE session_id=? AND user_id IS NULL AND created_at >= ?",
+            (session_id, month_start),
+        ).fetchone()
+        return float(row[0])
+
+    def get_default_matchmaker_cap(self) -> float:
+        raw = self.get_setting("matchmaker_default_cap_usd")
+        try:
+            return float(raw) if raw else self._DEFAULT_MATCHMAKER_CAP_USD
+        except ValueError:
+            return self._DEFAULT_MATCHMAKER_CAP_USD
+
+    def set_default_matchmaker_cap(self, cap_usd: float) -> None:
+        self.set_setting("matchmaker_default_cap_usd", str(cap_usd))
+
+    def get_effective_matchmaker_cap(self, user_id: int) -> float:
+        """The dollar cap that actually applies to this user this month for
+        the matchmaker — their per-user override if set, else the global
+        default, mirroring get_effective_ask_cap exactly."""
+        row = self.conn.execute("SELECT matchmaker_cap_usd FROM users WHERE id=?", (user_id,)).fetchone()
+        if row and row["matchmaker_cap_usd"] is not None:
+            return float(row["matchmaker_cap_usd"])
+        return self.get_default_matchmaker_cap()
+
+    def set_user_matchmaker_cap(self, user_id: int, cap_usd: float | None) -> None:
+        """Set a per-user override, or pass None to clear it (inherit the default)."""
+        self.conn.execute("UPDATE users SET matchmaker_cap_usd=? WHERE id=?", (cap_usd, user_id))
         self.conn.commit()
 
     # -- Ask / FP&A Buddy — the three reporting surfaces (admin, user, public) --

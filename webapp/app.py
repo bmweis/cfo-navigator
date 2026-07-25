@@ -5918,7 +5918,7 @@ def tools_communities(request: Request):
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
-groups, associations, and Slack channels. Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Take the quiz &rarr;</a></p>
+groups, associations, and Slack channels. Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Find your community &rarr;</a></p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"
@@ -6309,164 +6309,6 @@ _COMMUNITY_PROFILE_PUBLIC_FIELDS = [
 ]
 
 
-# Recommender (Phase 7): a 4-question quiz at /tools/communities/find that
-# routes to a filtered subset of the directory. Each answer maps onto one of
-# the directory's existing filterable dimensions (community_categories,
-# cost_band, the access bucket already computed client-side by
-# accessBucket() in JS) rather than a parallel scoring system — see
-# _recommender_filter below, a Python port of the directory's commFiltered()
-# semantics (categories OR-matched against each other, every dimension
-# AND-matched against the others). This is filtering, not ranking: results
-# come back in the same featured-first/alphabetical order as the directory,
-# with no per-community fit score. A true ranked score would need a metric
-# per community per dimension that the schema doesn't carry today (e.g. a
-# per-category relevance weight) — flagged as a possible follow-up rather
-# than built here, since the 4 quiz answers already narrow to a short,
-# usable list in practice.
-#
-# (value, label, category|None, cost_band|None, access_bucket|None) — a
-# "none of the above"/"no preference" option always has category=cost_band=
-# access_bucket=None, contributing no filter.
-_RECOMMENDER_QUESTIONS = [
-    {
-        "key": "role",
-        "label": "What best describes your role?",
-        "options": [
-            ("cfo", "CFO or VP Finance at a venture-backed or high-growth company", "CFO-specific invite-only", None, None),
-            ("fractional", "Fractional or part-time CFO building my own practice", "Fractional CFO", None, None),
-            ("controller", "Controller or accounting team leader", "Controller/accounting", None, None),
-            ("treasury", "Treasury or cash management focus", "Treasury", None, None),
-        ],
-    },
-    {
-        "key": "budget",
-        "label": "What's your budget for dues?",
-        "options": [
-            ("free", "Free only", None, "Free", None),
-            ("under1k", "Up to $1,000/year", None, "<$1k/yr", None),
-            ("under2500", "Up to $2,500/year", None, "<$2,500/yr", None),
-            ("any", "Budget isn't the deciding factor", None, None, None),
-        ],
-    },
-    {
-        "key": "access",
-        "label": "What kind of access are you looking for?",
-        "options": [
-            ("invite", "A tight, vetted peer group", None, None, "Invite-only"),
-            ("open", "Open, low friction to join", None, None, "Open"),
-            ("application", "A structured application process is fine", None, None, "Application"),
-            ("any", "No preference", None, None, None),
-        ],
-    },
-    {
-        "key": "focus",
-        "label": "Anything more specific you're looking for?",
-        "options": [
-            ("none", "Nothing specific", None, None, None),
-            ("dei", "Women- or DEI-focused", "Women/DEI", None, None),
-            ("industry", "Industry-specific (healthcare, nonprofit, life sciences, tech...)", "Industry-specific", None, None),
-            ("broad", "A broad association open to many finance titles, not just CFOs", "Broad paid association", None, None),
-        ],
-    },
-]
-
-
-def _recommender_option_map() -> dict[str, dict[str, tuple]]:
-    """{question_key: {answer_value: (label, category, cost_band, access_bucket)}}."""
-    return {
-        q["key"]: {opt[0]: opt[1:] for opt in q["options"]}
-        for q in _RECOMMENDER_QUESTIONS
-    }
-
-
-def _recommender_access_bucket(access: str) -> str:
-    """Python port of the directory's accessBucket() JS helper."""
-    a = access or ""
-    if a.startswith("Invite"):
-        return "Invite-only"
-    if "Application" in a or "Qualification" in a:
-        return "Application"
-    if a.startswith("Open"):
-        return "Open"
-    return "Other"
-
-
-def _recommender_filter(communities: list[dict], answers: dict[str, str]) -> list[dict]:
-    """Filters the directory by the quiz answers, using the same AND-across-
-    dimensions / OR-within-categories semantics as commFiltered() in JS."""
-    opt_map = _recommender_option_map()
-    categories: set[str] = set()
-    cost_band = None
-    access_bucket = None
-    for key, value in answers.items():
-        opt = opt_map.get(key, {}).get(value)
-        if not opt:
-            continue
-        label, cat, cb, ab = opt
-        if cat:
-            categories.add(cat)
-        if cb:
-            cost_band = cb
-        if ab:
-            access_bucket = ab
-
-    out = []
-    for c in communities:
-        if cost_band and c.get("cost_band") != cost_band:
-            continue
-        if access_bucket and _recommender_access_bucket(c.get("access", "")) != access_bucket:
-            continue
-        if categories and not (set(c.get("categories") or []) & categories):
-            continue
-        out.append(c)
-    out.sort(key=lambda c: (0 if c.get("featured") else 1, c["name"].lower()))
-    return out
-
-
-def _recommender_effective_weights_and_values(
-    visitor_values: dict[str, list[str]], default_weights: dict[str, float], default_values: dict[str, list[str]],
-) -> tuple[dict[str, float], dict[str, list[str]]]:
-    """Merges a visitor's own checked preferences (if any) with Brian's admin
-    defaults, per dimension independently — not an all-or-nothing choice
-    between "visitor" and "default." A dimension the visitor left unchecked
-    falls through to Brian's default value for THAT dimension only; a
-    dimension the visitor checked uses their chosen value(s) instead
-    (visitors set a target value, not a numeric weight — see the Recommender
-    weighting design note in CLAUDE.md/ARCHITECTURE.md). The weight applied
-    is always Brian's admin weight for that dimension, regardless of which
-    side supplied the target value — all 10 dimensions (both "profile"- and
-    "derived"-sourced, see _WEIGHT_DIMENSIONS) get the same admin default
-    weight+value treatment, so there's no special-casing here by source."""
-    weights: dict[str, float] = {}
-    target_values: dict[str, list[str]] = {}
-    for dim in _WEIGHT_DIMENSIONS:
-        key = dim["key"]
-        picked = visitor_values.get(key) or []
-        weights[key] = default_weights.get(key, 1.0)
-        target_values[key] = picked if picked else default_values.get(key, [])
-    return weights, target_values
-
-
-def _recommender_score(community: dict, profile: dict | None, weights: dict[str, float],
-                       target_values: dict[str, list[str]]) -> float:
-    """Weighted match score for one filtered community: sums weights[dim] for
-    every dimension whose target value(s) intersect the community's
-    controlled-vocabulary tag(s) for that dimension (see
-    _community_weight_tags). A dimension with no target value (never
-    customized by the visitor, and no admin default picked yet) simply
-    contributes nothing — it doesn't penalize or reward any community."""
-    score = 0.0
-    for dim_key, values in target_values.items():
-        if not values:
-            continue
-        weight = weights.get(dim_key, 0)
-        if not weight:
-            continue
-        tags = set(_community_weight_tags(dim_key, community, profile))
-        if tags & set(values):
-            score += weight
-    return score
-
 
 # Native gap-collection form (Phase 5): replaces the old /community
 # waitlist page's Google Form, folded into the live directory. Reachable
@@ -6835,281 +6677,278 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
     return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
-# Recommender (Phase 7): a short quiz that routes to a filtered subset of
-# the directory (_recommender_filter, defined above near the question data).
-# GET renders the form; POST logs the completed quiz (every completion, zero
-# or thin results included — the same kind of gap signal as a zero-result
-# directory search, see community_gap_submissions.submission_type) and
-# redirects to a plain, bookmarkable GET results page so a refresh or a
-# shared link never re-logs. Registered before /tools/communities/{slug} so
-# "find" isn't swallowed as a slug, same reasoning as /gap, /submit, and
-# /compare above.
-def _recommender_weight_fieldset(dim: dict) -> str:
-    """One checkbox group in the quiz's optional 'What matters most to you?'
-    step — name is 'w_<dim key>' so the POST handler can read every checked
-    value per dimension with form.getlist(). Left entirely unchecked (the
-    default), this dimension falls through to Brian's admin default at
-    scoring time — see _recommender_effective_weights_and_values."""
-    boxes = "".join(
-        f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#3a352e;cursor:pointer;">'
-        f'<input type="checkbox" class="rw-check" name="w_{dim["key"]}" value="{_esc(val)}"> {_esc(label)}</label>'
-        for val, label in dim["options"]
-    )
-    return f'''<div>
-  <p style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 8px;">{_esc(dim["quiz_label"])}</p>
-  <div style="display:flex;flex-direction:column;gap:6px;">{boxes}</div>
-</div>'''
-
-
+# Chat Matchmaker (linklib/matchmaker.py): replaces the old 4-question quiz at
+# this same URL — free-type what you're looking for, Claude asks clarifying
+# questions, narrows to 2-3 best-fit suggestions with profile links. Public,
+# no login required (same as the quiz it replaces), so rate limiting keys off
+# the anonymous cfo_visitor session cookie for the common signed-out case
+# (see matchmaker_cost_this_month_session), falling back to a per-user cap
+# only when the visitor happens to be signed in — see linklib/matchmaker.py's
+# module docstring and matchmaker_questions in ARCHITECTURE.md.
 @app.get("/tools/communities/find", response_class=HTMLResponse)
 def tools_communities_find(request: Request):
-    fieldsets = "".join(
-        f'''<fieldset style="border:none;padding:0;margin:0 0 24px;">
-  <legend style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:10px;padding:0;">{_esc(q["label"])}</legend>
-  <div style="display:flex;flex-direction:column;gap:8px;">
-    {"".join(
-        f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#3a352e;cursor:pointer;">'
-        f'<input type="radio" name="{q["key"]}" value="{_esc(val)}" required> {_esc(opt_label)}</label>'
-        for val, opt_label, *_rest in q["options"]
-    )}
+    session_id = _visitor_session_id(request)
+    body = """<div class="page page-full">
+<div class="tool-inner">
+<p style="margin:0 0 12px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
+<span class="mm-eyebrow">CFO Toolbox</span>
+<h1 style="margin-bottom:6px;">Find your community</h1>
+<p style="color:var(--muted);margin:0 0 24px;">Tell us what you're looking for and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
+
+<div id="mm-thread"></div>
+
+<div class="mm-card">
+  <textarea id="mm-q" rows="3" autofocus placeholder="e.g. I'm a fractional CFO working with early-stage SaaS companies, looking for a peer group that isn't too expensive"
+    style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;"></textarea>
+  <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+    <button class="btn" onclick="doMatch()" id="mm-btn" style="padding:11px 28px;font-size:15px;">Send</button>
   </div>
-</fieldset>'''
-        for q in _RECOMMENDER_QUESTIONS
-    )
-    weight_groups = "".join(_recommender_weight_fieldset(dim) for dim in _WEIGHT_DIMENSIONS)
-    body = f"""<div class="page page-form">
-<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
-<h1 style="margin:0;">Find your community</h1>
-<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Four quick questions, then we'll point you to the
-communities in the directory that fit.</p>
-<form method="post" action="/tools/communities/find">
-{fieldsets}
-<fieldset style="border-top:1px solid var(--line);padding-top:20px;margin:0 0 24px;">
-  <legend style="font-size:14px;font-weight:600;color:var(--navy);margin-bottom:4px;padding:0;">What matters most to you? <span style="font-weight:400;color:var(--muted);">(optional)</span></legend>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Check anything that matters to you and results will be ranked with that in mind. Leave a section blank
-    and we'll rank it using Brian's own default priorities instead. Skip this whole step and every result is ranked by Brian's defaults.</p>
-  <div id="rw-groups" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px;margin-bottom:12px;">
-    {weight_groups}
-  </div>
-  <button type="button" onclick="document.querySelectorAll('.rw-check').forEach(function(el){{el.checked=false;}});"
-    class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">Clear my choices</button>
-</fieldset>
-<button type="submit" class="btn">Get recommendations</button>
-</form>
-</div>"""
-    return HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
-
-
-@app.post("/tools/communities/find")
-async def tools_communities_find_submit(request: Request):
-    form = await request.form()
-    session_id = request.cookies.get(VISITOR_COOKIE_NAME) or ""
-    answers = {}
-    for q in _RECOMMENDER_QUESTIONS:
-        val = (form.get(q["key"]) or "").strip()
-        if val:
-            answers[q["key"]] = val
-
-    # Optional weighting step: only values from each dimension's own fixed
-    # vocabulary are kept, so a tampered/stray form value can't smuggle
-    # anything into scoring or the logged submission.
-    weight_prefs: dict[str, list[str]] = {}
-    for dim in _WEIGHT_DIMENSIONS:
-        valid = {v for v, _ in dim["options"]}
-        picked = [v for v in form.getlist(f"w_{dim['key']}") if v in valid]
-        if picked:
-            weight_prefs[dim["key"]] = picked
-
-    opt_map = _recommender_option_map()
-    lib = _lib()
-    try:
-        communities = lib.list_communities(approved_only=True)
-        results = _recommender_filter(communities, answers)
-        context = {"quiz": True, "result_count": len(results)}
-        for key, value in answers.items():
-            opt = opt_map.get(key, {}).get(value)
-            context[key] = opt[0] if opt else value
-        viewed_ids = lib.get_viewed_community_ids(session_id) if session_id else []
-        lib.add_community_gap_submission(
-            search_context_json=json.dumps(context),
-            viewed_community_ids_json=json.dumps(viewed_ids),
-            submission_type="recommender",
-        )
-        # Logged only when the visitor actually set a preference, never on a
-        # skip — separate row (not folded into the 'recommender' row above)
-        # so Brian can look at weight-preference signal on its own without
-        # every quiz completion (most of which won't set any) diluting it.
-        if weight_prefs:
-            lib.add_community_gap_submission(
-                search_context_json=json.dumps({"weights": weight_prefs}),
-                viewed_community_ids_json=json.dumps(viewed_ids),
-                submission_type="weight_preferences",
-            )
-    finally:
-        lib.close()
-
-    redirect_params = dict(answers)
-    redirect_params.update({f"w_{key}": values for key, values in weight_prefs.items()})
-    return RedirectResponse(f"/tools/communities/find/results?{urlencode(redirect_params, doseq=True)}", status_code=303)
-
-
-def _recommender_disclosure_html(visitor_values: dict[str, list[str]]) -> str:
-    """States plainly which weights ranked these results: the visitor's own
-    choices, restated back, if they set any; Brian's default priorities
-    otherwise. No separate methodology page needed — whichever weights are
-    in effect (custom or default) ARE the explanation."""
-    if not visitor_values:
-        return ('<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">'
-                'Ranked using Brian&rsquo;s default priorities. '
-                '<a href="/tools/communities/find">Set your own</a> to rank these results by what matters most to you.</p>')
-    dims_by_key = {dim["key"]: dim for dim in _WEIGHT_DIMENSIONS}
-    parts = []
-    for key, values in visitor_values.items():
-        dim = dims_by_key.get(key)
-        if not dim:
-            continue
-        labels = [label for val, label in dim["options"] if val in values]
-        if labels:
-            parts.append(f"{dim['quiz_label']}: {', '.join(labels)}")
-    stated = "; ".join(parts)
-    return (f'<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">'
-            f'You told us what matters to you ({_esc(stated)}), so results below are ranked with that in mind. '
-            f'Anything you didn&rsquo;t weigh in on still uses Brian&rsquo;s default priorities.</p>')
-
-
-def _recommender_result_card(c: dict) -> str:
-    """Non-interactive read of a directory card for the results page — same
-    fields as the /tools/communities grid, minus the compare checkbox (this
-    page has no client-side filter/pagination state to persist a selection
-    across)."""
-    cats = "".join(f'<span class="comm-cat">{_esc(x)}</span>' for x in c.get("categories") or [])
-    meta_parts = [_community_geo_line(c)]
-    if c.get("access"):
-        meta_parts.append(c["access"])
-    if c.get("sponsorship_type"):
-        sp = c["sponsorship_type"]
-        if c.get("sponsor_name"):
-            sp += f" ({c['sponsor_name']})"
-        meta_parts.append(sp)
-    meta_line = " &middot; ".join(_esc(p) for p in meta_parts)
-    notes_line = ""
-    if c.get("notes") or c.get("cost_note"):
-        notes_line = f'<p class="comm-notes">{_esc(" ".join(filter(None, [c.get("notes"), c.get("cost_note")])))}</p>'
-    featured_badge = (
-        '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
-        'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
-        if c.get("featured") else ""
-    )
-    advisor_star = (
-        '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>'
-        if c.get("advisor") else ""
-    )
-    return f"""<article class="comm-card{' comm-card-featured' if c.get('featured') else ''}">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">
-    <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
-      {featured_badge}{advisor_star}
-      <a class="comm-name" href="/tools/communities/{_esc(c['slug'])}" target="_blank" rel="noopener">{_esc(c['name'])}</a>
-    </div>
-    <span class="comm-cost">{_esc(c['cost_band'])}</span>
-  </div>
-  <p class="comm-meta">{meta_line}</p>
-  <p class="comm-demo">{_esc(c['demographic'])}</p>
-  {notes_line}
-  <div class="comm-cats">{cats}</div>
-</article>"""
-
-
-@app.get("/tools/communities/find/results", response_class=HTMLResponse)
-def tools_communities_find_results(request: Request, role: str = "", budget: str = "",
-                                   access: str = "", focus: str = ""):
-    answers = {k: v for k, v in {"role": role, "budget": budget, "access": access, "focus": focus}.items() if v}
-
-    # Optional weighting step's chosen values, carried through the redirect
-    # from POST /tools/communities/find as repeated query params (w_<dim
-    # key>=<value>) so this plain GET page stays bookmarkable/shareable on
-    # its own, same reasoning as the 4 filter answers above. Only values
-    # from each dimension's own fixed vocabulary are kept.
-    visitor_values: dict[str, list[str]] = {}
-    for dim in _WEIGHT_DIMENSIONS:
-        valid = {v for v, _ in dim["options"]}
-        picked = [v for v in request.query_params.getlist(f"w_{dim['key']}") if v in valid]
-        if picked:
-            visitor_values[dim["key"]] = picked
-
-    lib = _lib()
-    try:
-        communities = [_public_community(c) for c in lib.list_communities(approved_only=True)]
-        default_weights = _get_default_community_weights(lib)
-        default_values = _get_default_community_weight_values(lib)
-        results = _recommender_filter(communities, answers)
-        profiles = {c["id"]: lib.get_community_profile(c["id"]) for c in results}
-    finally:
-        lib.close()
-
-    weights, target_values = _recommender_effective_weights_and_values(
-        visitor_values, default_weights, default_values)
-    for c in results:
-        c["_score"] = _recommender_score(c, profiles.get(c["id"]), weights, target_values)
-    results.sort(key=lambda c: (-c["_score"], 0 if c.get("featured") else 1, c["name"].lower()))
-
-    disclosure = _recommender_disclosure_html(visitor_values)
-
-    back_link = '<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>'
-    retake_link = '<a href="/tools/communities/find" style="font-size:13px;color:var(--muted);">Retake the quiz</a>'
-
-    if not results:
-        body = f"""<div class="page page-grid">
-{back_link}
-<h1 style="margin:0;">Find your community</h1>
-<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Nothing in the directory matched all four answers.
-That's useful to know&mdash;we've noted it as a gap.</p>
-<div style="padding:20px 22px;background:var(--seafoam);border-radius:12px;margin-bottom:20px;">
-  <p style="margin:0 0 8px;font-weight:600;color:var(--navy);">Want to tell us more about what you're looking for?</p>
-  <a href="/tools/communities/gap" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;display:inline-block;background:#fff;">Tell us more &rarr;</a>
 </div>
-<p>{retake_link} &middot; <a href="/tools/communities" style="font-size:13px;color:var(--muted);">Browse the full directory &rarr;</a></p>
-</div>"""
-        return HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
-    cards = "".join(_recommender_result_card(c) for c in results)
-    body = f"""<div class="page page-grid">
-<div class="rf-noprint">
-{back_link}
+<div id="mm-capped" style="display:none;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:14px;color:var(--muted);">
+  You&rsquo;ve reached the limit for this conversation. <a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>, or <a href="/tools/communities">browse the full directory</a>.
 </div>
-<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-  <h1 style="margin:0;">Find your community</h1>
-  <button type="button" onclick="window.print();" class="btn btn-ghost rf-noprint" style="font-size:13px;padding:7px 16px;">Print your results</button>
 </div>
-<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Based on your answers, here's what fits: {len(results)}
-communit{'y' if len(results) == 1 else 'ies'}.</p>
-{disclosure}
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;margin-bottom:24px;">
-  {cards}
-</div>
-<p class="rf-noprint">{retake_link} &middot; <a href="/tools/communities" style="font-size:13px;color:var(--muted);">Browse the full directory &rarr;</a></p>
 </div>
 
 <style>
-.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
-.comm-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
-.comm-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
-.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
-.comm-name:hover{{color:var(--navy);}}
-.comm-meta{{font-size:13px;color:var(--muted);margin:0 0 8px;line-height:1.5;}}
-.comm-demo{{font-size:14px;color:#3a352e;margin:0 0 10px;line-height:1.5;}}
-.comm-notes{{font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5;}}
-.comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
-.comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
-.comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
-.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
-@media print {{
-  .site-header, .site-nav, .site-footer, .rf-noprint {{ display: none !important; }}
-  .page {{ max-width: 100%; padding: 0; margin: 0; }}
-  .comm-card {{ break-inside: avoid; box-shadow: none !important; }}
-  a[href]:after {{ content: ""; }}
-}}
-</style>"""
-    return HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+.mm-eyebrow{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
+.mm-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;}
+
+.mm-answer{background:#fff;border:1px solid var(--line);border-radius:14px 14px 14px 2px;max-width:88%;padding:20px 24px;font-size:15px;line-height:1.7;margin-bottom:18px;}
+.mm-answer p{margin:0 0 14px;}
+.mm-answer ul,.mm-answer ol{margin:0 0 14px;padding-left:22px;}
+.mm-answer li{margin-bottom:5px;}
+.mm-answer a{color:var(--accent);}
+.mm-q-bubble{background:var(--navy);color:#fff;border-radius:14px 14px 2px 14px;padding:12px 18px;font-size:14px;font-weight:500;margin:0 0 8px auto;max-width:80%;width:fit-content;}
+
+.mm-loading{display:flex;align-items:center;gap:10px;padding:2px 0;}
+.mm-loading .dots{display:flex;gap:5px;}
+.mm-loading .dots span{width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.3;animation:mm-dot-pulse 1.1s ease-in-out infinite;}
+.mm-loading .dots span:nth-child(2){animation-delay:.15s;}
+.mm-loading .dots span:nth-child(3){animation-delay:.3s;}
+@keyframes mm-dot-pulse{0%,80%,100%{opacity:.3;transform:scale(.85);}40%{opacity:1;transform:scale(1);}}
+.mm-loading-label{font-size:13px;color:var(--muted);}
+
+.mm-fb{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;}
+.mm-fb-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--muted);font:600 12px var(--font-body);cursor:pointer;}
+.mm-fb-btn.sel-pos{background:var(--navy);border-color:var(--navy);color:#fff;}
+.mm-fb-btn.sel-neg{background:var(--coral-wash);border-color:var(--coral-deep);color:var(--coral-deep);}
+</style>
+
+<script>
+var convoId = null;
+var asked = false;
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Small hand-rolled markdown renderer, same zero-dependency approach as
+// /library/ask's mdToHtml — but unlike that one, matchmaker links are
+// same-site profile paths (/tools/communities/<slug>), not https:// URLs.
+function mmInline(s) {
+  s = escapeHtml(s);
+  s = s.replace(/\\[([^\\]]+)\\]\\((\\/[^\\s)]+)\\)/g, function(_, t, u) {
+    return '<a href="' + u + '">' + t + '</a>';
+  });
+  s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1<em>$2</em>');
+  return s;
+}
+function mmToHtml(raw) {
+  var lines = (raw || '').split('\\n');
+  var html = [], para = [], inList = false;
+  function closeList() { if (inList) { html.push('</ul>'); inList = false; } }
+  function flushPara() { if (para.length) { html.push('<p>' + para.join('<br>') + '</p>'); para = []; } }
+  lines.forEach(function(line) {
+    var t = line.trim();
+    var ul = t.match(/^[-*]\\s+(.*)$/);
+    if (ul) {
+      flushPara();
+      if (!inList) { html.push('<ul>'); inList = true; }
+      html.push('<li>' + mmInline(ul[1]) + '</li>');
+    } else if (t === '') {
+      flushPara(); closeList();
+    } else {
+      closeList();
+      para.push(mmInline(t));
+    }
+  });
+  flushPara(); closeList();
+  return html.join('');
+}
+
+var FB_OPTIONS = [['helpful', '&#128077;'], ['not_helpful', '&#128078;']];
+function fbRowHtml() {
+  var btns = FB_OPTIONS.map(function(o) {
+    return '<button type="button" class="mm-fb-btn" data-rating="' + o[0] + '" onclick="rateTurn(this)">' + o[1] + '</button>';
+  }).join('');
+  // Session-only: a tap just toggles the button's own selected state client-side.
+  // Nothing is sent to the server or persisted — see CLAUDE.md's matchmaker
+  // feedback decision.
+  return '<div class="mm-fb">' + btns + '</div>';
+}
+function rateTurn(el) {
+  var row = el.closest('.mm-fb');
+  row.querySelectorAll('.mm-fb-btn').forEach(function(b) { b.classList.remove('sel-pos', 'sel-neg'); });
+  el.classList.add(el.getAttribute('data-rating') === 'helpful' ? 'sel-pos' : 'sel-neg');
+}
+
+function resetConvo() {
+  convoId = null; asked = false;
+  document.getElementById('mm-capped').style.display = 'none';
+  var btn = document.getElementById('mm-btn');
+  btn.disabled = false; btn.textContent = 'Send';
+  document.getElementById('mm-q').placeholder = "e.g. I'm a fractional CFO working with early-stage SaaS companies, looking for a peer group that isn't too expensive";
+}
+
+async function doMatch() {
+  var qEl = document.getElementById('mm-q');
+  var q = qEl.value.trim();
+  if (!q) { qEl.focus(); return; }
+
+  var btn = document.getElementById('mm-btn');
+  var thread = document.getElementById('mm-thread');
+  var turn = document.createElement('div');
+  turn.style.marginTop = '18px';
+  turn.innerHTML = '<div class="mm-q-bubble">' + escapeHtml(q) + '</div>' +
+                   '<div class="mm-answer"><div class="mm-loading"><span class="dots"><span></span><span></span><span></span></span>' +
+                   '<span class="mm-loading-label">Thinking&hellip;</span></div></div>';
+  thread.appendChild(turn);
+  var answerEl = turn.querySelector('.mm-answer');
+
+  btn.disabled = true; btn.textContent = 'Thinking…';
+  qEl.value = '';
+  turn.scrollIntoView({behavior:'smooth', block:'nearest'});
+
+  try {
+    var resp = await fetch('/tools/communities/find/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ question: q, conversation_id: convoId })
+    });
+    var d = await resp.json();
+    if (!resp.ok) {
+      answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(d.detail || 'Error') + '</span>';
+      btn.disabled = false; btn.textContent = asked ? 'Continue' : 'Send';
+      return;
+    }
+
+    answerEl.innerHTML = mmToHtml(d.answer) + fbRowHtml();
+
+    if (d.capped) {
+      document.getElementById('mm-capped').style.display = 'block';
+      btn.disabled = true; btn.textContent = 'Limit reached';
+      return;
+    }
+
+    convoId = d.conversation_id || convoId;
+    asked = true;
+    qEl.placeholder = 'Ask a follow-up…';
+    btn.disabled = false; btn.textContent = 'Continue';
+
+    if (d.followups_left === 0) {
+      document.getElementById('mm-capped').style.display = 'block';
+      btn.disabled = true; btn.textContent = 'Limit reached';
+    }
+  } catch(e) {
+    answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong: ' + escapeHtml(String(e)) + '</span>';
+    btn.disabled = false; btn.textContent = asked ? 'Continue' : 'Send';
+  }
+}
+
+document.addEventListener('keydown', function(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
+});
+</script>"""
+    resp = HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    _set_visitor_cookie(request, resp, session_id)
+    return resp
+
+
+@app.post("/tools/communities/find/chat")
+async def tools_communities_find_chat(request: Request):
+    from linklib.matchmaker import answer_communities_question, MAX_FOLLOWUPS
+    payload = await request.json()
+    question = (payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question required")
+    conversation_id = (payload.get("conversation_id") or "").strip()
+    session_id = _visitor_session_id(request)
+
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+
+        # Follow-up turn: rebuild history from the conversation's recorded
+        # rows, same server-side-source-of-truth pattern as POST /ask.
+        # Ownership requires BOTH the session cookie and (when set) the
+        # logged-in user_id to match — the cookie is the primary key since
+        # this page needs no login, but a signed-in conversation additionally
+        # can't be picked up by a different signed-in user sharing a device.
+        history: list[dict] = []
+        prior_questions = 0
+        if conversation_id:
+            turns = lib.list_matchmaker_conversation_turns(conversation_id)
+            if not turns:
+                raise HTTPException(status_code=404, detail="unknown conversation")
+            if turns[0]["session_id"] != session_id or turns[0]["user_id"] != user_id:
+                raise HTTPException(status_code=403, detail="not your conversation")
+            prior_questions = len(turns)
+            if prior_questions >= 1 + MAX_FOLLOWUPS:
+                body = {"capped": True,
+                        "answer": "We've reached the limit for this conversation. "
+                                  "Start a new question to keep going."}
+                resp = JSONResponse(body)
+                _set_visitor_cookie(request, resp, session_id)
+                return resp
+            for t in turns:
+                history.append({"role": "user", "content": t["question"]})
+                history.append({"role": "assistant", "content": t["answer"]})
+
+        # Dollar-based rate limit, mirroring POST /ask — but this page needs
+        # no login, so the common case has no user_id to key off of. Anonymous
+        # spend is tracked (and capped) by the cfo_visitor session cookie
+        # instead; a signed-in visitor still gets their own per-user cap.
+        if user_id is not None:
+            cap = lib.get_effective_matchmaker_cap(user_id)
+            spent = lib.matchmaker_cost_this_month(user_id)
+        else:
+            cap = lib.get_default_matchmaker_cap()
+            spent = lib.matchmaker_cost_this_month_session(session_id)
+        if spent >= cap:
+            body = {"capped": True,
+                    "answer": (f"We've used ${spent:.2f} of this month's ${cap:.2f} matchmaker "
+                               "budget. It resets at the start of next month — in the meantime, "
+                               "browse the full directory at /tools/communities.")}
+            resp = JSONResponse(body)
+            _set_visitor_cookie(request, resp, session_id)
+            return resp
+
+        ans = answer_communities_question(lib, question, history=history)
+
+        row_id = lib.record_matchmaker_question(
+            session_id, "community", question, ans.text, ans.model,
+            user_id=user_id, conversation_id=conversation_id, turn_index=prior_questions,
+            input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
+            cache_creation_tokens=ans.cache_creation_tokens, cache_read_tokens=ans.cache_read_tokens,
+            cost_usd=ans.cost_usd,
+        )
+        new_conversation_id = conversation_id or str(row_id)
+        followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
+
+        body = {
+            "answer": ans.text,
+            "conversation_id": new_conversation_id,
+            "followups_left": followups_left,
+        }
+        resp = JSONResponse(body)
+        _set_visitor_cookie(request, resp, session_id)
+        return resp
+    finally:
+        lib.close()
 
 
 @app.get("/tools/communities/correct", response_class=HTMLResponse)
@@ -9051,24 +8890,19 @@ _COMMUNITIES_REFERENCE_HTML = """
 </section>
 
 <section>
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Recommender (/tools/communities/find)</h3>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Matchmaker (/tools/communities/find)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li><strong>Heading:</strong> &ldquo;Find your community&rdquo; / &ldquo;Four quick questions, then we'll point you to the communities in the directory that fit.&rdquo; Submit button: &ldquo;Get recommendations&rdquo;.</li>
-<li><strong>Four required questions:</strong> role (&ldquo;What best describes your role?&rdquo;), budget (&ldquo;What's your budget for dues?&rdquo;), access (&ldquo;What kind of access are you looking for?&rdquo;), and a catch-all (&ldquo;Anything more specific you're looking for?&rdquo;) &mdash; each option maps onto an existing directory filter (category, cost band, or access bucket). This filtering step is unchanged by the weighting step below and is the sole gate on which communities appear at all.</li>
-<li><strong>Fifth, optional step &mdash; &ldquo;What matters most to you? (optional)&rdquo;:</strong> a checkbox group per weighting dimension (10 total: 8 <code>community_profiles</code>-sourced dimensions &mdash; including Dues, which moved from derived to profile-sourced so a freemium community can carry both Free and Paid tags &mdash; plus Local presence and Organization, derived from existing directory fields rather than a research pass), letting a visitor check every value they'd accept per dimension. Intro copy: &ldquo;Check anything that matters to you and results will be ranked with that in mind. Leave a section blank and we'll rank it using Brian's own default priorities instead. Skip this whole step and every result is ranked by Brian's defaults.&rdquo; A &ldquo;Clear my choices&rdquo; button unchecks every box client-side.</li>
-<li><strong>Zero-result results page:</strong> &ldquo;Nothing in the directory matched all four answers. That's useful to know&mdash;we've noted it as a gap.&rdquo; with a CTA box (&ldquo;Want to tell us more about what you're looking for?&rdquo; / &ldquo;Tell us more &rarr;&rdquo;) linking to the gap form. Not weighted/ranked (nothing to rank).</li>
-<li><strong>Results found:</strong> &ldquo;Based on your answers, here's what fits: N communit(y/ies).&rdquo; followed by the weighting disclosure line, then &ldquo;Retake the quiz&rdquo; and &ldquo;Browse the full directory &rarr;&rdquo; links. Results are sorted by weighted match score, <code>featured</code> breaking ties (same convention as the rest of the directory) &mdash; no separate methodology page, since the disclosure line below states the weights in effect. A &ldquo;Print your results&rdquo; button (<code>window.print()</code>, no PDF library) sits next to the heading; a <code>@media print</code> stylesheet hides the site header/nav/footer and the back/retake/browse links (<code>.rf-noprint</code>) so only the matched-community cards print.</li>
-<li><strong>Weighting disclosure line, visitor set at least one preference:</strong> &ldquo;You told us what matters to you (&lt;dimension: chosen values&gt;), so results below are ranked with that in mind. Anything you didn't weigh in on still uses Brian's default priorities.&rdquo;</li>
-<li><strong>Weighting disclosure line, nothing set (skip, or admin defaults only):</strong> &ldquo;Ranked using Brian's default priorities. Set your own to rank these results by what matters most to you.&rdquo; (links back to the quiz)</li>
-<li>Every completed quiz is logged &mdash; including a zero/thin result &mdash; as a <code>community_gap_submissions</code> row with <code>submission_type='recommender'</code>, the same gap signal as a zero-result directory search. When the visitor checked at least one weighting box (never on a skip), a <em>second</em>, separate row is logged with <code>submission_type='weight_preferences'</code>, storing the chosen values as JSON &mdash; kept apart from the <code>'recommender'</code> row so this signal isn't diluted by the majority of completions that set no preference.</li>
+<li>Replaced the old 4-question quiz outright, same URL. Free-type chat: the visitor describes what they're looking for, Claude asks a small number of clarifying questions (one or two per turn), then narrows to 2&ndash;3 best-fit suggestions with links to their profile pages, drawn from a text block covering every approved community's directory listing plus its Community Profile (<code>linklib/matchmaker.py::_build_communities_context</code>) &mdash; sent as full context on every turn rather than retrieved, since the ~38-community dataset is small enough that this is cheap and simpler than a retrieval layer.</li>
+<li>Thumbs up/down per suggestion, UI-only &mdash; never persisted (no server call, no DB row), unlike FP&amp;A Buddy's <code>ask_feedback</code> table.</li>
+<li>Multi-turn, server-rebuilt history (mirroring <code>/library/ask</code>'s <code>conversation_id</code> pattern) capped at <code>linklib.matchmaker.MAX_FOLLOWUPS</code> turns &mdash; higher than FP&amp;A Buddy's cap, since narrowing down through clarifying questions naturally takes more turns even though each turn is individually cheaper (no retrieval, no web search).</li>
+<li><strong>Public, no login required</strong> (same as the quiz it replaces) &mdash; so unlike FP&amp;A Buddy's user-keyed dollar cap, rate limiting here keys off the anonymous <code>cfo_visitor</code> session cookie for the common signed-out case, falling back to a per-user cap only when the visitor happens to be signed in. See <code>matchmaker_questions</code> in ARCHITECTURE.md for the schema and <code>/admin/users</code>' "Matchmaker" cap fields for the admin controls.</li>
 </ul>
 </section>
 
 <section>
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Recommender best-fit weighting admin (/admin/tools/communities)</h3>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Recommender best-fit weighting admin (/admin/tools/communities) &mdash; orphaned by the Matchmaker</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li><strong>&ldquo;Recommender ranking weights&rdquo; panel:</strong> one card per weighting dimension, all 10 (Level, Function, CPE eligible events, What you're looking for, Platform, Programming, Dues, Industry, Local Presence, Organization) with a 0&ndash;5 weight number and a checkbox group of that dimension's own controlled-vocabulary values. Both are required together for a dimension to actually rank anything &mdash; a weight alone has nothing to match a community's tags against. Saved together, no page reload, mirroring <code>/admin/voice</code>'s pattern. Local Presence and Organization get the identical admin default weight+value treatment as the 8 <code>community_profiles</code> dimensions, even though their tags are computed on the fly from an existing <code>communities</code> column (<code>local_markets</code>, <code>sponsorship_type</code>) rather than stored in a dedicated <code>*_tags</code> column.</li>
-<li><strong>Profile edit form (&ldquo;Recommender weighting&rdquo; section):</strong> checkbox groups for the 8 <code>community_profiles</code>-sourced dimensions only, per-community, keep each community's <code>*_tags</code> columns current for new/edited communities &mdash; separate from the free-text research fields of the same base name, since that prose was found too inconsistent for reliable keyword matching (see <code>scripts/backfill_community_weight_tags.py</code>'s docstring for the specific false-positive example that ruled it out). Dues moved into this group in PR 5 (<code>paid_free_tags</code>) so a freemium community can carry both Free and Paid, independently of the single-value Cost band select on the community's own edit form. Local Presence and Organization don't get a checkbox group here &mdash; each already has its own single-value control elsewhere on this same edit form (the Local markets text field and the Sponsorship select), and duplicating it as a second control would just invite the two to drift apart.</li>
+<li>This panel (weighting dimensions, per-community <code>*_tags</code> columns, the profile-edit checkbox groups) existed solely to power the old quiz's ranked-results page, which is gone. It's left in place rather than removed in the same PR that shipped the Matchmaker &mdash; ripping out curated per-community tag data and an admin panel is a bigger, harder-to-reverse call than replacing a page, and deserves its own explicit decision. Flagged here as a known follow-up: either repurpose this data for a future feature, or remove it (panel, tag columns, and <code>scripts/backfill_community_weight_tags.py</code>) once confirmed unused.</li>
 </ul>
 </section>
 
@@ -9244,14 +9078,12 @@ def admin_communities(request: Request, filter: str = ""):
   </div>
 </details>
 
-<details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--surface);" open>
-  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);">Recommender ranking weights</summary>
+<details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--surface);">
+  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);">Recommender ranking weights (orphaned&mdash;see note)</summary>
   <div style="margin-top:14px;">
-    <p style="font-size:13px;color:var(--muted);margin:0 0 14px;max-width:640px;">Your own default priorities for ranking
-      <a href="/tools/communities/find">/tools/communities/find</a> results: for each dimension, check the value(s) you'd prefer and
-      set how much it matters (0&ndash;5). Used for any dimension a visitor doesn't state their own preference for, including every
-      dimension when they skip the quiz's optional weighting step entirely. Leave a dimension's checkboxes empty to let it sit out of
-      ranking until you pick a default.</p>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 14px;max-width:640px;"><strong>/tools/communities/find is now the
+      conversational Matchmaker</strong>, which doesn't read these weights &mdash; they only ever powered the old quiz's ranked-results
+      page. Left in place rather than deleted; see the "Matchmaker" note above for the follow-up decision (repurpose or remove).</p>
     <div id="cw-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px 20px;margin-bottom:14px;">
       {"".join(
           f'''<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;">
@@ -15528,6 +15360,8 @@ def admin_users(request: Request, msg: str = ""):
         users = lib.list_users()
         default_cap = lib.get_default_ask_cap()
         ask_spend = {u["id"]: lib.ask_cost_this_month(u["id"]) for u in users}
+        default_mm_cap = lib.get_default_matchmaker_cap()
+        mm_spend = {u["id"]: lib.matchmaker_cost_this_month(u["id"]) for u in users}
         pending_resets = lib.list_password_reset_requests(pending_only=True)
     finally:
         lib.close()
@@ -15552,6 +15386,9 @@ def admin_users(request: Request, msg: str = ""):
         effective_cap = cap_override if cap_override is not None else default_cap
         spent = ask_spend.get(uid, 0.0)
         cap_note = "override" if cap_override is not None else "default"
+        mm_cap_override = u.get("matchmaker_cap_usd")
+        mm_effective_cap = mm_cap_override if mm_cap_override is not None else default_mm_cap
+        mm_spent = mm_spend.get(uid, 0.0)
         meta_bits = [b for b in (_esc(u["name"] or ""), _esc(u["email"] or "")) if b]
         meta_bits.append(f"Last in {last}")
         meta_line = " &middot; ".join(meta_bits)
@@ -15580,7 +15417,9 @@ def admin_users(request: Request, msg: str = ""):
     <div style="display:flex;align-items:center;gap:14px;flex-shrink:0;">
       <div style="text-align:right;font-size:12px;color:var(--muted);">
         <div style="font-weight:600;color:var(--ink);">${spent:.2f} / ${effective_cap:.2f}</div>
-        <div>{cap_note}</div>
+        <div>Ask &middot; {cap_note}</div>
+        <div style="font-weight:600;color:var(--ink);margin-top:4px;">${mm_spent:.2f} / ${mm_effective_cap:.2f}</div>
+        <div>Matchmaker &middot; {"override" if mm_cap_override is not None else "default"}</div>
       </div>
       <button type="button" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;" onclick="toggleManage({uid})">Manage</button>
     </div>
@@ -15601,6 +15440,17 @@ def admin_users(request: Request, msg: str = ""):
         <span style="font-size:13px;color:var(--muted);">$</span>
         <input type="number" name="cap" step="0.01" min="0" value="{'' if cap_override is None else cap_override}"
           placeholder="${default_cap:.2f}" title="Monthly cap override—blank inherits the site default"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+        <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
+      </form>
+    </div>
+    <div class="user-manage-row">
+      <label>Matchmaker cap</label>
+      <form method="post" action="/admin/users/{uid}/matchmaker-cap" style="display:flex;gap:6px;align-items:center;">
+        <span style="font-size:13px;color:var(--muted);">$</span>
+        <input type="number" name="cap" step="0.01" min="0" value="{'' if mm_cap_override is None else mm_cap_override}"
+          placeholder="${default_mm_cap:.2f}" title="Monthly cap override—blank inherits the site default"
           style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
         <span style="font-size:12px;color:var(--muted);">per month &middot; blank = site default</span>
         <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Set</button>
@@ -15639,6 +15489,13 @@ def admin_users(request: Request, msg: str = ""):
   <input type="number" name="cap" step="0.01" min="0" value="{default_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
   <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
   <span style="font-size:12px;color:var(--muted);">Per-user overrides below take priority over this.</span>
+</form>
+<form method="post" action="/admin/users/matchmaker-cap-default" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+  <span style="font-size:13px;color:var(--muted);">Matchmaker default monthly cap, per user (tracks separately from FP&amp;A Buddy&mdash;see CLAUDE.md):</span>
+  <span style="font-size:13px;">$</span>
+  <input type="number" name="cap" step="0.01" min="0" value="{default_mm_cap:.2f}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:80px;">
+  <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Save default</button>
+  <span style="font-size:12px;color:var(--muted);">Anonymous visitors (no login) are capped the same way, keyed by session cookie instead of a user row.</span>
 </form>
 <div style="display:grid;gap:10px;margin-bottom:26px;">{cards}</div>
 
@@ -15782,6 +15639,46 @@ async def admin_users_ask_cap(request: Request, user_id: int):
         else:
             lib.set_user_ask_cap(user_id, None)
             msg = 'FP&A Buddy cap override cleared—this user now follows the site default.'
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/users/matchmaker-cap-default")
+async def admin_users_matchmaker_cap_default(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    try:
+        cap = float(form.get("cap") or "2")
+    except ValueError:
+        return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
+    lib = _lib()
+    try:
+        lib.set_default_matchmaker_cap(max(0.0, cap))
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/users?msg={quote(f'Default Matchmaker cap set to ${cap:.2f}/month.')}", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/matchmaker-cap")
+async def admin_users_matchmaker_cap(request: Request, user_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    raw = (form.get("cap") or "").strip()
+    lib = _lib()
+    try:
+        if raw:
+            try:
+                cap = max(0.0, float(raw))
+            except ValueError:
+                return RedirectResponse(f"/admin/users?msg={quote('Enter a valid dollar amount.')}", status_code=303)
+            lib.set_user_matchmaker_cap(user_id, cap)
+            msg = f'Matchmaker cap override set to ${cap:.2f}/month.'
+        else:
+            lib.set_user_matchmaker_cap(user_id, None)
+            msg = 'Matchmaker cap override cleared—this user now follows the site default.'
     finally:
         lib.close()
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
