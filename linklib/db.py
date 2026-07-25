@@ -191,6 +191,40 @@ CREATE TABLE IF NOT EXISTS tool_competitors (
 CREATE INDEX IF NOT EXISTS idx_tool_competitors_tool ON tool_competitors(tool_id);
 CREATE INDEX IF NOT EXISTS idx_tool_competitors_competitor ON tool_competitors(competitor_id);
 
+-- Per-feature standalone-vs-bundled availability for a Software entry
+-- (search overhaul Phase 4a) — the data the Phase 5 comparison matrix reads.
+-- standalone_available/bundled_only are independent booleans, not mutually
+-- exclusive: some vendors sell a feature both a la carte and folded into a
+-- higher tier, so a row can legitimately be 1/1. needs_verification reuses
+-- the exact confidence-flag shape from linklib.enrich's community-listing
+-- autofill (NEEDS_VERIFICATION) rather than a new mechanism — here it's a
+-- per-row bool (not per-field) since one row is already one semantic unit
+-- (a feature name + its availability). Manually admin-entered rows default
+-- needs_verification=0 (a human typed it); rows from the Phase 4b LLM
+-- enrichment pass default it to 1 and get reviewed before Phase 5 treats
+-- them as reliable. No DB-level uniqueness on (tool_id, feature_name) —
+-- LLM-drafted names won't always match casing/phrasing exactly on a re-run,
+-- so de-duplication is the batch script's job, not a constraint here.
+-- Enrichment cost is recorded through the existing generic enrichment_cost
+-- ledger (article_id=NULL), the same pattern generate_tool_description and
+-- generate_community_profile already use — no new cost table needed.
+CREATE TABLE IF NOT EXISTS tool_features (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_id              INTEGER NOT NULL,
+    feature_name         TEXT NOT NULL,
+    standalone_available INTEGER NOT NULL DEFAULT 0,
+    bundled_only         INTEGER NOT NULL DEFAULT 0,
+    notes                TEXT NOT NULL DEFAULT '',
+    source_url           TEXT NOT NULL DEFAULT '',
+    needs_verification   INTEGER NOT NULL DEFAULT 0,
+    source               TEXT NOT NULL DEFAULT 'manual',
+    model                TEXT NOT NULL DEFAULT '',
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_features_tool ON tool_features(tool_id);
+
 -- Self-service "forgot password" requests, filed from /login. When the account
 -- has an email on file, token_hash (sha256 of the emailed token — never the
 -- raw token, so a DB leak alone can't be used to reset a password) +
@@ -1972,6 +2006,62 @@ class Library:
                 candidates.append(d)
         candidates.sort(key=lambda d: (-d["_overlap"], d["name"]))
         return candidates[:limit]
+
+    # -- feature comparison data (Phase 4a) ----------------------------------
+    # See the tool_features CREATE TABLE comment for the confidence-flag and
+    # dedup reasoning. Rendered on the Phase 5 comparison matrix.
+
+    def add_tool_feature(self, tool_id: int, feature_name: str,
+                         standalone_available: int = 0, bundled_only: int = 0,
+                         notes: str = "", source_url: str = "",
+                         needs_verification: int = 0, source: str = "manual",
+                         model: str = "") -> int:
+        feature_name = feature_name.strip()
+        if not feature_name:
+            raise ValueError("Feature name is required.")
+        now = _now()
+        cur = self.conn.execute(
+            """INSERT INTO tool_features (tool_id, feature_name, standalone_available,
+               bundled_only, notes, source_url, needs_verification, source, model,
+               created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (tool_id, feature_name, standalone_available, bundled_only,
+             notes.strip(), source_url.strip(), needs_verification, source.strip(),
+             model.strip(), now, now),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_tool_features(self, tool_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM tool_features WHERE tool_id=? ORDER BY feature_name", (tool_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_tool_feature(self, feature_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM tool_features WHERE id=?", (feature_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_tool_feature(self, feature_id: int, feature_name: str,
+                            standalone_available: int, bundled_only: int,
+                            notes: str, source_url: str, needs_verification: int) -> None:
+        """Full edit — used by the admin form, including the "mark verified"
+        checkbox that clears needs_verification once a human has confirmed
+        an LLM-drafted row (or edited it, which implies confirmation)."""
+        feature_name = feature_name.strip()
+        if not feature_name:
+            raise ValueError("Feature name is required.")
+        self.conn.execute(
+            """UPDATE tool_features SET feature_name=?, standalone_available=?, bundled_only=?,
+               notes=?, source_url=?, needs_verification=?, updated_at=? WHERE id=?""",
+            (feature_name, standalone_available, bundled_only, notes.strip(),
+             source_url.strip(), needs_verification, _now(), feature_id),
+        )
+        self.conn.commit()
+
+    def delete_tool_feature(self, feature_id: int) -> None:
+        self.conn.execute("DELETE FROM tool_features WHERE id=?", (feature_id,))
+        self.conn.commit()
 
     @staticmethod
     def _tool_to_dict(r: sqlite3.Row) -> dict:
