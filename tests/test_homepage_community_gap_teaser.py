@@ -57,15 +57,15 @@ def test_homepage_no_longer_shows_either_prompt_member(env):
     assert "Suggest a piece for the archive" not in r.text
 
 
-def test_quiz_line_inline_in_subtitle_not_a_separate_block(env):
-    # The quiz mention lives inline at the end of the subtitle paragraph now,
-    # not as a separate CTA block further down the page.
+def test_matchmaker_line_inline_in_subtitle_not_a_separate_block(env):
+    # The matchmaker mention lives inline at the end of the subtitle
+    # paragraph now, not as a separate CTA block further down the page.
     for client in (_client(env), _member_client(env)):
         r = client.get("/tools/communities")
         assert r.status_code == 200
         assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' not in r.text
         assert "Slack channels. Not sure which community's for you? " in r.text
-        assert '<a href="/tools/communities/find" style="font-weight:500;">Take the quiz' in r.text
+        assert '<a href="/tools/communities/find" style="font-weight:500;">Find your community' in r.text
         # The old two-line top-of-page CTA block is gone entirely.
         assert '<div style="margin-top:24px;">' not in r.text
 

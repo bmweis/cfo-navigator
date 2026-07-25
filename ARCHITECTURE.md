@@ -90,6 +90,7 @@ Every table in the file, grouped by feature area:
 |---|---|
 | Content spine | `articles`, `articles_fts`, `articles_vec`, `article_embeddings`, `enrichment_cost`, `library_queue`, `dedupe_decisions`, `read_later` |
 | FP&A Buddy (Ask) | `ask_questions`, `ask_feedback` |
+| Chat Matchmaker | `matchmaker_questions` |
 | Accounts | `users`, `password_reset_requests` |
 | CFO Toolbox | `tools`, `tool_categories`, `benchmarks`, `tool_leads`, `communities`, `community_categories`, `community_profiles`, `community_gap_submissions`, `community_profile_views` |
 | Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log` |
@@ -577,30 +578,69 @@ profile page, just applied per cell instead of to a whole page. Registered
 before `/tools/communities/{slug}` so "compare" isn't swallowed as a slug,
 same reasoning as `/gap` and `/submit`.
 
-**Community recommender** (Phase 7). A 4-question quiz at
-`GET /tools/communities/find` (role, budget, access, a catch-all "anything
-more specific") routes to `GET /tools/communities/find/results`, a filtered
-read of the directory. Each answer maps onto one of the directory's existing
-filterable dimensions — `community_categories`, `cost_band`, or the access
-bucket the directory's own `accessBucket()` JS helper already computes — so
-`_recommender_filter` (`webapp/app.py`) is a Python port of the directory's
-`commFiltered()` semantics (categories OR-matched against each other, every
-dimension AND-matched against the others). This filtering step is unchanged
-by the best-fit weighting below and stays the sole gate on which communities
-appear at all; weighting only reorders what's already passed it.
-`POST /tools/communities/find` logs every completed quiz — including a zero
+**Communities Chat Matchmaker** (replaces the quiz below). `GET
+/tools/communities/find` is now a free-type chat, not a 4-question form: the
+visitor describes what they're looking for, Claude (`linklib/matchmaker.py`)
+asks a small number of clarifying questions, then narrows to 2-3 best-fit
+suggestions with links to their profile pages. Unlike FP&A Buddy, there's no
+retrieval layer — every approved community's directory listing plus its
+Community Profile rides as full context in the system prompt on every turn
+(`_build_communities_context`), since the ~38-community dataset is small
+enough that this is cheap and simpler than retrieving a subset of it. The
+system prompt is cached server-side (Anthropic prompt caching,
+`cache_control` on the system block), since that context is identical across
+every turn of every visitor's conversation until a community changes.
+
+`POST /tools/communities/find/chat` is the turn-by-turn API, mirroring `POST
+/ask`'s server-rebuilds-history-from-DB-rows contract exactly (see the Ask
+sequence diagram below) but against its own table, `matchmaker_questions`,
+kept separate from `ask_questions` so FP&A Buddy and the matchmaker(s) track
+spend against independent monthly dollar caps — a matching conversation can
+run more back-and-forth turns than a typical FP&A Buddy question even though
+each turn is individually cheaper (no retrieval, no web search, no
+citations). Unlike Ask, **this page needs no login** (same as the quiz it
+replaced), so `matchmaker_questions.user_id` is nullable and rate limiting
+keys off the anonymous `cfo_visitor` session cookie for the common signed-out
+case (`matchmaker_cost_this_month_session`), falling back to a per-user cap
+(`users.matchmaker_cap_usd` / `settings['matchmaker_default_cap_usd']`,
+same override-else-default shape as Ask's cap, admin controls on
+`/admin/users`) only when the visitor happens to be signed in. Thumbs
+up/down feedback on suggestions is UI-only, session-scoped — no server call,
+no persistence, unlike Ask's `ask_feedback` table.
+
+The old quiz's best-fit weighting infrastructure below (dimensions, per-
+community `*_tags` columns, the `/admin/tools/communities` "Recommender
+ranking weights" panel) is **not read by the Matchmaker** and has no other
+consumer today — left in place rather than deleted in the same PR (ripping
+out curated per-community tag data and an admin panel is a bigger,
+harder-to-reverse call than replacing a page), flagged in
+`/admin/tools/communities`'s "How this works" reference block as a follow-up
+decision: repurpose it for a future feature, or remove it once confirmed
+unused.
+
+**Community recommender** (Phase 7, historical — the quiz replaced above). A
+4-question quiz at `GET /tools/communities/find` (role, budget, access, a
+catch-all "anything more specific") routed to `GET
+/tools/communities/find/results`, a filtered read of the directory. Each
+answer mapped onto one of the directory's existing filterable dimensions —
+`community_categories`, `cost_band`, or the access bucket the directory's own
+`accessBucket()` JS helper already computes — so `_recommender_filter`
+(removed from `webapp/app.py` along with the rest of the quiz's routes) was a
+Python port of the directory's `commFiltered()` semantics (categories
+OR-matched against each other, every dimension AND-matched against the
+others). This filtering step was unchanged by the best-fit weighting below
+and stayed the sole gate on which communities appeared at all; weighting only
+reordered what had already passed it.
+`POST /tools/communities/find` logged every completed quiz — including a zero
 or thin result, the same kind of gap signal as a zero-result directory
 search — as a `community_gap_submissions` row with `submission_type=
 'recommender'`, reusing the `cfo_visitor` session infrastructure from Phase 5
-(`get_viewed_community_ids`) rather than a parallel one, then redirects to
+(`get_viewed_community_ids`) rather than a parallel one, then redirected to
 the plain, bookmarkable GET results page so a refresh or a shared link never
-re-logs. A zero-result results page links to `/tools/communities/gap` for
-visitors who want to add free text, on top of the structured quiz answers
-already captured. Registered before `/tools/communities/{slug}` so "find"
-isn't swallowed as a slug, same reasoning as `/gap`, `/submit`, `/compare`,
-and `/correct`.
+re-logged.
 
-**Best-fit weighting** (ranking within the filtered results). Filtered
+**Best-fit weighting** (historical — ranking within the quiz's filtered
+results; orphaned by the Matchmaker above, see the note there). Filtered
 results are sorted by a per-community weighted match score, `featured`
 breaking ties same as everywhere else in the directory — replacing the
 plain featured-first/alphabetical order the filter alone produced before
@@ -749,33 +789,33 @@ entirely, and a weight with nothing to match against can't rank anything
 regardless of source. Corrected so all 10 dimensions get the identical
 default-weight-and-value treatment.)
 
-The quiz's `GET /tools/communities/find` page adds one further optional
+The quiz's `GET /tools/communities/find` page added one further optional
 step after the 4 filter questions: "What matters most to you?", a checkbox
 group per dimension (all 10) letting a visitor check every value they'd
 accept — not a single-choice control, since e.g. a visitor might find both
 "CFO" and "Open to all" acceptable for `seniority_band`.
-Skipping the whole step (simply not checking anything) is the same action
-as leaving any individual dimension's boxes unchecked: **resolution is
+Skipping the whole step (simply not checking anything) was the same action
+as leaving any individual dimension's boxes unchecked: **resolution was
 per-dimension, not all-or-nothing** — `_recommender_effective_weights_and_
-values` merges a visitor's checked values with Brian's admin default
-independently for each of the 10 dimensions, so a visitor who only weighs
-in on 2 dimensions gets their own preference on those 2 and Brian's
-defaults on the other 8. The visitor never sets a numeric weight directly —
-only a target value — the weight applied is always Brian's admin weight for
-that dimension, regardless of which side (visitor or admin default)
-supplied the target value. `_recommender_score` then sums the weight for
-every dimension whose effective target value(s) intersect the community's
+values` merged a visitor's checked values with Brian's admin default
+independently for each of the 10 dimensions, so a visitor who only weighed
+in on 2 dimensions got their own preference on those 2 and Brian's defaults
+on the other 8. The visitor never set a numeric weight directly — only a
+target value — the weight applied was always Brian's admin weight for that
+dimension, regardless of which side (visitor or admin default) supplied the
+target value. `_recommender_score` then summed the weight for every
+dimension whose effective target value(s) intersected the community's
 tag(s) for that dimension.
 
-`POST /tools/communities/find` carries the visitor's checked values through
+`POST /tools/communities/find` carried the visitor's checked values through
 to the results page as repeated query params (`w_<dim key>=<value>`, same
 bookmarkable-GET reasoning as the 4 filter answers) and, only when the
-visitor checked at least one box (never on a skip), logs a *second*
+visitor checked at least one box (never on a skip), logged a *second*
 `community_gap_submissions` row with `submission_type='weight_preferences'`
 storing the chosen values as JSON in `search_context_json` — kept as its own
-row rather than folded into the `'recommender'` row so this signal isn't
-diluted by the (majority of) quiz completions that don't set any
-preference. The results page states plainly which weights ranked what's
+row rather than folded into the `'recommender'` row so this signal wasn't
+diluted by the (majority of) quiz completions that didn't set any
+preference. The results page stated plainly which weights ranked what was
 shown (`_recommender_disclosure_html`): the visitor's own choices restated
 back if they set any, "Ranked using Brian's default priorities" otherwise —
 by design, no separate methodology explanation beyond stating the weights in
@@ -785,7 +825,7 @@ effect.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `settings` | Generic key/value store (global Ask cap default, editable email copy, tag-style guide, `voice_core`/`voice_fpa_buddy` voice guide, Communities Recommender default weights/values, …). | `key`/`value` |
+| `settings` | Generic key/value store (global Ask cap default, `matchmaker_default_cap_usd`, editable email copy, tag-style guide, `voice_core`/`voice_fpa_buddy` voice guide, Communities Recommender default weights/values [orphaned, see above], …). | `key`/`value` |
 | `contacts` | Contact-form submissions. | `deleted_at` (`''` = live — soft delete for spam, never hard delete) |
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
@@ -803,6 +843,7 @@ erDiagram
     users ||--o{ ask_questions : "user_id"
     users ||--o{ ask_feedback : "user_id"
     ask_questions ||--o{ ask_feedback : "question_id"
+    users ||--o{ matchmaker_questions : "user_id (nullable — public page)"
     users ||--o{ read_later : "user_id"
     users ||--o{ game_runs : "user_id"
     users ||--o{ password_reset_requests : "user_id"
@@ -864,11 +905,21 @@ erDiagram
         text rating "helpful | inaccurate | not_helpful"
         text comment "optional free text"
     }
+    matchmaker_questions {
+        int id PK
+        text kind "community | software"
+        text conversation_id "groups turns"
+        int turn_index
+        int user_id "NULL for anonymous — public page, no login"
+        text session_id "cfo_visitor cookie; the anonymous rate-limit key"
+        real cost_usd "turn TOTAL, no rewrite/embed split (no retrieval)"
+    }
     users {
         int id PK
         text username UK
         text role "user | admin"
         real ask_cap_usd "NULL = global default"
+        real matchmaker_cap_usd "NULL = global default; tracks separately from ask_cap_usd"
     }
     library_queue {
         int id PK
