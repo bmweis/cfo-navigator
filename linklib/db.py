@@ -170,6 +170,27 @@ CREATE TABLE IF NOT EXISTS tool_leads (
 CREATE INDEX IF NOT EXISTS idx_tool_leads_tool_id ON tool_leads(tool_id);
 CREATE INDEX IF NOT EXISTS idx_tool_leads_created  ON tool_leads(created_at);
 
+-- Manually curated competitor cross-links between Software entries (search
+-- overhaul Phase 3). One undirected edge per pair, normalized so tool_id is
+-- always the smaller id (see Library.add_tool_competitor) — that's what
+-- UNIQUE(tool_id, competitor_id) dedupes against, and it means curating the
+-- relationship from either tool's admin edit page is enough for it to show
+-- up on both profiles; callers looking up "competitors of X" query
+-- `WHERE tool_id=X OR competitor_id=X`. Source of truth is this table, not
+-- a live tag-overlap computation — see suggest_tool_competitors for the
+-- tag-overlap helper, which only powers an admin-UI suggestion list to
+-- speed up curation.
+CREATE TABLE IF NOT EXISTS tool_competitors (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_id       INTEGER NOT NULL,
+    competitor_id INTEGER NOT NULL,
+    created_at    TEXT NOT NULL,
+    UNIQUE(tool_id, competitor_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_competitors_tool ON tool_competitors(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_competitors_competitor ON tool_competitors(competitor_id);
+
 -- Self-service "forgot password" requests, filed from /login. When the account
 -- has an email on file, token_hash (sha256 of the emailed token — never the
 -- raw token, so a DB leak alone can't be used to reset a password) +
@@ -968,6 +989,11 @@ class Library:
             # dropped entirely rather than left as dead weight. A no-op
             # OperationalError (caught below) on every boot after the first.
             "ALTER TABLE communities DROP COLUMN region",
+            # Competitor cross-links (Phase 3): the free-text "how this
+            # differs from the competition" slot on a Software profile page.
+            # Placeholder UI only — no generator drafts this, it's hand-
+            # written by Brian, same as the rest of a tool's description.
+            "ALTER TABLE tools ADD COLUMN differentiation_note TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1871,6 +1897,81 @@ class Library:
     def delete_tool(self, tool_id: int) -> None:
         self.conn.execute("DELETE FROM tools WHERE id=?", (tool_id,))
         self.conn.commit()
+
+    def update_tool_differentiation(self, tool_id: int, differentiation_note: str) -> None:
+        """Narrow update for the admin full-edit form's "How this differs from
+        the competition" field (Phase 3) — same reasoning as
+        quick_update_tool: kept separate from update_tool so the Software
+        bulk-edit panel, which re-saves every other field on every call, can
+        never silently blank this one out just because it doesn't know about it."""
+        self.conn.execute(
+            "UPDATE tools SET differentiation_note=?, updated_at=? WHERE id=?",
+            (differentiation_note.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
+    # -- competitor cross-links (Phase 3) ------------------------------------
+    # See the tool_competitors CREATE TABLE comment for the normalized-pair
+    # storage shape. This is the source of truth rendered on a Software
+    # profile page; suggest_tool_competitors below is a separate, read-only
+    # tag-overlap helper that only powers an admin-UI suggestion list.
+
+    def add_tool_competitor(self, tool_id: int, competitor_id: int) -> None:
+        if tool_id == competitor_id:
+            raise ValueError("A tool can't be its own competitor.")
+        a, b = sorted((tool_id, competitor_id))
+        self.conn.execute(
+            "INSERT OR IGNORE INTO tool_competitors (tool_id, competitor_id, created_at) VALUES (?,?,?)",
+            (a, b, _now()),
+        )
+        self.conn.commit()
+
+    def remove_tool_competitor(self, tool_id: int, competitor_id: int) -> None:
+        a, b = sorted((tool_id, competitor_id))
+        self.conn.execute(
+            "DELETE FROM tool_competitors WHERE tool_id=? AND competitor_id=?", (a, b)
+        )
+        self.conn.commit()
+
+    def list_tool_competitors(self, tool_id: int) -> list[dict]:
+        """Every tool curated as a competitor of tool_id, from either side of
+        the normalized pair. Only returns approved rows — an unapproved
+        competitor has no live profile page to link to."""
+        rows = self.conn.execute(
+            """SELECT t.* FROM tools t
+               JOIN tool_competitors c
+                 ON (c.tool_id = ? AND c.competitor_id = t.id)
+                 OR (c.competitor_id = ? AND c.tool_id = t.id)
+               WHERE t.approved = 1
+               ORDER BY t.name""",
+            (tool_id, tool_id),
+        ).fetchall()
+        return [self._tool_to_dict(r) for r in rows]
+
+    def suggest_tool_competitors(self, tool_id: int, limit: int = 8) -> list[dict]:
+        """Candidate competitors for the admin edit page's suggestion list,
+        ranked by shared-category count (most overlap first, then name).
+        Excludes the tool itself and anything already curated as a
+        competitor — this is purely a curation speed-up, never the data
+        actually rendered on a profile page (see Phase 0: pure tag overlap
+        is too noisy to trust unreviewed, given how broad the 15-tag
+        taxonomy is)."""
+        tool = self.get_tool(tool_id)
+        if not tool or not tool["categories"]:
+            return []
+        existing_ids = {c["id"] for c in self.list_tool_competitors(tool_id)}
+        existing_ids.add(tool_id)
+        candidates = []
+        for row in self.conn.execute("SELECT * FROM tools WHERE approved=1"):
+            d = self._tool_to_dict(row)
+            if d["id"] in existing_ids:
+                continue
+            overlap = len(set(d["categories"]) & set(tool["categories"]))
+            if overlap:
+                d["_overlap"] = overlap
+                candidates.append(d)
+        candidates.sort(key=lambda d: (-d["_overlap"], d["name"]))
+        return candidates[:limit]
 
     @staticmethod
     def _tool_to_dict(r: sqlite3.Row) -> dict:
