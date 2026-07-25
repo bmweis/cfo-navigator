@@ -61,6 +61,12 @@ from webapp.thought_leadership_data import SECTIONS as TL_SECTIONS, TLItem
 DB_PATH = os.environ.get("LINKLIB_DB", "library.db")
 SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
 
+# Captured Software homepage screenshots live next to library.db (same
+# Railway volume in production — /data — so no new mount is needed) rather
+# than under the app's own static/ dir, which ships inside the Docker image
+# and doesn't persist across deploys.
+_SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "tool_screenshots")
+
 # /contact spam controls (see _contact_rate_limited and _is_contact_spam below).
 CONTACT_RATE_LIMIT_PER_HOUR = int(os.environ.get("LINKLIB_CONTACT_RATE_LIMIT_PER_HOUR", "5"))
 CONTACT_TIME_TRAP_SECONDS = float(os.environ.get("LINKLIB_CONTACT_TIME_TRAP_SECONDS", "3"))
@@ -5531,10 +5537,12 @@ def tools_software_profile(request: Request, slug: str):
 
     screenshot_block = ""
     if (tool.get("screenshot_url") or "").strip():
-        caption = (
-            "Product screenshot" if tool.get("screenshot_is_product")
-            else "Homepage screenshot — no product screenshot available yet"
-        )
+        if tool.get("screenshot_is_product"):
+            caption = "Product screenshot"
+        elif (tool.get("screenshot_captured_at") or "").strip():
+            caption = f"Homepage screenshot, captured {tool['screenshot_captured_at'][:10]}"
+        else:
+            caption = "Homepage screenshot (no product screenshot available yet)"
         screenshot_block = f"""<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;">
   <img src="{_esc(tool['screenshot_url'])}" alt="{_esc(tool['name'])} screenshot"
     style="width:100%;height:auto;border-radius:10px;display:block;object-fit:cover;">
@@ -9957,7 +9965,7 @@ def admin_tools_reject(request: Request, tool_id: int):
 
 
 @app.get("/admin/tools/{tool_id}/edit", response_class=HTMLResponse)
-def admin_tools_edit(request: Request, tool_id: int):
+def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -10044,6 +10052,26 @@ def admin_tools_edit(request: Request, tool_id: int):
                 f'<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button></form></div></div>')
 
     _features_list_html = "".join(_feature_row(f) for f in features)
+
+    _screenshot_banner_html = ""
+    if screenshot_captured == "1":
+        _screenshot_banner_html = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
+                                   'padding:10px 16px;font-size:14px;margin:0 0 16px;">Screenshot captured.</p>')
+    elif screenshot_captured == "0":
+        _screenshot_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                                   'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture a screenshot—'
+                                   'the site may block headless browsers or timed out. Try again, or paste a URL manually above.</p>')
+
+    _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
+    if (tool.get("screenshot_url") or "").strip():
+        _cap_note = (f"Captured {tool['screenshot_captured_at'][:10]}" if tool.get("screenshot_captured_at")
+                    else "Manually set—no capture date")
+        _screenshot_preview_html = (
+            f'<div style="max-width:320px;">'
+            f'<img src="{_esc(tool["screenshot_url"])}" alt="Current screenshot" '
+            f'style="width:100%;height:auto;border:1px solid var(--line);border-radius:10px;display:block;">'
+            f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">{_esc(_cap_note)}</p></div>'
+        )
 
     body = f"""<div class="page page-form">
 <h1>Edit software</h1>
@@ -10137,6 +10165,16 @@ def admin_tools_edit(request: Request, tool_id: int):
 </form>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Screenshot</h2>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Recapture pulls a fresh homepage screenshot at a fixed size, same as the bulk backfill script—use this for a one-off refresh. Paste a different URL above (then Save changes) to override with something else entirely.</p>
+  {_screenshot_banner_html}
+  {_screenshot_preview_html}
+  <form method="post" action="/admin/tools/{tool_id}/screenshot/recapture" style="margin-top:12px;">
+    <button type="submit" class="tool-admin-btn">&#128247; Recapture from homepage</button>
+  </form>
+</div>
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Competitors</h2>
   <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Closest competitors" on {_esc(tool['name'])}'s profile page. Curating from either tool's edit page links both directions.</p>
 
@@ -10220,6 +10258,33 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     finally:
         lib.close()
     return RedirectResponse("/tools/software", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/screenshot/recapture")
+def admin_tools_screenshot_recapture(request: Request, tool_id: int):
+    """Live homepage recapture — runs Playwright synchronously in this
+    request (a manual, occasional admin action, not a bulk job; the bulk
+    backfill is scripts/capture_tool_screenshots.py, run from the terminal).
+    Same capture logic and same fixed viewport as the CLI script, via
+    linklib.screenshots.capture_homepage, so a one-off recapture stays
+    visually consistent with the rest of the directory."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        from linklib.screenshots import capture_homepage
+        dest = os.path.join(_SCREENSHOT_DIR, f"{tool['slug']}.png")
+        ok = capture_homepage(tool["url"], dest)
+        if ok:
+            served_url = f"/tools/software/screenshot/{tool['slug']}.png?v={int(time.time())}"
+            lib.set_tool_screenshot_capture(tool_id, served_url)
+    finally:
+        lib.close()
+    msg = "screenshot_captured=1" if ok else "screenshot_captured=0"
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit?{msg}", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/competitors/add")
@@ -12752,6 +12817,8 @@ _OPEN_SOURCE = [
          "The preferred extractor—pulls clean article text out of a noisy page."),
         ("lxml", "lxml", "BSD-3-Clause", "https://lxml.de",
          "The fast C-backed parser the extractors lean on."),
+        ("Playwright", "playwright", "Apache-2.0", "https://playwright.dev/python/",
+         "Drives headless Chromium to capture the Software directory's homepage screenshots."),
     ]),
     ("Intelligence", "The AI behind enrichment, FP&A Buddy, drafting, and dedupe verification.", [
         ("Anthropic SDK", "anthropic", "MIT", "https://github.com/anthropics/anthropic-sdk-python",
@@ -17457,6 +17524,19 @@ def static_file(filename: str):
              "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp",
              "ico": "image/x-icon", "mp3": "audio/mpeg"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=media)
+
+
+@app.get("/tools/software/screenshot/{filename}")
+def tools_software_screenshot(filename: str):
+    """Serves captured homepage screenshots from _SCREENSHOT_DIR — same
+    basename-only traversal guard as /static/{filename}, kept as a separate
+    route/directory since these live on the persistent volume, not inside
+    the Docker image."""
+    safe = os.path.basename(filename)
+    path = os.path.join(_SCREENSHOT_DIR, safe)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/favicon.ico")
