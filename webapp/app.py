@@ -5419,9 +5419,17 @@ to compare them side by side. Check the box on any card, then use the compare ba
     # "not documented yet," never treated as "this vendor has no agent
     # capability" — the same sparse-data honesty rule as Features' "Not
     # tracked yet."
-    agent_row = _row("How agents are involved",
-                     [t.get("agent_taxonomy_note", "") for t in tools],
-                     empty_label="Not documented yet")
+    def _agent_cell(t: dict) -> str:
+        note = (t.get("agent_taxonomy_note") or "").strip()
+        if not note:
+            return '<td class="cc-cell cc-empty">Not documented yet</td>'
+        verify = ' <span class="cc-verify">unverified</span>' if t.get("agent_taxonomy_needs_verification") else ""
+        return f'<td class="cc-cell">{_esc(note)}{verify}</td>'
+
+    agent_row = ""
+    if any((t.get("agent_taxonomy_note") or "").strip() for t in tools):
+        agent_row = (f'<tr><td class="cc-cell cc-label">{_esc("How agents are involved")}</td>'
+                     + "".join(_agent_cell(t) for t in tools) + "</tr>")
     agent_section = ""
     if agent_row:
         agent_section = f"""<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>
@@ -5552,8 +5560,10 @@ def tools_software_profile(request: Request, slug: str):
 
     agent_taxonomy_block = ""
     if (tool.get("agent_taxonomy_note") or "").strip():
+        agent_verify = (' <span class="cc-verify">unverified</span>'
+                        if tool.get("agent_taxonomy_needs_verification") else "")
         agent_taxonomy_block = f"""<div style="margin-bottom:24px;">
-  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Agent taxonomy</div>
+  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Agent taxonomy{agent_verify}</div>
   <p style="margin:0;color:#3a352e;line-height:1.6;">{_esc(tool['agent_taxonomy_note'])}</p>
 </div>"""
 
@@ -5744,6 +5754,8 @@ function submitIntroForm() {{
 
     body = page_open + f"""
 <style>
+.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
+  background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 .tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:5px 12px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
@@ -5980,12 +5992,14 @@ groups, associations, and Slack channels. Not sure which community's for you? <a
 .comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
+.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
 .comm-compare-label{{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;}}
 .comm-compare-label input{{cursor:pointer;}}
 </style>
 
 <script>
 var ALL_COMMUNITIES = {communities_json};
+var NEEDS_VERIFICATION = {_json.dumps(_NEEDS_VERIFICATION)};
 var activeCommCats = new Set();
 var activeCommCost = '';
 var commAdvisorOnly = false;
@@ -5996,6 +6010,16 @@ var compareSelected = [];
 
 function commEsc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
+
+// Renders a Community listing field for the directory card: the escaped
+// value normally, or a muted "Needs verification" flag (not the vivid
+// comm-cost/comm-cat styling of a confirmed value) when it still carries
+// the auto-fill sentinel — same treatment as _verify_html on the server-
+// rendered compare/profile pages.
+function commVerify(s) {{
+  if (s === NEEDS_VERIFICATION) return '<span class="comm-verify">Needs verification</span>';
+  return commEsc(s);
 }}
 
 function accessBucket(access) {{
@@ -6010,6 +6034,7 @@ function accessBucket(access) {{
 // with local markets: "<reach> · <local markets>". National/Global with none:
 // "Global" or "National · online".
 function commGeoLine(c) {{
+  if (c.reach === NEEDS_VERIFICATION) return '<span class="comm-verify">Needs verification</span>';
   var localMarkets = c.local_markets || '';
   var reach = c.reach || 'National';
   if (reach === 'Regional') {{
@@ -6048,7 +6073,7 @@ function renderCommunities(list) {{
   if (list.length === 0) {{
     grid.innerHTML = '';
     empty.style.display = 'block';
-    empty.innerHTML = 'No communities match. <a href="' + gapFormHref(true) + '" style="font-weight:500;">Tell me what\'s missing &rarr;</a>';
+    empty.innerHTML = 'No communities match. <a href="' + gapFormHref(true) + '" style="font-weight:500;">Tell me what\\'s missing &rarr;</a>';
     count.textContent = '';
     pagination.style.display = 'none';
     pagination.innerHTML = '';
@@ -6084,9 +6109,11 @@ function renderCommunities(list) {{
       return '<span class="comm-cat">' + commEsc(x) + '</span>';
     }}).join('');
     var metaParts = [commGeoLine(c)];
-    if (c.access) metaParts.push(commEsc(c.access));
+    if (c.access) metaParts.push(commVerify(c.access));
     if (c.sponsorship_type) {{
-      metaParts.push(commEsc(c.sponsorship_type) + (c.sponsor_name ? ' (' + commEsc(c.sponsor_name) + ')' : ''));
+      metaParts.push(c.sponsorship_type === NEEDS_VERIFICATION
+        ? commVerify(c.sponsorship_type)
+        : commEsc(c.sponsorship_type) + (c.sponsor_name ? ' (' + commEsc(c.sponsor_name) + ')' : ''));
     }}
     var notesLine = '';
     if (c.notes || c.cost_note) {{
@@ -6099,16 +6126,19 @@ function renderCommunities(list) {{
     var advisorStar = c.advisor ? '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' : '';
     var compareChecked = compareSelected.indexOf(c.id) !== -1;
     var compareDisabled = !compareChecked && compareSelected.length >= COMPARE_MAX;
+    var costHtml = c.cost_band === NEEDS_VERIFICATION
+      ? '<span class="comm-verify">Needs verification</span>'
+      : '<span class="comm-cost">' + commEsc(c.cost_band) + '</span>';
     return '<article class="comm-card' + (c.featured ? ' comm-card-featured' : '') + '" data-comm-id="' + c.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
       + featuredBadge + advisorStar
       + '<a class="comm-name" href="/tools/communities/' + commEsc(c.slug) + '" target="_blank" rel="noopener">' + commEsc(c.name) + '</a>'
       + '</div>'
-      + '<span class="comm-cost">' + commEsc(c.cost_band) + '</span>'
+      + costHtml
       + '</div>'
       + '<p class="comm-meta">' + metaParts.join(' &middot; ') + '</p>'
-      + '<p class="comm-demo">' + commEsc(c.demographic) + '</p>'
+      + '<p class="comm-demo">' + commVerify(c.demographic) + '</p>'
       + notesLine
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
       + '<div class="comm-cats">' + cats + '</div>'
@@ -6245,7 +6275,12 @@ renderCommunities(ALL_COMMUNITIES);
 
 def _community_geo_line(c: dict) -> str:
     """Python mirror of the /tools/communities card's commGeoLine JS helper,
-    for server-rendering the same geography summary on the profile page."""
+    for server-rendering the same geography summary on the profile page.
+    An unresearched reach must return the verification flag rather than
+    falling through to the "no local_markets" branch below, which would
+    otherwise render a guessed "National · online" as if it were confirmed."""
+    if c.get("reach") == _NEEDS_VERIFICATION:
+        return "Needs verification"
     local_markets = (c.get("local_markets") or "").strip()
     reach = c.get("reach") or "National"
     if reach == "Regional":
@@ -6720,7 +6755,14 @@ to compare them side by side. Check the box on any card, then use the compare ba
         text = (text or "").strip()
         if not text:
             return '<td class="cc-cell cc-empty">Not available yet</td>'
+        if text == _NEEDS_VERIFICATION:
+            return '<td class="cc-cell cc-empty"><span class="comm-verify">Needs verification</span></td>'
         return f'<td class="cc-cell">{_esc(text)}</td>'
+
+    def _cost_badge(c: dict) -> str:
+        if c["cost_band"] == _NEEDS_VERIFICATION:
+            return '<span class="comm-verify" style="display:inline-block;margin-top:6px;">Needs verification</span>'
+        return f'<span class="comm-cost" style="display:inline-block;margin-top:6px;">{_esc(c["cost_band"])}</span>'
 
     header_cells = "".join(
         f'''<th class="cc-cell">
@@ -6729,7 +6771,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
     {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' if c.get('advisor') else ''}
   </div>
   <a href="/tools/communities/{_esc(c['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(c['name'])}</a>
-  <span class="comm-cost" style="display:inline-block;margin-top:6px;">{_esc(c['cost_band'])}</span>
+  {_cost_badge(c)}
 </th>'''
         for c in communities
     )
@@ -6788,6 +6830,7 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
 .comm-name:hover{{color:var(--navy);}}
 .comm-star{{font-size:14px;color:#b8860b;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
+.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
 </style>"""
     return HTMLResponse(_page("Compare communities—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
@@ -7058,6 +7101,7 @@ communit{'y' if len(results) == 1 else 'ies'}.</p>
 .comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
+.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
 @media print {{
   .site-header, .site-nav, .site-footer, .rf-noprint {{ display: none !important; }}
   .page {{ max-width: 100%; padding: 0; margin: 0; }}
@@ -7195,6 +7239,12 @@ def tools_community_profile(request: Request, slug: str):
         profile_sections = f"""<div style="margin-top:8px;padding-top:24px;border-top:1px solid var(--line);">
 {sections}</div>"""
 
+    cost_badge_html = (
+        '<span class="comm-verify">Needs verification</span>' if community["cost_band"] == _NEEDS_VERIFICATION
+        else f'<span class="comm-cost">{_esc(community["cost_band"])}</span>'
+    )
+    demographic_html = _verify_html(community["demographic"])
+
     body = f"""<div class="page page-full">
 <p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:2px;">
@@ -7202,11 +7252,11 @@ def tools_community_profile(request: Request, slug: str):
     {featured_badge}{advisor_star}
     <h1 style="margin:0;">{_esc(community['name'])}</h1>
   </div>
-  <span class="comm-cost">{_esc(community['cost_band'])}</span>
+  {cost_badge_html}
 </div>
 <p style="color:var(--muted);margin:8px 0 4px;">{meta_line}</p>
 {f'<p style="margin:4px 0 20px;"><a href="{_esc(community["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if community.get('url') else ''}
-<p style="font-size:15px;color:#3a352e;margin:0 0 16px;line-height:1.6;">{_esc(community['demographic'])}</p>
+<p style="font-size:15px;color:#3a352e;margin:0 0 16px;line-height:1.6;">{demographic_html}</p>
 {notes_line}
 <div class="comm-cats" style="margin-bottom:8px;">{cats}</div>
 {verdict_block}
@@ -7223,6 +7273,7 @@ def tools_community_profile(request: Request, slug: str):
 .comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:4px 10px;white-space:nowrap;}}
+.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
 </style>"""
     resp = HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request)))
     _set_visitor_cookie(request, resp, session_id)
@@ -8516,9 +8567,7 @@ _COMMUNITY_FORMAT = ["Hybrid", "In-person", "Slack", "Online", "LinkedIn group"]
 _COMMUNITY_REACH = ["Regional", "National", "Global"]
 
 # Fields the "Auto-fill from URL" draft (generate_community_listing) can mark
-# with the _NEEDS_VERIFICATION sentinel instead of guessing. Every public
-# route that renders a community must pass it through _public_community first
-# so an unreviewed gap never reaches a visitor.
+# with the _NEEDS_VERIFICATION sentinel instead of guessing.
 _COMMUNITY_VERIFIABLE_FIELDS = (
     "reach", "demographic", "cost_band", "cost_note",
     "sponsorship_type", "sponsor_name", "access", "format",
@@ -8526,16 +8575,26 @@ _COMMUNITY_VERIFIABLE_FIELDS = (
 
 
 def _public_community(c: dict) -> dict:
-    """Shallow-copy a community dict with any _NEEDS_VERIFICATION sentinel
-    values blanked out. Admin pages show the sentinel as-is (that's the whole
-    point — a visible gap to fix); this is the one choke point every
-    public-facing route must call before rendering a community, so an
-    unreviewed auto-fill gap never leaks to a visitor."""
-    c = dict(c)
-    for field_name in _COMMUNITY_VERIFIABLE_FIELDS:
-        if c.get(field_name) == _NEEDS_VERIFICATION:
-            c[field_name] = ""
-    return c
+    """Shallow-copy of a community dict. Historically this blanked any
+    _NEEDS_VERIFICATION sentinel field before it reached a visitor; per
+    Brian's call, unresearched fields now render visibly with a "Needs
+    verification" flag instead of being hidden (see _verify_html and its
+    call sites) — so this function is currently a no-op copy, kept as the
+    one choke point every public-facing community route already calls, in
+    case a future field needs public-side handling again."""
+    return dict(c)
+
+
+def _verify_html(value: str, cls: str = "comm-verify") -> str:
+    """Render a Community listing field for public display: the escaped
+    value normally, or a muted "Needs verification" flag (dashed border,
+    not the vivid comm-cost/comm-cat styling of a confirmed value) when it
+    still carries the _NEEDS_VERIFICATION sentinel — so a visitor can tell
+    "we know this" from "not yet researched" rather than either seeing a
+    guess dressed up as fact or the field silently missing."""
+    if value == _NEEDS_VERIFICATION:
+        return f'<span class="{cls}">Needs verification</span>'
+    return _esc(value)
 
 
 # Communities Recommender best-fit weighting: the controlled vocabulary each

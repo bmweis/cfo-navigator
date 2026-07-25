@@ -236,13 +236,29 @@ empty/default-looking field. `webapp/app.py::_public_community` is the single
 choke point every public-facing community route (`/tools/communities`,
 `/tools/communities/compare`, `/tools/communities/{slug}`,
 `/tools/communities/find/results`) runs a community dict through before
-rendering — it blanks any field still carrying the sentinel, so an unreviewed
-auto-fill gap never reaches a visitor. On `/admin/tools/communities`, a
-community with any gap gets a passive "N fields need verification" badge
-(distinct styling and text from the "Needs review" badge) — a nudge toward
-Edit, not a save blocker; there's no dedicated free-text search across the
-admin communities table today; the table isn't paginated, so the sentinel
-text is reachable with a browser find until/unless pagination is added later.
+rendering. **Reversed from the original design** (which blanked the sentinel
+so an unreviewed gap never reached a visitor at all): per Brian's call while
+the Software/Community richness work was landing, unresearched fields now
+render *visibly*, flagged rather than hidden, so visitors can see what's
+been researched while a review pass is still in progress —
+`_public_community` is now a no-op copy kept as that same choke point in
+case a field needs public-side handling again, and the actual rendering
+happens through `_verify_html` (server-rendered compare/profile pages) or
+the parallel `commVerify` JS helper (the JS-templated `/tools/communities`
+directory card), both keyed on the exact `NEEDS_VERIFICATION` sentinel
+string and both rendering the same muted, dashed-border "Needs
+verification" flag — visually distinct from a confirmed value's vivid
+`comm-cost`/`comm-cat` badge styling, so a visitor can't mistake a
+still-unresearched field for a real one. `_community_geo_line`
+(server) and `commGeoLine` (client) both special-case an unverified
+`reach` explicitly, since their normal fallback logic (no `local_markets`
+→ guess "National · online") would otherwise present a guess as if it
+were confirmed. On `/admin/tools/communities`, a community with any gap
+still gets the same passive "N fields need verification" badge (distinct
+styling and text from the "Needs review" badge) — a nudge toward Edit, not
+a save blocker; there's no dedicated free-text search across the admin
+communities table today; the table isn't paginated, so the sentinel text
+is reachable with a browser find until/unless pagination is added later.
 Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
 **Automated Software research (search overhaul automation follow-up)**
@@ -282,8 +298,14 @@ writes lands via the needs-verification-flagged draft paths
 confirmed; the Features section and a "Mark verified" action next to the
 Agent taxonomy field are how an admin reviews and clears the flag (or just
 edits the field directly, which clears it as a side effect via
-`update_tool_agent_taxonomy`). Cost lands in the same `enrichment_cost`
-ledger, `article_id=NULL`.
+`update_tool_agent_taxonomy`). The flag isn't admin-only: both public render
+sites (`/tools/software/{slug}`'s "Agent taxonomy" block and the compare
+matrix's "How agents are involved" row) show the same muted `.cc-verify`
+"unverified" badge next to a drafted-but-unconfirmed note, mirroring how
+`tool_features` rows already render `needs_verification` there — a visitor
+sees the note itself rather than nothing while review is pending, same
+reasoning as the Community listing fields' "Needs verification" flag below.
+Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
 **`scripts/enrich_tool_features.py`** (search overhaul Phase 4b, extended by
 the automation follow-up above) is a different shape from the `generate_*`
