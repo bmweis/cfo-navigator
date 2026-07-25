@@ -1028,6 +1028,16 @@ class Library:
             # Placeholder UI only — no generator drafts this, it's hand-
             # written by Brian, same as the rest of a tool's description.
             "ALTER TABLE tools ADD COLUMN differentiation_note TEXT NOT NULL DEFAULT ''",
+            # Agent taxonomy (Phase 0 decision, never actually shipped in
+            # Phases 1-4 — added here in Phase 5 since the comparison matrix
+            # is the first thing that needs it rendered): descriptive copy on
+            # where a tool sits on the standalone-feature vs. agent-assisted
+            # vs. fully-independent-agent spectrum. Deliberately free text,
+            # not a structured/enum field — see the Phase 0 notes. Included
+            # in the public directory's client-side search string
+            # (ALL_TOOLS in tools_directory) so it's searchable, not just
+            # decorative, same requirement as everything else on that page.
+            "ALTER TABLE tools ADD COLUMN agent_taxonomy_note TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1941,6 +1951,15 @@ class Library:
         self.conn.execute(
             "UPDATE tools SET differentiation_note=?, updated_at=? WHERE id=?",
             (differentiation_note.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def update_tool_agent_taxonomy(self, tool_id: int, agent_taxonomy_note: str) -> None:
+        """Narrow update for the admin full-edit form's agent-taxonomy field
+        (Phase 5) — same bulk-edit-safety reasoning as update_tool_differentiation."""
+        self.conn.execute(
+            "UPDATE tools SET agent_taxonomy_note=?, updated_at=? WHERE id=?",
+            (agent_taxonomy_note.strip(), _now(), tool_id),
         )
         self.conn.commit()
 

@@ -4804,6 +4804,7 @@ def tools_directory(request: Request):
             "url": t["url"],
             "slug": t["slug"],
             "categories": t["categories"],
+            "agent_taxonomy_note": t.get("agent_taxonomy_note") or "",
             "advisor": bool(t.get("advisor")),
             "promoted": bool(t.get("promoted")),
             # Only a computed boolean goes to every visitor — never the raw
@@ -4854,6 +4855,17 @@ def tools_directory(request: Request):
 
 <div id="tool-pagination" style="display:none;align-items:center;justify-content:center;gap:14px;margin:24px 0 8px;"></div>
 
+<div id="tool-compare-bar" style="display:none;position:sticky;bottom:16px;margin-top:20px;background:var(--navy);
+  border-radius:12px;padding:14px 20px;align-items:center;gap:14px;flex-wrap:wrap;box-shadow:0 4px 16px rgba(0,0,0,.18);">
+  <span id="tool-compare-count" style="color:#fff;font-size:14px;font-weight:600;"></span>
+  <span id="tool-compare-msg" style="color:var(--seafoam);font-size:13px;"></span>
+  <span style="flex:1;"></span>
+  <button type="button" onclick="clearToolCompareSelection()" class="btn btn-ghost"
+    style="font-size:13px;padding:6px 14px;background:transparent;color:#fff;border-color:rgba(255,255,255,.4);">Clear</button>
+  <a id="tool-compare-link" href="/tools/software/compare" class="btn"
+    style="font-size:13px;padding:6px 16px;background:var(--seafoam);color:var(--navy);border-color:var(--seafoam);">Compare &rarr;</a>
+</div>
+
 <p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
 
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
@@ -4881,6 +4893,8 @@ def tools_directory(request: Request):
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}}
 .tool-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .tool-full-link{{font-size:12px;font-weight:600;color:var(--navy);white-space:nowrap;flex-shrink:0;}}
+.tool-compare-label{{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;}}
+.tool-compare-label input{{cursor:pointer;}}
 .tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 .tool-admin{{display:flex;gap:6px;flex-shrink:0;}}
@@ -4932,6 +4946,8 @@ var activeCats = new Set();
 var advisorOnly = false;
 var PAGE_SIZE = 10;
 var currentPage = 0;
+var TOOL_COMPARE_MAX = 4;
+var toolCompareSelected = [];
 
 function esc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -5039,6 +5055,12 @@ function renderTools(tools) {{
     }}
     var fullProfileLink = '<a class="tool-full-link" href="/tools/software/' + esc(t.slug)
       + '" target="_blank" rel="noopener">Full profile &rarr;</a>';
+    var toolCompareChecked = toolCompareSelected.indexOf(t.id) !== -1;
+    var toolCompareDisabled = !toolCompareChecked && toolCompareSelected.length >= TOOL_COMPARE_MAX;
+    var compareCheckbox = '<label class="tool-compare-label"' + (toolCompareDisabled ? ' style="opacity:.45;"' : '') + '>'
+      + '<input type="checkbox" class="tool-compare-cb" data-id="' + t.id + '"'
+      + (toolCompareChecked ? ' checked' : '') + (toolCompareDisabled ? ' disabled' : '')
+      + ' onchange="toggleToolCompareSelect(this)"> Compare</label>';
     return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '" data-tool-id="' + t.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
@@ -5049,7 +5071,7 @@ function renderTools(tools) {{
       + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.description) + '</p>'
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:auto;">'
       + '<div class="tool-cats">' + cats + '</div>'
-      + '<div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">' + fullProfileLink + introBtn + '</div>'
+      + '<div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">' + fullProfileLink + compareCheckbox + introBtn + '</div>'
       + '</div>'
       + adminMeta + quickEditPanel + '</article>';
   }}).join('');
@@ -5100,7 +5122,7 @@ function filtered() {{
       if (!hit) return false;
     }}
     if (!q) return true;
-    return (t.name + ' ' + t.description + ' ' + (t.categories || []).join(' ')).toLowerCase().indexOf(q) !== -1;
+    return (t.name + ' ' + t.description + ' ' + (t.categories || []).join(' ') + ' ' + (t.agent_taxonomy_note || '')).toLowerCase().indexOf(q) !== -1;
   }});
 }}
 
@@ -5144,6 +5166,54 @@ function goToPage(page) {{
   currentPage = page;
   renderTools(filtered());
   document.getElementById('tool-grid').scrollIntoView({{behavior: 'smooth', block: 'start'}});
+}}
+
+function updateToolCompareBar() {{
+  var bar = document.getElementById('tool-compare-bar');
+  var count = document.getElementById('tool-compare-count');
+  var link = document.getElementById('tool-compare-link');
+  if (toolCompareSelected.length === 0) {{
+    bar.style.display = 'none';
+    return;
+  }}
+  bar.style.display = 'flex';
+  count.textContent = toolCompareSelected.length + ' of ' + TOOL_COMPARE_MAX + ' selected';
+  link.href = '/tools/software/compare?ids=' + toolCompareSelected.join(',');
+  if (toolCompareSelected.length < 2) {{
+    link.style.pointerEvents = 'none';
+    link.style.opacity = '.5';
+  }} else {{
+    link.style.pointerEvents = '';
+    link.style.opacity = '';
+  }}
+}}
+
+function toggleToolCompareSelect(cb) {{
+  var id = parseInt(cb.dataset.id, 10);
+  var msg = document.getElementById('tool-compare-msg');
+  if (cb.checked) {{
+    if (toolCompareSelected.length >= TOOL_COMPARE_MAX) {{
+      cb.checked = false;
+      return;
+    }}
+    toolCompareSelected.push(id);
+    msg.textContent = '';
+  }} else {{
+    toolCompareSelected = toolCompareSelected.filter(function(x) {{ return x !== id; }});
+    msg.textContent = '';
+  }}
+  updateToolCompareBar();
+  renderTools(filtered());
+  if (toolCompareSelected.length >= TOOL_COMPARE_MAX) {{
+    document.getElementById('tool-compare-msg').textContent = 'You can compare up to ' + TOOL_COMPARE_MAX + ' tools at once. Remove one to add another.';
+  }}
+}}
+
+function clearToolCompareSelection() {{
+  toolCompareSelected = [];
+  document.getElementById('tool-compare-msg').textContent = '';
+  updateToolCompareBar();
+  renderTools(filtered());
 }}
 
 renderTools(ALL_TOOLS);
@@ -5254,6 +5324,173 @@ function submitIntroForm() {
     return HTMLResponse(_page("Software—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
+# Registered before /tools/software/{slug} so "compare" isn't swallowed as a
+# slug — same reasoning, same fix, as /tools/communities/compare vs.
+# /tools/communities/{slug}.
+@app.get("/tools/software/compare", response_class=HTMLResponse)
+def tools_software_compare(request: Request, ids: str = ""):
+    id_list: list[int] = []
+    for part in ids.split(","):
+        part = part.strip()
+        if part.isdigit() and int(part) not in id_list:
+            id_list.append(int(part))
+    id_list = id_list[:4]   # matrix cap — a Venn diagram needed <=3, a table doesn't, but 4 stays readable
+
+    lib = _lib()
+    try:
+        tools = []
+        for tid in id_list:
+            t = lib.get_tool(tid)
+            if t and t.get("approved"):
+                tools.append(t)
+        features_by_tool = {t["id"]: lib.list_tool_features(t["id"]) for t in tools}
+    finally:
+        lib.close()
+
+    back_link = '<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>'
+
+    if len(tools) < 2:
+        body = f"""<div class="page page-grid">
+{back_link}
+<h1 style="margin:0;">Compare software</h1>
+<p style="color:var(--muted);margin:8px 0 20px;line-height:1.6;">Pick at least two tools from the directory
+to compare them side by side. Check the box on any card, then use the compare bar at the bottom of the page.</p>
+<a href="/tools/software" class="btn btn-ghost">Back to Software</a>
+</div>"""
+        return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+    def _cell(text: str, empty_label: str = "Not available yet") -> str:
+        text = (text or "").strip()
+        if not text:
+            return f'<td class="cc-cell cc-empty">{_esc(empty_label)}</td>'
+        return f'<td class="cc-cell">{_esc(text)}</td>'
+
+    header_cells = "".join(
+        f'''<th class="cc-cell">
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
+    {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if t.get('promoted') else ''}
+    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' if t.get('advisor') else ''}
+  </div>
+  <a href="/tools/software/{_esc(t['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(t['name'])}</a>
+</th>'''
+        for t in tools
+    )
+
+    def _row(label: str, values: list[str], empty_label: str = "Not available yet") -> str:
+        if not any((v or "").strip() for v in values):
+            return ""
+        return (f'<tr><td class="cc-cell cc-label">{_esc(label)}</td>'
+                + "".join(_cell(v, empty_label) for v in values) + "</tr>")
+
+    tags_row = _row("Tags", [", ".join(t.get("categories") or []) for t in tools])
+
+    # AI/agent involvement gets its own section, same visual weight as
+    # Features, rather than sitting alongside Description/How this differs
+    # as just another text field — this is a comparison dimension buyers
+    # increasingly ask about first, not an afterthought. An empty value is
+    # "not documented yet," never treated as "this vendor has no agent
+    # capability" — the same sparse-data honesty rule as Features' "Not
+    # tracked yet."
+    agent_row = _row("How agents are involved",
+                     [t.get("agent_taxonomy_note", "") for t in tools],
+                     empty_label="Not documented yet")
+    agent_section = ""
+    if agent_row:
+        agent_section = f"""<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>
+{agent_row}"""
+    else:
+        agent_section = (
+            f'<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">AI / Agent involvement</td></tr>'
+            f'<tr><td class="cc-cell cc-label"></td>'
+            + "".join('<td class="cc-cell cc-empty">Not documented yet</td>' for _ in tools) + "</tr>"
+        )
+
+    other_rows = (
+        _row("Description", [t.get("description", "") for t in tools])
+        + _row("How this differs", [t.get("differentiation_note", "") for t in tools])
+    )
+
+    # Features: union of every feature name across the selected tools (sorted
+    # by how many of the selected tools have it, most-shared first, then
+    # alphabetically), one row per name. A tool with no row for that feature
+    # gets "Not tracked yet" rather than assuming it lacks the feature —
+    # tool_features is a first-pass, sparse dataset (see Phase 4), so absence
+    # of a row is not the same as a confirmed "no."
+    feature_names: dict[str, int] = {}
+    features_by_tool_and_name: dict[int, dict[str, dict]] = {}
+    for t in tools:
+        by_name = {f["feature_name"]: f for f in features_by_tool.get(t["id"], [])}
+        features_by_tool_and_name[t["id"]] = by_name
+        for name in by_name:
+            feature_names[name] = feature_names.get(name, 0) + 1
+    sorted_feature_names = sorted(feature_names, key=lambda n: (-feature_names[n], n.lower()))
+
+    def _feature_cell(feat: dict | None) -> str:
+        if not feat:
+            return '<td class="cc-cell cc-empty">Not tracked yet</td>'
+        bits = []
+        if feat["standalone_available"]:
+            bits.append("Standalone")
+        if feat["bundled_only"]:
+            bits.append("Bundled only")
+        label = " + ".join(bits) or "Availability unset"
+        verify = ' <span class="cc-verify">unverified</span>' if feat["needs_verification"] else ""
+        return f'<td class="cc-cell">{_esc(label)}{verify}</td>'
+
+    feature_rows = "".join(
+        f'<tr><td class="cc-cell cc-label">{_esc(name)}</td>'
+        + "".join(_feature_cell(features_by_tool_and_name[t["id"]].get(name)) for t in tools)
+        + "</tr>"
+        for name in sorted_feature_names
+    )
+    features_section = ""
+    if feature_rows:
+        features_section = f"""<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">Features</td></tr>
+{feature_rows}"""
+    else:
+        features_section = f"""<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">Features</td></tr>
+<tr><td class="cc-cell cc-label"></td>{"".join('<td class="cc-cell cc-empty">No feature data yet</td>' for _ in tools)}</tr>"""
+
+    body = f"""<div class="page page-grid">
+{back_link}
+<h1 style="margin:0;">Compare software</h1>
+<p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Side by side, the same fields you'd see on each
+tool's own profile page, including how (and whether) AI agents are actually involved — not just a tagline, since
+that's increasingly a deciding factor — plus feature availability where it's been reviewed. Rows still marked
+<span class="cc-verify">unverified</span> came from an LLM first pass and haven't been confirmed yet.</p>
+
+<div style="overflow-x:auto;">
+<table class="cc-table">
+<thead><tr><td class="cc-cell cc-label"></td>{header_cells}</tr></thead>
+<tbody>
+{tags_row}
+{agent_section}
+{other_rows}
+{features_section}
+</tbody>
+</table>
+</div>
+</div>
+
+<style>
+.cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
+.cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
+  color:#3a352e;line-height:1.55;min-width:200px;}}
+.cc-label{{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
+  min-width:140px;white-space:nowrap;background:var(--bg);}}
+.cc-empty{{color:var(--muted);font-style:italic;}}
+.cc-section{{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--navy);
+  background:var(--seafoam);padding:8px 16px;}}
+.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
+  background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
+.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;letter-spacing:-0.01em;}}
+.comm-name:hover{{color:var(--accent);}}
+.tool-star{{font-size:14px;color:#b8860b;}}
+</style>"""
+    return HTMLResponse(_page("Compare software—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+
+
 @app.get("/tools/software/{slug}", response_class=HTMLResponse)
 def tools_software_profile(request: Request, slug: str):
     authed = _is_authed(request)   # admin sees the meta line + edit link
@@ -5283,6 +5520,13 @@ def tools_software_profile(request: Request, slug: str):
         differentiation_block = f"""<div style="margin-bottom:24px;">
   <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">How this differs</div>
   <p style="margin:0;color:#3a352e;line-height:1.6;">{_esc(tool['differentiation_note'])}</p>
+</div>"""
+
+    agent_taxonomy_block = ""
+    if (tool.get("agent_taxonomy_note") or "").strip():
+        agent_taxonomy_block = f"""<div style="margin-bottom:24px;">
+  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Agent taxonomy</div>
+  <p style="margin:0;color:#3a352e;line-height:1.6;">{_esc(tool['agent_taxonomy_note'])}</p>
 </div>"""
 
     featured_badge = (
@@ -5425,6 +5669,7 @@ function submitIntroForm() {{
 {f'<p style="margin:8px 0 20px;"><a href="{_esc(tool["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if tool.get('url') else ''}
 <p style="font-size:15px;color:#3a352e;margin:0 0 20px;line-height:1.6;">{_esc(tool['description'])}</p>
 <div class="tool-cats" style="margin-bottom:24px;">{cats}</div>
+{agent_taxonomy_block}
 {differentiation_block}
 {competitors_block}
 {f'<div style="margin-bottom:24px;">{intro_btn}</div>' if intro_btn else ''}
@@ -9832,6 +10077,12 @@ def admin_tools_edit(request: Request, tool_id: int):
       placeholder="Placeholder for now—hand-written copy, not auto-drafted.">{_esc(tool.get('differentiation_note') or '')}</textarea>
   </div>
   <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(optional—standalone feature, agent-assisted, or fully independent agent; searchable)</span></label>
+    <textarea name="agent_taxonomy_note" maxlength="400" rows="2"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
+  </div>
+  <div>
     <button type="submit" class="btn">Save changes</button>
     <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
@@ -9903,6 +10154,7 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     warm_intro_enabled = 1 if form.get("warm_intro_enabled") == "1" else 0
     vendor_name = (form.get("vendor_name") or "").strip()
     differentiation_note = (form.get("differentiation_note") or "").strip()
+    agent_taxonomy_note = (form.get("agent_taxonomy_note") or "").strip()
     if not (name and url and description):
         raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
@@ -9911,6 +10163,7 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
                         promoted=promoted, vendor_email=vendor_email,
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
         lib.update_tool_differentiation(tool_id, differentiation_note)
+        lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
     finally:

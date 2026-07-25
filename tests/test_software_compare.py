@@ -1,0 +1,197 @@
+"""Software comparison matrix (/tools/software/compare, Phase 5) and the
+agent-taxonomy free-text field (a Phase 0 decision never actually shipped
+until now, since the matrix is the first thing that needed it rendered).
+"""
+import os
+import pathlib
+import sys
+import tempfile
+
+import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+
+@pytest.fixture
+def env(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    yield appmod
+    if os.path.exists(db):
+        os.remove(db)
+
+
+def _client(appmod):
+    from fastapi.testclient import TestClient
+    return TestClient(appmod.app, raise_server_exceptions=True)
+
+
+def _login(client):
+    r = client.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    assert r.status_code in (302, 303)
+
+
+# -- agent_taxonomy_note ------------------------------------------------------
+
+def test_agent_taxonomy_saved_via_admin_edit(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/{a}/edit", data={
+        "name": "Runway", "url": "https://runway.com", "description": "FP&A",
+        "agent_taxonomy_note": "Fully independent AI agent, not a bolted-on feature.",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    assert lib.get_tool(a)["agent_taxonomy_note"] == "Fully independent AI agent, not a bolted-on feature."
+    lib.close()
+
+
+def test_agent_taxonomy_shown_on_profile_and_searchable_on_card(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.update_tool_agent_taxonomy(a, "Agent-assisted, not fully autonomous.")
+    lib.close()
+
+    client = _client(env)
+    r = client.get("/tools/software/runway")
+    assert r.status_code == 200
+    assert "Agent taxonomy" in r.text
+    assert "Agent-assisted, not fully autonomous." in r.text
+
+    r = client.get("/tools/software")
+    assert "Agent-assisted, not fully autonomous." in r.text   # present in the embedded ALL_TOOLS JSON
+
+
+def test_agent_taxonomy_hidden_when_empty(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.add_tool("Solo Co", "No agent taxonomy set.", "https://solo.example", [], approved=1)
+    lib.close()
+
+    r = _client(env).get("/tools/software/solo-co")
+    assert "Agent taxonomy" not in r.text
+
+
+# -- compare route ------------------------------------------------------------
+
+def test_compare_route_not_swallowed_by_slug_route(env):
+    """Regression: /tools/software/compare must resolve to the compare view,
+    not 404 as if "compare" were a slug — route registration order matters."""
+    r = _client(env).get("/tools/software/compare")
+    assert r.status_code == 200
+    assert "Compare software" in r.text
+    assert "Pick at least two tools" in r.text
+
+
+def test_compare_requires_at_least_two(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get("/tools/software/compare?ids=1")
+    assert "Pick at least two tools" in r.text
+
+
+def test_compare_renders_directory_fields_side_by_side(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "Financial planning for high-growth teams.", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "Financial planning inside Excel.", "https://datarails.com", ["FP&A"], approved=1)
+    lib.update_tool_agent_taxonomy(a, "Fully independent agent.")
+    lib.update_tool_differentiation(b, "Keeps teams in Excel.")
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert r.status_code == 200
+    assert "Runway" in r.text and "Datarails" in r.text
+    assert "Financial planning for high-growth teams." in r.text
+    assert "Financial planning inside Excel." in r.text
+    assert "Fully independent agent." in r.text
+    assert "Keeps teams in Excel." in r.text
+
+
+def test_compare_gives_agent_involvement_its_own_section(env):
+    """AI/agent involvement is a dedicated section (same visual weight as
+    Features), not just another row lumped in with Description — buyers
+    increasingly ask about this first."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Concourse", "AI agents for finance.", "https://concourse.co", ["FP&A"], approved=1)
+    b = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.update_tool_agent_taxonomy(a, "Fully independent agent that runs the whole workflow.")
+    # Runway has no agent_taxonomy_note set — must read as "not documented",
+    # never as "this tool has no agent capability."
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "AI / Agent involvement" in r.text
+    assert "Fully independent agent that runs the whole workflow." in r.text
+    assert "Not documented yet" in r.text
+    assert "not have" not in r.text.lower() and "no agent" not in r.text.lower()
+
+
+def test_compare_shows_feature_availability_and_verification_flag(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.add_tool_feature(a, "Scenario modeling", standalone_available=1, bundled_only=0)
+    lib.add_tool_feature(a, "Headcount planning", standalone_available=0, bundled_only=1,
+                         needs_verification=1, source="llm_enrichment")
+    # Datarails has no rows for either feature — should render as "Not tracked yet", not a false negative
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "Scenario modeling" in r.text
+    assert "Standalone" in r.text
+    assert "Bundled only" in r.text
+    assert "unverified" in r.text
+    assert "Not tracked yet" in r.text
+
+
+def test_compare_caps_at_four_tools(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    ids = [lib.add_tool(f"Tool {i}", "d", f"https://tool{i}.com", ["FP&A"], approved=1) for i in range(6)]
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={','.join(str(i) for i in ids)}")
+    assert r.status_code == 200
+    for i in range(4):
+        assert f"Tool {i}" in r.text
+    for i in range(4, 6):
+        assert f"Tool {i}" not in r.text
+
+
+def test_compare_excludes_unapproved_tools(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Pending Co", "Not approved", "https://pending.example", [], approved=0)
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert "Pick at least two tools" in r.text   # only 1 approved tool made it in, falls below the minimum
+
+
+def test_directory_card_has_compare_checkbox(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.close()
+
+    r = _client(env).get("/tools/software")
+    assert "toggleToolCompareSelect" in r.text
+    assert "TOOL_COMPARE_MAX = 4" in r.text
