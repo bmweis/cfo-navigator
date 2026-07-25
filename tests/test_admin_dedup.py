@@ -142,7 +142,7 @@ def test_software_create_blocked_on_duplicate_url(admin_client):
     lib.close()
 
     r = client.post("/admin/tools/new", data={
-        "name": "New Tool", "url": "https://vendor.example", "description": "desc",
+        "name": "New Tool", "url": "https://vendor.example", "description": "desc", "summary": "desc",
     })
     assert r.status_code == 400
     assert "already exists" in r.json()["detail"]
@@ -157,7 +157,7 @@ def test_software_edit_blocked_when_changing_url_to_duplicate(admin_client):
     lib.close()
 
     r = client.post(f"/admin/tools/{tool_b}/edit", data={
-        "name": "Tool B", "url": "https://vendor-a.example", "description": "desc",
+        "name": "Tool B", "url": "https://vendor-a.example", "description": "desc", "summary": "desc",
     })
     assert r.status_code == 400
     assert f"/admin/tools/{tool_a}/edit" in r.json()["detail"]
@@ -170,7 +170,7 @@ def test_software_edit_allowed_when_url_unchanged(admin_client):
     lib.close()
 
     r = client.post(f"/admin/tools/{tool_id}/edit", data={
-        "name": "Tool A Updated", "url": "https://vendor-a.example", "description": "new desc",
+        "name": "Tool A Updated", "url": "https://vendor-a.example", "description": "new desc", "summary": "new desc",
     }, follow_redirects=False)
     assert r.status_code == 303
 

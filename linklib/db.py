@@ -1061,12 +1061,25 @@ class Library:
             # tool_features rows already have. Defaults to 0 (verified) so
             # existing hand-typed notes aren't retroactively flagged.
             "ALTER TABLE tools ADD COLUMN agent_taxonomy_needs_verification INTEGER NOT NULL DEFAULT 0",
+            # Description-length follow-up: `description` grows to a full
+            # ~8-12 sentence profile-page write-up; `summary` is the short
+            # 2-3 sentence version for the directory card and client-side
+            # search on /tools/software — a proper condensed rewrite, not
+            # truncated description text. Backfilled below from the existing
+            # (already-short) description for every pre-existing row, so
+            # cards keep showing something sensible until re-enriched.
+            "ALTER TABLE tools ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
                 self.conn.commit()
             except sqlite3.OperationalError:
                 pass
+        # Idempotent: only touches rows where summary is still empty, so a
+        # row that later gets a real generated (or hand-written) summary is
+        # never overwritten by a re-run of this backfill on a later boot.
+        self.conn.execute("UPDATE tools SET summary=description WHERE summary='' AND description!=''")
+        self.conn.commit()
         # read_later predates per-user scoping (no user_id column, UNIQUE(url)
         # inline constraint) — a plain ALTER TABLE ADD COLUMN can't fix the
         # uniqueness half of that, so it gets its own table-recreation
@@ -1859,7 +1872,8 @@ class Library:
                  categories: list[str], submitted_by: str = "",
                  approved: int = 0, advisor: int = 0,
                  promoted: int = 0, vendor_email: str = "",
-                 warm_intro_enabled: int = 0, vendor_name: str = "") -> int:
+                 warm_intro_enabled: int = 0, vendor_name: str = "",
+                 summary: str = "") -> int:
         dup = self._find_tool_by_normalized_url(url)
         if dup:
             raise DuplicateURLError("software entry", dup["id"], dup["name"])
@@ -1873,11 +1887,12 @@ class Library:
         cur = self.conn.execute(
             """INSERT INTO tools (name, slug, description, url, categories_json,
                approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email,
-               warm_intro_enabled, vendor_name)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               warm_intro_enabled, vendor_name, summary)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, description.strip(), url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
-             promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip()),
+             promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip(),
+             summary.strip()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -1909,7 +1924,8 @@ class Library:
     def update_tool(self, tool_id: int, name: str, description: str,
                     url: str, categories: list[str], advisor: int = 0,
                     promoted: int = 0, vendor_email: str = "",
-                    warm_intro_enabled: int = 0, vendor_name: str = "") -> None:
+                    warm_intro_enabled: int = 0, vendor_name: str = "",
+                    summary: str = "") -> None:
         # Only check when the URL is actually changing — callers that resave a
         # row unchanged (e.g. the bulk-edit routes, which always pass the
         # row's own current url back) must never trip on a pre-existing
@@ -1922,10 +1938,10 @@ class Library:
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
                advisor=?, promoted=?, vendor_email=?, warm_intro_enabled=?, vendor_name=?,
-               updated_at=? WHERE id=?""",
+               summary=?, updated_at=? WHERE id=?""",
             (name.strip(), description.strip(), url.strip(),
              json.dumps(categories), advisor, promoted, vendor_email.strip(),
-             warm_intro_enabled, vendor_name.strip(), _now(), tool_id),
+             warm_intro_enabled, vendor_name.strip(), summary.strip(), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -1942,15 +1958,16 @@ class Library:
 
     def quick_update_tool(self, tool_id: int, description: str,
                           warm_intro_enabled: int, vendor_name: str,
-                          vendor_email: str) -> None:
+                          vendor_email: str, summary: str = "") -> None:
         """Partial update for the /tools inline "Quick edit" panel — touches
-        only description and warm-intro fields, leaving name/url/categories/
-        advisor/promoted untouched (those still require the full edit form)."""
+        only description/summary and warm-intro fields, leaving name/url/
+        categories/advisor/promoted untouched (those still require the full
+        edit form)."""
         self.conn.execute(
             """UPDATE tools SET description=?, warm_intro_enabled=?, vendor_name=?,
-               vendor_email=?, updated_at=? WHERE id=?""",
+               vendor_email=?, summary=?, updated_at=? WHERE id=?""",
             (description.strip(), warm_intro_enabled, vendor_name.strip(),
-             vendor_email.strip(), _now(), tool_id),
+             vendor_email.strip(), summary.strip(), _now(), tool_id),
         )
         self.conn.commit()
 

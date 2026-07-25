@@ -139,20 +139,33 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         return None
 
 
-_TOOL_DESC_PROMPT = """You are drafting a short vendor description for the CFO Toolbox, a
-directory read by finance leaders at high-growth tech companies.
+_TOOL_DESC_PROMPT = """You are drafting a vendor profile for the CFO Toolbox, a
+directory read by finance leaders at high-growth tech companies. This has two
+surfaces: a full profile-page write-up, and a short summary shown on the
+directory card and in search results — write both.
 
-Write a description of the tool named below. Follow these rules exactly:
-1. Say what the tool does — plainly and specifically, not a tagline.
-2. Note how it differs from competitors, or its core strengths — capability-focused.
+Follow these rules exactly:
+1. Say what the tool does — plainly and specifically, not marketing copy.
+2. Cover what it does, who it's built for, and how it differs from
+   competitors or its core strengths — capability-focused, grounded in the
+   page content below wherever it supports a claim.
 3. No marketing language: no "powerful," "seamless," "game-changing," "best-in-class,"
    or similar adjective stacking. No exclamation points.
-4. 1-3 sentences, roughly 30-70 words total — enough room to name a specific
-   differentiator or use case, not just a one-line tagline.
-5. Do not mention or guess whether the company has been acquired by another company —
+4. Do not mention or guess whether the company has been acquired by another company —
    leave that out entirely, even if you believe you know.
 
-Return ONLY the description as plain text — no quotes, no markdown, no preamble.
+Fields:
+  "description": the full profile-page write-up — roughly 8-12 sentences
+     (about 150-300 words). Budget and depth are not a constraint here; use
+     the page content thoroughly rather than settling for a thin summary.
+     Every sentence should carry real information, not padding.
+  "summary": a short, standalone 2-3 sentence version (about 30-60 words)
+     for the directory card and search results — a proper condensed
+     rewrite someone could read on its own and understand what the tool is
+     and does, not just the description's opening sentences copy-pasted.
+
+Return STRICT JSON only (no prose, no markdown fences) with exactly these
+keys: "description", "summary".
 
 Tool name: {name}
 Tool URL: {url}
@@ -164,6 +177,7 @@ Tool URL: {url}
 @dataclass
 class ToolDescriptionDraft:
     description: str
+    summary: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
     model: str = ""
     input_tokens: int = 0
@@ -172,12 +186,14 @@ class ToolDescriptionDraft:
 
 
 def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -> ToolDescriptionDraft | None:
-    """Draft a CFO Toolbox description for a vendor from its name + URL, or None
-    if the SDK/key is unavailable or the call fails. Fetches the URL's page text
-    (best-effort, same fetch as article extraction) as grounding; when that fetch
-    comes back empty, `low_confidence=True` flags the draft as based on the
-    model's own knowledge rather than the live page, so the caller can warn
-    whoever reviews it. Never infers acquisition status — see rule 5 above."""
+    """Draft a CFO Toolbox description (full profile-page write-up) plus a
+    short summary (directory card / search) for a vendor from its name +
+    URL, or None if the SDK/key is unavailable or the call fails. Fetches
+    the URL's page text (best-effort, same fetch as article extraction) as
+    grounding; when that fetch comes back empty, `low_confidence=True`
+    flags the draft as based on the model's own knowledge rather than the
+    live page, so the caller can warn whoever reviews it. Never infers
+    acquisition status — see rule 4 above."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -198,12 +214,14 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=800,  # headroom for Opus 5's on-by-default adaptive thinking
+            max_tokens=1600,  # room for an 8-12 sentence description, plus headroom
+                              # for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user",
                        "content": _TOOL_DESC_PROMPT.format(name=name, url=url, content_block=content_block)}],
         )
-        text = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text").strip()
-        text = text.strip('"').strip()
+        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
 
         from .pricing import compute_cost
         usage = getattr(resp, "usage", None)
@@ -214,7 +232,9 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
         return ToolDescriptionDraft(
-            description=text, low_confidence=low_confidence, model=model,
+            description=str(data.get("description", "")).strip(),
+            summary=str(data.get("summary", "")).strip(),
+            low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception:

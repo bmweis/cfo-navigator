@@ -46,7 +46,7 @@ def test_agent_taxonomy_saved_via_admin_edit(env):
     client = _client(env)
     _login(client)
     r = client.post(f"/admin/tools/{a}/edit", data={
-        "name": "Runway", "url": "https://runway.com", "description": "FP&A",
+        "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
         "agent_taxonomy_note": "Fully independent AI agent, not a bolted-on feature.",
     }, follow_redirects=False)
     assert r.status_code == 303

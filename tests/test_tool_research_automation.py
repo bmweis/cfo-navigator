@@ -131,6 +131,7 @@ def test_admin_add_tool_triggers_background_research(env, monkeypatch):
     _login(client)
     r = client.post("/admin/tools/new", data={
         "name": "Runway", "url": "https://runway.com", "description": "FP&A platform",
+        "summary": "FP&A platform for scenario modeling.",
     }, follow_redirects=False)
     assert r.status_code == 303
 

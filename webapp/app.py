@@ -4807,6 +4807,7 @@ def tools_directory(request: Request):
             "id": t["id"],
             "name": t["name"],
             "description": t["description"],
+            "summary": t.get("summary") or "",
             "url": t["url"],
             "slug": t["slug"],
             "categories": t["categories"],
@@ -5030,10 +5031,12 @@ function renderTools(tools) {{
         + '<label style="margin:0;">Description</label>'
         + '<span><button type="button" class="tool-admin-btn" onclick="generateDescription('
         + esc(JSON.stringify(t.name)) + ',' + esc(JSON.stringify(t.url))
-        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\')">Generate</button>'
+        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\')">Generate</button>'
         + ' <span id="qe-gen-status-' + t.id + '" class="qe-status"></span></span>'
         + '</div>'
-        + '<textarea id="qe-desc-' + t.id + '" rows="2">' + esc(t.description) + '</textarea>'
+        + '<textarea id="qe-desc-' + t.id + '" rows="4">' + esc(t.description) + '</textarea>'
+        + '<label style="margin:8px 0 0;">Short summary <span style="font-weight:400;color:var(--muted);">(directory card + search)</span></label>'
+        + '<textarea id="qe-summary-' + t.id + '" rows="2">' + esc(t.summary || '') + '</textarea>'
         + '<label class="qe-checkbox"><input type="checkbox" id="qe-warm-' + t.id + '"' + (t.warm_intro_enabled ? ' checked' : '') + '> Offer a Warm Intro button</label>'
         + '<div class="qe-row">'
         + '<div><label>Vendor contact name</label><input id="qe-vname-' + t.id + '" value="' + esc(t.vendor_name || '') + '" placeholder="Jane Smith"></div>'
@@ -5074,7 +5077,7 @@ function renderTools(tools) {{
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
       + '</div>'
       + adminControls + '</div>'
-      + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.description) + '</p>'
+      + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.summary || t.description) + '</p>'
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:auto;">'
       + '<div class="tool-cats">' + cats + '</div>'
       + '<div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">' + fullProfileLink + compareCheckbox + introBtn + '</div>'
@@ -5092,6 +5095,7 @@ async function saveQuickEdit(id) {{
   var status = document.getElementById('qe-status-' + id);
   var payload = {{
     description: document.getElementById('qe-desc-' + id).value.trim(),
+    summary: document.getElementById('qe-summary-' + id).value.trim(),
     warm_intro_enabled: document.getElementById('qe-warm-' + id).checked,
     vendor_name: document.getElementById('qe-vname-' + id).value.trim(),
     vendor_email: document.getElementById('qe-vemail-' + id).value.trim(),
@@ -5106,6 +5110,7 @@ async function saveQuickEdit(id) {{
     var t = ALL_TOOLS.find(function(x) {{ return x.id === id; }});
     if (t) {{
       t.description = d.tool.description;
+      t.summary = d.tool.summary;
       t.warm_intro_enabled = d.tool.warm_intro_enabled;
       t.vendor_name = d.tool.vendor_name;
       t.vendor_email = d.tool.vendor_email;
@@ -5128,7 +5133,7 @@ function filtered() {{
       if (!hit) return false;
     }}
     if (!q) return true;
-    return (t.name + ' ' + t.description + ' ' + (t.categories || []).join(' ') + ' ' + (t.agent_taxonomy_note || '')).toLowerCase().indexOf(q) !== -1;
+    return (t.name + ' ' + (t.summary || '') + ' ' + t.description + ' ' + (t.categories || []).join(' ') + ' ' + (t.agent_taxonomy_note || '')).toLowerCase().indexOf(q) !== -1;
   }});
 }}
 
@@ -5412,7 +5417,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         )
 
     other_rows = (
-        _row("Description", [t.get("description", "") for t in tools])
+        _row("Description", [t.get("summary") or t.get("description", "") for t in tools])
         + _row("How this differs", [t.get("differentiation_note", "") for t in tools])
     )
 
@@ -7222,7 +7227,7 @@ def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None
 # on /tools — all three point a "Generate" button at the same stateless
 # endpoint, since it only needs a name + URL to draft a description.
 _GENERATE_DESC_JS = """
-async function generateDescription(name, url, descId, statusId) {
+async function generateDescription(name, url, descId, statusId, summaryId) {
   name = (name || '').trim();
   url = (url || '').trim();
   var status = document.getElementById(statusId);
@@ -7236,6 +7241,10 @@ async function generateDescription(name, url, descId, statusId) {
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
     document.getElementById(descId).value = d.description;
+    if (summaryId) {
+      var summaryEl = document.getElementById(summaryId);
+      if (summaryEl) summaryEl.value = d.summary || '';
+    }
     status.textContent = d.low_confidence
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
       : 'Drafted. Review before saving.';
@@ -7404,7 +7413,12 @@ async def tools_submit(request: Request, background_tasks: BackgroundTasks):
     from linklib.email_utils import send_notification_email, send_tool_submission_confirmation_email, default_notify_email
     lib = _lib()
     try:
-        tool_id = lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0)
+        # Member submissions are a quick 1-2 sentence pitch, not a full profile
+        # write-up — use it as the initial summary too (short text is already
+        # the right shape for the directory card) until an admin reviews and
+        # regenerates a fuller description/summary from the edit page before approving.
+        tool_id = lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0,
+                                summary=description)
         notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
         if notify_to:
             _send_email_safely(
@@ -8084,7 +8098,7 @@ async def admin_software_bulk_edit(request: Request):
                 name=t["name"], description=t["description"], url=t["url"],
                 categories=t["categories"], advisor=t["advisor"], promoted=t["promoted"],
                 vendor_email=t["vendor_email"], warm_intro_enabled=t["warm_intro_enabled"],
-                vendor_name=t["vendor_name"],
+                vendor_name=t["vendor_name"], summary=t.get("summary") or "",
             )
             if field == "categories":
                 kwargs["categories"] = value if isinstance(value, list) else []
@@ -9855,15 +9869,21 @@ def admin_tools_new(request: Request):
   </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Short description *</label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status')">Generate</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
-    <textarea id="tool-desc" name="description" required maxlength="400" rows="3"
+    <textarea id="tool-desc" name="description" required maxlength="2500" rows="7"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-      placeholder="What does it do? 1–2 sentences."></textarea>
+      placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences."></textarea>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
+    <textarea id="tool-summary" name="summary" required maxlength="400" rows="2"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="2-3 sentences—shown on the directory card and in search results. Filled in by Generate above, or write your own."></textarea>
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
@@ -9975,19 +9995,21 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
     description = (form.get("description") or "").strip()
+    summary = (form.get("summary") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
     advisor = 1 if form.get("advisor") == "1" else 0
     promoted = 1 if form.get("promoted") == "1" else 0
     vendor_email = (form.get("vendor_email") or "").strip()
     warm_intro_enabled = 1 if form.get("warm_intro_enabled") == "1" else 0
     vendor_name = (form.get("vendor_name") or "").strip()
-    if not (name and url and description):
-        raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
+    if not (name and url and description and summary):
+        raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     lib = _lib()
     try:
         tool_id = lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
                                 promoted=promoted, vendor_email=vendor_email,
-                                warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
+                                warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
+                                summary=summary)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
     finally:
@@ -10167,14 +10189,21 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
   </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Short description *</label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status')">Generate</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
-    <textarea id="tool-desc" name="description" required maxlength="400" rows="3"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(tool['description'])}</textarea>
+    <textarea id="tool-desc" name="description" required maxlength="2500" rows="7"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
+    <textarea id="tool-summary" name="summary" required maxlength="400" rows="2"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
@@ -10321,6 +10350,7 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
     description = (form.get("description") or "").strip()
+    summary = (form.get("summary") or "").strip()
     categories = [v.strip() for v in form.getlist("categories") if v.strip()]
     advisor = 1 if form.get("advisor") == "1" else 0
     promoted = 1 if form.get("promoted") == "1" else 0
@@ -10331,13 +10361,14 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     agent_taxonomy_note = (form.get("agent_taxonomy_note") or "").strip()
     screenshot_url = (form.get("screenshot_url") or "").strip()
     screenshot_is_product = 1 if form.get("screenshot_is_product") == "1" else 0
-    if not (name and url and description):
-        raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
+    if not (name and url and description and summary):
+        raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     lib = _lib()
     try:
         lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
                         promoted=promoted, vendor_email=vendor_email,
-                        warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
+                        warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
+                        summary=summary)
         lib.update_tool_differentiation(tool_id, differentiation_note)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot(tool_id, screenshot_url, screenshot_is_product)
@@ -10596,20 +10627,22 @@ async def admin_tools_quick_edit(request: Request, tool_id: int):
     except Exception:
         return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
     description = (body.get("description") or "").strip()
+    summary = (body.get("summary") or "").strip()
     warm_intro_enabled = 1 if body.get("warm_intro_enabled") else 0
     vendor_name = (body.get("vendor_name") or "").strip()
     vendor_email = (body.get("vendor_email") or "").strip()
-    if not description:
-        return JSONResponse({"ok": False, "error": "Description is required"}, status_code=400)
+    if not (description and summary):
+        return JSONResponse({"ok": False, "error": "Description and summary are required"}, status_code=400)
     lib = _lib()
     try:
         if not lib.get_tool(tool_id):
             return JSONResponse({"ok": False, "error": "Tool not found"}, status_code=404)
-        lib.quick_update_tool(tool_id, description, warm_intro_enabled, vendor_name, vendor_email)
+        lib.quick_update_tool(tool_id, description, warm_intro_enabled, vendor_name, vendor_email, summary=summary)
     finally:
         lib.close()
     return JSONResponse({"ok": True, "tool": {
         "description": description,
+        "summary": summary,
         "warm_intro_enabled": bool(warm_intro_enabled),
         "vendor_name": vendor_name,
         "vendor_email": vendor_email,
@@ -10643,7 +10676,8 @@ async def admin_tools_generate_description(request: Request):
     finally:
         lib.close()
 
-    return JSONResponse({"ok": True, "description": draft.description, "low_confidence": draft.low_confidence})
+    return JSONResponse({"ok": True, "description": draft.description, "summary": draft.summary,
+                         "low_confidence": draft.low_confidence})
 
 
 @app.post("/tools/{tool_id}/interest")
