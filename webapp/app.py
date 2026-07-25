@@ -688,7 +688,9 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .page{max-width:780px;margin:0 auto;padding:48px 24px 72px;}
 
 .page-full{max-width:1900px;}   /* full-width content — homepage/about, TL landing, library landing, reader */
-.page-grid{max-width:1300px;}   /* card grids — CFO Toolbox landing */
+.page-grid{max-width:1300px;}   /* card grids (CFO Toolbox landing) and the Software
+                                    add/edit forms, which need the extra width for the
+                                    long-form description field */
 .page-form{max-width:640px;}    /* forms — contact, admin edit forms */
 .page-admin{max-width:1500px;} /* admin data tables — communities list */
 
@@ -4891,7 +4893,15 @@ def tools_directory(request: Request):
 #tool-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #tool-pagination-label{{font-size:13px;color:var(--muted);}}
 .tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
-.tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
+/* Same fixed-to-N-lines technique as .tool-desc below, applied to the title:
+   a long name (e.g. "Airbase (acquired by Paylocity)") used to wrap to a
+   second line and push that card's header row taller than its row siblings,
+   since the grid uses align-items:start rather than stretching cards to a
+   shared row height. Clamping to 2 lines with a matching min-height means
+   every card reserves the same header height regardless of name length. */
+.tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
+  line-height:1.3;min-height:44px;margin-bottom:6px;letter-spacing:-0.01em;}}
 .tool-name:hover{{color:var(--accent);}}
 /* Fixed to exactly 3 lines regardless of description length — min-height pads
    short descriptions up, -webkit-line-clamp truncates long ones down, so
@@ -5078,9 +5088,16 @@ function renderTools(tools) {{
       + '</div>'
       + adminControls + '</div>'
       + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.summary || t.description) + '</p>'
-      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:auto;">'
-      + '<div class="tool-cats">' + cats + '</div>'
-      + '<div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">' + fullProfileLink + compareCheckbox + introBtn + '</div>'
+      // Categories and the profile-link/compare row used to share one flex row
+      // (justify-content:space-between) — a long category name (e.g. "Treasury/Cash
+      // Management") made that row wrap to 2 lines while a short one (e.g. "FP&A")
+      // stayed on 1, breaking the uniform card height the .tool-name/.tool-desc
+      // clamps above are meant to guarantee. Splitting them into two always-separate
+      // rows means each row's height depends only on category *count* (nearly always
+      // one badge across the catalog), not category name length.
+      + '<div style="margin-top:auto;">'
+      + '<div class="tool-cats" style="min-height:24px;margin-bottom:10px;">' + cats + '</div>'
+      + '<div style="display:flex;align-items:center;gap:12px;">' + fullProfileLink + compareCheckbox + introBtn + '</div>'
       + '</div>'
       + adminMeta + quickEditPanel + '</article>';
   }}).join('');
@@ -9852,7 +9869,7 @@ def admin_tools_new(request: Request):
         categories = lib.list_tool_categories()
     finally:
         lib.close()
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-grid">
 <h1>Add software</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
 <form method="post" action="/admin/tools/new" style="display:grid;gap:20px;">
@@ -9887,7 +9904,7 @@ def admin_tools_new(request: Request):
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
       {_tool_category_checkboxes(categories)}
     </div>
   </div>
@@ -10173,7 +10190,7 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
             f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">{_esc(_cap_note)}</p></div>'
         )
 
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-grid">
 <h1>Edit software</h1>
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form method="post" action="/admin/tools/{tool_id}/edit" style="display:grid;gap:20px;">
@@ -10207,7 +10224,7 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
       {_tool_category_checkboxes(categories, tool['categories'])}
     </div>
   </div>
