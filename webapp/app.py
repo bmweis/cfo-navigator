@@ -4802,6 +4802,7 @@ def tools_directory(request: Request):
             "name": t["name"],
             "description": t["description"],
             "url": t["url"],
+            "slug": t["slug"],
             "categories": t["categories"],
             "advisor": bool(t.get("advisor")),
             "promoted": bool(t.get("promoted")),
@@ -4870,11 +4871,16 @@ def tools_directory(request: Request):
 #tool-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #tool-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #tool-pagination-label{{font-size:13px;color:var(--muted);}}
-.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
+.tool-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
 .tool-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
 .tool-name:hover{{color:var(--accent);}}
-.tool-desc{{font-size:14px;color:#3a352e;margin:0 0 12px;line-height:1.5;}}
+/* Fixed to exactly 3 lines regardless of description length — min-height pads
+   short descriptions up, -webkit-line-clamp truncates long ones down, so
+   every card's description block occupies the same height. */
+.tool-desc{{font-size:14px;color:#3a352e;margin:0 0 12px;line-height:1.5;min-height:63px;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}}
 .tool-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
+.tool-full-link{{font-size:12px;font-weight:600;color:var(--navy);white-space:nowrap;flex-shrink:0;}}
 .tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 .tool-admin{{display:flex;gap:6px;flex-shrink:0;}}
@@ -5031,6 +5037,8 @@ function renderTools(tools) {{
         ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ')">&#10024; Warm Intro</button>'
         : '<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">&#10024; Warm Intro</button>';
     }}
+    var fullProfileLink = '<a class="tool-full-link" href="/tools/software/' + esc(t.slug)
+      + '" target="_blank" rel="noopener">Full profile &rarr;</a>';
     return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '" data-tool-id="' + t.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
@@ -5039,9 +5047,9 @@ function renderTools(tools) {{
       + '</div>'
       + adminControls + '</div>'
       + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.description) + '</p>'
-      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:auto;">'
       + '<div class="tool-cats">' + cats + '</div>'
-      + introBtn
+      + '<div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">' + fullProfileLink + introBtn + '</div>'
       + '</div>'
       + adminMeta + quickEditPanel + '</article>';
   }}).join('');
@@ -5244,6 +5252,191 @@ function submitIntroForm() {
 }
 </script>"""
     return HTMLResponse(_page("Software—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+
+
+@app.get("/tools/software/{slug}", response_class=HTMLResponse)
+def tools_software_profile(request: Request, slug: str):
+    authed = _is_authed(request)   # admin sees the meta line + edit link
+    is_member = _is_member(request)  # gates the Warm Intro button, same as the card
+    lib = _lib()
+    try:
+        tool = lib.get_tool_by_slug(slug)
+    finally:
+        lib.close()
+    if not tool:
+        raise HTTPException(status_code=404, detail="Tool not found")
+
+    featured_badge = (
+        '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
+        'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>'
+        if tool.get("promoted") else ""
+    )
+    advisor_star = (
+        '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#9733;</span>'
+        if tool.get("advisor") else ""
+    )
+    cats = "".join(f'<span class="tool-cat">{_esc(c)}</span>' for c in tool.get("categories") or [])
+
+    has_warm_intro = bool(tool.get("warm_intro_enabled") and tool.get("vendor_email"))
+    intro_btn = ""
+    intro_modal_block = ""
+    if has_warm_intro:
+        if is_member:
+            intro_btn = '<button class="tool-intro-btn" onclick="openIntroModal()">&#10024; Warm Intro</button>'
+            intro_modal_block = f"""
+<div class="intro-overlay" id="intro-overlay" onclick="if(event.target===this)closeIntroModal()">
+  <div class="intro-modal">
+    <button class="intro-close" onclick="closeIntroModal()" aria-label="Close">&times;</button>
+    <h2>Request a Warm Intro</h2>
+    <p>I&rsquo;ll personally connect you with the team at <strong>{_esc(tool['name'])}</strong>.</p>
+    <div id="intro-form-body" style="display:grid;gap:16px;margin-top:4px;">
+      <div class="intro-field">
+        <label for="intro-name">Your name</label>
+        <input id="intro-name" type="text" placeholder="Jane Smith" maxlength="200">
+      </div>
+      <div class="intro-field">
+        <label for="intro-email">Work email</label>
+        <input id="intro-email" type="email" placeholder="jane@company.com" maxlength="200">
+      </div>
+      <div class="intro-field">
+        <label for="intro-company">Company</label>
+        <input id="intro-company" type="text" placeholder="Acme Corp" maxlength="200">
+      </div>
+      <div class="intro-field">
+        <label for="intro-size">Company size</label>
+        <select id="intro-size">
+          <option value="">Select&hellip;</option>
+          <option value="1-10">1&ndash;10 employees</option>
+          <option value="11-50">11&ndash;50 employees</option>
+          <option value="51-200">51&ndash;200 employees</option>
+          <option value="201-500">201&ndash;500 employees</option>
+          <option value="500+">500+ employees</option>
+        </select>
+      </div>
+      <div id="intro-error" style="display:none;font-size:13px;color:#b91c1c;"></div>
+      <button class="btn" id="intro-submit-btn" onclick="submitIntroForm()" style="justify-content:center;">Send intro request &rarr;</button>
+    </div>
+    <div id="intro-success" style="display:none;text-align:center;padding:16px 0;">
+      <div style="font-size:36px;margin-bottom:12px;">&#10024;</div>
+      <p style="font-size:16px;font-weight:600;color:var(--navy);margin:0 0 6px;">Request sent!</p>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 20px;line-height:1.5;">Brian will be in touch with an intro shortly.</p>
+      <button class="btn btn-ghost" onclick="closeIntroModal()">Close</button>
+    </div>
+  </div>
+</div>
+<script>
+function openIntroModal() {{
+  document.getElementById('intro-name').value = '';
+  document.getElementById('intro-email').value = '';
+  document.getElementById('intro-company').value = '';
+  document.getElementById('intro-size').value = '';
+  document.getElementById('intro-form-body').style.display = 'grid';
+  document.getElementById('intro-success').style.display = 'none';
+  var errEl = document.getElementById('intro-error');
+  errEl.style.display = 'none';
+  errEl.textContent = '';
+  var btn = document.getElementById('intro-submit-btn');
+  btn.disabled = false;
+  btn.textContent = 'Send intro request →';
+  document.getElementById('intro-overlay').classList.add('open');
+}}
+function closeIntroModal() {{
+  document.getElementById('intro-overlay').classList.remove('open');
+}}
+function submitIntroForm() {{
+  var name = (document.getElementById('intro-name').value || '').trim();
+  var email = (document.getElementById('intro-email').value || '').trim();
+  var company = (document.getElementById('intro-company').value || '').trim();
+  var size = document.getElementById('intro-size').value;
+  var errEl = document.getElementById('intro-error');
+  errEl.style.display = 'none';
+  if (!name || !email || !company || !size) {{
+    errEl.textContent = 'Please fill in all fields.';
+    errEl.style.display = 'block';
+    return;
+  }}
+  var btn = document.getElementById('intro-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  fetch('/tools/{tool["id"]}/interest', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{name: name, email: email, company: company, company_size: size}})
+  }}).then(function(r) {{ return r.json(); }}).then(function(data) {{
+    if (data.ok) {{
+      document.getElementById('intro-form-body').style.display = 'none';
+      document.getElementById('intro-success').style.display = 'block';
+    }} else {{
+      errEl.textContent = data.error || 'Something went wrong. Please try again.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Send intro request →';
+    }}
+  }}).catch(function() {{
+    errEl.textContent = 'Network error. Please try again.';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Send intro request →';
+  }});
+}}
+</script>"""
+        else:
+            intro_btn = ('<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">'
+                         '&#10024; Warm Intro</button>')
+
+    meta_parts = []
+    if authed:
+        if tool.get("submitted_by"):
+            meta_parts.append(f"Submitted by {_esc(tool['submitted_by'])}")
+        if tool.get("created_at"):
+            meta_parts.append(f"Added {tool['created_at'][:10]}")
+        if tool.get("updated_at") and tool["updated_at"] != tool["created_at"]:
+            meta_parts.append(f"Edited {tool['updated_at'][:10]}")
+    meta_line = " &middot; ".join(meta_parts)
+
+    body = f"""<div class="page page-full">
+<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:2px;">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    {featured_badge}{advisor_star}
+    <h1 style="margin:0;">{_esc(tool['name'])}</h1>
+  </div>
+  {f'<a href="/admin/tools/{tool["id"]}/edit" class="tool-admin-btn">Edit</a>' if authed else ''}
+</div>
+{f'<p style="margin:8px 0 20px;"><a href="{_esc(tool["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if tool.get('url') else ''}
+<p style="font-size:15px;color:#3a352e;margin:0 0 20px;line-height:1.6;">{_esc(tool['description'])}</p>
+<div class="tool-cats" style="margin-bottom:24px;">{cats}</div>
+{f'<div style="margin-bottom:24px;">{intro_btn}</div>' if intro_btn else ''}
+{f'<p style="font-size:13px;color:var(--muted);margin:0 0 20px;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}
+</div>
+<style>
+.tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
+.tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
+.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:5px 12px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
+.tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
+.tool-intro-btn{{font-size:13px;font-weight:600;color:var(--navy);background:none;border:1px solid var(--navy);
+  border-radius:8px;padding:6px 14px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
+.tool-intro-btn:hover{{background:var(--navy-wash);}}
+.tool-intro-btn:disabled{{color:var(--muted);border-color:var(--line);cursor:not-allowed;}}
+.tool-intro-btn:disabled:hover{{background:none;}}
+.intro-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;
+  align-items:center;justify-content:center;padding:20px;}}
+.intro-overlay.open{{display:flex;}}
+.intro-modal{{background:#fff;border-radius:20px;padding:32px 28px;width:100%;max-width:460px;
+  box-shadow:0 20px 60px rgba(0,0,0,.18);position:relative;}}
+.intro-modal h2{{font-family:var(--font-head);font-size:20px;font-weight:600;letter-spacing:-0.01em;
+  color:var(--ink);margin:0 0 6px;}}
+.intro-modal p{{font-size:14px;color:var(--muted);margin:0 0 20px;}}
+.intro-field{{display:grid;gap:6px;}}
+.intro-field label{{font-size:13px;font-weight:500;color:var(--navy);}}
+.intro-field input,.intro-field select{{width:100%;padding:9px 13px;border:1px solid var(--line);
+  border-radius:9px;font:inherit;font-size:14px;background:var(--bg);}}
+.intro-close{{position:absolute;top:16px;right:20px;background:none;border:none;font-size:20px;
+  color:var(--muted);cursor:pointer;line-height:1;padding:4px 8px;border-radius:6px;}}
+.intro-close:hover{{background:var(--navy-wash);color:var(--ink);}}
+</style>
+{intro_modal_block}"""
+    return HTMLResponse(_page(f"{tool['name']}—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
 @app.get("/tools/benchmarks", response_class=HTMLResponse)
