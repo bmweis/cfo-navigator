@@ -13541,14 +13541,14 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'</details>'
         )
 
-    # Two columns on wide viewports: left carries the Archive card plus the
-    # groups Brian triages often (Inbox, CFO Toolbox); right carries the
-    # lower-cadence settings/reference groups (Features, Brand & voice,
-    # System). Below the breakpoint both stacks concatenate into the
-    # original single-column order — unchanged from before this split.
-    _LEFT_GROUPS = {"Inbox", "CFO Toolbox"}
-    left_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
-    right_html = ""
+    # Two columns on wide viewports: left carries the group Brian triages
+    # most often (Inbox); right carries the Archive card plus the
+    # lower-cadence settings/reference groups (CFO Toolbox, Features,
+    # Brand & voice, System). Below the breakpoint both stacks concatenate
+    # into the original single-column order — unchanged from before this split.
+    _LEFT_GROUPS = {"Inbox"}
+    left_html = ""
+    right_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
     for gname, gdesc, items in _ADMIN_GROUPS:
         html = _group_html(gname, gdesc, items)
         if gname in _LEFT_GROUPS:
