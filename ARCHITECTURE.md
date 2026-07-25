@@ -166,7 +166,7 @@ Cost figures are computed from **real API token usage** at call time
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `tools` | The vendor directory on `/tools/software`. `scripts/seed_tools.py` is re-runnable, not one-shot: it adds any tool missing by URL and syncs `name`/`description` on existing rows when the script's copy changes (#113), via `Library.update_tool_content` — a narrow update that never touches `categories`/`advisor`/`promoted`/vendor/warm-intro fields, so admin edits made directly on the live site survive a re-run. Rendered publicly, one entry at a time, at `/tools/software/{slug}` (Software search overhaul Phase 2) via `get_tool_by_slug` — same only-approved-rows rule as `get_community_by_slug`. | `slug` (unique), `approved` (reader submissions wait for approval), `advisor`, `promoted`, `warm_intro_enabled` + `vendor_name`/`vendor_email` (the intro button needs both), `differentiation_note` (Phase 3 — free-text "how this differs from the competition," rendered on the profile page when non-empty; hand-written by Brian via a narrow `update_tool_differentiation`, deliberately kept off the general `update_tool` path so the Software bulk-edit panel — which resaves every field it knows about on every call — can never blank it out), `agent_taxonomy_note` (a Phase 0 decision — standalone feature vs. agent-assisted vs. fully independent agent, deliberately free text rather than a structured/enum field — that went unimplemented through Phases 1-4 and was added in Phase 5 since the comparison matrix is the first thing that needed it rendered; same narrow-update-method pattern as `differentiation_note` via `update_tool_agent_taxonomy`, and additionally folded into the public directory's client-side search string on `/tools/software` since Phase 0 required it be searchable, not just decorative), `screenshot_url`/`screenshot_is_product`/`screenshot_captured_at` (Phase 5 follow-up, rendered in a bordered sidebar box on the profile page — two write paths land on the same fields: `update_tool_screenshot` for a manually pasted external URL from the admin edit form, which clears `screenshot_captured_at` since a hand-pasted image has no known capture time; `set_tool_screenshot_capture` for an automated homepage capture, used by both `scripts/capture_tool_screenshots.py` (bulk backfill, run from the terminal) and the live "Recapture" button on the admin edit page — both go through `linklib/screenshots.py::capture_homepage` (Playwright + Chromium, fixed 1280×800 viewport) so a bulk backfill and a one-off recapture stay visually consistent, and both always set `screenshot_is_product=0` since automated capture is deliberately homepage-only, not attempting to auto-identify a real product screenshot. Captured images are stored on the persistent volume alongside `library.db` (`_SCREENSHOT_DIR`, not the Docker image's static/ dir) and served via `GET /tools/software/screenshot/{filename}` — same basename-only traversal guard as `/static/{filename}`. Profile-page caption is provenance-aware: "Product screenshot" when flagged, "Homepage screenshot, captured {date}" for an automated capture, "Homepage screenshot (no product screenshot available yet)" for a manually pasted URL with no capture date — never implies a homepage grab is the product) |
+| `tools` | The vendor directory on `/tools/software`. `scripts/seed_tools.py` is re-runnable, not one-shot: it adds any tool missing by URL and syncs `name`/`description` on existing rows when the script's copy changes (#113), via `Library.update_tool_content` — a narrow update that never touches `categories`/`advisor`/`promoted`/vendor/warm-intro fields, so admin edits made directly on the live site survive a re-run. Rendered publicly, one entry at a time, at `/tools/software/{slug}` (Software search overhaul Phase 2) via `get_tool_by_slug` — same only-approved-rows rule as `get_community_by_slug`. | `slug` (unique), `approved` (reader submissions wait for approval), `advisor`, `promoted`, `warm_intro_enabled` + `vendor_name`/`vendor_email` (the intro button needs both), `differentiation_note` (Phase 3 — free-text "how this differs from the competition," rendered on the profile page when non-empty; hand-written by Brian via a narrow `update_tool_differentiation`, deliberately kept off the general `update_tool` path so the Software bulk-edit panel — which resaves every field it knows about on every call — can never blank it out), `agent_taxonomy_note` (a Phase 0 decision — standalone feature vs. agent-assisted vs. fully independent agent, deliberately free text rather than a structured/enum field — that went unimplemented through Phases 1-4 and was added in Phase 5 since the comparison matrix is the first thing that needed it rendered; same narrow-update-method pattern as `differentiation_note` via `update_tool_agent_taxonomy`, and additionally folded into the public directory's client-side search string on `/tools/software` since Phase 0 required it be searchable, not just decorative), `agent_taxonomy_needs_verification` (added by the automated-research follow-up below — a per-tool confidence flag, same shape as `tool_features.needs_verification`, cleared automatically whenever a human saves the field through the admin edit form's `update_tool_agent_taxonomy`, and set fresh by an LLM-drafted note via `set_tool_agent_taxonomy_draft`; a dedicated `mark_tool_agent_taxonomy_verified` clears it without touching the text, mirroring the equivalent `tool_features` action), `screenshot_url`/`screenshot_is_product`/`screenshot_captured_at` (Phase 5 follow-up, rendered in a bordered sidebar box on the profile page — two write paths land on the same fields: `update_tool_screenshot` for a manually pasted external URL from the admin edit form, which clears `screenshot_captured_at` since a hand-pasted image has no known capture time; `set_tool_screenshot_capture` for an automated homepage capture, used by both `scripts/capture_tool_screenshots.py` (bulk backfill, run from the terminal) and the live "Recapture" button on the admin edit page — both go through `linklib/screenshots.py::capture_homepage` (Playwright + Chromium, fixed 1280×800 viewport) so a bulk backfill and a one-off recapture stay visually consistent, and both always set `screenshot_is_product=0` since automated capture is deliberately homepage-only, not attempting to auto-identify a real product screenshot. Captured images are stored on the persistent volume alongside `library.db` (`_SCREENSHOT_DIR`, not the Docker image's static/ dir) and served via `GET /tools/software/screenshot/{filename}` — same basename-only traversal guard as `/static/{filename}`. Profile-page caption is provenance-aware: "Product screenshot" when flagged, "Homepage screenshot, captured {date}" for an automated capture, "Homepage screenshot (no product screenshot available yet)" for a manually pasted URL with no capture date — never implies a homepage grab is the product) |
 | `tool_categories` | Controlled vocabulary of filter pills — can exist empty, unlike article tags which are purely usage-derived. Consolidated (Software search overhaul Phase 1) from a 21-tag ad hoc list, grown organically as tools were added, to a fixed, deliberately-designed 15-tag taxonomy — always shown alphabetized in the UI (`ORDER BY sort_order, name`, seeded with `sort_order` already alphabetical): `Accounting`, `BI/Analytics`, `Cloud/IT Spend`, `Equity Management`, `ERP`, `FP&A`, `Headcount Planning`, `Legal and Contracting`, `Neobanking`, `Procurement/Spend`, `Revenue`, `Revenue Operations`, `Tax Management`, `Travel Management`, `Treasury/Cash Management`. `scripts/migrate_software_tags.py` is the one-off, re-runnable migration that remapped every existing tool's `categories_json` from the old vocabulary and rebuilt this table — see its module docstring for the full old-to-new mapping. `_DEFAULT_TOOL_CATEGORIES`/`_DEFAULT_CATEGORY_DESCRIPTIONS` in `webapp/app.py` only matter for a fresh DB's first-time seed now that the migration has run. | `name` (unique), `sort_order` |
 | `tool_competitors` | Manually curated competitor cross-links between Software entries (Phase 3), rendered as "Closest competitors" on `/tools/software/{slug}`. One undirected edge per pair, normalized so `tool_id` is always the smaller id (`Library.add_tool_competitor` sorts before insert) — `UNIQUE(tool_id, competitor_id)` dedupes against that normalized form, and curating from either tool's `/admin/tools/{id}/edit` page links both directions. This table is the source of truth; `Library.suggest_tool_competitors` (shared-category count, most overlap first) is a separate read-only helper that only powers an admin-UI suggestion list — deliberately not a live auto-computed "competitors" feature, since the 15-tag taxonomy is broad enough that pure tag overlap surfaces plenty of non-competitors (see Phase 0's investigation). | `tool_id`, `competitor_id` (composite unique, normalized pair) |
 | `tool_features` | Per-feature standalone-vs-bundled availability for a Software entry (Phase 4a) — the data the Phase 5 comparison matrix reads. `standalone_available`/`bundled_only` are independent booleans (a feature can be sold both a la carte and folded into a tier, so both can be `1`). `needs_verification` reuses the exact confidence-flag shape from `linklib.enrich`'s community-listing autofill (`NEEDS_VERIFICATION`) rather than a new mechanism, but as a per-row bool rather than per-field, since one row is already one semantic unit. Manually admin-added rows default `needs_verification=0`; rows from the Phase 4b LLM enrichment pass default it to `1` (`source='llm_enrichment'`, `model` set) and stay flagged until an admin edits or explicitly marks them verified at `/admin/tools/{id}/features/{id}/edit` (or the one-click "Mark verified" action). No DB-level uniqueness on `(tool_id, feature_name)` — de-duplication across enrichment re-runs is the batch script's job, not a constraint. Enrichment cost is recorded through the existing generic `enrichment_cost` ledger (`article_id=NULL`), the same pattern `generate_tool_description`/`generate_community_profile` already use. | `tool_id`, `feature_name`, `needs_verification`, `source` (`'manual'`\|`'llm_enrichment'`) |
@@ -245,33 +245,70 @@ admin communities table today; the table isn't paginated, so the sentinel
 text is reachable with a browser find until/unless pagination is added later.
 Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
-**`scripts/enrich_tool_features.py`** (search overhaul Phase 4b) is a
-different shape from the `generate_*` web routes above: a standalone CLI
-batch job, not an admin-page button, since it's meant to run against many
-tools at once under Brian's own API credits rather than one row at a time.
-For each selected tool it makes one Claude call
-(`linklib/enrich.py::generate_tool_features`) grounded in the tool's
-homepage plus guessed `/pricing`, `/solutions`, and `/product` page fetches
-(`_fetch_feature_grounding` — reuses the existing single-page `extract.py`
-fetch three more times rather than a new capability, since bundling/tier
-info usually isn't on the homepage) to draft 5-10 `tool_features` rows:
-feature name, standalone-vs-bundled availability, and a per-feature
-`confident` flag that becomes `needs_verification` on write (`source=
-'llm_enrichment'`). Confidence here is a per-feature JSON boolean, not the
-string-sentinel pattern above — a feature row is already one semantic unit,
-so there's no per-field gap to flag inside it. Cost lands in the same
-`enrichment_cost` ledger, `article_id=NULL`, one row per tool processed.
-Re-running is safe: a tool that already has feature rows is skipped (not
-re-drafted) unless `--force`, and within a single run a feature name
-matching one already present for that tool (case-insensitive) is skipped as
-a duplicate rather than double-written. Requires explicit scope (`--tools`
-or `--limit`) — deliberately has no "run against everything" default, and
-`--dry-run` reports what would be drafted (and a projected full-catalog
-cost) without writing. Nothing written by this script is treated as
-reliable until the same admin review each `tool_features` row needs anyway
-(`/admin/tools/{id}/edit`'s Features section, or the fuller
-`/admin/tools/{id}/features/{id}/edit` page) — the Phase 5 comparison
-matrix is what actually starts reading this data, and only once reviewed.
+**Automated Software research (search overhaul automation follow-up)**
+replaced Phase 4b's guessed-path grounding with a real crawl and folded
+agent-taxonomy drafting into the same call. `linklib/enrich.py::
+_discover_nav_pages` fetches a tool's homepage and parses its own `<a>` nav
+links for ones whose text matches product/solution/platform/feature/agent/AI
+keywords (same-domain only, deduped, capped at 10) — a vendor's real
+Product or Agents page can live at any slug, so parsing the site's own
+navigation finds it where guessing `/pricing`, `/solutions`, `/product`
+(still the fallback when nav discovery finds nothing, e.g. a blocked fetch)
+often missed it entirely. `_fetch_feature_grounding` fetches the homepage
+plus up to 10 discovered pages (up to 10k characters each, 60k total) and
+feeds all of it to one Claude call, `generate_tool_features`, which now
+returns two things in one response: a whole-tool `agent_taxonomy_note` (3-6
+sentences, instructed to name every specific agent the content mentions —
+not just the first one noticed — and to say plainly when "AI-powered"
+language doesn't actually describe agentic behavior) and 8-15
+`tool_features` rows (feature name, standalone-vs-bundled availability, a
+substantive note). Both carry independent `confident`/`agent_taxonomy_
+confident` flags that become `needs_verification`/`agent_taxonomy_needs_
+verification` on write. This call runs at up to 4000 output tokens — richer
+drafts cost more per call (bounded well under $1 even at these settings
+given Opus 4.8 pricing), a deliberate tradeoff since profile quality matters
+more than the per-tool cost here. Two trigger points, both confirmed
+deliberately rather than picking one: (1) automatically, via `BackgroundTasks`,
+right after a tool is added — `webapp/app.py::_run_tool_research`, fired
+from both `/admin/tools/new` and the public `/tools/submit` form, so a
+slow/failed research call never blocks the add from completing; and (2)
+on demand, from a "Refresh AI research" button on `/admin/tools/{id}/edit`
+(`POST /admin/tools/{id}/research/refresh`), which runs the same
+`_run_tool_research` synchronously so the redirect can show a success/
+failure banner — for re-running after a vendor redesigns their site, or
+backfilling a tool added before this pipeline existed. Every field this
+writes lands via the needs-verification-flagged draft paths
+(`add_tool_feature`, `set_tool_agent_taxonomy_draft`) — never auto-
+confirmed; the Features section and a "Mark verified" action next to the
+Agent taxonomy field are how an admin reviews and clears the flag (or just
+edits the field directly, which clears it as a side effect via
+`update_tool_agent_taxonomy`). Cost lands in the same `enrichment_cost`
+ledger, `article_id=NULL`.
+
+**`scripts/enrich_tool_features.py`** (search overhaul Phase 4b, extended by
+the automation follow-up above) is a different shape from the `generate_*`
+web routes and the auto-trigger: a standalone CLI batch job, not an
+admin-page button or a per-add trigger, since it's meant to run against many
+tools at once under Brian's own API credits rather than one row at a time —
+this is what re-enriched the ~240-tool existing catalog once the real-crawl
+grounding replaced the original guessed-path approach. It calls the exact
+same `generate_tool_features` described above, so it drafts both feature
+rows and the agent-taxonomy note in one pass per tool. Re-running is safe: a
+tool that already has an `agent_taxonomy_note` is skipped (not re-drafted)
+unless `--force` — that's what marks a tool "already researched" by this
+pipeline now, not feature-row presence, since a tool drafted before this
+follow-up may carry old guessed-path features but no taxonomy note at all —
+and within a single run a feature name matching one already present for
+that tool (case-insensitive) is skipped as a duplicate rather than
+double-written. Requires explicit scope (`--tools` or `--limit`) —
+deliberately has no "run against everything" default, and `--dry-run`
+reports what would be drafted per feature and the agent-taxonomy note (and
+a projected full-catalog cost) without writing. Nothing written by this
+script is treated as reliable until the same admin review each row needs
+anyway (`/admin/tools/{id}/edit`'s Features section and Agent taxonomy
+field, or the fuller `/admin/tools/{id}/features/{id}/edit` page) — the
+Phase 5 comparison matrix is what actually starts reading this data, and
+only once reviewed.
 
 **Software admin rename + column picker/bulk edit (both tables).** The Software
 admin page moved from `/admin/tools` to `/admin/software` — a hard cutover, no

@@ -1054,6 +1054,13 @@ class Library:
             "ALTER TABLE tools ADD COLUMN screenshot_url TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN screenshot_is_product INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tools ADD COLUMN screenshot_captured_at TEXT NOT NULL DEFAULT ''",
+            # Automated agent-taxonomy research follow-up: agent_taxonomy_note
+            # can now be LLM-drafted (generate_tool_features, extended to
+            # return an agent_taxonomy summary alongside feature rows) as well
+            # as hand-typed, so it needs the same needs_verification tracking
+            # tool_features rows already have. Defaults to 0 (verified) so
+            # existing hand-typed notes aren't retroactively flagged.
+            "ALTER TABLE tools ADD COLUMN agent_taxonomy_needs_verification INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1972,10 +1979,40 @@ class Library:
 
     def update_tool_agent_taxonomy(self, tool_id: int, agent_taxonomy_note: str) -> None:
         """Narrow update for the admin full-edit form's agent-taxonomy field
-        (Phase 5) — same bulk-edit-safety reasoning as update_tool_differentiation."""
+        (Phase 5) — same bulk-edit-safety reasoning as update_tool_differentiation.
+        A human editing/saving this field is itself a confirmation, so this
+        always clears agent_taxonomy_needs_verification — same convention as
+        editing a tool_features row implying review."""
         self.conn.execute(
-            "UPDATE tools SET agent_taxonomy_note=?, updated_at=? WHERE id=?",
+            "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
+            "updated_at=? WHERE id=?",
             (agent_taxonomy_note.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def set_tool_agent_taxonomy_draft(self, tool_id: int, agent_taxonomy_note: str,
+                                      needs_verification: int = 1) -> None:
+        """Records an LLM-drafted agent-taxonomy summary (automated research —
+        either the auto-run-on-add background task or the on-demand refresh)
+        as unconfirmed by default. Only writes when the tool doesn't already
+        have a note, unless the caller explicitly wants to overwrite (the
+        on-demand "Refresh" action passes needs_verification the same way but
+        the caller decides whether to call this at all — see the refresh
+        route, which always overwrites; the auto-on-add path only calls this
+        for a brand-new tool that has nothing yet)."""
+        self.conn.execute(
+            "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=?, "
+            "updated_at=? WHERE id=?",
+            (agent_taxonomy_note.strip(), needs_verification, _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def mark_tool_agent_taxonomy_verified(self, tool_id: int) -> None:
+        """One-click "Mark verified" action, same as the equivalent
+        tool_features action — clears the flag without touching the text."""
+        self.conn.execute(
+            "UPDATE tools SET agent_taxonomy_needs_verification=0, updated_at=? WHERE id=?",
+            (_now(), tool_id),
         )
         self.conn.commit()
 

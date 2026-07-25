@@ -7390,7 +7390,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
 
 
 @app.post("/tools/submit")
-async def tools_submit(request: Request):
+async def tools_submit(request: Request, background_tasks: BackgroundTasks):
     if not _is_member(request):
         return _login_redirect(request)
     form = await request.form()
@@ -7404,7 +7404,7 @@ async def tools_submit(request: Request):
     from linklib.email_utils import send_notification_email, send_tool_submission_confirmation_email, default_notify_email
     lib = _lib()
     try:
-        lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0)
+        tool_id = lib.add_tool(name, description, url, categories, submitted_by=submitted_by, approved=0)
         notify_to = os.environ.get("LINKLIB_CONTACT_EMAIL") or default_notify_email()
         if notify_to:
             _send_email_safely(
@@ -7424,6 +7424,7 @@ async def tools_submit(request: Request):
         )
     finally:
         lib.close()
+    background_tasks.add_task(_run_tool_research, tool_id)
     return RedirectResponse("/tools/submit?submitted=1", status_code=303)
 
 
@@ -9912,8 +9913,62 @@ def admin_tools_new(request: Request):
     return HTMLResponse(_page("Add Software—CFO Toolbox", "", body, authed=True))
 
 
+def _run_tool_research(tool_id: int) -> bool:
+    """Automated feature + agent-taxonomy research for one Software entry —
+    the shared drafting logic behind both trigger points confirmed for the
+    search-overhaul automation follow-up: fired off-request via
+    BackgroundTasks right after a tool is added (admin add-form and the
+    public /tools/submit form), and re-run synchronously from the "Refresh AI
+    research" admin button (its return value drives that route's success/
+    failure banner; BackgroundTasks callers just ignore it). Mirrors the
+    other _*_background jobs here (off-request, best-effort, DB-open-per-call)
+    — a slow or failed research call never blocks the tool from going live.
+    Every field it writes lands via the needs_verification-flagged draft
+    paths (add_tool_feature, set_tool_agent_taxonomy_draft), never auto-
+    confirmed."""
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            return False
+        from linklib import enrich as enrich_mod
+        result = enrich_mod.generate_tool_features(tool["name"], tool["url"], tool.get("description", ""))
+        if result is None:
+            return False
+        existing = {f["feature_name"].strip().lower() for f in lib.list_tool_features(tool_id)}
+        wrote_anything = False
+        for draft in result.features:
+            if draft.feature_name.strip().lower() in existing:
+                continue
+            existing.add(draft.feature_name.strip().lower())
+            lib.add_tool_feature(
+                tool_id, draft.feature_name,
+                standalone_available=int(draft.standalone_available),
+                bundled_only=int(draft.bundled_only),
+                notes=draft.notes, source_url=draft.source_url,
+                needs_verification=int(draft.needs_verification),
+                source="llm_enrichment", model=result.model,
+            )
+            wrote_anything = True
+        if result.agent_taxonomy_note.strip():
+            lib.set_tool_agent_taxonomy_draft(
+                tool_id, result.agent_taxonomy_note,
+                needs_verification=int(result.agent_taxonomy_needs_verification),
+            )
+            wrote_anything = True
+        if wrote_anything or result.cost_usd:
+            lib.record_enrichment_cost(None, result.model, result.input_tokens,
+                                       result.output_tokens, result.cost_usd)
+        backup.maybe_backup(DB_PATH)
+        return True
+    except Exception:
+        return False
+    finally:
+        lib.close()
+
+
 @app.post("/admin/tools/new")
-async def admin_tools_new_submit(request: Request):
+async def admin_tools_new_submit(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
@@ -9930,13 +9985,14 @@ async def admin_tools_new_submit(request: Request):
         raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
     try:
-        lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
-                     promoted=promoted, vendor_email=vendor_email,
-                     warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
+        tool_id = lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
+                                promoted=promoted, vendor_email=vendor_email,
+                                warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
     finally:
         lib.close()
+    background_tasks.add_task(_run_tool_research, tool_id)
     return RedirectResponse("/tools/software", status_code=303)
 
 
@@ -9965,7 +10021,7 @@ def admin_tools_reject(request: Request, tool_id: int):
 
 
 @app.get("/admin/tools/{tool_id}/edit", response_class=HTMLResponse)
-def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = ""):
+def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = "", research_refreshed: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -10062,6 +10118,28 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
                                    'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture a screenshot—'
                                    'the site may block headless browsers or timed out. Try again, or paste a URL manually above.</p>')
 
+    _research_banner_html = ""
+    if research_refreshed == "1":
+        _research_banner_html = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
+                                 'padding:10px 16px;font-size:14px;margin:0 0 16px;">AI research refreshed—review the '
+                                 'drafted feature rows and agent taxonomy below before marking them verified.</p>')
+    elif research_refreshed == "0":
+        _research_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                                 'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t complete the research pass—'
+                                 'the site may block fetches, or the Anthropic API key/SDK is unavailable. Try again later.</p>')
+
+    _taxonomy_verify_badge = ""
+    _taxonomy_verify_action = ""
+    if tool.get("agent_taxonomy_needs_verification"):
+        _taxonomy_verify_badge = (
+            '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
+            'background:#fef3c7;color:#92400e;border-radius:5px;padding:2px 7px;margin-left:8px;">Needs verification</span>'
+        )
+        _taxonomy_verify_action = (
+            f'<form method="post" action="/admin/tools/{tool_id}/agent-taxonomy/verify" style="margin-top:8px;">'
+            f'<button type="submit" class="tool-admin-btn">Mark verified</button></form>'
+        )
+
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
         _cap_note = (f"Captured {tool['screenshot_captured_at'][:10]}" if tool.get("screenshot_captured_at")
@@ -10143,10 +10221,11 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
       placeholder="Placeholder for now—hand-written copy, not auto-drafted.">{_esc(tool.get('differentiation_note') or '')}</textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(optional—standalone feature, agent-assisted, or fully independent agent; searchable)</span></label>
-    <textarea name="agent_taxonomy_note" maxlength="400" rows="2"
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(optional—standalone feature, agent-assisted, or fully independent agent; searchable)</span>{_taxonomy_verify_badge}</label>
+    <textarea name="agent_taxonomy_note" maxlength="1200" rows="4"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
+    {_taxonomy_verify_action}
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(optional—shown in a bordered box on the profile page)</span></label>
@@ -10163,6 +10242,15 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
     <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">AI research</h2>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Crawls the vendor's homepage plus its real Product/Solutions-type nav pages to draft the Agent taxonomy note above and the Feature rows below in one pass—runs automatically when a tool is added; use this to re-run it (e.g. after a vendor redesigns their site).</p>
+  {_research_banner_html}
+  <form method="post" action="/admin/tools/{tool_id}/research/refresh" style="margin-top:4px;">
+    <button type="submit" class="tool-admin-btn">&#129504; Refresh AI research</button>
+  </form>
+</div>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Screenshot</h2>
@@ -10285,6 +10373,38 @@ def admin_tools_screenshot_recapture(request: Request, tool_id: int):
         lib.close()
     msg = "screenshot_captured=1" if ok else "screenshot_captured=0"
     return RedirectResponse(f"/admin/tools/{tool_id}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/research/refresh")
+def admin_tools_research_refresh(request: Request, tool_id: int):
+    """On-demand re-run of _run_tool_research — same drafting logic as the
+    automatic on-add trigger, run synchronously here (a manual, occasional
+    admin action) so the redirect banner can report success/failure."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    tool_exists = bool(lib.get_tool(tool_id))
+    lib.close()
+    if not tool_exists:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    ok = _run_tool_research(tool_id)
+    msg = "research_refreshed=1" if ok else "research_refreshed=0"
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/agent-taxonomy/verify")
+def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
+    """One-click "Mark verified" for the agent-taxonomy note, mirroring the
+    equivalent tool_features action — clears the needs_verification flag
+    without touching the text itself."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.mark_tool_agent_taxonomy_verified(tool_id)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/competitors/add")

@@ -26,6 +26,7 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-sonnet-4-6":         {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_read": 0.30},
     "claude-sonnet-5":           {"input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_read": 0.20},  # intro pricing through 2026-08-31; becomes $3/$15 after
     "claude-opus-4-8":           {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
+    "claude-opus-5":             {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
 }
 
 _FALLBACK = MODEL_PRICING["claude-sonnet-4-6"]
