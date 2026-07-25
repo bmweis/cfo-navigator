@@ -12,7 +12,7 @@ context on every turn rather than retrieve a subset of it.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .db import Library
 from .enrich import NEEDS_VERIFICATION

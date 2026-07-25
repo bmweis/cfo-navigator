@@ -45,7 +45,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
