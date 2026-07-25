@@ -1038,18 +1038,22 @@ class Library:
             # (ALL_TOOLS in tools_directory) so it's searchable, not just
             # decorative, same requirement as everything else on that page.
             "ALTER TABLE tools ADD COLUMN agent_taxonomy_note TEXT NOT NULL DEFAULT ''",
-            # Profile-page screenshot (Phase 5 follow-up). Hotlinked external
-            # URL, same pattern as the vendor-logo <img src> already used
-            # elsewhere in this codebase — no new storage/hosting
-            # infrastructure. screenshot_is_product distinguishes an actual
-            # product UI shot from a homepage-only fallback, so the profile
-            # page can caption honestly ("no product screenshot available
-            # yet") rather than imply a homepage grab is the product.
-            # Auto-capturing screenshots (e.g. via Playwright) is a real
-            # follow-up idea but out of scope here — it needs a storage/
-            # hosting decision this field doesn't make for you.
+            # Profile-page screenshot (Phase 5 follow-up). Two provenances
+            # write to the same fields: a manually pasted external URL
+            # (update_tool_screenshot — clears screenshot_captured_at, since
+            # we don't know when a hand-pasted image was taken), or an
+            # automated homepage capture (set_tool_screenshot_capture —
+            # scripts/capture_tool_screenshots.py's bulk backfill, or the
+            # live "Recapture" admin button; both go through
+            # linklib.screenshots.capture_homepage so every captured shot
+            # uses the same fixed viewport). screenshot_is_product
+            # distinguishes an actual product UI shot from a homepage-only
+            # capture, so the profile page can caption honestly rather than
+            # imply a homepage grab is the product; automated captures are
+            # always homepage-only by design, so they never set this flag.
             "ALTER TABLE tools ADD COLUMN screenshot_url TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN screenshot_is_product INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tools ADD COLUMN screenshot_captured_at TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1976,11 +1980,29 @@ class Library:
         self.conn.commit()
 
     def update_tool_screenshot(self, tool_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
-        """Narrow update for the admin full-edit form's screenshot fields —
-        same bulk-edit-safety reasoning as update_tool_differentiation."""
+        """Narrow update for the admin full-edit form's manual screenshot
+        fields — same bulk-edit-safety reasoning as update_tool_differentiation.
+        Clears screenshot_captured_at: a hand-pasted URL has no known capture
+        time, and leaving a stale timestamp on it would misrepresent it as a
+        fresh automated capture."""
         self.conn.execute(
-            "UPDATE tools SET screenshot_url=?, screenshot_is_product=?, updated_at=? WHERE id=?",
+            "UPDATE tools SET screenshot_url=?, screenshot_is_product=?, screenshot_captured_at='', "
+            "updated_at=? WHERE id=?",
             (screenshot_url.strip(), screenshot_is_product, _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def set_tool_screenshot_capture(self, tool_id: int, screenshot_url: str) -> None:
+        """Records an automated homepage capture — used by both
+        scripts/capture_tool_screenshots.py and the live "Recapture" admin
+        button, so a bulk backfill and a one-off manual recapture leave the
+        row in an identical state. Always homepage-only (screenshot_is_product=0)
+        by design; timestamp is set here, not passed in, so every capture path
+        stamps the actual write time."""
+        self.conn.execute(
+            "UPDATE tools SET screenshot_url=?, screenshot_is_product=0, screenshot_captured_at=?, "
+            "updated_at=? WHERE id=?",
+            (screenshot_url.strip(), _now(), _now(), tool_id),
         )
         self.conn.commit()
 

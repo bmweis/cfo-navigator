@@ -7,6 +7,7 @@ anthropic>=0.25
 python-multipart>=0.0.9
 sqlite-vec>=0.1.6
 openai>=1.50
+playwright>=1.45
 
 # Optional — higher-quality full-text extraction
 # pip install trafilatura
