@@ -44,6 +44,18 @@ def _select_tools(lib: Library, names: str, limit: int) -> list[dict]:
         missing = wanted - found
         if missing:
             print(f"WARNING: no approved tool found for: {', '.join(sorted(missing))}", file=sys.stderr)
+        # A name matching more than one approved row means duplicate Software
+        # entries exist for it — surface that loudly rather than silently
+        # drafting (and paying for) features twice. Not this script's job to
+        # dedupe; that's the admin table's duplicate-blocking feature.
+        name_counts: dict[str, int] = {}
+        for t in selected:
+            name_counts[t["name"].lower()] = name_counts.get(t["name"].lower(), 0) + 1
+        dupes = sorted(n for n, c in name_counts.items() if c > 1)
+        if dupes:
+            print(f"WARNING: multiple approved rows share these names — each will be drafted "
+                  f"separately: {', '.join(dupes)}. Dedupe in the admin table first if that's "
+                  f"not intended.", file=sys.stderr)
         return selected
     if limit:
         return all_tools[:limit]
@@ -87,10 +99,10 @@ def main() -> int:
                 print(f"[{t['name']}] already has {len(existing)} feature(s) — skipping (use --force to redraft)")
                 continue
 
-            print(f"[{t['name']}] drafting features…", end=" ", flush=True)
+            print(f"[{t['name']}] drafting features…", flush=True)
             result = enrich_mod.generate_tool_features(t["name"], t["url"], t.get("description", ""), model=args.model)
             if result is None:
-                print("FAILED (SDK/key unavailable or the call errored)")
+                print("  FAILED (SDK/key unavailable or the call errored)")
                 total_failed += 1
                 continue
 
@@ -102,7 +114,20 @@ def main() -> int:
                     continue
                 existing.add(draft.feature_name.strip().lower())
                 new_count += 1
-                if not args.dry_run:
+                if args.dry_run:
+                    # Print each drafted feature so a dry-run is actually
+                    # reviewable for accuracy, not just an aggregate count —
+                    # that's the whole point of running it dry first.
+                    avail = []
+                    if draft.standalone_available:
+                        avail.append("standalone")
+                    if draft.bundled_only:
+                        avail.append("bundled-only")
+                    avail_label = "+".join(avail) or "availability unset"
+                    verify_note = "" if not draft.needs_verification else " [needs verification]"
+                    notes_note = f" — {draft.notes}" if draft.notes else ""
+                    print(f"    - {draft.feature_name}: {avail_label}{notes_note}{verify_note}")
+                else:
                     lib.add_tool_feature(
                         t["id"], draft.feature_name,
                         standalone_available=int(draft.standalone_available),
@@ -120,7 +145,7 @@ def main() -> int:
             total_features += new_count
             total_skipped_dupe += dupe_count
             low_conf_note = " (low confidence — thin/no page content)" if result.low_confidence else ""
-            print(f"{new_count} feature(s){low_conf_note}, ${result.cost_usd:.4f}"
+            print(f"  {new_count} feature(s){low_conf_note}, ${result.cost_usd:.4f}"
                   + (f", {dupe_count} dupe(s) skipped" if dupe_count else ""))
             time.sleep(0.5)  # light rate-limit courtesy, this is a small interactive batch not a bulk job
 
