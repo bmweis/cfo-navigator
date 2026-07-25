@@ -9687,6 +9687,7 @@ def admin_tools_edit(request: Request, tool_id: int):
             t for t in lib.list_tools(approved_only=True)
             if t["id"] != tool_id and t["id"] not in {c["id"] for c in competitors}
         ] if tool else []
+        features = lib.list_tool_features(tool_id) if tool else []
     finally:
         lib.close()
     if not tool:
@@ -9728,6 +9729,38 @@ def admin_tools_edit(request: Request, tool_id: int):
     _other_tools_options_html = "".join(
         f'<option value="{t["id"]}">{_esc(t["name"])}</option>' for t in other_tools
     )
+
+    def _feature_row(feat: dict) -> str:
+        avail_bits = []
+        if feat["standalone_available"]:
+            avail_bits.append("Standalone")
+        if feat["bundled_only"]:
+            avail_bits.append("Bundled only")
+        avail_label = " + ".join(avail_bits) or "Availability unset"
+        verify_badge = (
+            '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
+            'background:#fef3c7;color:#92400e;border-radius:5px;padding:2px 7px;">Needs verification</span>'
+            if feat["needs_verification"] else ""
+        )
+        notes_line = f'<div style="font-size:12px;color:var(--muted);margin-top:2px;">{_esc(feat["notes"])}</div>' if feat["notes"] else ""
+        verify_action = ""
+        if feat["needs_verification"]:
+            verify_action = (
+                f'<form method="post" action="/admin/tools/{tool_id}/features/{feat["id"]}/verify" style="margin:0;">'
+                f'<button type="submit" class="tool-admin-btn">Mark verified</button></form>'
+            )
+        return (f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 0;'
+                f'border-top:1px solid var(--line);">'
+                f'<div style="min-width:0;">'
+                f'<div style="font-size:14px;font-weight:500;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+                f'{_esc(feat["feature_name"])} {verify_badge}</div>'
+                f'<div style="font-size:12px;color:var(--muted);">{avail_label}</div>{notes_line}</div>'
+                f'<div style="display:flex;gap:6px;flex-shrink:0;">{verify_action}'
+                f'<a href="/admin/tools/{tool_id}/features/{feat["id"]}/edit" class="tool-admin-btn">Edit</a>'
+                f'<form method="post" action="/admin/tools/{tool_id}/features/{feat["id"]}/delete" style="margin:0;">'
+                f'<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button></form></div></div>')
+
+    _features_list_html = "".join(_feature_row(f) for f in features)
 
     body = f"""<div class="page page-form">
 <h1>Edit software</h1>
@@ -9822,6 +9855,29 @@ def admin_tools_edit(request: Request, tool_id: int):
     </form>
   </div>
 </div>
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Features</h2>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Standalone-vs-bundled availability per feature — feeds the Phase 5 comparison matrix. Rows flagged "Needs verification" came from the LLM enrichment pass and haven't been confirmed yet.</p>
+
+  {_features_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No features added yet.</p>'}
+
+  <form method="post" action="/admin/tools/{tool_id}/features/add" style="margin-top:20px;display:grid;gap:10px;max-width:480px;">
+    <input name="feature_name" required maxlength="200" placeholder="Feature name"
+      style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+        <input type="checkbox" name="standalone_available" value="1"> Standalone available
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+        <input type="checkbox" name="bundled_only" value="1"> Bundled only
+      </label>
+    </div>
+    <input name="notes" maxlength="300" placeholder="Notes (optional, e.g. tier it's on)"
+      style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;">
+    <div><button type="submit" class="tool-admin-btn">+ Add feature</button></div>
+  </form>
+</div>
 </div>
 <style>
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:5px 12px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
@@ -9890,6 +9946,134 @@ def admin_tools_competitors_remove(request: Request, tool_id: int, competitor_id
     lib = _lib()
     try:
         lib.remove_tool_competitor(tool_id, competitor_id)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/features/add")
+async def admin_tools_features_add(request: Request, tool_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    feature_name = (form.get("feature_name") or "").strip()
+    standalone_available = 1 if form.get("standalone_available") == "1" else 0
+    bundled_only = 1 if form.get("bundled_only") == "1" else 0
+    notes = (form.get("notes") or "").strip()
+    lib = _lib()
+    try:
+        if feature_name and lib.get_tool(tool_id):
+            lib.add_tool_feature(tool_id, feature_name, standalone_available, bundled_only, notes)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+
+
+@app.get("/admin/tools/{tool_id}/features/{feature_id}/edit", response_class=HTMLResponse)
+def admin_tools_features_edit(request: Request, tool_id: int, feature_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        feature = lib.get_tool_feature(feature_id)
+    finally:
+        lib.close()
+    if not tool or not feature or feature["tool_id"] != tool_id:
+        raise HTTPException(status_code=404, detail="Feature not found")
+
+    body = f"""<div class="page page-form">
+<h1>Edit feature</h1>
+<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;"><a href="/admin/tools/{tool_id}/edit">&larr; {_esc(tool['name'])}</a></p>
+<form method="post" action="/admin/tools/{tool_id}/features/{feature_id}/edit" style="display:grid;gap:20px;">
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Feature name *</label>
+    <input name="feature_name" required maxlength="200" value="{_esc(feature['feature_name'])}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div style="display:flex;gap:20px;flex-wrap:wrap;">
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="standalone_available" value="1"{'checked' if feature['standalone_available'] else ''}> Standalone available
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="bundled_only" value="1"{'checked' if feature['bundled_only'] else ''}> Bundled only
+    </label>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Notes</label>
+    <input name="notes" maxlength="300" value="{_esc(feature['notes'])}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Source URL</label>
+    <input name="source_url" type="url" maxlength="500" value="{_esc(feature['source_url'])}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" name="needs_verification" value="1"{'checked' if feature['needs_verification'] else ''}> Still needs verification
+    </label>
+    {f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted by {_esc(feature["model"])} ({_esc(feature["source"])}).</p>' if feature.get('source') == 'llm_enrichment' else ''}
+  </div>
+  <div>
+    <button type="submit" class="btn">Save changes</button>
+    <a href="/admin/tools/{tool_id}/edit" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page(f"Edit feature—{_esc(tool['name'])}", "", body, authed=True))
+
+
+@app.post("/admin/tools/{tool_id}/features/{feature_id}/edit")
+async def admin_tools_features_edit_submit(request: Request, tool_id: int, feature_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    feature_name = (form.get("feature_name") or "").strip()
+    standalone_available = 1 if form.get("standalone_available") == "1" else 0
+    bundled_only = 1 if form.get("bundled_only") == "1" else 0
+    notes = (form.get("notes") or "").strip()
+    source_url = (form.get("source_url") or "").strip()
+    needs_verification = 1 if form.get("needs_verification") == "1" else 0
+    if not feature_name:
+        raise HTTPException(status_code=400, detail="Feature name is required.")
+    lib = _lib()
+    try:
+        feature = lib.get_tool_feature(feature_id)
+        if not feature or feature["tool_id"] != tool_id:
+            raise HTTPException(status_code=404, detail="Feature not found")
+        lib.update_tool_feature(feature_id, feature_name, standalone_available, bundled_only,
+                                notes, source_url, needs_verification)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/features/{feature_id}/verify")
+def admin_tools_features_verify(request: Request, tool_id: int, feature_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        feature = lib.get_tool_feature(feature_id)
+        if feature and feature["tool_id"] == tool_id:
+            lib.update_tool_feature(feature_id, feature["feature_name"], feature["standalone_available"],
+                                    feature["bundled_only"], feature["notes"], feature["source_url"],
+                                    needs_verification=0)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/features/{feature_id}/delete")
+def admin_tools_features_delete(request: Request, tool_id: int, feature_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        feature = lib.get_tool_feature(feature_id)
+        if feature and feature["tool_id"] == tool_id:
+            lib.delete_tool_feature(feature_id)
     finally:
         lib.close()
     return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
