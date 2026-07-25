@@ -5261,10 +5261,29 @@ def tools_software_profile(request: Request, slug: str):
     lib = _lib()
     try:
         tool = lib.get_tool_by_slug(slug)
+        competitors = lib.list_tool_competitors(tool["id"]) if tool else []
     finally:
         lib.close()
     if not tool:
         raise HTTPException(status_code=404, detail="Tool not found")
+
+    competitors_block = ""
+    if competitors:
+        comp_links = "".join(
+            f'<a href="/tools/software/{_esc(c["slug"])}" class="tool-cat" style="text-decoration:none;">{_esc(c["name"])}</a>'
+            for c in competitors
+        )
+        competitors_block = f"""<div style="margin-bottom:24px;">
+  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Closest competitors</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;">{comp_links}</div>
+</div>"""
+
+    differentiation_block = ""
+    if (tool.get("differentiation_note") or "").strip():
+        differentiation_block = f"""<div style="margin-bottom:24px;">
+  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">How this differs</div>
+  <p style="margin:0;color:#3a352e;line-height:1.6;">{_esc(tool['differentiation_note'])}</p>
+</div>"""
 
     featured_badge = (
         '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
@@ -5406,6 +5425,8 @@ function submitIntroForm() {{
 {f'<p style="margin:8px 0 20px;"><a href="{_esc(tool["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if tool.get('url') else ''}
 <p style="font-size:15px;color:#3a352e;margin:0 0 20px;line-height:1.6;">{_esc(tool['description'])}</p>
 <div class="tool-cats" style="margin-bottom:24px;">{cats}</div>
+{differentiation_block}
+{competitors_block}
 {f'<div style="margin-bottom:24px;">{intro_btn}</div>' if intro_btn else ''}
 {f'<p style="font-size:13px;color:var(--muted);margin:0 0 20px;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}
 </div>
@@ -9660,6 +9681,12 @@ def admin_tools_edit(request: Request, tool_id: int):
     try:
         tool = lib.get_tool(tool_id)
         categories = lib.list_tool_categories()
+        competitors = lib.list_tool_competitors(tool_id) if tool else []
+        suggestions = lib.suggest_tool_competitors(tool_id) if tool else []
+        other_tools = [
+            t for t in lib.list_tools(approved_only=True)
+            if t["id"] != tool_id and t["id"] not in {c["id"] for c in competitors}
+        ] if tool else []
     finally:
         lib.close()
     if not tool:
@@ -9672,6 +9699,35 @@ def admin_tools_edit(request: Request, tool_id: int):
     if tool.get("updated_at") and tool["updated_at"] != tool["created_at"]:
         meta_parts.append(f"Last edited {tool['updated_at'][:10]}")
     meta_line = (" &middot; ".join(meta_parts)) if meta_parts else ""
+
+    def _competitor_row(c: dict) -> str:
+        return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;'
+                f'border-top:1px solid var(--line);">'
+                f'<a href="/admin/tools/{c["id"]}/edit" style="font-size:14px;font-weight:500;color:var(--ink);">{_esc(c["name"])}</a>'
+                f'<form method="post" action="/admin/tools/{tool_id}/competitors/{c["id"]}/remove" style="margin:0;">'
+                f'<button type="submit" class="tool-admin-btn tool-admin-del">Remove</button></form></div>')
+
+    def _suggestion_row(s: dict) -> str:
+        cats_label = ", ".join(_esc(x) for x in s["categories"])
+        return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;">'
+                f'<span style="font-size:14px;">{_esc(s["name"])} '
+                f'<span style="color:var(--muted);font-size:12px;">({cats_label})</span></span>'
+                f'<form method="post" action="/admin/tools/{tool_id}/competitors/add" style="margin:0;">'
+                f'<input type="hidden" name="competitor_id" value="{s["id"]}">'
+                f'<button type="submit" class="tool-admin-btn">+ Add</button></form></div>')
+
+    _competitors_list_html = "".join(_competitor_row(c) for c in competitors)
+    _suggestions_block_html = ""
+    if suggestions:
+        _suggestions_block_html = (
+            '<div style="margin-top:20px;">'
+            '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
+            'letter-spacing:.07em;margin-bottom:8px;">Suggested—shares a tag</div>'
+            + "".join(_suggestion_row(s) for s in suggestions) + "</div>"
+        )
+    _other_tools_options_html = "".join(
+        f'<option value="{t["id"]}">{_esc(t["name"])}</option>' for t in other_tools
+    )
 
     body = f"""<div class="page page-form">
 <h1>Edit software</h1>
@@ -9737,11 +9793,41 @@ def admin_tools_edit(request: Request, tool_id: int):
     </div>
   </div>
   <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">How this differs from the competition <span style="font-weight:400;color:var(--muted);">(optional—shown on the profile page)</span></label>
+    <textarea name="differentiation_note" maxlength="600" rows="3"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="Placeholder for now—hand-written copy, not auto-drafted.">{_esc(tool.get('differentiation_note') or '')}</textarea>
+  </div>
+  <div>
     <button type="submit" class="btn">Save changes</button>
     <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Competitors</h2>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Closest competitors" on {_esc(tool['name'])}'s profile page. Curating from either tool's edit page links both directions.</p>
+
+  {_competitors_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No competitors curated yet.</p>'}
+
+  {_suggestions_block_html}
+
+  <div style="margin-top:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <form method="post" action="/admin/tools/{tool_id}/competitors/add" style="display:flex;gap:10px;align-items:center;">
+      <select name="competitor_id" style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;min-width:220px;">
+        <option value="">Add a competitor by name&hellip;</option>
+        {_other_tools_options_html}
+      </select>
+      <button type="submit" class="tool-admin-btn">+ Add</button>
+    </form>
+  </div>
 </div>
+</div>
+<style>
+.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:5px 12px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
+.tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
+.tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
+</style>
 <script>{_GENERATE_DESC_JS}</script>"""
     return HTMLResponse(_page(f"Edit {_esc(tool['name'])}—CFO Toolbox", "", body, authed=True))
 
@@ -9760,6 +9846,7 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
     vendor_email = (form.get("vendor_email") or "").strip()
     warm_intro_enabled = 1 if form.get("warm_intro_enabled") == "1" else 0
     vendor_name = (form.get("vendor_name") or "").strip()
+    differentiation_note = (form.get("differentiation_note") or "").strip()
     if not (name and url and description):
         raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
@@ -9767,11 +9854,45 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
         lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
                         promoted=promoted, vendor_email=vendor_email,
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name)
+        lib.update_tool_differentiation(tool_id, differentiation_note)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
     finally:
         lib.close()
     return RedirectResponse("/tools/software", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/competitors/add")
+async def admin_tools_competitors_add(request: Request, tool_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    try:
+        competitor_id = int(form.get("competitor_id") or "")
+    except (TypeError, ValueError):
+        return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+    lib = _lib()
+    try:
+        if lib.get_tool(tool_id) and lib.get_tool(competitor_id):
+            try:
+                lib.add_tool_competitor(tool_id, competitor_id)
+            except ValueError:
+                pass
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/competitors/{competitor_id}/remove")
+def admin_tools_competitors_remove(request: Request, tool_id: int, competitor_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.remove_tool_competitor(tool_id, competitor_id)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/delete")
