@@ -4,7 +4,9 @@ tool form's "Generate" description button.
 
 Covers: linklib.enrich.generate_community_listing (unit, mocked Claude call),
 the /admin/tools/communities/generate-listing route, and the NEEDS_VERIFICATION
-sentinel never leaking to a public-facing page (webapp/app.py::_public_community).
+sentinel rendering visibly (not hidden) on public-facing pages, flagged with the
+"comm-verify" styling rather than looking like a confirmed value
+(webapp/app.py::_public_community, _verify_html).
 """
 import pathlib
 import sys
@@ -229,7 +231,11 @@ def test_generate_listing_route_503_when_unavailable(env, monkeypatch):
     assert r.json()["ok"] is False
 
 
-def test_needs_verification_sentinel_never_reaches_public_directory(env):
+def test_needs_verification_sentinel_renders_flagged_on_public_directory(env):
+    """Per Brian's call: unresearched fields render visibly with a "Needs
+    verification" flag on public pages now, instead of being hidden — a
+    visitor should see the flag, but styled distinctly (comm-verify) from a
+    real confirmed value (comm-cost), never looking like a guessed fact."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     lib.add_community(
@@ -243,7 +249,12 @@ def test_needs_verification_sentinel_never_reaches_public_directory(env):
     c = _client(env)
     r = c.get("/tools/communities")
     assert r.status_code == 200
-    assert enrich.NEEDS_VERIFICATION not in r.text
+    # The directory card is JS-templated client-side from an embedded JSON
+    # blob, so a plain (non-browser) request can't see the rendered DOM —
+    # what it can confirm is that _public_community no longer blanks the
+    # sentinel out of that JSON before it reaches the page.
+    assert enrich.NEEDS_VERIFICATION in r.text
+    assert 'function commVerify' in r.text  # the JS helper that renders the flag from it
 
 
 def test_needs_verification_sentinel_visible_on_admin_table(env):
@@ -262,3 +273,68 @@ def test_needs_verification_sentinel_visible_on_admin_table(env):
     r = c.get("/admin/tools/communities")
     assert r.status_code == 200
     assert "need" in r.text and "verification" in r.text
+
+
+def test_needs_verification_sentinel_flagged_on_profile_page(env):
+    """The server-rendered profile page (unlike the JS-templated directory
+    card) lets us assert the actual output: the sentinel renders inside the
+    comm-verify flag, not the comm-cost badge a confirmed cost_band gets."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    community_id = lib.add_community(
+        "Gap Community", "https://example.com", enrich.NEEDS_VERIFICATION,
+        enrich.NEEDS_VERIFICATION, [], access=enrich.NEEDS_VERIFICATION,
+        format=enrich.NEEDS_VERIFICATION, reach=enrich.NEEDS_VERIFICATION,
+        sponsorship_type=enrich.NEEDS_VERIFICATION, approved=1,
+    )
+    slug = lib.get_community(community_id)["slug"]
+    lib.close()
+
+    c = _client(env)
+    r = c.get(f"/tools/communities/{slug}")
+    assert r.status_code == 200
+    assert '<span class="comm-verify">Needs verification</span>' in r.text
+    assert '<span class="comm-cost">Needs verification</span>' not in r.text  # never the confirmed-value badge
+
+
+def test_needs_verification_sentinel_flagged_on_compare_page(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    gap_id = lib.add_community(
+        "Gap Community", "https://example.com", enrich.NEEDS_VERIFICATION,
+        enrich.NEEDS_VERIFICATION, [], access=enrich.NEEDS_VERIFICATION,
+        format=enrich.NEEDS_VERIFICATION, reach=enrich.NEEDS_VERIFICATION,
+        sponsorship_type=enrich.NEEDS_VERIFICATION, approved=1,
+    )
+    confirmed_id = lib.add_community(
+        "Confirmed Community", "https://example.com/two", "CFOs at Series B+",
+        "Free", [], access="Open", approved=1,
+    )
+    lib.close()
+
+    c = _client(env)
+    r = c.get(f"/tools/communities/compare?ids={gap_id},{confirmed_id}")
+    assert r.status_code == 200
+    assert '<span class="comm-verify"' in r.text
+    assert 'class="comm-verify">Needs verification</span>' in r.text
+    assert "Open" in r.text  # the confirmed community's real access value still renders normally
+
+
+def test_community_geo_line_does_not_guess_when_reach_unverified(env):
+    """Regression guard: _community_geo_line's fallback branch used to treat
+    a truthy-but-unresearched reach as if it were empty, silently rendering
+    a guessed "National · online" instead of flagging the gap."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    community_id = lib.add_community(
+        "Gap Community", "https://example.com", "CFOs",
+        "Free", [], reach=enrich.NEEDS_VERIFICATION, approved=1,
+    )
+    slug = lib.get_community(community_id)["slug"]
+    lib.close()
+
+    c = _client(env)
+    r = c.get(f"/tools/communities/{slug}")
+    assert r.status_code == 200
+    assert "National &middot; online" not in r.text
+    assert "Needs verification" in r.text

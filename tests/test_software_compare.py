@@ -142,6 +142,53 @@ def test_compare_gives_agent_involvement_its_own_section(env):
     assert "not have" not in r.text.lower() and "no agent" not in r.text.lower()
 
 
+def test_agent_taxonomy_verification_flag_shown_on_profile(env):
+    """A drafted (unconfirmed) agent_taxonomy_note gets the same "unverified"
+    flag tool_features rows already carry on the compare matrix — consistency
+    across every verification-flagged field."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(a, "Uses an LLM-drafted agent summary.", 0.5)
+    lib.close()
+
+    r = _client(env).get("/tools/software/runway")
+    assert "Uses an LLM-drafted agent summary." in r.text
+    assert '<span class="cc-verify">unverified</span>' in r.text
+    assert ".cc-verify{" in r.text   # profile page has its own <style> block
+
+
+def test_agent_taxonomy_no_flag_once_verified(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(a, "Uses an LLM-drafted agent summary.", 0.5)
+    lib.mark_tool_agent_taxonomy_verified(a)
+    lib.close()
+
+    r = _client(env).get("/tools/software/runway")
+    assert "Uses an LLM-drafted agent summary." in r.text
+    assert '<span class="cc-verify">unverified</span>' not in r.text
+
+
+def test_compare_shows_agent_taxonomy_verification_flag(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(a, "Drafted agent note for Runway.", 0.5)
+    lib.update_tool_agent_taxonomy(b, "Confirmed agent note for Datarails.")
+    lib.close()
+
+    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
+    assert '<span class="cc-verify">unverified</span>' in r.text
+    assert "Drafted agent note for Runway." in r.text
+    assert "Confirmed agent note for Datarails." in r.text
+    # The confirmed tool's note must not itself carry the flag.
+    confirmed_idx = r.text.index("Confirmed agent note for Datarails.")
+    assert "cc-verify" not in r.text[confirmed_idx:confirmed_idx + 80]
+
+
 def test_compare_shows_feature_availability_and_verification_flag(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
