@@ -211,6 +211,49 @@ def test_script_dry_run_writes_nothing(monkeypatch, db_path):
     lib.close()
 
 
+def test_script_dry_run_prints_feature_detail(monkeypatch, db_path, capsys):
+    import scripts.enrich_tool_features as script_mod
+    lib = Library(db_path)
+    lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
+    lib.close()
+
+    def _fake_generate(name, url, description="", model=""):
+        return enrich.ToolFeaturesResult(
+            features=[
+                _draft("Scenario modeling", standalone=True, bundled=False, confident=True),
+                _draft("Headcount planning", standalone=False, bundled=True, confident=False),
+            ],
+            model="claude-haiku-4-5-20251001", input_tokens=50, output_tokens=40, cost_usd=0.0005,
+        )
+
+    monkeypatch.setattr(script_mod.enrich_mod, "generate_tool_features", _fake_generate)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--tools", "Runway", "--dry-run"])
+    rc = script_mod.main()
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "Scenario modeling: standalone" in out
+    assert "Headcount planning: bundled-only" in out
+    assert "[needs verification]" in out
+    # The confident one shouldn't be flagged
+    assert "Scenario modeling: standalone [needs verification]" not in out
+
+
+def test_script_warns_on_duplicate_tool_names(monkeypatch, db_path, capsys):
+    from scripts.enrich_tool_features import _select_tools
+    lib = Library(db_path)
+    lib.add_tool("Digits", "d1", "https://digits1.example", [], approved=1)
+    lib.add_tool("Digits", "d2", "https://digits2.example", [], approved=1)
+    lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
+    selected = _select_tools(lib, "Digits,Runway", 0)
+    assert len(selected) == 3   # both Digits rows, not deduped
+    err = capsys.readouterr().err
+    assert "multiple approved rows share these names" in err
+    assert "digits" in err
+    lib.close()
+
+
 def test_script_requires_scope_flag(monkeypatch, db_path):
     import scripts.enrich_tool_features as script_mod
     lib = Library(db_path)
