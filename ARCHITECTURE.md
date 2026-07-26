@@ -608,15 +608,25 @@ same override-else-default shape as Ask's cap, admin controls on
 up/down feedback on suggestions is UI-only, session-scoped — no server call,
 no persistence, unlike Ask's `ask_feedback` table.
 
-The old quiz's best-fit weighting infrastructure below (dimensions, per-
-community `*_tags` columns, the `/admin/tools/communities` "Recommender
-ranking weights" panel) is **not read by the Matchmaker** and has no other
-consumer today — left in place rather than deleted in the same PR (ripping
-out curated per-community tag data and an admin panel is a bigger,
-harder-to-reverse call than replacing a page), flagged in
-`/admin/tools/communities`'s "How this works" reference block as a follow-up
-decision: repurpose it for a future feature, or remove it once confirmed
-unused.
+The old quiz's best-fit weighting infrastructure described below (dimensions,
+per-community `*_tags` columns, the `/admin/tools/communities` "Recommender
+ranking weights" panel) has since been **removed entirely**, by Brian's
+explicit call: it was never read by the Matchmaker and had no other
+consumer, so the admin panel, its Python helpers
+(`_WEIGHT_DIMENSIONS`/`_get_default_community_weights`/`_community_weight_
+tags`/etc.), the eight `*_tags` columns those dimensions wrote
+(`seniority_band_tags`, `cpe_eligible_tags`, `platform_type_tags`,
+`function_tags`, `looking_for_tags`, `programming_tags`, `paid_free_tags`,
+`industry_tags`), the four already-retired `*_tags` columns from before it
+(`primary_purpose_tags`, `resources_included_tags`, `meeting_format_tags`,
+`event_style_tags`), and the one-off classification scripts that populated
+them (`scripts/backfill_community_weight_tags.py` and the
+`scripts/recategorize_*.py` family) are all gone. `community_profiles`' free-
+text columns of the same base name (`seniority_band`, `platform_type`, etc.)
+are untouched — the Matchmaker reads those directly, needing no controlled
+vocabulary. The dimension-by-dimension design history below is kept as a
+historical record of a system that no longer exists, same as the "Community
+recommender" section that follows it.
 
 **Software Chat Matchmaker** (Phase 2 — same pattern, applied to Software; no
 existing quiz to replace, so this is a new build rather than a route swap).
@@ -747,14 +757,11 @@ label, a quiz label, and a `source`):
     HFMA → healthcare; PECFOA and Private Funds CFO Network → PE/funds);
     the other 34 are `industry_neutral`.
 
-  All four retired `*_tags` columns (`primary_purpose_tags`,
-  `resources_included_tags`, `meeting_format_tags`, `event_style_tags`) and
-  their free-text siblings still exist on `community_profiles` (no
-  destructive migration) but are excluded from `Library._WEIGHT_TAG_COLUMNS`
-  and dropped from `upsert_community_profile`'s own column list entirely —
-  otherwise every future admin profile save would silently zero them out via
-  the always-replace upsert. They no longer drive any scoring — historical
-  data, not live.
+  (Update: all four retired `*_tags` columns above, and the eight still-live
+  ones described through the rest of this section, were later dropped
+  entirely — see the note at the top of this Matchmaker/Recommender
+  subsection for why and when. Their free-text siblings on
+  `community_profiles` were never touched.)
 
   `platform_type`'s own vocabulary was also re-derived post-#159, from
   Slack/chat-based, In-person only, Mix to naming the actual platform:
@@ -849,7 +856,7 @@ effect.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `settings` | Generic key/value store (global Ask cap default, `matchmaker_default_cap_usd`, editable email copy, tag-style guide, `voice_core`/`voice_fpa_buddy` voice guide, Communities Recommender default weights/values [orphaned, see above], …). | `key`/`value` |
+| `settings` | Generic key/value store (global Ask cap default, `matchmaker_default_cap_usd`, editable email copy, tag-style guide, `voice_core`/`voice_fpa_buddy`/`voice_matchmaker` voice guide, …). | `key`/`value` |
 | `contacts` | Contact-form submissions. | `deleted_at` (`''` = live — soft delete for spam, never hard delete) |
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |

@@ -373,6 +373,14 @@ abstract, first-person proof, earned metaphors, the LinkedIn shape, and the hard
 the editable **Voice guide** on `/admin/voice` — it's both what Claude uses to draft posts and the
 rubric the voice check holds new writing to.
 
+`/admin/voice` edits three separate, independently-customizable layers, each falling back to a
+built-in default when empty: **Voice core** (the shared mechanics/tone above, doubling as the
+"General / site copy" rubric), **FP&A Buddy voice** (appended after the core for FP&A Buddy's
+third-person, cite-or-name-the-gap register), and **Chat Matchmaker voice** (appended after the
+core for the Communities and Software matchmakers — first person plural, references what the
+visitor said, no invented experience with any listed community or vendor). The **Check content
+against your voice** rubric picker on the same page mirrors this three-way split.
+
 Like color, voice has two kinds of rules:
 
 - **Mechanical** (deterministic) — banned buzzwords (*delve, robust, seamless, synergy, transformative,

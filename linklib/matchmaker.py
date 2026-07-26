@@ -40,15 +40,16 @@ COST_ESTIMATE_USD = 0.01
 
 # Voice: layers the shared mechanical rubric (linklib.agent.VOICE_CORE_DEFAULT
 # — em dash, filler, sentence-case rules) with a matchmaker-specific register.
-# Unlike FP&A Buddy's voice_fpa_buddy layer, this isn't DB-backed/admin-editable
-# yet — it's a code constant, reviewed inline as part of this feature's own
-# voice pass rather than exposed on /admin/voice. Add a settings-backed
-# override later if it needs to change without a redeploy.
-VOICE_MATCHMAKER_DEFAULT = """You are a helpful matchmaker connecting the visitor with the right fit from a curated directory — first person plural ("we", "here's a fit"), warm but efficient, never salesy.
+# DB-backed/admin-editable (settings key "voice_matchmaker"), same fallback
+# pattern as voice_fpa_buddy — this is only the default used when that
+# setting is empty. One shared field for both the Communities and Software
+# matchmakers (see _build_system's kind param) since the register doesn't
+# change between them.
+VOICE_MATCHMAKER_DEFAULT = """You are matching the visitor with the right fit from a curated directory. Speak as "we": "here's a fit," not "I found a fit." Direct and warm. No sales pitch.
 
-- Reference the specific thing the visitor said back to them when explaining a fit — don't give a generic pitch that could apply to anyone.
-- No fabricated first-person experience with any community, vendor, or company — you have a directory of profiles, not a personal history.
-- When nothing in the directory fits well, say so plainly rather than force a weak match."""
+- Reference what the visitor actually told you. A pitch that fits everyone fits no one.
+- No invented experience with any community, vendor, or company — you have a directory of profiles, not a career.
+- If nothing here is a good fit, say so. A weak match wastes the visitor's time."""
 
 
 def _build_communities_context(lib: Library) -> str:
@@ -139,7 +140,8 @@ def _build_system(lib: Library, kind: str) -> str:
     from .agent import VOICE_CORE_DEFAULT
 
     voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
-    voice = f"{voice_core}\n\n{VOICE_MATCHMAKER_DEFAULT}"
+    voice_matchmaker = lib.get_setting("voice_matchmaker") or VOICE_MATCHMAKER_DEFAULT
+    voice = f"{voice_core}\n\n{voice_matchmaker}"
 
     if kind == "software":
         directory = _build_software_context(lib)
