@@ -88,9 +88,12 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   cascade automatically; no manual reindex needed.
 - **Enrichment is additive.** `enriched=0` rows get a Claude summary + tags later via
   `enrich_backfill`. The import does not require an API key.
-- **Web search is domain-restricted.** `agent.py` passes `preferred_sites.opml` domains
-  as `allowed_domains` to the `web_search_20250305` tool, so the chatbot only cites
-  sources Brian already trusts.
+- **Web search is domain-restricted.** `agent.py`'s `retrieve_exa()` passes
+  `preferred_sites.opml` domains as Exa's `includeDomains`, so the chatbot only
+  cites sources Brian already trusts. Exa results ride as Citations-API
+  document blocks, the same pattern as library/feed retrieval — not a
+  model-invoked tool (that's what `web_search_20250305` was, before the Exa
+  Phase 2 migration).
 - **Library retrieval is hybrid: FTS5 + vector search, merged by reciprocal rank
   fusion.** `sqlite-vec` adds a vec0 virtual table (`articles_vec`) inside `library.db`
   — no separate vector database. Embeddings (OpenAI `text-embedding-3-small`) can't be
@@ -171,7 +174,7 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
-| `EXA_API_KEY` | — | Reserved for a future Exa retrieval source for FP&A Buddy (`linklib/pricing.py` already has `EXA_PRICING`/`compute_exa_cost` for cost capture). Not yet read anywhere — no retrieval code calls Exa yet. |
+| `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's web retrieval tier (`linklib/agent.py`'s `retrieve_exa`), which replaced the old `web_search_20250305` model tool in Phase 2. Absent → Buddy answers from Library + Feed alone, no error (same graceful-degrade contract as `OPENAI_API_KEY`). |
 | `LINKLIB_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model for `linklib/embeddings.py` |
 | `LINKLIB_DB` | `library.db` | Path to the SQLite database |
 | `LINKLIB_SAVE_TOKEN` | (none) | Token for `POST /save` + bookmarklet; also the default login password. Set when hosted. |

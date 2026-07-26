@@ -30,7 +30,8 @@ flowchart LR
     end
 
     R -->|"Q&A, enrichment, rewrite,<br/>dedupe verification"| A["Anthropic API"]
-    A -->|"web_search tool<br/>(domain-restricted)"| W["Trusted sites from<br/>preferred_sites.opml"]
+    R -->|"web retrieval<br/>(domain-restricted)"| X["Exa API"]
+    X --> W["Trusted sites from<br/>preferred_sites.opml"]
     R -->|"RSS/Atom + article<br/>full-text fetches"| F["Publisher sites"]
     R -->|"outbound email"| G["Gmail REST API"]
     R -->|"weekly DB snapshot"| D["Google Drive"]
@@ -63,10 +64,14 @@ Notes on the edges:
 - **The volume path** is Railway configuration, not code: the app reads
   `LINKLIB_DB` (default `./library.db`); production points it at the mounted
   volume. The DB is deliberately not in git — it's personal reading history.
-- **Web search never leaves the allowlist**: `preferred_sites.opml` (the same
-  file that drives the `/feed` reader) is parsed into `allowed_domains` for
-  Anthropic's `web_search` tool, so FP&A Buddy can only cite sources the
-  curator already trusts.
+- **Web retrieval never leaves the allowlist**: `preferred_sites.opml` (the
+  same file that drives the `/feed` reader) is parsed into Exa's
+  `includeDomains`, so FP&A Buddy can only cite sources the curator already
+  trusts. This is a direct Exa `/search` API call from `linklib/agent.py`
+  (`retrieve_exa`), not an Anthropic-hosted tool — Phase 2 of the Exa
+  migration replaced the earlier `web_search_20250305` model tool with
+  Python-side retrieval, the same pattern library and feed sources already
+  used.
 - **Email is the Gmail REST API, not SMTP** — Railway's Hobby plan blocks SMTP
   ports. Every send is best-effort and must never block the underlying DB
   write; failures land in the `email_failures` table and surface as an admin
@@ -1043,6 +1048,7 @@ sequenceDiagram
     participant AG as linklib/agent.py
     participant H as Anthropic API (Haiku)
     participant O as OpenAI API (embeddings)
+    participant X as Exa API (search)
     participant C as Anthropic API (tier model)
 
     B->>W: POST /ask {question, conversation_id?, effort}
@@ -1073,11 +1079,14 @@ sequenceDiagram
     AG->>DB: vec0 KNN search on the query vector, 2x max_library
     AG->>AG: reciprocal rank fusion - merge FTS5 + vector hits,<br/>dedupe by article id, take top max_library
     AG->>AG: optional feed matching (keyword overlap, 30-min cached feed)
-    AG->>C: messages.create: sources as document blocks with<br/>citations enabled + web_search tool (allowed_domains from OPML)
-    C-->>AG: text blocks with citation spans + web results + usage
-    AG->>AG: reassemble answer - append [n] after each cited span,<br/>one deduped first-use-ordered list across library/feed/web
+    AG->>X: retrieve_exa: /search, includeDomains from OPML, max_web results
+    X-->>AG: results (+ real result count)
+    Note over AG: best-effort - no EXA_API_KEY or the call fails<br/>-> falls back to library/feed-only silently
+    AG->>C: messages.create: library + feed + Exa sources,<br/>all as document blocks with citations enabled (no web tool)
+    C-->>AG: text blocks with citation spans + usage
+    AG->>AG: reassemble answer - append [n] after each cited span,<br/>one deduped first-use-ordered list across library/feed/web documents
     AG->>AG: compute_cost from real token usage (pricing.py)
-    AG-->>W: Answer {text, citations, cost_usd = answer + rewrite + query embed}
+    AG-->>W: Answer {text, citations, cost_usd = answer + rewrite + query embed + Exa}
     W->>DB: record_ask_question - one row per turn<br/>(conversation_id, turn_index, tokens, cost breakdown,<br/>citations_json snapshot of the cited sources)
     W-->>B: {answer, citations, sources, followups_left,<br/>conversation_id, turn_id, usage: {spent, cap}}
     opt member rates the answer
@@ -1100,16 +1109,17 @@ Details worth knowing:
   first-person experience claims) on top for both generation and its own
   "FP&A Buddy answer" rubric. No caching — one indexed SELECT on an
   already-open connection is immaterial next to the Claude API round-trip.
-- **Two, sometimes three, API calls can happen per turn.** On follow-ups, a
-  cheap Haiku call first rewrites e.g. *"what about at Series A?"* into a
-  standalone search question so retrieval sees the conversation's subject.
-  It's retrieval-only (the answering prompt always gets the verbatim question
-  plus raw history), strictly best-effort (10s timeout, malformed output
-  rejected, silent fallback), and its spend is still recorded — folded into
-  the same row's `cost_usd` with `rewrite_*` columns breaking out its share.
-  A separate OpenAI call embeds that same retrieval question for the vector
-  half of hybrid search — same best-effort contract, same fold-into-`cost_usd`
-  pattern (`embed_*` columns).
+- **Two to four API calls can happen per turn.** On follow-ups, a cheap Haiku
+  call first rewrites e.g. *"what about at Series A?"* into a standalone
+  search question so retrieval sees the conversation's subject. It's
+  retrieval-only (the answering prompt always gets the verbatim question plus
+  raw history), strictly best-effort (10s timeout, malformed output rejected,
+  silent fallback), and its spend is still recorded — folded into the same
+  row's `cost_usd` with `rewrite_*` columns breaking out its share. A
+  separate OpenAI call embeds that same retrieval question for the vector
+  half of hybrid search, and (when `use_web`) an Exa `/search` call retrieves
+  web results — same best-effort contract, same fold-into-`cost_usd` pattern
+  (`embed_*` and `exa_*` columns respectively).
 - **Library retrieval is hybrid: FTS5 keyword search + vector semantic
   search, merged by reciprocal rank fusion (`agent._rrf_merge`, k=60).** Each
   path fetches 2x the tier's `max_library` so the merge has real rank signal
@@ -1119,12 +1129,15 @@ Details worth knowing:
   weight against, whereas RRF only needs rank position. Every failure mode —
   `sqlite-vec` unavailable, no `OPENAI_API_KEY`, the embed call erroring —
   degrades silently to FTS5-only, never blocking an answer.
-- **Citations are API-verified, not prompted.** Library/feed sources ride as
-  Citations-API `document` blocks; web search cites automatically. The
-  response's cited spans are reassembled server-side into `[n]` markers
-  against one continuous, deduplicated, first-use-ordered list spanning all
-  three source types. Any surprise in citation metadata degrades to plain
-  text — citation handling can never fail an answer.
+- **Citations are API-verified, not prompted.** Library, feed, and web (Exa)
+  sources all ride as Citations-API `document` blocks — one uniform citation
+  shape, not a documents-vs-tool-citations split (that split existed only
+  while `web_search_20250305` was the web source; Phase 2 of the Exa
+  migration removed it). The response's cited spans are reassembled
+  server-side into `[n]` markers against one continuous, deduplicated,
+  first-use-ordered list spanning all three source types. Any surprise in
+  citation metadata degrades to plain text — citation handling can never fail
+  an answer.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything
