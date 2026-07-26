@@ -66,3 +66,32 @@ def compute_embedding_cost(model: str, input_tokens: int = 0) -> float:
     """
     rate = EMBEDDING_PRICING.get(model, _EMBEDDING_FALLBACK)
     return input_tokens * rate / 1_000_000
+
+
+# USD per 1,000 requests. Checked 2026-07-26 against Exa's published rates
+# (exa.ai/pricing). `included_results` is how many results the base price
+# covers before `extra_per_1k_result` kicks in per result over that (Exa's
+# per-additional-result fee is the same $1/1k across every search tier).
+# Only "search" is modeled — the one endpoint Phase 1 has a concrete use for.
+# Contents ($1/1k pages/content type), Deep Search ($12/1k), Deep-Reasoning
+# Search ($15/1k), and Answer ($5/1k) are real Exa tiers but aren't wired to
+# anything yet; add a row here only once a caller actually needs one, same
+# as the "add a model row when it becomes selectable" rule above.
+EXA_PRICING: dict[str, dict[str, float]] = {
+    "search": {"base_per_1k": 7.00, "included_results": 10, "extra_per_1k_result": 1.00},
+}
+
+_EXA_FALLBACK = EXA_PRICING["search"]
+
+
+def compute_exa_cost(endpoint: str = "search", num_results: int = 0) -> float:
+    """Exact USD cost for one Exa API call from its real result count.
+
+    `num_results` is how many results the call actually returned (not the
+    number requested) — Exa's overage fee is billed per result delivered.
+    Falls back to the "search" rates for an unrecognized endpoint, matching
+    compute_cost's never-silently-$0 behavior above.
+    """
+    rates = EXA_PRICING.get(endpoint, _EXA_FALLBACK)
+    overage = max(0, num_results - rates["included_results"])
+    return (rates["base_per_1k"] + overage * rates["extra_per_1k_result"]) / 1_000
