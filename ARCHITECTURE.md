@@ -649,8 +649,8 @@ design, not accident — **share one monthly dollar budget**: a session or
 user's cap is the SUM of `cost_usd` across both kinds
 (`matchmaker_cost_this_month[_session]` never filters by `kind`), rather than
 each matchmaker getting its own pool. A `/tools/software`-page CTA ("Not sure
-which tool's for you? Find your tool →") mirrors the Communities directory's
-own inline CTA.
+which tool's for you? Software Matchmaker →") mirrors the Communities
+directory's own inline CTA ("Community Matchmaker →").
 
 **Community recommender** (Phase 7, historical — the quiz replaced above). A
 4-question quiz at `GET /tools/communities/find` (role, budget, access, a

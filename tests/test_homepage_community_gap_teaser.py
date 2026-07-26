@@ -65,7 +65,7 @@ def test_matchmaker_line_inline_in_subtitle_not_a_separate_block(env):
         assert r.status_code == 200
         assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' not in r.text
         assert "Slack channels. Not sure which community's for you? " in r.text
-        assert '<a href="/tools/communities/find" style="font-weight:500;">Find your community' in r.text
+        assert '<a href="/tools/communities/find" style="font-weight:500;">Community Matchmaker' in r.text
         # The old two-line top-of-page CTA block is gone entirely.
         assert '<div style="margin-top:24px;">' not in r.text
 

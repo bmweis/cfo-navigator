@@ -4846,7 +4846,7 @@ def tools_directory(request: Request):
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
-Not sure which tool's for you? <a href="/tools/software/find" style="font-weight:500;">Find your tool &rarr;</a>
+Not sure which tool's for you? <a href="/tools/software/find" style="font-weight:500;">Software Matchmaker &rarr;</a>
 {'<a href="/admin/tools/categories" style="margin-left:12px;font-size:14px;font-weight:500;">Manage categories →</a>' if authed else ''}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
@@ -5543,7 +5543,7 @@ def tools_software_find(request: Request):
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
-<h1 style="margin-bottom:6px;">Find your tool</h1>
+<h1 style="margin-bottom:6px;">Software Matchmaker</h1>
 <p style="color:var(--muted);margin:0 0 24px;">Tell us what you're trying to solve and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
 
 <div id="mm-thread"></div>
@@ -5714,7 +5714,7 @@ document.addEventListener('keydown', function(e) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
 });
 </script>"""
-    resp = HTMLResponse(_page("Find your tool—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page("Software Matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
     _set_visitor_cookie(request, resp, session_id)
     return resp
 
@@ -6188,7 +6188,7 @@ def tools_communities(request: Request):
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
-groups, associations, and Slack channels. Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Find your community &rarr;</a></p>
+groups, associations, and Slack channels. Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Community Matchmaker &rarr;</a></p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"
@@ -6962,7 +6962,7 @@ def tools_communities_find(request: Request):
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
-<h1 style="margin-bottom:6px;">Find your community</h1>
+<h1 style="margin-bottom:6px;">Community Matchmaker</h1>
 <p style="color:var(--muted);margin:0 0 24px;">Tell us what you're looking for and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
 
 <div id="mm-thread"></div>
@@ -7133,7 +7133,7 @@ document.addEventListener('keydown', function(e) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
 });
 </script>"""
-    resp = HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page("Community Matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
     _set_visitor_cookie(request, resp, session_id)
     return resp
 
