@@ -12798,19 +12798,40 @@ _LIBRARY_TOOLS = [
 ]
 
 # CFO Toolbox items, used as one of the expandable groups below (same pattern
-# as the other groups — no separate hub page).
+# as the other groups — no separate hub page). Sail, Don't Row's settings
+# live here too (added Phase 6): the game itself isn't part of the public
+# /tools directory (it's an easter egg linked only from the AI Hackathon
+# Playbook thought-leadership page — see the /play route), so this group's
+# description line ("Everything behind the public /tools directory.") is a
+# slightly loose fit for it. Left as-is rather than reworded to force a fit —
+# flagged in the Phase 6 PR for Brian to decide whether it's worth adjusting.
 _TOOLBOX_TOOLS = [
     ("/admin/software",         "Software",             "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
     ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
     ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
+    ("/admin/game-settings",    "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
+]
+
+# FP&A Buddy's own admin pages, consolidated into one section (Phase 6) —
+# previously split between System ("How FP&A Buddy works") and the old
+# Features catch-all (report, feedback). Same three routes, same content,
+# only the section grouping changed.
+_FPA_BUDDY_TOOLS = [
+    ("/admin/system/how-fpa-buddy-works", "How FP&amp;A Buddy works", "The retrieval tiers, effort levels, citations, and cost model behind the Q&amp;A tool&mdash;for anyone who wants the real mechanism."),
+    ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
+    ("/admin/ask-feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
-# Grouping logic (per the July 2026 IA review): Inbox holds only things that
-# actually arrive and wait on Brian; Features holds per-feature settings and
-# reporting (including parked feature ideas); Brand & voice is the design
-# system; System is accounts, health, and plumbing.
+# Grouping logic (per the July 2026 IA review, revised Phase 6): Inbox holds
+# only things that actually arrive and wait on Brian; CFO Toolbox is
+# everything behind the public /tools directory (plus Sail, Don't Row's
+# settings, see the note on _TOOLBOX_TOOLS above); FP&A Buddy is its own
+# section now that it has three admin pages of its own; Brand & voice is the
+# design system; System is accounts, health, and plumbing. The old Features
+# catch-all is gone — every card that lived there had a real home once FP&A
+# Buddy became its own section and Sail Don't Row moved into CFO Toolbox.
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
@@ -12819,11 +12840,7 @@ _ADMIN_GROUPS = [
         ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
-    ("Features", "Per-feature settings and reporting.", [
-        ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
-        ("/admin/ask-feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
-        ("/admin/game-settings", "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
-    ]),
+    ("FP&A Buddy", "The Q&amp;A tool's own explainer, usage report, and feedback triage.", _FPA_BUDDY_TOOLS),
     ("Brand & voice", "How the site looks and sounds.", [
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
         ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
@@ -12837,7 +12854,6 @@ _ADMIN_GROUPS = [
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
         ("/admin/system/page-index", "Page Index",        "A live, self-updating map of every route and its width tier."),
-        ("/admin/system/how-fpa-buddy-works", "How FP&amp;A Buddy works", "The retrieval tiers, effort levels, citations, and cost model behind the Q&amp;A tool&mdash;for anyone who wants the real mechanism."),
     ]),
 ]
 
@@ -13604,7 +13620,7 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 
     # Two columns on wide viewports: left carries the group Brian triages
     # most often (Inbox); right carries the Archive card plus the
-    # lower-cadence settings/reference groups (CFO Toolbox, Features,
+    # lower-cadence settings/reference groups (CFO Toolbox, FP&A Buddy,
     # Brand & voice, System). Below the breakpoint both stacks concatenate
     # into the original single-column order — unchanged from before this split.
     _LEFT_GROUPS = {"Inbox"}
