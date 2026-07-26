@@ -2258,7 +2258,12 @@ class Library:
     @staticmethod
     def _tool_to_dict(r: sqlite3.Row) -> dict:
         d = dict(r)
-        d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
+        # Sorted at read time, not just at write time — every caller that
+        # reads a tool's categories (card grid, profile page, compare matrix,
+        # admin table) goes through here, so this is the one place that
+        # guarantees alphabetical order regardless of what order a given
+        # write path (add/update/quick-edit/bulk-edit) happened to save them in.
+        d["categories"] = sorted(json.loads(d.pop("categories_json", "[]") or "[]"))
         return d
 
     # -- tool categories (the /tools filter pills) --------------------------
@@ -2545,7 +2550,9 @@ class Library:
     @staticmethod
     def _community_to_dict(r: sqlite3.Row) -> dict:
         d = dict(r)
-        d["categories"] = json.loads(d.pop("categories_json", "[]") or "[]")
+        # Same read-time sort as Library._tool_to_dict — guarantees alphabetical
+        # order for every caller regardless of write-time order.
+        d["categories"] = sorted(json.loads(d.pop("categories_json", "[]") or "[]"))
         return d
 
     # -- community profiles (deep qualitative read per community) -----------
