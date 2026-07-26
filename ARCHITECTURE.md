@@ -138,6 +138,22 @@ newly added, never-tiered page automatically. `_page_index_snapshot()` in
 `webapp/app.py` is the single source; no maintained list of pages or tiers
 exists elsewhere.
 
+**`/admin/system/how-fpa-buddy-works`** (System nav group, added in the Exa
+migration's Phase 4) is a plain-language technical explainer of FP&A Buddy's
+mechanism — retrieval tiers (library/feed/web), the Quick/Standard/Deep
+effort tiers, citation verification, and the per-user dollar cost cap —
+written for a technically comfortable reader (a PM, an engineer, or a CFO)
+who wants the real mechanism, not marketing copy. It plays the same
+reference-doc role `_COMMUNITIES_REFERENCE_HTML` plays for the Communities
+feature, but as its own System-group page rather than a collapsible block
+on a working admin page, since explaining the mechanism IS this page's whole
+purpose. Per-tier source counts read live from `linklib.agent.EFFORT_SETTINGS`
+and the default monthly cap reads live from `Library.get_default_ask_cap()`,
+so neither can drift out of sync with the code the way a hand-typed number
+would; model names are deliberately described qualitatively
+(fastest/balanced/most-capable) rather than pinned to a canonical model ID,
+since those rotate independently of this page.
+
 ### Content spine
 
 | Table | Purpose | Columns that carry meaning |

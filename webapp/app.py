@@ -12837,6 +12837,7 @@ _ADMIN_GROUPS = [
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
         ("/admin/system/page-index", "Page Index",        "A live, self-updating map of every route and its width tier."),
+        ("/admin/system/how-fpa-buddy-works", "How FP&amp;A Buddy works", "The retrieval tiers, effort levels, citations, and cost model behind the Q&amp;A tool&mdash;for anyone who wants the real mechanism."),
     ]),
 ]
 
@@ -13285,6 +13286,106 @@ def admin_system_page_index(request: Request):
 </div>
 </div>"""
     return HTMLResponse(_page("Page Index—Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/system/how-fpa-buddy-works", response_class=HTMLResponse)
+def admin_how_fpa_buddy_works(request: Request):
+    """A plain-language technical explainer for FP&A Buddy's mechanism (Exa
+    Phase 4) — the same reference-doc role _COMMUNITIES_REFERENCE_HTML plays
+    for the Communities feature, but as its own System-group page rather than
+    a collapsible block on a working admin page, since this page's whole
+    purpose IS the explanation (no other primary content to collapse under).
+    Written for a technically comfortable reader (PM, engineer, or CFO) who
+    wants the real mechanism, not marketing copy.
+
+    Per-tier source counts (max_library/max_feed/max_web) and the default
+    monthly cap are read live from linklib.agent.EFFORT_SETTINGS and
+    Library.get_default_ask_cap() rather than hardcoded, so this page can't
+    silently drift out of sync with EFFORT_SETTINGS or an admin-adjusted
+    default cap the way a hand-typed number would. Model names are
+    deliberately described qualitatively (fastest/balanced/most capable),
+    not pinned to a canonical model ID — those rotate independently of this
+    page and a literal model name would go stale the moment one retires.
+    """
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    from linklib.agent import EFFORT_SETTINGS
+    lib = _lib()
+    try:
+        default_cap = lib.get_default_ask_cap()
+    finally:
+        lib.close()
+
+    _TIER_BLURBS = {
+        "quick": "Fastest and least expensive model. Good for a quick lookup or a question you already mostly know the answer to.",
+        "standard": "A stronger general-purpose model with a wider source budget. The default for most questions.",
+        "deep": "The most capable model available, with the deepest source budget and the most thorough answers. Costs the most and takes the longest.",
+    }
+    tier_rows = "".join(
+        f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);font-weight:600;text-transform:capitalize;">{_esc(tier)}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{s["max_library"]}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{s["max_feed"]}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{s["max_web"]}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-soft);">{_esc(_TIER_BLURBS.get(tier, ""))}</td></tr>'
+        for tier, s in EFFORT_SETTINGS.items()
+    )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>How FP&amp;A Buddy works</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">The real mechanism behind <a href="/library/ask" style="color:var(--accent);">/library/ask</a>, for anyone who wants more than the marketing description&mdash;a PM, an engineer, or a technically comfortable CFO. Retrieval-tier counts and the default cost cap below are read live from the code, so this page can't quietly drift out of date the way a hand-typed number would.</p>
+
+<div style="display:grid;gap:20px;">
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where an answer's sources come from</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Library</strong> (highest authority, always searched first): the curated archive of saved articles, retrieved by a hybrid of keyword search (FTS5) and semantic search (vector embeddings), merged by a rank-fusion algorithm so an article can surface even when the question's wording doesn't match the source's own.</li>
+<li><strong>Feed:</strong> recent items from the subscribed RSS/Atom feeds, matched to the question by keyword overlap. Optional&mdash;off by default.</li>
+<li><strong>Web:</strong> live web search, scoped only to the domains on the trusted-sites list (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list. As of this build, that search runs through Exa's search API directly, called from the server, rather than a web-search tool the model invokes on its own; when a web result gets cited, the answer carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list.</li>
+</ul>
+<p style="margin:8px 0 0;font-size:13.5px;color:#3a352e;line-height:1.7;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Quick, Standard, Deep</h3>
+<p style="margin:0 0 10px;font-size:13.5px;color:#3a352e;line-height:1.7;">The only choice a user makes is how much effort to spend&mdash;there's no separate model picker. Each tier maps to a model, how many sources get pulled from each tier, and how long the answer can run:</p>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+<thead><tr style="background:var(--bg);">
+<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Tier</th>
+<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Archive sources</th>
+<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Feed items</th>
+<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Web results</th>
+<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">What changes</th>
+</tr></thead>
+<tbody>
+{tier_rows}
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Every claim traces to a citation</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Verified, not self-reported.</strong> Sources are handed to the model as documents with citations turned on, and the numbered <code>[n]</code> markers in an answer come from the model's own verified citation data, not from the model being asked to remember to cite things.</li>
+<li><strong>Source-typed.</strong> Each citation is tagged library, feed, or web, and shown with a small icon so it's obvious which tier an answer drew from.</li>
+<li><strong>Names the gap instead of guessing.</strong> If the available sources don't cover a question well, the model is instructed to say so plainly rather than answer with unsupported confidence.</li>
+</ul>
+</section>
+
+<section>
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it costs</h3>
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<li><strong>Priced from real usage, not a query count.</strong> Every answer, follow-up rewrite, and retrieval step is costed from its actual token usage against the model providers' published rates, so the number reflects what a question actually spent, not an estimate.</li>
+<li><strong>A monthly dollar cap per user,</strong> currently ${default_cap:.2f} by default and adjustable per user in <a href="/admin/users" style="color:var(--accent);">/admin/users</a>. Once a user hits their cap for the month, Buddy tells them so instead of answering, and the cap resets at the start of the next month.</li>
+<li><strong>Visible to the user,</strong> not just to Admin&mdash;a member can see their own spend-to-date against their cap from the Ask page itself.</li>
+</ul>
+</section>
+</div>
+</div>"""
+    return HTMLResponse(_page("How FP&A Buddy works—Admin", "Admin", body, authed=True))
 
 
 @app.get("/admin/checks", response_class=HTMLResponse)
