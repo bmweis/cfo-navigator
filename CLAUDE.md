@@ -171,6 +171,7 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
+| `EXA_API_KEY` | — | Reserved for a future Exa retrieval source for FP&A Buddy (`linklib/pricing.py` already has `EXA_PRICING`/`compute_exa_cost` for cost capture). Not yet read anywhere — no retrieval code calls Exa yet. |
 | `LINKLIB_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model for `linklib/embeddings.py` |
 | `LINKLIB_DB` | `library.db` | Path to the SQLite database |
 | `LINKLIB_SAVE_TOKEN` | (none) | Token for `POST /save` + bookmarklet; also the default login password. Set when hosted. |
