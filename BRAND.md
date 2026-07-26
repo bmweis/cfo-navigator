@@ -152,7 +152,7 @@ unchanged).
 | Page title (H1) | Outfit | 30px | 600 | -0.02em |
 | Section (H2) | Outfit | 21px | 600 | -0.01em |
 | Subhead (H3) | Outfit | 15px | 600 | — |
-| Eyebrow / kicker | DM Sans | 12px uppercase | 600 | .12–.16em |
+| Eyebrow / kicker | DM Sans | 11.5px uppercase | 600 | .1em |
 | Body | DM Sans | 16px / 1.65 | 400 | — |
 | UI / labels | DM Sans | 13–15px | 500–600 | — |
 | Reader body | Source Serif 4 | 18px / 1.75 | 400 | — |
