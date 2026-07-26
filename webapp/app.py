@@ -11634,7 +11634,7 @@ def library(request: Request):
 
     def _section(title, cards):
         return (
-            f'<h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);'
+            f'<h2 style="font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);'
             f'margin:0 0 12px;">{title}</h2>'
             f'<div class="lib-card-row">{cards}</div>'
         )
