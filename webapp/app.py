@@ -12043,6 +12043,7 @@ def ask_page(request: Request, q: str = ""):
 .ask-src-list li{{font-size:12px;}}
 .ask-src-list a{{display:inline-flex;align-items:center;gap:5px;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
 .ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}
+.ask-src-caption{{margin:6px 0 0;font-size:11px;color:var(--muted);}}
 
 .ask-loading{{display:flex;align-items:center;gap:10px;padding:2px 0;}}
 .ask-loading .dots{{display:flex;gap:5px;}}
@@ -12166,12 +12167,19 @@ function mdToHtml(raw) {{
 }}
 // Below-answer list: only the sources the answer actually cited, numbered to
 // match the inline [n] markers. Zero citations -> no list (silently allowed).
+// A "Web search powered by Exa" caption follows the list, but only when this
+// turn actually cited a web-type source — Library/Feed-only answers show no
+// caption at all.
 function srcListHtml(d) {{
   var icons = {{library: '&#128218;', feed: '&#128240;', web: '&#127760;'}};
-  var items = (d.citations || []).map(function(c) {{
+  var cites = d.citations || [];
+  var items = cites.map(function(c) {{
     return '<li>' + (icons[c.type] || '') + ' <a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">[' + c.n + '] ' + escapeHtml(c.title) + '</a></li>';
   }});
-  return items.length ? '<ul class="ask-src-list">' + items.join('') + '</ul>' : '';
+  if (!items.length) return '';
+  var caption = cites.some(function(c) {{ return c.type === 'web'; }})
+    ? '<div class="ask-src-caption">Web search powered by Exa</div>' : '';
+  return '<ul class="ask-src-list">' + items.join('') + '</ul>' + caption;
 }}
 // Per-answer feedback: one tap records; tapping another option changes the
 // rating (the server upserts one row per turn per user). A negative rating
