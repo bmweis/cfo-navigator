@@ -13146,9 +13146,11 @@ def admin_system_database(request: Request):
     )
 
     body = f"""<div class="page page-admin">
+<div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Database</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, and row counts, introspected from the schema on every page load. This schema declares no SQL foreign keys, so relationship lines below come from a small hand-maintained map (see <code>_DB_RELATIONSHIPS</code> in <code>webapp/app.py</code>) rather than the database itself. Summary-level by design&mdash;see <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for full schema detail.</p>
+</div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px;">
 {stat_cards}
@@ -13278,33 +13280,40 @@ def admin_system_page_index(request: Request):
         return f'<code>{_esc(r["tier"])}</code>'
 
     rows_html = "".join(
-        f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);'
-        f'font-family:ui-monospace,monospace;font-size:13px;">{_esc(r["path"])}</td>'
-        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{_tier_cell(r)}</td></tr>'
+        f'<tr><td class="cc-cell" style="font-family:ui-monospace,monospace;font-size:13px;min-width:280px;">{_esc(r["path"])}</td>'
+        f'<td class="cc-cell" style="min-width:180px;">{_tier_cell(r)}</td></tr>'
         for r in rows
     )
 
     body = f"""<div class="page page-admin">
+<div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Page Index</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every route and its width tier&mdash;introspected from <code>app.routes</code> on every page load, not a maintained list. Skips non-page endpoints (redirects, JSON/AJAX APIs, file downloads); flags any page route that doesn't carry a recognized width tier, so a newly added page that never got tiered doesn't go unnoticed. See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for the tier system itself.</p>
+</div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
 {stat_cards}
 </div>
 {summary}
 
-<div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
-<table style="width:100%;border-collapse:collapse;font-size:14px;">
+<div style="overflow-x:auto;">
+<table class="cc-table">
 <thead><tr style="background:var(--bg);">
-<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Route</th>
-<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Width tier</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Route</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Width tier</th>
 </tr></thead>
 <tbody>
 {rows_html}
 </tbody>
 </table>
 </div>
+
+<style>
+.cc-table{{border-collapse:collapse;width:100%;min-width:520px;background:#fff;border:1px solid var(--line);border-radius:12px;}}
+.cc-cell{{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--line);}}
+thead .cc-cell{{border-bottom:2px solid var(--line);}}
+</style>
 </div>"""
     return HTMLResponse(_page("Page Index—Admin", "Admin", body, authed=True))
 
@@ -13348,14 +13357,16 @@ def admin_how_fpa_buddy_works(request: Request):
         f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{s["max_library"]}</td>'
         f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{s["max_feed"]}</td>'
         f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);">{s["max_web"]}</td>'
-        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-soft);">{_esc(_TIER_BLURBS.get(tier, ""))}</td></tr>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px;color:var(--ink-soft);min-width:200px;">{_esc(_TIER_BLURBS.get(tier, ""))}</td></tr>'
         for tier, s in EFFORT_SETTINGS.items()
     )
 
     body = f"""<div class="page page-admin">
+<div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>How FP&amp;A Buddy works</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">The real mechanism behind <a href="/library/ask" style="color:var(--accent);">/library/ask</a>, for anyone who wants more than the marketing description&mdash;a PM, an engineer, or a technically comfortable CFO. Retrieval-tier counts and the default cost cap below are read live from the code, so this page can't quietly drift out of date the way a hand-typed number would.</p>
+</div>
 
 <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;overflow-x:auto;margin-bottom:20px;">
 <pre class="mermaid" style="margin:0;">
@@ -13373,7 +13384,9 @@ flowchart LR
     class T annotation;
 </pre>
 </div>
+<div class="tool-prose">
 <p style="color:var(--muted);margin:-14px 0 24px;font-size:12.5px;line-height:1.5;">A concept-level view&mdash;see the &ldquo;FP&amp;A Buddy&rdquo; section of <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for the full request/response sequence (API calls, token usage, cost guards, follow-up handling).</p>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
 <script>
@@ -13391,27 +13404,29 @@ mermaid.initialize({{
 </script>
 
 <div style="display:grid;gap:20px;">
-<section>
+<section class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where an answer's sources come from</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:14px;color:#3a352e;line-height:1.7;">
 <li><strong>Library</strong> (highest authority, always searched first): the curated archive of saved articles, retrieved by a hybrid of keyword search (FTS5) and semantic search (vector embeddings), merged by a rank-fusion algorithm so an article can surface even when the question's wording doesn't match the source's own.</li>
 <li><strong>Feed:</strong> recent items from the subscribed RSS/Atom feeds, matched to the question by keyword overlap. Optional&mdash;off by default.</li>
 <li><strong>Web:</strong> live web search, scoped only to the domains on the trusted-sites list (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list, whichever mechanism handles it. Exa's search API, called directly from the server, is the preferred mechanism&mdash;on by default, toggled at <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings</a>. When Exa is off, or its API key isn't configured, Claude's own web-search tool steps in instead, so web search itself is never unavailable&mdash;only which engine handles it changes. Exactly one of the two runs per question, never both. A web result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</li>
 </ul>
-<p style="margin:8px 0 0;font-size:13.5px;color:#3a352e;line-height:1.7;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
+<p style="margin:8px 0 0;font-size:14px;color:#3a352e;line-height:1.7;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
 </section>
 
 <section>
+<div class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Quick, Standard, Deep</h3>
-<p style="margin:0 0 10px;font-size:13.5px;color:#3a352e;line-height:1.7;">The only choice a user makes is how much effort to spend&mdash;there's no separate model picker. Each tier maps to a model, how many sources get pulled from each tier, and how long the answer can run:</p>
+<p style="margin:0 0 10px;font-size:14px;color:#3a352e;line-height:1.7;">The only choice a user makes is how much effort to spend&mdash;there's no separate model picker. Each tier maps to a model, how many sources get pulled from each tier, and how long the answer can run:</p>
+</div>
 <div style="overflow-x:auto;">
-<table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+<table class="cc-table">
 <thead><tr style="background:var(--bg);">
-<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Tier</th>
-<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Archive sources</th>
-<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Feed items</th>
-<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Web results</th>
-<th style="text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">What changes</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Tier</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Archive sources</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Feed items</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Web results</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">What changes</th>
 </tr></thead>
 <tbody>
 {tier_rows}
@@ -13420,24 +13435,30 @@ mermaid.initialize({{
 </div>
 </section>
 
-<section>
+<section class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Every claim traces to a citation</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:14px;color:#3a352e;line-height:1.7;">
 <li><strong>Verified, not self-reported.</strong> Sources are handed to the model as documents with citations turned on, and the numbered <code>[n]</code> markers in an answer come from the model's own verified citation data, not from the model being asked to remember to cite things.</li>
 <li><strong>Source-typed.</strong> Each citation is tagged library, feed, or web, and shown with a small icon so it's obvious which tier an answer drew from.</li>
 <li><strong>Names the gap instead of guessing.</strong> If the available sources don't cover a question well, the model is instructed to say so plainly rather than answer with unsupported confidence.</li>
 </ul>
 </section>
 
-<section>
+<section class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it costs</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:14px;color:#3a352e;line-height:1.7;">
 <li><strong>Priced from real usage, not a query count.</strong> Every answer, follow-up rewrite, and retrieval step is costed from its actual token usage against the model providers' published rates, so the number reflects what a question actually spent, not an estimate.</li>
 <li><strong>A monthly dollar cap per user,</strong> currently ${default_cap:.2f} by default and adjustable per user in <a href="/admin/users" style="color:var(--accent);">/admin/users</a>. Once a user hits their cap for the month, Buddy tells them so instead of answering, and the cap resets at the start of the next month.</li>
 <li><strong>Visible to the user,</strong> not just to Admin&mdash;a member can see their own spend-to-date against their cap from the Ask page itself.</li>
 </ul>
 </section>
 </div>
+
+<style>
+.cc-table{{border-collapse:collapse;width:100%;min-width:680px;background:#fff;border:1px solid var(--line);border-radius:10px;}}
+.cc-cell{{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px;}}
+thead .cc-cell{{border-bottom:2px solid var(--line);}}
+</style>
 </div>"""
     return HTMLResponse(_page("How FP&A Buddy works—Admin", "Admin", body, authed=True))
 
