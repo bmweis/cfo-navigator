@@ -12168,8 +12168,11 @@ function mdToHtml(raw) {{
 // Below-answer list: only the sources the answer actually cited, numbered to
 // match the inline [n] markers. Zero citations -> no list (silently allowed).
 // A "Web search powered by Exa" caption follows the list, but only when this
-// turn actually cited a web-type source — Library/Feed-only answers show no
-// caption at all.
+// turn's web tier was actually handled by Exa (c.provider === 'exa') —
+// gating on citation type alone isn't enough since Phase 7: the native
+// web_search_20250305 fallback also produces type "web" citations when Exa
+// is toggled off or EXA_API_KEY is missing, and those get no caption at all
+// (a normal citation, just no "Powered by Exa" line).
 function srcListHtml(d) {{
   var icons = {{library: '&#128218;', feed: '&#128240;', web: '&#127760;'}};
   var cites = d.citations || [];
@@ -12177,7 +12180,7 @@ function srcListHtml(d) {{
     return '<li>' + (icons[c.type] || '') + ' <a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">[' + c.n + '] ' + escapeHtml(c.title) + '</a></li>';
   }});
   if (!items.length) return '';
-  var caption = cites.some(function(c) {{ return c.type === 'web'; }})
+  var caption = cites.some(function(c) {{ return c.type === 'web' && c.provider === 'exa'; }})
     ? '<div class="ask-src-caption">Web search powered by Exa</div>' : '';
   return '<ul class="ask-src-list">' + items.join('') + '</ul>' + caption;
 }}
@@ -12816,11 +12819,13 @@ _TOOLBOX_TOOLS = [
 # FP&A Buddy's own admin pages, consolidated into one section (Phase 6) —
 # previously split between System ("How FP&A Buddy works") and the old
 # Features catch-all (report, feedback). Same three routes, same content,
-# only the section grouping changed.
+# only the section grouping changed. Exa web search settings (Phase 7) is
+# the section's 4th card.
 _FPA_BUDDY_TOOLS = [
     ("/admin/system/how-fpa-buddy-works", "How FP&amp;A Buddy works", "The retrieval tiers, effort levels, citations, and cost model behind the Q&amp;A tool&mdash;for anyone who wants the real mechanism."),
     ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
     ("/admin/ask-feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
+    ("/admin/exa-settings",  "Exa web search",       "Turn Exa on or off for the web tier, and test the connection."),
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
@@ -13391,7 +13396,7 @@ mermaid.initialize({{
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong>Library</strong> (highest authority, always searched first): the curated archive of saved articles, retrieved by a hybrid of keyword search (FTS5) and semantic search (vector embeddings), merged by a rank-fusion algorithm so an article can surface even when the question's wording doesn't match the source's own.</li>
 <li><strong>Feed:</strong> recent items from the subscribed RSS/Atom feeds, matched to the question by keyword overlap. Optional&mdash;off by default.</li>
-<li><strong>Web:</strong> live web search, scoped only to the domains on the trusted-sites list (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list. As of this build, that search runs through Exa's search API directly, called from the server, rather than a web-search tool the model invokes on its own; when a web result gets cited, the answer carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list.</li>
+<li><strong>Web:</strong> live web search, scoped only to the domains on the trusted-sites list (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list, whichever mechanism handles it. Exa's search API, called directly from the server, is the preferred mechanism&mdash;on by default, toggled at <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings</a>. When Exa is off, or its API key isn't configured, Claude's own web-search tool steps in instead, so web search itself is never unavailable&mdash;only which engine handles it changes. Exactly one of the two runs per question, never both. A web result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</li>
 </ul>
 <p style="margin:8px 0 0;font-size:13.5px;color:#3a352e;line-height:1.7;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
 </section>
@@ -13435,6 +13440,131 @@ mermaid.initialize({{
 </div>
 </div>"""
     return HTMLResponse(_page("How FP&A Buddy works—Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/exa-settings", response_class=HTMLResponse)
+def admin_exa_settings(request: Request):
+    """Exa kill switch (Phase 7): toggle which mechanism handles FP&A Buddy's
+    web tier, and an on-demand connection test. Turning Exa off doesn't
+    disable web search — it switches to Claude's native web_search_20250305
+    tool as the fallback (see linklib.agent._web_provider); that unified
+    condition (toggle AND EXA_API_KEY) is why the page also flags a missing
+    key even when the toggle itself is on, so an admin isn't left wondering
+    why Buddy is still using the native tool."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    lib = _lib()
+    try:
+        exa_enabled = lib.get_exa_enabled()
+    finally:
+        lib.close()
+    has_key = bool(os.environ.get("EXA_API_KEY"))
+
+    key_banner = "" if has_key else (
+        '<p style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;'
+        'padding:10px 16px;font-size:14px;margin:-4px 0 20px;">&#9888; <code>EXA_API_KEY</code> is not '
+        'set on this host&mdash;FP&amp;A Buddy is using the native web-search fallback regardless of '
+        'the toggle below.</p>'
+    )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Exa web search</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Exa is the preferred mechanism for FP&amp;A Buddy's web tier. Turning it off doesn't disable web search&mdash;it switches to Claude's own web-search tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/admin/system/how-fpa-buddy-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</p>
+{key_banner}
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Web search engine</div>
+<label style="display:flex;align-items:center;gap:10px;font-size:15px;cursor:pointer;">
+<input type="checkbox" id="exa-toggle" {"checked" if exa_enabled else ""} onchange="toggleExa()" style="width:18px;height:18px;">
+Use Exa for web search
+</label>
+<span id="exa-toggle-status" style="font-size:13px;color:var(--muted);margin-top:8px;display:inline-block;"></span>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Test connection</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Fires one real, minimal Exa search to confirm <code>EXA_API_KEY</code> actually works. Manual and on-demand only&mdash;never runs automatically.</p>
+<div style="display:flex;gap:10px;align-items:center;">
+<button id="exa-test-btn" onclick="testExaConnection()" class="btn" style="font-size:14px;padding:9px 22px;">Test connection</button>
+<span id="exa-test-status" style="font-size:13px;color:var(--muted);"></span>
+</div>
+<div id="exa-test-result" style="display:none;margin-top:14px;font-size:14px;"></div>
+</div>
+
+<script>
+async function toggleExa() {{
+  var cb = document.getElementById('exa-toggle');
+  var status = document.getElementById('exa-toggle-status');
+  var enabled = cb.checked;
+  cb.disabled = true;
+  status.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/exa-settings/toggle', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{enabled: enabled}})}});
+    if (!r.ok) throw new Error();
+    status.textContent = enabled ? 'Exa is on.' : 'Exa is off — using the native web-search fallback.';
+    status.style.color = '#065f46';
+  }} catch(e) {{
+    cb.checked = !enabled;
+    status.textContent = 'Save failed — try again.';
+    status.style.color = '#b91c1c';
+  }} finally {{
+    cb.disabled = false;
+  }}
+}}
+
+async function testExaConnection() {{
+  var btn = document.getElementById('exa-test-btn');
+  var status = document.getElementById('exa-test-status');
+  var box = document.getElementById('exa-test-result');
+  btn.disabled = true; btn.textContent = 'Testing…';
+  status.textContent = '';
+  box.style.display = 'none';
+  try {{
+    var r = await fetch('/admin/exa-settings/test-connection', {{method:'POST'}});
+    var d = await r.json();
+    box.style.display = 'block';
+    if (d.ok) {{
+      box.innerHTML = '<span style="color:#065f46;">&#10003; Connected.</span> Cost of this test: $' + d.cost_usd.toFixed(4);
+    }} else {{
+      box.innerHTML = '<span style="color:#b91c1c;">&#10007; Failed:</span> ' + (d.error || 'Unknown error');
+    }}
+  }} catch(e) {{
+    box.style.display = 'block';
+    box.innerHTML = '<span style="color:#b91c1c;">&#10007; Request failed — try again.</span>';
+  }} finally {{
+    btn.disabled = false; btn.textContent = 'Test connection';
+  }}
+}}
+</script>
+</div>"""
+    return HTMLResponse(_page("Exa web search—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/exa-settings/toggle")
+async def admin_exa_settings_toggle(request: Request):
+    """Save the exa_enabled kill switch (Phase 7)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    enabled = bool(payload.get("enabled"))
+    lib = _lib()
+    try:
+        lib.set_exa_enabled(enabled)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "enabled": enabled})
+
+
+@app.post("/admin/exa-settings/test-connection")
+def admin_exa_settings_test_connection(request: Request):
+    """Fire one real Exa call to verify EXA_API_KEY works — manual/on-demand
+    only, never a background job."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    from linklib.agent import test_exa_connection
+    return JSONResponse(test_exa_connection())
 
 
 @app.get("/admin/checks", response_class=HTMLResponse)

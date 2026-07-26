@@ -1,8 +1,11 @@
 """Phase 3 of the Exa integration: a small "Web search powered by Exa" caption
-on /library/ask's client-side citation list (srcListHtml in webapp/app.py),
-shown only when a turn's citations include a web-type entry. Server-rendered
-surfaces (/ask/history, /library/past-questions, /admin/ask-feedback) are
-untouched — this is presentation-only on the live-rendering page.
+on /library/ask's client-side citation list (srcListHtml in webapp/app.py).
+Phase 7 tightened the gating condition: a web-type citation alone is no
+longer enough (the native web_search_20250305 fallback also produces
+type "web" citations when Exa is off) — it must also carry provider "exa".
+Server-rendered surfaces (/ask/history, /library/past-questions,
+/admin/ask-feedback) are untouched — this is presentation-only on the
+live-rendering page.
 """
 import pathlib
 import sys
@@ -49,16 +52,16 @@ def _admin_client(appmod):
 
 def test_library_ask_ships_the_conditional_exa_caption(env):
     """The live-rendering page's JS carries the caption logic, gated on the
-    turn's citations actually including a web-type entry — not shown
-    unconditionally for every answer."""
+    turn's citations including a web-type entry produced by Exa specifically
+    (provider === 'exa') — not shown for a Library/Feed-only turn, and not
+    shown when the native web_search_20250305 fallback handled the web tier
+    instead (Phase 7)."""
     c = _member_client(env)
     resp = c.get("/library/ask")
     assert resp.status_code == 200
     body = resp.text
     assert CAPTION in body
-    # Gated on a web-type citation being present in the turn, not shown for
-    # every answer (a Library/Feed-only turn has no web citation).
-    assert "c.type === 'web'" in body
+    assert "c.type === 'web' && c.provider === 'exa'" in body
     assert "ask-src-caption" in body
 
 

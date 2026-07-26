@@ -2,10 +2,19 @@
 
 Retrieval-augmented: pulls the most relevant saved articles (and optionally
 current feed items and fresh web results), hands them to Claude as grounded
-sources, and returns an answer with numbered citations. Web retrieval (Exa)
-is restricted to the user's trusted domains from preferred_sites.opml, same
-as library/feed sources — all three ride as Citations-API document blocks,
-not a model-invoked tool.
+sources, and returns an answer with numbered citations. Web retrieval is
+restricted to the user's trusted domains from preferred_sites.opml either way.
+
+Two mechanisms handle the web tier, exactly one per turn (Phase 7): Exa's
+/search API (`retrieve_exa`), Python-side, riding as a Citations-API document
+block like library/feed sources — this is preferred whenever `exa_enabled`
+is on and EXA_API_KEY is set. Otherwise (toggled off, or no key), Claude's
+native `web_search_20250305` tool is armed instead, same as before Phase 2
+removed it — see `_web_provider` for the unified fallback condition. Both
+paths produce citations tagged `type: "web"`; a `provider` field
+("exa" | "native") on the citation says which mechanism actually ran, so the
+"Powered by Exa" UI caption (Phase 3) can gate on the real mechanism, not
+just the citation category.
 
 Source types, model, and effort level are all configurable at call time.
 """
@@ -417,11 +426,82 @@ def retrieve_feed(question: str, opml_path: str, max_items: int = 5) -> list[dic
 
 
 # Exa's /search endpoint, restricted to the user's trusted domains — the
-# Python-side replacement for the old model-invoked web_search_20250305
-# tool. A slow Exa call isn't worth stalling the answer for, same reasoning
-# as REWRITE_TIMEOUT_SECONDS above.
+# preferred mechanism for the web tier when enabled (Phase 7 made it a
+# kill switch; Claude's native web_search_20250305 tool is the fallback,
+# restored below — see _web_provider). A slow Exa call isn't worth stalling
+# the answer for, same reasoning as REWRITE_TIMEOUT_SECONDS above.
 EXA_SEARCH_URL = "https://api.exa.ai/search"
 EXA_TIMEOUT_SECONDS = 10.0
+
+
+def _web_provider(lib: Library | None) -> str:
+    """Which mechanism handles the web tier this turn: 'exa' or 'native'.
+
+    Exactly one runs per turn (never both — see the module docstring).
+    'exa' requires both the admin toggle (Library.get_exa_enabled(),
+    defaults on) AND EXA_API_KEY being set; either one being off/missing
+    falls back to 'native' (Claude's own web_search_20250305 tool). This is
+    a single unified fallback condition, decided once before retrieval
+    starts — not a reactive retry if a chosen Exa call happens to fail
+    mid-turn (that call still degrades to zero web results on failure, the
+    same best-effort contract retrieve_exa always had; it does not re-arm
+    the native tool for that same turn).
+
+    `lib=None` (some callers/tests never open a connection) is treated as
+    "toggle on" — the same as a fresh database's default — since there's no
+    setting to read; EXA_API_KEY presence still gates it either way.
+    """
+    exa_enabled = lib.get_exa_enabled() if lib is not None else True
+    if exa_enabled and os.environ.get("EXA_API_KEY"):
+        return "exa"
+    return "native"
+
+
+def test_exa_connection() -> dict:
+    """Fire one minimal, real Exa /search call to verify EXA_API_KEY actually
+    works — manual/on-demand only from the admin toggle's "Test connection"
+    action, never a background job. Returns {"ok", "error", "cost_usd"}:
+    cost_usd is 0.0 on any failure (an auth/rate-limit/timeout error means
+    Exa never billed the request), and the real compute_exa_cost() figure on
+    a genuine success — the same pricing.py call every other Exa path uses,
+    so this reports what it actually costs, not an estimate. Not persisted
+    to a cost ledger (flagged as an open question in the Phase 7 PR
+    description) — it's a rarely-used manual check, not a per-turn user-cap
+    or overhead-spend cost that needs its own row.
+    """
+    api_key = os.environ.get("EXA_API_KEY")
+    if not api_key:
+        return {"ok": False, "error": "EXA_API_KEY is not set.", "cost_usd": 0.0}
+
+    try:
+        resp = requests.post(
+            EXA_SEARCH_URL,
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json={"query": "test connection", "numResults": 1},
+            timeout=EXA_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.exceptions.Timeout:
+        return {"ok": False, "error": "Request timed out.", "cost_usd": 0.0}
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        if status in (401, 403):
+            msg = f"Authentication failed (HTTP {status}) — check EXA_API_KEY."
+        elif status == 429:
+            msg = f"Rate limited (HTTP {status})."
+        elif status == 402:
+            msg = f"Billing or plan issue (HTTP {status})."
+        else:
+            msg = f"Exa returned HTTP {status}."
+        return {"ok": False, "error": msg, "cost_usd": 0.0}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "cost_usd": 0.0}
+
+    from .pricing import compute_exa_cost
+    num_results = len(data.get("results") or [])
+    cost = compute_exa_cost("search", num_results=num_results)
+    return {"ok": True, "error": "", "cost_usd": cost}
 
 
 def retrieve_exa(question: str, opml_path: str | None, max_results: int = 4
@@ -524,7 +604,7 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
     used = 0
 
     def _add(title: str, url: str, kind: str, body: str,
-             article_id: int | None = None) -> None:
+             article_id: int | None = None, provider: str | None = None) -> None:
         nonlocal used
         body = (body or "").strip()
         if not body:
@@ -542,6 +622,12 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
             # can be traced back to the archive row (feed/web are transient —
             # their title/url snapshot is the whole record).
             doc["article_id"] = article_id
+        if provider is not None:
+            # Web-tier only (Phase 7): which mechanism produced this source,
+            # so _assemble_cited_answer can tag the citation and the "Powered
+            # by Exa" caption can gate on the real mechanism, not just the
+            # citation type (both Exa and the native tool are type "web").
+            doc["provider"] = provider
         sent_docs.append(doc)
 
     for h in lib_hits:
@@ -561,11 +647,13 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
         if used >= global_chars:
             break
         # Exa results keep the "web" citation type — the same category the
-        # old model-invoked web_search tool used, just a different backend
-        # behind it (see the Phase 2 PR description for why type stayed
-        # "web" rather than a new "exa" tag).
+        # native web_search tool's citations use when that's the fallback
+        # (see the Phase 2 PR description for why type stayed "web" rather
+        # than a new "exa" tag). provider="exa" is the separate Phase 7
+        # marker that tells them apart for the "Powered by Exa" caption.
         _add(item.get("title", ""), item.get("url", ""), "web",
-             (item.get("summary") or "")[: min(source_chars, global_chars - used)])
+             (item.get("summary") or "")[: min(source_chars, global_chars - used)],
+             provider="exa")
 
     return doc_blocks, sent_docs
 
@@ -585,13 +673,18 @@ def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
     With citations enabled, the answer arrives as multiple text blocks and
     cited spans carry a `citations` list. This appends [n] after each cited
     span (the API splits text exactly at citation boundaries), where n indexes
-    one continuous, deduplicated, first-use-ordered list covering every
-    document sent (via `document_index` into sent_docs) — library, feed, and
-    web (Exa) sources are all document blocks now, so there's a single
-    citation shape to resolve, not a documents-vs-URL-citations split.
+    one continuous, deduplicated, first-use-ordered list covering documents
+    (via `document_index` into sent_docs — library, feed, and web/Exa when
+    Exa handled this turn) and, when the native web_search_20250305 tool
+    handled this turn instead (Phase 7 fallback), automatic URL citations —
+    the post-call renumbering that unifies both shapes into one list.
 
     Returns (text, citations) where citations is [{n, title, url, type,
-    article_id?}] for the sources actually cited. Best-effort by design: any surprise in the
+    article_id?, provider?}] for the sources actually cited. `provider`
+    ("exa" | "native") is present only on web-type citations — it says which
+    mechanism produced this citation, so the "Powered by Exa" caption can
+    gate on the real mechanism rather than the citation type alone (both
+    paths use type "web"). Best-effort by design: any surprise in the
     citation metadata degrades to the plain flattened text and an empty list —
     citation handling must never fail an answer.
     """
@@ -607,10 +700,19 @@ def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
             nums: list[int] = []
             for c in getattr(block, "citations", None) or []:
                 doc_idx = _cit_get(c, "document_index")
-                if not (isinstance(doc_idx, int) and 0 <= doc_idx < len(sent_docs)):
+                url = _cit_get(c, "url")
+                if isinstance(doc_idx, int) and 0 <= doc_idx < len(sent_docs):
+                    key = ("doc", doc_idx)
+                    info = sent_docs[doc_idx]
+                elif url:
+                    # Automatic citation from the native web_search tool
+                    # (Phase 7 fallback) — always "native", since Exa results
+                    # never arrive this way (they're document blocks).
+                    key = ("web", url)
+                    info = {"title": _cit_get(c, "title") or url,
+                            "url": url, "type": "web", "provider": "native"}
+                else:
                     continue   # unrecognized citation shape — skip silently
-                key = ("doc", doc_idx)
-                info = sent_docs[doc_idx]
                 n = seen.get(key)
                 if n is None:
                     n = len(cited) + 1
@@ -619,6 +721,8 @@ def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
                              "url": info["url"], "type": info["type"]}
                     if info.get("article_id") is not None:
                         entry["article_id"] = info["article_id"]
+                    if info.get("provider") is not None:
+                        entry["provider"] = info["provider"]
                     cited.append(entry)
                 if n not in nums:
                     nums.append(n)
@@ -664,6 +768,23 @@ def _trim_history(history) -> list[dict]:
     return list(reversed(kept))
 
 
+def _collect_web_sources(content_blocks) -> list[dict]:
+    """Pull title/url out of any web_search_tool_result blocks in the
+    response — restored for the Phase 7 native-tool fallback (removed in
+    Phase 2 when Exa became the only web mechanism; retrieve_exa's own hits
+    already populate web_sources on the Exa path, so this is only called
+    when the native tool handled this turn instead)."""
+    out = []
+    for block in content_blocks:
+        if getattr(block, "type", None) == "web_search_tool_result":
+            for r in getattr(block, "content", None) or []:
+                url = getattr(r, "url", None) or (r.get("url") if isinstance(r, dict) else None)
+                title = getattr(r, "title", None) or (r.get("title") if isinstance(r, dict) else None)
+                if url:
+                    out.append({"title": title or url, "url": url})
+    return out
+
+
 def answer_question(
     lib: Library,
     question: str,
@@ -688,10 +809,16 @@ def answer_question(
             budget, and (absent an explicit `model`) which model answers.
         use_library: search the SQLite FTS5 library.
         use_feed: include recent RSS feed items (requires opml_path).
-        use_web: search Exa's web index (requires opml_path), restricted to
-            trusted domains — Python-side retrieval, same pattern as
-            use_library/use_feed, not a model-invoked tool.
-        opml_path: path to preferred_sites.opml; required when use_feed or use_web is True.
+        use_web: search the web, restricted to trusted domains. Exactly one
+            mechanism handles it per turn (see _web_provider): Exa's /search
+            API (Python-side retrieval, requires opml_path, same pattern as
+            use_library/use_feed) when enabled and EXA_API_KEY is set;
+            otherwise Claude's native web_search_20250305 tool, armed
+            regardless of opml_path (falls back to the default OPML via
+            preferred_domains() itself, matching its pre-Exa behavior).
+        opml_path: path to preferred_sites.opml; required for use_feed and
+            for the Exa half of use_web (not required for the native-tool
+            fallback half — see use_web above).
         history: prior [{role, content}] turns for a follow-up; bounded by
             MAX_HISTORY_CHARS. On follow-up turns retrieval runs on a
             history-aware rewrite of the question (falling back to the raw
@@ -719,13 +846,16 @@ def answer_question(
     embed_cost = 0.0
     exa_results = 0
     exa_cost = 0.0
+    # Decided once, upfront — not re-evaluated reactively if the chosen
+    # mechanism's call happens to fail mid-turn (see _web_provider).
+    web_provider = _web_provider(lib) if use_web else None
 
     if use_library:
         lib_hits, embed_in, embed_cost = retrieve(
             lib, retrieval_question, max_sources=settings["max_library"])
     if use_feed and opml_path:
         feed_items = retrieve_feed(retrieval_question, opml_path, max_items=settings["max_feed"])
-    if use_web and opml_path:
+    if use_web and opml_path and web_provider == "exa":
         exa_hits, exa_results, exa_cost = retrieve_exa(
             retrieval_question, opml_path, max_results=settings["max_web"])
 
@@ -769,9 +899,33 @@ def answer_question(
         "messages": messages,
     }
 
+    if use_web and web_provider == "native":
+        # The native web_search_20250305 tool, restored exactly as it was
+        # before Phase 2 removed it (pulled from PR #218's diff, not
+        # reconstructed from memory) — including arming regardless of
+        # opml_path, since preferred_domains() already falls back to the
+        # default OPML on its own. max_uses reuses settings["max_web"]: same
+        # 2/4/6 per-tier depth the old web_max_uses key held before its
+        # Phase 2 rename, just read from its new name.
+        from .sources import preferred_domains
+        domains = list(preferred_domains(opml_path) if opml_path else preferred_domains())
+        tool: dict = {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": settings["max_web"],
+        }
+        if domains:
+            tool["allowed_domains"] = domains
+        kwargs["tools"] = [tool]
+
     try:
         resp = _get_client().messages.create(**kwargs)
         text, citations = _assemble_cited_answer(resp.content, sent_docs)
+        # Only one of these is ever non-empty for a given turn: exa_hits
+        # when Exa handled the web tier, native_web when the native tool did
+        # (empty when it wasn't armed, or was armed but the model chose not
+        # to call it) — so summing rather than branching is safe here.
+        native_web = _collect_web_sources(resp.content) if use_web else []
 
         from .pricing import compute_cost
         usage = resp.usage
@@ -781,7 +935,7 @@ def answer_question(
         cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits,
+        return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits + native_web,
                      citations=citations,
                      model=model, input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r,

@@ -3255,6 +3255,17 @@ class Library:
     def set_default_ask_cap(self, cap_usd: float) -> None:
         self.set_setting("ask_default_cap_usd", str(cap_usd))
 
+    def get_exa_enabled(self) -> bool:
+        """Whether Exa should handle FP&A Buddy's web tier (Phase 7 kill
+        switch). Defaults to True — Exa stays the live behavior unless
+        explicitly toggled off. This is independent of whether EXA_API_KEY is
+        actually set; agent.py combines both conditions into one fallback to
+        the native web_search_20250305 tool."""
+        return self.get_setting("exa_enabled", "1") != "0"
+
+    def set_exa_enabled(self, enabled: bool) -> None:
+        self.set_setting("exa_enabled", "1" if enabled else "0")
+
     def get_effective_ask_cap(self, user_id: int) -> float:
         """The dollar cap that actually applies to this user this month —
         their per-user override if set, else the global default. Kept as data
