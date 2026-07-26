@@ -266,6 +266,13 @@ of the old 960px box. The Growth Engine Ratio's long-form paragraphs nest a narr
 `.tool-prose` (760px) inside that wrapper — 1300px is too wide a text measure to read
 comfortably, but the calculator itself benefits from the extra width.
 
+`.tool-prose` isn't limited to `.tool-inner` — it's a general-purpose narrow-reading
+wrapper (max-width 760px, centered) usable inside any wider tier. The three
+`/admin/system/*` reference pages (Database, Page Index, How FP&A Buddy works) reuse it
+directly inside `.page-admin` (1500px): each nests its intro copy and any prose-only
+section in `.tool-prose`, while diagrams and tables stay at the full `page-admin` width
+so they don't get squeezed into a 760px column meant for reading text.
+
 ---
 
 ## 6. Do / Don't
