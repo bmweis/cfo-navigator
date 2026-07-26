@@ -83,16 +83,9 @@ class _DocCit:
         self.cited_text = "…"
 
 
-class _WebCit:
-    def __init__(self, url, title=""):
-        self.type = "web_search_result_location"
-        self.url = url
-        self.title = title
-        self.cited_text = "…"
-
-
 _SENT = [{"title": "Doc One", "url": "https://one", "type": "library"},
-         {"title": "Feed Two", "url": "https://two", "type": "feed"}]
+         {"title": "Feed Two", "url": "https://two", "type": "feed"},
+         {"title": "Web Three", "url": "https://three", "type": "web"}]
 
 
 def test_assemble_injects_markers_and_builds_cited_list():
@@ -110,14 +103,17 @@ def test_assemble_injects_markers_and_builds_cited_list():
 
 
 def test_assemble_unifies_web_citations_in_same_numbering():
+    # Since Phase 2 (Exa replaces web_search_20250305), web sources ride as
+    # document blocks too — one continuous document_index-based numbering
+    # across library/feed/web, not a separate URL-citation code path.
     blocks = [
         _Block("Local fact.", citations=[_DocCit(1)]),
-        _Block(" Fresh fact.", citations=[_WebCit("https://web", "Web Title")]),
+        _Block(" Fresh fact.", citations=[_DocCit(2)]),
     ]
     text, cites = agent._assemble_cited_answer(blocks, _SENT)
     assert "[1]" in text and "[2]" in text
     assert cites[0]["type"] == "feed"
-    assert cites[1] == {"n": 2, "title": "Web Title", "url": "https://web", "type": "web"}
+    assert cites[1] == {"n": 2, "title": "Web Three", "url": "https://three", "type": "web"}
 
 
 def test_assemble_dedupes_repeat_citations():

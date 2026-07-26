@@ -1,9 +1,11 @@
 """Ask FP&A / finance questions against your own library, RSS feed, and the web.
 
 Retrieval-augmented: pulls the most relevant saved articles (and optionally
-current feed items), hands them to Claude as grounded sources, and returns an
-answer with numbered citations. Web search is restricted to the user's trusted
-domains from preferred_sites.opml.
+current feed items and fresh web results), hands them to Claude as grounded
+sources, and returns an answer with numbered citations. Web retrieval (Exa)
+is restricted to the user's trusted domains from preferred_sites.opml, same
+as library/feed sources — all three ride as Citations-API document blocks,
+not a model-invoked tool.
 
 Source types, model, and effort level are all configurable at call time.
 """
@@ -12,6 +14,8 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+
+import requests
 
 from .db import Library
 
@@ -28,14 +32,19 @@ MODEL_ALIASES: dict[str, str] = {
 # Controls how many sources are pulled, how long synthesis runs, and which
 # model answers. The UI surfaces only this Quick/Standard/Deep tier — the
 # underlying model is an internal implementation detail, not a user choice.
-# web_max_uses caps the number of web_search tool calls Claude may make.
+# max_web caps how many Exa results retrieve_exa() requests per turn (one
+# Exa /search call, not a loop — see retrieve_exa's docstring). It keeps the
+# same 2/4/6 relative depth the old web_search_20250305 tool's `max_uses`
+# used across the tiers, and staying at/under Exa's 10-result base tier means
+# every effort level costs a flat $0.007/call with no per-result overage —
+# deliberately, not incidentally.
 EFFORT_SETTINGS: dict[str, dict] = {
     # source_chars: per-source grounding budget (summary + archived-text excerpt).
     # global_chars: hard cap on TOTAL grounding text per answer, so a query that
     #   retrieves many long articles can't balloon the prompt (cost guard).
-    "quick":    {"model": "claude-haiku-4-5-20251001", "max_library": 4,  "max_feed": 3,  "web_max_uses": 2, "max_tokens": 700,  "source_chars": 900,  "global_chars": 6000},
-    "standard": {"model": "claude-sonnet-4-6",         "max_library": 8,  "max_feed": 5,  "web_max_uses": 4, "max_tokens": 1500, "source_chars": 1800, "global_chars": 16000},
-    "deep":     {"model": "claude-opus-4-8",           "max_library": 16, "max_feed": 8,  "web_max_uses": 6, "max_tokens": 2500, "source_chars": 3500, "global_chars": 40000},
+    "quick":    {"model": "claude-haiku-4-5-20251001", "max_library": 4,  "max_feed": 3,  "max_web": 2, "max_tokens": 700,  "source_chars": 900,  "global_chars": 6000},
+    "standard": {"model": "claude-sonnet-4-6",         "max_library": 8,  "max_feed": 5,  "max_web": 4, "max_tokens": 1500, "source_chars": 1800, "global_chars": 16000},
+    "deep":     {"model": "claude-opus-4-8",           "max_library": 16, "max_feed": 8,  "max_web": 6, "max_tokens": 2500, "source_chars": 3500, "global_chars": 40000},
 }
 
 # Conversation cost guards — invisible and server-enforced, so a monetized user
@@ -119,18 +128,12 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library
                        "results, to supplement the library — not replace it.")
     source_list = "\n".join(f"{i+1}. {s}" for i, s in enumerate(sources))
 
-    # Citations happen at the API level now (documents are sent with
-    # citations enabled, and web search cites automatically) — the prompt no
-    # longer asks for [n] markers or a "Worth reading:" line; markers are
-    # injected server-side from the verified citation metadata.
-    cite_parts = []
-    if use_library or use_feed:
-        cite_parts.append("The saved articles and feed items are provided as "
-                          "documents — cite them for every claim you draw from them.")
-    if use_web:
-        cite_parts.append("Don't paste raw URLs into the answer text; web "
-                          "results are cited automatically.")
-    cite_note = " ".join(cite_parts)
+    # Citations happen at the API level now (every source — library, feed,
+    # and web alike — is sent as a document block with citations enabled) —
+    # the prompt no longer asks for [n] markers or a "Worth reading:" line;
+    # markers are injected server-side from the verified citation metadata.
+    cite_note = ("Every source below is provided as a document — cite it for "
+                 "every claim you draw from it.") if (use_library or use_feed or use_web) else ""
 
     return (
         "You are a strategic-finance advisor for finance leaders at high-growth "
@@ -285,9 +288,11 @@ class Answer:
     model: str = ""
     # Real usage from the API response (0 when the call never ran, e.g. no key).
     # cost_usd is the authoritative per-TURN dollar figure — the answer call
-    # plus the follow-up rewrite call (when one ran) — as opposed to the
-    # pre-call COST_ESTIMATES. The token fields below cover the answer call
-    # only; the rewrite call's share is broken out in the rewrite_* fields.
+    # plus the follow-up rewrite call, query embedding, and Exa web retrieval
+    # (whichever ran) — as opposed to the pre-call COST_ESTIMATES, which does
+    # not (yet) add an Exa allowance; see the Phase 2 PR description. The
+    # token fields below cover the answer call only; the rewrite/embed/Exa
+    # calls' shares are broken out in their own *_cost_usd fields.
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -306,6 +311,13 @@ class Answer:
     # included in cost_usd above.
     embed_input_tokens: int = 0
     embed_cost_usd: float = 0.0
+    # Exa web retrieval call (#Exa Phase 2) — zero when use_web is false, no
+    # EXA_API_KEY is set, or the call failed (all degrade silently to
+    # library/feed-only, same best-effort contract as the two fields above).
+    # exa_result_count is Exa's actual result count, not the requested
+    # max_web cap. exa_cost_usd is already included in cost_usd above.
+    exa_result_count: int = 0
+    exa_cost_usd: float = 0.0
 
 
 # Reuse one client across requests so its httpx connection pool stays warm —
@@ -404,6 +416,74 @@ def retrieve_feed(question: str, opml_path: str, max_items: int = 5) -> list[dic
     return sorted(items, key=score, reverse=True)[:max_items]
 
 
+# Exa's /search endpoint, restricted to the user's trusted domains — the
+# Python-side replacement for the old model-invoked web_search_20250305
+# tool. A slow Exa call isn't worth stalling the answer for, same reasoning
+# as REWRITE_TIMEOUT_SECONDS above.
+EXA_SEARCH_URL = "https://api.exa.ai/search"
+EXA_TIMEOUT_SECONDS = 10.0
+
+
+def retrieve_exa(question: str, opml_path: str | None, max_results: int = 4
+                 ) -> tuple[list[dict], int, float]:
+    """Search Exa's web index, restricted to preferred_sites.opml domains.
+
+    Returns (hits, num_results, cost_usd). hits are shaped like library/feed
+    hits ({title, url, summary}) so _build_source_documents can treat all
+    three source types uniformly. num_results is the count Exa actually
+    returned (not max_results requested) — compute_exa_cost bills on real
+    results delivered, the same "no estimation" discipline as every other
+    cost path in this file.
+
+    Best-effort by design, matching retrieve()'s vector-search fallback and
+    _rewrite_followup's contract: no EXA_API_KEY, a network failure, a
+    non-200 response, or a malformed body all degrade to ([], 0, 0.0) rather
+    than blocking an answer — Buddy still works on library + feed alone.
+    """
+    api_key = os.environ.get("EXA_API_KEY")
+    if not api_key or not question.strip():
+        return [], 0, 0.0
+
+    from .sources import preferred_domains
+    domains = list(preferred_domains(opml_path) if opml_path else preferred_domains())
+
+    payload: dict = {
+        "query": question,
+        "numResults": max_results,
+        "contents": {"text": True, "highlights": True},
+    }
+    if domains:
+        payload["includeDomains"] = domains
+
+    try:
+        resp = requests.post(
+            EXA_SEARCH_URL,
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json=payload,
+            timeout=EXA_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return [], 0, 0.0
+
+    results = data.get("results") or []
+    hits: list[dict] = []
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        url = r.get("url")
+        if not url:
+            continue
+        highlights = r.get("highlights") or []
+        summary = " ".join(h for h in highlights if h) if highlights else (r.get("text") or "")
+        hits.append({"title": r.get("title") or url, "url": url, "summary": summary})
+
+    from .pricing import compute_exa_cost
+    cost = compute_exa_cost("search", num_results=len(results))
+    return hits, len(results), cost
+
+
 def _ground_body(h: dict, source_chars: int) -> str:
     """Grounding text for one library hit: the distilled summary plus an excerpt
     of the archived article body, up to the per-source budget. The full text is
@@ -420,15 +500,17 @@ def _ground_body(h: dict, source_chars: int) -> str:
 
 
 def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
+                            exa_hits: list[dict] | None = None,
                             source_chars: int = 1800, global_chars: int = 16000
                             ) -> tuple[list[dict], list[dict]]:
     """Build Citations-API `document` content blocks for the retrieved sources.
 
     Returns (doc_blocks, sent_docs). doc_blocks are plain-text document blocks
-    with citations enabled, in retrieval order — library first, then feed —
-    which keeps numbering deterministic. sent_docs[i] describes doc_blocks[i]
-    as {title, url, type}; a response citation's `document_index` indexes into
-    it, so it must describe what was actually SENT, not everything retrieved.
+    with citations enabled, in retrieval order — library, then feed, then web
+    (Exa) — which keeps numbering deterministic. sent_docs[i] describes
+    doc_blocks[i] as {title, url, type}; a response citation's
+    `document_index` indexes into it, so it must describe what was actually
+    SENT, not everything retrieved.
 
     The same cost guards as the old flattened prompt apply, and only document
     text counts against them (titles ride in the block's `title` field, like
@@ -475,6 +557,16 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
         _add(item.get("title", ""), item.get("url", ""), "feed",
              (item.get("summary") or "")[: min(source_chars, global_chars - used)])
 
+    for item in (exa_hits or []):
+        if used >= global_chars:
+            break
+        # Exa results keep the "web" citation type — the same category the
+        # old model-invoked web_search tool used, just a different backend
+        # behind it (see the Phase 2 PR description for why type stayed
+        # "web" rather than a new "exa" tag).
+        _add(item.get("title", ""), item.get("url", ""), "web",
+             (item.get("summary") or "")[: min(source_chars, global_chars - used)])
+
     return doc_blocks, sent_docs
 
 
@@ -493,9 +585,10 @@ def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
     With citations enabled, the answer arrives as multiple text blocks and
     cited spans carry a `citations` list. This appends [n] after each cited
     span (the API splits text exactly at citation boundaries), where n indexes
-    one continuous, deduplicated, first-use-ordered list covering documents
-    (via `document_index` into sent_docs) and web results (via URL citations)
-    alike — the post-call renumbering that unifies all three source types.
+    one continuous, deduplicated, first-use-ordered list covering every
+    document sent (via `document_index` into sent_docs) — library, feed, and
+    web (Exa) sources are all document blocks now, so there's a single
+    citation shape to resolve, not a documents-vs-URL-citations split.
 
     Returns (text, citations) where citations is [{n, title, url, type,
     article_id?}] for the sources actually cited. Best-effort by design: any surprise in the
@@ -514,16 +607,10 @@ def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
             nums: list[int] = []
             for c in getattr(block, "citations", None) or []:
                 doc_idx = _cit_get(c, "document_index")
-                url = _cit_get(c, "url")
-                if isinstance(doc_idx, int) and 0 <= doc_idx < len(sent_docs):
-                    key = ("doc", doc_idx)
-                    info = sent_docs[doc_idx]
-                elif url:
-                    key = ("web", url)
-                    info = {"title": _cit_get(c, "title") or url,
-                            "url": url, "type": "web"}
-                else:
+                if not (isinstance(doc_idx, int) and 0 <= doc_idx < len(sent_docs)):
                     continue   # unrecognized citation shape — skip silently
+                key = ("doc", doc_idx)
+                info = sent_docs[doc_idx]
                 n = seen.get(key)
                 if n is None:
                     n = len(cited) + 1
@@ -577,19 +664,6 @@ def _trim_history(history) -> list[dict]:
     return list(reversed(kept))
 
 
-def _collect_web_sources(content_blocks) -> list[dict]:
-    """Pull title/url out of any web_search_tool_result blocks in the response."""
-    out = []
-    for block in content_blocks:
-        if getattr(block, "type", None) == "web_search_tool_result":
-            for r in getattr(block, "content", None) or []:
-                url = getattr(r, "url", None) or (r.get("url") if isinstance(r, dict) else None)
-                title = getattr(r, "title", None) or (r.get("title") if isinstance(r, dict) else None)
-                if url:
-                    out.append({"title": title or url, "url": url})
-    return out
-
-
 def answer_question(
     lib: Library,
     question: str,
@@ -614,7 +688,9 @@ def answer_question(
             budget, and (absent an explicit `model`) which model answers.
         use_library: search the SQLite FTS5 library.
         use_feed: include recent RSS feed items (requires opml_path).
-        use_web: enable web_search tool against trusted domains.
+        use_web: search Exa's web index (requires opml_path), restricted to
+            trusted domains — Python-side retrieval, same pattern as
+            use_library/use_feed, not a model-invoked tool.
         opml_path: path to preferred_sites.opml; required when use_feed or use_web is True.
         history: prior [{role, content}] turns for a follow-up; bounded by
             MAX_HISTORY_CHARS. On follow-up turns retrieval runs on a
@@ -638,34 +714,43 @@ def answer_question(
 
     lib_hits: list[dict] = []
     feed_items: list[dict] = []
+    exa_hits: list[dict] = []
     embed_in = 0
     embed_cost = 0.0
+    exa_results = 0
+    exa_cost = 0.0
 
     if use_library:
         lib_hits, embed_in, embed_cost = retrieve(
             lib, retrieval_question, max_sources=settings["max_library"])
     if use_feed and opml_path:
         feed_items = retrieve_feed(retrieval_question, opml_path, max_items=settings["max_feed"])
+    if use_web and opml_path:
+        exa_hits, exa_results, exa_cost = retrieve_exa(
+            retrieval_question, opml_path, max_results=settings["max_web"])
 
     import importlib.util
     if importlib.util.find_spec("anthropic") is None:
         return Answer(text="(Install `anthropic` to enable answers.)",
-                      sources=lib_hits, feed_sources=feed_items, model=model,
-                      cost_usd=rw_cost + embed_cost, rewrite_input_tokens=rw_in,
+                      sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
+                      cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
                       rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
-                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost)
+                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
+                      exa_result_count=exa_results, exa_cost_usd=exa_cost)
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return Answer(text="(Set ANTHROPIC_API_KEY to enable answers.)",
-                      sources=lib_hits, feed_sources=feed_items, model=model,
-                      cost_usd=rw_cost + embed_cost, rewrite_input_tokens=rw_in,
+                      sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
+                      cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
                       rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
-                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost)
+                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
+                      exa_result_count=exa_results, exa_cost_usd=exa_cost)
 
-    # Retrieved sources ride as Citations-API document blocks (library first,
-    # then feed — same order as the returned source lists). sent_docs is the
-    # document_index -> source manifest used to resolve response citations.
+    # Retrieved sources ride as Citations-API document blocks (library, then
+    # feed, then web/Exa — same order as the returned source lists). sent_docs
+    # is the document_index -> source manifest used to resolve response
+    # citations.
     doc_blocks, sent_docs = _build_source_documents(
-        lib_hits, feed_items,
+        lib_hits, feed_items, exa_hits,
         source_chars=settings.get("source_chars", 1800),
         global_chars=settings.get("global_chars", 16000),
     )
@@ -684,24 +769,9 @@ def answer_question(
         "messages": messages,
     }
 
-    if use_web:
-        # preferred_domains() defaults to the configured OPML and returns ()
-        # on any parse error, so no extra guarding is needed here.
-        from .sources import preferred_domains
-        domains = list(preferred_domains(opml_path) if opml_path else preferred_domains())
-        tool: dict = {
-            "type": "web_search_20250305",
-            "name": "web_search",
-            "max_uses": settings["web_max_uses"],
-        }
-        if domains:
-            tool["allowed_domains"] = domains
-        kwargs["tools"] = [tool]
-
     try:
         resp = _get_client().messages.create(**kwargs)
         text, citations = _assemble_cited_answer(resp.content, sent_docs)
-        web = _collect_web_sources(resp.content) if use_web else []
 
         from .pricing import compute_cost
         usage = resp.usage
@@ -711,19 +781,21 @@ def answer_question(
         cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=web,
+        return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits,
                      citations=citations,
                      model=model, input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r,
-                     cost_usd=cost + rw_cost + embed_cost, rewrite_input_tokens=rw_in,
+                     cost_usd=cost + rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
-                     embed_input_tokens=embed_in, embed_cost_usd=embed_cost)
+                     embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
+                     exa_result_count=exa_results, exa_cost_usd=exa_cost)
     except Exception as e:
-        # The rewrite/embedding calls already spent real money even though
-        # the answer call failed — keep their cost on the Answer so it's
-        # still recorded.
+        # The rewrite/embedding/Exa calls already spent real money even
+        # though the answer call failed — keep their cost on the Answer so
+        # it's still recorded.
         return Answer(text=f"(Answer call failed: {e})",
-                      sources=lib_hits, feed_sources=feed_items, model=model,
-                      cost_usd=rw_cost + embed_cost, rewrite_input_tokens=rw_in,
+                      sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
+                      cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
                       rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
-                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost)
+                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
+                      exa_result_count=exa_results, exa_cost_usd=exa_cost)

@@ -12529,7 +12529,7 @@ async def ask(request: Request):
             "citations": ans.citations,
             "sources":      [{"title": s["title"], "url": s["url"]} for s in ans.sources],
             "feed_sources": [{"title": s["title"], "url": s["url"]} for s in ans.feed_sources],
-            "web_sources":  ans.web_sources,
+            "web_sources":  [{"title": s["title"], "url": s["url"]} for s in ans.web_sources],
             "followups_left": followups_left,
             "conversation_id": new_conversation_id,
             # The recorded ask_questions row id for this turn — what the
