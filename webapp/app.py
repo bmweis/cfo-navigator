@@ -4846,7 +4846,7 @@ def tools_directory(request: Request):
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
-Not sure which tool's for you? <a href="/tools/software/find" style="font-weight:500;">Find your tool &rarr;</a>
+Not sure which tool's for you? <a href="/tools/software/find" style="font-weight:500;">Software Matchmaker &rarr;</a>
 {'<a href="/admin/tools/categories" style="margin-left:12px;font-size:14px;font-weight:500;">Manage categories →</a>' if authed else ''}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
@@ -5543,7 +5543,7 @@ def tools_software_find(request: Request):
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
-<h1 style="margin-bottom:6px;">Find your tool</h1>
+<h1 style="margin-bottom:6px;">Software Matchmaker</h1>
 <p style="color:var(--muted);margin:0 0 24px;">Tell us what you're trying to solve and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
 
 <div id="mm-thread"></div>
@@ -5714,7 +5714,7 @@ document.addEventListener('keydown', function(e) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
 });
 </script>"""
-    resp = HTMLResponse(_page("Find your tool—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page("Software Matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
     _set_visitor_cookie(request, resp, session_id)
     return resp
 
@@ -6188,7 +6188,7 @@ def tools_communities(request: Request):
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
-groups, associations, and Slack channels. Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Find your community &rarr;</a></p>
+groups, associations, and Slack channels. Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Community Matchmaker &rarr;</a></p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"
@@ -6962,7 +6962,7 @@ def tools_communities_find(request: Request):
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <span class="mm-eyebrow">CFO Toolbox</span>
-<h1 style="margin-bottom:6px;">Find your community</h1>
+<h1 style="margin-bottom:6px;">Community Matchmaker</h1>
 <p style="color:var(--muted);margin:0 0 24px;">Tell us what you're looking for and we'll narrow the directory down to a few best fits&mdash;ask follow-ups any time.</p>
 
 <div id="mm-thread"></div>
@@ -7133,7 +7133,7 @@ document.addEventListener('keydown', function(e) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doMatch();
 });
 </script>"""
-    resp = HTMLResponse(_page("Find your community—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    resp = HTMLResponse(_page("Community Matchmaker—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
     _set_visitor_cookie(request, resp, session_id)
     return resp
 
@@ -8706,162 +8706,6 @@ def _verify_html(value: str, cls: str = "comm-verify") -> str:
     return _esc(value)
 
 
-# Communities Recommender best-fit weighting: the controlled vocabulary each
-# weighting dimension draws from. `source` is "profile" for the 8 that read
-# their tags from a community_profiles.*_tags column (added alongside the
-# free-text research column of the same base name where one exists — see the
-# ALTER TABLE comment in linklib/db.py's _SCHEMA), or "derived" for the 2
-# computed on the fly from an existing `communities` column instead of a
-# stored *_tags column (local_presence from local_markets, sponsorship_type
-# straight off the communities.sponsorship_type value already on every
-# directory row). Dues (paid_free) used to be the 3rd derived dimension
-# (["free"] if cost_band=='Free' else ["paid"]) but moved to "profile" in PR 5
-# so a freemium community can carry both tags — see paid_free_tags. `industry`
-# (PR 6) is a new dimension with no free-text sibling column, same as
-# `function`/`looking_for`/`programming` before it. ALL 10 dimensions get an
-# admin default weight+value pair (Phase 1) — a weight alone has nothing to
-# match a community's tags against,
-# so both are required together, same UI control for every dimension
-# regardless of source. `source` only matters for two things: how
-# _community_weight_tags computes a community's tag(s) for that dimension,
-# and whether the dimension gets a checkbox group on the admin profile-edit
-# form (only "profile" dimensions do — a "derived" dimension's value already
-# lives on the directory-listing edit form, e.g. sponsorship_type's existing
-# dropdown, so a second, redundant control there would just invite drift).
-# `admin_label` reflects the UI label pass from the Communities feature
-# request; where no relabel was specified (or Brian asked to keep the live
-# label), it matches the pre-existing text.
-_WEIGHT_DIMENSIONS = [
-    {"key": "seniority_band", "admin_label": "Level", "quiz_label": "Seniority level",
-     "source": "profile",
-     "options": [("cfo", "CFO"), ("senior_exec", "Senior Exec (VP+)"),
-                 ("open_to_all", "Open to all")]},
-    {"key": "function", "admin_label": "Function", "quiz_label": "Function",
-     "source": "profile",
-     "options": [("overall", "Overall finance org"), ("fpa", "FP&A"),
-                 ("accounting", "Accounting"), ("treasury", "Treasury")]},
-    {"key": "cpe_eligible", "admin_label": "CPE eligible events", "quiz_label": "CPE eligible events",
-     "source": "profile",
-     "options": [("yes", "Offers CPE credit")]},
-    {"key": "looking_for", "admin_label": "What you're looking for", "quiz_label": "What you're looking for",
-     "source": "profile",
-     "options": [("peer_discussions", "Peer discussions"), ("networking", "Networking"),
-                 ("learning", "Learning & education"), ("vendor_connections", "Vendor connections"),
-                 ("resources_templates", "Resources & templates")]},
-    {"key": "platform_type", "admin_label": "Platform", "quiz_label": "Platform",
-     "source": "profile",
-     "options": [("slack", "Slack"), ("circle", "Circle"), ("email", "Email"),
-                 ("linkedin", "LinkedIn"), ("proprietary", "Proprietary")]},
-    {"key": "programming", "admin_label": "Programming", "quiz_label": "Programming",
-     "source": "profile",
-     "options": [("meals", "Meals (dinners, etc.)"), ("conferences", "Conferences"),
-                 ("retreats", "Retreats"), ("virtual_panels", "Virtual Panels")]},
-    {"key": "local_presence", "admin_label": "Local Presence", "quiz_label": "Local presence",
-     "source": "derived",
-     "options": [("yes", "Has a local chapter / metro presence")]},
-    {"key": "paid_free", "admin_label": "Dues", "quiz_label": "Cost",
-     "source": "profile",
-     "options": [("free", "Free"), ("paid", "Paid")]},
-    {"key": "sponsorship_type", "admin_label": "Organization", "quiz_label": "Organization",
-     "source": "derived",
-     "options": [("independent", "Independent"), ("vendor", "Vendor-backed"), ("investor", "Investor-backed")]},
-    {"key": "industry", "admin_label": "Industry", "quiz_label": "Industry",
-     "source": "profile",
-     "options": [("life_sciences", "Life sciences"), ("healthcare", "Healthcare"),
-                 ("pe_funds", "Private equity/funds"), ("industry_neutral", "Industry-neutral")]},
-]
-
-_COMMUNITY_WEIGHT_SETTING_PREFIX = "community_weight_"
-_COMMUNITY_WEIGHT_VALUES_SETTING_PREFIX = "community_weight_values_"
-
-
-def _community_weight_setting_key(dim_key: str) -> str:
-    return f"{_COMMUNITY_WEIGHT_SETTING_PREFIX}{dim_key}"
-
-
-def _community_weight_values_setting_key(dim_key: str) -> str:
-    return f"{_COMMUNITY_WEIGHT_VALUES_SETTING_PREFIX}{dim_key}"
-
-
-def _get_default_community_weights(lib) -> dict[str, float]:
-    """Brian's admin-set default weight per dimension (all 10 — see
-    _WEIGHT_DIMENSIONS' `source` note; "derived" dimensions get the exact
-    same admin default treatment as "profile" ones), applied on every
-    dimension a visitor doesn't state their own preference for (including,
-    at the extreme, every dimension when the visitor skips the optional quiz
-    step entirely). All default to equal weight (1.0) until adjusted."""
-    weights = {}
-    for dim in _WEIGHT_DIMENSIONS:
-        raw = lib.get_setting(_community_weight_setting_key(dim["key"]), "1")
-        try:
-            weights[dim["key"]] = float(raw)
-        except ValueError:
-            weights[dim["key"]] = 1.0
-    return weights
-
-
-def _get_default_community_weight_values(lib) -> dict[str, list[str]]:
-    """Brian's admin-set default TARGET VALUE(S) per dimension (all 10) — a
-    weight alone has nothing to match a community's tags against, so this is
-    the other half of Phase 1's default (same checkbox control the visitor's
-    quiz step uses; see _community_weight_setting_key's sibling). Empty (no
-    default value picked yet) is a valid state: that dimension simply
-    doesn't differentiate results until Brian picks one."""
-    values = {}
-    for dim in _WEIGHT_DIMENSIONS:
-        raw = lib.get_setting(_community_weight_values_setting_key(dim["key"]), "[]")
-        try:
-            parsed = json.loads(raw)
-        except ValueError:
-            parsed = []
-        valid = {v for v, _ in dim["options"]}
-        values[dim["key"]] = [v for v in parsed if v in valid] if isinstance(parsed, list) else []
-    return values
-
-
-_SPONSORSHIP_TYPE_WEIGHT_TAGS = {
-    "Independent": "independent", "Vendor-sponsored": "vendor", "Investor-sponsored": "investor",
-}
-
-
-def _community_weight_tags(dim_key: str, community: dict, profile: dict | None) -> list[str]:
-    """The controlled-vocabulary tag(s) that apply to this community for one
-    weighting dimension — from community_profiles's *_tags column for the 7
-    "profile"-sourced dimensions, or derived on the fly from directory fields
-    for the 2 "derived" ones (local_presence, sponsorship_type). Dues
-    (paid_free) used to be derived here too (["free"] if cost_band=='Free'
-    else ["paid"]) but moved to "profile"-sourced in PR 5 so a freemium
-    community can carry both tags — a single cost_band column can't
-    represent "has both"; see paid_free_tags in _SCHEMA."""
-    if dim_key == "local_presence":
-        return ["yes"] if (community.get("local_markets") or "").strip() else []
-    if dim_key == "sponsorship_type":
-        tag = _SPONSORSHIP_TYPE_WEIGHT_TAGS.get(community.get("sponsorship_type") or "")
-        return [tag] if tag else []
-    if not profile:
-        return []
-    return profile.get(f"{dim_key}_tags") or []
-
-
-def _community_profile_checkbox_group(dim: dict, selected: list[str] | None = None) -> str:
-    """Checkbox group for one "profile"-sourced _WEIGHT_DIMENSIONS entry,
-    used on the admin profile-edit form to keep a community's *_tags columns
-    current. Not called for "derived" dimensions — see the module comment
-    above _WEIGHT_DIMENSIONS for why."""
-    selected = selected or []
-    name = f"{dim['key']}_tags"
-    boxes = "".join(
-        f'<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">'
-        f'<input type="checkbox" name="{name}" value="{_esc(val)}"'
-        f'{" checked" if val in selected else ""}> {_esc(label)}</label>'
-        for val, label in dim["options"]
-    )
-    return f"""  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(dim['admin_label'])} (Recommender weighting)</label>
-    <div style="display:flex;flex-direction:column;gap:6px;">{boxes}</div>
-  </div>"""
-
-
 def _community_category_checkboxes(categories: list[dict], selected: list[str] | None = None) -> str:
     selected = selected or []
     return "".join(
@@ -9075,15 +8919,6 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
 {_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any. Placeholder, not yet researched or weighted.')}
 {_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both. Placeholder, not yet researched or weighted.')}
   </div>
-  <div style="border-top:1px solid var(--line);padding-top:18px;margin-top:4px;">
-    <p style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 4px;">Recommender weighting</p>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Controlled-vocabulary tags the visitor-facing quiz matches against,
-      separate from the free-text fields above (see CLAUDE.md's Phase 0 note on why the raw research prose isn't reliable for matching).
-      Check every value that genuinely applies; a community can span more than one.</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-{"".join(_community_profile_checkbox_group(dim, p.get(f"{dim['key']}_tags")) for dim in _WEIGHT_DIMENSIONS if dim["source"] == "profile")}
-    </div>
-  </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" id="cp-low_confidence" name="low_confidence" value="1"{' checked' if p.get('low_confidence') else ''}>
@@ -9170,13 +9005,6 @@ _COMMUNITIES_REFERENCE_HTML = """
 </section>
 
 <section>
-<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Recommender best-fit weighting admin (/admin/tools/communities) &mdash; orphaned by the Matchmaker</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
-<li>This panel (weighting dimensions, per-community <code>*_tags</code> columns, the profile-edit checkbox groups) existed solely to power the old quiz's ranked-results page, which is gone. It's left in place rather than removed in the same PR that shipped the Matchmaker &mdash; ripping out curated per-community tag data and an admin panel is a bigger, harder-to-reverse call than replacing a page, and deserves its own explicit decision. Flagged here as a known follow-up: either repurpose this data for a future feature, or remove it (panel, tag columns, and <code>scripts/backfill_community_weight_tags.py</code>) once confirmed unused.</li>
-</ul>
-</section>
-
-<section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Auto-fill from URL (/admin/tools/communities/new and /{id}/edit)</h3>
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
 <li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, next to Name/URL on the Add/Edit Community form &mdash; drafts the basic directory-listing fields (demographic, reach, local markets, cost band, cost note, sponsorship, sponsor name, access, format, categories) from one Claude call grounded in a fetch of the entered URL. Distinct from the &ldquo;Generate&rdquo; button on the Community Profile edit page, which drafts the deeper qualitative fields instead.</li>
@@ -9209,8 +9037,6 @@ def admin_communities(request: Request, filter: str = ""):
     try:
         all_communities = lib.list_communities(approved_only=False)
         needs_review_ids = lib.community_profile_needs_review_ids()
-        current_weights = _get_default_community_weights(lib)
-        current_weight_values = _get_default_community_weight_values(lib)
         community_categories = lib.list_community_categories()
     finally:
         lib.close()
@@ -9348,59 +9174,6 @@ def admin_communities(request: Request, filter: str = ""):
   </div>
 </details>
 
-<details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--surface);">
-  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);">Recommender ranking weights (orphaned&mdash;see note)</summary>
-  <div style="margin-top:14px;">
-    <p style="font-size:13px;color:var(--muted);margin:0 0 14px;max-width:640px;"><strong>/tools/communities/find is now the
-      conversational Matchmaker</strong>, which doesn't read these weights &mdash; they only ever powered the old quiz's ranked-results
-      page. Left in place rather than deleted; see the "Matchmaker" note above for the follow-up decision (repurpose or remove).</p>
-    <div id="cw-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px 20px;margin-bottom:14px;">
-      {"".join(
-          f'''<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;">
-    <label for="cw-{dim['key']}" style="display:block;font-size:13px;font-weight:600;color:var(--navy);margin-bottom:6px;">{_esc(dim['admin_label'])}</label>
-    <input id="cw-{dim['key']}" type="number" min="0" max="5" step="0.5" value="{current_weights.get(dim['key'], 1.0)}"
-      style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;margin-bottom:8px;">
-    <div style="display:flex;flex-direction:column;gap:4px;">
-      {"".join(
-          f'<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">'
-          f'<input type="checkbox" class="cw-value-{dim["key"]}" value="{_esc(val)}"'
-          f'{" checked" if val in current_weight_values.get(dim["key"], []) else ""}> {_esc(label)}</label>'
-          for val, label in dim["options"]
-      )}
-    </div>
-  </div>'''
-          for dim in _WEIGHT_DIMENSIONS
-      )}
-    </div>
-    <button id="cw-save-btn" onclick="saveCommunityWeights()" class="btn" style="font-size:14px;padding:9px 22px;">Save weights</button>
-    <span id="cw-status" style="font-size:13px;color:var(--muted);margin-left:10px;"></span>
-  </div>
-</details>
-
-<script>
-var CW_DIMENSIONS = {json.dumps([dim["key"] for dim in _WEIGHT_DIMENSIONS])};
-async function saveCommunityWeights() {{
-  var btn = document.getElementById('cw-save-btn'), status = document.getElementById('cw-status');
-  var weights = {{}}, values = {{}};
-  CW_DIMENSIONS.forEach(function(k) {{
-    var v = parseFloat(document.getElementById('cw-' + k).value);
-    weights[k] = isNaN(v) ? 1.0 : v;
-    values[k] = Array.prototype.slice.call(document.querySelectorAll('.cw-value-' + k + ':checked')).map(function(el) {{ return el.value; }});
-  }});
-  btn.disabled = true; btn.textContent = 'Saving…';
-  try {{
-    var r = await fetch('/admin/tools/communities/weights', {{
-      method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{weights: weights, values: values}})
-    }});
-    if (!r.ok) throw new Error();
-    status.textContent = 'Saved.'; status.style.color = '#065f46';
-    setTimeout(function() {{ status.textContent = ''; }}, 3000);
-  }} catch (e) {{
-    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
-  }} finally {{ btn.disabled = false; btn.textContent = 'Save weights'; }}
-}}
-</script>
-
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
 <div style="overflow-x:auto;margin-bottom:40px;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
@@ -9451,37 +9224,6 @@ applySortFilter('communities');
 </p>
 </div>"""
     return HTMLResponse(_page("Communities—CFO Toolbox Admin", "", body, authed=True))
-
-
-@app.post("/admin/tools/communities/weights")
-async def admin_communities_save_weights(request: Request):
-    """Save the 7 Recommender default weight+value pairs in one call, same
-    no-reload settings pattern as /admin/voice/core (two settings keys per
-    dimension: the weight number and its default target value(s) — see
-    _community_weight_setting_key/_community_weight_values_setting_key)."""
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    payload = await request.json()
-    weights = payload.get("weights")
-    values = payload.get("values")
-    if not isinstance(weights, dict) or not isinstance(values, dict):
-        return JSONResponse({"ok": False, "error": "Invalid payload"}, status_code=400)
-    dims_by_key = {dim["key"]: dim for dim in _WEIGHT_DIMENSIONS}
-    lib = _lib()
-    try:
-        for key, dim in dims_by_key.items():
-            if key in weights:
-                try:
-                    lib.set_setting(_community_weight_setting_key(key), str(float(weights[key])))
-                except (TypeError, ValueError):
-                    pass
-            if key in values and isinstance(values[key], list):
-                valid = {v for v, _ in dim["options"]}
-                picked = [v for v in values[key] if v in valid]
-                lib.set_setting(_community_weight_values_setting_key(key), json.dumps(picked))
-    finally:
-        lib.close()
-    return JSONResponse({"ok": True})
 
 
 # Field allowlist for the Communities bulk-edit panel — same server-side gate
@@ -9902,14 +9644,6 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             stage_focus=(form.get("stage_focus") or "").strip(),
             jobs_program=(form.get("jobs_program") or "").strip(),
             team_or_individual=(form.get("team_or_individual") or "").strip(),
-            seniority_band_tags=form.getlist("seniority_band_tags"),
-            cpe_eligible_tags=form.getlist("cpe_eligible_tags"),
-            platform_type_tags=form.getlist("platform_type_tags"),
-            function_tags=form.getlist("function_tags"),
-            looking_for_tags=form.getlist("looking_for_tags"),
-            programming_tags=form.getlist("programming_tags"),
-            paid_free_tags=form.getlist("paid_free_tags"),
-            industry_tags=form.getlist("industry_tags"),
         )
     finally:
         lib.close()
@@ -17046,20 +16780,23 @@ def admin_brand_avatar_remove(request: Request):
 
 @app.get("/admin/voice", response_class=HTMLResponse)
 def admin_voice_page(request: Request):
-    """Verbal identity: the two DB-backed voice fields FP&A Buddy generation
-    and the reviewer both draw from live (voice_core, voice_fpa_buddy), plus
-    an on-demand check for whether a piece of copy or an FP&A Buddy answer is
-    on-voice. Split out of /admin/brand (which stays the visual/color system)
-    since the two are edited and read independently."""
+    """Verbal identity: the DB-backed voice fields FP&A Buddy generation, the
+    Chat Matchmaker, and the reviewer all draw from live (voice_core,
+    voice_fpa_buddy, voice_matchmaker), plus an on-demand check for whether a
+    piece of copy or a generated answer is on-voice. Split out of
+    /admin/brand (which stays the visual/color system) since these are
+    edited and read independently."""
     if not _is_authed(request):
         return _login_redirect(request)
 
     from linklib.agent import VOICE_CORE_DEFAULT, VOICE_FPA_BUDDY_DEFAULT
+    from linklib.matchmaker import VOICE_MATCHMAKER_DEFAULT
 
     lib = _lib()
     try:
         custom_core = lib.get_setting("voice_core")
         custom_fpa_buddy = lib.get_setting("voice_fpa_buddy")
+        custom_matchmaker = lib.get_setting("voice_matchmaker")
     finally:
         lib.close()
 
@@ -17104,6 +16841,10 @@ def admin_voice_page(request: Request):
         "voice-fpa", "FP&amp;A Buddy voice",
         "Appended after the voice core for FP&amp;A Buddy specifically&mdash;third-person register, cite-or-name-the-gap, no personal metaphors or LinkedIn-shape devices.",
         custom_fpa_buddy, VOICE_FPA_BUDDY_DEFAULT, 10)
+    matchmaker_block = _voice_field(
+        "voice-matchmaker", "Chat Matchmaker voice",
+        "Appended after the voice core for the Communities and Software matchmakers (/tools/communities/find, /tools/software/find)&mdash;first person plural, references what the visitor said, no invented experience with any listed community or vendor.",
+        custom_matchmaker, VOICE_MATCHMAKER_DEFAULT, 8)
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -17112,6 +16853,7 @@ def admin_voice_page(request: Request):
 
 {core_block}
 {fpa_buddy_block}
+{matchmaker_block}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Check content against your voice</div>
@@ -17122,6 +16864,7 @@ def admin_voice_page(request: Request):
 <select id="vr-rubric" style="margin-left:8px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);">
 <option value="general">General / site copy</option>
 <option value="fpa_buddy">FP&amp;A Buddy answer</option>
+<option value="matchmaker">Chat Matchmaker answer</option>
 </select></label>
 <textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice—a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
@@ -17132,8 +16875,8 @@ def admin_voice_page(request: Request):
 </div>
 
 <script>
-var VOICE_ENDPOINTS = {{'voice-core': '/admin/voice/core', 'voice-fpa': '/admin/voice/fpa-buddy'}};
-var VOICE_KEYS = {{'voice-core': 'voice_core', 'voice-fpa': 'voice_fpa_buddy'}};
+var VOICE_ENDPOINTS = {{'voice-core': '/admin/voice/core', 'voice-fpa': '/admin/voice/fpa-buddy', 'voice-matchmaker': '/admin/voice/matchmaker'}};
+var VOICE_KEYS = {{'voice-core': 'voice_core', 'voice-fpa': 'voice_fpa_buddy', 'voice-matchmaker': 'voice_matchmaker'}};
 
 async function saveVoice(fieldId) {{
   var prompt = document.getElementById(fieldId + '-prompt').value;
@@ -17228,12 +16971,30 @@ async def admin_voice_save_fpa_buddy(request: Request):
     return JSONResponse({"ok": True, "custom": bool(prompt)})
 
 
+@app.post("/admin/voice/matchmaker")
+async def admin_voice_save_matchmaker(request: Request):
+    """Save (or reset, when blank) the voice_matchmaker setting — shared by
+    both the Communities and Software Chat Matchmakers."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    prompt = (payload.get("voice_matchmaker") or "").strip()
+    lib = _lib()
+    try:
+        lib.set_setting("voice_matchmaker", prompt)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "custom": bool(prompt)})
+
+
 @app.post("/admin/voice/review")
 async def admin_voice_review(request: Request):
     """Review pasted content against a voice rubric (mechanical lint + Claude
-    tone read). `rubric` picks which guide, both composed live from the same
-    settings FP&A Buddy generation uses: "general" (default) is voice_core
-    alone; "fpa_buddy" is voice_core + voice_fpa_buddy — see issue #95."""
+    tone read). `rubric` picks which guide, all composed live from the same
+    settings the live generators use: "general" (default) is voice_core
+    alone; "fpa_buddy" is voice_core + voice_fpa_buddy (see issue #95);
+    "matchmaker" is voice_core + voice_matchmaker (shared by both Chat
+    Matchmakers)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
@@ -17242,14 +17003,21 @@ async def admin_voice_review(request: Request):
         raise HTTPException(status_code=400, detail="text required")
     rubric = payload.get("rubric") or "general"
     from linklib.agent import VOICE_CORE_DEFAULT, VOICE_FPA_BUDDY_DEFAULT
+    from linklib.matchmaker import VOICE_MATCHMAKER_DEFAULT
     from linklib.voice_review import review_text
     lib = _lib()
     try:
         voice_core = lib.get_setting("voice_core") or VOICE_CORE_DEFAULT
         voice_fpa_buddy = lib.get_setting("voice_fpa_buddy") or VOICE_FPA_BUDDY_DEFAULT
+        voice_matchmaker = lib.get_setting("voice_matchmaker") or VOICE_MATCHMAKER_DEFAULT
     finally:
         lib.close()
-    voice_prompt = f"{voice_core}\n\n{voice_fpa_buddy}" if rubric == "fpa_buddy" else voice_core
+    if rubric == "fpa_buddy":
+        voice_prompt = f"{voice_core}\n\n{voice_fpa_buddy}"
+    elif rubric == "matchmaker":
+        voice_prompt = f"{voice_core}\n\n{voice_matchmaker}"
+    else:
+        voice_prompt = voice_core
     return JSONResponse(review_text(text, voice_prompt=voice_prompt))
 
 

@@ -1,8 +1,9 @@
-"""/admin/voice: the two DB-backed voice fields (voice_core, voice_fpa_buddy),
-their fallback panels, and the reviewer's two composed rubrics (#95).
+"""/admin/voice: the three DB-backed voice fields (voice_core,
+voice_fpa_buddy, voice_matchmaker), their fallback panels, and the
+reviewer's three composed rubrics (#95, plus the Chat Matchmaker voice pass).
 
 Covers what tests/test_ask_agent.py can't from inside linklib: the HTML page
-renders both fields' code-constant defaults in the collapsed fallback panel,
+renders each field's code-constant default in the collapsed fallback panel,
 the save/reset endpoints round-trip through the settings table, and the
 reviewer composes the rubric text the same way _build_system does.
 """
@@ -16,7 +17,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib.db import Library
-from linklib import agent, voice_review
+from linklib import agent, matchmaker, voice_review
 from webapp.app import _esc
 
 
@@ -54,9 +55,10 @@ def test_page_renders_both_defaults_and_fallback_panels(env):
     html = _login_admin(env).get("/admin/voice").text
     assert _esc(agent.VOICE_CORE_DEFAULT) in html
     assert _esc(agent.VOICE_FPA_BUDDY_DEFAULT) in html
+    assert _esc(matchmaker.VOICE_MATCHMAKER_DEFAULT) in html
     assert "Default voice guide (used when the field above is empty)" in html
     assert ">Built-in default<" in html
-    assert ">Customized<" not in html   # neither field is customized yet
+    assert ">Customized<" not in html   # none of the fields are customized yet
 
 
 def test_save_core_then_page_reflects_customization(env):
@@ -94,6 +96,44 @@ def test_save_fpa_buddy_independent_of_core(env):
         lib.close()
 
 
+def test_save_matchmaker_voice_independent_of_core_and_fpa(env):
+    c = _login_admin(env)
+    c.post("/admin/voice/matchmaker", json={"voice_matchmaker": "MY CUSTOM MATCHMAKER"})
+    lib = Library(os.environ["LINKLIB_DB"])
+    try:
+        assert lib.get_setting("voice_matchmaker") == "MY CUSTOM MATCHMAKER"
+        assert lib.get_setting("voice_core") == ""       # untouched
+        assert lib.get_setting("voice_fpa_buddy") == ""  # untouched
+    finally:
+        lib.close()
+
+
+def test_reset_matchmaker_voice_clears_customization(env):
+    c = _login_admin(env)
+    c.post("/admin/voice/matchmaker", json={"voice_matchmaker": "MY CUSTOM MATCHMAKER"})
+    r = c.post("/admin/voice/matchmaker", json={"voice_matchmaker": ""})
+    assert r.json() == {"ok": True, "custom": False}
+    lib = Library(os.environ["LINKLIB_DB"])
+    try:
+        assert lib.get_setting("voice_matchmaker") == ""
+    finally:
+        lib.close()
+
+
+def test_matchmaker_build_system_uses_live_db_setting_not_just_default(env):
+    """The Chat Matchmaker's own _build_system should pick up a saved
+    voice_matchmaker override, mirroring how agent._build_system already
+    does for voice_fpa_buddy."""
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.set_setting("voice_matchmaker", "CUSTOM MATCHMAKER VOICE")
+    lib.add_community("Test Community", "https://example.com", "Finance leaders",
+                      "Free", ["Peer group"], approved=1)
+    system = matchmaker._build_system(lib, "community")
+    lib.close()
+    assert "CUSTOM MATCHMAKER VOICE" in system
+    assert matchmaker.VOICE_MATCHMAKER_DEFAULT not in system
+
+
 def test_review_endpoint_requires_text(env):
     c = _login_admin(env)
     assert c.post("/admin/voice/review", json={"text": ""}).status_code == 400
@@ -123,6 +163,19 @@ def test_review_rubric_fpa_buddy_composes_core_plus_fpa(env, monkeypatch):
     c = _login_admin(env)
     c.post("/admin/voice/review", json={"text": "an FP&A Buddy answer", "rubric": "fpa_buddy"})
     assert captured["voice_prompt"] == f"{agent.VOICE_CORE_DEFAULT}\n\n{agent.VOICE_FPA_BUDDY_DEFAULT}"
+
+
+def test_review_rubric_matchmaker_composes_core_plus_matchmaker(env, monkeypatch):
+    captured = {}
+
+    def fake_review_text(text, voice_prompt=None, model=None):
+        captured["voice_prompt"] = voice_prompt
+        return {"mechanical": [], "review": "stub", "ok": True}
+
+    monkeypatch.setattr(voice_review, "review_text", fake_review_text)
+    c = _login_admin(env)
+    c.post("/admin/voice/review", json={"text": "a matchmaker suggestion", "rubric": "matchmaker"})
+    assert captured["voice_prompt"] == f"{agent.VOICE_CORE_DEFAULT}\n\n{matchmaker.VOICE_MATCHMAKER_DEFAULT}"
 
 
 def test_review_rubric_reads_live_db_settings_not_just_defaults(env, monkeypatch):

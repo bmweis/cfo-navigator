@@ -1121,6 +1121,28 @@ class Library:
             # Buddy and the matchmaker(s) track spend independently rather
             # than competing for one budget — see matchmaker_questions below.
             "ALTER TABLE users ADD COLUMN matchmaker_cap_usd REAL",
+            # Recommender weighting *_tags columns dropped entirely: the quiz
+            # they existed for is gone (replaced by the Chat Matchmaker, which
+            # reads the free-text columns of the same base name directly, no
+            # controlled vocabulary needed) and nothing else ever read them —
+            # confirmed unused, then removed by Brian's explicit call rather
+            # than left as dead weight (same DROP COLUMN precedent as
+            # `communities.region` above). Takes the four already-retired
+            # columns (primary_purpose_tags, resources_included_tags,
+            # meeting_format_tags, event_style_tags — dead even before this)
+            # along with the eight that were still live until now.
+            "ALTER TABLE community_profiles DROP COLUMN seniority_band_tags",
+            "ALTER TABLE community_profiles DROP COLUMN cpe_eligible_tags",
+            "ALTER TABLE community_profiles DROP COLUMN platform_type_tags",
+            "ALTER TABLE community_profiles DROP COLUMN function_tags",
+            "ALTER TABLE community_profiles DROP COLUMN looking_for_tags",
+            "ALTER TABLE community_profiles DROP COLUMN programming_tags",
+            "ALTER TABLE community_profiles DROP COLUMN paid_free_tags",
+            "ALTER TABLE community_profiles DROP COLUMN industry_tags",
+            "ALTER TABLE community_profiles DROP COLUMN primary_purpose_tags",
+            "ALTER TABLE community_profiles DROP COLUMN resources_included_tags",
+            "ALTER TABLE community_profiles DROP COLUMN meeting_format_tags",
+            "ALTER TABLE community_profiles DROP COLUMN event_style_tags",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -2530,28 +2552,11 @@ class Library:
     # 1:1 with communities via community_id; see the CREATE TABLE comment in
     # _SCHEMA for why this stays an upsert-by-PK rather than a SQL FK.
 
-    # primary_purpose_tags and resources_included_tags are deliberately
-    # excluded here (retired weighting dimensions, superseded by
-    # looking_for_tags — see the ALTER TABLE comment in _SCHEMA) even though
-    # the columns and their free-text siblings still exist on the table;
-    # get_community_profile only JSON-decodes the columns actually used for
-    # weighting today.
-    _WEIGHT_TAG_COLUMNS = (
-        "seniority_band_tags", "cpe_eligible_tags", "platform_type_tags",
-        "function_tags", "looking_for_tags", "programming_tags", "paid_free_tags",
-        "industry_tags",
-    )
-
     def get_community_profile(self, community_id: int) -> dict | None:
         row = self.conn.execute(
             "SELECT * FROM community_profiles WHERE community_id=?", (community_id,)
         ).fetchone()
-        if not row:
-            return None
-        d = dict(row)
-        for col in self._WEIGHT_TAG_COLUMNS:
-            d[col] = json.loads(d.get(col) or "[]")
-        return d
+        return dict(row) if row else None
 
     def upsert_community_profile(self, community_id: int, ideal_member: str = "",
                                  anti_fit: str = "", value_prop: str = "",
@@ -2565,30 +2570,23 @@ class Library:
                                  platform_type: str = "", meeting_format: str = "",
                                  event_style: str = "", seniority_band: str = "",
                                  resources_included: str = "", needs_review: int = 0,
-                                 seniority_band_tags: list[str] | None = None,
-                                 cpe_eligible_tags: list[str] | None = None,
-                                 platform_type_tags: list[str] | None = None,
                                  stage_focus: str = "", jobs_program: str = "",
-                                 team_or_individual: str = "",
-                                 function_tags: list[str] | None = None,
-                                 looking_for_tags: list[str] | None = None,
-                                 programming_tags: list[str] | None = None,
-                                 paid_free_tags: list[str] | None = None,
-                                 industry_tags: list[str] | None = None) -> None:
+                                 team_or_individual: str = "") -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
-        edit form always submits every field, generated or hand-written. The
-        *_tags params are the Recommender weighting's controlled-vocabulary
-        matches (see the ALTER TABLE comment in _SCHEMA), distinct from and
-        alongside the free-text column of the same base name. Deliberately no
-        primary_purpose_tags/resources_included_tags/meeting_format_tags/
-        event_style_tags params — those four retired as weighting dimensions
-        (primary_purpose_tags/resources_included_tags into looking_for_tags,
-        meeting_format_tags/event_style_tags into programming_tags — see the
-        ALTER TABLE comments), so this upsert no longer touches those columns
-        at all, leaving whatever was last written there (by
-        scripts/backfill_community_weight_tags.py) as a frozen historical
-        artifact rather than silently zeroing it out on every future save."""
+        edit form always submits every field, generated or hand-written.
+
+        The Recommender's controlled-vocabulary `*_tags` columns (seniority_band_
+        tags, cpe_eligible_tags, platform_type_tags, function_tags, looking_for_
+        tags, programming_tags, paid_free_tags, industry_tags) were dropped
+        entirely once the quiz they existed for was replaced by the Chat
+        Matchmaker (which reads these free-text columns directly, needing no
+        controlled vocabulary) — removed by Brian's explicit call rather than
+        left as dead weight, alongside the admin panel that edited them and
+        scripts/backfill_community_weight_tags.py. The four *_tags columns
+        retired even earlier than that (primary_purpose_tags,
+        resources_included_tags, meeting_format_tags, event_style_tags) went
+        the same way in the same migration."""
         self.conn.execute(
             """INSERT INTO community_profiles
                (community_id, ideal_member, anti_fit, value_prop, format_reality,
@@ -2597,11 +2595,8 @@ class Library:
                 verdict_summary, low_confidence, updated_at, business_model,
                 primary_purpose, cpe_eligible, platform_type, meeting_format,
                 event_style, seniority_band, resources_included, needs_review,
-                seniority_band_tags, cpe_eligible_tags, platform_type_tags,
-                stage_focus, jobs_program, team_or_individual,
-                function_tags, looking_for_tags, programming_tags, paid_free_tags,
-                industry_tags)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                stage_focus, jobs_program, team_or_individual)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(community_id) DO UPDATE SET
                  ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
                  value_prop=excluded.value_prop, format_reality=excluded.format_reality,
@@ -2624,16 +2619,8 @@ class Library:
                  seniority_band=excluded.seniority_band,
                  resources_included=excluded.resources_included,
                  needs_review=excluded.needs_review,
-                 seniority_band_tags=excluded.seniority_band_tags,
-                 cpe_eligible_tags=excluded.cpe_eligible_tags,
-                 platform_type_tags=excluded.platform_type_tags,
                  stage_focus=excluded.stage_focus, jobs_program=excluded.jobs_program,
-                 team_or_individual=excluded.team_or_individual,
-                 function_tags=excluded.function_tags,
-                 looking_for_tags=excluded.looking_for_tags,
-                 programming_tags=excluded.programming_tags,
-                 paid_free_tags=excluded.paid_free_tags,
-                 industry_tags=excluded.industry_tags""",
+                 team_or_individual=excluded.team_or_individual""",
             (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
              format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
@@ -2642,12 +2629,7 @@ class Library:
              primary_purpose.strip(), cpe_eligible.strip(), platform_type.strip(),
              meeting_format.strip(), event_style.strip(), seniority_band.strip(),
              resources_included.strip(), needs_review,
-             json.dumps(seniority_band_tags or []), json.dumps(cpe_eligible_tags or []),
-             json.dumps(platform_type_tags or []),
-             stage_focus.strip(), jobs_program.strip(), team_or_individual.strip(),
-             json.dumps(function_tags or []), json.dumps(looking_for_tags or []),
-             json.dumps(programming_tags or []), json.dumps(paid_free_tags or []),
-             json.dumps(industry_tags or [])),
+             stage_focus.strip(), jobs_program.strip(), team_or_individual.strip()),
         )
         self.conn.commit()
 
@@ -2684,25 +2666,6 @@ class Library:
             return
         set_clause = ", ".join(f"{col}=?" for col in fields)
         values = [v.strip() if isinstance(v, str) else v for v in fields.values()]
-        self.conn.execute(
-            f"UPDATE community_profiles SET {set_clause}, updated_at=? WHERE community_id=?",
-            (*values, _now(), community_id),
-        )
-        self.conn.commit()
-
-    def update_community_weight_tags(self, community_id: int, **tags: list[str]) -> None:
-        """Narrow, partial update for the Recommender weighting *_tags columns
-        only — used by scripts/backfill_community_weight_tags.py's one-off
-        classification pass so it doesn't have to round-trip every other
-        profile field through upsert_community_profile. Keys are column names
-        from Library._WEIGHT_TAG_COLUMNS (e.g. seniority_band_tags=[...]);
-        unknown keys are ignored. Requires an existing community_profiles row
-        (upsert_community_profile creates the row; this only updates it)."""
-        fields = {k: v for k, v in tags.items() if k in self._WEIGHT_TAG_COLUMNS}
-        if not fields:
-            return
-        set_clause = ", ".join(f"{col}=?" for col in fields)
-        values = [json.dumps(v or []) for v in fields.values()]
         self.conn.execute(
             f"UPDATE community_profiles SET {set_clause}, updated_at=? WHERE community_id=?",
             (*values, _now(), community_id),

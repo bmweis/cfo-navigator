@@ -47,7 +47,7 @@ def test_find_page_renders_without_login(env):
     c = _client(appmod)
     r = c.get("/tools/software/find")
     assert r.status_code == 200
-    assert "Find your tool" in r.text
+    assert "Software Matchmaker" in r.text
 
 
 def test_software_directory_links_to_matchmaker(env):
@@ -55,7 +55,7 @@ def test_software_directory_links_to_matchmaker(env):
     c = _client(appmod)
     r = c.get("/tools/software")
     assert r.status_code == 200
-    assert '<a href="/tools/software/find" style="font-weight:500;">Find your tool' in r.text
+    assert '<a href="/tools/software/find" style="font-weight:500;">Software Matchmaker' in r.text
 
 
 def test_chat_requires_question(env):

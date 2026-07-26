@@ -62,15 +62,13 @@ def test_profile_page_renders_full_profile(env):
     assert "Business model" in r.text
 
 
-def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
-    """Regression test: the admin profile edit POST handler hardcodes one
-    form.getlist(...) line per Recommender weighting *_tags dimension (see
-    webapp/app.py's admin_communities_profile_save-equivalent handler) —
-    unlike the checkbox groups above it, which render generically off
-    _WEIGHT_DIMENSIONS. A new dimension (e.g. function_tags, added in the
-    Level/Function PR) is silently dropped on every save until its own
-    getlist line is added, even though its checkbox renders and its column
-    exists. Catches that class of bug for every current *_tags dimension."""
+def test_admin_profile_save_persists_narrative_fields(env):
+    """Regression test: the admin profile edit POST handler still saves the
+    narrative fields correctly now that the Recommender weighting *_tags
+    columns (and their form.getlist(...) lines) have been removed entirely —
+    the quiz they existed for is gone, replaced by the Chat Matchmaker, which
+    reads these free-text columns directly and needs no controlled
+    vocabulary (see linklib/db.py's upsert_community_profile docstring)."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     cid = lib.add_community(
@@ -83,29 +81,20 @@ def test_admin_profile_save_persists_all_weight_tag_dimensions(env):
     c = _client(env)
     c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
     r = c.post(f"/admin/tools/communities/{cid}/profile", data={
-        "ideal_member": "Solo CFOs at Series A/B",
-        "seniority_band_tags": ["cfo", "senior_exec"],
-        "function_tags": ["fpa"],
-        "cpe_eligible_tags": ["yes"],
-        "platform_type_tags": ["slack"],
-        "looking_for_tags": ["peer_discussions", "vendor_connections"],
-        "programming_tags": ["meals", "conferences"],
-        "paid_free_tags": ["free", "paid"],
-        "industry_tags": ["life_sciences"],
+        "ideal_member": "Updated: Solo CFOs at Series A/B",
+        "seniority_band": "CFO",
+        "platform_type": "Slack",
     }, follow_redirects=False)
     assert r.status_code == 303
 
     lib = Library(os.environ["LINKLIB_DB"])
     profile = lib.get_community_profile(cid)
     lib.close()
-    assert profile["seniority_band_tags"] == ["cfo", "senior_exec"]
-    assert profile["function_tags"] == ["fpa"]
-    assert profile["cpe_eligible_tags"] == ["yes"]
-    assert profile["platform_type_tags"] == ["slack"]
-    assert profile["looking_for_tags"] == ["peer_discussions", "vendor_connections"]
-    assert profile["programming_tags"] == ["meals", "conferences"]
-    assert profile["paid_free_tags"] == ["free", "paid"]
-    assert profile["industry_tags"] == ["life_sciences"]
+    assert profile["ideal_member"] == "Updated: Solo CFOs at Series A/B"
+    assert profile["seniority_band"] == "CFO"
+    assert profile["platform_type"] == "Slack"
+    assert "seniority_band_tags" not in profile
+    assert "industry_tags" not in profile
 
 
 def test_profile_page_falls_back_to_minimal_when_no_profile(env):
