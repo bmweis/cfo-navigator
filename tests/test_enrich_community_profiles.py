@@ -5,8 +5,8 @@ selection (--communities/--limit), dry-run vs. write, the skip-unless-force
 already-researched guard, and the critical echo-back safety property:
 upsert_community_profile fully replaces every column it owns, so this
 script must read the existing row first and pass every field the draft
-doesn't produce straight through — never blank a retired field or a
-Recommender weighting tag just because a bulk refresh ran.
+doesn't produce straight through — never blank a retired field just
+because a bulk refresh ran.
 """
 import os
 import pathlib
@@ -187,8 +187,8 @@ def test_force_redrafts_existing(db, monkeypatch):
 def test_refresh_does_not_blank_untouched_profile_fields(db, monkeypatch):
     """upsert_community_profile fully replaces every column — a bulk refresh
     must read the existing row and pass through fields generate_community_profile
-    doesn't produce, or a --force re-run silently wipes out hand-set weighting
-    tags and the retired free-text fields."""
+    doesn't produce, or a --force re-run silently wipes out the retired
+    free-text fields."""
     lib = Library(db)
     cid = _add_community(lib, "Chief", "https://chief.com")
     lib.upsert_community_profile(
@@ -197,9 +197,6 @@ def test_refresh_does_not_blank_untouched_profile_fields(db, monkeypatch):
         platform_type="Slack + in-person", meeting_format="Hybrid",
         event_style="Roundtable", seniority_band="VP+",
         resources_included="Vendor directory",
-        seniority_band_tags=["VP", "C-suite"],
-        function_tags=["Finance"],
-        industry_tags=["SaaS"],
     )
     lib.close()
 
@@ -218,9 +215,6 @@ def test_refresh_does_not_blank_untouched_profile_fields(db, monkeypatch):
     assert profile["event_style"] == "Roundtable"
     assert profile["seniority_band"] == "VP+"
     assert profile["resources_included"] == "Vendor directory"
-    assert profile["seniority_band_tags"] == ["VP", "C-suite"]
-    assert profile["function_tags"] == ["Finance"]
-    assert profile["industry_tags"] == ["SaaS"]
 
 
 # -- CLI guardrails ---------------------------------------------------------------

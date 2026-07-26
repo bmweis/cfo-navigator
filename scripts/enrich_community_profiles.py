@@ -15,11 +15,11 @@ needs_review=1 (webapp/app.py's admin communities list already badges and
 filters on that flag), and only the sixteen drafted fields are touched —
 every other community_profiles column (the retired primary_purpose/
 cpe_eligible/platform_type/meeting_format/event_style/seniority_band/
-resources_included fields, and all the Recommender *_tags weighting
-columns) is read back from the existing row and passed through unchanged,
-since upsert_community_profile always fully replaces every column and has
-no partial-update mode — the same "echo every field back or it gets
-silently blanked" hazard the Software bulk-edit route had for `summary`.
+resources_included fields) is read back from the existing row and passed
+through unchanged, since upsert_community_profile always fully replaces
+every column and has no partial-update mode — the same "echo every field
+back or it gets silently blanked" hazard the Software bulk-edit route had
+for `summary`.
 
 This makes real API calls under YOUR OWN Anthropic API credits — set
 ANTHROPIC_API_KEY first. Always dry-run a new community list before writing:
@@ -154,14 +154,6 @@ def main() -> int:
                     event_style=existing_profile.get("event_style", ""),
                     seniority_band=existing_profile.get("seniority_band", ""),
                     resources_included=existing_profile.get("resources_included", ""),
-                    seniority_band_tags=existing_profile.get("seniority_band_tags") or [],
-                    cpe_eligible_tags=existing_profile.get("cpe_eligible_tags") or [],
-                    platform_type_tags=existing_profile.get("platform_type_tags") or [],
-                    function_tags=existing_profile.get("function_tags") or [],
-                    looking_for_tags=existing_profile.get("looking_for_tags") or [],
-                    programming_tags=existing_profile.get("programming_tags") or [],
-                    paid_free_tags=existing_profile.get("paid_free_tags") or [],
-                    industry_tags=existing_profile.get("industry_tags") or [],
                 )
                 lib.record_enrichment_cost(None, draft.model, draft.input_tokens,
                                            draft.output_tokens, draft.cost_usd)

@@ -347,9 +347,8 @@ fully replaces every `community_profiles` column rather than partially
 patching it, and `generate_community_profile` only drafts sixteen of that
 row's fields, this script reads the existing row first and passes every
 other column — the retired `primary_purpose`/`cpe_eligible`/`platform_type`/
-`meeting_format`/`event_style`/`seniority_band`/`resources_included` fields,
-and all the Recommender `*_tags` weighting columns — straight through
-unchanged, the same "echo every field back or it gets silently blanked"
+`meeting_format`/`event_style`/`seniority_band`/`resources_included` fields —
+straight through unchanged, the same "echo every field back or it gets silently blanked"
 discipline `tools.summary` needed in the Software bulk-edit route. Re-running
 is safe: a community whose profile already has a non-empty `ideal_member` is
 skipped unless `--force`. Requires explicit scope (`--communities` or
