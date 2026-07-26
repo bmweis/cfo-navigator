@@ -94,7 +94,10 @@ def test_default_ask_cap_is_read_live_not_hardcoded(env, monkeypatch):
     assert "$12.34" in body
 
 
-def test_admin_hub_lists_the_new_card_in_system_group(env):
+def test_admin_hub_lists_the_new_card(env):
+    # Moved from the System group into its own "FP&A Buddy" section in
+    # Phase 6 — this test only checks the card is reachable from /admin,
+    # not which section it lives in (see test_admin_nav_phase6.py for that).
     c = _admin_client(env)
     resp = c.get("/admin")
     assert resp.status_code == 200
