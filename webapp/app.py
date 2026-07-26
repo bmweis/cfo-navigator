@@ -13336,6 +13336,39 @@ def admin_how_fpa_buddy_works(request: Request):
 <h1>How FP&amp;A Buddy works</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">The real mechanism behind <a href="/library/ask" style="color:var(--accent);">/library/ask</a>, for anyone who wants more than the marketing description&mdash;a PM, an engineer, or a technically comfortable CFO. Retrieval-tier counts and the default cost cap below are read live from the code, so this page can't quietly drift out of date the way a hand-typed number would.</p>
 
+<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;overflow-x:auto;margin-bottom:20px;">
+<pre class="mermaid" style="margin:0;">
+flowchart LR
+    Q[Your question] --> L[Library<br/>curated archive]
+    Q --> F[Feed<br/>recent RSS]
+    Q --> W[Web<br/>Exa search, trusted sites only]
+    L --> C[Claude<br/>synthesizes an answer]
+    F --> C
+    W --> C
+    C --> A[Answer<br/>numbered citations]
+    T[Quick / Standard / Deep<br/>sets how much of each tier runs] -.-> C
+
+    classDef annotation fill:#F5F4EF,stroke:#6F6A60,stroke-dasharray: 3 3,color:#6F6A60;
+    class T annotation;
+</pre>
+</div>
+<p style="color:var(--muted);margin:-14px 0 24px;font-size:12.5px;line-height:1.5;">A concept-level view&mdash;see the &ldquo;FP&amp;A Buddy&rdquo; section of <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for the full request/response sequence (API calls, token usage, cost guards, follow-up handling).</p>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+mermaid.initialize({{
+  startOnLoad: true,
+  theme: 'base',
+  themeVariables: {{
+    primaryColor: '#EAF7F2',
+    primaryBorderColor: '#1F7A66',
+    primaryTextColor: '#002975',
+    lineColor: '#6F6A60',
+    tertiaryColor: '#F5F4EF'
+  }}
+}});
+</script>
+
 <div style="display:grid;gap:20px;">
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where an answer's sources come from</h3>
