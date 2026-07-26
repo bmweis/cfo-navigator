@@ -333,6 +333,30 @@ field, or the fuller `/admin/tools/{id}/features/{id}/edit` page) — the
 Phase 5 comparison matrix is what actually starts reading this data, and
 only once reviewed.
 
+**`scripts/enrich_community_profiles.py`** is the Communities equivalent of
+the script above — a standalone CLI batch job wrapping the exact same
+`generate_community_profile` call the "Auto-fill from URL"/"Regenerate"
+button on `/admin/tools/communities/{id}/edit` makes one community at a
+time, for running it against many communities in one pass instead of
+clicking that button repeatedly. Every profile it writes lands via
+`upsert_community_profile` with `needs_review=1` — never auto-confirmed,
+same review contract as the admin button and as the Software agent-taxonomy
+draft above; the admin communities list's existing "N pending review"
+badge/filter is how these get reviewed. Because `upsert_community_profile`
+fully replaces every `community_profiles` column rather than partially
+patching it, and `generate_community_profile` only drafts sixteen of that
+row's fields, this script reads the existing row first and passes every
+other column — the retired `primary_purpose`/`cpe_eligible`/`platform_type`/
+`meeting_format`/`event_style`/`seniority_band`/`resources_included` fields,
+and all the Recommender `*_tags` weighting columns — straight through
+unchanged, the same "echo every field back or it gets silently blanked"
+discipline `tools.summary` needed in the Software bulk-edit route. Re-running
+is safe: a community whose profile already has a non-empty `ideal_member` is
+skipped unless `--force`. Requires explicit scope (`--communities` or
+`--limit`) — no "run against everything" default — and `--dry-run` reports
+every field that would be drafted (and a projected full-catalog cost)
+without writing.
+
 **Software admin rename + column picker/bulk edit (both tables).** The Software
 admin page moved from `/admin/tools` to `/admin/software` — a hard cutover, no
 redirect; the old URL now 404s. Only the bare list-page route moved — every
