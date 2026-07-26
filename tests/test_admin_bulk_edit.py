@@ -169,6 +169,16 @@ def test_communities_bulk_edit_categories(admin_client):
     lib.close()
 
 
+def test_get_community_sorts_categories_alphabetically(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    c1 = lib.add_community(name="Comm A", url="https://ca.example", demographic="CFOs",
+                            cost_band="Free", categories=["Peer Group", "CPE", "Board Prep"], approved=1)
+    assert lib.get_community(c1)["categories"] == ["Board Prep", "CPE", "Peer Group"]
+    lib.close()
+
+
 # --- column picker / bulk-edit markup rendering -------------------------------
 
 def test_software_page_renders_column_picker_and_bulk_edit_markup(admin_client):

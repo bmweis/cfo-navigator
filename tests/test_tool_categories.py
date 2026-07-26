@@ -109,3 +109,30 @@ def test_delete_only_affects_tools_that_have_it(lib):
 
 def test_delete_unknown_category_is_noop(lib):
     assert lib.delete_tool_category(999) == 0
+
+
+# -- read-time alphabetical sort ---------------------------------------------
+# Every reader of a tool's categories (card grid, profile page, compare
+# matrix, admin table) must see them alphabetized regardless of the order
+# they were saved in — Library._tool_to_dict is the one choke point every
+# read path goes through, so the sort lives there rather than depending on
+# every write path (add/update/quick-edit/bulk-edit) to sort before saving.
+
+def test_get_tool_sorts_categories_alphabetically(lib):
+    tool_id = lib.add_tool("Ramp", "Spend management", "https://ramp.com",
+                           ["Revenue", "Accounting", "FP&A"], approved=1)
+    assert lib.get_tool(tool_id)["categories"] == ["Accounting", "FP&A", "Revenue"]
+
+
+def test_list_tools_sorts_categories_alphabetically(lib):
+    lib.add_tool("Ramp", "Spend management", "https://ramp.com",
+                ["Revenue", "Accounting", "FP&A"], approved=1)
+    tool = lib.list_tools(approved_only=True)[0]
+    assert tool["categories"] == ["Accounting", "FP&A", "Revenue"]
+
+
+def test_update_tool_out_of_order_still_reads_sorted(lib):
+    tool_id = lib.add_tool("Ramp", "Spend management", "https://ramp.com", [], approved=1)
+    lib.update_tool(tool_id, "Ramp", "Spend management", "https://ramp.com",
+                    ["Tax Management", "BI/Analytics"])
+    assert lib.get_tool(tool_id)["categories"] == ["BI/Analytics", "Tax Management"]
