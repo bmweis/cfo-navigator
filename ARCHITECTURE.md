@@ -152,7 +152,13 @@ and the default monthly cap reads live from `Library.get_default_ask_cap()`,
 so neither can drift out of sync with the code the way a hand-typed number
 would; model names are deliberately described qualitatively
 (fastest/balanced/most-capable) rather than pinned to a canonical model ID,
-since those rotate independently of this page.
+since those rotate independently of this page. Phase 5 added a
+concept-level Mermaid `flowchart` above the prose (question → library/feed/web
+→ synthesis → cited answer, no token counts or API names) — deliberately not
+the developer-grade sequence diagram above, which stays the reference for
+anyone debugging the actual request flow. Renders via the same
+CDN-hosted `mermaid.min.js` used by `/admin/system/database`'s ER diagram,
+not a new dependency.
 
 ### Content spine
 

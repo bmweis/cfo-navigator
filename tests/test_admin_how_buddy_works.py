@@ -100,3 +100,30 @@ def test_admin_hub_lists_the_new_card_in_system_group(env):
     assert resp.status_code == 200
     assert "/admin/system/how-fpa-buddy-works" in resp.text
     assert "How FP&amp;A Buddy works" in resp.text
+
+
+# --- Phase 5: simplified concept-level Mermaid flowchart ---------------------
+
+def test_page_ships_a_simplified_flowchart_not_the_sequence_diagram(env):
+    """A concept-level flowchart (not the developer-grade sequence diagram
+    already in ARCHITECTURE.md) — no token counts, API names, or cost-guard
+    branches belong here; those stay in the prose/ARCHITECTURE.md."""
+    c = _admin_client(env)
+    body = c.get("/admin/system/how-fpa-buddy-works").text
+    assert "flowchart LR" in body
+    assert "sequenceDiagram" not in body
+    for label in ("Your question", "Library", "Feed", "Web", "synthesizes an answer", "numbered citations"):
+        assert label in body
+    # No implementation detail that belongs to the prose/ARCHITECTURE.md instead.
+    for leaky_term in ("claude-haiku", "claude-sonnet", "claude-opus", "input_tokens", "cache_read"):
+        assert leaky_term not in body.lower()
+
+
+def test_flowchart_mermaid_js_loads_on_this_page(env):
+    """Mermaid renders client-side via the same CDN script already used on
+    /admin/system/database — not a new dependency, just reused."""
+    c = _admin_client(env)
+    body = c.get("/admin/system/how-fpa-buddy-works").text
+    assert "cdnjs.cloudflare.com/ajax/libs/mermaid" in body
+    assert "mermaid.initialize(" in body
+    assert 'class="mermaid"' in body
