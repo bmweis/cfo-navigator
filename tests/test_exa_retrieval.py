@@ -137,6 +137,7 @@ def _fake_lib_retrieve(monkeypatch):
 def test_answer_question_folds_exa_cost_when_anthropic_key_missing(monkeypatch):
     _fake_lib_retrieve(monkeypatch)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("EXA_API_KEY", "fake-key")  # Phase 7: Exa is the provider only when this is set
     exa_hits = [{"title": "Web Hit", "url": "https://w.com", "summary": "s"}]
     monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4: (exa_hits, 3, 0.007))
 
@@ -154,6 +155,7 @@ def test_answer_question_no_exa_call_without_opml_path(monkeypatch):
     contract — retrieve_exa must not be called at all."""
     _fake_lib_retrieve(monkeypatch)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("EXA_API_KEY", "fake-key")  # Phase 7: force provider="exa" so this test's premise holds
 
     def boom(*a, **k):
         raise AssertionError("retrieve_exa must not run without an opml_path")
@@ -183,6 +185,7 @@ class _FakeAnswerResponse:
 def test_answer_question_folds_exa_cost_on_success(monkeypatch, tmp_path):
     _fake_lib_retrieve(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
+    monkeypatch.setenv("EXA_API_KEY", "fake-key")  # Phase 7: Exa is the provider only when this is set
     exa_hits = [{"title": "Web Hit", "url": "https://w.com", "summary": "s"}]
     monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4: (exa_hits, 3, 0.007))
 
@@ -211,6 +214,7 @@ def test_answer_question_folds_exa_cost_on_success(monkeypatch, tmp_path):
 def test_answer_question_folds_exa_cost_on_answer_call_exception(monkeypatch, tmp_path):
     _fake_lib_retrieve(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
+    monkeypatch.setenv("EXA_API_KEY", "fake-key")  # Phase 7: Exa is the provider only when this is set
     exa_hits = [{"title": "Web Hit", "url": "https://w.com", "summary": "s"}]
     monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4: (exa_hits, 3, 0.007))
 

@@ -43,7 +43,10 @@ def test_features_section_no_longer_exists(env):
     assert "Features" not in group_names
 
 
-def test_fpa_buddy_is_its_own_section_with_all_three_pages(env):
+def test_fpa_buddy_is_its_own_section_with_all_expected_pages(env):
+    # 4th entry (/admin/exa-settings) added in Phase 7 — this test only
+    # pins the original Phase 6 moves; Phase 7's own tests cover the toggle
+    # page itself (tests/test_admin_exa_settings.py).
     fpa_groups = [items for gname, _, items in env._ADMIN_GROUPS if gname == "FP&A Buddy"]
     assert len(fpa_groups) == 1
     hrefs = [href for href, _, _ in fpa_groups[0]]
@@ -51,6 +54,7 @@ def test_fpa_buddy_is_its_own_section_with_all_three_pages(env):
         "/admin/system/how-fpa-buddy-works",
         "/admin/ask-report",
         "/admin/ask-feedback",
+        "/admin/exa-settings",
     ]
 
 

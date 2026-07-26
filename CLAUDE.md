@@ -88,12 +88,17 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   cascade automatically; no manual reindex needed.
 - **Enrichment is additive.** `enriched=0` rows get a Claude summary + tags later via
   `enrich_backfill`. The import does not require an API key.
-- **Web search is domain-restricted.** `agent.py`'s `retrieve_exa()` passes
-  `preferred_sites.opml` domains as Exa's `includeDomains`, so the chatbot only
-  cites sources Brian already trusts. Exa results ride as Citations-API
-  document blocks, the same pattern as library/feed retrieval — not a
-  model-invoked tool (that's what `web_search_20250305` was, before the Exa
-  Phase 2 migration).
+- **Web search is domain-restricted, whichever mechanism handles it.** Exa
+  is preferred — `agent.py`'s `retrieve_exa()` passes `preferred_sites.opml`
+  domains as Exa's `includeDomains`, riding as Citations-API document blocks
+  like library/feed retrieval, not a model-invoked tool. But it's a kill
+  switch, not the only mechanism (Phase 7): when `exa_enabled` is off
+  (`/admin/exa-settings`) or `EXA_API_KEY` is missing, Claude's native
+  `web_search_20250305` tool steps in instead, restricted by the same OPML
+  list via `allowed_domains` — restored to exactly its pre-Phase-2 shape,
+  not rebuilt from scratch. Exactly one mechanism runs per turn
+  (`agent._web_provider`); either way the chatbot only cites sources Brian
+  already trusts.
 - **Library retrieval is hybrid: FTS5 + vector search, merged by reciprocal rank
   fusion.** `sqlite-vec` adds a vec0 virtual table (`articles_vec`) inside `library.db`
   — no separate vector database. Embeddings (OpenAI `text-embedding-3-small`) can't be
@@ -174,7 +179,7 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
-| `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's web retrieval tier (`linklib/agent.py`'s `retrieve_exa`), which replaced the old `web_search_20250305` model tool in Phase 2. Absent → Buddy answers from Library + Feed alone, no error (same graceful-degrade contract as `OPENAI_API_KEY`). |
+| `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's preferred web retrieval mechanism (`linklib/agent.py`'s `retrieve_exa`). Absent, or the `exa_enabled` setting toggled off at `/admin/exa-settings` → Claude's native `web_search_20250305` tool handles the web tier instead (Phase 7 kill switch); web search itself is never disabled, only which engine runs. No error either way. |
 | `LINKLIB_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model for `linklib/embeddings.py` |
 | `LINKLIB_DB` | `library.db` | Path to the SQLite database |
 | `LINKLIB_SAVE_TOKEN` | (none) | Token for `POST /save` + bookmarklet; also the default login password. Set when hosted. |

@@ -30,8 +30,9 @@ flowchart LR
     end
 
     R -->|"Q&A, enrichment, rewrite,<br/>dedupe verification"| A["Anthropic API"]
-    R -->|"web retrieval<br/>(domain-restricted)"| X["Exa API"]
+    R -->|"web retrieval<br/>(domain-restricted, preferred)"| X["Exa API"]
     X --> W["Trusted sites from<br/>preferred_sites.opml"]
+    A -.->|"native web_search tool<br/>(fallback: Exa off or no key)"| W
     R -->|"RSS/Atom + article<br/>full-text fetches"| F["Publisher sites"]
     R -->|"outbound email"| G["Gmail REST API"]
     R -->|"weekly DB snapshot"| D["Google Drive"]
@@ -64,14 +65,19 @@ Notes on the edges:
 - **The volume path** is Railway configuration, not code: the app reads
   `LINKLIB_DB` (default `./library.db`); production points it at the mounted
   volume. The DB is deliberately not in git — it's personal reading history.
-- **Web retrieval never leaves the allowlist**: `preferred_sites.opml` (the
-  same file that drives the `/feed` reader) is parsed into Exa's
-  `includeDomains`, so FP&A Buddy can only cite sources the curator already
-  trusts. This is a direct Exa `/search` API call from `linklib/agent.py`
-  (`retrieve_exa`), not an Anthropic-hosted tool — Phase 2 of the Exa
-  migration replaced the earlier `web_search_20250305` model tool with
-  Python-side retrieval, the same pattern library and feed sources already
-  used.
+- **Web retrieval never leaves the allowlist, whichever mechanism handles
+  it.** `preferred_sites.opml` (the same file that drives the `/feed`
+  reader) restricts both paths: Exa's `includeDomains` on the preferred
+  path, and `allowed_domains` on the native `web_search_20250305` tool on
+  the fallback path. Exa — a direct `/search` API call from
+  `linklib/agent.py` (`retrieve_exa`), not an Anthropic-hosted tool — is
+  preferred whenever the `exa_enabled` setting is on and `EXA_API_KEY` is
+  set (Phase 2's migration, later made toggleable in Phase 7). Otherwise
+  Claude's native tool (Anthropic-hosted, restored in Phase 7 after Phase 2
+  had removed it outright) steps in instead. Exactly one of the two runs
+  per question — see `linklib.agent._web_provider` for the unified
+  condition, and `/admin/exa-settings` for the toggle and its connection
+  test.
 - **Email is the Gmail REST API, not SMTP** — Railway's Hobby plan blocks SMTP
   ports. Every send is best-effort and must never block the underlying DB
   write; failures land in the `email_failures` table and surface as an admin
@@ -138,27 +144,42 @@ newly added, never-tiered page automatically. `_page_index_snapshot()` in
 `webapp/app.py` is the single source; no maintained list of pages or tiers
 exists elsewhere.
 
-**`/admin/system/how-fpa-buddy-works`** (System nav group, added in the Exa
-migration's Phase 4) is a plain-language technical explainer of FP&A Buddy's
-mechanism — retrieval tiers (library/feed/web), the Quick/Standard/Deep
-effort tiers, citation verification, and the per-user dollar cost cap —
-written for a technically comfortable reader (a PM, an engineer, or a CFO)
-who wants the real mechanism, not marketing copy. It plays the same
-reference-doc role `_COMMUNITIES_REFERENCE_HTML` plays for the Communities
-feature, but as its own System-group page rather than a collapsible block
-on a working admin page, since explaining the mechanism IS this page's whole
-purpose. Per-tier source counts read live from `linklib.agent.EFFORT_SETTINGS`
-and the default monthly cap reads live from `Library.get_default_ask_cap()`,
-so neither can drift out of sync with the code the way a hand-typed number
-would; model names are deliberately described qualitatively
-(fastest/balanced/most-capable) rather than pinned to a canonical model ID,
-since those rotate independently of this page. Phase 5 added a
-concept-level Mermaid `flowchart` above the prose (question → library/feed/web
-→ synthesis → cited answer, no token counts or API names) — deliberately not
-the developer-grade sequence diagram above, which stays the reference for
+**`/admin/system/how-fpa-buddy-works`** (added in the Exa migration's
+Phase 4; moved from the System nav group into its own "FP&A Buddy" section
+in Phase 6, alongside the report/feedback pages and the Phase 7 toggle
+below — the route itself didn't change, only its section) is a
+plain-language technical explainer of FP&A Buddy's mechanism — retrieval
+tiers (library/feed/web), the Quick/Standard/Deep effort tiers, citation
+verification, and the per-user dollar cost cap — written for a technically
+comfortable reader (a PM, an engineer, or a CFO) who wants the real
+mechanism, not marketing copy. It plays the same reference-doc role
+`_COMMUNITIES_REFERENCE_HTML` plays for the Communities feature, but as its
+own page rather than a collapsible block on a working admin page, since
+explaining the mechanism IS this page's whole purpose. Per-tier source
+counts read live from `linklib.agent.EFFORT_SETTINGS` and the default
+monthly cap reads live from `Library.get_default_ask_cap()`, so neither can
+drift out of sync with the code the way a hand-typed number would; model
+names are deliberately described qualitatively (fastest/balanced/most-
+capable) rather than pinned to a canonical model ID, since those rotate
+independently of this page. Phase 5 added a concept-level Mermaid
+`flowchart` above the prose (question → library/feed/web → synthesis →
+cited answer, no token counts or API names) — deliberately not the
+developer-grade sequence diagram above, which stays the reference for
 anyone debugging the actual request flow. Renders via the same
 CDN-hosted `mermaid.min.js` used by `/admin/system/database`'s ER diagram,
 not a new dependency.
+
+**`/admin/exa-settings`** (Phase 7, FP&A Buddy nav group) is the Exa kill
+switch: an `exa_enabled` toggle (`settings` table, `Library.get_exa_enabled`/
+`set_exa_enabled`, defaults on) plus a "Test connection" action that fires
+one real, minimal Exa `/search` call and reports pass/fail — manual and
+on-demand only, never a background job, via `linklib.agent.test_exa_connection`.
+The page also flags when `EXA_API_KEY` isn't set on the host at all, since
+that's an independent condition from the toggle and an admin could
+otherwise be confused about why Buddy is using the fallback. Not persisted
+to a cost ledger — the test's tiny real cost (via `compute_exa_cost`) is
+only surfaced in the result, not written to a table, since it's a rarely-
+used manual check rather than a per-turn or overhead cost.
 
 ### Content spine
 
@@ -1101,14 +1122,20 @@ sequenceDiagram
     AG->>DB: vec0 KNN search on the query vector, 2x max_library
     AG->>AG: reciprocal rank fusion - merge FTS5 + vector hits,<br/>dedupe by article id, take top max_library
     AG->>AG: optional feed matching (keyword overlap, 30-min cached feed)
-    AG->>X: retrieve_exa: /search, includeDomains from OPML, max_web results
-    X-->>AG: results (+ real result count)
-    Note over AG: best-effort - no EXA_API_KEY or the call fails<br/>-> falls back to library/feed-only silently
-    AG->>C: messages.create: library + feed + Exa sources,<br/>all as document blocks with citations enabled (no web tool)
-    C-->>AG: text blocks with citation spans + usage
-    AG->>AG: reassemble answer - append [n] after each cited span,<br/>one deduped first-use-ordered list across library/feed/web documents
+    AG->>DB: _web_provider - exa_enabled setting AND EXA_API_KEY set?
+    alt Exa is the provider (preferred)
+        AG->>X: retrieve_exa: /search, includeDomains from OPML, max_web results
+        X-->>AG: results (+ real result count)
+        Note over AG: best-effort - the call fails<br/>-> falls back to library/feed-only silently, does NOT re-arm the native tool this turn
+        AG->>C: messages.create: library + feed + Exa sources,<br/>all as document blocks with citations enabled (no web tool armed)
+    else native tool is the provider (Exa off, or no key)
+        AG->>C: messages.create: library + feed as document blocks,<br/>web_search_20250305 tool armed (allowed_domains from OPML)
+        Note over C: the model decides whether/how many times<br/>to call the tool (max_uses = max_web), same as pre-Exa
+    end
+    C-->>AG: text blocks with citation spans<br/>(+ automatic web citations when the native tool fired) + usage
+    AG->>AG: reassemble answer - append [n] after each cited span,<br/>one deduped first-use-ordered list across library/feed/web sources;<br/>each web citation tagged provider "exa" or "native"
     AG->>AG: compute_cost from real token usage (pricing.py)
-    AG-->>W: Answer {text, citations, cost_usd = answer + rewrite + query embed + Exa}
+    AG-->>W: Answer {text, citations, cost_usd = answer + rewrite + query embed + Exa (if it ran)}
     W->>DB: record_ask_question - one row per turn<br/>(conversation_id, turn_index, tokens, cost breakdown,<br/>citations_json snapshot of the cited sources)
     W-->>B: {answer, citations, sources, followups_left,<br/>conversation_id, turn_id, usage: {spent, cap}}
     opt member rates the answer
@@ -1139,9 +1166,23 @@ Details worth knowing:
   silent fallback), and its spend is still recorded — folded into the same
   row's `cost_usd` with `rewrite_*` columns breaking out its share. A
   separate OpenAI call embeds that same retrieval question for the vector
-  half of hybrid search, and (when `use_web`) an Exa `/search` call retrieves
-  web results — same best-effort contract, same fold-into-`cost_usd` pattern
-  (`embed_*` and `exa_*` columns respectively).
+  half of hybrid search, and (when `use_web` and Exa is the provider — see
+  below) an Exa `/search` call retrieves web results — same best-effort
+  contract, same fold-into-`cost_usd` pattern (`embed_*` and `exa_*` columns
+  respectively). When the native tool is the provider instead, its own
+  per-search fee is billed by Anthropic and isn't captured in `cost_usd` at
+  all — a pre-existing gap flagged back in the Phase 0 investigation, not
+  introduced or worsened by Phase 7's restoration of the tool.
+- **Exactly one mechanism handles the web tier per turn — never both.**
+  `linklib.agent._web_provider(lib)` decides once, before retrieval starts:
+  Exa when the `exa_enabled` setting is on (default) AND `EXA_API_KEY` is
+  set; otherwise the native `web_search_20250305` tool (Phase 7 restored it
+  from before Phase 2's removal — same `allowed_domains`/`max_uses` shape).
+  This is a one-time decision, not a reactive retry: if Exa is chosen but
+  its call fails mid-turn, that turn just gets zero web results (the
+  existing best-effort contract) rather than falling back to the native
+  tool for the same turn — avoiding any scenario where both could fire.
+  Toggle and connection test live at `/admin/exa-settings`.
 - **Library retrieval is hybrid: FTS5 keyword search + vector semantic
   search, merged by reciprocal rank fusion (`agent._rrf_merge`, k=60).** Each
   path fetches 2x the tier's `max_library` so the merge has real rank signal
@@ -1151,15 +1192,20 @@ Details worth knowing:
   weight against, whereas RRF only needs rank position. Every failure mode —
   `sqlite-vec` unavailable, no `OPENAI_API_KEY`, the embed call erroring —
   degrades silently to FTS5-only, never blocking an answer.
-- **Citations are API-verified, not prompted.** Library, feed, and web (Exa)
-  sources all ride as Citations-API `document` blocks — one uniform citation
-  shape, not a documents-vs-tool-citations split (that split existed only
-  while `web_search_20250305` was the web source; Phase 2 of the Exa
-  migration removed it). The response's cited spans are reassembled
-  server-side into `[n]` markers against one continuous, deduplicated,
-  first-use-ordered list spanning all three source types. Any surprise in
-  citation metadata degrades to plain text — citation handling can never fail
-  an answer.
+- **Citations are API-verified, not prompted.** When Exa is the provider,
+  library, feed, and web sources all ride as Citations-API `document` blocks
+  — one uniform citation shape. When the native tool is the provider instead
+  (Phase 7 fallback), its automatic URL-based citations are reassembled
+  alongside the document-block citations from library/feed — both shapes
+  are unified into one continuous, deduplicated, first-use-ordered `[n]`
+  list either way, so the answer text and source list look identical
+  regardless of which mechanism handled the web tier. Every web-type
+  citation additionally carries a `provider` field ("exa" | "native") not
+  present on library/feed citations — a separate marker from citation
+  `type` (which stays "web" for both), used only to gate the "Powered by
+  Exa" caption (Phase 3) on the real mechanism. Any surprise in citation
+  metadata degrades to plain text — citation handling can never fail an
+  answer.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything
