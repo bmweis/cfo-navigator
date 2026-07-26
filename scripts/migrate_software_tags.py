@@ -64,6 +64,10 @@ CATEGORY_MAP = {
     "RevOps": "Revenue Operations",
     "Cloud/IT Spend": "Cloud/IT Spend",
     "BI & Analytics": "BI/Analytics",
+    "Tax Compliance": "Tax Management",
+    "CLM": "Legal and Contracting",
+    "Legal AI": "Legal and Contracting",
+    "Process Optimization": "Accounting",
 }
 
 # Kept in sync by hand with _DEFAULT_TOOL_CATEGORIES / _DEFAULT_CATEGORY_DESCRIPTIONS
