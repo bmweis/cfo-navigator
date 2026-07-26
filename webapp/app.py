@@ -545,6 +545,18 @@ def _login_redirect(request: Request) -> RedirectResponse:
     return RedirectResponse(f"/login?next={quote(nxt, safe='')}", status_code=303)
 
 
+def _safe_next(nxt: str | None) -> str | None:
+    """Validate a `next` redirect target is a same-app relative path — not an
+    open redirect. Rejects absolute URLs, scheme-relative (`//host/...`) and
+    backslash tricks some browsers still treat as scheme-relative."""
+    if not nxt or not nxt.startswith("/") or nxt.startswith("//") or nxt.startswith("/\\"):
+        return None
+    parsed = urlsplit(nxt)
+    if parsed.scheme or parsed.netloc:
+        return None
+    return nxt
+
+
 def _check_token(token: str | None) -> None:
     """Constant-time token check for the bookmarklet / programmatic save."""
     if SAVE_TOKEN and not (token and hmac.compare_digest(token, SAVE_TOKEN)):
@@ -992,16 +1004,17 @@ _ICON_CHAT_QUESTION = ('<path d="M4 5.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0
 # ---------------------------------------------------------------------------
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = "/library", error: str = "", reset: str = ""):
+def login_page(request: Request, next: str = "", error: str = "", reset: str = ""):
+    safe_next = _safe_next(next)
     if _is_member(request):   # already signed in (member or admin) — go on in
         # A signed-in member only ever reaches this page at all when `next`
         # required admin specifically — a member-only route would never have
         # redirected an already-valid member here in the first place. So for
         # a non-admin member, bouncing back to `next` would loop forever
         # (next redirects to /login, which redirects back to next, ...).
-        # Send them to /library instead, which any member can always reach.
-        safe_next = (next or "/library") if _is_authed(request) else "/library"
-        return RedirectResponse(safe_next, status_code=303)
+        # Send them to the homepage instead, which anyone can always reach.
+        dest = safe_next if (safe_next and _is_authed(request)) else "/"
+        return RedirectResponse(dest, status_code=303)
     err = ('<p style="color:#b91c1c;font-size:14px;margin:0 0 16px;">That didn&rsquo;t work—check your details and try again.</p>'
            if error else "")
     reset_notice = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
@@ -1013,7 +1026,7 @@ def login_page(request: Request, next: str = "/library", error: str = "", reset:
 {reset_notice}
 {err}
 <form method="post" action="/login" style="display:grid;gap:16px;">
-  <input type="hidden" name="next" value="{_esc(next or '/library')}">
+  <input type="hidden" name="next" value="{_esc(safe_next or '')}">
   <input name="username" type="text" required autofocus autocomplete="username" placeholder="Username"
          style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   <input name="password" type="password" required autocomplete="current-password" placeholder="Password"
@@ -1155,9 +1168,7 @@ async def login_submit(request: Request):
     form = await request.form()
     username = (form.get("username") or "").strip()
     password = form.get("password") or ""
-    nxt = form.get("next") or "/library"
-    if not nxt.startswith("/"):  # never redirect off-site
-        nxt = "/library"
+    safe_next = _safe_next(form.get("next"))
 
     role = username_for_cookie = None
     if username:
@@ -1174,14 +1185,19 @@ async def login_submit(request: Request):
             role, username_for_cookie = "admin", ADMIN_USERNAME
 
     if role:
-        resp = RedirectResponse(nxt, status_code=303)
+        # An explicit, validated `next` wins regardless of role. Otherwise,
+        # default by role: admins land in the back office, everyone else on
+        # the public homepage (never /library — that's not every user's home).
+        dest = safe_next or ("/admin" if role == "admin" else "/")
+        resp = RedirectResponse(dest, status_code=303)
         secure = (request.url.scheme == "https"
                   or request.headers.get("x-forwarded-proto") == "https")
         resp.set_cookie(COOKIE_NAME, _make_session(role, username_for_cookie),
                         max_age=SESSION_TTL, httponly=True, samesite="lax",
                         secure=secure, path="/")
         return resp
-    return RedirectResponse(f"/login?error=1&next={quote(nxt, safe='')}", status_code=303)
+    next_qs = f"&next={quote(safe_next, safe='')}" if safe_next else ""
+    return RedirectResponse(f"/login?error=1{next_qs}", status_code=303)
 
 
 @app.get("/logout")
@@ -4846,7 +4862,11 @@ def tools_directory(request: Request):
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
-Not sure which tool's for you? <a href="/tools/software/find" style="font-weight:500;">Software Matchmaker &rarr;</a>
+Not sure which tool's for you? {(
+    '<a href="/tools/software/find" style="font-weight:500;">Software Matchmaker &rarr;</a>'
+    if is_member else
+    '<a href="/login?next=%2Ftools%2Fsoftware%2Ffind" style="font-weight:500;">Sign in for access to Software Matchmaker &rarr;</a>'
+)}
 {'<a href="/admin/tools/categories" style="margin-left:12px;font-size:14px;font-weight:500;">Manage categories →</a>' if authed else ''}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
@@ -6188,7 +6208,11 @@ def tools_communities(request: Request):
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <h1 style="margin:0;">Communities</h1>
 <p style="color:var(--muted);margin:8px 0 28px;">A directory of CFO and finance communities worth joining: peer
-groups, associations, and Slack channels. Not sure which community's for you? <a href="/tools/communities/find" style="font-weight:500;">Community Matchmaker &rarr;</a></p>
+groups, associations, and Slack channels. Not sure which community's for you? {(
+    '<a href="/tools/communities/find" style="font-weight:500;">Community Matchmaker &rarr;</a>'
+    if is_member else
+    '<a href="/login?next=%2Ftools%2Fcommunities%2Ffind" style="font-weight:500;">Sign in for access to Community Matchmaker &rarr;</a>'
+)}</p>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
   <input id="comm-search" type="search" placeholder="Search communities…"

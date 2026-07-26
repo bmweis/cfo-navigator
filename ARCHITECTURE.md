@@ -1210,6 +1210,20 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   value `exp|role|username` (key: `LINKLIB_SECRET_KEY`, falling back to the
   password — unset means restarts invalidate sessions), HttpOnly,
   SameSite=Lax, 30-day TTL.
+- **Post-login/logout redirect**: `GET/POST /login` carries an optional
+  `next` query param/hidden field, validated by `_safe_next` (must be a
+  same-app relative path — rejects absolute URLs, `//host` scheme-relative,
+  and `/\host` backslash tricks). A present, valid `next` wins after a
+  successful login regardless of role. With no `next`, the default is
+  role-based: admins land on `/admin`, everyone else on the homepage (`/`) —
+  never `/library`, which isn't every signed-in user's home. Any private page
+  that redirects to `/login` (`_login_redirect`) already round-trips through
+  `next` this way. `GET /logout` always redirects to `/` for every role.
+  The Software/Community Matchmaker links (`/tools`, `/tools/communities`)
+  use this: signed out, the link is replaced with a "Sign in for access…"
+  prompt pointing at `/login?next=<matchmaker path>`; the matchmaker routes
+  themselves stay public (see below) — this is a soft, discovery-level nudge
+  toward signing in, not a hard gate on the chat itself.
 - **Three surfaces**:
   - *Public* — no auth: `/`, `/thought-leadership`,
     `/thought-leadership/growth-engine-ratio`, `/thought-leadership/ai-hackathon-playbook`,

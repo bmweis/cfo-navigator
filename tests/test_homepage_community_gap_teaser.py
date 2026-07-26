@@ -60,14 +60,20 @@ def test_homepage_no_longer_shows_either_prompt_member(env):
 def test_matchmaker_line_inline_in_subtitle_not_a_separate_block(env):
     # The matchmaker mention lives inline at the end of the subtitle
     # paragraph now, not as a separate CTA block further down the page.
+    # Signed out, that inline mention is a sign-in prompt rather than a
+    # direct matchmaker link — see tests/test_matchmaker_auth_gating.py.
     for client in (_client(env), _member_client(env)):
         r = client.get("/tools/communities")
         assert r.status_code == 200
         assert '<strong style="color:var(--ink);">Think finance communities could be better?</strong>' not in r.text
         assert "Slack channels. Not sure which community's for you? " in r.text
-        assert '<a href="/tools/communities/find" style="font-weight:500;">Community Matchmaker' in r.text
         # The old two-line top-of-page CTA block is gone entirely.
         assert '<div style="margin-top:24px;">' not in r.text
+
+    assert '<a href="/tools/communities/find" style="font-weight:500;">Community Matchmaker' in \
+        _member_client(env).get("/tools/communities").text
+    assert 'href="/login?next=%2Ftools%2Fcommunities%2Ffind"' in \
+        _client(env).get("/tools/communities").text
 
 
 def test_gap_feedback_line_moved_to_bottom_of_page(env):

@@ -50,9 +50,12 @@ def test_find_page_renders_without_login(env):
     assert "Software Matchmaker" in r.text
 
 
-def test_software_directory_links_to_matchmaker(env):
+def test_software_directory_links_to_matchmaker_when_signed_in(env):
+    # Anonymous visitors see a sign-in prompt instead (tests/test_matchmaker_auth_gating.py) —
+    # the matchmaker link itself only shows once signed in.
     appmod, _ = env
     c = _client(appmod)
+    c.post("/login", data={"username": "member1", "password": "supersecret"}, follow_redirects=False)
     r = c.get("/tools/software")
     assert r.status_code == 200
     assert '<a href="/tools/software/find" style="font-weight:500;">Software Matchmaker' in r.text
