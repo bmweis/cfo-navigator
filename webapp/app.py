@@ -11634,7 +11634,7 @@ def library(request: Request):
 
     def _section(title, cards):
         return (
-            f'<h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);'
+            f'<h2 style="font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);'
             f'margin:0 0 12px;">{title}</h2>'
             f'<div class="lib-card-row">{cards}</div>'
         )
@@ -13406,18 +13406,18 @@ mermaid.initialize({{
 <div style="display:grid;gap:20px;">
 <section class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where an answer's sources come from</h3>
-<ul style="margin:0;padding-left:20px;font-size:14px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:16px;color:#3a352e;line-height:1.65;">
 <li><strong>Library</strong> (highest authority, always searched first): the curated archive of saved articles, retrieved by a hybrid of keyword search (FTS5) and semantic search (vector embeddings), merged by a rank-fusion algorithm so an article can surface even when the question's wording doesn't match the source's own.</li>
 <li><strong>Feed:</strong> recent items from the subscribed RSS/Atom feeds, matched to the question by keyword overlap. Optional&mdash;off by default.</li>
 <li><strong>Web:</strong> live web search, scoped only to the domains on the trusted-sites list (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list, whichever mechanism handles it. Exa's search API, called directly from the server, is the preferred mechanism&mdash;on by default, toggled at <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings</a>. When Exa is off, or its API key isn't configured, Claude's own web-search tool steps in instead, so web search itself is never unavailable&mdash;only which engine handles it changes. Exactly one of the two runs per question, never both. A web result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</li>
 </ul>
-<p style="margin:8px 0 0;font-size:14px;color:#3a352e;line-height:1.7;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
+<p style="margin:8px 0 0;font-size:16px;color:#3a352e;line-height:1.65;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
 </section>
 
 <section>
 <div class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Quick, Standard, Deep</h3>
-<p style="margin:0 0 10px;font-size:14px;color:#3a352e;line-height:1.7;">The only choice a user makes is how much effort to spend&mdash;there's no separate model picker. Each tier maps to a model, how many sources get pulled from each tier, and how long the answer can run:</p>
+<p style="margin:0 0 10px;font-size:16px;color:#3a352e;line-height:1.65;">The only choice a user makes is how much effort to spend&mdash;there's no separate model picker. Each tier maps to a model, how many sources get pulled from each tier, and how long the answer can run:</p>
 </div>
 <div style="overflow-x:auto;">
 <table class="cc-table">
@@ -13437,7 +13437,7 @@ mermaid.initialize({{
 
 <section class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Every claim traces to a citation</h3>
-<ul style="margin:0;padding-left:20px;font-size:14px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:16px;color:#3a352e;line-height:1.65;">
 <li><strong>Verified, not self-reported.</strong> Sources are handed to the model as documents with citations turned on, and the numbered <code>[n]</code> markers in an answer come from the model's own verified citation data, not from the model being asked to remember to cite things.</li>
 <li><strong>Source-typed.</strong> Each citation is tagged library, feed, or web, and shown with a small icon so it's obvious which tier an answer drew from.</li>
 <li><strong>Names the gap instead of guessing.</strong> If the available sources don't cover a question well, the model is instructed to say so plainly rather than answer with unsupported confidence.</li>
@@ -13446,7 +13446,7 @@ mermaid.initialize({{
 
 <section class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it costs</h3>
-<ul style="margin:0;padding-left:20px;font-size:14px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:16px;color:#3a352e;line-height:1.65;">
 <li><strong>Priced from real usage, not a query count.</strong> Every answer, follow-up rewrite, and retrieval step is costed from its actual token usage against the model providers' published rates, so the number reflects what a question actually spent, not an estimate.</li>
 <li><strong>A monthly dollar cap per user,</strong> currently ${default_cap:.2f} by default and adjustable per user in <a href="/admin/users" style="color:var(--accent);">/admin/users</a>. Once a user hits their cap for the month, Buddy tells them so instead of answering, and the cap resets at the start of the next month.</li>
 <li><strong>Visible to the user,</strong> not just to Admin&mdash;a member can see their own spend-to-date against their cap from the Ask page itself.</li>

@@ -152,7 +152,7 @@ unchanged).
 | Page title (H1) | Outfit | 30px | 600 | -0.02em |
 | Section (H2) | Outfit | 21px | 600 | -0.01em |
 | Subhead (H3) | Outfit | 15px | 600 | — |
-| Eyebrow / kicker | DM Sans | 12px uppercase | 600 | .12–.16em |
+| Eyebrow / kicker | DM Sans | 11.5px uppercase | 600 | .1em |
 | Body | DM Sans | 16px / 1.65 | 400 | — |
 | UI / labels | DM Sans | 13–15px | 500–600 | — |
 | Reader body | Source Serif 4 | 18px / 1.75 | 400 | — |
@@ -265,6 +265,13 @@ next to it. Each wraps its actual working content (chat, calculator, game canvas
 of the old 960px box. The Growth Engine Ratio's long-form paragraphs nest a narrower
 `.tool-prose` (760px) inside that wrapper — 1300px is too wide a text measure to read
 comfortably, but the calculator itself benefits from the extra width.
+
+`.tool-prose` isn't limited to `.tool-inner` — it's a general-purpose narrow-reading
+wrapper (max-width 760px, centered) usable inside any wider tier. The three
+`/admin/system/*` reference pages (Database, Page Index, How FP&A Buddy works) reuse it
+directly inside `.page-admin` (1500px): each nests its intro copy and any prose-only
+section in `.tool-prose`, while diagrams and tables stay at the full `page-admin` width
+so they don't get squeezed into a 760px column meant for reading text.
 
 ---
 
