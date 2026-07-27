@@ -46,17 +46,20 @@ _CORAL_TEXT_MIN_PX = 18
 # a real, current usage:
 #
 #   - Neutrals / surfaces — off-token grays/creams close to --ink-soft/--muted,
-#     used inline instead of the token. E.g. #3a352e, the CFO Toolbox card
-#     description text (`.tool-desc`, webapp/app.py:4636).
+#     used inline instead of the token. E.g. #5a5248, the feed-card summary text
+#     (webapp/app.py, CFO Feed reader).
 #   - Data-viz tints — light fills/bands for chart series and tier bands, kin of
 #     the seafoam/coral tokens but softened for use as an area fill rather than a
 #     line/text color. E.g. #D6EFE8, the GER contribution diagram's prior-revenue
 #     bar (webapp/app.py:1777); #E3F2EC/#EDF5F1/#FAF1E1/#F9E8E3, the GER line
 #     chart's Elite/Strong/Typical/Below-target tier bands (webapp/app.py:1964).
 #   - Status / feedback — semantic UI state, not brand: success green, error red,
-#     paywall amber. E.g. #d1fae5/#065f46, the "Saved"/"Done" success banner
+#     advisory amber. E.g. #d1fae5/#065f46, the "Saved"/"Done" success banner
 #     (webapp/app.py:5809); #b91c1c/#fca5a5, the "Delete"/"Reject" button and its
-#     hover border (webapp/app.py:5664).
+#     hover border (webapp/app.py:5664); #fef3c7/#92400e, the feed paywall badge,
+#     "Needs verification" badges, and verify banners — a deliberately distinct
+#     advisory tone from --caution (which BRAND.md scopes to the GER calculator
+#     readout only), not a near-miss to reconcile.
 #   - Benchmark coverage badges (CFO Toolbox) — one fixed color pair per
 #     Private/Public/Both tag. E.g. #dbeafe/#1d4ed8 for "Private"
 #     (webapp/app.py:5020).
@@ -76,7 +79,6 @@ _CORAL_TEXT_MIN_PX = 18
 #     (webapp/app.py:2922).
 AUX_COLORS = {
     # Neutrals / surfaces used inline (close kin of the neutral tokens)
-    "#3a352e",  # legacy body-copy ink (≈ --ink-soft) in card/summary text
     "#5a5248",  # feed-card summary text
     "#fdfcfa",  # GER benchmark table alt-row stripe
     "#fbfaf6",  # GER projected-quarter input background
@@ -97,7 +99,8 @@ AUX_COLORS = {
     # Status / feedback — semantic UI, not brand
     "#d1fae5", "#065f46",            # success toast (bg / text)
     "#b91c1c", "#fee2e2", "#fca5a5",  # danger: delete/error text, hover bg, reject border
-    "#fef3c7", "#92400e",            # feed paywall badge (amber bg / text)
+    "#fef3c7", "#92400e",            # advisory amber (bg / text) — feed paywall badge,
+                                      # "Needs verification" badges, and verify banners
     # Benchmark coverage badges (CFO Toolbox)
     "#dbeafe", "#1d4ed8",            # Private
     "#dcfce7", "#16a34a",            # Public
