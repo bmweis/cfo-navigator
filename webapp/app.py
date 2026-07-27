@@ -1369,8 +1369,8 @@ def homepage(request: Request):
 </style>
 <div class="home-hero">
   <div class="home-hero-copy">
-    <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
-    <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.08;">{_underline_last_word(homepage_headline)}</h1>
+    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
+    <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">{_underline_last_word(homepage_headline)}</h1>
     {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0 0 12px;")}
   </div>
   <div class="home-hero-side">
@@ -1403,7 +1403,7 @@ def about_page(request: Request):
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
   {_avatar(140)}
   <div>
-    <div style="font:600 12px var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">CFO &middot; Boston, MA</div>
+    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">CFO &middot; Boston, MA</div>
     <h1 style="margin:0 0 4px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">Brian Weisberg</h1>
   </div>
 </div>
@@ -1506,7 +1506,7 @@ def thought_leadership(request: Request):
         'border-radius:14px;padding:22px 22px 18px;text-decoration:none;transition:border-color .15s,box-shadow .15s,transform .15s;}'
         '.tl-card:hover{border-color:var(--navy-light);box-shadow:0 6px 20px rgba(0,41,117,.08);transform:translateY(-2px);text-decoration:none;}'
         '.tl-tag{font:700 10px var(--font-body);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;}'
-        '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
+        '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
         '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
         '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
         '.tl-cols{display:flex;gap:24px;margin:8px 0 12px;}'
@@ -1597,7 +1597,7 @@ def growth_engine_ratio(request: Request):
 </style>
 
 <div class="tool-prose">
-<p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Framework</p>
+<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Framework</p>
 <h1 style="margin:0 0 8px;">The Growth Engine Ratio</h1>
 <p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
   By Brian Weisberg &middot; Published with <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a> &middot; June 2026
@@ -1715,7 +1715,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
   <div style="display:grid;gap:20px;">
 
     <div>
-      <p style="font:600 13px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">Revenue</p>
+      <p style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">Revenue</p>
       <div class="ger-grid-2">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Current quarter (Q<sub>n</sub>)</label>
@@ -1731,7 +1731,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     </div>
 
     <div>
-      <p style="font:600 13px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">GTM Spend (Sales &amp; Marketing)—last 4 quarters</p>
+      <p style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">GTM Spend (Sales &amp; Marketing)—last 4 quarters</p>
       <div class="ger-grid-4">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-4</sub></label>
@@ -1757,7 +1757,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
     </div>
 
     <div>
-      <p style="font:600 13px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">R&amp;D Spend—2 quarters (the build window)</p>
+      <p style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin:0 0 12px;">R&amp;D Spend—2 quarters (the build window)</p>
       <div class="ger-grid-2" style="max-width:320px;">
         <div>
           <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px;">Q<sub>n-5</sub></label>
@@ -1781,7 +1781,7 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
   <div id="ger-result" style="display:none;margin-top:26px;background:var(--seafoam-wash);border:1px solid #C9EADF;border-radius:14px;padding:24px 26px;">
     <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap;">
       <div style="flex:0 0 auto;">
-        <p style="font-size:13px;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.06em;">Your Growth Engine Ratio</p>
+        <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.1em;">Your Growth Engine Ratio</p>
         <p id="ger-value" class="ger-value-big" style="font-family:var(--font-head);font-size:48px;font-weight:700;letter-spacing:-0.03em;margin:0;color:var(--accent);"></p>
       </div>
       <div style="flex:1;min-width:200px;">
@@ -2300,12 +2300,12 @@ def finops_ai_hackathon(request: Request):
   .fah-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
   .fah-pull p{margin:0;font-size:17px;font-style:italic;line-height:1.55;color:var(--ink);}
   .fah-callout{background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);border-radius:0 0 10px 10px;padding:20px 24px;margin:28px 0;}
-  .fah-callout-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
+  .fah-callout-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
   .fah-callout p,.fah-callout li{font-size:15px;color:var(--ink-soft);margin-bottom:6px;}
   .fah-callout ul{padding-left:20px;margin:0;}
   .fah-callout li{margin-bottom:5px;}
   .fah-warn{background:var(--coral-wash);border-top:2px solid var(--coral);border-radius:0 0 10px 10px;padding:18px 22px;margin:24px 0;}
-  .fah-warn-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--coral-deep);margin-bottom:8px;}
+  .fah-warn-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--coral-deep);margin-bottom:8px;}
   .fah-warn p{font-size:14px;color:var(--ink-soft);margin:0;}
   /* Phase track */
   .fah-track{display:flex;flex-direction:column;gap:0;margin:28px 0;}
@@ -2354,7 +2354,7 @@ def finops_ai_hackathon(request: Request):
   .fah-tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:22px 0;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}
   .fah-tier{padding:18px 16px;}
   .fah-tier:not(:last-child){border-right:1px solid var(--line);}
-  .fah-tier-title{font-family:var(--font-head);font-size:15px;font-weight:700;margin-bottom:6px;}
+  .fah-tier-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px;}
   .fah-tier p{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}
   .fah-t-ship{background:var(--navy);}.fah-t-ship .fah-tier-title{color:#fff;}.fah-t-ship p{color:rgba(255,255,255,.8);}
   .fah-t-iter{background:var(--coral-wash);}.fah-t-iter .fah-tier-title{color:var(--coral-deep);}
@@ -2369,7 +2369,7 @@ def finops_ai_hackathon(request: Request):
   }
 </style>
 
-<p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Playbook</p>
+<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Playbook</p>
 <h1 style="margin:0 0 8px;">Sail, Don't Row</h1>
 <p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">A playbook for running an AI hackathon with your finance team</p>
 <p style="color:var(--muted);font-size:14px;margin:0 0 36px;">By Brian Weisberg &middot; June 2026</p>
@@ -2407,17 +2407,17 @@ def finops_ai_hackathon(request: Request):
 
 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--line-strong);border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;margin:20px 0;">
   <div style="background:#fff;padding:18px 16px;">
-    <div style="font:700 10px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Airbnb</div>
+    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Airbnb</div>
     <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">Early growth</div>
     <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Bookings were flat. They visited hosts, looked at listings, and realized photos were terrible. One non-technical intervention. The insight came from observing the problem directly.</p>
   </div>
   <div style="background:#fff;padding:18px 16px;">
-    <div style="font:700 10px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">IBM</div>
+    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">IBM</div>
     <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">Enterprise shift</div>
     <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Flipped the order: start with what the customer needs, then figure out the technology. Built internal design studios. Retrained thousands. Outputs improved. So did relationships.</p>
   </div>
   <div style="background:#fff;padding:18px 16px;">
-    <div style="font:700 10px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Google</div>
+    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Google</div>
     <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">20% rule</div>
     <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Structured diverge time with real stakes attached. Gmail, Google News, and AdSense all started there. The roadmap never would have produced them.</p>
   </div>
@@ -2668,12 +2668,12 @@ def netsuite_mcp(request: Request):
   .ns-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
   .ns-pull p{margin:0;font-size:16px;font-style:italic;line-height:1.55;color:var(--ink);}
   .ns-callout{background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);border-radius:0 0 10px 10px;padding:20px 24px;margin:24px 0;}
-  .ns-callout-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
+  .ns-callout-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
   .ns-callout p,.ns-callout li{font-size:15px;color:var(--ink-soft);margin-bottom:6px;}
   .ns-callout ul{padding-left:20px;margin:0;}
   .ns-callout li{margin-bottom:4px;}
   .ns-warn{background:var(--coral-wash);border-top:2px solid var(--coral);border-radius:0 0 10px 10px;padding:16px 22px;margin:18px 0;}
-  .ns-warn-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--coral-deep);margin-bottom:6px;}
+  .ns-warn-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--coral-deep);margin-bottom:6px;}
   .ns-warn p{font-size:14px;color:var(--ink-soft);margin:0;}
   .ns-note{background:var(--surface-2);border-left:3px solid var(--line-strong);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}
   .ns-note p{font-size:14px;color:var(--muted);margin:0;}
@@ -2689,7 +2689,7 @@ def netsuite_mcp(request: Request):
   .ns-cases{display:grid;grid-template-columns:1fr;gap:12px;margin:20px 0;}
   .ns-case{background:#fff;border:1px solid var(--line-strong);border-radius:10px;padding:20px 22px;}
   .ns-case-label{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}
-  .ns-case-title{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin-bottom:8px;}
+  .ns-case-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin-bottom:8px;}
   .ns-case p{font-size:14px;color:var(--ink-soft);margin-bottom:10px;line-height:1.55;}
   .ns-tip{background:var(--seafoam-wash);border-radius:6px;padding:10px 14px;font-size:13px;color:var(--seafoam-deep);margin-top:8px;}
   .ns-tip strong{font-weight:600;}
@@ -2717,7 +2717,7 @@ def netsuite_mcp(request: Request):
   }
 </style>
 
-<p style="font-size:13px;color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;">Setup Guide</p>
+<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Setup Guide</p>
 <h1 style="margin:0 0 8px;">Connecting Claude to NetSuite</h1>
 <p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">An end-to-end guide to the two-role OAuth setup for finance teams</p>
 <p style="color:var(--muted);font-size:14px;margin:0 0 36px;">By Brian Weisberg &middot; June 2026</p>
@@ -5533,10 +5533,10 @@ that's increasingly a deciding factor—plus feature availability where it's bee
 .cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
 .cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
   color:var(--ink-soft);line-height:1.55;min-width:200px;}}
-.cc-label{{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
+.cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
   min-width:140px;white-space:nowrap;background:var(--bg);}}
 .cc-empty{{color:var(--muted);font-style:italic;}}
-.cc-section{{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--navy);
+.cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);
   background:var(--seafoam);padding:8px 16px;}}
 .cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
   background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
@@ -5837,14 +5837,14 @@ def tools_software_profile(request: Request, slug: str):
             for c in competitors
         )
         competitors_block = f"""<div style="margin-bottom:24px;">
-  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Closest competitors</div>
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Closest competitors</div>
   <div style="display:flex;flex-wrap:wrap;gap:8px;">{comp_links}</div>
 </div>"""
 
     differentiation_block = ""
     if (tool.get("differentiation_note") or "").strip():
         differentiation_block = f"""<div style="margin-bottom:24px;">
-  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">How this differs</div>
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">How this differs</div>
   <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{_esc(tool['differentiation_note'])}</p>
 </div>"""
 
@@ -5853,7 +5853,7 @@ def tools_software_profile(request: Request, slug: str):
         agent_verify = (' <span class="cc-verify">unverified</span>'
                         if tool.get("agent_taxonomy_needs_verification") else "")
         agent_taxonomy_block = f"""<div style="margin-bottom:24px;">
-  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Agent taxonomy{agent_verify}</div>
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Agent taxonomy{agent_verify}</div>
   <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{_esc(tool['agent_taxonomy_note'])}</p>
 </div>"""
 
@@ -6958,7 +6958,7 @@ community's own profile page.</p>
 .cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
 .cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
   color:var(--ink-soft);line-height:1.55;min-width:200px;}}
-.cc-label{{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
+.cc-label{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
   min-width:140px;white-space:nowrap;background:var(--bg);}}
 .cc-empty{{color:var(--muted);font-style:italic;}}
 thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
@@ -7350,7 +7350,7 @@ def tools_community_profile(request: Request, slug: str):
     verdict_block = ""
     if has_profile and (profile.get("verdict_summary") or "").strip():
         verdict_block = f"""<div style="background:var(--seafoam);border-radius:12px;padding:16px 20px;margin:0 0 24px;">
-  <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Bottom line</div>
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Bottom line</div>
   <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;">{_esc(profile['verdict_summary'])}</p>
 </div>"""
 
@@ -7358,7 +7358,7 @@ def tools_community_profile(request: Request, slug: str):
     if has_profile:
         sections = "".join(
             f"""<div style="margin-bottom:20px;">
-  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
   <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{_esc(profile[key])}</p>
 </div>"""
             for label, key in _COMMUNITY_PROFILE_PUBLIC_FIELDS
@@ -7366,7 +7366,7 @@ def tools_community_profile(request: Request, slug: str):
         )
         if profile.get("founded_year"):
             sections += f"""<div style="margin-bottom:20px;">
-  <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Founded</div>
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Founded</div>
   <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{profile['founded_year']}</p>
 </div>"""
         profile_sections = f"""<div style="margin-top:8px;padding-top:24px;border-top:1px solid var(--line);">
@@ -9840,7 +9840,7 @@ def admin_tools_new(request: Request):
     </label>
   </div>
   <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
-    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;">Warm Intro</div>
+    <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Warm Intro</div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="warm_intro_enabled" value="1">
       <span>&#10024; Offer a Warm Intro button for this tool</span>
@@ -10160,7 +10160,7 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
     </label>
   </div>
   <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
-    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;">Warm Intro</div>
+    <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Warm Intro</div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="warm_intro_enabled" value="1"{'checked' if tool.get('warm_intro_enabled') else ''}>
       <span>&#10024; Offer a Warm Intro button for this tool</span>
@@ -10822,7 +10822,7 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
     if not rl:
         src_section = f"""<div style="margin-bottom:16px;">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-        <span style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">Sources</span>
+        <span style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Sources</span>
         <button onclick="setAll(true)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Select all</button>
         <button onclick="setAll(false)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Clear all</button>
         <span id="filter-count" style="font-size:12px;color:var(--muted);margin-left:auto;"></span>
@@ -10836,7 +10836,7 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
   <div style="max-width:860px;margin:0 auto;">
     {src_section}
     <div>
-      <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Topics</div>
+      <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Topics</div>
       <div id="topic-chips" style="display:flex;flex-wrap:wrap;gap:8px;">{topic_chips}</div>
       <div style="margin-top:8px;display:flex;gap:6px;align-items:center;">
         <input id="custom-topic-input" placeholder="Add keyword&#x2026;"
@@ -10860,7 +10860,7 @@ def feed_reader(request: Request, cat: str = "", rl: str = ""):
 .ftab-on{background:var(--accent);color:#fff !important;}
 .fcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 20px;}
 .fcard-meta{font-size:12px;color:var(--muted);margin-bottom:5px;}
-.fcard-title{font-size:16px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;line-height:1.35;}
+.fcard-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;line-height:1.35;}
 .fcard-title:hover{color:var(--accent);text-decoration:none;}
 .fcard-summary{font-size:14px;color:#5a5248;margin:0 0 10px;line-height:1.5;}
 .fcard-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
@@ -11085,7 +11085,7 @@ a:hover{opacity:.8;}
 .reader-layout{display:flex;justify-content:space-between;gap:40px;max-width:1900px;margin:0 auto;padding:56px 24px 100px;}
 .reader-main{max-width:760px;min-width:0;}
 .reader-toc{width:220px;flex-shrink:0;position:sticky;top:64px;align-self:flex-start;}
-.reader-toc-title{font:700 11px 'DM Sans',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
+.reader-toc-title{font:600 11.5px 'DM Sans',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
 .reader-toc a{display:block;font:14px 'DM Sans',sans-serif;color:#3F5C9A;line-height:2.2;text-decoration:none;}
 .reader-toc a:hover{text-decoration:underline;}
 @media(max-width:1100px){
@@ -11464,7 +11464,7 @@ def archive(request: Request, q: str = ""):
 </main>
 <style>
 .card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;}}
-.card-title{{font-size:16px;font-weight:600;color:var(--ink);}}
+.card-title{{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);}}
 .card-title:hover{{color:var(--accent);}}
 .meta{{color:var(--muted);font-size:13px;margin:3px 0 8px;}}
 .summary{{margin:0 0 10px;color:var(--ink-soft);font-size:14px;}}
@@ -11985,7 +11985,7 @@ def ask_page(request: Request, q: str = ""):
   .ask-value-details .ask-value-list{{grid-template-columns:1fr;gap:8px;}}
 }}
 .ask-section{{margin:20px 0;}}
-.ask-section-label{{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;}}
+.ask-section-label{{font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;}}
 
 .ask-tags{{display:flex;flex-wrap:wrap;gap:8px;}}
 .ask-tag{{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:6px;font:600 13px var(--font-body);
