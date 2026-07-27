@@ -295,9 +295,49 @@ all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, an
 (~1850px). A brief attempt at a new sitewide 1500px prose ceiling was tried and reverted
 (too wide for comfortable reading, outside the usual 60–75-character-per-line
 guidance); the interim fix is the same `.tool-prose` (760px) wrapper already proven on
-GER and the SYSTEM pages, applied to those four as well. A proper two-pattern editorial
-system (this narrow reading column vs. a wider treatment for pages that want it) is
-being scoped as its own later phase, not decided here.
+GER and the SYSTEM pages, applied to those four as well.
+
+### Editorial content system (Phase 6) — Atlantic tag
+
+Phase 6a investigated two long-form registers Brian wants available — a short-form
+"Axios" pattern (bold ledes, bullet-heavy, built for scanning) and a long-form
+"Atlantic" pattern (generous whitespace, pull-quotes, built for sitting with a piece).
+Phase 6b built the long-form half and piloted it on AI Hackathon Playbook; the
+short-form pattern is a separate, later phase.
+
+**Shared article devices** (`.article-pull`, `.article-callout`/`.article-callout-title`,
+`.article-warn`/`.article-warn-title`) are the pull-quote/callout/warning box trio,
+extracted in Phase 6b from AI Hackathon Playbook's and Connecting Claude to NetSuite's
+previously-duplicated `.fah-*`/`.ns-*` copies — those two pages' CSS was pixel-for-pixel
+identical except for a handful of small spacing/font-size values, so each page still
+composes the shared base class with its own small override class for just what
+differs (e.g. `class="article-pull fah-pull"`), keeping both pages' rendering
+unchanged from before the extraction. A new long-form page can use the shared classes
+alone, no override needed.
+
+**The Atlantic tag** (`.article-atlantic`, applied alongside the page's width tier,
+e.g. `class="page page-full article-atlantic"`) is the tagging mechanism — the
+simplest viable option identified in Phase 6a: a second CSS class, not a new Python
+abstraction. It widens paragraph rhythm inside `.tool-prose` (line-height 1.65 → 1.75,
+more paragraph spacing) for a more unhurried reading feel. **What it can't do:** insert
+a pull-quote, decide where a callout goes, or write a subhead — those are still
+hand-authored into the page's HTML regardless of the tag. The tag is a typographic
+switch and a documentation signal, not enforcement; see `EDITORIAL_SYSTEM_PHASE6A.md`
+for the full reasoning.
+
+**The break rule:** an Atlantic-tagged page shouldn't run more than ~250 words
+(roughly 5-6 lines at this measure) of unbroken paragraph text before a subhead,
+pull-quote, callout, or image. AI Hackathon Playbook was audited word-by-word against
+this rule during the Phase 6b pilot — its longest unbroken stretch anywhere is ~144
+words, comfortably under the threshold, using only its existing pull-quotes/callouts
+repositioned via the shared classes above. No new copy or images were needed for this
+page to satisfy the rule.
+
+**Images:** no reusable in-body image component exists yet. The only precedent is
+`/about`'s hand-coded 2-column photo grid with caption — worth generalizing into a
+shared helper whenever an Atlantic-tagged page actually needs one, per
+`EDITORIAL_SYSTEM_PHASE6A.md` §2/§4. Not built in Phase 6b since Hackathon Playbook's
+pilot didn't need one to satisfy the break rule.
 
 ---
 
