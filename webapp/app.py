@@ -5512,8 +5512,8 @@ to compare them side by side. Check the box on any card, then use the compare ba
 {back_link}
 <h1 style="margin:0;">Compare software</h1>
 <p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Side by side, the same fields you'd see on each
-tool's own profile page, including how (and whether) AI agents are actually involved — not just a tagline, since
-that's increasingly a deciding factor — plus feature availability where it's been reviewed. Rows still marked
+tool's own profile page, including how (and whether) AI agents are actually involved—not just a tagline, since
+that's increasingly a deciding factor—plus feature availability where it's been reviewed. Rows still marked
 <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been confirmed yet.</p>
 
 <div style="overflow-x:auto;">
@@ -5787,7 +5787,7 @@ async def tools_software_find_chat(request: Request):
         if spent >= cap:
             body = {"capped": True,
                     "answer": (f"We've used ${spent:.2f} of this month's ${cap:.2f} matchmaker "
-                               "budget. It resets at the start of next month — in the meantime, "
+                               "budget. It resets at the start of next month—in the meantime, "
                                "browse the full directory at /tools/software.")}
             resp = JSONResponse(body)
             _set_visitor_cookie(request, resp, session_id)
@@ -7215,7 +7215,7 @@ async def tools_communities_find_chat(request: Request):
         if spent >= cap:
             body = {"capped": True,
                     "answer": (f"We've used ${spent:.2f} of this month's ${cap:.2f} matchmaker "
-                               "budget. It resets at the start of next month — in the meantime, "
+                               "budget. It resets at the start of next month—in the meantime, "
                                "browse the full directory at /tools/communities.")}
             resp = JSONResponse(body)
             _set_visitor_cookie(request, resp, session_id)
@@ -7531,7 +7531,7 @@ async function generateCommunityListing(name, url, statusId) {
     });
     status.textContent = d.low_confidence
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
-      : 'Drafted. Review before saving — anything marked "Needs verification" needs a manual check.';
+      : 'Drafted. Review before saving—anything marked "Needs verification" needs a manual check.';
   } catch (e) {
     status.textContent = e.message || 'Generation failed. Fill in the form by hand.';
   }
@@ -8937,7 +8937,7 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
 {_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
 {_short_field('seniority_band', 'Level', 'Who it targets by seniority')}
   </div>
-{_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc. — or "No".', rows=2)}
+{_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc.—or "No".', rows=2)}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
 {_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus. Placeholder, not yet researched or weighted.')}
 {_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any. Placeholder, not yet researched or weighted.')}
@@ -10248,7 +10248,7 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Features</h2>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Standalone-vs-bundled availability per feature — feeds the Phase 5 comparison matrix. Rows flagged "Needs verification" came from the LLM enrichment pass and haven't been confirmed yet.</p>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Standalone-vs-bundled availability per feature—feeds the Phase 5 comparison matrix. Rows flagged "Needs verification" came from the LLM enrichment pass and haven't been confirmed yet.</p>
 
   {_features_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No features added yet.</p>'}
 
@@ -13524,11 +13524,11 @@ async function toggleExa() {{
   try {{
     var r = await fetch('/admin/exa-settings/toggle', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{enabled: enabled}})}});
     if (!r.ok) throw new Error();
-    status.textContent = enabled ? 'Exa is on.' : 'Exa is off — using the native web-search fallback.';
+    status.textContent = enabled ? 'Exa is on.' : 'Exa is off—using the native web-search fallback.';
     status.style.color = '#065f46';
   }} catch(e) {{
     cb.checked = !enabled;
-    status.textContent = 'Save failed — try again.';
+    status.textContent = 'Save failed—try again.';
     status.style.color = '#b91c1c';
   }} finally {{
     cb.disabled = false;
