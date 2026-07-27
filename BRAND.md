@@ -273,6 +273,16 @@ directly inside `.page-admin` (1500px): each nests its intro copy and any prose-
 section in `.tool-prose`, while diagrams and tables stay at the full `page-admin` width
 so they don't get squeezed into a 760px column meant for reading text.
 
+The brand audit's Phase 4 also found four pages with *no* reading-width constraint at
+all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, and
+`/library/past-questions` — rendering body copy at the full `page-full` measure
+(~1850px). A brief attempt at a new sitewide 1500px prose ceiling was tried and reverted
+(too wide for comfortable reading, outside the usual 60–75-character-per-line
+guidance); the interim fix is the same `.tool-prose` (760px) wrapper already proven on
+GER and the SYSTEM pages, applied to those four as well. A proper two-pattern editorial
+system (this narrow reading column vs. a wider treatment for pages that want it) is
+being scoped as its own later phase, not decided here.
+
 ---
 
 ## 6. Do / Don't

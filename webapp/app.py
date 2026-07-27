@@ -697,7 +697,7 @@ p{margin:0 0 16px;color:var(--ink-soft);}
    page-full" (the later class wins the max-width tie). The original
    .page-narrow/.page-wide two-tier system is fully retired as of the
    Phase 9 sweep — every route now carries one of the five tiers below. */
-.page{max-width:780px;margin:0 auto;padding:48px 24px 72px;}
+.page{width:100%;max-width:780px;margin:0 auto;padding:48px 24px 72px;}
 
 .page-full{max-width:1900px;}   /* full-width content — homepage/about, TL landing, library landing, reader */
 .page-grid{max-width:1300px;}   /* card grids (CFO Toolbox landing) and the Software
@@ -708,15 +708,14 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 
 /* Functional tools (FP&A Buddy, GER calculator, Sail Don't Row + leaderboard)
    used to sit in their own narrow .page-tool tier (960px), which read as
-   visibly boxed-in next to every other content page — .page/.page-full only
-   render as wide as their content actually wants (a flex-shrink quirk of
-   .site-main, not a hard stretch), so a lone 960px card was the one thing
-   forcing those pages to stay narrow even on a wide monitor. Phase 9b moved
-   them to .page-full and widened their working width to card-grid scale
-   (1300px, .tool-inner) so the calculator/chat/game card actually gets to
-   use the room. .tool-prose (760px) is for GER's long-form paragraphs only,
-   nested inside .tool-inner — full 1300px is too wide a text measure to
-   read comfortably, but the calculator itself benefits from the extra room. */
+   visibly boxed-in next to every other content page, so a lone 960px card was
+   the one thing forcing those pages to stay narrow even on a wide monitor.
+   Phase 9b moved them to .page-full and widened their working width to
+   card-grid scale (1300px, .tool-inner) so the calculator/chat/game card
+   actually gets to use the room. .tool-prose (760px) is for long-form
+   paragraphs — GER's, nested inside .tool-inner — full 1300px is too wide a
+   text measure to read comfortably, but the calculator itself benefits from
+   the extra room. */
 .tool-inner{max-width:1300px;margin:0 auto;}
 .tool-prose{max-width:760px;margin:0 auto;}
 
@@ -2369,6 +2368,7 @@ def finops_ai_hackathon(request: Request):
   }
 </style>
 
+<div class="tool-prose">
 <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Playbook</p>
 <h1 style="margin:0 0 8px;">Sail, Don't Row</h1>
 <p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">A playbook for running an AI hackathon with your finance team</p>
@@ -2647,6 +2647,7 @@ def finops_ai_hackathon(request: Request):
   <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
   <p style="font-size:12px;color:var(--muted);margin:14px 0 0;">&#9973; Made it this far? <a href="/play">Sail, Don&rsquo;t Row</a> is also a game.</p>
 </div>
+</div>
 
 </div>"""
     return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
@@ -2717,6 +2718,7 @@ def netsuite_mcp(request: Request):
   }
 </style>
 
+<div class="tool-prose">
 <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Setup Guide</p>
 <h1 style="margin:0 0 8px;">Connecting Claude to NetSuite</h1>
 <p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">An end-to-end guide to the two-role OAuth setup for finance teams</p>
@@ -2948,6 +2950,7 @@ def netsuite_mcp(request: Request):
 
 <div style="border-top:1px solid var(--line-strong);margin-top:48px;padding-top:24px;">
   <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
+</div>
 </div>
 
 </div>"""
@@ -6048,7 +6051,7 @@ function submitIntroForm() {{
   background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 .tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
-.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:5px 12px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
+.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-intro-btn{{font-size:13px;font-weight:600;color:var(--navy);background:none;border:1px solid var(--navy);
   border-radius:8px;padding:6px 14px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
@@ -10289,7 +10292,7 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
 </div>
 </div>
 <style>
-.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:5px 12px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
+.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 </style>
@@ -11754,6 +11757,7 @@ def community_questions(request: Request, q: str = ""):
          + '</div>')
 
     body = f"""<div class="page page-full">
+<div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Past Questions</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy&mdash;check here before spending a query re-asking one. <a href="/library/ask">Ask your own &rarr;</a></p>
@@ -11763,6 +11767,7 @@ def community_questions(request: Request, q: str = ""):
   <button type="submit" class="btn">Search</button>
 </form>
 {rows_html}
+</div>
 </div>"""
     return HTMLResponse(_page("Past Questions—Brian Weisberg", "Library", body, role=_role(request)))
 
@@ -12764,6 +12769,7 @@ def ask_history(request: Request):
          '<a href="/library/ask">Ask a question &rarr;</a></div>')
 
     body = f"""<div class="page page-full">
+<div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/library/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/library/past-questions">Past Questions page</a> for other members to browse.</p>
@@ -12771,6 +12777,7 @@ def ask_history(request: Request):
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>
 {rows_html}
+</div>
 <style>
 .convo > summary{{list-style:none;}}
 .convo > summary::-webkit-details-marker{{display:none;}}
@@ -13330,7 +13337,7 @@ def admin_system_page_index(request: Request):
 
 <style>
 .cc-table{{border-collapse:collapse;width:100%;min-width:520px;background:#fff;border:1px solid var(--line);border-radius:12px;}}
-.cc-cell{{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--line);}}
+.cc-cell{{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px;}}
 thead .cc-cell{{border-bottom:2px solid var(--line);}}
 </style>
 </div>"""
@@ -15245,11 +15252,11 @@ def admin_ask_report(request: Request, user: str = ""):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:760px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Date</th>
-      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Asker</th>
-      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Question</th>
-      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Settings</th>
-      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Cost</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Date</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Asker</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Question</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Settings</th>
+      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Cost</th>
     </tr></thead>
     <tbody>{table_rows}</tbody>
   </table>
@@ -15397,10 +15404,10 @@ def admin_overhead_spend(request: Request):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:24px;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Source</th>
-      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Calls</th>
-      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">This month</th>
-      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">All time</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
+      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Calls</th>
+      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">This month</th>
+      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">All time</th>
     </tr></thead>
     <tbody>{source_rows}</tbody>
   </table>
@@ -15410,8 +15417,8 @@ def admin_overhead_spend(request: Request):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:320px;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Month</th>
-      <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Combined cost</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Month</th>
+      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Combined cost</th>
     </tr></thead>
     <tbody>{month_rows}</tbody>
   </table>
