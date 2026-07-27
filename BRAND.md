@@ -214,7 +214,11 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
 ## 5. UI components
 
 - **Buttons** — primary = navy fill; secondary = ghost (navy outline, transparent). Radius 10px.
-  Hover deepens to navy-deep. *Color is never a button background.*
+  Hover deepens to navy-deep. *Color is never a button background* — with one sanctioned
+  exception: **destructive actions** (Delete/Reject) use `#b91c1c` text and border, `#fee2e2`
+  hover fill, `#fca5a5` reject border. This is a semantic status color communicating
+  "irreversible/dangerous," the same category as `--alert`, not a decorative button color —
+  see `AUX_COLORS` in `linklib/brand_check.py` for the exact values.
 - **Inline row-action buttons** — a third, smaller button style for compact per-row actions inside
   a list or card (e.g. "Quick edit" / "Full edit" / "Delete" / "Generate" on a Toolbox card, "Edit
   tags" on the reader). `--muted` text, `--line` border (not navy), radius 6px, ~12px font,
@@ -224,7 +228,19 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
 - **Inputs** — white surface, `--line` border, radius 10px. Focus = navy border + soft seafoam
   ring `0 0 0 3px rgba(163,229,212,.55)`.
 - **Tags / badges** — seafoam fill, navy text, radius 6px, 600 weight, ~11px.
+- **Admin section headings** — an informal sub-heading role used to break up an admin page into
+  named sections (e.g. "Pending submissions" / "Approved software" on the Toolbox review pages,
+  "AI research" / "Screenshot" / "Competitors" / "Features" on the tool-edit page, dependency-group
+  titles on `/admin/open-source`). 16px, 600 weight — smaller and lighter than the base `h2` (21px/600),
+  since these mark subsections within a page rather than the page's own top-level sections.
 - **Cards** — white surface, `--line` border, radius 12–16px.
+- **Card titles** — Outfit, 17px, 600 weight, `-0.01em` tracking, `--ink`. One standard across
+  every card family sitewide: the Software/Community/Benchmark directory cards, thought-leadership
+  landing cards, case-study cards, and the archive/feed cards all converged to this single value in
+  the brand audit (previously split across three sizes and three weights with no shared standard).
+  The one confirmed exception is `.sdr-outcome-title` (Sail Don't Row's game-over overlay,
+  800 weight) — deliberately bolder, verified side-by-side against the 600-weight standard and kept
+  distinct because it's a single bespoke result overlay, not a family of cards sharing a role.
 - **Tables** — navy header row with white text; alt rows `--surface-2`.
 - **Links** — navy; optional seafoam underline for emphasis in editorial copy.
 
@@ -295,6 +311,10 @@ being scoped as its own later phase, not decided here.
 | Headings in Outfit, reading in Source Serif 4 | Mix the serif into UI, or set body in Outfit |
 | One marker-underline, one or two stickers per page, in a header/hero or card corner | Repeat the graffiti kit decoratively, or put it on admin/data surfaces |
 | Buttons navy or ghost | Make a seafoam or coral button |
+
+The one sanctioned exception to "buttons navy or ghost": Delete/Reject actions use the
+status-red `#b91c1c`/`#fee2e2`/`#fca5a5` family (§5) — a destructive-action signal, the
+same category as `--alert`, not a decorative color choice.
 
 ---
 
@@ -368,8 +388,11 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
   slipped in before the refresh).
 - **Colors** — every hex in the codebase must be a brand token (parsed from the `:root` above, so the
   palette is its single source of truth) or one of the explicitly-documented auxiliary colors
-  (status/feedback, benchmark badges, chart tints). A brand-new off-palette hex fails the build,
-  forcing a deliberate choice: add it to the system or fix it.
+  (status/feedback, benchmark badges, chart tints, and two deliberate exceptions: destructive-action
+  buttons, §5/§6; and "Sail, Don't Row"'s realistic sky/water/skyline/boat illustration palette,
+  which reads as an actual landscape rather than brand-token shading, confined entirely to that one
+  game). A brand-new off-palette hex fails the build, forcing a deliberate choice: add it to the
+  system or fix it.
 - **Banned legacy colors** — the specific values purged in the refresh (old greens, the generic
   `#3b82f6`/`#10b981`/`#f4683b` data palette) can never reappear.
 - **Token integrity** — the full token set (all three ramps + neutrals + semantic) must be present.

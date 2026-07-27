@@ -96,18 +96,25 @@ def test_page_index_recognizes_custom_exceptions(env):
         assert rows[path]["flagged"] is False
 
 
-def test_page_index_flags_route_with_no_recognized_tier(env):
-    """A page route whose rendered markup carries no `page-*` tier class (and
-    isn't one of the two documented custom exceptions) must be flagged —
-    this is the drift-detection the feature exists for."""
+def test_page_index_recognizes_read_as_page_full(env):
+    """`/read` is a fully standalone template (_READER_TMPL/_READER_CSS) that
+    never uses the `.page`/`.page-full` classes, so the live-source regex
+    can't detect its tier on its own — it genuinely renders at the page-full
+    width (1900px) though, so it's mapped to that real tier name (not flagged,
+    and not lumped in with the two true custom-exception layouts) rather than
+    surfacing as a false "no tier assigned" flag."""
     rows = {r["path"]: r for r in env._page_index_snapshot()}
-    assert rows["/read"]["flagged"] is True
-    assert rows["/read"]["tier"] == ""
+    assert rows["/read"]["flagged"] is False
+    assert rows["/read"]["tier"] == "page-full"
 
 
 def test_page_index_flags_a_newly_added_untiered_route(env):
-    """Simulates someone adding a new page and forgetting to tier it —
-    added and removed on the live app object, no source file changes."""
+    """Simulates someone adding a new page and forgetting to tier it — added
+    and removed on the live app object, no source file changes. This is the
+    drift-detection the feature exists for, and now the only real-world way
+    to see a "no tier assigned" flag, since every currently-shipped untiered
+    route (`/read`, plus the two custom-exception layouts) has a documented
+    exception above."""
     from fastapi.responses import HTMLResponse
 
     @env.app.get("/test-temp-untiered-route", response_class=HTMLResponse)
