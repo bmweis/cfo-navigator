@@ -708,17 +708,16 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 
 /* Functional tools (FP&A Buddy, GER calculator, Sail Don't Row + leaderboard)
    used to sit in their own narrow .page-tool tier (960px), which read as
-   visibly boxed-in next to every other content page — .page/.page-full only
-   render as wide as their content actually wants (a flex-shrink quirk of
-   .site-main, not a hard stretch), so a lone 960px card was the one thing
-   forcing those pages to stay narrow even on a wide monitor. Phase 9b moved
-   them to .page-full and widened their working width to card-grid scale
-   (1300px, .tool-inner) so the calculator/chat/game card actually gets to
-   use the room. .tool-prose (760px) is for GER's long-form paragraphs only,
-   nested inside .tool-inner — full 1300px is too wide a text measure to
-   read comfortably, but the calculator itself benefits from the extra room. */
+   visibly boxed-in next to every other content page, so a lone 960px card was
+   the one thing forcing those pages to stay narrow even on a wide monitor.
+   Phase 9b moved them to .page-full and widened their working width to
+   card-grid scale (1300px, .tool-inner) so the calculator/chat/game card
+   actually gets to use the room. .tool-prose is the sitewide prose-width
+   ceiling (BRAND.md §5 "Prose width") — 1500px, but a narrower tier (like
+   .tool-inner's 1300px here) still governs when it applies, so GER's
+   long-form paragraphs nested inside .tool-inner render at 1300px, not 1500. */
 .tool-inner{max-width:1300px;margin:0 auto;}
-.tool-prose{max-width:760px;margin:0 auto;}
+.tool-prose{max-width:1500px;margin:0 auto;}
 
 /* Buttons — primary navy fill, ghost navy outline. Seafoam is NEVER a button. */
 .btn{display:inline-block;padding:11px 22px;background:var(--navy);color:#fff;border-radius:10px;font:600 15px var(--font-body);border:1px solid var(--navy);cursor:pointer;}
@@ -2369,6 +2368,7 @@ def finops_ai_hackathon(request: Request):
   }
 </style>
 
+<div class="tool-prose">
 <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Playbook</p>
 <h1 style="margin:0 0 8px;">Sail, Don't Row</h1>
 <p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">A playbook for running an AI hackathon with your finance team</p>
@@ -2647,6 +2647,7 @@ def finops_ai_hackathon(request: Request):
   <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
   <p style="font-size:12px;color:var(--muted);margin:14px 0 0;">&#9973; Made it this far? <a href="/play">Sail, Don&rsquo;t Row</a> is also a game.</p>
 </div>
+</div>
 
 </div>"""
     return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
@@ -2717,6 +2718,7 @@ def netsuite_mcp(request: Request):
   }
 </style>
 
+<div class="tool-prose">
 <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Setup Guide</p>
 <h1 style="margin:0 0 8px;">Connecting Claude to NetSuite</h1>
 <p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">An end-to-end guide to the two-role OAuth setup for finance teams</p>
@@ -2948,6 +2950,7 @@ def netsuite_mcp(request: Request):
 
 <div style="border-top:1px solid var(--line-strong);margin-top:48px;padding-top:24px;">
   <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
+</div>
 </div>
 
 </div>"""
@@ -11754,6 +11757,7 @@ def community_questions(request: Request, q: str = ""):
          + '</div>')
 
     body = f"""<div class="page page-full">
+<div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Past Questions</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy&mdash;check here before spending a query re-asking one. <a href="/library/ask">Ask your own &rarr;</a></p>
@@ -11763,6 +11767,7 @@ def community_questions(request: Request, q: str = ""):
   <button type="submit" class="btn">Search</button>
 </form>
 {rows_html}
+</div>
 </div>"""
     return HTMLResponse(_page("Past Questions—Brian Weisberg", "Library", body, role=_role(request)))
 
@@ -12764,6 +12769,7 @@ def ask_history(request: Request):
          '<a href="/library/ask">Ask a question &rarr;</a></div>')
 
     body = f"""<div class="page page-full">
+<div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/library/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/library/past-questions">Past Questions page</a> for other members to browse.</p>
@@ -12771,6 +12777,7 @@ def ask_history(request: Request):
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>
 {rows_html}
+</div>
 <style>
 .convo > summary{{list-style:none;}}
 .convo > summary::-webkit-details-marker{{display:none;}}

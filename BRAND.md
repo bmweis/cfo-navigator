@@ -262,16 +262,40 @@ those pages (FP&A Buddy, GER calculator, Sail Don't Row + leaderboard) now sit o
 `.page-full` like every other content page, so they no longer feel visually cramped
 next to it. Each wraps its actual working content (chat, calculator, game canvas) in
 `.tool-inner` (1300px, centered, card-grid scale) so the widget gets real room instead
-of the old 960px box. The Growth Engine Ratio's long-form paragraphs nest a narrower
-`.tool-prose` (760px) inside that wrapper — 1300px is too wide a text measure to read
-comfortably, but the calculator itself benefits from the extra width.
+of the old 960px box.
 
-`.tool-prose` isn't limited to `.tool-inner` — it's a general-purpose narrow-reading
-wrapper (max-width 760px, centered) usable inside any wider tier. The three
-`/admin/system/*` reference pages (Database, Page Index, How FP&A Buddy works) reuse it
-directly inside `.page-admin` (1500px): each nests its intro copy and any prose-only
-section in `.tool-prose`, while diagrams and tables stay at the full `page-admin` width
-so they don't get squeezed into a 760px column meant for reading text.
+### Prose width — a single sitewide ceiling
+
+Long-form body copy (paragraphs, headings, lists — the actual reading content, not
+diagrams, tables, or card grids) is capped at **1500px** via `.tool-prose`, regardless
+of which width tier the page itself sits on. This is a ceiling, not a fixed column: a
+tier narrower than 1500px (e.g. `.tool-inner`'s 1300px) still governs, so `.tool-prose`
+only visibly narrows content on tiers wider than 1500px — in practice, `.page-full`
+(1800–2000px) and the wide end of `.page-admin`.
+
+This was 760px through the Phase 9b/SYSTEM-pages rounds, reasoned from `.tool-inner`'s
+1300px ("too wide a text measure to read comfortably"). Brian's call after the brand
+audit's Phase 4 verification: 760px reads as too tight on a large display, and the
+right ceiling is 1500px — wide enough to feel like a proper editorial column rather
+than a cramped sidebar, capping only the handful of pages that had no reading-width
+constraint at all and were stretching to the full 1800–2000px tier width.
+
+**Currently wrapped in `.tool-prose`:**
+- Growth Engine Ratio's long-form paragraphs, nested inside `.tool-inner` (1300px) — so
+  `.tool-prose` doesn't visibly change anything here; `.tool-inner`'s narrower measure
+  already governs.
+- The three `/admin/system/*` reference pages (Database, Page Index, How FP&A Buddy
+  works), directly inside `.page-admin` (1500px) — diagrams and tables stay at the full
+  `page-admin` width, only the surrounding prose narrows (previously squeezed to 760px,
+  now uses effectively the whole `page-admin` measure since the tier itself is ≤1500px).
+- The two other thought-leadership long-reads (AI Hackathon Playbook, Connecting Claude
+  to NetSuite) and the FP&A Buddy history pages (`/ask/history`, `/library/past-questions`)
+  — all four previously had no reading-width constraint and rendered body text at the
+  full `.page-full` measure (~1850px); now capped at 1500px.
+
+`.tool-prose` is a general-purpose wrapper (max-width 1500px, centered), usable inside
+any wider tier — reach for it any time a page's body copy would otherwise stretch to
+the full tier width with no reading-width ceiling.
 
 ---
 
