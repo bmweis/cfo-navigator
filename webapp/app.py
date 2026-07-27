@@ -712,12 +712,12 @@ p{margin:0 0 16px;color:var(--ink-soft);}
    the one thing forcing those pages to stay narrow even on a wide monitor.
    Phase 9b moved them to .page-full and widened their working width to
    card-grid scale (1300px, .tool-inner) so the calculator/chat/game card
-   actually gets to use the room. .tool-prose is the sitewide prose-width
-   ceiling (BRAND.md §5 "Prose width") — 1500px, but a narrower tier (like
-   .tool-inner's 1300px here) still governs when it applies, so GER's
-   long-form paragraphs nested inside .tool-inner render at 1300px, not 1500. */
+   actually gets to use the room. .tool-prose (760px) is for long-form
+   paragraphs — GER's, nested inside .tool-inner — full 1300px is too wide a
+   text measure to read comfortably, but the calculator itself benefits from
+   the extra room. */
 .tool-inner{max-width:1300px;margin:0 auto;}
-.tool-prose{max-width:1500px;margin:0 auto;}
+.tool-prose{max-width:760px;margin:0 auto;}
 
 /* Buttons — primary navy fill, ghost navy outline. Seafoam is NEVER a button. */
 .btn{display:inline-block;padding:11px 22px;background:var(--navy);color:#fff;border-radius:10px;font:600 15px var(--font-body);border:1px solid var(--navy);cursor:pointer;}
