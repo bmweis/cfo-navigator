@@ -4927,7 +4927,7 @@ Not sure which tool's for you? {(
 /* Fixed to exactly 3 lines regardless of description length — min-height pads
    short descriptions up, -webkit-line-clamp truncates long ones down, so
    every card's description block occupies the same height. */
-.tool-desc{{font-size:14px;color:#3a352e;margin:0 0 12px;line-height:1.5;min-height:63px;
+.tool-desc{{font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;min-height:63px;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}}
 .tool-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .tool-full-link{{font-size:12px;font-weight:600;color:var(--navy);white-space:nowrap;flex-shrink:0;}}
@@ -5532,7 +5532,7 @@ that's increasingly a deciding factor — plus feature availability where it's b
 <style>
 .cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
 .cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
-  color:#3a352e;line-height:1.55;min-width:200px;}}
+  color:var(--ink-soft);line-height:1.55;min-width:200px;}}
 .cc-label{{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
   min-width:140px;white-space:nowrap;background:var(--bg);}}
 .cc-empty{{color:var(--muted);font-style:italic;}}
@@ -5845,7 +5845,7 @@ def tools_software_profile(request: Request, slug: str):
     if (tool.get("differentiation_note") or "").strip():
         differentiation_block = f"""<div style="margin-bottom:24px;">
   <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">How this differs</div>
-  <p style="margin:0;color:#3a352e;line-height:1.6;">{_esc(tool['differentiation_note'])}</p>
+  <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{_esc(tool['differentiation_note'])}</p>
 </div>"""
 
     agent_taxonomy_block = ""
@@ -5854,7 +5854,7 @@ def tools_software_profile(request: Request, slug: str):
                         if tool.get("agent_taxonomy_needs_verification") else "")
         agent_taxonomy_block = f"""<div style="margin-bottom:24px;">
   <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Agent taxonomy{agent_verify}</div>
-  <p style="margin:0;color:#3a352e;line-height:1.6;">{_esc(tool['agent_taxonomy_note'])}</p>
+  <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{_esc(tool['agent_taxonomy_note'])}</p>
 </div>"""
 
     screenshot_block = ""
@@ -6008,7 +6008,7 @@ function submitIntroForm() {{
   {f'<a href="/admin/tools/{tool["id"]}/edit" class="tool-admin-btn">Edit</a>' if authed else ''}
 </div>
 {f'<p style="margin:8px 0 20px;"><a href="{_esc(tool["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if tool.get('url') else ''}
-<p style="font-size:15px;color:#3a352e;margin:0 0 20px;line-height:1.6;">{_esc(tool['description'])}</p>
+<p style="font-size:15px;color:var(--ink-soft);margin:0 0 20px;line-height:1.6;">{_esc(tool['description'])}</p>
 <div class="tool-cats" style="margin-bottom:24px;">{cats}</div>
 {agent_taxonomy_block}
 {differentiation_block}
@@ -6135,7 +6135,7 @@ def tools_benchmarks(request: Request):
 .bench-name{{font-size:15px;font-weight:600;color:var(--ink);}}
 .bench-card:hover .bench-name{{color:var(--accent);}}
 .bench-badge{{font-size:11px;font-weight:500;border-radius:6px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}}
-.bench-desc{{font-size:13px;color:#3a352e;margin:0;line-height:1.5;}}
+.bench-desc{{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}}
 </style>"""
     return HTMLResponse(_page("Benchmarking—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
@@ -6281,7 +6281,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 .comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
 .comm-name:hover{{color:var(--navy);}}
 .comm-meta{{font-size:13px;color:var(--muted);margin:0 0 8px;line-height:1.5;}}
-.comm-demo{{font-size:14px;color:#3a352e;margin:0 0 10px;line-height:1.5;}}
+.comm-demo{{font-size:14px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;}}
 .comm-notes{{font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5;}}
 .comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
@@ -6957,7 +6957,7 @@ community's own profile page.</p>
 <style>
 .cc-table{{border-collapse:collapse;width:100%;min-width:560px;}}
 .cc-cell{{text-align:left;vertical-align:top;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;
-  color:#3a352e;line-height:1.55;min-width:200px;}}
+  color:var(--ink-soft);line-height:1.55;min-width:200px;}}
 .cc-label{{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
   min-width:140px;white-space:nowrap;background:var(--bg);}}
 .cc-empty{{color:var(--muted);font-style:italic;}}
@@ -7359,7 +7359,7 @@ def tools_community_profile(request: Request, slug: str):
         sections = "".join(
             f"""<div style="margin-bottom:20px;">
   <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
-  <p style="margin:0;color:#3a352e;line-height:1.6;">{_esc(profile[key])}</p>
+  <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{_esc(profile[key])}</p>
 </div>"""
             for label, key in _COMMUNITY_PROFILE_PUBLIC_FIELDS
             if (profile.get(key) or "").strip()
@@ -7367,7 +7367,7 @@ def tools_community_profile(request: Request, slug: str):
         if profile.get("founded_year"):
             sections += f"""<div style="margin-bottom:20px;">
   <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Founded</div>
-  <p style="margin:0;color:#3a352e;line-height:1.6;">{profile['founded_year']}</p>
+  <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{profile['founded_year']}</p>
 </div>"""
         profile_sections = f"""<div style="margin-top:8px;padding-top:24px;border-top:1px solid var(--line);">
 {sections}</div>"""
@@ -7389,7 +7389,7 @@ def tools_community_profile(request: Request, slug: str):
 </div>
 <p style="color:var(--muted);margin:8px 0 4px;">{meta_line}</p>
 {f'<p style="margin:4px 0 20px;"><a href="{_esc(community["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if community.get('url') else ''}
-<p style="font-size:15px;color:#3a352e;margin:0 0 16px;line-height:1.6;">{demographic_html}</p>
+<p style="font-size:15px;color:var(--ink-soft);margin:0 0 16px;line-height:1.6;">{demographic_html}</p>
 {notes_line}
 <div class="comm-cats" style="margin-bottom:8px;">{cats}</div>
 {verdict_block}
@@ -8969,7 +8969,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <div style="display:grid;gap:20px;">
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Directory page (/tools/communities)</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Quiz mention</strong> (inline at the end of the subtitle paragraph, top of page): &ldquo;...Slack channels. Not sure which community's for you? Take the quiz &rarr;&rdquo; &mdash; links to the recommender. Plain inline text link, not a separate CTA block.</li>
 <li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;, the link inline in the message itself rather than pointing the visitor to a separate CTA elsewhere on the page. Its href (and the bottom-of-page gap link's href) still carries the live search/filter state plus <code>?zero=1</code>, computed client-side by <code>gapFormHref()</code>, so the gap form can tailor its transparency note (see below).</li>
 <li><strong>Advisor legend:</strong> &ldquo;&#9733; Formal advisor to these communities.&rdquo;</li>
@@ -8979,7 +8979,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Profile pages (/tools/communities/&lt;slug&gt;)</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Per-profile mini-CTA:</strong> &ldquo;Not quite the right fit? Tell us why &rarr;&rdquo; &mdash; links to the gap form pre-filled with <code>closest_community_id</code>; the &ldquo;Re: [Name] wasn't quite the right fit&hellip;&rdquo; line itself renders on the gap form, not here (see below).</li>
 <li><strong>Empty-profile fallback:</strong> when a community has no <code>community_profiles</code> row, only the directory-card fields render (name, cost, region, access, sponsor, &ldquo;Visit website&rdquo; button) &mdash; no verdict/deep-profile sections.</li>
 <li><strong>Suggest-a-correction</strong> (<code>/tools/communities/correct?community_id=&lt;id&gt;</code>): &ldquo;Something here out of date? Suggest a correction &rarr;&rdquo; &mdash; a public, no-login, single free-text field ("What's incorrect or out of date?") plus optional email, distinct from the gap form's fit-feedback purpose. Requires a known <code>community_id</code> (404s otherwise, since a correction is always about one specific listing, unlike the gap form's "none in particular" option). Lands in the same <code>community_gap_submissions</code> table as gap/recommender rows, tagged <code>submission_type='correction'</code>, and is reviewed alongside them at <code>/admin/community-gaps</code> &mdash; it lands in a review queue and is never auto-applied to the listing.</li>
@@ -8988,7 +8988,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Gap form (/tools/communities/gap)</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Always-shown heading:</strong> &ldquo;Tell us where communities fall short&rdquo; / &ldquo;Every field here is optional. We just want to know what's missing from the finance community landscape, so this directory (and maybe a future community) can actually close the gap.&rdquo;</li>
 <li><strong>Transparency note</strong> (seafoam box), built from whatever session state is detected:
   <ul style="margin:4px 0 0;padding-left:18px;">
@@ -9004,7 +9004,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Suggest-a-community (/tools/communities/submit)</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Member-gated</strong> (redirects to <code>/login</code> if signed out) &mdash; not a public form. Three required fields: community name, URL, submitter email.</li>
 <li>Confirmation email via <code>COMMUNITY_SUBMISSION_*</code> templates, admin-editable at <a href="/admin/emails">/admin/emails</a>, plus an internal notification email to Brian on each submission.</li>
 </ul>
@@ -9012,7 +9012,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Compare view (/tools/communities/compare)</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Fewer than 2 selected:</strong> &ldquo;Pick at least two communities from the directory to compare them side by side. Check the box on any card, then use the compare bar at the bottom of the page.&rdquo;</li>
 <li><strong>Cap-reached message</strong> (max 3 communities, shown inline in the sticky compare bar when a 4th selection is attempted): &ldquo;You can compare up to 3 communities at once. Remove one to add another.&rdquo;</li>
 </ul>
@@ -9020,7 +9020,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Matchmaker (/tools/communities/find)</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li>Replaced the old 4-question quiz outright, same URL. Free-type chat: the visitor describes what they're looking for, Claude asks a small number of clarifying questions (one or two per turn), then narrows to 2&ndash;3 best-fit suggestions with links to their profile pages, drawn from a text block covering every approved community's directory listing plus its Community Profile (<code>linklib/matchmaker.py::_build_communities_context</code>) &mdash; sent as full context on every turn rather than retrieved, since the ~38-community dataset is small enough that this is cheap and simpler than a retrieval layer.</li>
 <li>Thumbs up/down per suggestion, UI-only &mdash; never persisted (no server call, no DB row), unlike FP&amp;A Buddy's <code>ask_feedback</code> table.</li>
 <li>Multi-turn, server-rebuilt history (mirroring <code>/library/ask</code>'s <code>conversation_id</code> pattern) capped at <code>linklib.matchmaker.MAX_FOLLOWUPS</code> turns &mdash; higher than FP&amp;A Buddy's cap, since narrowing down through clarifying questions naturally takes more turns even though each turn is individually cheaper (no retrieval, no web search).</li>
@@ -9030,7 +9030,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Auto-fill from URL (/admin/tools/communities/new and /{id}/edit)</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Button:</strong> &ldquo;Auto-fill from URL&rdquo;, next to Name/URL on the Add/Edit Community form &mdash; drafts the basic directory-listing fields (demographic, reach, local markets, cost band, cost note, sponsorship, sponsor name, access, format, categories) from one Claude call grounded in a fetch of the entered URL. Distinct from the &ldquo;Generate&rdquo; button on the Community Profile edit page, which drafts the deeper qualitative fields instead.</li>
 <li><strong>Status line while running:</strong> &ldquo;Generating&hellip;&rdquo;, then either &ldquo;Drafted. Review before saving &mdash; anything marked &lsquo;Needs verification&rsquo; needs a manual check.&rdquo; or, if the page fetch failed, &ldquo;Drafted. Could not fetch the page, so verify facts before saving.&rdquo; On failure: the request's own error message, or &ldquo;Generation failed. Fill in the form by hand.&rdquo;</li>
 <li><strong>&ldquo;Needs verification&rdquo; sentinel:</strong> when the model can't confidently determine a field, it drafts the literal string &ldquo;Needs verification&rdquo; into that field rather than guessing &mdash; a selectable option on the Reach/Cost band/Sponsorship selects, or the field's literal text otherwise. Deliberately a different label from the &ldquo;Needs review&rdquo; badge below (that one is Brian's own manual sign-off on the whole Community Profile; this one is a machine-set, per-field gap on the basic listing) so the two never get confused in the same admin table.</li>
@@ -9040,7 +9040,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 
 <section style="padding-top:6px;border-top:1px solid var(--line);">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:14px 0 8px;">How the anonymous tracking works</h3>
-<ul style="margin:0;padding-left:20px;font-size:13.5px;color:#3a352e;line-height:1.7;">
+<ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong><code>cfo_visitor</code> cookie:</strong> unsigned, <code>httponly</code>, <code>samesite=lax</code>, 30-day TTL, value is <code>secrets.token_urlsafe(16)</code> &mdash; a random token with no IP, user agent, or fingerprint embedded. Set only once per visitor (never re-set on an existing cookie), so it never resets its own TTL on every page view.</li>
 <li><strong><code>community_profile_views</code> table:</strong> records <code>(session_id, community_id, viewed_at)</code> &mdash; which profile pages a session viewed, and when. Composite primary key on <code>(session_id, community_id)</code> dedups repeat views; a re-view just refreshes <code>viewed_at</code>.</li>
 <li><strong><code>community_gap_submissions</code> table:</strong> stores the free-text fields (current communities, gaps, looking-for), <code>search_context_json</code> (the search/filter state, quiz answers, or the quiz's optional weighting-step choices, at submission time), <code>viewed_community_ids_json</code> (computed server-side from <code>community_profile_views</code>, never trusted from the client), <code>closest_community_id</code>, optional email, a <code>reviewed</code> flag for admin triage, and <code>submission_type</code> (<code>'gap'</code>, <code>'recommender'</code>, <code>'weight_preferences'</code>, or <code>'correction'</code>) distinguishing gap-form submissions, logged recommender-quiz completions, a visitor's own weighting choices (logged only when they set at least one, never on a skip), and per-profile correction reports (which reuse just <code>gaps</code> for the free text and <code>closest_community_id</code> for the listing being corrected) from each other.</li>
@@ -11467,7 +11467,7 @@ def archive(request: Request, q: str = ""):
 .card-title{{font-size:16px;font-weight:600;color:var(--ink);}}
 .card-title:hover{{color:var(--accent);}}
 .meta{{color:var(--muted);font-size:13px;margin:3px 0 8px;}}
-.summary{{margin:0 0 10px;color:#3a352e;font-size:14px;}}
+.summary{{margin:0 0 10px;color:var(--ink-soft);font-size:14px;}}
 .tags{{display:flex;flex-wrap:wrap;gap:6px;}}
 .tags span{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;display:inline-flex;align-items:center;gap:2px;}}
 .tag-x-btn{{background:none;border:none;cursor:pointer;color:var(--muted);font-size:10px;padding:0;line-height:1;opacity:.7;}}
@@ -13406,18 +13406,18 @@ mermaid.initialize({{
 <div style="display:grid;gap:20px;">
 <section class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where an answer's sources come from</h3>
-<ul style="margin:0;padding-left:20px;font-size:16px;color:#3a352e;line-height:1.65;">
+<ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
 <li><strong>Library</strong> (highest authority, always searched first): the curated archive of saved articles, retrieved by a hybrid of keyword search (FTS5) and semantic search (vector embeddings), merged by a rank-fusion algorithm so an article can surface even when the question's wording doesn't match the source's own.</li>
 <li><strong>Feed:</strong> recent items from the subscribed RSS/Atom feeds, matched to the question by keyword overlap. Optional&mdash;off by default.</li>
 <li><strong>Web:</strong> live web search, scoped only to the domains on the trusted-sites list (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list, whichever mechanism handles it. Exa's search API, called directly from the server, is the preferred mechanism&mdash;on by default, toggled at <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings</a>. When Exa is off, or its API key isn't configured, Claude's own web-search tool steps in instead, so web search itself is never unavailable&mdash;only which engine handles it changes. Exactly one of the two runs per question, never both. A web result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</li>
 </ul>
-<p style="margin:8px 0 0;font-size:16px;color:#3a352e;line-height:1.65;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
+<p style="margin:8px 0 0;font-size:16px;color:var(--ink-soft);line-height:1.65;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
 </section>
 
 <section>
 <div class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Quick, Standard, Deep</h3>
-<p style="margin:0 0 10px;font-size:16px;color:#3a352e;line-height:1.65;">The only choice a user makes is how much effort to spend&mdash;there's no separate model picker. Each tier maps to a model, how many sources get pulled from each tier, and how long the answer can run:</p>
+<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The only choice a user makes is how much effort to spend&mdash;there's no separate model picker. Each tier maps to a model, how many sources get pulled from each tier, and how long the answer can run:</p>
 </div>
 <div style="overflow-x:auto;">
 <table class="cc-table">
@@ -13437,7 +13437,7 @@ mermaid.initialize({{
 
 <section class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Every claim traces to a citation</h3>
-<ul style="margin:0;padding-left:20px;font-size:16px;color:#3a352e;line-height:1.65;">
+<ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
 <li><strong>Verified, not self-reported.</strong> Sources are handed to the model as documents with citations turned on, and the numbered <code>[n]</code> markers in an answer come from the model's own verified citation data, not from the model being asked to remember to cite things.</li>
 <li><strong>Source-typed.</strong> Each citation is tagged library, feed, or web, and shown with a small icon so it's obvious which tier an answer drew from.</li>
 <li><strong>Names the gap instead of guessing.</strong> If the available sources don't cover a question well, the model is instructed to say so plainly rather than answer with unsupported confidence.</li>
@@ -13446,7 +13446,7 @@ mermaid.initialize({{
 
 <section class="tool-prose">
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it costs</h3>
-<ul style="margin:0;padding-left:20px;font-size:16px;color:#3a352e;line-height:1.65;">
+<ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
 <li><strong>Priced from real usage, not a query count.</strong> Every answer, follow-up rewrite, and retrieval step is costed from its actual token usage against the model providers' published rates, so the number reflects what a question actually spent, not an estimate.</li>
 <li><strong>A monthly dollar cap per user,</strong> currently ${default_cap:.2f} by default and adjustable per user in <a href="/admin/users" style="color:var(--accent);">/admin/users</a>. Once a user hits their cap for the month, Buddy tells them so instead of answering, and the cap resets at the start of the next month.</li>
 <li><strong>Visible to the user,</strong> not just to Admin&mdash;a member can see their own spend-to-date against their cap from the Ask page itself.</li>
