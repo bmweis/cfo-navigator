@@ -8443,7 +8443,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 </div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;">
-  <h2 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a category</h2>
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 14px;">Add a category</h2>
   <form method="post" action="/admin/tools/categories/new" style="display:grid;gap:12px;">
     <div>
       <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
@@ -9385,7 +9385,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
 </div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;">
-  <h2 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a category</h2>
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 14px;">Add a category</h2>
   <form method="post" action="/admin/tools/communities/categories/new" style="display:grid;gap:12px;">
     <div>
       <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
@@ -13034,7 +13034,7 @@ def admin_open_source(request: Request):
             )
         groups_html += (
             f'<section style="margin-bottom:28px;">'
-            f'<h2 style="font-size:16px;font-weight:700;margin:0 0 2px;">{_esc(title)}</h2>'
+            f'<h2 style="font-size:16px;font-weight:600;margin:0 0 2px;">{_esc(title)}</h2>'
             f'<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">{_esc(blurb)}</p>'
             f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;">{cards}</div>'
             f'</section>'
@@ -13209,10 +13209,21 @@ mermaid.initialize({{
 _PAGE_TIER_RE = re.compile(r"page-(full|grid|form|admin)\b")
 _PAGE_TIER_LABELS = {"full": "page-full", "grid": "page-grid",
                       "form": "page-form", "admin": "page-admin"}
-# Two bespoke full-bleed layouts documented in BRAND.md §5 as living outside
-# the .page tier system entirely — not part of the tier table by design, so
-# they're recognized rather than flagged.
-_PAGE_INDEX_CUSTOM_EXCEPTIONS = {"/library/archive", "/library/feed"}
+# Routes whose width can't be read off a `.page-*` class name in their own
+# source, so the live-introspection regex below would otherwise flag them as
+# untiered — each maps to the accurate label to show instead of re-deriving it.
+# Two are bespoke full-bleed layouts documented in BRAND.md §5 as living
+# outside the .page tier system entirely (their own internal widths, not one
+# of the four tiers). `/read` is different: it genuinely renders at the
+# page-full width (1900px, matching BRAND.md §5's own listing of it under
+# that tier) — it's just built from a fully standalone `_READER_TMPL`/
+# `_READER_CSS` template that never uses the `.page`/`.page-full` classes, so
+# it gets its real tier name (not "custom exception") rather than a false flag.
+_PAGE_INDEX_CUSTOM_EXCEPTIONS = {
+    "/library/archive": "custom exception",
+    "/library/feed": "custom exception",
+    "/read": "page-full",
+}
 
 
 def _page_index_response_class_name(route) -> str:
@@ -13270,7 +13281,7 @@ def _page_index_snapshot() -> list[dict]:
             continue
         if _page_index_response_class_name(route) != "HTMLResponse":
             continue
-        tier = "custom exception" if route.path in _PAGE_INDEX_CUSTOM_EXCEPTIONS else _page_index_tier_for(route)
+        tier = _PAGE_INDEX_CUSTOM_EXCEPTIONS.get(route.path) or _page_index_tier_for(route)
         rows.append({"path": route.path, "tier": tier, "flagged": not tier})
     rows.sort(key=lambda r: r["path"])
     return rows
