@@ -6275,18 +6275,28 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 #comm-pagination .btn:disabled{{opacity:.4;cursor:not-allowed;}}
 #comm-pagination .btn:disabled:hover{{background:transparent;color:var(--navy);}}
 #comm-pagination-label{{font-size:13px;color:var(--muted);}}
-.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;}}
+.comm-card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;}}
 .comm-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
 .comm-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
-.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;letter-spacing:-0.01em;}}
+/* Same fixed-height technique as .tool-name/.tool-desc on the Software directory
+   (webapp/app.py:4916-4931): every variable-length field is clamped to a fixed
+   number of lines with a matching min-height, so every card in the grid ends up
+   the same height regardless of content length — name, meta line, and the
+   demographic+notes description (folded into one clamped paragraph rather than
+   an optional extra row, which used to add its own height variance). */
+.comm-name{{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--ink);text-decoration:none;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
+  line-height:1.3;min-height:44px;margin-bottom:6px;letter-spacing:-0.01em;}}
 .comm-name:hover{{color:var(--navy);}}
-.comm-meta{{font-size:13px;color:var(--muted);margin:0 0 8px;line-height:1.5;}}
-.comm-demo{{font-size:14px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;}}
-.comm-notes{{font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5;}}
-.comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
+.comm-meta{{font-size:13px;color:var(--muted);margin:0 0 8px;line-height:1.5;min-height:39px;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;}}
+.comm-demo{{font-size:14px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;min-height:63px;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}}
+.comm-cats{{display:flex;flex-wrap:wrap;gap:6px;min-height:24px;}}
 .comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
 .comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
+.comm-full-link{{font-size:12px;font-weight:600;color:var(--navy);white-space:nowrap;flex-shrink:0;}}
 .comm-compare-label{{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;}}
 .comm-compare-label input{{cursor:pointer;}}
 </style>
@@ -6409,10 +6419,11 @@ function renderCommunities(list) {{
         ? commVerify(c.sponsorship_type)
         : commEsc(c.sponsorship_type) + (c.sponsor_name ? ' (' + commEsc(c.sponsor_name) + ')' : ''));
     }}
-    var notesLine = '';
-    if (c.notes || c.cost_note) {{
-      notesLine = '<p class="comm-notes">' + commEsc([c.notes, c.cost_note].filter(Boolean).join(' ')) + '</p>';
-    }}
+    var demoParts = [];
+    if (c.demographic) demoParts.push(commVerify(c.demographic));
+    if (c.notes) demoParts.push(commEsc(c.notes));
+    if (c.cost_note) demoParts.push(commEsc(c.cost_note));
+    var demoHtml = demoParts.join(' &middot; ');
     var featuredBadge = c.featured
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
@@ -6423,6 +6434,8 @@ function renderCommunities(list) {{
     var costHtml = c.cost_band === NEEDS_VERIFICATION
       ? '<span class="comm-verify">Needs verification</span>'
       : '<span class="comm-cost">' + commEsc(c.cost_band) + '</span>';
+    var fullProfileLink = '<a class="comm-full-link" href="/tools/communities/' + commEsc(c.slug)
+      + '" target="_blank" rel="noopener">Full profile &rarr;</a>';
     return '<article class="comm-card' + (c.featured ? ' comm-card-featured' : '') + '" data-comm-id="' + c.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
@@ -6432,14 +6445,20 @@ function renderCommunities(list) {{
       + costHtml
       + '</div>'
       + '<p class="comm-meta">' + metaParts.join(' &middot; ') + '</p>'
-      + '<p class="comm-demo">' + commVerify(c.demographic) + '</p>'
-      + notesLine
-      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
+      + '<p class="comm-demo">' + demoHtml + '</p>'
+      // Cats and the profile-link/compare row are split into two always-separate
+      // rows (same fix as the Software directory's .tool-cats, webapp/app.py:4949-4951)
+      // rather than sharing one flex row — a multi-badge category set wrapping to
+      // 2 lines on one card and 1 on its neighbor used to break the uniform height
+      // the clamps above are meant to guarantee.
+      + '<div style="margin-top:auto;">'
       + '<div class="comm-cats">' + cats + '</div>'
+      + '<div style="display:flex;align-items:center;gap:12px;margin-top:10px;">' + fullProfileLink
       + '<label class="comm-compare-label"' + (compareDisabled ? ' style="opacity:.45;"' : '') + '>'
       + '<input type="checkbox" class="comm-compare-cb" data-id="' + c.id + '"'
       + (compareChecked ? ' checked' : '') + (compareDisabled ? ' disabled' : '')
       + ' onchange="toggleCompareSelect(this)"> Compare</label>'
+      + '</div>'
       + '</div>'
       + '</article>';
   }}).join('');
