@@ -719,6 +719,35 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .tool-inner{max-width:1300px;margin:0 auto;}
 .tool-prose{max-width:760px;margin:0 auto;}
 
+/* Shared long-form article devices (pull-quote, callout, warning) — extracted
+   in Phase 6b from AI Hackathon Playbook's and Connecting Claude to NetSuite's
+   duplicated .fah- and .ns- prefixed copies, which were pixel-for-pixel
+   identical except for a handful of small spacing/font-size values. Each
+   article composes one of these base classes with its own small
+   page-prefixed override class for just the properties that still differ
+   (e.g. class="article-pull fah-pull"), so existing pages render exactly as
+   before while new pages can use the shared classes alone with no override
+   needed. Reach for these any time a long-form page needs to break up a
+   block of prose — see BRAND.md §5 "Prose width" for the ~250-word break
+   rule an Atlantic-tagged page follows. */
+.article-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
+.article-pull p{margin:0;font-style:italic;line-height:1.55;color:var(--ink);}
+.article-callout{background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);border-radius:0 0 10px 10px;padding:20px 24px;}
+.article-callout-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
+.article-callout p,.article-callout li{font-size:15px;color:var(--ink-soft);margin-bottom:6px;}
+.article-callout ul{padding-left:20px;margin:0;}
+.article-warn{background:var(--coral-wash);border-top:2px solid var(--coral);border-radius:0 0 10px 10px;}
+.article-warn-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--coral-deep);}
+.article-warn p{font-size:14px;color:var(--ink-soft);margin:0;}
+
+/* Atlantic long-form tag (Phase 6b) — the simplest viable tagging mechanism
+   from the Phase 6a investigation: a second class alongside the page's width
+   tier, flipping a handful of typographic properties for a wider, more
+   generous reading rhythm. It cannot insert content (pull-quotes, callouts,
+   subheads, images are still hand-authored) — see EDITORIAL_SYSTEM_PHASE6A.md
+   for why that's a hand-authoring discipline, not something CSS can enforce. */
+.article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px;}
+
 /* Buttons — primary navy fill, ghost navy outline. Seafoam is NEVER a button. */
 .btn{display:inline-block;padding:11px 22px;background:var(--navy);color:#fff;border-radius:10px;font:600 15px var(--font-body);border:1px solid var(--navy);cursor:pointer;}
 .btn:hover{background:var(--navy-deep);border-color:var(--navy-deep);text-decoration:none;}
@@ -2293,19 +2322,18 @@ def finops_ai_hackathon_redirect(request: Request):
 
 @app.get("/thought-leadership/ai-hackathon-playbook", response_class=HTMLResponse)
 def finops_ai_hackathon(request: Request):
-    body = """<div class="page page-full">
+    body = """<div class="page page-full article-atlantic">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
 <style>
-  .fah-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
-  .fah-pull p{margin:0;font-size:17px;font-style:italic;line-height:1.55;color:var(--ink);}
-  .fah-callout{background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);border-radius:0 0 10px 10px;padding:20px 24px;margin:28px 0;}
-  .fah-callout-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
-  .fah-callout p,.fah-callout li{font-size:15px;color:var(--ink-soft);margin-bottom:6px;}
-  .fah-callout ul{padding-left:20px;margin:0;}
+  /* Base pull-quote/callout/warning styling lives in the shared .article-*
+     classes (Phase 6b) — these are just this page's few pre-existing spacing
+     overrides, composed alongside the shared class (class="article-pull
+     fah-pull") so this page's rendering is unchanged from before extraction. */
+  .fah-pull p{font-size:17px;}
+  .fah-callout{margin:28px 0;}
   .fah-callout li{margin-bottom:5px;}
-  .fah-warn{background:var(--coral-wash);border-top:2px solid var(--coral);border-radius:0 0 10px 10px;padding:18px 22px;margin:24px 0;}
-  .fah-warn-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--coral-deep);margin-bottom:8px;}
-  .fah-warn p{font-size:14px;color:var(--ink-soft);margin:0;}
+  .fah-warn{padding:18px 22px;margin:24px 0;}
+  .fah-warn-title{margin-bottom:8px;}
   /* Phase track */
   .fah-track{display:flex;flex-direction:column;gap:0;margin:28px 0;}
   .fah-step{display:flex;gap:18px;position:relative;}
@@ -2380,7 +2408,7 @@ def finops_ai_hackathon(request: Request):
 
 <p>I've run one of these with my own finance and ops team, and this is the format distilled—what worked, why it worked, and how to run it yourself.</p>
 
-<div class="fah-pull"><p>"Before any piece of work, two questions: Is this worth doing? And am I sailing or rowing—is there a template, an automation, a repeatable version that keeps this from being a one-off someone owns forever?"</p></div>
+<div class="article-pull fah-pull"><p>"Before any piece of work, two questions: Is this worth doing? And am I sailing or rowing—is there a template, an automation, a repeatable version that keeps this from being a one-off someone owns forever?"</p></div>
 
 <h2>Why a hackathon—and why now</h2>
 <p>AI adoption in finance doesn't happen on its own. It gets crowded out by the close, the board deck, the forecast update. There's always something more urgent. Left to find the time on their own, most teams never do.</p>
@@ -2399,7 +2427,7 @@ def finops_ai_hackathon(request: Request):
 
 <p>Design thinking is a problem-solving approach that starts with the people experiencing the problem, not with the solution. It works in two modes:</p>
 
-<div class="fah-pull"><p>"Diverge first. Everyone generates ideas independently, without talking. Then converge. The separation matters—if you skip the silent step and just go around the room, the first voice anchors every other answer."</p></div>
+<div class="article-pull fah-pull"><p>"Diverge first. Everyone generates ideas independently, without talking. Then converge. The separation matters—if you skip the silent step and just go around the room, the first voice anchors every other answer."</p></div>
 
 <p>The other half is the ground rule going in: <strong>no bad ideas.</strong> No judgment, no evaluating while generating. The only requirement is a clear persona and use case: a real person with a real problem, not a vague wish. That's what makes people comfortable putting the half-formed thing on the wall—which is exactly where the good ones tend to start.</p>
 
@@ -2446,8 +2474,8 @@ def finops_ai_hackathon(request: Request):
 <h2>Before you arrive: the setup</h2>
 <p>The single biggest mistake in running a hackathon is walking into the room cold. If the first thing you do is ask "so what should we build?"—you'll spend half your time generating half-baked ideas and the other half convincing people to try something. Do the intake work before you're in a room together.</p>
 
-<div class="fah-callout">
-  <div class="fah-callout-title">Async intake—1–2 weeks before the event</div>
+<div class="article-callout fah-callout">
+  <div class="article-callout-title">Async intake—1–2 weeks before the event</div>
   <ul>
     <li>Set up a simple intake form (Notion works well) with these fields: <strong>problem statement</strong> (one sentence), <strong>who it hurts</strong>, <strong>type</strong> (automation / visibility / missing skill / analysis), <strong>impact and feasibility</strong> (a first guess), and <strong>definition of done</strong>.</li>
     <li>Ask specific questions. <em>"What do you do every week that feels like copy-paste?"</em> gets better answers than <em>"What problems do you have?"</em></li>
@@ -2521,8 +2549,8 @@ def finops_ai_hackathon(request: Request):
   </div>
 </div>
 
-<div class="fah-warn">
-  <div class="fah-warn-title">Name what you're skipping</div>
+<div class="article-warn fah-warn">
+  <div class="article-warn-title fah-warn-title">Name what you're skipping</div>
   <p>Things that "fall off the list" have a way of coming back. Things you've explicitly decided to skip don't. For every idea below the line: name it, say it out loud, agree to leave it alone. <em>"Intentionally skipping"</em> and <em>"fell off the list"</em> are not the same thing.</p>
 </div>
 
@@ -2550,15 +2578,15 @@ def finops_ai_hackathon(request: Request):
 
 <p>The framing session is dense with new thinking—a full backlog processed, clustered, voted on, and prioritized. Ending there, inspired rather than rushed, gives that thinking time to settle. People go home with a problem in their head. They think about it in the shower. They wake up with the approach half-formed. That overnight processing is doing real work.</p>
 
-<div class="fah-pull"><p>"Inspire → Sleep → Build. That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method."</p></div>
+<div class="article-pull fah-pull"><p>"Inspire → Sleep → Build. That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method."</p></div>
 
 <p>Add one more step on the morning of the build day before anyone opens a laptop: <strong>15–20 minutes of inspiration.</strong> Show examples of what other finance teams have actually built with AI. Real demos, not slides. Actual workflows someone is using. Then, and this is the move worth stealing, clear the votes and run a second idea-generation round from scratch. The second round is almost always better than the first. People arrive with new angles, sharper problem statements, and sometimes a completely different sense of what they want to build.</p>
 
 <h2>The build day</h2>
 <p>The build sprint is simple by design. Complexity is the enemy of shipping.</p>
 
-<div class="fah-callout">
-  <div class="fah-callout-title">Build day structure</div>
+<div class="article-callout fah-callout">
+  <div class="article-callout-title">Build day structure</div>
   <ul>
     <li><strong>Morning reboot (15–20 min):</strong> Inspiration videos, second idea-generation round, confirm pairs and targets.</li>
     <li><strong>Sprint #1 (90 min):</strong> Pairs build. Floaters circulate. No whole-group check-ins until time's called—mid-sprint interruptions break flow.</li>
@@ -2591,7 +2619,7 @@ def finops_ai_hackathon(request: Request):
 
 <p>The Park verdict deserves more credit than it gets. It's not failure—it's intellectual honesty. Naming why something isn't ready (wrong timing, missing data, dependency on something else) is more useful than letting it die quietly. A well-documented Park can become a Ship six months later when the conditions change.</p>
 
-<div class="fah-pull"><p>"The goal is at least one thing in production before anyone gets on a plane. Aim for that. It changes the energy of the room and sets the bar for everything that follows."</p></div>
+<div class="article-pull fah-pull"><p>"The goal is at least one thing in production before anyone gets on a plane. Aim for that. It changes the energy of the room and sets the bar for everything that follows."</p></div>
 
 <h2>The operating system: a Notion setup that compounds</h2>
 <p>The post-its get the attention. They're not what makes this work. What makes it work is the underlying system—one intake database, one page per idea, a structured record that outlives the event.</p>
@@ -2630,8 +2658,8 @@ def finops_ai_hackathon(request: Request):
 
 <p>Run the hackathon again next year. The format gets easier the second time—the setup is faster, people know what to expect, and the ideas are sharper because everyone has spent a year noticing problems worth solving. The first one is the hardest. The flywheel needs one good push.</p>
 
-<div class="fah-callout">
-  <div class="fah-callout-title">What good looks like when you leave</div>
+<div class="article-callout fah-callout">
+  <div class="article-callout-title">What good looks like when you leave</div>
   <ul>
     <li>3–4 working prototypes, each with a verdict and a named owner</li>
     <li>A prioritized backlog in Notion for everything that didn't get built—with owners on anything that moves forward</li>
@@ -2666,16 +2694,15 @@ def netsuite_mcp(request: Request):
     body = """<div class="page page-full">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
 <style>
-  .ns-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
-  .ns-pull p{margin:0;font-size:16px;font-style:italic;line-height:1.55;color:var(--ink);}
-  .ns-callout{background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);border-radius:0 0 10px 10px;padding:20px 24px;margin:24px 0;}
-  .ns-callout-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
-  .ns-callout p,.ns-callout li{font-size:15px;color:var(--ink-soft);margin-bottom:6px;}
-  .ns-callout ul{padding-left:20px;margin:0;}
+  /* Base pull-quote/callout/warning styling lives in the shared .article-*
+     classes (Phase 6b) — these are just this page's few pre-existing spacing
+     overrides, composed alongside the shared class (class="article-callout
+     ns-callout") so this page's rendering is unchanged from before extraction. */
+  .ns-pull p{font-size:16px;}
+  .ns-callout{margin:24px 0;}
   .ns-callout li{margin-bottom:4px;}
-  .ns-warn{background:var(--coral-wash);border-top:2px solid var(--coral);border-radius:0 0 10px 10px;padding:16px 22px;margin:18px 0;}
-  .ns-warn-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--coral-deep);margin-bottom:6px;}
-  .ns-warn p{font-size:14px;color:var(--ink-soft);margin:0;}
+  .ns-warn{padding:16px 22px;margin:18px 0;}
+  .ns-warn-title{margin-bottom:6px;}
   .ns-note{background:var(--surface-2);border-left:3px solid var(--line-strong);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}
   .ns-note p{font-size:14px;color:var(--muted);margin:0;}
   /* Phase track */
@@ -2728,8 +2755,8 @@ def netsuite_mcp(request: Request):
 
 <p>Once connected, you can ask things like <em>"how much did we spend with this vendor last year?"</em> or <em>"what's the deferred revenue balance for this customer?"</em> and Claude will query NetSuite and return the answer in plain language, a table, or a formatted report. The connection runs through something called an MCP integration. You don't need to understand the underlying technology to use it—this guide covers everything you need.</p>
 
-<div class="ns-callout">
-  <div class="ns-callout-title">Before you start</div>
+<div class="article-callout ns-callout">
+  <div class="article-callout-title">Before you start</div>
   <p>Check that the NetSuite AI Connector SuiteApp is installed: <strong>Customization → SuiteCloud → Installed SuiteApps</strong>, look for <code>com.netsuite.mcpstandardtools</code>. It should show <strong>Status: COMPLETE</strong>. If it's not installed, go to the SuiteApp Marketplace and search for it by name before continuing.</p>
 </div>
 
@@ -2764,8 +2791,8 @@ def netsuite_mcp(request: Request):
 
 <p>Claude's NetSuite integration includes tools that can create and update records, not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do. The protection is enforced by NetSuite, not by hoping Claude behaves.</p>
 
-<div class="ns-warn">
-  <div class="ns-warn-title">One thing that trips people up</div>
+<div class="article-warn ns-warn">
+  <div class="article-warn-title ns-warn-title">One thing that trips people up</div>
   <p>When you connect Claude, you need to be logged into NetSuite under your <strong>normal working role</strong>—not the new read-only role you're about to create. You'll select the read-only role on a screen that appears during the connection flow. More on this in Part 2.</p>
 </div>
 
@@ -2800,8 +2827,8 @@ def netsuite_mcp(request: Request):
         </table>
       </div>
       <p>Save the role. Do not add any permissions related to creating, editing, approving, or posting transactions. This role should stay read-only.</p>
-      <div class="ns-warn" style="margin-top:12px;">
-        <div class="ns-warn-title">Known issue</div>
+      <div class="article-warn ns-warn" style="margin-top:12px;">
+        <div class="article-warn-title ns-warn-title">Known issue</div>
         <p>The Web Services Only Role checkbox is easy to miss but critical. Without it, the role may not show up correctly during the connection flow, and you may see a "does not support OAuth 2.0 login" error.</p>
       </div>
     </div>
@@ -2831,8 +2858,8 @@ def netsuite_mcp(request: Request):
     <div class="ns-body">
       <h3>Make sure you're in the right NetSuite role first</h3>
       <p>Before going to Claude, check which role you're currently in on the NetSuite side. You need to be logged in under your <strong>normal working role</strong>—not the Netsuite MCP role you just created. Netsuite MCP is what you'll select during the connection flow, not what you're already in. Check the role indicator in the top-right corner of NetSuite. If it says Netsuite MCP, switch to your normal role first.</p>
-      <div class="ns-warn" style="margin-top:8px;">
-        <div class="ns-warn-title">Most common mistake when reconnecting</div>
+      <div class="article-warn ns-warn" style="margin-top:8px;">
+        <div class="article-warn-title ns-warn-title">Most common mistake when reconnecting</div>
         <p>Going straight to Claude without checking your NetSuite role first. Always confirm you're in your normal working role in NetSuite before clicking Connect in Claude. This step catches more than half of all connection failures.</p>
       </div>
     </div>
@@ -2861,8 +2888,8 @@ def netsuite_mcp(request: Request):
 
 <h3 style="font-size:16px;margin:24px 0 8px;">Ask for everything, not just bills</h3>
 <p>When you ask Claude to look something up, it may default to querying only vendor bills or invoices. This can miss a lot. Journal entries are a separate transaction type—and many common workflows post through JEs: month-end accruals, prepayment amortizations, corporate card programs. A query limited to vendor bills misses them entirely.</p>
-<div class="ns-callout">
-  <div class="ns-callout-title">Sanity check for any spend query</div>
+<div class="article-callout ns-callout">
+  <div class="article-callout-title">Sanity check for any spend query</div>
   <p>Ask Claude to first pull a grand total with no filters other than the account and date range, then compare against the detailed results. If they don't match, something is being filtered out. The discrepancy tells you what to investigate next.</p>
 </div>
 
