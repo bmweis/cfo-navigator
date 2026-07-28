@@ -508,6 +508,47 @@ rule of thumb going forward: a Quote is one short, standalone idea a reader coul
 repeat verbatim; anything that needs structure (a list, multiple sentences of
 explanation) is a Tip even if it originated as a "pull-quote."
 
+**Pull-quote audit (post-taxonomy):** with Quotes now a real, distinctly-styled type
+rather than a fudged box, several blocks repositioned into `.article-pull` during the
+original 6b/6c builds turned out not to pass a genuine test on review. **The test:** a
+real pull-quote is a standalone declarative statement or insight — it reads naturally
+as "this is the idea" on its own, out of context. It is *not* a process/sequence (→
+flowchart + caption instead), a list of steps or parallel items (→ bulleted list
+instead), or a plain informational sentence that just happens to sound punchy (→
+standard body text instead, same fix already applied to NetSuite MCP's "protection is
+enforced by NetSuite" line above).
+
+Auditing every `.article-pull` instance across all three Atlantic pages against this
+test:
+
+- **GER's three Phase 6d quotes** (efficiency-disaster, network-effects, permanent-capital-loss)
+  all pass — each reads as a standalone idea a reader could repeat verbatim, out of
+  context. Sourced from the published PDF and already vetted; untouched.
+- **NetSuite MCP** has zero remaining `.article-pull` instances (its one quote was
+  already reverted to body text — see above).
+- **Hackathon Playbook** had three that failed the test, all fixed:
+  - *"Diverge first...Then converge...The separation matters..."* was a two-mode
+    process description, not an idea → converted to a plain bulleted list (unboxed,
+    matching the page's other plain lists), with the "why the order matters" sentence
+    kept as a following paragraph rather than folded into a list item.
+  - *"Inspire → Sleep → Build. That's the sequence..."* was a three-step sequence, not
+    an idea → converted to a lightweight CSS-only boxes-and-arrows flowchart (three
+    steps connected by arrows, stacking vertically with down-arrows on mobile) with the
+    explanatory sentence underneath as a plain caption, not quote styling. No charting
+    dependency needed — Mermaid is already wired up elsewhere (the admin ER diagram and
+    "How FP&A Buddy Works" sequence diagram) but only for genuinely complex diagrams;
+    three linear boxes on a public page didn't justify loading it.
+  - *"The goal is at least one thing in production before anyone gets on a plane..."*
+    was a plain declarative sentence → converted to standard body text, same treatment
+    as the NetSuite MCP correction above.
+
+Break rule re-verified after all three conversions: the unbroken-prose stretches on
+either side of each conversion are 52/114 words (design-thinking section), 77/90 words
+(inspire/sleep/build section), and 82 words (Park-verdict section) — all comfortably
+under the ~250-word threshold. A bulleted list and a flowchart are legitimate break
+devices in their own right, same as a pull-quote, callout, or image, so removing a
+quote in favor of one doesn't reopen a gap.
+
 ---
 
 ## 6. Do / Don't
