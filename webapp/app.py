@@ -2802,7 +2802,12 @@ def netsuite_mcp(request: Request):
   .ns-step{display:flex;gap:18px;position:relative;}
   .ns-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}
   .ns-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}
-  .ns-body{padding-bottom:24px;flex:1;}
+  /* min-width:0 overrides the flex item's default min-width:auto, which
+     otherwise sizes to the content's intrinsic minimum — including the
+     nested .ns-table's min-width:360px — and pushes the whole flex row
+     wider than the viewport on narrow screens instead of letting
+     .ns-table-wrap's overflow-x:auto scroll the table in place. */
+  .ns-body{padding-bottom:24px;flex:1;min-width:0;}
   .ns-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}
   .ns-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}
   /* Use case cards */
@@ -2815,7 +2820,7 @@ def netsuite_mcp(request: Request):
   .ns-tip strong{font-weight:600;}
   /* Permission table */
   .ns-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0;}
-  .ns-table{width:100%;border-collapse:collapse;font-size:14px;min-width:360px;}
+  .ns-table{width:100%;border-collapse:collapse;font-size:14px;}
   .ns-table th{background:var(--navy);color:#fff;padding:9px 14px;text-align:left;font-weight:600;}
   .ns-table td{padding:9px 14px;border-top:1px solid var(--line);}
   .ns-table tr:nth-child(even) td{background:var(--surface-2);}
@@ -2834,6 +2839,8 @@ def netsuite_mcp(request: Request):
   @media(max-width:640px){
     .ns-trouble{font-size:13px;}
     .ns-trouble td,.ns-trouble th{padding:8px 10px;}
+    .ns-table{font-size:13px;}
+    .ns-table td,.ns-table th{padding:8px 10px;}
   }
 </style>
 
