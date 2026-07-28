@@ -400,6 +400,21 @@ safe. This phase also showed Atlantic pages absorbing curated external content
 (attribution, named benchmark data, verbatim quotes from a source document) as
 cleanly as originally-authored prose.
 
+**Full-width breakout (Phase 6d addendum):** GER's three pull-quotes break out of
+the 760px `.tool-prose` reading column to span the full 1300px `.tool-inner` width,
+rather than sitting inline at the narrower text measure — body paragraphs stay at
+the comfortable reading width, only the pull-quote/callout/stat-block devices break
+out wider. The CSS (a page-scoped `.ger-pull` modifier, not a change to the shared
+`.article-pull` base) uses `left:50%` plus `transform:translateX(-50%)` against a
+`width:calc(100vw - 48px)` capped at `max-width:1300px` — since `.tool-prose`,
+`.tool-inner`, and `.page` are all centered on the same axis with a fixed 48px total
+side padding, this re-centers the wider box under `.tool-inner` at any viewport size
+and collapses cleanly to the same width as the surrounding prose once the viewport is
+too narrow to have room to break out (verified at 375/900/1400/2400px viewports, no
+horizontal overflow at any of them). This breakout treatment is scoped to GER's three
+Phase 6d pull-quotes only — it did not touch the shared `.article-pull` base or the
+existing inline pull-quotes on Hackathon Playbook or NetSuite MCP.
+
 ---
 
 ## 6. Do / Don't

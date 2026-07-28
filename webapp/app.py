@@ -1613,6 +1613,16 @@ def growth_engine_ratio(request: Request):
   .tl-ctrl button{font:inherit;font-size:18px;line-height:1;width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--accent);cursor:pointer;}
   .tl-ctrl button:hover{background:var(--accent-light);}
   .tl-ctrl span{font-size:16px;font-weight:700;min-width:16px;text-align:center;color:var(--ink);}
+  /* Full-width breakout: the pull-quote spans .tool-inner's width (1300px,
+     matching .page's fixed 24px+24px side padding), not .tool-prose's
+     narrower 760px reading column. Centering math: left:50% shifts the box
+     right by half of its normal containing block's width (.tool-prose, the
+     column it sits in); translateX(-50%) then shifts it left by half of its
+     own (wider) width. Since .tool-prose, .tool-inner, and .page are all
+     centered on the same axis, the net result re-centers the wider box under
+     .tool-inner regardless of viewport size, collapsing to no visible
+     breakout once the viewport is too narrow for one. */
+  .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1300px;}
   .ger-pull p{font-size:16px;}
   @media (max-width:640px){
     .ger-grid-4{grid-template-columns:repeat(2,1fr);}
