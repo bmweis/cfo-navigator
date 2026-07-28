@@ -85,13 +85,23 @@ Coral is the **warm counterweight** to a cool palette. Use it as a graphic/displ
 - A short coral underline or marker under a single hero word or section number
 - Data-viz **third series** (e.g. the R&D lane in the GER contribution diagram)
 - Large display numerals or stat call-outs (≥ 24px)
-- A coral-wash (`#FBEAE3`) callout/quote block — put **navy** text on it (11:1 contrast)
+- A coral-wash (`#FBEAE3`) **warning box** (`.article-warn` — see "Callout taxonomy" below)
+  — put **navy** text on it (11:1 contrast)
 
 **🚫 Never coral**
 - Body text or any text under ~18px (use `--coral-deep` only if unavoidable)
 - Button fills (buttons are navy or ghost-navy — *no* color buttons, ever)
 - Status/error states (that's `--alert`)
-- More than ~one coral element per viewport — if you see two, remove one
+- More than ~one coral element per viewport — if you see two, remove one, **except**
+  `.article-warn` warning boxes (see the "Callout taxonomy" entry below): a long-form
+  page can legitimately need more than one warning called out in the same view (e.g.
+  Connecting Claude to NetSuite's setup guide has a warning at the top of "The security
+  architecture" plus one nested in each of two later setup steps), and diluting that to
+  "one warning per page" would mean either merging unrelated warnings together or
+  demoting real ones to plain text. This is a **deliberate, sanctioned exception** to the
+  one-per-viewport rule — specific to warning boxes, not a general loosening of the coral
+  rule. Everything else on this list (badges, underlines, data-viz, display numerals,
+  the coral-wash callout/quote block) still holds to one-per-viewport.
 
 ### 2.4 Data-visualization palette
 
@@ -413,7 +423,61 @@ and collapses cleanly to the same width as the surrounding prose once the viewpo
 too narrow to have room to break out (verified at 375/900/1400/2400px viewports, no
 horizontal overflow at any of them). This breakout treatment is scoped to GER's three
 Phase 6d pull-quotes only — it did not touch the shared `.article-pull` base or the
-existing inline pull-quotes on Hackathon Playbook or NetSuite MCP.
+existing inline pull-quotes on Hackathon Playbook or NetSuite MCP. (A later retrofit
+phase brought the same breakout treatment to Hackathon Playbook and NetSuite MCP's
+existing boxes too — see the PR history; this entry describes only what Phase 6d
+itself did.)
+
+**Callout taxonomy:** comparing GER's new pull-quotes against Hackathon Playbook's
+existing one surfaced a problem — every box on an Atlantic page (CTAs, tips, warnings,
+quotes) reused the same generic pale-box treatment, so a short pull-quote read as
+awkward empty space rather than an intentional design moment. Every box on an
+Atlantic page is now one of exactly four types, distinguished by color and treatment
+so each reads as what it is:
+
+| Type | Class | Color | Treatment |
+|---|---|---|---|
+| **CTA** | `.article-cta` | Navy (`--navy-wash` fill, `--navy` left border) | Boxed, `border-radius:0 10px 10px 0`, `padding:18px 22px` — "here's a link to follow" |
+| **Tips** | `.article-callout` | Seafoam (`--seafoam-wash` fill, `--seafoam-mid` top border) | Boxed, titled (`.article-callout-title`, uppercase seafoam-deep), `border-radius:0 0 10px 10px` — "here's a fact/technique" |
+| **Warnings** | `.article-warn` | Coral (`--coral-wash` fill, `--coral` top border) | Boxed, titled (`.article-warn-title`, uppercase coral-deep), `border-radius:0 0 10px 10px` — "here's a failure mode to avoid" |
+| **Quotes** | `.article-pull` | No fill — `--navy` left border only | Unboxed: `font-family:var(--font-head)`, 600 weight, italic, 22px, `line-height:1.45` — "this is the idea," not a boxed fact |
+
+The CTA class formalizes GER's pre-existing "download the full guide" box (previously
+an ad-hoc inline style, not a shared class) rather than inventing a new visual —
+it's the reference implementation for what a CTA looks like. Tips and Warnings needed
+no color change (`.article-callout` was already seafoam, `.article-warn` was already
+coral from the Phase 6b extraction) — only the taxonomy naming and the sanctioned
+coral exception (§2.3 above) are new. Quotes got the real design work: `.article-pull`
+previously used the same navy-wash boxed treatment as a CTA, which is exactly what
+made a short pull-quote read as an awkward, undersized version of a CTA box instead of
+an intentional editorial moment. Dropping the box and scaling up the type (using the
+display font, `--font-head`, instead of body copy) gives a quote real visual weight
+without competing with the boxed types. The three page-specific per-quote font-size
+overrides this replaced (`.ger-pull p`, `.fah-pull p`, `.ns-pull p`) are gone — one
+consistent Quote size now applies everywhere, which is possible now that quotes are a
+real distinct type rather than a differently-fudged version of a box. The literal
+surrounding quotation marks were also dropped from every quote's text — with the
+left-rule accent and the distinct display-font treatment already signaling "this is a
+quote," a leading/trailing `"` was redundant, not clarifying.
+
+One non-obvious retag: NetSuite MCP's `.ns-note` ("The connection is per person...")
+was previously its own fifth gray style (`--surface-2`/`--line-strong`) that didn't
+map onto any of the four types. It's folded into the Tips family (seafoam) rather
+than kept as a one-off exception, since its content — informational, not a warning,
+not a CTA, not a quotable idea — is functionally a tip. NetSuite MCP's `.ns-tip`
+boxes (the compact seafoam annotations nested inside its use-case cards) were already
+correctly seafoam before this phase and needed no change — they're a legitimate
+compact, card-nested variant of the Tips type, not a duplicate to consolidate away.
+
+**Quote vs. Tip is a content judgment call, not just a mechanical retag.** Hackathon
+Playbook's opening pull-quote ("Before any piece of work, two questions...") was
+rewritten mid-phase into a two-question numbered list plus an explanatory paragraph —
+content that structurally doesn't fit the Quote type's unboxed, single-idea, large-type
+treatment. It was moved to a Tip box instead (which already supports ordered/unordered
+lists), rather than forcing a list and a paragraph into 22px italic display type. The
+rule of thumb going forward: a Quote is one short, standalone idea a reader could
+repeat verbatim; anything that needs structure (a list, multiple sentences of
+explanation) is a Tip even if it originated as a "pull-quote."
 
 ---
 
@@ -422,8 +486,8 @@ existing inline pull-quotes on Hackathon Playbook or NetSuite MCP.
 | ✅ Do | 🚫 Don't |
 |---|---|
 | Let navy + off-white do most of the work | Reach for color to fill space |
-| Use coral once per screen, as a pop | Spread coral across a layout |
-| Keep status colors for status only | Use alert red as a highlight, or coral as a warning |
+| Use coral once per screen, as a pop (`.article-warn` boxes excepted — see §5's Callout taxonomy) | Spread coral across a layout |
+| Keep status colors for status only | Use `--alert` red as a highlight, or coral as a *system* status/error color |
 | Headings in Outfit, reading in Source Serif 4 | Mix the serif into UI, or set body in Outfit |
 | One marker-underline, one or two stickers per page, in a header/hero or card corner | Repeat the graffiti kit decoratively, or put it on admin/data surfaces |
 | Buttons navy or ghost | Make a seafoam or coral button |

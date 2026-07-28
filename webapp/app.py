@@ -719,23 +719,35 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .tool-inner{max-width:1300px;margin:0 auto;}
 .tool-prose{max-width:760px;margin:0 auto;}
 
-/* Shared long-form article devices (pull-quote, callout, warning) — extracted
-   in Phase 6b from AI Hackathon Playbook's and Connecting Claude to NetSuite's
-   duplicated .fah- and .ns- prefixed copies, which were pixel-for-pixel
-   identical except for a handful of small spacing/font-size values. Each
-   article composes one of these base classes with its own small
-   page-prefixed override class for just the properties that still differ
-   (e.g. class="article-pull fah-pull"), so existing pages render exactly as
-   before while new pages can use the shared classes alone with no override
-   needed. Reach for these any time a long-form page needs to break up a
-   block of prose — see BRAND.md §5 "Prose width" for the ~250-word break
-   rule an Atlantic-tagged page follows. */
-.article-pull{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 24px;margin:28px 0;}
-.article-pull p{margin:0;font-style:italic;line-height:1.55;color:var(--ink);}
+/* Shared long-form article devices — extracted in Phase 6b from AI Hackathon
+   Playbook's and Connecting Claude to NetSuite's duplicated .fah- and .ns-
+   prefixed copies, which were pixel-for-pixel identical except for a handful
+   of small spacing/font-size values. Each article composes one of these base
+   classes with its own small page-prefixed override class for just the
+   properties that still differ (e.g. class="article-tip fah-callout"), so
+   existing pages render exactly as before while new pages can use the shared
+   classes alone with no override needed. Reach for these any time a long-form
+   page needs to break up a block of prose — see BRAND.md §5 "Prose width"
+   for the ~250-word break rule an Atlantic-tagged page follows.
+
+   Four-type callout taxonomy (this phase): every box on an Atlantic page is
+   one of exactly four types, distinguished by color/treatment so each reads
+   as what it is rather than as one generic "blue box" — CTA (navy), Tips
+   (seafoam), Warnings (coral), Quotes (no box at all). See BRAND.md's
+   "Callout taxonomy" entry for the full reasoning, including the sanctioned
+   exception letting Warnings appear more than once per screen. */
+.article-cta{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 22px;margin:0 0 36px;}
+.article-cta p{margin:0;font-size:15px;}
+/* Quotes: the one type that's deliberately NOT a boxed callout — no
+   background, no border box, just a left-rule accent and larger, bolder,
+   editorial-weight type so a quote reads as "this is the idea," distinct
+   from the boxed types reading as "here's a fact/link." */
+.article-pull{border-left:3px solid var(--navy);padding:2px 0 2px 26px;margin:32px 0;}
+.article-pull p{margin:0;font-family:var(--font-head);font-weight:600;font-style:italic;font-size:22px;line-height:1.45;letter-spacing:-.01em;color:var(--ink);}
 .article-callout{background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);border-radius:0 0 10px 10px;padding:20px 24px;}
 .article-callout-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
 .article-callout p,.article-callout li{font-size:15px;color:var(--ink-soft);margin-bottom:6px;}
-.article-callout ul{padding-left:20px;margin:0;}
+.article-callout ul,.article-callout ol{padding-left:20px;margin:0;}
 .article-warn{background:var(--coral-wash);border-top:2px solid var(--coral);border-radius:0 0 10px 10px;}
 .article-warn-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--coral-deep);}
 .article-warn p{font-size:14px;color:var(--ink-soft);margin:0;}
@@ -1623,7 +1635,6 @@ def growth_engine_ratio(request: Request):
      .tool-inner regardless of viewport size, collapsing to no visible
      breakout once the viewport is too narrow for one. */
   .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1300px;}
-  .ger-pull p{font-size:16px;}
   @media (max-width:640px){
     .ger-grid-4{grid-template-columns:repeat(2,1fr);}
     .ger-grid-2{grid-template-columns:1fr;}
@@ -1645,8 +1656,8 @@ def growth_engine_ratio(request: Request):
   Contributor: Katherine Zhang, CEO of OPEXEngine by Bain &amp; Company, whose benchmark database makes the company-level numbers in this piece possible.
 </p>
 
-<div style="background:var(--accent-light);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:18px 22px;margin:0 0 36px;">
-  <p style="margin:0;font-size:15px;">
+<div class="article-cta">
+  <p>
     The full guide—including benchmark data from 200+ public and private SaaS companies via OPEXEngine—
     is available as a downloadable whitepaper on The F Suite.
     <strong><a href="https://www.fsuite.co" target="_blank" rel="noopener">Read the full article and download the guide &rarr;</a></strong>
@@ -1665,7 +1676,7 @@ it directly influences how easy or hard it is for GTM to do its job. A great pro
 sales cycles, reduces churn, and drives expansion. A product that's hard to understand or hasn't
 kept pace with customer needs makes every dollar of GTM spend work harder just to stay in place.</p>
 
-<div class="article-pull ger-pull"><p>"Spending like a 50%+ growth company while delivering 25% = efficiency disaster."</p></div>
+<div class="article-pull ger-pull"><p>Spending like a 50%+ growth company while delivering 25% = efficiency disaster.</p></div>
 
 <p>When product and GTM are evaluated in separate silos, it's almost impossible to answer the
 question that actually matters: are these two engines working together efficiently?
@@ -1704,12 +1715,12 @@ that are profitable on acquisition from those that aren't.</p>
 in steady state. The guide names them: Reddit at $2.94, Palantir at $2.04. It benchmarks both
 against 200+ private SaaS companies via OPEXEngine's database.</p>
 
-<div class="article-pull ger-pull"><p>"Don't benchmark against these outliers unless you have similar network effects."</p></div>
+<div class="article-pull ger-pull"><p>Don't benchmark against these outliers unless you have similar network effects.</p></div>
 
 <p>The other 9 need to retain customers for 1.2 to 2.8 years just to break even
 on acquisition costs. That changes how you think about churn—permanently.</p>
 
-<div class="article-pull ger-pull"><p>"Every churned customer represents permanent capital loss."</p></div>
+<div class="article-pull ger-pull"><p>Every churned customer represents permanent capital loss.</p></div>
 
 <div class="ger-table-wrap" style="background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 32px;">
   <table class="ger-table" style="width:100%;border-collapse:collapse;font-size:14px;min-width:520px;">
@@ -2352,7 +2363,6 @@ def finops_ai_hackathon(request: Request):
      classes (Phase 6b) — these are just this page's few pre-existing spacing
      overrides, composed alongside the shared class (class="article-pull
      fah-pull") so this page's rendering is unchanged from before extraction. */
-  .fah-pull p{font-size:17px;}
   .fah-callout{margin:28px 0;}
   .fah-callout li{margin-bottom:5px;}
   .fah-warn{padding:18px 22px;margin:24px 0;}
@@ -2437,7 +2447,14 @@ def finops_ai_hackathon(request: Request):
 
 <p>I've run one of these with my own finance and ops team, and this is the format distilled—what worked, why it worked, and how to run it yourself.</p>
 
-<div class="article-pull fah-pull"><p>"Before any piece of work, two questions: Is this worth doing? And am I sailing or rowing—is there a template, an automation, a repeatable version that keeps this from being a one-off someone owns forever?"</p></div>
+<div class="article-callout fah-callout">
+  <div class="article-callout-title">Before any piece of work, two questions</div>
+  <ol>
+    <li>Is this worth doing?</li>
+    <li>And am I sailing or rowing?</li>
+  </ol>
+  <p style="margin-top:10px;">Rowing isn't inherently bad. The point is being intentional about when you go manual and when you build something repeatable. Ad-hoc has a way of becoming permanent ad-hoc.</p>
+</div>
 
 <h2>Why a hackathon—and why now</h2>
 <p>AI adoption in finance doesn't happen on its own. It gets crowded out by the close, the board deck, the forecast update. There's always something more urgent. Left to find the time on their own, most teams never do.</p>
@@ -2456,7 +2473,7 @@ def finops_ai_hackathon(request: Request):
 
 <p>Design thinking is a problem-solving approach that starts with the people experiencing the problem, not with the solution. It works in two modes:</p>
 
-<div class="article-pull fah-pull"><p>"Diverge first. Everyone generates ideas independently, without talking. Then converge. The separation matters—if you skip the silent step and just go around the room, the first voice anchors every other answer."</p></div>
+<div class="article-pull fah-pull"><p>Diverge first. Everyone generates ideas independently, without talking. Then converge. The separation matters—if you skip the silent step and just go around the room, the first voice anchors every other answer.</p></div>
 
 <p>The other half is the ground rule going in: <strong>no bad ideas.</strong> No judgment, no evaluating while generating. The only requirement is a clear persona and use case: a real person with a real problem, not a vague wish. That's what makes people comfortable putting the half-formed thing on the wall—which is exactly where the good ones tend to start.</p>
 
@@ -2607,7 +2624,7 @@ def finops_ai_hackathon(request: Request):
 
 <p>The framing session is dense with new thinking—a full backlog processed, clustered, voted on, and prioritized. Ending there, inspired rather than rushed, gives that thinking time to settle. People go home with a problem in their head. They think about it in the shower. They wake up with the approach half-formed. That overnight processing is doing real work.</p>
 
-<div class="article-pull fah-pull"><p>"Inspire → Sleep → Build. That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method."</p></div>
+<div class="article-pull fah-pull"><p>Inspire → Sleep → Build. That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method.</p></div>
 
 <p>Add one more step on the morning of the build day before anyone opens a laptop: <strong>15–20 minutes of inspiration.</strong> Show examples of what other finance teams have actually built with AI. Real demos, not slides. Actual workflows someone is using. Then, and this is the move worth stealing, clear the votes and run a second idea-generation round from scratch. The second round is almost always better than the first. People arrive with new angles, sharper problem statements, and sometimes a completely different sense of what they want to build.</p>
 
@@ -2648,7 +2665,7 @@ def finops_ai_hackathon(request: Request):
 
 <p>The Park verdict deserves more credit than it gets. It's not failure—it's intellectual honesty. Naming why something isn't ready (wrong timing, missing data, dependency on something else) is more useful than letting it die quietly. A well-documented Park can become a Ship six months later when the conditions change.</p>
 
-<div class="article-pull fah-pull"><p>"The goal is at least one thing in production before anyone gets on a plane. Aim for that. It changes the energy of the room and sets the bar for everything that follows."</p></div>
+<div class="article-pull fah-pull"><p>The goal is at least one thing in production before anyone gets on a plane. Aim for that. It changes the energy of the room and sets the bar for everything that follows.</p></div>
 
 <h2>The operating system: a Notion setup that compounds</h2>
 <p>The post-its get the attention. They're not what makes this work. What makes it work is the underlying system—one intake database, one page per idea, a structured record that outlives the event.</p>
@@ -2727,7 +2744,6 @@ def netsuite_mcp(request: Request):
      classes (Phase 6b) — these are just this page's few pre-existing spacing
      overrides, composed alongside the shared class (class="article-callout
      ns-callout") so this page's rendering is unchanged from before extraction. */
-  .ns-pull p{font-size:16px;}
   .ns-callout{margin:24px 0;}
   .ns-callout li{margin-bottom:4px;}
   .ns-warn{padding:16px 22px;margin:18px 0;}
@@ -2741,8 +2757,11 @@ def netsuite_mcp(request: Request):
      the breakout is scoped to a separate .ns-warn-wide modifier applied only
      to the one prose-flow instance, not to .ns-warn itself. */
   .ns-pull,.ns-callout,.ns-warn-wide{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1300px;}
-  .ns-note{background:var(--surface-2);border-left:3px solid var(--line-strong);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}
-  .ns-note p{font-size:14px;color:var(--muted);margin:0;}
+  /* Callout taxonomy (this phase): folded into the Tips color family
+     (seafoam) rather than kept as its own fifth gray "note" style — see
+     BRAND.md's "Callout taxonomy" entry. */
+  .ns-note{background:var(--seafoam-wash);border-left:3px solid var(--seafoam-mid);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}
+  .ns-note p{font-size:14px;color:var(--ink-soft);margin:0;}
   /* Phase track */
   .ns-track{display:flex;flex-direction:column;gap:0;margin:24px 0;}
   .ns-step{display:flex;gap:18px;position:relative;}
@@ -2829,7 +2848,7 @@ def netsuite_mcp(request: Request):
 
 <p>Claude's NetSuite integration includes tools that can create and update records, not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do.</p>
 
-<div class="article-pull ns-pull"><p>"The protection is enforced by NetSuite, not by hoping Claude behaves."</p></div>
+<div class="article-pull ns-pull"><p>The protection is enforced by NetSuite, not by hoping Claude behaves.</p></div>
 
 <div class="article-warn ns-warn ns-warn-wide">
   <div class="article-warn-title ns-warn-title">One thing that trips people up</div>
