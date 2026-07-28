@@ -2357,6 +2357,12 @@ def finops_ai_hackathon(request: Request):
   .fah-callout li{margin-bottom:5px;}
   .fah-warn{padding:18px 22px;margin:24px 0;}
   .fah-warn-title{margin-bottom:8px;}
+  /* Full-width breakout (retrofit, matching GER's Phase 6d technique): these
+     boxes span .tool-inner's 1300px width instead of sitting inline at
+     .tool-prose's narrower 760px column, while body paragraphs stay at the
+     comfortable reading width. See BRAND.md's Phase 6d entry for the
+     centering math. */
+  .fah-pull,.fah-callout,.fah-warn{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1300px;}
   /* Phase track */
   .fah-track{display:flex;flex-direction:column;gap:0;margin:28px 0;}
   .fah-step{display:flex;gap:18px;position:relative;}
@@ -2726,6 +2732,15 @@ def netsuite_mcp(request: Request):
   .ns-callout li{margin-bottom:4px;}
   .ns-warn{padding:16px 22px;margin:18px 0;}
   .ns-warn-title{margin-bottom:6px;}
+  /* Full-width breakout (retrofit, matching GER's Phase 6d technique): these
+     boxes span .tool-inner's 1300px width instead of sitting inline at
+     .tool-prose's narrower 760px column, while body paragraphs stay at the
+     comfortable reading width. See BRAND.md's Phase 6d entry for the
+     centering math. .ns-warn is reused both in the main prose flow and
+     nested inside the numbered setup-step cards further down the page, so
+     the breakout is scoped to a separate .ns-warn-wide modifier applied only
+     to the one prose-flow instance, not to .ns-warn itself. */
+  .ns-pull,.ns-callout,.ns-warn-wide{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1300px;}
   .ns-note{background:var(--surface-2);border-left:3px solid var(--line-strong);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}
   .ns-note p{font-size:14px;color:var(--muted);margin:0;}
   /* Phase track */
@@ -2816,7 +2831,7 @@ def netsuite_mcp(request: Request):
 
 <div class="article-pull ns-pull"><p>"The protection is enforced by NetSuite, not by hoping Claude behaves."</p></div>
 
-<div class="article-warn ns-warn">
+<div class="article-warn ns-warn ns-warn-wide">
   <div class="article-warn-title ns-warn-title">One thing that trips people up</div>
   <p>When you connect Claude, you need to be logged into NetSuite under your <strong>normal working role</strong>—not the new read-only role you're about to create. You'll select the read-only role on a screen that appears during the connection flow. More on this in Part 2.</p>
 </div>
