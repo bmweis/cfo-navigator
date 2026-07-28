@@ -375,6 +375,17 @@ still read fine without it. This is a different result from a narrative essay, w
 pull-quotes are doing real structural work breaking up long prose (Hackathon
 Playbook) — on technical content they're closer to an occasional accent than a load-bearing device.
 
+**Correction (post-taxonomy):** on review, "The protection is enforced by NetSuite, not
+by hoping Claude behaves" turned out to be a plain declarative sentence, not a quotable
+idea — it restates the preceding paragraph's point rather than compressing it into
+something a reader would repeat. It's been moved back into that paragraph as standard
+body text. Per the "it's a nice addition, not a rescue" verdict above, removing it
+doesn't open a break-rule gap: the surrounding stretch (H2 to the next warning box) is
+106 words, unchanged from the count already documented above, comfortably under the
+~250-word threshold. This is the Quote-vs-Tip judgment call (see the Callout taxonomy
+entry below) applied a third way: some sentences that read as quotable in isolation
+turn out, on a second look, to just be text.
+
 **Phase 6d — does Atlantic coexist with an already-narrowed page, and can it carry
 new content, not just typography?** Growth Engine Ratio (GER) is a different shape
 again: an interactive calculator with prose woven around it, and its reading width
@@ -435,12 +446,30 @@ awkward empty space rather than an intentional design moment. Every box on an
 Atlantic page is now one of exactly four types, distinguished by color and treatment
 so each reads as what it is:
 
-| Type | Class | Color | Treatment |
-|---|---|---|---|
-| **CTA** | `.article-cta` | Navy (`--navy-wash` fill, `--navy` left border) | Boxed, `border-radius:0 10px 10px 0`, `padding:18px 22px` — "here's a link to follow" |
-| **Tips** | `.article-callout` | Seafoam (`--seafoam-wash` fill, `--seafoam-mid` top border) | Boxed, titled (`.article-callout-title`, uppercase seafoam-deep), `border-radius:0 0 10px 10px` — "here's a fact/technique" |
-| **Warnings** | `.article-warn` | Coral (`--coral-wash` fill, `--coral` top border) | Boxed, titled (`.article-warn-title`, uppercase coral-deep), `border-radius:0 0 10px 10px` — "here's a failure mode to avoid" |
-| **Quotes** | `.article-pull` | No fill — `--navy` left border only | Unboxed: `font-family:var(--font-head)`, 600 weight, italic, 22px, `line-height:1.45` — "this is the idea," not a boxed fact |
+| Type | Class | Color | Treatment | Width |
+|---|---|---|---|---|
+| **CTA** | `.article-cta` | Navy (`--navy-wash` fill, `--navy` left border) | Boxed, `border-radius:0 10px 10px 0`, `padding:18px 22px` — "here's a link to follow" | Body-copy (760px, `.tool-prose`) |
+| **Tips** | `.article-callout` | Seafoam (`--seafoam-wash` fill, `--seafoam-mid` top border) | Boxed, titled (`.article-callout-title`, uppercase seafoam-deep), `border-radius:0 0 10px 10px` — "here's a fact/technique" | Body-copy (760px) |
+| **Warnings** | `.article-warn` | Coral (`--coral-wash` fill, `--coral` top border) | Boxed, titled (`.article-warn-title`, uppercase coral-deep), `border-radius:0 0 10px 10px` — "here's a failure mode to avoid" | Body-copy (760px) |
+| **Quotes** | `.article-pull` | No fill — `--navy` left border only | Unboxed: `font-family:var(--font-head)`, 600 weight, italic, 22px, `line-height:1.45` — "this is the idea," not a boxed fact | Wider breakout (1040px) |
+
+**Width is part of the taxonomy, not an afterthought.** CTA/Tips/Warnings stay at
+body-copy width (`.tool-prose`'s 760px column) rather than breaking out — reviewed
+live, they're mostly multi-line instructional prose, and a wide box just reads as an
+odd second column next to the reading column, not an intentional layout choice. Quotes
+are the opposite case: short by nature, so widening them reads as a deliberate
+editorial moment rather than empty space. **1040px** is the chosen Quote width — a
+middle ground between the 760px reading column and `.tool-inner`'s full 1300px
+(the width a wide UI element like GER's calculator card uses); wide enough to read as
+intentional without being identical to a full-width container element. The CSS is the
+same breakout technique introduced in Phase 6d (`left:50%` / `transform:translateX
+(-50%)` against `width:calc(100vw - 48px)`), just with the `max-width` cap changed
+from 1300px to 1040px and scoped only to `.ger-pull`/`.fah-pull` — the breakout rule
+was removed entirely from Hackathon Playbook's callout/warning boxes and from
+NetSuite MCP's callout/warning boxes (including retiring the now-unused
+`.ns-warn-wide` modifier, since NetSuite MCP currently has no Quote instances at all
+after the "protection is enforced by NetSuite" sentence was reverted to body text —
+see the Phase 6c correction above).
 
 The CTA class formalizes GER's pre-existing "download the full guide" box (previously
 an ad-hoc inline style, not a shared class) rather than inventing a new visual —
@@ -614,3 +643,16 @@ Like color, voice has two kinds of rules:
   API and isn't deterministic). Use the **Check content against your voice** box on `/admin/voice`, or
   the CLI: `python -m scripts.voice_review draft.md` (reads a file or stdin; exits non-zero on any
   mechanical violation, so it can gate a pre-publish script).
+
+**Dash rules — two distinct characters, two distinct jobs.** Don't conflate these into one "any
+dash" policy:
+
+- **Em dash (—)** is sentence-level punctuation — an aside, or a punchy two-part close. Always
+  unspaced (`point—not like this`, never `point — not like this`), used sparingly. New em dashes
+  in fresh copy get flagged to Brian with full sentence context before shipping — see CLAUDE.md's
+  "Voice — em dash policy" for the complete rule and the flagging workflow.
+- **En dash (–)** is a numeric-range separator — `$0.50–$0.70`, `Q3–Q4`, `1–10 employees`. Also
+  always unspaced, same discipline as the em dash, but it's a different character doing a
+  different job (a range, not a sentence-level pause), not a second flavor of em dash. No flagging
+  workflow needed for en dashes — a spaced one is a straightforward typo to fix on sight, since
+  there's no voice/tone judgment call involved, just a typographic convention.

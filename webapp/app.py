@@ -1609,6 +1609,11 @@ def growth_engine_ratio(request: Request):
   .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
   .ger-grid-3{display:grid;grid-template-columns:88px 1fr 1fr 1fr;gap:10px;align-items:center;}
   .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  /* Tier and Ratio columns are short, fixed-format values ("Below target",
+     "$0.50–$0.70") that should never wrap; What It Means is prose and keeps
+     wrapping normally. */
+  .ger-table th:nth-child(1),.ger-table td:nth-child(1){white-space:nowrap;width:1%;}
+  .ger-table th:nth-child(2),.ger-table td:nth-child(2){white-space:nowrap;}
   .ger-modes{display:flex;flex-wrap:wrap;gap:8px;}
   .ger-mode{font:inherit;font-size:14px;font-weight:500;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer;}
   .ger-mode:hover{background:var(--accent-light);color:var(--ink);}
@@ -1625,16 +1630,21 @@ def growth_engine_ratio(request: Request):
   .tl-ctrl button{font:inherit;font-size:18px;line-height:1;width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--accent);cursor:pointer;}
   .tl-ctrl button:hover{background:var(--accent-light);}
   .tl-ctrl span{font-size:16px;font-weight:700;min-width:16px;text-align:center;color:var(--ink);}
-  /* Full-width breakout: the pull-quote spans .tool-inner's width (1300px,
-     matching .page's fixed 24px+24px side padding), not .tool-prose's
-     narrower 760px reading column. Centering math: left:50% shifts the box
-     right by half of its normal containing block's width (.tool-prose, the
-     column it sits in); translateX(-50%) then shifts it left by half of its
-     own (wider) width. Since .tool-prose, .tool-inner, and .page are all
-     centered on the same axis, the net result re-centers the wider box under
-     .tool-inner regardless of viewport size, collapsing to no visible
-     breakout once the viewport is too narrow for one. */
-  .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1300px;}
+  /* Quote breakout (width refinement, this phase): only Quotes widen beyond
+     .tool-prose's 760px reading column — CTA/Tip/Warning boxes stay at
+     body-copy width since they're mostly multi-line instructional prose,
+     where a wide box just reads as an odd second column. A quote is short,
+     so it earns the wider, deliberate moment. 1040px is a middle ground
+     between the 760px reading column and .tool-inner's full 1300px — wide
+     enough to read as intentional, not so wide it matches the calculator
+     card below it. Centering math: left:50% shifts the box right by half of
+     its normal containing block's width (.tool-prose, the column it sits
+     in); translateX(-50%) then shifts it left by half of its own (wider)
+     width. Since .tool-prose, .tool-inner, and .page are all centered on the
+     same axis, the net result re-centers the wider box under .tool-inner
+     regardless of viewport size, collapsing to no visible breakout once the
+     viewport is too narrow for one. */
+  .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}
   @media (max-width:640px){
     .ger-grid-4{grid-template-columns:repeat(2,1fr);}
     .ger-grid-2{grid-template-columns:1fr;}
@@ -1739,14 +1749,14 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
       </tr>
       <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
         <td style="padding:10px 14px;">&#11088; Strong</td>
-        <td style="padding:10px 14px;">$0.70 – $1.20</td>
-        <td style="padding:10px 14px;">0.8 – 1.4 years</td>
+        <td style="padding:10px 14px;">$0.70&ndash;$1.20</td>
+        <td style="padding:10px 14px;">0.8&ndash;1.4 years</td>
         <td style="padding:10px 14px;">Above median—maintain efficiency as you scale</td>
       </tr>
       <tr style="border-top:1px solid var(--line);">
         <td style="padding:10px 14px;">&#10003; Typical</td>
-        <td style="padding:10px 14px;">$0.50 – $0.70</td>
-        <td style="padding:10px 14px;">1.4 – 2.0 years</td>
+        <td style="padding:10px 14px;">$0.50&ndash;$0.70</td>
+        <td style="padding:10px 14px;">1.4&ndash;2.0 years</td>
         <td style="padding:10px 14px;">In the pack—retention must be a top priority</td>
       </tr>
       <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
@@ -2367,12 +2377,14 @@ def finops_ai_hackathon(request: Request):
   .fah-callout li{margin-bottom:5px;}
   .fah-warn{padding:18px 22px;margin:24px 0;}
   .fah-warn-title{margin-bottom:8px;}
-  /* Full-width breakout (retrofit, matching GER's Phase 6d technique): these
-     boxes span .tool-inner's 1300px width instead of sitting inline at
-     .tool-prose's narrower 760px column, while body paragraphs stay at the
-     comfortable reading width. See BRAND.md's Phase 6d entry for the
-     centering math. */
-  .fah-pull,.fah-callout,.fah-warn{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1300px;}
+  /* Quote breakout (width refinement, this phase): only Quotes widen beyond
+     the body-copy column — CTA/Tip/Warning boxes stay at body-copy width
+     (mostly multi-line instructional prose, where a wide box reads as an
+     odd second column). 1040px is a middle ground between the 760px
+     .tool-prose column and the page's full working width. See BRAND.md's
+     Callout taxonomy entry for the centering math and the box-vs-quote
+     width reasoning. */
+  .fah-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}
   /* Phase track */
   .fah-track{display:flex;flex-direction:column;gap:0;margin:28px 0;}
   .fah-step{display:flex;gap:18px;position:relative;}
@@ -2748,15 +2760,12 @@ def netsuite_mcp(request: Request):
   .ns-callout li{margin-bottom:4px;}
   .ns-warn{padding:16px 22px;margin:18px 0;}
   .ns-warn-title{margin-bottom:6px;}
-  /* Full-width breakout (retrofit, matching GER's Phase 6d technique): these
-     boxes span .tool-inner's 1300px width instead of sitting inline at
-     .tool-prose's narrower 760px column, while body paragraphs stay at the
-     comfortable reading width. See BRAND.md's Phase 6d entry for the
-     centering math. .ns-warn is reused both in the main prose flow and
-     nested inside the numbered setup-step cards further down the page, so
-     the breakout is scoped to a separate .ns-warn-wide modifier applied only
-     to the one prose-flow instance, not to .ns-warn itself. */
-  .ns-pull,.ns-callout,.ns-warn-wide{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1300px;}
+  /* Width refinement (this phase): CTA/Tip/Warning boxes stay at body-copy
+     width (.tool-prose's 760px column) rather than breaking out — they're
+     mostly multi-line instructional prose, where a wide box reads as an odd
+     second column. Only Quotes widen (see BRAND.md's Callout taxonomy
+     entry); NetSuite MCP currently has no Quote instances, so nothing on
+     this page breaks out. */
   /* Callout taxonomy (this phase): folded into the Tips color family
      (seafoam) rather than kept as its own fifth gray "note" style — see
      BRAND.md's "Callout taxonomy" entry. */
@@ -2846,11 +2855,9 @@ def netsuite_mcp(request: Request):
 <h2>The security architecture</h2>
 <p>The setup involves creating a dedicated read-only role in NetSuite for Claude to authenticate as. The reason matters.</p>
 
-<p>Claude's NetSuite integration includes tools that can create and update records, not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do.</p>
+<p>Claude's NetSuite integration includes tools that can create and update records, not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do. The protection is enforced by NetSuite, not by hoping Claude behaves.</p>
 
-<div class="article-pull ns-pull"><p>The protection is enforced by NetSuite, not by hoping Claude behaves.</p></div>
-
-<div class="article-warn ns-warn ns-warn-wide">
+<div class="article-warn ns-warn">
   <div class="article-warn-title ns-warn-title">One thing that trips people up</div>
   <p>When you connect Claude, you need to be logged into NetSuite under your <strong>normal working role</strong>—not the new read-only role you're about to create. You'll select the read-only role on a screen that appears during the connection flow. More on this in Part 2.</p>
 </div>
