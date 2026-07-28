@@ -2437,6 +2437,20 @@ def finops_ai_hackathon(request: Request):
   .fah-t-ship{background:var(--navy);}.fah-t-ship .fah-tier-title{color:#fff;}.fah-t-ship p{color:rgba(255,255,255,.8);}
   .fah-t-iter{background:var(--coral-wash);}.fah-t-iter .fah-tier-title{color:var(--coral-deep);}
   .fah-t-park{background:var(--surface-2);}.fah-t-park .fah-tier-title{color:var(--muted);}
+  /* Inspire -> Sleep -> Build flowchart: a process sequence, not a quotable
+     idea, so it gets a lightweight CSS-only boxes-and-arrows visual instead
+     of pull-quote styling. No charting dependency needed for three linear
+     steps — see BRAND.md's Callout taxonomy entry. */
+  .fah-flow{display:flex;align-items:center;gap:10px;margin:24px 0 10px;}
+  .fah-flow-step{flex:1;background:var(--navy-wash);border:1px solid var(--line);border-radius:10px;padding:16px 14px;text-align:center;font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);}
+  .fah-flow-arrow{flex:0 0 auto;font-size:20px;color:var(--muted);}
+  .fah-flow-arrow-v{display:none;}
+  .fah-flow-caption{font-size:14px;color:var(--ink-soft);text-align:center;margin:0 0 24px;}
+  @media(max-width:640px){
+    .fah-flow{flex-direction:column;}
+    .fah-flow-arrow-h{display:none;}
+    .fah-flow-arrow-v{display:inline;}
+  }
   /* Sailboat SVG motif */
   .fah-motif{text-align:center;margin:32px 0 24px;}
   @media(max-width:640px){
@@ -2485,7 +2499,12 @@ def finops_ai_hackathon(request: Request):
 
 <p>Design thinking is a problem-solving approach that starts with the people experiencing the problem, not with the solution. It works in two modes:</p>
 
-<div class="article-pull fah-pull"><p>Diverge first. Everyone generates ideas independently, without talking. Then converge. The separation matters—if you skip the silent step and just go around the room, the first voice anchors every other answer.</p></div>
+<ul style="padding-left:22px;margin:0 0 20px;">
+  <li style="margin-bottom:10px;">Diverge first. Everyone generates ideas independently, without talking.</li>
+  <li style="margin-bottom:10px;">Then converge.</li>
+</ul>
+
+<p>The separation matters—if you skip the silent step and just go around the room, the first voice anchors every other answer.</p>
 
 <p>The other half is the ground rule going in: <strong>no bad ideas.</strong> No judgment, no evaluating while generating. The only requirement is a clear persona and use case: a real person with a real problem, not a vague wish. That's what makes people comfortable putting the half-formed thing on the wall—which is exactly where the good ones tend to start.</p>
 
@@ -2636,7 +2655,14 @@ def finops_ai_hackathon(request: Request):
 
 <p>The framing session is dense with new thinking—a full backlog processed, clustered, voted on, and prioritized. Ending there, inspired rather than rushed, gives that thinking time to settle. People go home with a problem in their head. They think about it in the shower. They wake up with the approach half-formed. That overnight processing is doing real work.</p>
 
-<div class="article-pull fah-pull"><p>Inspire → Sleep → Build. That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method.</p></div>
+<div class="fah-flow">
+  <div class="fah-flow-step">Inspire</div>
+  <div class="fah-flow-arrow"><span class="fah-flow-arrow-h">&rarr;</span><span class="fah-flow-arrow-v">&darr;</span></div>
+  <div class="fah-flow-step">Sleep</div>
+  <div class="fah-flow-arrow"><span class="fah-flow-arrow-h">&rarr;</span><span class="fah-flow-arrow-v">&darr;</span></div>
+  <div class="fah-flow-step">Build</div>
+</div>
+<p class="fah-flow-caption">That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method.</p>
 
 <p>Add one more step on the morning of the build day before anyone opens a laptop: <strong>15–20 minutes of inspiration.</strong> Show examples of what other finance teams have actually built with AI. Real demos, not slides. Actual workflows someone is using. Then, and this is the move worth stealing, clear the votes and run a second idea-generation round from scratch. The second round is almost always better than the first. People arrive with new angles, sharper problem statements, and sometimes a completely different sense of what they want to build.</p>
 
@@ -2677,7 +2703,7 @@ def finops_ai_hackathon(request: Request):
 
 <p>The Park verdict deserves more credit than it gets. It's not failure—it's intellectual honesty. Naming why something isn't ready (wrong timing, missing data, dependency on something else) is more useful than letting it die quietly. A well-documented Park can become a Ship six months later when the conditions change.</p>
 
-<div class="article-pull fah-pull"><p>The goal is at least one thing in production before anyone gets on a plane. Aim for that. It changes the energy of the room and sets the bar for everything that follows.</p></div>
+<p>The goal is at least one thing in production before anyone gets on a plane. Aim for that. It changes the energy of the room and sets the bar for everything that follows.</p>
 
 <h2>The operating system: a Notion setup that compounds</h2>
 <p>The post-its get the attention. They're not what makes this work. What makes it work is the underlying system—one intake database, one page per idea, a structured record that outlives the event.</p>
@@ -2776,7 +2802,12 @@ def netsuite_mcp(request: Request):
   .ns-step{display:flex;gap:18px;position:relative;}
   .ns-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}
   .ns-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}
-  .ns-body{padding-bottom:24px;flex:1;}
+  /* min-width:0 overrides the flex item's default min-width:auto, which
+     otherwise sizes to the content's intrinsic minimum — including the
+     nested .ns-table's min-width:360px — and pushes the whole flex row
+     wider than the viewport on narrow screens instead of letting
+     .ns-table-wrap's overflow-x:auto scroll the table in place. */
+  .ns-body{padding-bottom:24px;flex:1;min-width:0;}
   .ns-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}
   .ns-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}
   /* Use case cards */
@@ -2789,7 +2820,7 @@ def netsuite_mcp(request: Request):
   .ns-tip strong{font-weight:600;}
   /* Permission table */
   .ns-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0;}
-  .ns-table{width:100%;border-collapse:collapse;font-size:14px;min-width:360px;}
+  .ns-table{width:100%;border-collapse:collapse;font-size:14px;}
   .ns-table th{background:var(--navy);color:#fff;padding:9px 14px;text-align:left;font-weight:600;}
   .ns-table td{padding:9px 14px;border-top:1px solid var(--line);}
   .ns-table tr:nth-child(even) td{background:var(--surface-2);}
@@ -2808,6 +2839,8 @@ def netsuite_mcp(request: Request):
   @media(max-width:640px){
     .ns-trouble{font-size:13px;}
     .ns-trouble td,.ns-trouble th{padding:8px 10px;}
+    .ns-table{font-size:13px;}
+    .ns-table td,.ns-table th{padding:8px 10px;}
   }
 </style>
 
