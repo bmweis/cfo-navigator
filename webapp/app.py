@@ -2691,7 +2691,7 @@ def netsuite_mcp_redirect(request: Request):
 
 @app.get("/thought-leadership/netsuite-mcp", response_class=HTMLResponse)
 def netsuite_mcp(request: Request):
-    body = """<div class="page page-full">
+    body = """<div class="page page-full article-atlantic">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
 <style>
   /* Base pull-quote/callout/warning styling lives in the shared .article-*
@@ -2774,7 +2774,7 @@ def netsuite_mcp(request: Request):
   <div class="ns-case">
     <div class="ns-case-label">Use case 02</div>
     <div class="ns-case-title">Vendor spend analysis</div>
-    <p>Vendor spend is deceptively messy in NetSuite. The same vendor might appear under different names across bills. Some vendors route through a spend management platform (Ramp, Navan, Brex), which means they show up as a single vendor with the actual vendor buried in a memo field. Others route through a marketplace, invisible unless you know where to look.</p>
+    <p>Vendor can be deceptively messy in NetSuite. The same vendor might appear under different names across bills. Some vendors route through a spend management platform (Ramp, Navan, Brex), which means they show up as a single vendor with the actual vendor buried in a memo field. Others route through a marketplace, invisible unless you know where to look.</p>
     <p>Claude can learn these patterns. Once you show it how your vendors are recorded, for example <em>"this vendor always comes through as the platform with the name in the memo,"</em> it applies that logic consistently. The result is a spend picture that reflects reality, not just whatever's in the vendor field.</p>
     <div class="ns-tip"><strong>Tip:</strong> The first time you run a vendor spend query, ask Claude to show you a sample of raw transaction data before it aggregates anything. Easy way to spot non-obvious mappings before they roll up into a wrong total.</div>
   </div>
@@ -2782,14 +2782,16 @@ def netsuite_mcp(request: Request):
     <div class="ns-case-label">Use case 03</div>
     <div class="ns-case-title">Per-employee benefit and stipend tracking</div>
     <p>If your company offers benefits employees draw on over time—L&amp;D stipends, wellness budgets, home office allowances—and those transactions flow through NetSuite in any form, Claude can extract and organize them by person. A useful output: each employee's YTD usage broken down by category, with transaction-level detail on demand. Useful for answering "who has used their full allocation?" without compiling spreadsheets manually.</p>
-    <div class="ns-tip"><strong>Tip:</strong> Employee names in NetSuite memos are often inconsistent—nicknames, initials, misspellings. Ask Claude to show you the distinct name variations it finds before attributing spend, so you can confirm the mapping is right.</div>
+    <div class="ns-tip"><strong>Tip:</strong> Employee names in NetSuite memos are often inconsistent—nicknames, initials, misspellings. Ask Claude to show you the distinct name variations it finds before attributing spend, so you can confirm the mapping is right. It gets even easier if you have a public or internal page that lists your team—Claude picks up on it and learns how you want employee names represented, or how teams are structured.</div>
   </div>
 </div>
 
 <h2>The security architecture</h2>
 <p>The setup involves creating a dedicated read-only role in NetSuite for Claude to authenticate as. The reason matters.</p>
 
-<p>Claude's NetSuite integration includes tools that can create and update records, not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do. The protection is enforced by NetSuite, not by hoping Claude behaves.</p>
+<p>Claude's NetSuite integration includes tools that can create and update records, not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do.</p>
+
+<div class="article-pull ns-pull"><p>"The protection is enforced by NetSuite, not by hoping Claude behaves."</p></div>
 
 <div class="article-warn ns-warn">
   <div class="article-warn-title ns-warn-title">One thing that trips people up</div>
