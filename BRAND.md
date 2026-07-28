@@ -339,6 +339,32 @@ shared helper whenever an Atlantic-tagged page actually needs one, per
 `EDITORIAL_SYSTEM_PHASE6A.md` §2/§4. Not built in Phase 6b since Hackathon Playbook's
 pilot didn't need one to satisfy the break rule.
 
+**Phase 6c — does Atlantic work on technical content?** Hackathon Playbook is a
+narrative essay; Connecting Claude to NetSuite is a technical setup guide (numbered
+steps, a permissions table, a troubleshooting table) that doesn't naturally produce
+quotable prose the way an essay does. The tag was applied anyway to test the
+hypothesis that Atlantic's *typography* (wider rhythm, generous whitespace) can still
+suit technical content even where its signature device (the pull-quote) mostly can't.
+
+The break rule needed nothing new: NetSuite MCP's existing subheads, use-case cards,
+numbered step tracks, callouts, and tables already keep every unbroken stretch under
+~106 words — well inside the ~250-word threshold — with zero new copy. One genuine
+pull-quote candidate did turn up in the existing prose ("The protection is enforced by
+NetSuite, not by hoping Claude behaves.") and was repositioned (not rewritten) out of
+its paragraph into a `.article-pull`; two other candidate sentences were considered and
+rejected as too tied to their surrounding instructional context to stand alone. The
+numbered setup-step prose (Parts 1-2) is deliberately pull-quote-free — procedural
+"go here, click this" instructions don't compress into standalone insights, and
+forcing one would read as decorative rather than earned.
+
+**Verdict:** the hypothesis held. Atlantic's typography reads well on technical
+content on its own — the wider rhythm doesn't fight a setup guide's structure, since
+the guide's density comes from its instructional steps and tables, not from paragraph
+length. The one genuine pull-quote is a nice addition, not a rescue; the piece would
+still read fine without it. This is a different result from a narrative essay, where
+pull-quotes are doing real structural work breaking up long prose (Hackathon
+Playbook) — on technical content they're closer to an occasional accent than a load-bearing device.
+
 ---
 
 ## 6. Do / Don't
