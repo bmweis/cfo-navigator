@@ -1589,7 +1589,7 @@ def growth_engine_ratio_redirect(request: Request):
 
 @app.get("/thought-leadership/growth-engine-ratio", response_class=HTMLResponse)
 def growth_engine_ratio(request: Request):
-    body = """<div class="page page-full">
+    body = """<div class="page page-full article-atlantic">
 <div class="tool-inner">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
 <style>
@@ -1613,6 +1613,7 @@ def growth_engine_ratio(request: Request):
   .tl-ctrl button{font:inherit;font-size:18px;line-height:1;width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--accent);cursor:pointer;}
   .tl-ctrl button:hover{background:var(--accent-light);}
   .tl-ctrl span{font-size:16px;font-weight:700;min-width:16px;text-align:center;color:var(--ink);}
+  .ger-pull p{font-size:16px;}
   @media (max-width:640px){
     .ger-grid-4{grid-template-columns:repeat(2,1fr);}
     .ger-grid-2{grid-template-columns:1fr;}
@@ -1627,8 +1628,11 @@ def growth_engine_ratio(request: Request):
 <div class="tool-prose">
 <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Framework</p>
 <h1 style="margin:0 0 8px;">The Growth Engine Ratio</h1>
-<p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
+<p style="color:var(--muted);font-size:15px;margin:0 0 8px;">
   By Brian Weisberg &middot; Published with <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a> &middot; June 2026
+</p>
+<p style="color:var(--muted);font-size:14px;margin:0 0 32px;">
+  Contributor: Katherine Zhang, CEO of OPEXEngine by Bain &amp; Company, whose benchmark database makes the company-level numbers in this piece possible.
 </p>
 
 <div style="background:var(--accent-light);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:18px 22px;margin:0 0 36px;">
@@ -1650,6 +1654,8 @@ they leave R&D entirely out of the efficiency equation.</p>
 it directly influences how easy or hard it is for GTM to do its job. A great product shortens
 sales cycles, reduces churn, and drives expansion. A product that's hard to understand or hasn't
 kept pace with customer needs makes every dollar of GTM spend work harder just to stay in place.</p>
+
+<div class="article-pull ger-pull"><p>"Spending like a 50%+ growth company while delivering 25% = efficiency disaster."</p></div>
 
 <p>When product and GTM are evaluated in separate silos, it's almost impossible to answer the
 question that actually matters: are these two engines working together efficiently?
@@ -1685,8 +1691,15 @@ every $1 of combined R&amp;D + GTM investment. That's the threshold that separat
 that are profitable on acquisition from those that aren't.</p>
 
 <p>In my analysis of 11 public SaaS companies across 188 company-quarters, only 2 exceeded $1.00
-in steady state. The other 9 need to retain customers for 1.2 to 2.8 years just to break even
+in steady state. The guide names them: Reddit at $2.94, Palantir at $2.04. It benchmarks both
+against 200+ private SaaS companies via OPEXEngine's database.</p>
+
+<div class="article-pull ger-pull"><p>"Don't benchmark against these outliers unless you have similar network effects."</p></div>
+
+<p>The other 9 need to retain customers for 1.2 to 2.8 years just to break even
 on acquisition costs. That changes how you think about churn—permanently.</p>
+
+<div class="article-pull ger-pull"><p>"Every churned customer represents permanent capital loss."</p></div>
 
 <div class="ger-table-wrap" style="background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 32px;">
   <table class="ger-table" style="width:100%;border-collapse:collapse;font-size:14px;min-width:520px;">
