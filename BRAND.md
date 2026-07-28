@@ -365,6 +365,56 @@ still read fine without it. This is a different result from a narrative essay, w
 pull-quotes are doing real structural work breaking up long prose (Hackathon
 Playbook) — on technical content they're closer to an occasional accent than a load-bearing device.
 
+**Phase 6d — does Atlantic coexist with an already-narrowed page, and can it carry
+new content, not just typography?** Growth Engine Ratio (GER) is a different shape
+again: an interactive calculator with prose woven around it, and its reading width
+was already narrowed to `.tool-prose` (760px) inside the wider `.tool-inner` (1300px)
+in an earlier fix, deliberately — not something to casually undo. `.article-atlantic`'s
+only CSS effect is `.article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px;}`,
+scoped to paragraphs nested inside `.tool-prose`. GER already wraps its two prose
+sections (before and after the calculator) in separate `.tool-prose` blocks, with the
+calculator itself sitting outside `.tool-prose` in between — so tagging the outer
+`.page` wrapper widens rhythm in both prose sections automatically while leaving the
+calculator's markup, inputs, and JS completely untouched. No restructuring of
+`.tool-inner`/`.tool-prose` was needed; they coexist with Atlantic exactly as designed.
+
+Unlike 6b/6c, this pilot wasn't purely a typography-and-break-rule exercise — it
+paired the tag with real content updates: a contributor attribution line (Katherine
+Zhang, CEO of OPEXEngine by Bain & Company, credited by name for the first time), a
+short teaser naming two of the benchmark's actual companies (Reddit at $2.94,
+Palantir at $2.04) to reinforce the existing download CTA without reproducing the
+guide's full table, and three pull-quotes Brian selected directly from the published
+whitepaper, placed verbatim at the points in the prose they contextualize (the
+efficiency-disaster line illustrating GTM/R&D misalignment, the outlier/network-effects
+line following the two companies that cleared $1.00, and the permanent-capital-loss
+line following the churn discussion). GER's existing structure (subheads, the formula
+block, the tier table) already kept every unbroken stretch well under the ~250-word
+threshold before any of this was added, so the new devices layer on top of an
+already-compliant page rather than fixing a gap.
+
+**Verdict:** Atlantic and a narrowed reading width aren't in tension — the tag's
+narrow CSS footprint (a `.tool-prose p` selector only) means it composes with any
+width tier a page already uses, including one that deliberately narrowed its width
+for a documented reason earlier; that earlier fix was worth verifying, not assuming
+safe. This phase also showed Atlantic pages absorbing curated external content
+(attribution, named benchmark data, verbatim quotes from a source document) as
+cleanly as originally-authored prose.
+
+**Full-width breakout (Phase 6d addendum):** GER's three pull-quotes break out of
+the 760px `.tool-prose` reading column to span the full 1300px `.tool-inner` width,
+rather than sitting inline at the narrower text measure — body paragraphs stay at
+the comfortable reading width, only the pull-quote/callout/stat-block devices break
+out wider. The CSS (a page-scoped `.ger-pull` modifier, not a change to the shared
+`.article-pull` base) uses `left:50%` plus `transform:translateX(-50%)` against a
+`width:calc(100vw - 48px)` capped at `max-width:1300px` — since `.tool-prose`,
+`.tool-inner`, and `.page` are all centered on the same axis with a fixed 48px total
+side padding, this re-centers the wider box under `.tool-inner` at any viewport size
+and collapses cleanly to the same width as the surrounding prose once the viewport is
+too narrow to have room to break out (verified at 375/900/1400/2400px viewports, no
+horizontal overflow at any of them). This breakout treatment is scoped to GER's three
+Phase 6d pull-quotes only — it did not touch the shared `.article-pull` base or the
+existing inline pull-quotes on Hackathon Playbook or NetSuite MCP.
+
 ---
 
 ## 6. Do / Don't
