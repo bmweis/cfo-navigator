@@ -307,247 +307,69 @@ all — AI Hackathon Playbook, Connecting Claude to NetSuite, `/ask/history`, an
 guidance); the interim fix is the same `.tool-prose` (760px) wrapper already proven on
 GER and the SYSTEM pages, applied to those four as well.
 
-### Editorial content system (Phase 6) — Atlantic tag
+### Editorial content system — Atlantic pattern
 
-Phase 6a investigated two long-form registers Brian wants available — a short-form
-"Axios" pattern (bold ledes, bullet-heavy, built for scanning) and a long-form
-"Atlantic" pattern (generous whitespace, pull-quotes, built for sitting with a piece).
-Phase 6b built the long-form half and piloted it on AI Hackathon Playbook; the
-short-form pattern is a separate, later phase.
+A long-form register for pages Brian wants to read like a considered piece rather
+than a wall of prose: generous whitespace, pull-quotes, built for sitting with a
+piece. (A shorter, scan-built "Axios" pattern — bold ledes, bullet-heavy — is a
+separate, not-yet-built register for a different kind of page.)
 
-**Shared article devices** (`.article-pull`, `.article-callout`/`.article-callout-title`,
-`.article-warn`/`.article-warn-title`) are the pull-quote/callout/warning box trio,
-extracted in Phase 6b from AI Hackathon Playbook's and Connecting Claude to NetSuite's
-previously-duplicated `.fah-*`/`.ns-*` copies — those two pages' CSS was pixel-for-pixel
-identical except for a handful of small spacing/font-size values, so each page still
-composes the shared base class with its own small override class for just what
-differs (e.g. `class="article-pull fah-pull"`), keeping both pages' rendering
-unchanged from before the extraction. A new long-form page can use the shared classes
-alone, no override needed.
+**The tag:** `.article-atlantic`, applied alongside a page's width tier (e.g.
+`class="page page-full article-atlantic"`). It widens paragraph rhythm inside
+`.tool-prose` (line-height 1.65 → 1.75, more paragraph spacing). **What it can't
+do:** insert a pull-quote, decide where a callout goes, or write a subhead — those
+are still hand-authored into the page's HTML. The tag is a typographic switch, not
+an automated layout system.
 
-**The Atlantic tag** (`.article-atlantic`, applied alongside the page's width tier,
-e.g. `class="page page-full article-atlantic"`) is the tagging mechanism — the
-simplest viable option identified in Phase 6a: a second CSS class, not a new Python
-abstraction. It widens paragraph rhythm inside `.tool-prose` (line-height 1.65 → 1.75,
-more paragraph spacing) for a more unhurried reading feel. **What it can't do:** insert
-a pull-quote, decide where a callout goes, or write a subhead — those are still
-hand-authored into the page's HTML regardless of the tag. The tag is a typographic
-switch and a documentation signal, not enforcement; see `EDITORIAL_SYSTEM_PHASE6A.md`
-for the full reasoning.
+**Shared devices:** `.article-pull` (quote), `.article-callout`/`.article-callout-title`
+(tip), `.article-warn`/`.article-warn-title` (warning), `.article-cta` (CTA) — one
+shared base each, so a new Atlantic page composes them directly with no per-page
+override needed.
 
 **The break rule:** an Atlantic-tagged page shouldn't run more than ~250 words
-(roughly 5-6 lines at this measure) of unbroken paragraph text before a subhead,
-pull-quote, callout, or image. AI Hackathon Playbook was audited word-by-word against
-this rule during the Phase 6b pilot — its longest unbroken stretch anywhere is ~144
-words, comfortably under the threshold, using only its existing pull-quotes/callouts
-repositioned via the shared classes above. No new copy or images were needed for this
-page to satisfy the rule.
+(roughly 5–6 lines at this measure) of unbroken paragraph text before a subhead,
+pull-quote, callout, bulleted list, flowchart, or image. A bulleted list and a
+simple flowchart are legitimate break devices in their own right, same standing as
+a quote or callout — don't force content that's actually a process or a set of
+parallel items into quote styling just to satisfy the rule.
 
-**Images:** no reusable in-body image component exists yet. The only precedent is
-`/about`'s hand-coded 2-column photo grid with caption — worth generalizing into a
-shared helper whenever an Atlantic-tagged page actually needs one, per
-`EDITORIAL_SYSTEM_PHASE6A.md` §2/§4. Not built in Phase 6b since Hackathon Playbook's
-pilot didn't need one to satisfy the break rule.
+**Images:** no reusable in-body image component exists yet. `/about`'s hand-coded
+2-column photo grid with caption is the only precedent — worth generalizing into a
+shared helper the first time an Atlantic page actually needs one.
 
-**Phase 6c — does Atlantic work on technical content?** Hackathon Playbook is a
-narrative essay; Connecting Claude to NetSuite is a technical setup guide (numbered
-steps, a permissions table, a troubleshooting table) that doesn't naturally produce
-quotable prose the way an essay does. The tag was applied anyway to test the
-hypothesis that Atlantic's *typography* (wider rhythm, generous whitespace) can still
-suit technical content even where its signature device (the pull-quote) mostly can't.
+#### Callout taxonomy
 
-The break rule needed nothing new: NetSuite MCP's existing subheads, use-case cards,
-numbered step tracks, callouts, and tables already keep every unbroken stretch under
-~106 words — well inside the ~250-word threshold — with zero new copy. One genuine
-pull-quote candidate did turn up in the existing prose ("The protection is enforced by
-NetSuite, not by hoping Claude behaves.") and was repositioned (not rewritten) out of
-its paragraph into a `.article-pull`; two other candidate sentences were considered and
-rejected as too tied to their surrounding instructional context to stand alone. The
-numbered setup-step prose (Parts 1-2) is deliberately pull-quote-free — procedural
-"go here, click this" instructions don't compress into standalone insights, and
-forcing one would read as decorative rather than earned.
-
-**Verdict:** the hypothesis held. Atlantic's typography reads well on technical
-content on its own — the wider rhythm doesn't fight a setup guide's structure, since
-the guide's density comes from its instructional steps and tables, not from paragraph
-length. The one genuine pull-quote is a nice addition, not a rescue; the piece would
-still read fine without it. This is a different result from a narrative essay, where
-pull-quotes are doing real structural work breaking up long prose (Hackathon
-Playbook) — on technical content they're closer to an occasional accent than a load-bearing device.
-
-**Correction (post-taxonomy):** on review, "The protection is enforced by NetSuite, not
-by hoping Claude behaves" turned out to be a plain declarative sentence, not a quotable
-idea — it restates the preceding paragraph's point rather than compressing it into
-something a reader would repeat. It's been moved back into that paragraph as standard
-body text. Per the "it's a nice addition, not a rescue" verdict above, removing it
-doesn't open a break-rule gap: the surrounding stretch (H2 to the next warning box) is
-106 words, unchanged from the count already documented above, comfortably under the
-~250-word threshold. This is the Quote-vs-Tip judgment call (see the Callout taxonomy
-entry below) applied a third way: some sentences that read as quotable in isolation
-turn out, on a second look, to just be text.
-
-**Phase 6d — does Atlantic coexist with an already-narrowed page, and can it carry
-new content, not just typography?** Growth Engine Ratio (GER) is a different shape
-again: an interactive calculator with prose woven around it, and its reading width
-was already narrowed to `.tool-prose` (760px) inside the wider `.tool-inner` (1300px)
-in an earlier fix, deliberately — not something to casually undo. `.article-atlantic`'s
-only CSS effect is `.article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px;}`,
-scoped to paragraphs nested inside `.tool-prose`. GER already wraps its two prose
-sections (before and after the calculator) in separate `.tool-prose` blocks, with the
-calculator itself sitting outside `.tool-prose` in between — so tagging the outer
-`.page` wrapper widens rhythm in both prose sections automatically while leaving the
-calculator's markup, inputs, and JS completely untouched. No restructuring of
-`.tool-inner`/`.tool-prose` was needed; they coexist with Atlantic exactly as designed.
-
-Unlike 6b/6c, this pilot wasn't purely a typography-and-break-rule exercise — it
-paired the tag with real content updates: a contributor attribution line (Katherine
-Zhang, CEO of OPEXEngine by Bain & Company, credited by name for the first time), a
-short teaser naming two of the benchmark's actual companies (Reddit at $2.94,
-Palantir at $2.04) to reinforce the existing download CTA without reproducing the
-guide's full table, and three pull-quotes Brian selected directly from the published
-whitepaper, placed verbatim at the points in the prose they contextualize (the
-efficiency-disaster line illustrating GTM/R&D misalignment, the outlier/network-effects
-line following the two companies that cleared $1.00, and the permanent-capital-loss
-line following the churn discussion). GER's existing structure (subheads, the formula
-block, the tier table) already kept every unbroken stretch well under the ~250-word
-threshold before any of this was added, so the new devices layer on top of an
-already-compliant page rather than fixing a gap.
-
-**Verdict:** Atlantic and a narrowed reading width aren't in tension — the tag's
-narrow CSS footprint (a `.tool-prose p` selector only) means it composes with any
-width tier a page already uses, including one that deliberately narrowed its width
-for a documented reason earlier; that earlier fix was worth verifying, not assuming
-safe. This phase also showed Atlantic pages absorbing curated external content
-(attribution, named benchmark data, verbatim quotes from a source document) as
-cleanly as originally-authored prose.
-
-**Full-width breakout (Phase 6d addendum):** GER's three pull-quotes break out of
-the 760px `.tool-prose` reading column to span the full 1300px `.tool-inner` width,
-rather than sitting inline at the narrower text measure — body paragraphs stay at
-the comfortable reading width, only the pull-quote/callout/stat-block devices break
-out wider. The CSS (a page-scoped `.ger-pull` modifier, not a change to the shared
-`.article-pull` base) uses `left:50%` plus `transform:translateX(-50%)` against a
-`width:calc(100vw - 48px)` capped at `max-width:1300px` — since `.tool-prose`,
-`.tool-inner`, and `.page` are all centered on the same axis with a fixed 48px total
-side padding, this re-centers the wider box under `.tool-inner` at any viewport size
-and collapses cleanly to the same width as the surrounding prose once the viewport is
-too narrow to have room to break out (verified at 375/900/1400/2400px viewports, no
-horizontal overflow at any of them). This breakout treatment is scoped to GER's three
-Phase 6d pull-quotes only — it did not touch the shared `.article-pull` base or the
-existing inline pull-quotes on Hackathon Playbook or NetSuite MCP. (A later retrofit
-phase brought the same breakout treatment to Hackathon Playbook and NetSuite MCP's
-existing boxes too — see the PR history; this entry describes only what Phase 6d
-itself did.)
-
-**Callout taxonomy:** comparing GER's new pull-quotes against Hackathon Playbook's
-existing one surfaced a problem — every box on an Atlantic page (CTAs, tips, warnings,
-quotes) reused the same generic pale-box treatment, so a short pull-quote read as
-awkward empty space rather than an intentional design moment. Every box on an
-Atlantic page is now one of exactly four types, distinguished by color and treatment
-so each reads as what it is:
+Every box on an Atlantic page is one of exactly four types, distinguished by color
+and treatment so each reads as what it is:
 
 | Type | Class | Color | Treatment | Width |
 |---|---|---|---|---|
 | **CTA** | `.article-cta` | Navy (`--navy-wash` fill, `--navy` left border) | Boxed, `border-radius:0 10px 10px 0`, `padding:18px 22px` — "here's a link to follow" | Body-copy (760px, `.tool-prose`) |
 | **Tips** | `.article-callout` | Seafoam (`--seafoam-wash` fill, `--seafoam-mid` top border) | Boxed, titled (`.article-callout-title`, uppercase seafoam-deep), `border-radius:0 0 10px 10px` — "here's a fact/technique" | Body-copy (760px) |
 | **Warnings** | `.article-warn` | Coral (`--coral-wash` fill, `--coral` top border) | Boxed, titled (`.article-warn-title`, uppercase coral-deep), `border-radius:0 0 10px 10px` — "here's a failure mode to avoid" | Body-copy (760px) |
-| **Quotes** | `.article-pull` | No fill — `--navy` left border only | Unboxed: `font-family:var(--font-head)`, 600 weight, italic, 22px, `line-height:1.45` — "this is the idea," not a boxed fact | Wider breakout (1040px) |
+| **Quotes** | `.article-pull` | No fill — `--navy` left border only | Unboxed: `font-family:var(--font-head)`, 600 weight, italic, 22px, `line-height:1.45` — "this is the idea," not a boxed fact. No surrounding quotation marks — the rule/type treatment already signals "this is a quote." | Wider breakout (1040px, centered under `.tool-inner` via `left:50%`/`transform:translateX(-50%)` against `width:calc(100vw - 48px)`) |
 
-**Width is part of the taxonomy, not an afterthought.** CTA/Tips/Warnings stay at
-body-copy width (`.tool-prose`'s 760px column) rather than breaking out — reviewed
-live, they're mostly multi-line instructional prose, and a wide box just reads as an
-odd second column next to the reading column, not an intentional layout choice. Quotes
-are the opposite case: short by nature, so widening them reads as a deliberate
-editorial moment rather than empty space. **1040px** is the chosen Quote width — a
-middle ground between the 760px reading column and `.tool-inner`'s full 1300px
-(the width a wide UI element like GER's calculator card uses); wide enough to read as
-intentional without being identical to a full-width container element. The CSS is the
-same breakout technique introduced in Phase 6d (`left:50%` / `transform:translateX
-(-50%)` against `width:calc(100vw - 48px)`), just with the `max-width` cap changed
-from 1300px to 1040px and scoped only to `.ger-pull`/`.fah-pull` — the breakout rule
-was removed entirely from Hackathon Playbook's callout/warning boxes and from
-NetSuite MCP's callout/warning boxes (including retiring the now-unused
-`.ns-warn-wide` modifier, since NetSuite MCP currently has no Quote instances at all
-after the "protection is enforced by NetSuite" sentence was reverted to body text —
-see the Phase 6c correction above).
+**Width is part of the taxonomy.** CTA/Tips/Warnings stay at body-copy width —
+they're mostly multi-line instructional prose, and a wide box reads as an odd
+second column, not a design choice. Quotes are short by nature, so widening them
+(1040px — a middle ground between the 760px reading column and `.tool-inner`'s full
+1300px) reads as a deliberate editorial moment instead.
 
-The CTA class formalizes GER's pre-existing "download the full guide" box (previously
-an ad-hoc inline style, not a shared class) rather than inventing a new visual —
-it's the reference implementation for what a CTA looks like. Tips and Warnings needed
-no color change (`.article-callout` was already seafoam, `.article-warn` was already
-coral from the Phase 6b extraction) — only the taxonomy naming and the sanctioned
-coral exception (§2.3 above) are new. Quotes got the real design work: `.article-pull`
-previously used the same navy-wash boxed treatment as a CTA, which is exactly what
-made a short pull-quote read as an awkward, undersized version of a CTA box instead of
-an intentional editorial moment. Dropping the box and scaling up the type (using the
-display font, `--font-head`, instead of body copy) gives a quote real visual weight
-without competing with the boxed types. The three page-specific per-quote font-size
-overrides this replaced (`.ger-pull p`, `.fah-pull p`, `.ns-pull p`) are gone — one
-consistent Quote size now applies everywhere, which is possible now that quotes are a
-real distinct type rather than a differently-fudged version of a box. The literal
-surrounding quotation marks were also dropped from every quote's text — with the
-left-rule accent and the distinct display-font treatment already signaling "this is a
-quote," a leading/trailing `"` was redundant, not clarifying.
+**Informational asides that aren't warnings or quotable ideas** (e.g. a
+per-person/per-account setup note) belong in the Tips family — don't invent a
+fifth box style for something that's functionally a tip.
 
-One non-obvious retag: NetSuite MCP's `.ns-note` ("The connection is per person...")
-was previously its own fifth gray style (`--surface-2`/`--line-strong`) that didn't
-map onto any of the four types. It's folded into the Tips family (seafoam) rather
-than kept as a one-off exception, since its content — informational, not a warning,
-not a CTA, not a quotable idea — is functionally a tip. NetSuite MCP's `.ns-tip`
-boxes (the compact seafoam annotations nested inside its use-case cards) were already
-correctly seafoam before this phase and needed no change — they're a legitimate
-compact, card-nested variant of the Tips type, not a duplicate to consolidate away.
+#### Quote vs. Tip — the test
 
-**Quote vs. Tip is a content judgment call, not just a mechanical retag.** Hackathon
-Playbook's opening pull-quote ("Before any piece of work, two questions...") was
-rewritten mid-phase into a two-question numbered list plus an explanatory paragraph —
-content that structurally doesn't fit the Quote type's unboxed, single-idea, large-type
-treatment. It was moved to a Tip box instead (which already supports ordered/unordered
-lists), rather than forcing a list and a paragraph into 22px italic display type. The
-rule of thumb going forward: a Quote is one short, standalone idea a reader could
-repeat verbatim; anything that needs structure (a list, multiple sentences of
-explanation) is a Tip even if it originated as a "pull-quote."
+A real pull-quote is a standalone declarative statement or insight — it reads
+naturally as "this is the idea" on its own, out of context. It is *not*:
+- A process/sequence → a flowchart + caption instead
+- A list of steps or parallel items → a bulleted list instead
+- A plain informational sentence that just happens to sound punchy → standard body
+  text instead
 
-**Pull-quote audit (post-taxonomy):** with Quotes now a real, distinctly-styled type
-rather than a fudged box, several blocks repositioned into `.article-pull` during the
-original 6b/6c builds turned out not to pass a genuine test on review. **The test:** a
-real pull-quote is a standalone declarative statement or insight — it reads naturally
-as "this is the idea" on its own, out of context. It is *not* a process/sequence (→
-flowchart + caption instead), a list of steps or parallel items (→ bulleted list
-instead), or a plain informational sentence that just happens to sound punchy (→
-standard body text instead, same fix already applied to NetSuite MCP's "protection is
-enforced by NetSuite" line above).
-
-Auditing every `.article-pull` instance across all three Atlantic pages against this
-test:
-
-- **GER's three Phase 6d quotes** (efficiency-disaster, network-effects, permanent-capital-loss)
-  all pass — each reads as a standalone idea a reader could repeat verbatim, out of
-  context. Sourced from the published PDF and already vetted; untouched.
-- **NetSuite MCP** has zero remaining `.article-pull` instances (its one quote was
-  already reverted to body text — see above).
-- **Hackathon Playbook** had three that failed the test, all fixed:
-  - *"Diverge first...Then converge...The separation matters..."* was a two-mode
-    process description, not an idea → converted to a plain bulleted list (unboxed,
-    matching the page's other plain lists), with the "why the order matters" sentence
-    kept as a following paragraph rather than folded into a list item.
-  - *"Inspire → Sleep → Build. That's the sequence..."* was a three-step sequence, not
-    an idea → converted to a lightweight CSS-only boxes-and-arrows flowchart (three
-    steps connected by arrows, stacking vertically with down-arrows on mobile) with the
-    explanatory sentence underneath as a plain caption, not quote styling. No charting
-    dependency needed — Mermaid is already wired up elsewhere (the admin ER diagram and
-    "How FP&A Buddy Works" sequence diagram) but only for genuinely complex diagrams;
-    three linear boxes on a public page didn't justify loading it.
-  - *"The goal is at least one thing in production before anyone gets on a plane..."*
-    was a plain declarative sentence → converted to standard body text, same treatment
-    as the NetSuite MCP correction above.
-
-Break rule re-verified after all three conversions: the unbroken-prose stretches on
-either side of each conversion are 52/114 words (design-thinking section), 77/90 words
-(inspire/sleep/build section), and 82 words (Park-verdict section) — all comfortably
-under the ~250-word threshold. A bulleted list and a flowchart are legitimate break
-devices in their own right, same as a pull-quote, callout, or image, so removing a
-quote in favor of one doesn't reopen a gap.
+Anything that needs structure (a list, multiple sentences of explanation) is a Tip
+or a plain break device, even if it originated as a "pull-quote."
 
 ---
 
