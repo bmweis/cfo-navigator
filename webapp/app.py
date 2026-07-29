@@ -17125,7 +17125,6 @@ def admin_brand(request: Request):
         '<div style="font:500 13px var(--font-body);color:var(--muted);margin-bottom:10px;">Sticker badge&mdash;white bg, 2px graffiti-ink border, 4&ndash;6&deg; rotation, hard drop-shadow, Caveat 700. Max one or two per page, header/hero or card corner only.</div>'
         f'<div style="position:relative;display:inline-block;width:170px;height:50px;">'
         f'{_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="4px", right="0")}</div>'
-        '<div style="margin-top:10px;font:500 13px var(--font-body);color:var(--alert);">Nautical motifs (rope rule, compass star) are retired sitewide. The compass-star favicon is the one intentional exception&mdash;left as-is by design.</div>'
         '</div>'
     )
 
