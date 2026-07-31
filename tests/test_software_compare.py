@@ -41,11 +41,12 @@ def test_agent_taxonomy_saved_via_admin_edit(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/edit", data={
+    r = client.post(f"/tools/software/{a_slug}/edit", data={
         "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
         "agent_taxonomy_note": "Fully independent AI agent, not a bolted-on feature.",
     }, follow_redirects=False)
@@ -76,10 +77,12 @@ def test_agent_taxonomy_shown_on_profile_and_searchable_on_card(env):
 def test_agent_taxonomy_hidden_when_empty(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
-    lib.add_tool("Solo Co", "No agent taxonomy set.", "https://solo.example", [], approved=1)
+    a = lib.add_tool("Solo Co", "No agent taxonomy set.", "https://solo.example", [], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
-    r = _client(env).get("/tools/software/solo-co")
+    r = _client(env).get(f"/tools/software/{a_slug}")
+    assert r.status_code == 200
     assert "Agent taxonomy" not in r.text
 
 

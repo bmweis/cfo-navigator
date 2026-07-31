@@ -139,6 +139,7 @@ def test_software_create_blocked_on_duplicate_url(admin_client):
     client, appmod, db = admin_client
     lib = Library(db)
     tool_id = lib.add_tool("Existing Tool", "desc", "https://vendor.example", [], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
     r = client.post("/admin/tools/new", data={
@@ -146,30 +147,33 @@ def test_software_create_blocked_on_duplicate_url(admin_client):
     })
     assert r.status_code == 400
     assert "already exists" in r.json()["detail"]
-    assert f"/admin/tools/{tool_id}/edit" in r.json()["detail"]
+    assert f"/tools/software/{tool_slug}/edit" in r.json()["detail"]
 
 
 def test_software_edit_blocked_when_changing_url_to_duplicate(admin_client):
     client, appmod, db = admin_client
     lib = Library(db)
     tool_a = lib.add_tool("Tool A", "desc", "https://vendor-a.example", [], approved=1)
+    tool_a_slug = lib.get_tool(tool_a)["slug"]
     tool_b = lib.add_tool("Tool B", "desc", "https://vendor-b.example", [], approved=1)
+    tool_b_slug = lib.get_tool(tool_b)["slug"]
     lib.close()
 
-    r = client.post(f"/admin/tools/{tool_b}/edit", data={
+    r = client.post(f"/tools/software/{tool_b_slug}/edit", data={
         "name": "Tool B", "url": "https://vendor-a.example", "description": "desc", "summary": "desc",
     })
     assert r.status_code == 400
-    assert f"/admin/tools/{tool_a}/edit" in r.json()["detail"]
+    assert f"/tools/software/{tool_a_slug}/edit" in r.json()["detail"]
 
 
 def test_software_edit_allowed_when_url_unchanged(admin_client):
     client, appmod, db = admin_client
     lib = Library(db)
     tool_id = lib.add_tool("Tool A", "desc", "https://vendor-a.example", [], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
-    r = client.post(f"/admin/tools/{tool_id}/edit", data={
+    r = client.post(f"/tools/software/{tool_slug}/edit", data={
         "name": "Tool A Updated", "url": "https://vendor-a.example", "description": "new desc", "summary": "new desc",
     }, follow_redirects=False)
     assert r.status_code == 303
@@ -186,6 +190,7 @@ def test_communities_create_blocked_on_duplicate_url(admin_client):
     lib = Library(db)
     comm_id = lib.add_community(name="Existing Comm", url="https://comm.example",
                                  demographic="CFOs", cost_band="Free", categories=[], approved=1)
+    comm_slug = lib.get_community(comm_id)["slug"]
     lib.close()
 
     r = client.post("/admin/tools/communities/new", data={
@@ -193,7 +198,7 @@ def test_communities_create_blocked_on_duplicate_url(admin_client):
     })
     assert r.status_code == 400
     assert "already exists" in r.json()["detail"]
-    assert f"/admin/tools/communities/{comm_id}/edit" in r.json()["detail"]
+    assert f"/tools/communities/{comm_slug}/edit" in r.json()["detail"]
 
 
 def test_communities_edit_blocked_when_changing_url_to_duplicate(admin_client):
@@ -201,15 +206,17 @@ def test_communities_edit_blocked_when_changing_url_to_duplicate(admin_client):
     lib = Library(db)
     comm_a = lib.add_community(name="Comm A", url="https://comm-a.example",
                                 demographic="CFOs", cost_band="Free", categories=[], approved=1)
+    comm_a_slug = lib.get_community(comm_a)["slug"]
     comm_b = lib.add_community(name="Comm B", url="https://comm-b.example",
                                 demographic="CFOs", cost_band="Free", categories=[], approved=1)
+    comm_b_slug = lib.get_community(comm_b)["slug"]
     lib.close()
 
-    r = client.post(f"/admin/tools/communities/{comm_b}/edit", data={
+    r = client.post(f"/tools/communities/{comm_b_slug}/edit", data={
         "name": "Comm B", "url": "https://comm-a.example", "demographic": "CFOs",
     })
     assert r.status_code == 400
-    assert f"/admin/tools/communities/{comm_a}/edit" in r.json()["detail"]
+    assert f"/tools/communities/{comm_a_slug}/edit" in r.json()["detail"]
 
 
 def test_communities_edit_allowed_when_url_unchanged(admin_client):
@@ -217,9 +224,10 @@ def test_communities_edit_allowed_when_url_unchanged(admin_client):
     lib = Library(db)
     comm_id = lib.add_community(name="Comm A", url="https://comm-a.example",
                                  demographic="CFOs", cost_band="Free", categories=[], approved=1)
+    comm_slug = lib.get_community(comm_id)["slug"]
     lib.close()
 
-    r = client.post(f"/admin/tools/communities/{comm_id}/edit", data={
+    r = client.post(f"/tools/communities/{comm_slug}/edit", data={
         "name": "Comm A Updated", "url": "https://comm-a.example", "demographic": "CFOs",
     }, follow_redirects=False)
     assert r.status_code == 303

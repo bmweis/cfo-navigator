@@ -166,6 +166,7 @@ def test_research_refresh_success(env, monkeypatch):
     calls = _mock_generate_tool_features(monkeypatch)
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
     client = _client(env)
@@ -175,7 +176,7 @@ def test_research_refresh_success(env, monkeypatch):
     assert "research_refreshed=1" in r.headers["location"]
     assert calls
 
-    r = client.get(f"/admin/tools/{tool_id}/edit?research_refreshed=1")
+    r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
     assert "AI research refreshed" in r.text
 
 
@@ -184,6 +185,7 @@ def test_research_refresh_failure_banner(env, monkeypatch):
     monkeypatch.setattr(enrich_mod, "generate_tool_features", lambda *a, **k: None)
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
     client = _client(env)
@@ -192,7 +194,7 @@ def test_research_refresh_failure_banner(env, monkeypatch):
     assert r.status_code == 303
     assert "research_refreshed=0" in r.headers["location"]
 
-    r = client.get(f"/admin/tools/{tool_id}/edit?research_refreshed=0")
+    r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=0")
     assert "Couldn" in r.text
 
 
@@ -238,12 +240,13 @@ def test_agent_taxonomy_verify_requires_auth(env):
 def test_edit_page_shows_needs_verification_badge_and_refresh_button(env):
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
     lib.set_tool_agent_taxonomy_draft(tool_id, "Drafted note.", needs_verification=1)
     lib.close()
 
     client = _client(env)
     _login(client)
-    r = client.get(f"/admin/tools/{tool_id}/edit")
+    r = client.get(f"/tools/software/{tool_slug}/edit")
     assert "Needs verification" in r.text
     assert "Mark verified" in r.text
     assert "Refresh AI research" in r.text
@@ -252,11 +255,12 @@ def test_edit_page_shows_needs_verification_badge_and_refresh_button(env):
 def test_edit_page_hides_badge_once_verified(env):
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
     lib.set_tool_agent_taxonomy_draft(tool_id, "Drafted note.", needs_verification=0)
     lib.close()
 
     client = _client(env)
     _login(client)
-    r = client.get(f"/admin/tools/{tool_id}/edit")
+    r = client.get(f"/tools/software/{tool_slug}/edit")
     assert "Agent taxonomy" in r.text
     assert 'agent-taxonomy/verify' not in r.text   # no verify action rendered once confirmed
