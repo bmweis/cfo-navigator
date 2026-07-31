@@ -1,4 +1,4 @@
-"""Software admin rename (/admin/tools -> /admin/software) and the shared
+"""Software admin rename (/admin/tools -> /admin/tools/software) and the shared
 column-picker/bulk-edit routes for the Communities and Software admin tables."""
 import os
 import tempfile
@@ -26,12 +26,15 @@ def admin_client(monkeypatch):
 
 def test_admin_software_rename_hard_cutover(admin_client):
     client, appmod, db = admin_client
-    r = client.get("/admin/software")
+    r = client.get("/admin/tools/software")
     assert r.status_code == 200
     assert "Software" in r.text
 
     old = client.get("/admin/tools")
     assert old.status_code == 404
+
+    older = client.get("/admin/software")
+    assert older.status_code == 404
 
 
 # --- Software bulk edit -------------------------------------------------------
@@ -44,7 +47,7 @@ def test_software_bulk_edit_applies_only_to_selected_rows(admin_client):
     t2 = lib.add_tool("Tool B", "desc", "https://b.example", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/software/bulk-edit", json={"ids": [t1, t2], "field": "advisor", "value": "1"})
+    r = client.post("/admin/tools/software/bulk-edit", json={"ids": [t1, t2], "field": "advisor", "value": "1"})
     assert r.status_code == 200
     assert r.json() == {"ok": True}
 
@@ -61,10 +64,10 @@ def test_software_bulk_edit_rejects_non_allowlisted_field(admin_client):
     t1 = lib.add_tool("Tool A", "desc", "https://a.example", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/software/bulk-edit", json={"ids": [t1], "field": "name", "value": "HACKED"})
+    r = client.post("/admin/tools/software/bulk-edit", json={"ids": [t1], "field": "name", "value": "HACKED"})
     assert r.status_code == 400
 
-    r2 = client.post("/admin/software/bulk-edit", json={"ids": [t1], "field": "url", "value": "https://evil.example"})
+    r2 = client.post("/admin/tools/software/bulk-edit", json={"ids": [t1], "field": "url", "value": "https://evil.example"})
     assert r2.status_code == 400
 
     lib = Library(db)
@@ -83,7 +86,7 @@ def test_software_bulk_edit_requires_auth(monkeypatch):
     importlib.reload(appmod)
     from fastapi.testclient import TestClient
     client = TestClient(appmod.app, raise_server_exceptions=False)
-    r = client.post("/admin/software/bulk-edit", json={"ids": [1], "field": "advisor", "value": "1"})
+    r = client.post("/admin/tools/software/bulk-edit", json={"ids": [1], "field": "advisor", "value": "1"})
     assert r.status_code == 401
     if os.path.exists(db):
         os.remove(db)
@@ -188,7 +191,7 @@ def test_software_page_renders_column_picker_and_bulk_edit_markup(admin_client):
     lib.add_tool("Tool A", "desc", "https://a.example", [], approved=1)
     lib.close()
 
-    r = client.get("/admin/software")
+    r = client.get("/admin/tools/software")
     assert 'class="software-row-cb"' in r.text
     assert "software-bulk-panel" in r.text
     assert 'colpick-software-url' in r.text

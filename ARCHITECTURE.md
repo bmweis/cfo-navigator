@@ -405,12 +405,16 @@ every field that would be drafted (and a projected full-catalog cost)
 without writing.
 
 **Software admin rename + column picker/bulk edit (both tables).** The Software
-admin page moved from `/admin/tools` to `/admin/software` — a hard cutover, no
-redirect; the old URL now 404s. Only the bare list-page route moved — every
-`/admin/tools/*` sub-path (`/admin/tools/communities`, `/admin/tools/categories`,
-`/admin/tools/benchmarks`, `/admin/tools/leads`, `/admin/tools/{id}/edit`, etc.)
-is a distinct admin area under the historical "Toolbox" URL prefix and was
-left alone. Both the Software and Communities approved-rows tables gained a
+admin page moved from `/admin/tools` to `/admin/software` (hard cutover, no
+redirect), then again from `/admin/software` to `/admin/tools/software` — each
+step a hard cutover with no redirect; both prior URLs now 404. The second move
+also brought the bulk-edit sub-route along (`/admin/software/bulk-edit` →
+`/admin/tools/software/bulk-edit`), matching the `/admin/tools/communities/
+bulk-edit` naming pattern. Every other `/admin/tools/*` sub-path
+(`/admin/tools/communities`, `/admin/tools/categories`, `/admin/tools/benchmarks`,
+`/admin/tools/leads`, `/admin/tools/{id}/edit`, etc.) is a distinct admin area
+under the historical "Toolbox" URL prefix and was left alone both times.
+Both the Software and Communities approved-rows tables gained a
 matching column picker and bulk-edit panel — `_admin_column_picker_html` and
 `_admin_bulk_panel_html` in `webapp/app.py` render one shared, table-key-
 parameterized UI (`_ADMIN_BULK_EDIT_JS`) reused by both pages, the same
@@ -424,7 +428,7 @@ scoped to shared/categorical fields only, never the per-record unique ones
 `reach`, `categories`, `featured`, `advisor`) and `_SOFTWARE_BULK_FIELDS`
 (`categories`, `advisor`, `promoted`, `warm_intro_enabled`) are the server-side
 allowlists `POST /admin/tools/communities/bulk-edit` and
-`POST /admin/software/bulk-edit` check the requested `field` against before
+`POST /admin/tools/software/bulk-edit` check the requested `field` against before
 touching the DB — enum fields (`cost_band`/`sponsorship_type`/`access`/
 `format`/`reach`) are further checked against their fixed option lists
 (`_COMMUNITY_BULK_SELECT_OPTIONS`). Both routes loop the selected ids, fetch
@@ -559,7 +563,7 @@ submitted_by=..., approved=0)`, fires the internal notification email plus a
 admin-editable at `/admin/emails`, same `_send_email_safely` best-effort
 pattern as tool submissions), and waits at `/admin/tools/communities` in a
 "Pending submissions" table above the "Approved communities" list — the same
-two-section layout as `/admin/software`. `POST
+two-section layout as `/admin/tools/software`. `POST
 /admin/tools/communities/{id}/approve` calls `approve_community` and redirects
 straight to `/admin/tools/communities/{id}/profile` (rather than back to the
 list) so the "Generate profile draft" button is immediately in front of
