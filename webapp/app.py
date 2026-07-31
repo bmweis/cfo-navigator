@@ -8316,25 +8316,32 @@ def admin_software(request: Request):
                       f'padding:2px 8px;font-size:11px;font-weight:700;text-decoration:none;white-space:nowrap;">'
                       f'{n_leads} intro{"s" if n_leads != 1 else ""}</a>') if n_leads else \
                      '<span style="font-size:12px;color:var(--muted);">0 intros</span>'
-        featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if t.get("promoted") else ""
+        featured_badge = '<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;">Featured</span>' if t.get("promoted") else ""
         row_attrs = _admin_row_data_attrs({
             "name": t["name"], "promoted": "1" if t.get("promoted") else "0",
             "categories": "|".join(t["categories"]),
         })
         return f"""<tr {row_attrs}>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(t['name'])}{featured_badge}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
+              <span>{_esc(t['name'])}</span>{featured_badge}
+            </div>
+          </td>
           <td data-col="software:url" style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(t['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(t['url'][:50])}{'…' if len(t['url']) > 50 else ''}</a></td>
+          <td data-col="software:summary" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:260px;">{_esc(t.get('summary') or '—')}</td>
           <td data-col="software:categories" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td data-col="software:intros" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
           <td data-col="software:vendor_name" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t.get('vendor_name') or '—')}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
-            <a href="/admin/tools/{t['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
-            <form method="post" action="/admin/tools/{t['id']}/delete" style="display:inline;margin-left:6px;"
-                  onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
-              <input type="hidden" name="redirect_to" value="/admin/software">
-              <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
-            </form>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
+              <a href="/admin/tools/{t['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+              <form method="post" action="/admin/tools/{t['id']}/delete" style="margin:0;"
+                    onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
+                <input type="hidden" name="redirect_to" value="/admin/software">
+                <button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+              </form>
+            </div>
           </td>
         </tr>"""
 
@@ -8344,7 +8351,7 @@ def admin_software(request: Request):
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No approved software yet.</td></tr>'
     total_leads = sum(lead_counts.values())
 
-    software_cols = [("url", "URL"), ("categories", "Categories"), ("intros", "Intros"), ("vendor_name", "Vendor name")]
+    software_cols = [("url", "URL"), ("summary", "Description"), ("categories", "Categories"), ("intros", "Intros"), ("vendor_name", "Vendor name")]
     software_bulk_fields = [
         {"key": "categories", "label": "Categories", "kind": "multi"},
         {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
@@ -8393,6 +8400,7 @@ def admin_software(request: Request):
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
   <th data-col="software:url" style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
+  <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Description</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
   <th data-col="software:vendor_name" style="padding:10px 12px;text-align:left;font-size:13px;">Vendor name</th>
@@ -9242,20 +9250,20 @@ def admin_communities(request: Request, filter: str = ""):
 
     def _approved_row(c: dict) -> str:
         cats = ", ".join(c["categories"]) or "—"
-        featured_badge = '<span style="font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px;">Featured</span>' if c.get("featured") else ""
-        review_badge = ('<span style="font-size:11px;font-weight:700;background:var(--caution);color:#fff;border-radius:4px;'
-                         'padding:1px 6px;margin-left:6px;">Needs review</span>') if c.get("needs_review") else ""
+        featured_badge = '<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--coral);color:#fff;border-radius:4px;padding:1px 6px;">Featured</span>' if c.get("featured") else ""
+        review_badge = ('<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--caution);color:#fff;border-radius:4px;'
+                         'padding:1px 6px;">Needs review</span>') if c.get("needs_review") else ""
         # Distinct from review_badge above: that one is Brian's manual
         # whole-profile sign-off (community_profiles.needs_review). This one
         # is a passive count of per-field auto-fill gaps left by "Auto-fill
         # from URL" (the _NEEDS_VERIFICATION sentinel) — not a save blocker,
         # just a nudge toward Edit for anyone who forgets to check the field.
         n_gaps = sum(1 for f in _COMMUNITY_VERIFIABLE_FIELDS if c.get(f) == _NEEDS_VERIFICATION)
-        gap_badge = (f'<span style="font-size:11px;font-weight:700;background:var(--muted);color:#fff;border-radius:4px;'
-                     f'padding:1px 6px;margin-left:6px;">{n_gaps} field{"s" if n_gaps != 1 else ""} '
+        gap_badge = (f'<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--muted);color:#fff;border-radius:4px;'
+                     f'padding:1px 6px;">{n_gaps} field{"s" if n_gaps != 1 else ""} '
                      f'need{"s" if n_gaps == 1 else ""} verification</span>') if n_gaps else ""
-        mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="display:inline;">'
-                         f'<button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;margin-left:4px;">Mark reviewed</button></form>'
+        mark_reviewed = (f'<form method="post" action="/admin/tools/communities/{c["id"]}/mark-reviewed" style="margin:0;">'
+                         f'<button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;">Mark reviewed</button></form>'
                          ) if c.get("needs_review") else ""
         row_attrs = _admin_row_data_attrs({
             "name": c["name"], "cost_band": c["cost_band"], "access": c["access"] or "",
@@ -9264,32 +9272,40 @@ def admin_communities(request: Request, filter: str = ""):
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
-  <td style="padding:10px 12px;font-weight:600;">{_esc(c['name'])}{featured_badge}{review_badge}{gap_badge}</td>
+  <td style="padding:10px 12px;font-weight:600;">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
+      <span>{_esc(c['name'])}</span>{featured_badge}{review_badge}{gap_badge}
+    </div>
+  </td>
+  <td data-col="communities:url" style="padding:10px 12px;font-size:13px;"><a href="{_esc(c['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(c['url'][:50])}{'…' if len(c['url']) > 50 else ''}</a></td>
+  <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:260px;">{_esc(c['notes'] or '—')}</td>
   <td data-col="communities:cost_band" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td data-col="communities:access" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
   <td data-col="communities:categories" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(cats)}</td>
   <td data-col="communities:sponsorship_type" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['sponsorship_type'] or '—')}</td>
-  <td data-col="communities:format" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['format'] or '—')}</td>
+  <td data-col="communities:format" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:220px;">{_esc(c['format'] or '—')}</td>
   <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
-  <td style="padding:10px 12px;white-space:nowrap;">
-    <a href="/admin/tools/communities/{c['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
-    <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="margin-left:4px;">Profile</a>
-    {mark_reviewed}
-    <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="display:inline;"
-          onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
-      <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
-    </form>
+  <td style="padding:10px 12px;">
+    <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
+      <a href="/admin/tools/communities/{c['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+      <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="text-align:center;">Profile</a>
+      {mark_reviewed}
+      <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
+            onsubmit="return confirm('Delete &quot;{_esc(c['name'])}&quot; from the Communities directory?');">
+        <button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+      </form>
+    </div>
   </td>
 </tr>"""
 
     pending_rows = "".join(_pending_row(c) for c in pending) or \
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
     approved_rows = "".join(_approved_row(c) for c in approved) or \
-        '<tr><td colspan="9" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>' if filter != "needs_review" else \
-        '<tr><td colspan="9" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
+        '<tr><td colspan="11" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>' if filter != "needs_review" else \
+        '<tr><td colspan="11" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
 
     communities_cols = [
-        ("cost_band", "Cost band"), ("access", "Access"), ("categories", "Categories"),
+        ("url", "URL"), ("notes", "Description"), ("cost_band", "Cost band"), ("access", "Access"), ("categories", "Categories"),
         ("sponsorship_type", "Sponsorship type"), ("format", "Format"), ("reach", "Reach"),
     ]
     communities_bulk_fields = [
@@ -9372,6 +9388,8 @@ def admin_communities(request: Request, filter: str = ""):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
+  <th data-col="communities:url" style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
+  <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;">Description</th>
   <th data-col="communities:cost_band" style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th data-col="communities:access" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
   <th data-col="communities:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
