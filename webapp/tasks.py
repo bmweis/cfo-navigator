@@ -38,7 +38,7 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/queue": lib.queue_count(status="pending"),
         "/admin/review-removals": lib.flagged_count(),
         "/admin/contacts": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
-        "/admin/software": lib.count_pending_tools(),
+        "/admin/tools/software": lib.count_pending_tools(),
         "/admin/tools/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
         "/admin/tools/communities": lib.count_pending_communities() + lib.count_communities_needing_review(),
         "/admin/community-gaps": lib.community_gap_counts()["unreviewed"],

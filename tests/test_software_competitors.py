@@ -175,7 +175,7 @@ def test_bulk_edit_does_not_clobber_differentiation_note(env):
 
     client = _client(env)
     _login(client)
-    r = client.post("/admin/software/bulk-edit", json={"ids": [a], "field": "advisor", "value": "1"})
+    r = client.post("/admin/tools/software/bulk-edit", json={"ids": [a], "field": "advisor", "value": "1"})
     assert r.status_code == 200
 
     lib = Library(os.environ["LINKLIB_DB"])

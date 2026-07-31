@@ -238,7 +238,7 @@ def test_bulk_edit_unaffected_by_dedup_check(admin_client):
     t2 = lib.add_tool("Tool B", "desc", "https://b.example", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/software/bulk-edit", json={"ids": [t1, t2], "field": "advisor", "value": "1"})
+    r = client.post("/admin/tools/software/bulk-edit", json={"ids": [t1, t2], "field": "advisor", "value": "1"})
     assert r.status_code == 200
     assert r.json() == {"ok": True}
 

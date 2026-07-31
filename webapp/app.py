@@ -8275,7 +8275,7 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
 </div>"""
 
 
-@app.get("/admin/software", response_class=HTMLResponse)
+@app.get("/admin/tools/software", response_class=HTMLResponse)
 def admin_software(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -8338,7 +8338,7 @@ def admin_software(request: Request):
               <a href="/admin/tools/{t['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
               <form method="post" action="/admin/tools/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
-                <input type="hidden" name="redirect_to" value="/admin/software">
+                <input type="hidden" name="redirect_to" value="/admin/tools/software">
                 <button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
               </form>
             </div>
@@ -8392,7 +8392,7 @@ def admin_software(request: Request):
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software</h2>
 {_admin_column_picker_html("software", software_cols)}
 {_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories)}
-{_admin_bulk_panel_html("software", "/admin/software/bulk-edit", software_bulk_fields, category_options=tool_categories)}
+{_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories)}
 <div style="overflow-x:auto;">
 <form id="software-approved-form">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
@@ -8431,7 +8431,7 @@ applySortFilter('software');
 _SOFTWARE_BULK_FIELDS = {"categories", "advisor", "promoted", "warm_intro_enabled"}
 
 
-@app.post("/admin/software/bulk-edit")
+@app.post("/admin/tools/software/bulk-edit")
 async def admin_software_bulk_edit(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -10027,7 +10027,7 @@ def admin_tools_new(request: Request):
   </div>
   <div>
     <button type="submit" class="btn">Add to directory</button>
-    <a href="/admin/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/admin/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>
@@ -10129,7 +10129,7 @@ def admin_tools_approve(request: Request, tool_id: int):
         lib.approve_tool(tool_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/software", status_code=303)
+    return RedirectResponse("/admin/tools/software", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/reject")
@@ -10141,7 +10141,7 @@ def admin_tools_reject(request: Request, tool_id: int):
         lib.delete_tool(tool_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/software", status_code=303)
+    return RedirectResponse("/admin/tools/software", status_code=303)
 
 
 @app.get("/admin/tools/{tool_id}/edit", response_class=HTMLResponse)
@@ -10707,10 +10707,10 @@ async def admin_tools_delete(request: Request, tool_id: int):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
     # Deleting is offered both on /tools/software (public directory, admin controls)
-    # and /admin/software (Toolbox submissions) — return to whichever one asked,
+    # and /admin/tools/software (Toolbox submissions) — return to whichever one asked,
     # validated against an allowlist since it echoes into a redirect.
     redirect_to = form.get("redirect_to") or "/tools/software"
-    if redirect_to not in ("/tools/software", "/admin/software"):
+    if redirect_to not in ("/tools/software", "/admin/tools/software"):
         redirect_to = "/tools/software"
     lib = _lib()
     try:
@@ -12979,7 +12979,7 @@ _LIBRARY_TOOLS = [
 # slightly loose fit for it. Left as-is rather than reworded to force a fit —
 # flagged in the Phase 6 PR for Brian to decide whether it's worth adjusting.
 _TOOLBOX_TOOLS = [
-    ("/admin/software",         "Software",             "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
+    ("/admin/tools/software",   "Software",             "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
     ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
     ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),

@@ -214,7 +214,7 @@ def test_bulk_edit_does_not_blank_summary(env):
 
     client = _client(env)
     _login(client)
-    r = client.post("/admin/software/bulk-edit", json={
+    r = client.post("/admin/tools/software/bulk-edit", json={
         "ids": [tool_id], "field": "advisor", "value": "1",
     })
     assert r.status_code == 200

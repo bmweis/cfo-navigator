@@ -30,7 +30,7 @@ def test_software_sort_filter_toolbar_renders(admin_client):
     lib.add_tool("Tool A", "desc", "https://a.example", ["FP&A"], approved=1, promoted=1)
     lib.close()
 
-    r = client.get("/admin/software")
+    r = client.get("/admin/tools/software")
     assert 'id="software-sort-field"' in r.text
     assert '<option value="name">Name</option>' in r.text
     assert '<option value="promoted">Featured</option>' in r.text
@@ -73,7 +73,7 @@ def test_communities_sort_filter_toolbar_renders(admin_client):
 
 def test_default_sort_field_is_name_for_both_tables(admin_client):
     client, appmod, db = admin_client
-    r1 = client.get("/admin/software")
+    r1 = client.get("/admin/tools/software")
     r2 = client.get("/admin/tools/communities")
     # The first <option> in each sort <select> is the default — matches the
     # tables' existing server-side ORDER BY name. No other <option> tag may
