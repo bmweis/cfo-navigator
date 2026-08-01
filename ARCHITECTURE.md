@@ -361,7 +361,9 @@ deliberately rather than picking one: (1) automatically, via `BackgroundTasks`,
 right after a tool is added — `webapp/app.py::_run_tool_research`, fired
 from both `/admin/tools/new` and the public `/tools/submit` form, so a
 slow/failed research call never blocks the add from completing; and (2)
-on demand, from a "Refresh AI research" button on `/tools/software/{slug}/edit`
+on demand, from a "Generate AI Data" button (renamed from "Refresh AI
+research" and moved next to the Agent taxonomy field in the Phase 4 edit-page
+button reorg) on `/tools/software/{slug}/edit`
 (`POST /admin/tools/{id}/research/refresh`), which runs the same
 `_run_tool_research` synchronously so the redirect can show a success/
 failure banner — for re-running after a vendor redesigns their site, or
