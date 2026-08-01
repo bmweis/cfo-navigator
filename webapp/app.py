@@ -598,6 +598,21 @@ def _duplicate_url_message(e: DuplicateURLError, edit_url: str) -> str:
             f'Edit the existing entry instead of creating a new one: {edit_url}')
 
 
+def _record_ai_drafted_reviews(lib: Library, request: Request, entity_type: str, entity_id: int, form) -> None:
+    """Stamps a field_reviews row for every field named in the submitted
+    ai_drafted_fields hidden input (see markAiDrafted in the edit-form JS) —
+    standing principle: AI drafts into the form, the save that follows is
+    what makes "reviewed" real. A no-op when the field is empty, e.g. a save
+    that never touched a Generate button."""
+    raw = (form.get("ai_drafted_fields") or "").strip()
+    if not raw:
+        return
+    claims = _current_claims(request)
+    reviewed_by = (claims.get("username") if claims else "") or "admin"
+    for field_name in {f.strip() for f in raw.split(",") if f.strip()}:
+        lib.record_field_review(entity_type, entity_id, field_name, reviewed_by)
+
+
 def _send_email_safely(lib: Library, context: str, fn, *args, **kwargs) -> bool:
     """Best-effort email send that never raises and never fails silently.
     Every outbound-email call site (contact, tool submissions, welcome
@@ -7875,7 +7890,24 @@ def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None
 # Shared by /admin/tools/new, /admin/tools/{id}/edit, and the Quick Edit panel
 # on /tools — all three point a "Generate" button at the same stateless
 # endpoint, since it only needs a name + URL to draft a description.
-_GENERATE_DESC_JS = """
+# markAiDrafted: shared by every generate-button handler across both profile
+# edit forms — appends a field name to the #ai-drafted-fields hidden input
+# (comma-separated, deduped) so the edit-submit route knows which fields to
+# stamp a field_reviews row for on save (standing principle: AI drafts into
+# the form, a human review-and-save is what makes it live — see
+# Library.record_field_review). A no-op where that hidden input doesn't
+# exist (the stateless Add Tool form has no entity_id yet to review against).
+_MARK_AI_DRAFTED_JS = """
+function markAiDrafted(fieldName) {
+  var el = document.getElementById('ai-drafted-fields');
+  if (!el) return;
+  var fields = el.value ? el.value.split(',') : [];
+  if (fields.indexOf(fieldName) === -1) fields.push(fieldName);
+  el.value = fields.join(',');
+}
+"""
+
+_GENERATE_DESC_JS = _MARK_AI_DRAFTED_JS + """
 async function generateDescription(name, url, descId, statusId, summaryId) {
   name = (name || '').trim();
   url = (url || '').trim();
@@ -7890,9 +7922,10 @@ async function generateDescription(name, url, descId, statusId, summaryId) {
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
     document.getElementById(descId).value = d.description;
+    markAiDrafted('description');
     if (summaryId) {
       var summaryEl = document.getElementById(summaryId);
-      if (summaryEl) summaryEl.value = d.summary || '';
+      if (summaryEl) { summaryEl.value = d.summary || ''; markAiDrafted('summary'); }
     }
     status.textContent = d.low_confidence
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
@@ -7912,8 +7945,10 @@ _COMMUNITY_PROFILE_FIELD_IDS = [
     "sponsor_relationship_note", "business_model", "application_friction", "cost_value_verdict",
     "notable_members", "founded_year", "public_criticism", "verdict_summary",
     "stage_focus", "jobs_program", "team_or_individual",
+    "seniority_band", "primary_purpose", "resources_included",
+    "platform_type", "meeting_format", "event_style", "cpe_eligible",
 ]
-_GENERATE_PROFILE_JS = """
+_GENERATE_PROFILE_JS = _MARK_AI_DRAFTED_JS + """
 var COMMUNITY_PROFILE_FIELDS = """ + json.dumps(_COMMUNITY_PROFILE_FIELD_IDS) + """;
 async function generateCommunityProfile(name, url, statusId) {
   name = (name || '').trim();
@@ -7935,7 +7970,9 @@ async function generateCommunityProfile(name, url, statusId) {
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
     COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
       var el = document.getElementById('cp-' + k);
-      if (el) el.value = (d[k] === null || d[k] === undefined) ? '' : d[k];
+      if (!el) return;
+      el.value = (d[k] === null || d[k] === undefined) ? '' : d[k];
+      if (el.value) markAiDrafted(k);
     });
     var lowConf = document.getElementById('cp-low_confidence');
     if (lowConf) lowConf.checked = !!d.low_confidence;
@@ -7955,7 +7992,7 @@ async function generateCommunityProfile(name, url, statusId) {
 # `name` attribute rather than an id, since there's only ever one such form
 # on the page; categories is the one remaining checkbox group, synced by
 # checking membership in the returned list instead.
-_GENERATE_LISTING_JS = """
+_GENERATE_LISTING_JS = _MARK_AI_DRAFTED_JS + """
 async function generateCommunityListing(name, url, statusId) {
   name = (name || '').trim();
   url = (url || '').trim();
@@ -7972,11 +8009,12 @@ async function generateCommunityListing(name, url, statusId) {
     ['demographic', 'reach', 'local_markets', 'cost_band', 'cost_note', 'sponsorship_type',
      'sponsor_name', 'access', 'format'].forEach(function(k) {
       var el = document.querySelector('[name="' + k + '"]');
-      if (el && d[k]) el.value = d[k];
+      if (el && d[k]) { el.value = d[k]; markAiDrafted(k); }
     });
     document.querySelectorAll('input[name="categories"]').forEach(function(cb) {
       cb.checked = (d.categories || []).indexOf(cb.value) !== -1;
     });
+    if ((d.categories || []).length) markAiDrafted('categories');
     status.textContent = d.low_confidence
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
       : 'Drafted. Review before saving—anything marked "Needs verification" needs a manual check.';
@@ -10002,6 +10040,7 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
     body = f"""<div class="page page-form">
 <h1>Edit community</h1>
 <form method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
+  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
 {_community_form_fields(c, categories)}
   <div>
     <button type="submit" class="btn">Save changes</button>
@@ -10067,6 +10106,7 @@ async def admin_communities_edit_submit(request: Request, slug: str):
                              access=access, format=format_, notes=notes,
                              reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
         lib.update_community_screenshot(community_id, screenshot_url, screenshot_is_product)
+        _record_ai_drafted_reviews(lib, request, "community", community_id, form)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/communities/{e.slug}/edit"))
     finally:
@@ -10165,6 +10205,7 @@ def admin_community_profile_edit(request: Request, community_id: int):
 <p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <h1>Profile: {_esc(c['name'])}</h1>
 <form method="post" action="/admin/tools/communities/{community_id}/profile" style="display:grid;gap:20px;">
+  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
 {_community_profile_form_fields(p, c)}
   <div>
     <button type="submit" class="btn">Save profile</button>
@@ -10215,6 +10256,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             jobs_program=(form.get("jobs_program") or "").strip(),
             team_or_individual=(form.get("team_or_individual") or "").strip(),
         )
+        _record_ai_drafted_reviews(lib, request, "community", community_id, form)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -10268,6 +10310,13 @@ async def admin_communities_generate_profile(request: Request):
         "stage_focus": draft.stage_focus,
         "jobs_program": draft.jobs_program,
         "team_or_individual": draft.team_or_individual,
+        "seniority_band": draft.seniority_band,
+        "primary_purpose": draft.primary_purpose,
+        "resources_included": draft.resources_included,
+        "platform_type": draft.platform_type,
+        "meeting_format": draft.meeting_format,
+        "event_style": draft.event_style,
+        "cpe_eligible": draft.cpe_eligible,
     })
 
 
@@ -10660,6 +10709,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <h1>Edit software</h1>
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
+  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
     <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
@@ -10727,10 +10777,16 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     </div>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">How this differs from the competition <span style="font-weight:400;color:var(--muted);">(optional—shown on the profile page)</span></label>
-    <textarea name="differentiation_note" maxlength="600" rows="3"
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">How this differs from the competition <span style="font-weight:400;color:var(--muted);">(shown on the profile page as the Bottom line callout)</span></label>
+      <span>
+        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status')">Generate</button>
+        <span id="diff-gen-status" class="qe-status"></span>
+      </span>
+    </div>
+    <textarea id="tool-differentiation" name="differentiation_note" maxlength="600" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-      placeholder="Placeholder for now—hand-written copy, not auto-drafted.">{_esc(tool.get('differentiation_note') or '')}</textarea>
+      placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('differentiation_note') or '')}</textarea>
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(optional—standalone feature, agent-assisted, or fully independent agent; searchable)</span>{_taxonomy_verify_badge}</label>
@@ -10821,7 +10877,24 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 </style>
-<script>{_GENERATE_DESC_JS}</script>"""
+<script>{_GENERATE_DESC_JS}
+async function generateDifferentiation(toolId, textareaId, statusId) {{
+  var status = document.getElementById(statusId);
+  status.textContent = 'Generating…';
+  try {{
+    var r = await fetch('/admin/tools/' + toolId + '/generate-differentiation', {{method: 'POST'}});
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
+    document.getElementById(textareaId).value = d.differentiation_note;
+    markAiDrafted('differentiation_note');
+    status.textContent = d.low_confidence
+      ? 'Drafted. No competitors curated yet, so this is weaker than it could be—review carefully.'
+      : 'Drafted. Review before saving.';
+  }} catch (e) {{
+    status.textContent = e.message || 'Generation failed. Write it by hand.';
+  }}
+}}
+</script>"""
     return HTMLResponse(_page(f"Edit {_esc(tool['name'])}—CFO Toolbox", "", body, authed=True))
 
 
@@ -10863,6 +10936,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         lib.update_tool_differentiation(tool_id, differentiation_note)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot(tool_id, screenshot_url, screenshot_is_product)
+        _record_ai_drafted_reviews(lib, request, "tool", tool_id, form)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     finally:
@@ -11189,6 +11263,40 @@ async def admin_tools_generate_description(request: Request):
         lib.close()
 
     return JSONResponse({"ok": True, "description": draft.description, "summary": draft.summary,
+                         "low_confidence": draft.low_confidence})
+
+
+@app.post("/admin/tools/{tool_id}/generate-differentiation")
+def admin_tools_generate_differentiation(request: Request, tool_id: int):
+    """Drafts the "Bottom line" callout into the edit form — never
+    auto-saved, standing AI-first-pass-then-human-review principle. Grounded
+    in the tool's own description + curated competitors, so it needs the
+    tool_id (unlike generate-description, which is stateless)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        competitor_names = [c["name"] for c in lib.list_tool_competitors(tool_id)]
+    finally:
+        lib.close()
+
+    from linklib.enrich import generate_tool_differentiation
+    draft = generate_tool_differentiation(tool["name"], tool["url"], tool.get("description", ""), competitor_names)
+    if draft is None:
+        return JSONResponse({"ok": False, "error": "Generation is unavailable right now "
+                                                     "(missing ANTHROPIC_API_KEY, or the request failed). "
+                                                     "Write it by hand."}, status_code=503)
+
+    lib = _lib()
+    try:
+        lib.record_enrichment_cost(None, draft.model, draft.input_tokens, draft.output_tokens, draft.cost_usd)
+    finally:
+        lib.close()
+
+    return JSONResponse({"ok": True, "differentiation_note": draft.differentiation_note,
                          "low_confidence": draft.low_confidence})
 
 

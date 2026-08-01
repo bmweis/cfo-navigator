@@ -241,6 +241,93 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         return None
 
 
+_TOOL_DIFFERENTIATION_PROMPT = """You are drafting the "Bottom line" callout for a vendor's profile page on the
+CFO Toolbox, a directory read by finance leaders deciding between tools. This
+is the single most scannable takeaway on the page — a "best for X, trade-off
+is Y" framing, not a restatement of the description.
+
+Follow these rules exactly:
+1. Name who the tool is genuinely best for (a specific buyer/use case, not
+   "finance teams" generically) and the real trade-off or limitation that
+   comes with picking it — every strength implies something it costs you.
+2. Ground the claim in the description and competitor context below; never
+   invent a comparison point you can't support.
+3. No marketing language: no "powerful," "seamless," "best-in-class," or
+   similar adjective stacking. No exclamation points.
+4. One or two sentences. This is a callout, not a paragraph.
+
+Vendor: {name} ({url})
+Description: {description}
+{competitors_block}
+
+Respond with JSON only: {{"differentiation_note": "..."}}"""
+
+
+@dataclass
+class ToolDifferentiationDraft:
+    differentiation_note: str
+    low_confidence: bool = False
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def generate_tool_differentiation(name: str, url: str, description: str,
+                                   competitor_names: list[str] | None = None,
+                                   model: str = DEFAULT_MODEL) -> ToolDifferentiationDraft | None:
+    """Draft the profile page's "Bottom line" callout — a first pass for
+    Brian to review/edit in the admin edit form, never auto-saved (standing
+    principle: AI drafts into the form, nothing publishes without an
+    explicit human review-and-save). Grounded in the tool's own description
+    plus its curated competitor list when available; `low_confidence=True`
+    when there's no competitor context to compare against, since "how this
+    differs" is weaker without something to differ from. Returns None if the
+    SDK/key is unavailable or the call fails."""
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    competitor_names = competitor_names or []
+    low_confidence = not bool(competitor_names)
+    competitors_block = (
+        f"Curated competitors: {', '.join(competitor_names)}" if competitor_names
+        else "(No competitors curated yet — draft from the description alone.)"
+    )
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model,
+            max_tokens=400,
+            messages=[{"role": "user",
+                       "content": _TOOL_DIFFERENTIATION_PROMPT.format(
+                           name=name, url=url, description=description, competitors_block=competitors_block)}],
+        )
+        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+
+        from .pricing import compute_cost
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
+        return ToolDifferentiationDraft(
+            differentiation_note=str(data.get("differentiation_note", "")).strip(),
+            low_confidence=low_confidence, model=model,
+            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+        )
+    except Exception:
+        return None
+
+
 # Feature comparison data (search overhaul Phase 4b, extended in the
 # automated-research follow-up to also draft agent_taxonomy_note in the same
 # call) — drafts standalone-vs-bundled availability rows for tool_features
@@ -485,15 +572,22 @@ def generate_tool_features(name: str, url: str, description: str = "",
         return None
 
 
-# The thirteen fields generate_community_profile drafts (excludes low_confidence,
+# The fields generate_community_profile drafts (excludes low_confidence,
 # which is computed from the fetch, and updated_at, which is set on save) —
 # shared with webapp/app.py so the "existing draft as context" block and the
 # JSON response stay in lockstep with what the form actually submits.
+# seniority_band/primary_purpose/resources_included/platform_type/
+# meeting_format/event_style/cpe_eligible were originally hand-entry-only
+# (added after this list, alongside the Details-card short-field inputs) —
+# folded into the same generate call here per the AI-first-pass-on-every-
+# field standing principle, rather than a second generate mechanism.
 COMMUNITY_PROFILE_FIELDS = [
     "ideal_member", "anti_fit", "value_prop", "format_reality", "engagement_level",
     "sponsor_relationship_note", "business_model", "application_friction", "cost_value_verdict",
     "notable_members", "founded_year", "public_criticism", "verdict_summary",
     "stage_focus", "jobs_program", "team_or_individual",
+    "seniority_band", "primary_purpose", "resources_included",
+    "platform_type", "meeting_format", "event_style", "cpe_eligible",
 ]
 
 _COMMUNITY_PROFILE_PROMPT = """You are drafting a deep, opinionated profile of a peer community for the
@@ -515,9 +609,16 @@ Write about the community named below. Follow these rules exactly:
    from the page/your knowledge (e.g. pay-to-play concerns, inconsistent chapter
    quality) — null if you don't know of any, never a fabricated nitpick.
 6. `verdict_summary` is one short sentence in the shape "Best for X, not for Y."
-7. Every other field is 2-5 plain-prose sentences, no markdown, no quotes —
-   budget and depth are not a constraint here, so use the page content below
-   thoroughly rather than settling for a thin one-liner.
+7. Every prose field (see below) is 2-5 plain-prose sentences, no markdown, no
+   quotes — budget and depth are not a constraint here, so use the page
+   content below thoroughly rather than settling for a thin one-liner.
+8. `seniority_band`/`primary_purpose`/`resources_included`/`platform_type`/
+   `meeting_format`/`event_style` are short factual/categorical values (a
+   phrase, not a paragraph) — deliberately brief, distinct from the prose
+   fields above.
+9. `cpe_eligible` must be one of "Yes", "No", or "Unclear", optionally with a
+   short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)") —
+   never guess "Yes" without a specific reason to believe it.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
 
@@ -550,6 +651,18 @@ Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
      or null if unclear.
   "team_or_individual": whether membership is individual-only, team/company-
      based, or supports both — or null if unclear.
+  "seniority_band": who it targets by seniority (e.g. "CFO and VP Finance
+     only," "open to Controllers and up") — or null if unclear.
+  "primary_purpose": the community's main purpose in a few words, e.g.
+     "networking," "peer learning," or "both" — or null if unclear.
+  "resources_included": templates, benchmarking data, research, job boards,
+     etc. actually provided to members, or "No" if none — or null if unclear.
+  "platform_type": the technical platform members actually use, e.g. "Slack,"
+     "proprietary app," "in-person only" — or null if unclear.
+  "meeting_format": in-person, virtual, or hybrid cadence — or null if unclear.
+  "event_style": the feel of its events, e.g. "large-format conferences,"
+     "intimate small-group," "forum-only, no events" — or null if unclear.
+  "cpe_eligible": "Yes"/"No"/"Unclear", per rule 9 above.
 
 Community name: {name}
 Community URL: {url}
@@ -576,6 +689,13 @@ class CommunityProfileDraft:
     stage_focus: str = ""
     jobs_program: str = ""
     team_or_individual: str = ""
+    seniority_band: str = ""
+    primary_purpose: str = ""
+    resources_included: str = ""
+    platform_type: str = ""
+    meeting_format: str = ""
+    event_style: str = ""
+    cpe_eligible: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
     model: str = ""
     input_tokens: int = 0
@@ -585,10 +705,12 @@ class CommunityProfileDraft:
 
 def generate_community_profile(name: str, url: str, existing: dict | None = None,
                                model: str = DEFAULT_MODEL) -> CommunityProfileDraft | None:
-    """Draft all thirteen qualitative Community Profile fields from a community's
-    name + URL in one Claude call, mirroring generate_tool_description exactly
-    (same page-fetch grounding, same low_confidence rule) but sized for the
-    larger field count. `existing`, when given, feeds back any already-drafted
+    """Draft every Community Profile field (COMMUNITY_PROFILE_FIELDS — the
+    original 13 narrative fields plus the short factual/categorical ones
+    added later) from a community's name + URL in one Claude call, mirroring
+    generate_tool_description exactly (same page-fetch grounding, same
+    low_confidence rule) but sized for the larger field count. `existing`,
+    when given, feeds back any already-drafted
     or admin-edited fields as context so a regenerate refines rather than
     starts from scratch. Never auto-saved — same review contract as the tool
     description draft. Returns None if the SDK/key is unavailable or the call
@@ -662,6 +784,13 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             stage_focus=str(data.get("stage_focus") or "").strip(),
             jobs_program=str(data.get("jobs_program") or "").strip(),
             team_or_individual=str(data.get("team_or_individual") or "").strip(),
+            seniority_band=str(data.get("seniority_band") or "").strip(),
+            primary_purpose=str(data.get("primary_purpose") or "").strip(),
+            resources_included=str(data.get("resources_included") or "").strip(),
+            platform_type=str(data.get("platform_type") or "").strip(),
+            meeting_format=str(data.get("meeting_format") or "").strip(),
+            event_style=str(data.get("event_style") or "").strip(),
+            cpe_eligible=str(data.get("cpe_eligible") or "").strip(),
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )

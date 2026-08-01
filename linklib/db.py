@@ -604,6 +604,31 @@ CREATE TABLE IF NOT EXISTS community_profiles (
     updated_at                TEXT NOT NULL DEFAULT ''
 );
 
+-- Review-status audit trail for every AI-drafted field on Software/Communities
+-- profiles (standing principle: AI drafts a first pass into the edit form,
+-- nothing publishes without Brian reviewing and saving it — this table is
+-- what makes that a real, auditable gate rather than an assumption). One
+-- generic table rather than a {field}_reviewed_at/_by column pair per field
+-- — with 15+ generatable fields across two record types and more likely to
+-- come later (e.g. Phase 8 features), a fixed-shape table scales without a
+-- migration every time a new generatable field is added.
+-- reviewed_by is stored even though there's only ever one admin (Brian)
+-- today, so the schema doesn't need revisiting if that ever changes.
+-- Written by Library.record_field_review, called from an edit-submit route
+-- whenever the submitted form explicitly flags a field as AI-drafted this
+-- editing session (see the ai_drafted_fields hidden input convention in the
+-- generate-button JS) — never inferred from content alone, since there's no
+-- reliable way to tell "hand-typed" from "AI draft the admin approved as-is"
+-- after the fact.
+CREATE TABLE IF NOT EXISTS field_reviews (
+    entity_type TEXT NOT NULL,
+    entity_id   INTEGER NOT NULL,
+    field_name  TEXT NOT NULL,
+    reviewed_at TEXT NOT NULL,
+    reviewed_by TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (entity_type, entity_id, field_name)
+);
+
 -- Gap-collection (Phase 5): the native replacement for the old /community
 -- waitlist page's Google Form, folded into the live directory instead of a
 -- separate parked page. current_communities/gaps/looking_for are the
@@ -1535,6 +1560,34 @@ class Library:
         )
         self.conn.commit()
 
+    # -- AI-drafted field review tracking (standing principle: AI drafts a
+    # first pass into the edit form, nothing publishes without an explicit
+    # human review-and-save) ------------------------------------------------
+
+    def record_field_review(self, entity_type: str, entity_id: int, field_name: str,
+                             reviewed_by: str = "") -> None:
+        """Stamp one field as reviewed (saved after being AI-drafted this
+        editing session) — an upsert, since only the most recent review of a
+        field matters. Called from an edit-submit route once per field named
+        in the submitted ai_drafted_fields list, never inferred from content."""
+        self.conn.execute(
+            """INSERT INTO field_reviews (entity_type, entity_id, field_name, reviewed_at, reviewed_by)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(entity_type, entity_id, field_name)
+               DO UPDATE SET reviewed_at=excluded.reviewed_at, reviewed_by=excluded.reviewed_by""",
+            (entity_type, entity_id, field_name, _now(), reviewed_by.strip()),
+        )
+        self.conn.commit()
+
+    def list_field_reviews(self, entity_type: str, entity_id: int) -> dict[str, dict]:
+        """{field_name: {"reviewed_at":..., "reviewed_by":...}} for one
+        entity — the admin edit page's per-field "last reviewed" display."""
+        rows = self.conn.execute(
+            "SELECT field_name, reviewed_at, reviewed_by FROM field_reviews WHERE entity_type=? AND entity_id=?",
+            (entity_type, entity_id),
+        ).fetchall()
+        return {r["field_name"]: {"reviewed_at": r["reviewed_at"], "reviewed_by": r["reviewed_by"]} for r in rows}
+
     def enrichment_cost_total(self, since: Optional[str] = None) -> float:
         """Total enrichment overhead spend, optionally since an ISO date/datetime
         prefix. Mirrors ask_cost_total's shape for the user-cap ledger."""
@@ -2118,6 +2171,7 @@ class Library:
 
     def delete_tool(self, tool_id: int) -> None:
         self.conn.execute("DELETE FROM tools WHERE id=?", (tool_id,))
+        self.conn.execute("DELETE FROM field_reviews WHERE entity_type='tool' AND entity_id=?", (tool_id,))
         self.conn.commit()
 
     def update_tool_differentiation(self, tool_id: int, differentiation_note: str) -> None:
@@ -2637,6 +2691,7 @@ class Library:
     def delete_community(self, community_id: int) -> None:
         self.conn.execute("DELETE FROM communities WHERE id=?", (community_id,))
         self.conn.execute("DELETE FROM community_profiles WHERE community_id=?", (community_id,))
+        self.conn.execute("DELETE FROM field_reviews WHERE entity_type='community' AND entity_id=?", (community_id,))
         self.conn.commit()
 
     @staticmethod
