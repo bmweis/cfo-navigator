@@ -274,6 +274,16 @@ hard stop — do not proceed to code until approval is given in the session.**
 
 ## Documentation
 
+`docs/BUILD_PLAN.md` is the canonical build plan for the current Admin Tooling +
+Profile Pages + Feature Normalization & Compare initiative — every phase (1
+through 9), what's decided, and the investigation-first gates that require
+Brian's explicit approval before schema/migration work. It exists specifically
+so a session doesn't lose the plan when it was only ever pasted into chat —
+read it directly at the start of any session picking up this work, rather than
+asking to have it re-pasted. Verify phase status against actual code/PR
+history before assuming the doc is current, the same way you'd verify any
+other memory of repo state.
+
 `ARCHITECTURE.md` (repo root) is the living technical overview — schema, request
 flows, design decisions, and their Mermaid diagrams. `RUNBOOK.md` (repo root)
 holds the operational procedures — DB restore from a Drive snapshot, save-token
