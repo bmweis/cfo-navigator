@@ -97,7 +97,10 @@ def test_profile_page_shows_homepage_fallback_caption(env):
     assert "no product screenshot available yet" in r.text.lower()
 
 
-def test_profile_page_hides_screenshot_box_when_unset(env):
+def test_profile_page_shows_placeholder_when_screenshot_unset(env):
+    """Phase 3: the screenshot card always renders (layout completeness, per
+    the mockup) — a tool with no screenshot gets a "No screenshot yet"
+    placeholder rather than the card disappearing entirely."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Solo Co", "A tool with nothing set for the image field.", "https://solo.example", [], approved=1)
@@ -105,5 +108,5 @@ def test_profile_page_hides_screenshot_box_when_unset(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/{a_slug}")
-    assert "tool-profile-side" not in r.text
-    assert "screenshot" not in r.text.lower()
+    assert "No screenshot yet" in r.text
+    assert "<img" not in r.text

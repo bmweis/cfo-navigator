@@ -157,8 +157,8 @@ def test_agent_taxonomy_verification_flag_shown_on_profile(env):
 
     r = _client(env).get("/tools/software/runway")
     assert "Uses an LLM-drafted agent summary." in r.text
-    assert '<span class="cc-verify">unverified</span>' in r.text
-    assert ".cc-verify{" in r.text   # profile page has its own <style> block
+    assert '<span class="tp-verify">unverified</span>' in r.text
+    assert ".tp-verify{" in r.text   # profile page has its own <style> block
 
 
 def test_agent_taxonomy_no_flag_once_verified(env):
@@ -171,7 +171,7 @@ def test_agent_taxonomy_no_flag_once_verified(env):
 
     r = _client(env).get("/tools/software/runway")
     assert "Uses an LLM-drafted agent summary." in r.text
-    assert '<span class="cc-verify">unverified</span>' not in r.text
+    assert '<span class="tp-verify">unverified</span>' not in r.text
 
 
 def test_compare_shows_agent_taxonomy_verification_flag(env):

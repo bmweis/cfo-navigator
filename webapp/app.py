@@ -5948,12 +5948,13 @@ async def tools_software_find_chat(request: Request):
 
 @app.get("/tools/software/{slug}", response_class=HTMLResponse)
 def tools_software_profile(request: Request, slug: str):
-    authed = _is_authed(request)   # admin sees the meta line + edit link
+    authed = _is_authed(request)   # admin sees the meta line, verification count, and Edit button
     is_member = _is_member(request)  # gates the Warm Intro button, same as the card
     lib = _lib()
     try:
         tool = lib.get_tool_by_slug(slug)
         competitors = lib.list_tool_competitors(tool["id"]) if tool else []
+        features = lib.list_tool_features(tool["id"]) if tool else []
     finally:
         lib.close()
     if not tool:
@@ -5961,62 +5962,108 @@ def tools_software_profile(request: Request, slug: str):
 
     competitors_block = ""
     if competitors:
-        comp_links = "".join(
-            f'<a href="/tools/software/{_esc(c["slug"])}" class="tool-cat" style="text-decoration:none;">{_esc(c["name"])}</a>'
+        comp_chips = "".join(
+            f'<a href="/tools/software/{_esc(c["slug"])}" class="tp-chip">{_esc(c["name"])}</a>'
             for c in competitors
         )
-        competitors_block = f"""<div style="margin-bottom:24px;">
-  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Closest competitors</div>
-  <div style="display:flex;flex-wrap:wrap;gap:8px;">{comp_links}</div>
+        competitors_block = f"""<div class="tp-card">
+  <h2 class="tp-card-h">Competitors</h2>
+  <div class="tp-chip-row">{comp_chips}</div>
 </div>"""
 
     differentiation_block = ""
     if (tool.get("differentiation_note") or "").strip():
-        differentiation_block = f"""<div style="margin-bottom:24px;">
-  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">How this differs</div>
-  <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{_esc(tool['differentiation_note'])}</p>
-</div>"""
+        differentiation_block = (
+            f'<p style="margin:14px 0 0;font-style:italic;color:var(--muted);">'
+            f'How this differs from the competition: {_esc(tool["differentiation_note"])}</p>'
+        )
 
     agent_taxonomy_block = ""
     if (tool.get("agent_taxonomy_note") or "").strip():
-        agent_verify = (' <span class="cc-verify">unverified</span>'
-                        if tool.get("agent_taxonomy_needs_verification") else "")
-        agent_taxonomy_block = f"""<div style="margin-bottom:24px;">
-  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Agent taxonomy{agent_verify}</div>
-  <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{_esc(tool['agent_taxonomy_note'])}</p>
+        agent_verify = ' <span class="tp-verify">unverified</span>' if tool.get("agent_taxonomy_needs_verification") else ""
+        agent_taxonomy_block = f"""<div class="tp-card">
+  <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy{agent_verify}</h2>
+  <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
 </div>"""
 
-    screenshot_block = ""
+    # Features card: two-column Feature/AI table, reading tool_features free
+    # text directly (Phase 3) — Phase 8.4 switches this to the normalized
+    # feature/family tables once they exist. AI enablement is a display-layer
+    # heuristic until then: a feature_name with a leading "AI " is shown with
+    # that prefix stripped and a checkmark in the AI column, same as the
+    # mockup's dev note.
+    features_card = ""
+    if features:
+        n_needs_verify = sum(1 for f in features if f["needs_verification"])
+
+        def _feature_row(f: dict) -> str:
+            name = f["feature_name"]
+            is_ai = name[:3].lower() == "ai "
+            display_name = name[3:].lstrip() if is_ai else name
+            ai_check = '<span class="tp-ai-check">&#10003;</span>' if is_ai else ""
+            verify_tag = '<span class="tp-needs-verify">verify</span>' if f["needs_verification"] else ""
+            return f'<tr><td>{_esc(display_name)}{verify_tag}</td><td>{ai_check}</td></tr>'
+
+        feature_rows = "".join(_feature_row(f) for f in features)
+        verify_line = ""
+        if authed:
+            verify_line = (
+                f'<div style="margin-top:8px;text-align:right;font-weight:500;font-size:11.5px;color:var(--muted);">'
+                f'{n_needs_verify} of {len(features)} need verification</div>'
+            )
+        features_card = f"""<div class="tp-card">
+  <h2 class="tp-card-h">Features</h2>
+  <table class="tp-feature-table">
+    <thead><tr><th>Feature</th><th>AI</th></tr></thead>
+    <tbody>{feature_rows}</tbody>
+  </table>
+  {verify_line}
+</div>"""
+
+    cats = tool.get("categories") or []
+    categories_card = ""
+    if cats:
+        cat_items = "".join(f'<li>{_esc(c)}</li>' for c in cats)
+        categories_card = f"""<div class="tp-card">
+  <h2 class="tp-card-h">Categories</h2>
+  <ul class="tp-cat-list">{cat_items}</ul>
+</div>"""
+
+    screenshot_caption = ""
     if (tool.get("screenshot_url") or "").strip():
         if tool.get("screenshot_is_product"):
-            caption = "Product screenshot"
+            screenshot_caption = "Product screenshot"
         elif (tool.get("screenshot_captured_at") or "").strip():
-            caption = f"Homepage screenshot, captured {tool['screenshot_captured_at'][:10]}"
+            screenshot_caption = f"Homepage screenshot, captured {tool['screenshot_captured_at'][:10]}"
         else:
-            caption = "Homepage screenshot (no product screenshot available yet)"
-        screenshot_block = f"""<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;">
-  <img src="{_esc(tool['screenshot_url'])}" alt="{_esc(tool['name'])} screenshot"
-    style="width:100%;height:auto;border-radius:10px;display:block;object-fit:cover;">
-  <p style="margin:10px 2px 2px;font-size:12px;color:var(--muted);font-style:italic;">{_esc(caption)}</p>
+            screenshot_caption = "Homepage screenshot (no product screenshot available yet)"
+    screenshot_frame_inner = (
+        f'<img src="{_esc(tool["screenshot_url"])}" alt="{_esc(tool["name"])} screenshot" '
+        f'style="width:100%;height:100%;object-fit:cover;display:block;">'
+        if (tool.get("screenshot_url") or "").strip() else "No screenshot yet"
+    )
+    featured_sticker = _sticker("Featured", rotate=8, top="-14px", right="-16px", size=14) if tool.get("promoted") else ""
+    screenshot_block = f"""<div class="tp-card tp-shot-card">
+  {featured_sticker}
+  <div class="tp-shot-frame">{screenshot_frame_inner}</div>
+  {f'<div class="tp-shot-caption">{_esc(screenshot_caption)}</div>' if screenshot_caption else ''}
 </div>"""
 
-    featured_badge = (
-        '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
-        'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>'
-        if tool.get("promoted") else ""
-    )
-    advisor_star = (
-        '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#9733;</span>'
-        if tool.get("advisor") else ""
-    )
-    cats = "".join(f'<span class="tool-cat">{_esc(c)}</span>' for c in tool.get("categories") or [])
+    advisor_mark_html = '<span class="tp-fn-mark">*</span>' if tool.get("advisor") else ""
+    footnote_block = ""
+    if tool.get("advisor"):
+        footnote_block = (
+            f'<div class="tp-footnote"><span class="tp-fn-mark">*</span>'
+            f'<span>Brian is a formal advisor to {_esc(tool["name"])}. Advisor relationships are always '
+            f'disclosed and never affect ranking or inclusion.</span></div>'
+        )
 
     has_warm_intro = bool(tool.get("warm_intro_enabled") and tool.get("vendor_email"))
     intro_btn = ""
     intro_modal_block = ""
     if has_warm_intro:
         if is_member:
-            intro_btn = '<button class="tool-intro-btn" onclick="openIntroModal()">&#10024; Warm Intro</button>'
+            intro_btn = '<button class="btn btn-ghost" onclick="openIntroModal()">&#10024; Warm Intro</button>'
             intro_modal_block = f"""
 <div class="intro-overlay" id="intro-overlay" onclick="if(event.target===this)closeIntroModal()">
   <div class="intro-modal">
@@ -6115,7 +6162,7 @@ function submitIntroForm() {{
 }}
 </script>"""
         else:
-            intro_btn = ('<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">'
+            intro_btn = ('<button class="btn btn-ghost" disabled title="Sign in to request a warm intro">'
                          '&#10024; Warm Intro</button>')
 
     meta_parts = []
@@ -6128,62 +6175,104 @@ function submitIntroForm() {{
             meta_parts.append(f"Edited {tool['updated_at'][:10]}")
     meta_line = " &middot; ".join(meta_parts)
 
-    main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
-<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:2px;">
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    {featured_badge}{advisor_star}
-    <h1 style="margin:0;">{_esc(tool['name'])}</h1>
+    # Action row, one line, fixed order: Visit -> Warm intro -> Compare ->
+    # divider -> Edit (Software profile page, Phase 3). Compare is a UI-only
+    # stub — its real behavior (launching the mockup-v4 comparison view with
+    # this entry pre-selected) is wired up in Phase 8.5, not here.
+    action_row_parts = []
+    if tool.get("url"):
+        action_row_parts.append(f'<a class="btn" href="{_esc(tool["url"])}" target="_blank" rel="noopener">Visit &#8599;</a>')
+    if intro_btn:
+        action_row_parts.append(intro_btn)
+    action_row_parts.append('<a class="btn btn-ghost" href="#">&#8644; Compare</a>')
+    if authed:
+        action_row_parts.append('<span class="tp-admin-divider"></span>')
+        action_row_parts.append(f'<a class="tp-admin-btn" href="/tools/software/{tool["slug"]}/edit">&#9998; Edit</a>')
+    action_row = "".join(action_row_parts)
+
+    subhead = (tool.get("summary") or tool.get("description") or "").strip()
+
+    hero_text = f"""<h1 class="tp-h1">{_esc(tool['name'])}{advisor_mark_html}</h1>
+{f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
+<div class="tp-hero-actions">{action_row}</div>"""
+
+    top_band = f"""<div class="tp-band">
+  <div>{hero_text}</div>
+  <div>{screenshot_block}</div>
+</div>"""
+
+    description_card = f"""<div class="tp-card">
+  <h2 class="tp-card-h">Description</h2>
+  <p style="margin:0;">{_esc(tool['description'])}</p>
+  {differentiation_block}
+</div>"""
+
+    lower_band = f"""<div class="tp-band">
+  <div class="tp-col-stack">
+    {description_card}
+    {agent_taxonomy_block}
   </div>
-  {f'<a href="/tools/software/{tool["slug"]}/edit" class="tool-admin-btn">Edit</a>' if authed else ''}
-</div>
-{f'<p style="margin:8px 0 20px;"><a href="{_esc(tool["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if tool.get('url') else ''}
-<p style="font-size:15px;color:var(--ink-soft);margin:0 0 20px;line-height:1.6;">{_esc(tool['description'])}</p>
-<div class="tool-cats" style="margin-bottom:24px;">{cats}</div>
-{agent_taxonomy_block}
-{differentiation_block}
-{competitors_block}
-{f'<div style="margin-bottom:24px;">{intro_btn}</div>' if intro_btn else ''}
-{f'<p style="font-size:13px;color:var(--muted);margin:0 0 20px;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}"""
-
-    # Two-column layout (content + sticky screenshot sidebar) only when
-    # there's actually a screenshot to show — most tools don't have one yet,
-    # and reserving a 320px column for nothing would waste real space on the
-    # common case. Mobile-first: stacks by default, grid kicks in at 900px+,
-    # same pattern as the homepage hero's photo column.
-    if screenshot_block:
-        page_open = f"""<div class="page page-full">
-<style>
-.tool-profile-layout{{display:flex;flex-direction:column;gap:24px;}}
-@media(min-width:900px){{
-  .tool-profile-layout{{display:grid;grid-template-columns:1fr 320px;gap:32px;align-items:start;}}
-  .tool-profile-side{{position:sticky;top:24px;}}
-}}
-</style>
-<div class="tool-profile-layout">
-<div>
-{main_content}
-</div>
-<div class="tool-profile-side">{screenshot_block}</div>
-</div>
-</div>"""
-    else:
-        page_open = f"""<div class="page page-full">
-{main_content}
+  <div class="tp-col-stack">
+    {features_card}
+    {categories_card}
+    {competitors_block}
+  </div>
 </div>"""
 
-    body = page_open + f"""
+    main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
+{top_band}
+{lower_band}
+{f'<p style="font-size:13px;color:var(--muted);margin:16px 0 0;padding-top:16px;border-top:1px solid var(--line);">{meta_line}</p>' if meta_line else ''}
+{footnote_block}"""
+
+    body = f"""<div class="page page-full">
+{main_content}
+</div>
 <style>
-.cc-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
+.tp-band{{display:grid;grid-template-columns:2fr 1fr;gap:22px;align-items:start;margin-top:22px;}}
+.tp-band:first-of-type{{margin-top:20px;}}
+@media(max-width:800px){{.tp-band{{grid-template-columns:1fr;}}}}
+.tp-col-stack{{display:flex;flex-direction:column;gap:22px;}}
+.tp-h1{{margin:0 0 8px;display:inline-flex;align-items:flex-start;}}
+.tp-fn-mark{{font-size:18px;color:var(--navy-light);font-weight:600;margin-left:3px;transform:translateY(2px);line-height:1;}}
+.tp-subhead{{font-size:17px;color:var(--ink-soft);margin:0 0 18px;}}
+.tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
+.tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
+.tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
+  padding:10px 16px;font:600 14px var(--font-body);cursor:pointer;text-decoration:none;display:inline-flex;
+  align-items:center;gap:6px;white-space:nowrap;}}
+.tp-admin-btn:hover{{background:var(--navy-wash);color:var(--ink);text-decoration:none;}}
+.tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
+.tp-card-h{{font-family:var(--font-head);font-weight:600;font-size:18px;color:var(--ink);margin:0 0 14px;letter-spacing:-0.01em;}}
+.tp-card-h small{{display:block;font-family:var(--font-body);font-weight:500;font-size:12px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}}
+.tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;}}
+.tp-shot-card{{padding:12px;text-align:center;position:relative;overflow:visible;}}
+.tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
+  aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
+.tp-shot-caption{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:10px;}}
+.tp-feature-table{{width:100%;border-collapse:collapse;font-size:13px;}}
+.tp-feature-table th{{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
+  font-weight:600;padding-bottom:7px;border-bottom:1px solid var(--line);}}
+.tp-feature-table th:last-child{{text-align:center;width:34px;}}
+.tp-feature-table td{{padding:8px 0;border-bottom:1px solid var(--line);color:var(--ink-soft);vertical-align:middle;}}
+.tp-feature-table tr:last-child td{{border-bottom:none;}}
+.tp-feature-table td:last-child{{text-align:center;}}
+.tp-ai-check{{color:var(--seafoam-deep);font-weight:700;font-size:14px;}}
+.tp-needs-verify{{background:var(--coral-wash);color:var(--coral-deep);font-size:9px;font-weight:600;padding:1px 5px;
+  border-radius:4px;margin-left:6px;white-space:nowrap;}}
+.tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
   background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
-.tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
-.tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
-.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
-.tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
-.tool-intro-btn{{font-size:13px;font-weight:600;color:var(--navy);background:none;border:1px solid var(--navy);
-  border-radius:8px;padding:6px 14px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
-.tool-intro-btn:hover{{background:var(--navy-wash);}}
-.tool-intro-btn:disabled{{color:var(--muted);border-color:var(--line);cursor:not-allowed;}}
-.tool-intro-btn:disabled:hover{{background:none;}}
+.tp-cat-list{{list-style:none;margin:0;padding:0;}}
+.tp-cat-list li{{font-size:14px;color:var(--ink-soft);padding:5px 0 5px 16px;position:relative;}}
+.tp-cat-list li::before{{content:"\\2022";color:var(--seafoam-deep);position:absolute;left:0;font-weight:700;}}
+.tp-chip-row{{display:flex;gap:8px;flex-wrap:wrap;}}
+.tp-chip{{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:6px 14px;
+  font-size:13px;color:var(--ink-soft);font-weight:500;text-decoration:none;}}
+.tp-chip:hover{{background:var(--navy-wash);text-decoration:none;}}
+.tp-footnote{{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);
+  display:flex;gap:6px;}}
+.tp-footnote .tp-fn-mark{{color:var(--navy-light);font-weight:600;flex-shrink:0;}}
 .intro-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;
   align-items:center;justify-content:center;padding:20px;}}
 .intro-overlay.open{{display:flex;}}
