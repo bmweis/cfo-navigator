@@ -7647,6 +7647,7 @@ def tools_community_profile(request: Request, slug: str):
             raise HTTPException(status_code=404, detail="Community not found")
         community = _public_community(community)
         profile = lib.get_community_profile(community["id"]) or {}
+        similar_communities = lib.list_community_competitors(community["id"])
         lib.record_community_view(session_id, community["id"])
     finally:
         lib.close()
@@ -7805,6 +7806,22 @@ def tools_community_profile(request: Request, slug: str):
   <ul class="tp-cat-list">{''.join(f'<li>{_esc(x)}</li>' for x in cats)}</ul>
 </div>"""
 
+    # Similar communities—same tp-chip-row treatment as Software's
+    # Competitors card, deferred from Phase 3b to the Competitors/Similar-
+    # communities upgrade since community_competitors didn't exist yet.
+    similar_communities_block = ""
+    if similar_communities:
+        similar_chips = "".join(
+            f'<a href="/tools/communities/{_esc(s["slug"])}" class="tp-chip">{_esc(s["name"])}</a>'
+            for s in similar_communities
+        )
+        similar_communities_block = f"""<div class="tp-card">
+  <h2 class="tp-card-h">Similar communities</h2>
+  <div class="tp-chip-row">{similar_chips}</div>
+</div>"""
+    elif authed:
+        similar_communities_block = _profile_admin_nudge("No similar communities curated yet.")
+
     footnote_block = ""
     if community.get("advisor"):
         footnote_block = (
@@ -7822,6 +7839,7 @@ def tools_community_profile(request: Request, slug: str):
   <div class="tp-col-stack">
     {details_card}
     {categories_card}
+    {similar_communities_block}
   </div>
 </div>"""
 
@@ -10012,10 +10030,94 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
     try:
         c = lib.get_community_by_slug(slug)
         categories = lib.list_community_categories()
+        community_id = c["id"] if c else None
+        competitors = lib.list_community_competitors(community_id) if c else []
+        suggestions = lib.suggest_community_competitors(community_id) if c else []
+        other_communities = [
+            x for x in lib.list_communities(approved_only=True)
+            if x["id"] != community_id and x["id"] not in {comp["id"] for comp in competitors}
+        ] if c else []
     finally:
         lib.close()
     if not c:
         raise HTTPException(status_code=404, detail="Community not found")
+
+    def _competitor_row(comp: dict) -> str:
+        return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;'
+                f'border-top:1px solid var(--line);">'
+                f'<a href="/tools/communities/{comp["slug"]}/edit" style="font-size:14px;font-weight:500;color:var(--ink);">{_esc(comp["name"])}</a>'
+                f'<form method="post" action="/admin/tools/communities/{community_id}/competitors/{comp["id"]}/remove" style="margin:0;">'
+                f'<button type="submit" class="tool-admin-btn tool-admin-del">Remove</button></form></div>')
+
+    def _suggestion_row(s: dict) -> str:
+        cats_label = ", ".join(_esc(x) for x in s["categories"])
+        return (f'<label style="display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer;">'
+                f'<input type="checkbox" name="competitor_id" value="{s["id"]}" id="community-competitor-cb-{s["id"]}">'
+                f'<span style="font-size:14px;">{_esc(s["name"])} '
+                f'<span style="color:var(--muted);font-size:12px;">({cats_label})</span></span></label>')
+
+    _competitors_list_html = "".join(_competitor_row(comp) for comp in competitors)
+    _suggestions_block_html = ""
+    if suggestions:
+        _suggestions_block_html = (
+            '<div style="margin-top:20px;">'
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
+            '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
+            'letter-spacing:.07em;">Suggested—shares a tag</div>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\')">&#10024; Generate</button>'
+            '</div>'
+            '<p id="community-competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
+            f'<form method="post" action="/admin/tools/communities/{community_id}/competitors/add-selected">'
+            '<input type="hidden" id="community-competitor-ai-drafted-fields" name="ai_drafted_fields" value="">'
+            + "".join(_suggestion_row(s) for s in suggestions) +
+            '<button type="submit" class="tool-admin-btn" style="margin-top:8px;">+ Add selected</button>'
+            '</form></div>'
+        )
+    _other_communities_options_html = "".join(
+        f'<option value="{x["id"]}">{_esc(x["name"])}</option>' for x in other_communities
+    )
+    _competitors_card_html = f"""
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Similar communities</h2>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Similar communities" on {_esc(c['name'])}'s profile page. Curating from either community's edit page links both directions.</p>
+
+  {_competitors_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No similar communities curated yet.</p>'}
+
+  {_suggestions_block_html}
+
+  <div style="margin-top:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <form method="post" action="/admin/tools/communities/{community_id}/competitors/add" style="display:flex;gap:10px;align-items:center;">
+      <select name="competitor_id" style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;min-width:220px;">
+        <option value="">Add a similar community by name&hellip;</option>
+        {_other_communities_options_html}
+      </select>
+      <button type="submit" class="tool-admin-btn">+ Add</button>
+    </form>
+  </div>
+</div>
+<script>
+async function generateCommunityCompetitorMatches(communityId, statusId) {{
+  var status = document.getElementById(statusId);
+  status.textContent = 'Generating…';
+  try {{
+    var r = await fetch('/admin/tools/communities/' + communityId + '/competitors/generate-matches', {{method: 'POST'}});
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
+    var matched = d.competitor_ids || [];
+    matched.forEach(function(id) {{
+      var cb = document.getElementById('community-competitor-cb-' + id);
+      if (cb) cb.checked = true;
+    }});
+    var flagEl = document.getElementById('community-competitor-ai-drafted-fields');
+    if (flagEl && matched.length) flagEl.value = 'competitors';
+    status.textContent = matched.length
+      ? 'Pre-checked ' + matched.length + ' AI-matched candidate' + (matched.length === 1 ? '' : 's') + '. Review before adding.'
+      : 'No confident matches found. Pick similar communities by hand.';
+  }} catch (e) {{
+    status.textContent = e.message || 'Generation failed. Pick similar communities by hand.';
+  }}
+}}
+</script>"""
 
     screenshot_banner_html = ""
     if screenshot_captured == "1":
@@ -10057,10 +10159,13 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
     <button type="submit" class="tool-admin-btn">&#128247; Recapture from homepage</button>
   </form>
 </div>
+
+{_competitors_card_html}
 </div>
 <style>
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
+.tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 </style>
 <script>{_GENERATE_LISTING_JS}</script>"""
     return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
@@ -10112,6 +10217,113 @@ async def admin_communities_edit_submit(request: Request, slug: str):
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/competitors/add")
+async def admin_communities_competitors_add(request: Request, community_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        form = await request.form()
+        try:
+            competitor_id = int(form.get("competitor_id") or "")
+        except (TypeError, ValueError):
+            return RedirectResponse(f"/tools/communities/{community['slug']}/edit", status_code=303)
+        if lib.get_community(competitor_id):
+            try:
+                lib.add_community_competitor(community_id, competitor_id)
+            except ValueError:
+                pass
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/communities/{community['slug']}/edit", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/competitors/{competitor_id}/remove")
+def admin_communities_competitors_remove(request: Request, community_id: int, competitor_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        lib.remove_community_competitor(community_id, competitor_id)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/communities/{community['slug']}/edit", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/competitors/add-selected")
+async def admin_communities_competitors_add_selected(request: Request, community_id: int):
+    """Batch-add version of /competitors/add for Communities—see
+    admin_tools_competitors_add_selected for the identical Software pattern
+    this mirrors."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        form = await request.form()
+        ids = []
+        for raw in form.getlist("competitor_id"):
+            try:
+                ids.append(int(raw))
+            except ValueError:
+                continue
+        for cid in ids:
+            if lib.get_community(cid):
+                try:
+                    lib.add_community_competitor(community_id, cid)
+                except ValueError:
+                    pass
+        _record_ai_drafted_reviews(lib, request, "community", community_id, form)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/communities/{community['slug']}/edit", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/competitors/generate-matches")
+def admin_communities_generate_competitor_matches(request: Request, community_id: int):
+    """AI first pass over suggest_community_competitors' tag-overlap
+    shortlist—Communities equivalent of admin_tools_generate_competitor_matches,
+    reusing the same generate_competitor_matches() judgment function since the
+    underlying task (pick genuine matches from a pre-filtered shortlist) is
+    identical for both entity types."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        candidates = lib.suggest_community_competitors(community_id, limit=8)
+    finally:
+        lib.close()
+
+    from linklib.enrich import generate_competitor_matches
+    result = generate_competitor_matches(
+        community["name"], community.get("notes", ""),
+        [{"id": x["id"], "name": x["name"], "description": x.get("notes", "")} for x in candidates],
+    )
+    if result is None:
+        return JSONResponse({"ok": False, "error": "Generation is unavailable right now "
+                                                     "(missing ANTHROPIC_API_KEY, no candidates, or the request failed). "
+                                                     "Pick similar communities by hand."}, status_code=503)
+
+    lib = _lib()
+    try:
+        lib.record_enrichment_cost(None, result.model, result.input_tokens, result.output_tokens, result.cost_usd)
+    finally:
+        lib.close()
+
+    return JSONResponse({"ok": True, "competitor_ids": result.competitor_ids})
 
 
 @app.post("/admin/tools/communities/{community_id}/screenshot/recapture")
@@ -10611,21 +10823,27 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
     def _suggestion_row(s: dict) -> str:
         cats_label = ", ".join(_esc(x) for x in s["categories"])
-        return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;">'
+        return (f'<label style="display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer;">'
+                f'<input type="checkbox" name="competitor_id" value="{s["id"]}" id="competitor-cb-{s["id"]}">'
                 f'<span style="font-size:14px;">{_esc(s["name"])} '
-                f'<span style="color:var(--muted);font-size:12px;">({cats_label})</span></span>'
-                f'<form method="post" action="/admin/tools/{tool_id}/competitors/add" style="margin:0;">'
-                f'<input type="hidden" name="competitor_id" value="{s["id"]}">'
-                f'<button type="submit" class="tool-admin-btn">+ Add</button></form></div>')
+                f'<span style="color:var(--muted);font-size:12px;">({cats_label})</span></span></label>')
 
     _competitors_list_html = "".join(_competitor_row(c) for c in competitors)
     _suggestions_block_html = ""
     if suggestions:
         _suggestions_block_html = (
             '<div style="margin-top:20px;">'
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
-            'letter-spacing:.07em;margin-bottom:8px;">Suggested—shares a tag</div>'
-            + "".join(_suggestion_row(s) for s in suggestions) + "</div>"
+            'letter-spacing:.07em;">Suggested—shares a tag</div>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\')">&#10024; Generate</button>'
+            '</div>'
+            '<p id="competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
+            f'<form method="post" action="/admin/tools/{tool_id}/competitors/add-selected">'
+            '<input type="hidden" id="competitor-ai-drafted-fields" name="ai_drafted_fields" value="">'
+            + "".join(_suggestion_row(s) for s in suggestions) +
+            '<button type="submit" class="tool-admin-btn" style="margin-top:8px;">+ Add selected</button>'
+            '</form></div>'
         )
     _other_tools_options_html = "".join(
         f'<option value="{t["id"]}">{_esc(t["name"])}</option>' for t in other_tools
@@ -10892,6 +11110,27 @@ async function generateDifferentiation(toolId, textareaId, statusId) {{
       : 'Drafted. Review before saving.';
   }} catch (e) {{
     status.textContent = e.message || 'Generation failed. Write it by hand.';
+  }}
+}}
+async function generateCompetitorMatches(toolId, statusId) {{
+  var status = document.getElementById(statusId);
+  status.textContent = 'Generating…';
+  try {{
+    var r = await fetch('/admin/tools/' + toolId + '/competitors/generate-matches', {{method: 'POST'}});
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
+    var matched = d.competitor_ids || [];
+    matched.forEach(function(id) {{
+      var cb = document.getElementById('competitor-cb-' + id);
+      if (cb) cb.checked = true;
+    }});
+    var flagEl = document.getElementById('competitor-ai-drafted-fields');
+    if (flagEl && matched.length) flagEl.value = 'competitors';
+    status.textContent = matched.length
+      ? 'Pre-checked ' + matched.length + ' AI-matched candidate' + (matched.length === 1 ? '' : 's') + '. Review before adding.'
+      : 'No confident matches found. Pick competitors by hand.';
+  }} catch (e) {{
+    status.textContent = e.message || 'Generation failed. Pick competitors by hand.';
   }}
 }}
 </script>"""
@@ -11298,6 +11537,75 @@ def admin_tools_generate_differentiation(request: Request, tool_id: int):
 
     return JSONResponse({"ok": True, "differentiation_note": draft.differentiation_note,
                          "low_confidence": draft.low_confidence})
+
+
+@app.post("/admin/tools/{tool_id}/competitors/generate-matches")
+def admin_tools_generate_competitor_matches(request: Request, tool_id: int):
+    """AI first pass over the tag-overlap suggestion shortlist (see
+    suggest_tool_competitors) — judges which candidates are genuine
+    competitors. Never writes to tool_competitors; the admin UI pre-checks
+    the returned ids and a human still clicks Add selected, same
+    generate-then-review contract as every other field."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        candidates = lib.suggest_tool_competitors(tool_id, limit=8)
+    finally:
+        lib.close()
+
+    from linklib.enrich import generate_competitor_matches
+    result = generate_competitor_matches(
+        tool["name"], tool.get("description", ""),
+        [{"id": c["id"], "name": c["name"], "description": c.get("description", "")} for c in candidates],
+    )
+    if result is None:
+        return JSONResponse({"ok": False, "error": "Generation is unavailable right now "
+                                                     "(missing ANTHROPIC_API_KEY, no candidates, or the request failed). "
+                                                     "Pick competitors by hand."}, status_code=503)
+
+    lib = _lib()
+    try:
+        lib.record_enrichment_cost(None, result.model, result.input_tokens, result.output_tokens, result.cost_usd)
+    finally:
+        lib.close()
+
+    return JSONResponse({"ok": True, "competitor_ids": result.competitor_ids})
+
+
+@app.post("/admin/tools/{tool_id}/competitors/add-selected")
+async def admin_tools_competitors_add_selected(request: Request, tool_id: int):
+    """Batch-add version of /competitors/add — accepts multiple competitor_id
+    values from the suggestions checkbox list in one submit, so the AI-drafted
+    matches from generate-matches above can be reviewed as a group and saved
+    together rather than one instant-add click per candidate."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        form = await request.form()
+        ids = []
+        for raw in form.getlist("competitor_id"):
+            try:
+                ids.append(int(raw))
+            except ValueError:
+                continue
+        for cid in ids:
+            if lib.get_tool(cid):
+                try:
+                    lib.add_tool_competitor(tool_id, cid)
+                except ValueError:
+                    pass
+        _record_ai_drafted_reviews(lib, request, "tool", tool_id, form)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
 @app.post("/tools/{tool_id}/interest")
