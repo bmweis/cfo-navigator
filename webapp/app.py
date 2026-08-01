@@ -5226,7 +5226,7 @@ function renderTools(tools) {{
         + '<label style="margin:0;">Description</label>'
         + '<span><button type="button" class="tool-admin-btn" onclick="generateDescription('
         + esc(JSON.stringify(t.name)) + ',' + esc(JSON.stringify(t.url))
-        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\')">Generate</button>'
+        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\')">Generate summary</button>'
         + ' <span id="qe-gen-status-' + t.id + '" class="qe-status"></span></span>'
         + '</div>'
         + '<textarea id="qe-desc-' + t.id + '" rows="4">' + esc(t.description) + '</textarea>'
@@ -9429,7 +9429,7 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
     <span style="white-space:nowrap;">
       <input type="hidden" id="cp-name" value="{_esc(community.get('name', ''))}">
       <input type="hidden" id="cp-url" value="{_esc(community.get('url', ''))}">
-      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status')">Generate profile draft</button>
+      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status')">Generate summary</button>
       <span id="cp-gen-status" class="qe-status"></span>
     </span>
   </div>
@@ -10064,7 +10064,7 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—shares a tag</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\')">&#10024; Generate</button>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\')">Generate summary</button>'
             '</div>'
             '<p id="community-competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
             f'<form method="post" action="/admin/tools/communities/{community_id}/competitors/add-selected">'
@@ -10156,7 +10156,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId) {{
   {screenshot_banner_html}
   {screenshot_preview_html}
   <form method="post" action="/admin/tools/communities/{c['id']}/screenshot/recapture" style="margin-top:12px;">
-    <button type="submit" class="tool-admin-btn">&#128247; Recapture from homepage</button>
+    <button type="submit" class="tool-admin-btn">Generate screenshot</button>
   </form>
 </div>
 
@@ -10384,8 +10384,8 @@ def admin_communities_approve(request: Request, community_id: int):
     finally:
         lib.close()
     # Straight to the profile editor rather than back to the list—so
-    # "Generate profile draft" is right there for a newly-approved community
-    # instead of it sitting thin in the directory.
+    # the profile's "Generate summary" button is right there for a
+    # newly-approved community instead of it sitting thin in the directory.
     return RedirectResponse(f"/admin/tools/communities/{community_id}/profile", status_code=303)
 
 
@@ -10614,7 +10614,7 @@ def admin_tools_new(request: Request):
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate descriptions</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -10836,7 +10836,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—shares a tag</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\')">&#10024; Generate</button>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\')">Generate summary</button>'
             '</div>'
             '<p id="competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
             f'<form method="post" action="/admin/tools/{tool_id}/competitors/add-selected">'
@@ -10950,7 +10950,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate descriptions</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -10986,7 +10986,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">How this differs from the competition <span style="font-weight:400;color:var(--muted);">(shown on the profile page as the Bottom line callout)</span></label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status')">Generate</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -10998,7 +10998,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(standalone feature, agent-assisted, or fully independent agent; searchable)</span>{_taxonomy_verify_badge}</label>
       <span>
-        <button type="submit" form="research-refresh-form" class="tool-admin-btn">&#129504; Generate AI Data</button>
+        <button type="submit" form="research-refresh-form" class="tool-admin-btn">Generate summary</button>
       </span>
     </div>
     <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Crawls the vendor's homepage plus its real Product/Solutions-type nav pages to draft this note and the Feature rows below in one pass—runs automatically when a tool is added; use this button to re-run it (e.g. after a vendor redesigns their site).</p>
@@ -11012,7 +11012,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
       <span>
-        <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn">&#128247; Recapture from homepage</button>
+        <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn">Generate screenshot</button>
       </span>
     </div>
     <input name="screenshot_url" type="url" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"

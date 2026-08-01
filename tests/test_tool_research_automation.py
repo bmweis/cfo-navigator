@@ -3,7 +3,7 @@ follow-up): _run_tool_research (shared drafting logic — real feature rows +
 an agent-taxonomy draft in one Claude call), the two auto-trigger points
 (admin add-form, public /tools/submit form — both via BackgroundTasks so a
 slow/failed research call never blocks the tool from going live), the
-on-demand "Generate AI Data" admin route, and the "Mark verified"
+on-demand "Generate summary" admin route, and the "Mark verified"
 one-click action for the agent-taxonomy note.
 """
 import os
@@ -249,7 +249,7 @@ def test_edit_page_shows_needs_verification_badge_and_refresh_button(env):
     r = client.get(f"/tools/software/{tool_slug}/edit")
     assert "Needs verification" in r.text
     assert "Mark verified" in r.text
-    assert "Generate AI Data" in r.text
+    assert "Generate summary" in r.text
 
 
 def test_edit_page_hides_badge_once_verified(env):
