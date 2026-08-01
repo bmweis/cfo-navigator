@@ -278,7 +278,8 @@ def test_needs_verification_sentinel_visible_on_admin_table(env):
 def test_needs_verification_sentinel_flagged_on_profile_page(env):
     """The server-rendered profile page (unlike the JS-templated directory
     card) lets us assert the actual output: the sentinel renders inside the
-    comm-verify flag, not the comm-cost badge a confirmed cost_band gets."""
+    tp-verify-inline flag (Phase 3b's Details card), not styled as a
+    confirmed value."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     community_id = lib.add_community(
@@ -293,8 +294,7 @@ def test_needs_verification_sentinel_flagged_on_profile_page(env):
     c = _client(env)
     r = c.get(f"/tools/communities/{slug}")
     assert r.status_code == 200
-    assert '<span class="comm-verify">Needs verification</span>' in r.text
-    assert '<span class="comm-cost">Needs verification</span>' not in r.text  # never the confirmed-value badge
+    assert '<span class="tp-verify-inline">Needs verification</span>' in r.text
 
 
 def test_needs_verification_sentinel_flagged_on_compare_page(env):
