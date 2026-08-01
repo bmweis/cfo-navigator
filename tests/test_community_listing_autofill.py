@@ -1,6 +1,6 @@
 """Community directory-listing auto-populate ("Auto-fill from URL" on the
 Add/Edit Community form) — the community-side equivalent of the CFO Toolbox
-tool form's "Generate" description button.
+tool form's "Generate summary" description button.
 
 Covers: linklib.enrich.generate_community_listing (unit, mocked Claude call),
 the /admin/tools/communities/generate-listing route, and the NEEDS_VERIFICATION

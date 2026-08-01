@@ -5226,7 +5226,7 @@ function renderTools(tools) {{
         + '<label style="margin:0;">Description</label>'
         + '<span><button type="button" class="tool-admin-btn" onclick="generateDescription('
         + esc(JSON.stringify(t.name)) + ',' + esc(JSON.stringify(t.url))
-        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\')">Generate</button>'
+        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\')">Generate summary</button>'
         + ' <span id="qe-gen-status-' + t.id + '" class="qe-status"></span></span>'
         + '</div>'
         + '<textarea id="qe-desc-' + t.id + '" rows="4">' + esc(t.description) + '</textarea>'
@@ -9383,7 +9383,7 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
     </label>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(optional—shown in a bordered box on the profile page)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
     <input name="screenshot_url" type="url" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
@@ -9429,7 +9429,7 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
     <span style="white-space:nowrap;">
       <input type="hidden" id="cp-name" value="{_esc(community.get('name', ''))}">
       <input type="hidden" id="cp-url" value="{_esc(community.get('url', ''))}">
-      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status')">Generate profile draft</button>
+      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status')">Generate summary</button>
       <span id="cp-gen-status" class="qe-status"></span>
     </span>
   </div>
@@ -10064,7 +10064,7 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—shares a tag</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\')">&#10024; Generate</button>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\')">Generate summary</button>'
             '</div>'
             '<p id="community-competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
             f'<form method="post" action="/admin/tools/communities/{community_id}/competitors/add-selected">'
@@ -10156,7 +10156,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId) {{
   {screenshot_banner_html}
   {screenshot_preview_html}
   <form method="post" action="/admin/tools/communities/{c['id']}/screenshot/recapture" style="margin-top:12px;">
-    <button type="submit" class="tool-admin-btn">&#128247; Recapture from homepage</button>
+    <button type="submit" class="tool-admin-btn">Generate screenshot</button>
   </form>
 </div>
 
@@ -10384,8 +10384,8 @@ def admin_communities_approve(request: Request, community_id: int):
     finally:
         lib.close()
     # Straight to the profile editor rather than back to the list—so
-    # "Generate profile draft" is right there for a newly-approved community
-    # instead of it sitting thin in the directory.
+    # the profile's "Generate summary" button is right there for a
+    # newly-approved community instead of it sitting thin in the directory.
     return RedirectResponse(f"/admin/tools/communities/{community_id}/profile", status_code=303)
 
 
@@ -10614,7 +10614,7 @@ def admin_tools_new(request: Request):
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -10629,7 +10629,7 @@ def admin_tools_new(request: Request):
       placeholder="2-3 sentences—shown on the directory card and in search results. Filled in by Generate above, or write your own."></textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
       {_tool_category_checkboxes(categories)}
     </div>
@@ -10836,7 +10836,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—shares a tag</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\')">&#10024; Generate</button>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\')">Generate summary</button>'
             '</div>'
             '<p id="competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
             f'<form method="post" action="/admin/tools/{tool_id}/competitors/add-selected">'
@@ -10880,6 +10880,14 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
                 f'<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button></form></div></div>')
 
     _features_list_html = "".join(_feature_row(f) for f in features)
+    _n_features = len(features)
+    _n_features_needs_verify = sum(1 for f in features if f["needs_verification"])
+    _features_badge_html = (
+        f'<span style="font-size:12px;color:var(--muted);">{_n_features} feature{"s" if _n_features != 1 else ""}'
+        + (f'&nbsp;&middot;&nbsp;<span style="color:#92400e;">{_n_features_needs_verify} need'
+           f'{"s" if _n_features_needs_verify == 1 else ""} verification</span>' if _n_features_needs_verify else '')
+        + '</span>'
+    )
 
     _screenshot_banner_html = ""
     if screenshot_captured == "1":
@@ -10926,7 +10934,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     body = f"""<div class="page page-grid">
 <h1>Edit software</h1>
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
-<form method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
+<form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
@@ -10942,7 +10950,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -10957,7 +10965,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(optional—select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
       {_tool_category_checkboxes(categories, tool['categories'])}
     </div>
@@ -10974,31 +10982,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       <span>&#10024; Featured—pin to top of directory with coral badge</span>
     </label>
   </div>
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
-    <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Warm Intro</div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="warm_intro_enabled" value="1"{'checked' if tool.get('warm_intro_enabled') else ''}>
-      <span>&#10024; Offer a Warm Intro button for this tool</span>
-    </label>
-    <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below—either alone isn&rsquo;t enough.</p>
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
-      <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="Jane Smith">
-    </div>
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
-      <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="contact@vendor.com">
-    </div>
-  </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">How this differs from the competition <span style="font-weight:400;color:var(--muted);">(shown on the profile page as the Bottom line callout)</span></label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status')">Generate</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -11007,14 +10995,26 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('differentiation_note') or '')}</textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(optional—standalone feature, agent-assisted, or fully independent agent; searchable)</span>{_taxonomy_verify_badge}</label>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(standalone feature, agent-assisted, or fully independent agent; searchable)</span>{_taxonomy_verify_badge}</label>
+      <span>
+        <button type="submit" form="research-refresh-form" class="tool-admin-btn">Generate summary</button>
+      </span>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Crawls the vendor's homepage plus its real Product/Solutions-type nav pages to draft this note and the Feature rows below in one pass—runs automatically when a tool is added; use this button to re-run it (e.g. after a vendor redesigns their site).</p>
+    {_research_banner_html}
     <textarea name="agent_taxonomy_note" maxlength="1200" rows="4"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
     {_taxonomy_verify_action}
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(optional—shown in a bordered box on the profile page)</span></label>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
+      <span>
+        <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn">Generate screenshot</button>
+      </span>
+    </div>
     <input name="screenshot_url" type="url" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
@@ -11022,31 +11022,17 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       <input type="checkbox" name="screenshot_is_product" value="1"{'checked' if tool.get('screenshot_is_product') else ''}>
       This is an actual product screenshot (unchecked = homepage/other, captioned as such)
     </label>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture pulls a fresh homepage screenshot at a fixed size, same as the bulk backfill script—use this for a one-off refresh. Paste a different URL above (then Save changes) to override with something else entirely.</p>
+    {_screenshot_banner_html}
+    <div style="margin-top:8px;">{_screenshot_preview_html}</div>
   </div>
   <div>
     <button type="submit" class="btn">Save changes</button>
     <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
-
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">AI research</h2>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Crawls the vendor's homepage plus its real Product/Solutions-type nav pages to draft the Agent taxonomy note above and the Feature rows below in one pass—runs automatically when a tool is added; use this to re-run it (e.g. after a vendor redesigns their site).</p>
-  {_research_banner_html}
-  <form method="post" action="/admin/tools/{tool_id}/research/refresh" style="margin-top:4px;">
-    <button type="submit" class="tool-admin-btn">&#129504; Refresh AI research</button>
-  </form>
-</div>
-
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Screenshot</h2>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Recapture pulls a fresh homepage screenshot at a fixed size, same as the bulk backfill script—use this for a one-off refresh. Paste a different URL above (then Save changes) to override with something else entirely.</p>
-  {_screenshot_banner_html}
-  {_screenshot_preview_html}
-  <form method="post" action="/admin/tools/{tool_id}/screenshot/recapture" style="margin-top:12px;">
-    <button type="submit" class="tool-admin-btn">&#128247; Recapture from homepage</button>
-  </form>
-</div>
+<form id="research-refresh-form" method="post" action="/admin/tools/{tool_id}/research/refresh" style="display:none;"></form>
+<form id="screenshot-recapture-form" method="post" action="/admin/tools/{tool_id}/screenshot/recapture" style="display:none;"></form>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Competitors</h2>
@@ -11067,9 +11053,15 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </div>
 </div>
 
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Features</h2>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Standalone-vs-bundled availability per feature—feeds the Phase 5 comparison matrix. Rows flagged "Needs verification" came from the LLM enrichment pass and haven't been confirmed yet.</p>
+<details style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Features</h2>
+      {_features_badge_html}
+    </span>
+    <span style="color:var(--navy);font-size:13px;line-height:1;">&#9660;</span>
+  </summary>
+  <p style="font-size:13px;color:var(--muted);margin:12px 0 16px;">Standalone-vs-bundled availability per feature—feeds the Phase 5 comparison matrix. Rows flagged "Needs verification" came from the LLM enrichment pass and haven't been confirmed yet.</p>
 
   {_features_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No features added yet.</p>'}
 
@@ -11084,10 +11076,31 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         <input type="checkbox" name="bundled_only" value="1"> Bundled only
       </label>
     </div>
-    <input name="notes" maxlength="300" placeholder="Notes (optional, e.g. tier it's on)"
+    <input name="notes" maxlength="300" placeholder="Notes (e.g. tier it's on)"
       style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;">
     <div><button type="submit" class="tool-admin-btn">+ Add feature</button></div>
   </form>
+</details>
+
+<div style="margin-top:32px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
+  <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Warm Intro</div>
+  <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+    <input type="checkbox" name="warm_intro_enabled" value="1" form="tool-edit-form"{'checked' if tool.get('warm_intro_enabled') else ''}>
+    <span>&#10024; Offer a Warm Intro button for this tool</span>
+  </label>
+  <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below—either alone isn&rsquo;t enough.</p>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
+    <input name="vendor_name" form="tool-edit-form" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="Jane Smith">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
+    <input name="vendor_email" form="tool-edit-form" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="contact@vendor.com">
+  </div>
 </div>
 </div>
 <style>
