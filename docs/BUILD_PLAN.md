@@ -22,10 +22,10 @@ guesses — see the "Plan vs. code" notes below for where the two disagreed.
 | 2 — Domain-slug URL restructure | MERGED | [#245](https://github.com/bmweis/cfo-navigator/pull/245). Public + edit routes both on `/tools/{type}/{slug}[/edit]`. |
 | 3 — Software profile page | MERGED | [#246](https://github.com/bmweis/cfo-navigator/pull/246) (redesign) + [#247](https://github.com/bmweis/cfo-navigator/pull/247) (Bottom Line callout addendum). |
 | 3b — Communities profile page | MERGED | [#248](https://github.com/bmweis/cfo-navigator/pull/248). Full build (screenshot capture extended to Communities, Details card, edit form) — the 3b.0 preview gate was cleared before this merged, not just the preview round. |
-| 4 — Edit-page button reorg | OPEN (ready to merge) | [#251](https://github.com/bmweis/cfo-navigator/pull/251), bundled with Phases 6 and 7 — see note below. |
-| 5 — Competitors / Similar-entities auto-suggestion | MERGED — **ahead of plan sequencing** | Landed in [#249](https://github.com/bmweis/cfo-navigator/pull/249) ("AI-first-pass Competitors/Similar-communities upgrade"), before Phase 4/6/7. **Plan vs. code disagreement:** the plan sequenced Phase 5 after Phase 4/6/7; in practice it shipped earlier, bundled into the AI-first-pass principle work instead of as its own phase. Schema (`community_competitors`), admin curation UI (suggestions + "+ Add selected"), the public "Similar communities" chip card, and the AI-drafted-suggestion logic (`generate_competitor_matches` / `generateCommunityCompetitorMatches`) are all live for both Software and Communities. Nothing outstanding from the plan's Phase 5 scope that we've found. |
-| 6 — Features section collapsible (Software edit page) | OPEN (ready to merge) | [#251](https://github.com/bmweis/cfo-navigator/pull/251), bundled with Phases 4 and 7. |
-| 7 — Warm intro reorder (Software edit page) | OPEN (ready to merge) | [#251](https://github.com/bmweis/cfo-navigator/pull/251), bundled with Phases 4 and 6. |
+| 4 — Edit-page button reorg | MERGED | [#251](https://github.com/bmweis/cfo-navigator/pull/251), bundled with Phases 6 and 7 — see note below. |
+| 5 — Competitors / Similar-entities auto-suggestion | MERGED — **ahead of plan sequencing** | Landed in [#249](https://github.com/bmweis/cfo-navigator/pull/249), before Phase 4/6/7, bundled into the AI-first-pass principle work instead of as its own phase. Verified complete in a dedicated investigation session (2026-08-01) — see the Phase 5 section below for what actually exists. |
+| 6 — Features section collapsible (Software edit page) | MERGED | [#251](https://github.com/bmweis/cfo-navigator/pull/251), bundled with Phases 4 and 7. |
+| 7 — Warm intro reorder (Software edit page) | MERGED | [#251](https://github.com/bmweis/cfo-navigator/pull/251), bundled with Phases 4 and 6. |
 | 8 — Feature normalization + Compare | NOT STARTED | Hard gate at 8.0 — investigation + cleanup-mapping proposal needs Brian's explicit approval before 8.1/8.2. |
 | 9 — Per-item memory | NOT STARTED | Hard dependency on Phases 5 and 8 both being fully merged; Phase 5 is done, Phase 8 is not, so this stays blocked. |
 
@@ -176,14 +176,52 @@ Apply the Phase 3 visual system, adapted:
 
 ---
 
-## Phase 5 — Competitors / Similar-entities auto-suggestion (Software AND Communities)
+## Phase 5 — Competitors / Similar-entities auto-suggestion (Software AND Communities) — COMPLETE
 
-Covers both types from the start — not Software-only, not a later extension.
+**Shipped for both types, verified against code in a dedicated investigation
+session (2026-08-01) — no build work remains.** This landed in
+[PR #249](https://github.com/bmweis/cfo-navigator/pull/249) ("AI-first-pass
+Competitors/Similar-communities upgrade"), ahead of where this doc originally
+sequenced it (after Phase 4/6/7) — it shipped bundled into the AI-first-pass
+principle work instead of as a standalone phase. The bullets below described
+the target scope at planning time; what's left is a record of what actually
+exists, confirmed by code inspection, not a to-do list.
 
-- **Communities has no schema for this today** — add a `similar_communities`-style relationship, an admin edit-form field mirroring Software's Competitors picker (same "curation speed-up, too noisy to trust unreviewed" ranking function Phase 0 found), and a "Similar communities" card on the public profile (same chip-row pattern as Software's Competitors card). This is real added scope for Communities, not a copy-paste.
-- **Suggestion logic upgraded to a full draft, not just ranking:** combine long description + short description + selected categories, and **draft the actual competitor/similar-entity list directly** into the edit form — not just rank candidates for Brian to pick from. Reuses the existing LLM-call pattern (no new dependency). Same review-before-publish gate as everything else — Brian edits/approves before it ships, AI just does more of the first-draft work than before.
-- Manual "Generate" trigger, consistent with other AI-assisted fields.
-- Likely its own investigation-first sub-step for the Communities half, given there's zero existing scaffolding for this concept there — don't assume Software's exact schema shape transfers cleanly.
+- **Schema**: `community_competitors` (`linklib/db.py`) — a real relational
+  join table, structural mirror of `tool_competitors` (normalized pair with
+  the smaller id first, same `UNIQUE(community_id, competitor_id)`
+  constraint, same OR-both-sides lookup). Full CRUD exists:
+  `add_community_competitor`, `remove_community_competitor`,
+  `list_community_competitors`, `suggest_community_competitors` (tag-overlap
+  shortlist) — one-for-one mirrors of the Software functions of the same
+  name. `delete_community` cascades cleanup into this table. Documented in
+  `ARCHITECTURE.md` (schema table + ER diagram).
+- **Suggestion logic drafts a full list, not just ranking**: `POST
+  /admin/tools/communities/{community_id}/competitors/generate-matches`
+  (`webapp/app.py`) runs `suggest_community_competitors`'s tag-overlap
+  shortlist through the shared `linklib.enrich.generate_competitor_matches()`
+  judgment function — the same one Software's equivalent route uses, since
+  the underlying task (pick genuine matches from a pre-filtered shortlist) is
+  identical for both entity types. Returns JSON only; nothing is written
+  here.
+- **Review-before-publish gate, same as every other AI-drafted field**: the
+  frontend `generateCommunityCompetitorMatches()` JS pre-checks the returned
+  candidate ids in the suggestion checkbox list. Only when a human submits
+  "+ Add selected" (`POST
+  /admin/tools/communities/{community_id}/competitors/add-selected`) does
+  `add_community_competitor` actually write a row — AI drafts, Brian
+  approves, exactly like every other Generate button in this build.
+- **Admin edit-form picker**, matching Software's Competitors card
+  structurally: a "Similar communities" section on
+  `/tools/communities/{slug}/edit` with the current list (per-row "Remove"),
+  a "Suggested — shares a tag" checkbox list with the "Generate summary"
+  button, "+ Add selected", and a manual "+ Add a similar community by name"
+  dropdown.
+- **Public profile card**: `/tools/communities/{slug}` renders a "Similar
+  communities" card using the same `tp-chip-row` treatment as Software's
+  Competitors card, linking to each curated similar community. Admin-only
+  empty-state nudge ("No similar communities curated yet.") when nothing's
+  curated, same pattern used elsewhere on the profile pages.
 
 ---
 
