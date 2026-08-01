@@ -328,6 +328,96 @@ def generate_tool_differentiation(name: str, url: str, description: str,
         return None
 
 
+_COMPETITOR_MATCH_PROMPT = """You are curating the "Competitors" section of a directory profile page, read by
+finance leaders comparing options. Below is one entry and a shortlist of candidates
+already pre-filtered by shared category tags — your job is to judge which of THOSE
+candidates are genuinely close competitors or alternatives, not to invent new ones.
+
+Follow these rules exactly:
+1. A true competitor solves substantially the same problem for a similar buyer —
+   shared category tags alone are not enough (the tag taxonomy is broad).
+2. When in doubt, leave a candidate out — a false negative here just means Brian
+   adds it by hand; a false positive misleads a reader comparing options.
+3. Judge only the candidates listed below. Never suggest anything not in the list.
+
+Entry: {name}
+Description: {description}
+
+Candidates (id: name — description):
+{candidates_block}
+
+Respond with JSON only: {{"competitor_ids": [<id>, <id>, ...]}}"""
+
+
+@dataclass
+class CompetitorMatchResult:
+    competitor_ids: list[int] = field(default_factory=list)
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def generate_competitor_matches(name: str, description: str, candidates: list[dict],
+                                 model: str = DEFAULT_MODEL) -> CompetitorMatchResult | None:
+    """Judges which of a pre-filtered candidate shortlist are genuine
+    competitors/similar entries — shared by Software (Competitors) and
+    Communities (Similar communities), since the underlying task is
+    identical: given one entry and a shortlist already narrowed by category
+    overlap (see Library.suggest_tool_competitors /
+    suggest_community_competitors), decide which candidates are real
+    matches. Returns only IDs drawn from `candidates` — never invents a new
+    one. A first pass for the admin edit form's checkbox list: never
+    auto-saved, same review-before-publish gate as every other generatable
+    field. `candidates`: list of {{"id", "name", "description"}} dicts.
+    Returns None if the SDK/key is unavailable, the call fails, or
+    `candidates` is empty (nothing to judge)."""
+    if not candidates:
+        return None
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    candidates_block = "\n".join(
+        f"{c['id']}: {c['name']} — {(c.get('description') or '').strip()[:300]}" for c in candidates
+    )
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model,
+            max_tokens=500,
+            messages=[{"role": "user",
+                       "content": _COMPETITOR_MATCH_PROMPT.format(
+                           name=name, description=description, candidates_block=candidates_block)}],
+        )
+        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(raw)
+
+        from .pricing import compute_cost
+        usage = getattr(resp, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) or 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0
+        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+
+        valid_ids = {c["id"] for c in candidates}
+        raw_ids = data.get("competitor_ids") if isinstance(data, dict) else None
+        matched = [int(i) for i in raw_ids if isinstance(i, (int, str)) and int(i) in valid_ids] if isinstance(raw_ids, list) else []
+
+        return CompetitorMatchResult(
+            competitor_ids=matched, model=model,
+            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+        )
+    except Exception:
+        return None
+
+
 # Feature comparison data (search overhaul Phase 4b, extended in the
 # automated-research follow-up to also draft agent_taxonomy_note in the same
 # call) — drafts standalone-vs-bundled availability rows for tool_features

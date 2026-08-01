@@ -570,6 +570,24 @@ CREATE TABLE IF NOT EXISTS community_categories (
     sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
+-- Manually curated "similar communities" cross-links, mirroring
+-- tool_competitors exactly (same normalized-pair-with-smaller-id-first
+-- shape, same UNIQUE constraint, same OR-both-sides lookup pattern) — see
+-- the tool_competitors CREATE TABLE comment above for the full reasoning.
+-- A separate table rather than a shared/polymorphic one, matching this
+-- codebase's convention of keeping Software and Communities schema/routes
+-- independent throughout.
+CREATE TABLE IF NOT EXISTS community_competitors (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    community_id  INTEGER NOT NULL,
+    competitor_id INTEGER NOT NULL,
+    created_at    TEXT NOT NULL,
+    UNIQUE(community_id, competitor_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_community_competitors_community ON community_competitors(community_id);
+CREATE INDEX IF NOT EXISTS idx_community_competitors_competitor ON community_competitors(competitor_id);
+
 -- Deep, opinionated read on a community (Community Profiles, Phase 2): the
 -- qualitative judgment calls a directory row's cost/access/region fields can't
 -- carry. 1:1 with communities via community_id as the PRIMARY KEY, mirroring
@@ -2172,6 +2190,10 @@ class Library:
     def delete_tool(self, tool_id: int) -> None:
         self.conn.execute("DELETE FROM tools WHERE id=?", (tool_id,))
         self.conn.execute("DELETE FROM field_reviews WHERE entity_type='tool' AND entity_id=?", (tool_id,))
+        self.conn.execute(
+            "DELETE FROM tool_competitors WHERE tool_id=? OR competitor_id=?",
+            (tool_id, tool_id),
+        )
         self.conn.commit()
 
     def update_tool_differentiation(self, tool_id: int, differentiation_note: str) -> None:
@@ -2692,6 +2714,10 @@ class Library:
         self.conn.execute("DELETE FROM communities WHERE id=?", (community_id,))
         self.conn.execute("DELETE FROM community_profiles WHERE community_id=?", (community_id,))
         self.conn.execute("DELETE FROM field_reviews WHERE entity_type='community' AND entity_id=?", (community_id,))
+        self.conn.execute(
+            "DELETE FROM community_competitors WHERE community_id=? OR competitor_id=?",
+            (community_id, community_id),
+        )
         self.conn.commit()
 
     @staticmethod
@@ -2701,6 +2727,67 @@ class Library:
         # order for every caller regardless of write-time order.
         d["categories"] = sorted(json.loads(d.pop("categories_json", "[]") or "[]"))
         return d
+
+    # -- competitor cross-links ("similar communities") ----------------------
+    # Exact mirror of add_tool_competitor/remove_tool_competitor/
+    # list_tool_competitors/suggest_tool_competitors above — see those
+    # docstrings and the community_competitors CREATE TABLE comment for the
+    # shared reasoning; not deduplicated into a shared helper because this
+    # codebase keeps Software and Communities schema/routes independent.
+
+    def add_community_competitor(self, community_id: int, competitor_id: int) -> None:
+        if community_id == competitor_id:
+            raise ValueError("A community can't be its own competitor.")
+        a, b = sorted((community_id, competitor_id))
+        self.conn.execute(
+            "INSERT OR IGNORE INTO community_competitors (community_id, competitor_id, created_at) VALUES (?,?,?)",
+            (a, b, _now()),
+        )
+        self.conn.commit()
+
+    def remove_community_competitor(self, community_id: int, competitor_id: int) -> None:
+        a, b = sorted((community_id, competitor_id))
+        self.conn.execute(
+            "DELETE FROM community_competitors WHERE community_id=? AND competitor_id=?", (a, b)
+        )
+        self.conn.commit()
+
+    def list_community_competitors(self, community_id: int) -> list[dict]:
+        """Every community curated as similar to community_id, from either
+        side of the normalized pair. Only returns approved rows — an
+        unapproved community has no live profile page to link to."""
+        rows = self.conn.execute(
+            """SELECT c.* FROM communities c
+               JOIN community_competitors x
+                 ON (x.community_id = ? AND x.competitor_id = c.id)
+                 OR (x.competitor_id = ? AND x.community_id = c.id)
+               WHERE c.approved = 1
+               ORDER BY c.name""",
+            (community_id, community_id),
+        ).fetchall()
+        return [self._community_to_dict(r) for r in rows]
+
+    def suggest_community_competitors(self, community_id: int, limit: int = 8) -> list[dict]:
+        """Candidate similar communities for the admin edit page's suggestion
+        list, ranked by shared-category count. Same pure-tag-overlap
+        curation speed-up as suggest_tool_competitors — never the data
+        actually rendered on a profile page."""
+        community = self.get_community(community_id)
+        if not community or not community["categories"]:
+            return []
+        existing_ids = {c["id"] for c in self.list_community_competitors(community_id)}
+        existing_ids.add(community_id)
+        candidates = []
+        for row in self.conn.execute("SELECT * FROM communities WHERE approved=1"):
+            d = self._community_to_dict(row)
+            if d["id"] in existing_ids:
+                continue
+            overlap = len(set(d["categories"]) & set(community["categories"]))
+            if overlap:
+                d["_overlap"] = overlap
+                candidates.append(d)
+        candidates.sort(key=lambda d: (-d["_overlap"], d["name"]))
+        return candidates[:limit]
 
     # -- community profiles (deep qualitative read per community) -----------
     # 1:1 with communities via community_id; see the CREATE TABLE comment in

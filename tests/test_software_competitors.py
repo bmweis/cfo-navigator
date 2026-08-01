@@ -139,6 +139,68 @@ def test_admin_can_add_and_remove_competitor(env):
     assert "No competitors curated yet." in r.text
 
 
+def test_admin_can_add_selected_competitors_in_bulk(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    c = lib.add_tool("Pigment", "FP&A", "https://pigment.com", ["FP&A"], approved=1)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+
+    r = client.post(f"/admin/tools/{a}/competitors/add-selected",
+                     data={"competitor_id": [str(b), str(c)], "ai_drafted_fields": "competitors"},
+                     follow_redirects=False)
+    assert r.status_code == 303
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    names = {t["name"] for t in lib.list_tool_competitors(a)}
+    assert names == {"Datarails", "Pigment"}
+    reviews = lib.list_field_reviews("tool", a)
+    assert "competitors" in reviews
+    lib.close()
+
+
+def test_generate_matches_unavailable_without_api_key(env, monkeypatch):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/{a}/competitors/generate-matches")
+    assert r.status_code == 503
+    assert r.json()["ok"] is False
+
+
+def test_generate_matches_returns_matched_ids(env, monkeypatch):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.close()
+
+    import linklib.enrich as enrich_mod
+    from linklib.enrich import CompetitorMatchResult
+
+    def fake_generate_competitor_matches(name, description, candidates, model=enrich_mod.DEFAULT_MODEL):
+        return CompetitorMatchResult(competitor_ids=[c["id"] for c in candidates], model="fake", cost_usd=0.0)
+
+    monkeypatch.setattr(enrich_mod, "generate_competitor_matches", fake_generate_competitor_matches)
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/admin/tools/{a}/competitors/generate-matches")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "competitor_ids": [b]}
+
+
 def test_admin_edit_saves_differentiation_note(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
