@@ -771,10 +771,11 @@ class DuplicateURLError(Exception):
     given URL normalize_url()-matches an existing row (a different row, on
     update). Carries the conflicting row so callers can point the admin at it
     instead of just saying "duplicate"."""
-    def __init__(self, entry_type: str, entry_id: int, name: str):
+    def __init__(self, entry_type: str, entry_id: int, name: str, slug: str = ""):
         self.entry_type = entry_type
         self.entry_id = entry_id
         self.name = name
+        self.slug = slug
         super().__init__(f'A {entry_type} with this URL already exists: "{name}" (id={entry_id})')
 
 
@@ -784,6 +785,51 @@ def _slugify(name: str) -> str:
     slug = re.sub(r"[^\w\s-]", "", slug)
     slug = re.sub(r"[\s_]+", "-", slug)
     return slug[:80]
+
+
+def _slug_host(url: str) -> str:
+    """Lowercased hostname with a leading 'www.' stripped, for slug derivation.
+    Best-effort — returns '' if the URL can't be parsed or has no host."""
+    from urllib.parse import urlsplit
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if "://" not in url:
+        url = f"//{url}"
+    try:
+        host = urlsplit(url).hostname or ""
+    except Exception:
+        return ""
+    host = host.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _domain_slug_base(url: str) -> str:
+    """Short domain-derived slug: the first label of the bare domain root,
+    e.g. https://www.abacum.io -> 'abacum'. Falls back to '' when the URL
+    can't be parsed — callers should treat that as "no domain slug available"."""
+    import re
+    host = _slug_host(url)
+    if not host:
+        return ""
+    label = host.split(".")[0]
+    label = re.sub(r"[^a-z0-9]+", "-", label).strip("-")
+    return label
+
+
+def _domain_slug_full(url: str) -> str:
+    """Full bare domain with dots replaced by hyphens, e.g. 'abacum.io' ->
+    'abacum-io'. Used as the collision fallback when two entries of the same
+    type reduce to the same short domain-slug base (see Phase 2 algorithm)."""
+    import re
+    host = _slug_host(url)
+    if not host:
+        return ""
+    slug = host.replace(".", "-")
+    slug = re.sub(r"[^a-z0-9-]+", "-", slug).strip("-")
+    return slug
 
 
 @dataclass
@@ -1936,7 +1982,7 @@ class Library:
         target = normalize_url(url)
         if not target:
             return None
-        rows = self.conn.execute("SELECT id, name, url FROM tools").fetchall()
+        rows = self.conn.execute("SELECT id, name, url, slug FROM tools").fetchall()
         for r in rows:
             if r["id"] == exclude_id:
                 continue
@@ -1952,8 +1998,15 @@ class Library:
                  summary: str = "") -> int:
         dup = self._find_tool_by_normalized_url(url)
         if dup:
-            raise DuplicateURLError("software entry", dup["id"], dup["name"])
-        base = _slugify(name)
+            raise DuplicateURLError("software entry", dup["id"], dup["name"], dup["slug"])
+        # Domain-derived slug (Phase 2): short domain root first (e.g.
+        # "abacum"), falling back to the full hyphenated domain only when
+        # the short form collides with an existing row, then a numeric
+        # suffix as a last resort. Falls back to a name-based slug when the
+        # URL has no parseable host.
+        base = _domain_slug_base(url) or _slugify(name)
+        if self.conn.execute("SELECT 1 FROM tools WHERE slug=?", (base,)).fetchone():
+            base = _domain_slug_full(url) or base
         slug = base
         suffix = 2
         while self.conn.execute("SELECT 1 FROM tools WHERE slug=?", (slug,)).fetchone():
@@ -2010,7 +2063,7 @@ class Library:
         if current and normalize_url(url) != normalize_url(current["url"]):
             dup = self._find_tool_by_normalized_url(url, exclude_id=tool_id)
             if dup:
-                raise DuplicateURLError("software entry", dup["id"], dup["name"])
+                raise DuplicateURLError("software entry", dup["id"], dup["name"], dup["slug"])
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
                advisor=?, promoted=?, vendor_email=?, warm_intro_enabled=?, vendor_name=?,
@@ -2428,7 +2481,7 @@ class Library:
         target = normalize_url(url)
         if not target:
             return None
-        rows = self.conn.execute("SELECT id, name, url FROM communities").fetchall()
+        rows = self.conn.execute("SELECT id, name, url, slug FROM communities").fetchall()
         for r in rows:
             if r["id"] == exclude_id:
                 continue
@@ -2445,8 +2498,15 @@ class Library:
                       featured: int = 0, advisor: int = 0) -> int:
         dup = self._find_community_by_normalized_url(url)
         if dup:
-            raise DuplicateURLError("community", dup["id"], dup["name"])
-        base = _slugify(name)
+            raise DuplicateURLError("community", dup["id"], dup["name"], dup["slug"])
+        # Domain-derived slug (Phase 2) — see add_tool for the algorithm.
+        # Software and Communities each enforce slug uniqueness only within
+        # their own table, so a domain shared across a vendor's software
+        # listing and its own branded community (e.g. datarails.com) is not
+        # a collision — separate namespaces, separate URL prefixes.
+        base = _domain_slug_base(url) or _slugify(name)
+        if self.conn.execute("SELECT 1 FROM communities WHERE slug=?", (base,)).fetchone():
+            base = _domain_slug_full(url) or base
         slug = base
         suffix = 2
         while self.conn.execute("SELECT 1 FROM communities WHERE slug=?", (slug,)).fetchone():
@@ -2504,7 +2564,7 @@ class Library:
         if current and normalize_url(url) != normalize_url(current["url"]):
             dup = self._find_community_by_normalized_url(url, exclude_id=community_id)
             if dup:
-                raise DuplicateURLError("community", dup["id"], dup["name"])
+                raise DuplicateURLError("community", dup["id"], dup["name"], dup["slug"])
         self.conn.execute(
             """UPDATE communities SET name=?, url=?, demographic=?, cost_band=?,
                cost_note=?, sponsorship_type=?, sponsor_name=?, access=?, format=?,

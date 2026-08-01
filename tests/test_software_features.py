@@ -1,6 +1,6 @@
 """Feature comparison data model (Software search overhaul Phase 4a):
 linklib.db's tool_features table/helpers and the admin curation UI on
-/admin/tools/{id}/edit and /admin/tools/{id}/features/{id}/edit. No public
+/tools/software/{slug}/edit and /admin/tools/{id}/features/{id}/edit. No public
 surface yet — Phase 5's comparison matrix is what actually reads this data.
 """
 import os
@@ -114,6 +114,7 @@ def test_admin_can_add_feature(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
     client = _client(env)
@@ -123,7 +124,7 @@ def test_admin_can_add_feature(env):
     }, follow_redirects=False)
     assert r.status_code == 303
 
-    r = client.get(f"/admin/tools/{a}/edit")
+    r = client.get(f"/tools/software/{a_slug}/edit")
     assert "Scenario modeling" in r.text
     assert "Standalone" in r.text
 

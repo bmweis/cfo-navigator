@@ -85,11 +85,12 @@ def test_profile_page_404s_for_unapproved_tool(env):
 def test_profile_page_shows_disabled_intro_button_when_not_signed_in(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
-    lib.add_tool("Vendor Co", "Has a vendor contact.", "https://vendor.example", [],
-                 approved=1, warm_intro_enabled=1, vendor_email="sales@vendor.example")
+    a = lib.add_tool("Vendor Co", "Has a vendor contact.", "https://vendor.example", [],
+                      approved=1, warm_intro_enabled=1, vendor_email="sales@vendor.example")
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
-    r = _client(env).get("/tools/software/vendor-co")
+    r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
     assert "Warm Intro" in r.text
     assert "disabled" in r.text
@@ -99,11 +100,12 @@ def test_profile_page_shows_disabled_intro_button_when_not_signed_in(env):
 def test_profile_page_hides_intro_button_without_warm_intro(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
-    lib.add_tool("No Intro Co", "No vendor contact set up.", "https://nointro.example", [],
-                 approved=1)
+    a = lib.add_tool("No Intro Co", "No vendor contact set up.", "https://nointro.example", [],
+                      approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
-    r = _client(env).get("/tools/software/no-intro-co")
+    r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
     assert "Warm Intro" not in r.text
 

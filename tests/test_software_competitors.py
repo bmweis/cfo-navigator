@@ -1,6 +1,6 @@
 """Competitor cross-links + differentiation copy (Software search overhaul
 Phase 3): linklib.db's tool_competitors table/helpers, the admin curation UI
-on /admin/tools/{id}/edit, and the public "Closest competitors" section on
+on /tools/software/{slug}/edit, and the public "Closest competitors" section on
 /tools/software/{slug}.
 """
 import os
@@ -119,6 +119,7 @@ def test_admin_can_add_and_remove_competitor(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
     lib.close()
 
@@ -129,12 +130,12 @@ def test_admin_can_add_and_remove_competitor(env):
                      follow_redirects=False)
     assert r.status_code == 303
 
-    r = client.get(f"/admin/tools/{a}/edit")
+    r = client.get(f"/tools/software/{a_slug}/edit")
     assert "Datarails" in r.text
 
     r = client.post(f"/admin/tools/{a}/competitors/{b}/remove", follow_redirects=False)
     assert r.status_code == 303
-    r = client.get(f"/admin/tools/{a}/edit")
+    r = client.get(f"/tools/software/{a_slug}/edit")
     assert "No competitors curated yet." in r.text
 
 
@@ -142,11 +143,12 @@ def test_admin_edit_saves_differentiation_note(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/edit", data={
+    r = client.post(f"/tools/software/{a_slug}/edit", data={
         "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
         "differentiation_note": "Human-readable formulas, real-time sync.",
     }, follow_redirects=False)
@@ -208,10 +210,11 @@ def test_profile_page_shows_competitors_and_differentiation(env):
 def test_profile_page_hides_sections_when_empty(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
-    lib.add_tool("Solo Co", "No competitors curated.", "https://solo.example", [], approved=1)
+    a = lib.add_tool("Solo Co", "No competitors curated.", "https://solo.example", [], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
-    r = _client(env).get("/tools/software/solo-co")
+    r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
     assert "Closest competitors" not in r.text
     assert "How this differs" not in r.text

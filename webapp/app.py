@@ -6134,7 +6134,7 @@ function submitIntroForm() {{
     {featured_badge}{advisor_star}
     <h1 style="margin:0;">{_esc(tool['name'])}</h1>
   </div>
-  {f'<a href="/admin/tools/{tool["id"]}/edit" class="tool-admin-btn">Edit</a>' if authed else ''}
+  {f'<a href="/tools/software/{tool["slug"]}/edit" class="tool-admin-btn">Edit</a>' if authed else ''}
 </div>
 {f'<p style="margin:8px 0 20px;"><a href="{_esc(tool["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if tool.get('url') else ''}
 <p style="font-size:15px;color:var(--ink-soft);margin:0 0 20px;line-height:1.6;">{_esc(tool['description'])}</p>
@@ -8335,7 +8335,7 @@ def admin_software(request: Request):
           <td data-col="software:vendor_name" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t.get('vendor_name') or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">
             <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-              <a href="/admin/tools/{t['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+              <a href="/tools/software/{t['slug']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
               <form method="post" action="/admin/tools/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
@@ -9287,7 +9287,7 @@ def admin_communities(request: Request, filter: str = ""):
   <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
   <td style="padding:10px 12px;">
     <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-      <a href="/admin/tools/communities/{c['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+      <a href="/tools/communities/{c['slug']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
       <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="text-align:center;">Profile</a>
       {mark_reviewed}
       <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
@@ -9650,19 +9650,19 @@ async def admin_communities_new_submit(request: Request):
                           access=access, format=format_, notes=notes, approved=1,
                           reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
     except DuplicateURLError as e:
-        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/communities/{e.entry_id}/edit"))
+        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/communities/{e.slug}/edit"))
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
 
 
-@app.get("/admin/tools/communities/{community_id}/edit", response_class=HTMLResponse)
-def admin_communities_edit(request: Request, community_id: int):
+@app.get("/tools/communities/{slug}/edit", response_class=HTMLResponse)
+def admin_communities_edit(request: Request, slug: str):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
     try:
-        c = lib.get_community(community_id)
+        c = lib.get_community_by_slug(slug)
         categories = lib.list_community_categories()
     finally:
         lib.close()
@@ -9670,7 +9670,7 @@ def admin_communities_edit(request: Request, community_id: int):
         raise HTTPException(status_code=404, detail="Community not found")
     body = f"""<div class="page page-form">
 <h1>Edit community</h1>
-<form method="post" action="/admin/tools/communities/{community_id}/edit" style="display:grid;gap:20px;">
+<form method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
 {_community_form_fields(c, categories)}
   <div>
     <button type="submit" class="btn">Save changes</button>
@@ -9682,10 +9682,18 @@ def admin_communities_edit(request: Request, community_id: int):
     return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
 
 
-@app.post("/admin/tools/communities/{community_id}/edit")
-async def admin_communities_edit_submit(request: Request, community_id: int):
+@app.post("/tools/communities/{slug}/edit")
+async def admin_communities_edit_submit(request: Request, slug: str):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        c = lib.get_community_by_slug(slug)
+    finally:
+        lib.close()
+    if not c:
+        raise HTTPException(status_code=404, detail="Community not found")
+    community_id = c["id"]
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
@@ -9712,7 +9720,7 @@ async def admin_communities_edit_submit(request: Request, community_id: int):
                              access=access, format=format_, notes=notes,
                              reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
     except DuplicateURLError as e:
-        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/communities/{e.entry_id}/edit"))
+        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/communities/{e.slug}/edit"))
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -10113,7 +10121,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
                                 warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
                                 summary=summary)
     except DuplicateURLError as e:
-        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
+        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     finally:
         lib.close()
     background_tasks.add_task(_run_tool_research, tool_id)
@@ -10144,13 +10152,14 @@ def admin_tools_reject(request: Request, tool_id: int):
     return RedirectResponse("/admin/tools/software", status_code=303)
 
 
-@app.get("/admin/tools/{tool_id}/edit", response_class=HTMLResponse)
-def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = "", research_refreshed: str = ""):
+@app.get("/tools/software/{slug}/edit", response_class=HTMLResponse)
+def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "", research_refreshed: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
     try:
-        tool = lib.get_tool(tool_id)
+        tool = lib.get_tool_by_slug(slug)
+        tool_id = tool["id"] if tool else None
         categories = lib.list_tool_categories()
         competitors = lib.list_tool_competitors(tool_id) if tool else []
         suggestions = lib.suggest_tool_competitors(tool_id) if tool else []
@@ -10175,7 +10184,7 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
     def _competitor_row(c: dict) -> str:
         return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;'
                 f'border-top:1px solid var(--line);">'
-                f'<a href="/admin/tools/{c["id"]}/edit" style="font-size:14px;font-weight:500;color:var(--ink);">{_esc(c["name"])}</a>'
+                f'<a href="/tools/software/{c["slug"]}/edit" style="font-size:14px;font-weight:500;color:var(--ink);">{_esc(c["name"])}</a>'
                 f'<form method="post" action="/admin/tools/{tool_id}/competitors/{c["id"]}/remove" style="margin:0;">'
                 f'<button type="submit" class="tool-admin-btn tool-admin-del">Remove</button></form></div>')
 
@@ -10278,7 +10287,7 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
     body = f"""<div class="page page-grid">
 <h1>Edit software</h1>
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
-<form method="post" action="/admin/tools/{tool_id}/edit" style="display:grid;gap:20px;">
+<form method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
     <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
@@ -10444,10 +10453,18 @@ def admin_tools_edit(request: Request, tool_id: int, screenshot_captured: str = 
     return HTMLResponse(_page(f"Edit {_esc(tool['name'])}—CFO Toolbox", "", body, authed=True))
 
 
-@app.post("/admin/tools/{tool_id}/edit")
-async def admin_tools_edit_submit(request: Request, tool_id: int):
+@app.post("/tools/software/{slug}/edit")
+async def admin_tools_edit_submit(request: Request, slug: str):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool_by_slug(slug)
+    finally:
+        lib.close()
+    if not tool:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    tool_id = tool["id"]
     form = await request.form()
     name = (form.get("name") or "").strip()
     url = (form.get("url") or "").strip()
@@ -10475,7 +10492,7 @@ async def admin_tools_edit_submit(request: Request, tool_id: int):
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot(tool_id, screenshot_url, screenshot_is_product)
     except DuplicateURLError as e:
-        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/admin/tools/{e.entry_id}/edit"))
+        raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     finally:
         lib.close()
     return RedirectResponse("/tools/software", status_code=303)
@@ -10505,7 +10522,7 @@ def admin_tools_screenshot_recapture(request: Request, tool_id: int):
     finally:
         lib.close()
     msg = "screenshot_captured=1" if ok else "screenshot_captured=0"
-    return RedirectResponse(f"/admin/tools/{tool_id}/edit?{msg}", status_code=303)
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/research/refresh")
@@ -10516,13 +10533,13 @@ def admin_tools_research_refresh(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
-    tool_exists = bool(lib.get_tool(tool_id))
+    tool = lib.get_tool(tool_id)
     lib.close()
-    if not tool_exists:
+    if not tool:
         raise HTTPException(status_code=404, detail="Tool not found")
     ok = _run_tool_research(tool_id)
     msg = "research_refreshed=1" if ok else "research_refreshed=0"
-    return RedirectResponse(f"/admin/tools/{tool_id}/edit?{msg}", status_code=303)
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/agent-taxonomy/verify")
@@ -10534,31 +10551,37 @@ def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
     try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
         lib.mark_tool_agent_taxonomy_verified(tool_id)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/competitors/add")
 async def admin_tools_competitors_add(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
-    form = await request.form()
-    try:
-        competitor_id = int(form.get("competitor_id") or "")
-    except (TypeError, ValueError):
-        return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
     lib = _lib()
     try:
-        if lib.get_tool(tool_id) and lib.get_tool(competitor_id):
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        form = await request.form()
+        try:
+            competitor_id = int(form.get("competitor_id") or "")
+        except (TypeError, ValueError):
+            return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
+        if lib.get_tool(competitor_id):
             try:
                 lib.add_tool_competitor(tool_id, competitor_id)
             except ValueError:
                 pass
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/competitors/{competitor_id}/remove")
@@ -10567,10 +10590,13 @@ def admin_tools_competitors_remove(request: Request, tool_id: int, competitor_id
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
     try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
         lib.remove_tool_competitor(tool_id, competitor_id)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/features/add")
@@ -10584,11 +10610,14 @@ async def admin_tools_features_add(request: Request, tool_id: int):
     notes = (form.get("notes") or "").strip()
     lib = _lib()
     try:
-        if feature_name and lib.get_tool(tool_id):
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        if feature_name:
             lib.add_tool_feature(tool_id, feature_name, standalone_available, bundled_only, notes)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
 @app.get("/admin/tools/{tool_id}/features/{feature_id}/edit", response_class=HTMLResponse)
@@ -10606,7 +10635,7 @@ def admin_tools_features_edit(request: Request, tool_id: int, feature_id: int):
 
     body = f"""<div class="page page-form">
 <h1>Edit feature</h1>
-<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;"><a href="/admin/tools/{tool_id}/edit">&larr; {_esc(tool['name'])}</a></p>
+<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;"><a href="/tools/software/{tool['slug']}/edit">&larr; {_esc(tool['name'])}</a></p>
 <form method="post" action="/admin/tools/{tool_id}/features/{feature_id}/edit" style="display:grid;gap:20px;">
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Feature name *</label>
@@ -10639,7 +10668,7 @@ def admin_tools_features_edit(request: Request, tool_id: int, feature_id: int):
   </div>
   <div>
     <button type="submit" class="btn">Save changes</button>
-    <a href="/admin/tools/{tool_id}/edit" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/tools/software/{tool['slug']}/edit" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>"""
@@ -10661,6 +10690,9 @@ async def admin_tools_features_edit_submit(request: Request, tool_id: int, featu
         raise HTTPException(status_code=400, detail="Feature name is required.")
     lib = _lib()
     try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
         feature = lib.get_tool_feature(feature_id)
         if not feature or feature["tool_id"] != tool_id:
             raise HTTPException(status_code=404, detail="Feature not found")
@@ -10668,7 +10700,7 @@ async def admin_tools_features_edit_submit(request: Request, tool_id: int, featu
                                 notes, source_url, needs_verification)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/features/{feature_id}/verify")
@@ -10677,6 +10709,9 @@ def admin_tools_features_verify(request: Request, tool_id: int, feature_id: int)
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
     try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
         feature = lib.get_tool_feature(feature_id)
         if feature and feature["tool_id"] == tool_id:
             lib.update_tool_feature(feature_id, feature["feature_name"], feature["standalone_available"],
@@ -10684,7 +10719,7 @@ def admin_tools_features_verify(request: Request, tool_id: int, feature_id: int)
                                     needs_verification=0)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/features/{feature_id}/delete")
@@ -10693,12 +10728,15 @@ def admin_tools_features_delete(request: Request, tool_id: int, feature_id: int)
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
     try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
         feature = lib.get_tool_feature(feature_id)
         if feature and feature["tool_id"] == tool_id:
             lib.delete_tool_feature(feature_id)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/tools/{tool_id}/edit", status_code=303)
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/delete")

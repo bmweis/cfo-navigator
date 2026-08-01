@@ -50,11 +50,12 @@ def test_admin_edit_saves_screenshot_fields(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/edit", data={
+    r = client.post(f"/tools/software/{a_slug}/edit", data={
         "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
         "screenshot_url": "https://example.com/shot.png",
         "screenshot_is_product": "1",
@@ -72,10 +73,11 @@ def test_profile_page_shows_product_screenshot_caption(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.update_tool_screenshot(a, "https://example.com/product-shot.png", 1)
     lib.close()
 
-    r = _client(env).get("/tools/software/runway")
+    r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
     assert "https://example.com/product-shot.png" in r.text
     assert "Product screenshot" in r.text
@@ -86,10 +88,11 @@ def test_profile_page_shows_homepage_fallback_caption(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.update_tool_screenshot(a, "https://example.com/homepage.png", 0)
     lib.close()
 
-    r = _client(env).get("/tools/software/runway")
+    r = _client(env).get(f"/tools/software/{a_slug}")
     assert "https://example.com/homepage.png" in r.text
     assert "no product screenshot available yet" in r.text.lower()
 
@@ -97,9 +100,10 @@ def test_profile_page_shows_homepage_fallback_caption(env):
 def test_profile_page_hides_screenshot_box_when_unset(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
-    lib.add_tool("Solo Co", "A tool with nothing set for the image field.", "https://solo.example", [], approved=1)
+    a = lib.add_tool("Solo Co", "A tool with nothing set for the image field.", "https://solo.example", [], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
-    r = _client(env).get("/tools/software/solo-co")
+    r = _client(env).get(f"/tools/software/{a_slug}")
     assert "tool-profile-side" not in r.text
     assert "screenshot" not in r.text.lower()

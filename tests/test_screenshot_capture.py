@@ -176,6 +176,7 @@ def test_admin_recapture_success(env, monkeypatch):
     written = _mock_playwright_success(monkeypatch)
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.close()
 
     client = _client(env)
@@ -191,7 +192,7 @@ def test_admin_recapture_success(env, monkeypatch):
     assert tool["screenshot_is_product"] == 0
     lib.close()
 
-    r = client.get(f"/admin/tools/{a}/edit?screenshot_captured=1")
+    r = client.get(f"/tools/software/{a_slug}/edit?screenshot_captured=1")
     assert "Screenshot captured." in r.text
 
 
@@ -199,6 +200,7 @@ def test_admin_recapture_failure_leaves_existing_screenshot(env, monkeypatch):
     _mock_playwright_failure(monkeypatch)
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
     lib.update_tool_screenshot(a, "https://example.com/existing.png", 0)
     lib.close()
 
@@ -212,7 +214,7 @@ def test_admin_recapture_failure_leaves_existing_screenshot(env, monkeypatch):
     assert lib.get_tool(a)["screenshot_url"] == "https://example.com/existing.png"   # untouched
     lib.close()
 
-    r = client.get(f"/admin/tools/{a}/edit?screenshot_captured=0")
+    r = client.get(f"/tools/software/{a_slug}/edit?screenshot_captured=0")
     assert "Couldn" in r.text  # the failure banner
 
 
