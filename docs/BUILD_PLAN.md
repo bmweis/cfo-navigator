@@ -10,6 +10,42 @@
 
 ---
 
+## Status (as of 2026-08-01)
+
+Pulled from actual code/PR state, not from this doc's original phase-by-phase
+guesses — see the "Plan vs. code" notes below for where the two disagreed.
+
+| Phase | Status | Notes |
+|---|---|---|
+| 0 — Findings | MERGED | Investigation-only; findings folded into the phases below. |
+| 1 — Bulk edit polish / admin table columns | MERGED | [#244](https://github.com/bmweis/cfo-navigator/pull/244). |
+| 2 — Domain-slug URL restructure | MERGED | [#245](https://github.com/bmweis/cfo-navigator/pull/245). Public + edit routes both on `/tools/{type}/{slug}[/edit]`. |
+| 3 — Software profile page | MERGED | [#246](https://github.com/bmweis/cfo-navigator/pull/246) (redesign) + [#247](https://github.com/bmweis/cfo-navigator/pull/247) (Bottom Line callout addendum). |
+| 3b — Communities profile page | MERGED | [#248](https://github.com/bmweis/cfo-navigator/pull/248). Full build (screenshot capture extended to Communities, Details card, edit form) — the 3b.0 preview gate was cleared before this merged, not just the preview round. |
+| 4 — Edit-page button reorg | OPEN (ready to merge) | [#251](https://github.com/bmweis/cfo-navigator/pull/251), bundled with Phases 6 and 7 — see note below. |
+| 5 — Competitors / Similar-entities auto-suggestion | MERGED — **ahead of plan sequencing** | Landed in [#249](https://github.com/bmweis/cfo-navigator/pull/249) ("AI-first-pass Competitors/Similar-communities upgrade"), before Phase 4/6/7. **Plan vs. code disagreement:** the plan sequenced Phase 5 after Phase 4/6/7; in practice it shipped earlier, bundled into the AI-first-pass principle work instead of as its own phase. Schema (`community_competitors`), admin curation UI (suggestions + "+ Add selected"), the public "Similar communities" chip card, and the AI-drafted-suggestion logic (`generate_competitor_matches` / `generateCommunityCompetitorMatches`) are all live for both Software and Communities. Nothing outstanding from the plan's Phase 5 scope that we've found. |
+| 6 — Features section collapsible (Software edit page) | OPEN (ready to merge) | [#251](https://github.com/bmweis/cfo-navigator/pull/251), bundled with Phases 4 and 7. |
+| 7 — Warm intro reorder (Software edit page) | OPEN (ready to merge) | [#251](https://github.com/bmweis/cfo-navigator/pull/251), bundled with Phases 4 and 6. |
+| 8 — Feature normalization + Compare | NOT STARTED | Hard gate at 8.0 — investigation + cleanup-mapping proposal needs Brian's explicit approval before 8.1/8.2. |
+| 9 — Per-item memory | NOT STARTED | Hard dependency on Phases 5 and 8 both being fully merged; Phase 5 is done, Phase 8 is not, so this stays blocked. |
+
+**Note on #251 (Phases 4/6/7 bundled into one PR):** this is a deliberate
+exception to the "one PR per phase minimum" process rule below, not a missed
+rule — Phase 6 (collapsible Features) and Phase 7 (Warm Intro moving to below
+Features) are structurally entangled on the same edit-page real estate as
+Phase 4's button moves, so splitting them into three PRs would have meant
+each one repeatedly touching code the other two also touch.
+
+**AI-first-pass, human-approval-gate standing principle:** all 5 items are
+done (Bottom Line generate button, Competitors/Similar-communities full
+draft, review-status tracking via `ai_drafted_fields`/`_record_ai_drafted_reviews`,
+Communities narrative-field generate buttons, and the 7 previously
+hand-entry-only Communities fields folded into the generate flow) — ahead of
+where the phase-by-phase list below implies, since this was pursued as a
+cross-cutting principle rather than sequenced phase-by-phase.
+
+---
+
 ## Standing project context
 
 - Repo: bmweis/cfo-navigator on GitHub. `main` is the only branch — feature work happens on short-lived branches off `main`, merged via PR.
