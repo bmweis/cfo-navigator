@@ -952,6 +952,20 @@ def _sticker(text: str, *, rotate: float = 5, top: str = "-10px",
     )
 
 
+def _profile_admin_nudge(text: str) -> str:
+    """Admin-only placeholder for a whole profile-page section that's never
+    been generated/populated at all (Software and Communities profile pages,
+    Phase 3b follow-up) — same visibility rule as the page's Edit button.
+    Deliberately not styled as a real `.tp-card` (no solid border/shadow) so
+    it reads as a placeholder, not populated content; a public visitor never
+    sees this — the section is simply omitted for them. Distinct from a
+    single empty field inside an otherwise-populated section, which shows
+    muted "No details available" text to everyone instead (an honest
+    "doesn't apply here," not a research gap)."""
+    return (f'<p style="font-size:12px;color:var(--muted);font-style:italic;margin:0;'
+            f'padding:12px 16px;border:1px dashed var(--line-strong);border-radius:10px;">{_esc(text)}</p>')
+
+
 def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Hand-drawn wavy SVG underline for one hero heading word. Stretches to
     fill its parent's width (`preserveAspectRatio="none"`, a fixed viewBox).
@@ -5966,6 +5980,13 @@ def tools_software_profile(request: Request, slug: str):
     if not tool:
         raise HTTPException(status_code=404, detail="Tool not found")
 
+    # Whole-section-missing cases (Competitors/Bottom line/Agent taxonomy/
+    # Features) get an admin-only nudge in their place rather than showing
+    # nothing at all — solves "how do I know what's missing" without
+    # showing public visitors a page full of empty boxes. Distinct from a
+    # single empty field inside an otherwise-populated section (see the
+    # Community Profile cards further down), which shows muted text to
+    # everyone instead of hiding.
     competitors_block = ""
     if competitors:
         comp_chips = "".join(
@@ -5976,6 +5997,8 @@ def tools_software_profile(request: Request, slug: str):
   <h2 class="tp-card-h">Competitors</h2>
   <div class="tp-chip-row">{comp_chips}</div>
 </div>"""
+    elif authed:
+        competitors_block = _profile_admin_nudge("No competitors curated yet.")
 
     # "Bottom line" callout — same seafoam treatment as the Communities
     # profile page's verdict_summary callout (Phase 3b), replacing the old
@@ -5988,6 +6011,9 @@ def tools_software_profile(request: Request, slug: str):
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line</div>
   <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;">{_esc(tool['differentiation_note'])}</p>
 </div>"""
+    elif authed:
+        differentiation_block = (f'<div style="margin-bottom:22px;">'
+                                  f'{_profile_admin_nudge("Bottom line not yet written (hand-written, not auto-drafted).")}</div>')
 
     agent_taxonomy_block = ""
     if (tool.get("agent_taxonomy_note") or "").strip():
@@ -5996,6 +6022,8 @@ def tools_software_profile(request: Request, slug: str):
   <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy{agent_verify}</h2>
   <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
 </div>"""
+    elif authed:
+        agent_taxonomy_block = _profile_admin_nudge("Agent taxonomy not yet generated.")
 
     # Features card: two-column Feature/AI table, reading tool_features free
     # text directly (Phase 3) — Phase 8.4 switches this to the normalized
@@ -6004,6 +6032,8 @@ def tools_software_profile(request: Request, slug: str):
     # that prefix stripped and a checkmark in the AI column, same as the
     # mockup's dev note.
     features_card = ""
+    if not features and authed:
+        features_card = _profile_admin_nudge("Features not yet generated.")
     if features:
         n_needs_verify = sum(1 for f in features if f["needs_verification"])
 
@@ -7614,10 +7644,6 @@ def tools_community_profile(request: Request, slug: str):
         profile = dict(profile)
         profile["format_reality"] = f"{base} {profile['event_style']}".strip() if base else profile["event_style"]
 
-    all_group_keys = [key for _, fields in _COMMUNITY_PROFILE_GROUPS for _, key in fields]
-    has_profile = (any((profile.get(k) or "").strip() for k in all_group_keys)
-                   or (profile.get("verdict_summary") or "").strip() or profile.get("founded_year"))
-
     cats = community.get("categories") or []
     featured_badge = (
         '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
@@ -7671,6 +7697,12 @@ def tools_community_profile(request: Request, slug: str):
   <p style="margin:0;">{_esc(notes_text) if notes_text else '<span style="color:var(--muted);font-style:italic;">No description yet.</span>'}</p>
 </div>"""
 
+    # Whole-section-missing (Bottom line, and each Community Profile card
+    # independently) gets an admin-only nudge rather than nothing at all —
+    # same rule as Software's Competitors/Agent taxonomy/Features. A field
+    # empty within a card that DOES have other populated fields is a
+    # different case (Tier 2 below): shown to everyone as muted "No details
+    # available" text, an honest "doesn't apply here," not a research gap.
     verdict_block = ""
     if (profile.get("verdict_summary") or "").strip():
         verdict_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
@@ -7678,25 +7710,39 @@ def tools_community_profile(request: Request, slug: str):
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line</div>
   <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;">{_esc(profile['verdict_summary'])}</p>
 </div>"""
+    elif authed:
+        verdict_block = (f'<div style="margin-bottom:22px;">'
+                          f'{_profile_admin_nudge("Bottom line not yet generated.")}</div>')
 
-    profile_cards = ""
-    if has_profile:
-        cards = []
-        for group_title, fields in _COMMUNITY_PROFILE_GROUPS:
-            sections = "".join(
-                f"""<div style="margin-bottom:16px;">
+    cards = []
+    for group_title, fields in _COMMUNITY_PROFILE_GROUPS:
+        sections = "".join(
+            f"""<div style="margin-bottom:16px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
   <p style="margin:0;">{_esc(profile[key])}</p>
 </div>"""
+            for label, key in fields
+            if (profile.get(key) or "").strip()
+        )
+        if sections:
+            # Tier 2: a field left empty within this otherwise-populated card
+            # shows muted text to every visitor, not just admin — a single
+            # missing fact doesn't warrant hiding a card that has real content.
+            missing = "".join(
+                f"""<div style="margin-bottom:16px;">
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
+  <p style="margin:0;color:var(--muted);font-style:italic;">No details available.</p>
+</div>"""
                 for label, key in fields
-                if (profile.get(key) or "").strip()
+                if not (profile.get(key) or "").strip()
             )
-            if sections:
-                cards.append(f"""<div class="tp-card">
+            cards.append(f"""<div class="tp-card">
   <h2 class="tp-card-h">{_esc(group_title)}</h2>
-  {sections}
+  {sections}{missing}
 </div>""")
-        profile_cards = "\n".join(cards)
+        elif authed:
+            cards.append(_profile_admin_nudge(f"{group_title} not yet generated."))
+    profile_cards = "\n".join(cards)
 
     # Details card: the fixed directory-metadata fields as label/value rows,
     # same pattern as the Software profile page's future equivalent. Format
