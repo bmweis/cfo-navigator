@@ -66,6 +66,12 @@ SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
 # than under the app's own static/ dir, which ships inside the Docker image
 # and doesn't persist across deploys.
 _SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "tool_screenshots")
+# Separate directory from _SCREENSHOT_DIR (Phase 3b) — Software and
+# Communities slugs are separate namespaces (Phase 2) but can collide on the
+# same value (Phase 0 found airbase/datarails/rillet shared across both), so
+# a single shared "{slug}.png" filename scheme would silently overwrite one
+# type's screenshot with the other's.
+_COMMUNITY_SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "community_screenshots")
 
 # /contact spam controls (see _contact_rate_limited and _is_contact_spam below).
 CONTACT_RATE_LIMIT_PER_HOUR = int(os.environ.get("LINKLIB_CONTACT_RATE_LIMIT_PER_HOUR", "5"))
@@ -6845,6 +6851,46 @@ _COMMUNITY_PROFILE_PUBLIC_FIELDS = [
 ]
 
 
+# Themed grouping for the redesigned Communities profile page (Phase 3b) —
+# _COMMUNITY_PROFILE_PUBLIC_FIELDS above stays untouched and is still used
+# by the old /tools/communities/compare page (a flat label/value table,
+# Phase 8.5's job to rebuild, not this phase's). Fourteen flat sections read
+# as a wall of text regardless of how many cards they're split across, so
+# this groups them by theme instead — four cards, each with real breathing
+# room, mirroring the Software profile page's one-concept-per-card pattern.
+# event_style has no row of its own — merged into "Format, in practice"
+# text at render time, since it's texture on that fact, not a new one.
+# platform_type/meeting_format fold into the Details card's Format row
+# instead (near-duplicates of `format`'s own fixed vocabulary), and
+# cpe_eligible is a single Details-card line, not a section — see
+# _community_details_card. Notable members / Public criticism don't name-match
+# either of Brian's four groups perfectly; placed here as the closest
+# semantic fit (social proof / trade-off caveat).
+_COMMUNITY_PROFILE_GROUPS = [
+    ("Who it's for", [
+        ("Ideal member", "ideal_member"),
+        ("Who should skip it", "anti_fit"),
+        ("Who it targets", "seniority_band"),
+    ]),
+    ("What you get", [
+        ("Value proposition", "value_prop"),
+        ("Primary purpose", "primary_purpose"),
+        ("Resources included", "resources_included"),
+        ("Notable members", "notable_members"),
+    ]),
+    ("How it works", [
+        ("Format, in practice", "format_reality"),
+        ("Engagement level", "engagement_level"),
+        ("Application friction", "application_friction"),
+    ]),
+    ("Cost & structure", [
+        ("Cost vs. value", "cost_value_verdict"),
+        ("Sponsor relationship", "sponsor_relationship_note"),
+        ("Business model", "business_model"),
+        ("Public criticism", "public_criticism"),
+    ]),
+]
+
 
 # Native gap-collection form (Phase 5): replaces the old /community
 # waitlist page's Google Form, folded into the live directory. Reachable
@@ -7547,6 +7593,7 @@ async def tools_community_correct_submit(request: Request):
 
 @app.get("/tools/communities/{slug}", response_class=HTMLResponse)
 def tools_community_profile(request: Request, slug: str):
+    authed = _is_authed(request)   # admin sees the Edit button, same rule as Software
     session_id = _visitor_session_id(request)
     lib = _lib()
     try:
@@ -7559,96 +7606,209 @@ def tools_community_profile(request: Request, slug: str):
     finally:
         lib.close()
 
-    text_fields = [k for _, k in _COMMUNITY_PROFILE_PUBLIC_FIELDS] + ["verdict_summary"]
-    has_profile = any((profile.get(k) or "").strip() for k in text_fields) or profile.get("founded_year")
+    # event_style is texture on format_reality, not its own fact — merged
+    # into that field's text at render time rather than given its own row
+    # (see _COMMUNITY_PROFILE_GROUPS docstring).
+    if profile.get("event_style"):
+        base = (profile.get("format_reality") or "").strip()
+        profile = dict(profile)
+        profile["format_reality"] = f"{base} {profile['event_style']}".strip() if base else profile["event_style"]
 
-    meta_parts = [_community_geo_line(community)]
-    if community.get("access"):
-        meta_parts.append(community["access"])
-    if community.get("sponsorship_type"):
-        sp = community["sponsorship_type"]
-        if community.get("sponsor_name"):
-            sp += f" ({community['sponsor_name']})"
-        meta_parts.append(sp)
-    meta_line = " &middot; ".join(_esc(p) for p in meta_parts)
+    all_group_keys = [key for _, fields in _COMMUNITY_PROFILE_GROUPS for _, key in fields]
+    has_profile = (any((profile.get(k) or "").strip() for k in all_group_keys)
+                   or (profile.get("verdict_summary") or "").strip() or profile.get("founded_year"))
 
-    cats = "".join(f'<span class="comm-cat">{_esc(x)}</span>' for x in community.get("categories") or [])
+    cats = community.get("categories") or []
     featured_badge = (
         '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>'
         if community.get("featured") else ""
     )
-    advisor_star = (
-        '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>'
-        if community.get("advisor") else ""
+    advisor_mark_html = '<span class="tp-fn-mark">*</span>' if community.get("advisor") else ""
+
+    action_row_parts = []
+    if community.get("url"):
+        action_row_parts.append(f'<a class="btn" href="{_esc(community["url"])}" target="_blank" rel="noopener">Visit &#8599;</a>')
+    action_row_parts.append('<a class="btn btn-ghost" href="#">&#8644; Compare</a>')
+    if authed:
+        action_row_parts.append('<span class="tp-admin-divider"></span>')
+        action_row_parts.append(f'<a class="tp-admin-btn" href="/tools/communities/{community["slug"]}/edit">&#9998; Edit</a>')
+    action_row = "".join(action_row_parts)
+
+    demographic_html = _verify_html(community["demographic"], "tp-verify-inline")
+    hero_text = f"""<h1 class="tp-h1">{featured_badge} {_esc(community['name'])}{advisor_mark_html}</h1>
+<p class="tp-subhead">{demographic_html}</p>
+<div class="tp-hero-actions">{action_row}</div>"""
+
+    screenshot_caption = ""
+    if (community.get("screenshot_url") or "").strip():
+        if community.get("screenshot_is_product"):
+            screenshot_caption = "Product screenshot"
+        elif (community.get("screenshot_captured_at") or "").strip():
+            screenshot_caption = f"Homepage screenshot, captured {community['screenshot_captured_at'][:10]}"
+        else:
+            screenshot_caption = "Homepage screenshot (no product screenshot available yet)"
+    screenshot_frame_inner = (
+        f'<img src="{_esc(community["screenshot_url"])}" alt="{_esc(community["name"])} screenshot" '
+        f'style="width:100%;height:100%;object-fit:cover;display:block;">'
+        if (community.get("screenshot_url") or "").strip() else "No screenshot yet"
     )
-    notes_line = ""
-    if community.get("notes") or community.get("cost_note"):
-        notes_line = (
-            f'<p style="color:var(--muted);margin:0 0 20px;line-height:1.6;">'
-            f'{_esc(" ".join(filter(None, [community.get("notes"), community.get("cost_note")])))}</p>'
-        )
+    featured_sticker = _sticker("Featured", rotate=8, top="-14px", right="-16px", size=14) if community.get("featured") else ""
+    screenshot_block = f"""<div class="tp-card tp-shot-card">
+  {featured_sticker}
+  <div class="tp-shot-frame">{screenshot_frame_inner}</div>
+  {f'<div class="tp-shot-caption">{_esc(screenshot_caption)}</div>' if screenshot_caption else ''}
+</div>"""
+
+    top_band = f"""<div class="tp-band">
+  <div>{hero_text}</div>
+  <div>{screenshot_block}</div>
+</div>"""
+
+    notes_text = " ".join(filter(None, [community.get("notes"), community.get("cost_note")]))
+    description_card = f"""<div class="tp-card">
+  <h2 class="tp-card-h">Description</h2>
+  <p style="margin:0;">{_esc(notes_text) if notes_text else '<span style="color:var(--muted);font-style:italic;">No description yet.</span>'}</p>
+</div>"""
 
     verdict_block = ""
-    if has_profile and (profile.get("verdict_summary") or "").strip():
-        verdict_block = f"""<div style="background:var(--seafoam);border-radius:12px;padding:16px 20px;margin:0 0 24px;">
-  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);margin-bottom:6px;">Bottom line</div>
+    if (profile.get("verdict_summary") or "").strip():
+        verdict_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
+  border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line</div>
   <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;">{_esc(profile['verdict_summary'])}</p>
 </div>"""
 
-    profile_sections = ""
+    profile_cards = ""
     if has_profile:
-        sections = "".join(
-            f"""<div style="margin-bottom:20px;">
+        cards = []
+        for group_title, fields in _COMMUNITY_PROFILE_GROUPS:
+            sections = "".join(
+                f"""<div style="margin-bottom:16px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">{_esc(label)}</div>
-  <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{_esc(profile[key])}</p>
+  <p style="margin:0;">{_esc(profile[key])}</p>
 </div>"""
-            for label, key in _COMMUNITY_PROFILE_PUBLIC_FIELDS
-            if (profile.get(key) or "").strip()
+                for label, key in fields
+                if (profile.get(key) or "").strip()
+            )
+            if sections:
+                cards.append(f"""<div class="tp-card">
+  <h2 class="tp-card-h">{_esc(group_title)}</h2>
+  {sections}
+</div>""")
+        profile_cards = "\n".join(cards)
+
+    # Details card: the fixed directory-metadata fields as label/value rows,
+    # same pattern as the Software profile page's future equivalent. Format
+    # folds in platform_type/meeting_format (near-duplicates of format's own
+    # fixed vocabulary — no separate section), Reach folds in local_markets,
+    # Founded moves here from its own narrative section (a single number
+    # doesn't earn a whole card), and CPE eligibility is a single line, not
+    # a section (Phase 3b.0 follow-up resolutions).
+    detail_rows = []
+    def _detail_row(label: str, value: str) -> None:
+        if not value:
+            return
+        detail_rows.append(f'<div class="tp-detail-row"><span class="tp-detail-label">{_esc(label)}</span>'
+                            f'<span class="tp-detail-value">{_verify_html(value, "tp-verify-inline")}</span></div>')
+    _detail_row("Cost band", community.get("cost_band"))
+    _detail_row("Access", community.get("access"))
+    sponsorship = community.get("sponsorship_type") or ""
+    if sponsorship and sponsorship != _NEEDS_VERIFICATION and community.get("sponsor_name"):
+        sponsorship += f" ({community['sponsor_name']})"
+    _detail_row("Sponsorship", sponsorship)
+    fmt = community.get("format") or ""
+    extra_fmt_bits = [b for b in [profile.get("platform_type"), profile.get("meeting_format")] if (b or "").strip()]
+    if fmt and fmt != _NEEDS_VERIFICATION and extra_fmt_bits:
+        fmt = f"{fmt} ({'; '.join(extra_fmt_bits)})"
+    elif (not fmt or fmt == _NEEDS_VERIFICATION) and extra_fmt_bits:
+        fmt = "; ".join(extra_fmt_bits)
+    _detail_row("Format", fmt)
+    geo_line = _community_geo_line(community)
+    _detail_row("Reach", geo_line)
+    if profile.get("founded_year"):
+        _detail_row("Founded", str(profile["founded_year"]))
+    if (profile.get("cpe_eligible") or "").strip():
+        _detail_row("CPE eligible", profile["cpe_eligible"])
+    details_card = ""
+    if detail_rows:
+        details_card = f"""<div class="tp-card">
+  <h2 class="tp-card-h">Details</h2>
+  {''.join(detail_rows)}
+</div>"""
+
+    categories_card = ""
+    if cats:
+        categories_card = f"""<div class="tp-card">
+  <h2 class="tp-card-h">Categories</h2>
+  <ul class="tp-cat-list">{''.join(f'<li>{_esc(x)}</li>' for x in cats)}</ul>
+</div>"""
+
+    footnote_block = ""
+    if community.get("advisor"):
+        footnote_block = (
+            f'<div class="tp-footnote"><span class="tp-fn-mark">*</span>'
+            f'<span>Brian is a formal advisor to {_esc(community["name"])}. Advisor relationships are always '
+            f'disclosed and never affect ranking or inclusion.</span></div>'
         )
-        if profile.get("founded_year"):
-            sections += f"""<div style="margin-bottom:20px;">
-  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Founded</div>
-  <p style="margin:0;color:var(--ink-soft);line-height:1.6;">{profile['founded_year']}</p>
-</div>"""
-        profile_sections = f"""<div style="margin-top:8px;padding-top:24px;border-top:1px solid var(--line);">
-{sections}</div>"""
 
-    cost_badge_html = (
-        '<span class="comm-verify">Needs verification</span>' if community["cost_band"] == _NEEDS_VERIFICATION
-        else f'<span class="comm-cost">{_esc(community["cost_band"])}</span>'
-    )
-    demographic_html = _verify_html(community["demographic"])
-
-    body = f"""<div class="page page-full">
-<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
-<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:2px;">
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    {featured_badge}{advisor_star}
-    <h1 style="margin:0;">{_esc(community['name'])}</h1>
+    lower_band = f"""<div class="tp-band">
+  <div class="tp-col-stack">
+    {verdict_block}
+    {description_card}
+    {profile_cards}
   </div>
-  {cost_badge_html}
-</div>
-<p style="color:var(--muted);margin:8px 0 4px;">{meta_line}</p>
-{f'<p style="margin:4px 0 20px;"><a href="{_esc(community["url"])}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;display:inline-block;">Visit website &rarr;</a></p>' if community.get('url') else ''}
-<p style="font-size:15px;color:var(--ink-soft);margin:0 0 16px;line-height:1.6;">{demographic_html}</p>
-{notes_line}
-<div class="comm-cats" style="margin-bottom:8px;">{cats}</div>
-{verdict_block}
-{profile_sections}
+  <div class="tp-col-stack">
+    {details_card}
+    {categories_card}
+  </div>
+</div>"""
 
-<div style="margin-top:36px;padding-top:20px;border-top:1px solid var(--line);">
+    footer_links = f"""<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
   <p style="margin:0 0 6px;"><a href="/tools/communities/gap?community_id={community['id']}" style="font-size:13px;color:var(--muted);">Not quite the right fit? Tell us why &rarr;</a></p>
   <p style="margin:0;"><a href="/tools/communities/correct?community_id={community['id']}" style="font-size:13px;color:var(--muted);">Something here out of date? Suggest a correction &rarr;</a></p>
-</div>
-</div>
+</div>"""
 
+    main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
+{top_band}
+{lower_band}
+{footnote_block}
+{footer_links}"""
+
+    body = f"""<div class="page page-full">
+{main_content}
+</div>
 <style>
-.comm-star{{font-size:16px;color:#b8860b;}}
-.comm-cats{{display:flex;flex-wrap:wrap;gap:6px;}}
-.comm-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
-.comm-cost{{font-size:11px;font-weight:600;color:var(--navy);background:var(--navy-wash);border-radius:6px;padding:4px 10px;white-space:nowrap;}}
-.comm-verify{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:3px 9px;white-space:nowrap;}}
+.tp-band{{display:grid;grid-template-columns:2fr 1fr;gap:22px;align-items:start;margin-top:22px;}}
+@media(max-width:800px){{.tp-band{{grid-template-columns:1fr;}}}}
+.tp-col-stack{{display:flex;flex-direction:column;gap:22px;}}
+.tp-h1{{margin:0 0 8px;display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;}}
+.tp-fn-mark{{font-size:18px;color:var(--navy-light);font-weight:600;margin-left:3px;transform:translateY(2px);line-height:1;}}
+.tp-subhead{{font-size:17px;color:var(--ink-soft);margin:0 0 18px;}}
+.tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
+.tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
+.tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
+  padding:10px 16px;font:600 14px var(--font-body);cursor:pointer;text-decoration:none;display:inline-flex;
+  align-items:center;gap:6px;white-space:nowrap;}}
+.tp-admin-btn:hover{{background:var(--navy-wash);color:var(--ink);text-decoration:none;}}
+.tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
+.tp-card-h{{font-family:var(--font-head);font-weight:600;font-size:18px;color:var(--ink);margin:0 0 14px;letter-spacing:-0.01em;}}
+.tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;}}
+.tp-shot-card{{padding:12px;text-align:center;position:relative;overflow:visible;}}
+.tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
+  aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
+.tp-shot-caption{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:10px;}}
+.tp-cat-list{{list-style:none;margin:0;padding:0;}}
+.tp-cat-list li{{font-size:14px;color:var(--ink-soft);padding:5px 0 5px 16px;position:relative;}}
+.tp-cat-list li::before{{content:"\\2022";color:var(--seafoam-deep);position:absolute;left:0;font-weight:700;}}
+.tp-footnote{{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);
+  display:flex;gap:6px;}}
+.tp-footnote .tp-fn-mark{{color:var(--navy-light);font-weight:600;flex-shrink:0;}}
+.tp-detail-row{{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;}}
+.tp-detail-row:last-child{{border-bottom:none;}}
+.tp-detail-label{{color:var(--muted);font-weight:500;}}
+.tp-detail-value{{color:var(--ink-soft);text-align:right;}}
+.tp-verify-inline{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
 </style>"""
     resp = HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request)))
     _set_visitor_cookie(request, resp, session_id)
@@ -9119,6 +9279,16 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
       <input type="checkbox" name="advisor" value="1"{' checked' if c.get('advisor') else ''}>
       <span>&#9733; Formal advisor: marks this community with an advisor star</span>
     </label>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(optional—shown in a bordered box on the profile page)</span></label>
+    <input name="screenshot_url" type="url" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…/screenshot.png">
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
+      <input type="checkbox" name="screenshot_is_product" value="1"{'checked' if c.get('screenshot_is_product') else ''}>
+      This is an actual product screenshot (unchecked = homepage/other, captioned as such)
+    </label>
   </div>"""
 
 
@@ -9751,7 +9921,7 @@ async def admin_communities_new_submit(request: Request):
 
 
 @app.get("/tools/communities/{slug}/edit", response_class=HTMLResponse)
-def admin_communities_edit(request: Request, slug: str):
+def admin_communities_edit(request: Request, slug: str, screenshot_captured: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -9762,6 +9932,27 @@ def admin_communities_edit(request: Request, slug: str):
         lib.close()
     if not c:
         raise HTTPException(status_code=404, detail="Community not found")
+
+    screenshot_banner_html = ""
+    if screenshot_captured == "1":
+        screenshot_banner_html = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
+                                   'padding:10px 16px;font-size:14px;margin:0 0 16px;">Screenshot captured.</p>')
+    elif screenshot_captured == "0":
+        screenshot_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                                   'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture a screenshot—'
+                                   'the site may block headless browsers or timed out. Try again, or paste a URL manually above.</p>')
+
+    screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
+    if (c.get("screenshot_url") or "").strip():
+        cap_note = (f"Captured {c['screenshot_captured_at'][:10]}" if c.get("screenshot_captured_at")
+                    else "Manually set—no capture date")
+        screenshot_preview_html = (
+            f'<div style="max-width:320px;">'
+            f'<img src="{_esc(c["screenshot_url"])}" alt="Current screenshot" '
+            f'style="width:100%;height:auto;border:1px solid var(--line);border-radius:10px;display:block;">'
+            f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">{_esc(cap_note)}</p></div>'
+        )
+
     body = f"""<div class="page page-form">
 <h1>Edit community</h1>
 <form method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
@@ -9771,7 +9962,21 @@ def admin_communities_edit(request: Request, slug: str):
     <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Screenshot</h2>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Recapture pulls a fresh homepage screenshot at a fixed size. Paste a different URL above (then Save changes) to override with something else entirely.</p>
+  {screenshot_banner_html}
+  {screenshot_preview_html}
+  <form method="post" action="/admin/tools/communities/{c['id']}/screenshot/recapture" style="margin-top:12px;">
+    <button type="submit" class="tool-admin-btn">&#128247; Recapture from homepage</button>
+  </form>
 </div>
+</div>
+<style>
+.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
+.tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
+</style>
 <script>{_GENERATE_LISTING_JS}</script>"""
     return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
 
@@ -9804,6 +10009,8 @@ async def admin_communities_edit_submit(request: Request, slug: str):
     local_markets = (form.get("local_markets") or "").strip()
     featured = 1 if form.get("featured") == "1" else 0
     advisor = 1 if form.get("advisor") == "1" else 0
+    screenshot_url = (form.get("screenshot_url") or "").strip()
+    screenshot_is_product = 1 if form.get("screenshot_is_product") == "1" else 0
     if not (name and demographic):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
@@ -9813,11 +10020,36 @@ async def admin_communities_edit_submit(request: Request, slug: str):
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                              access=access, format=format_, notes=notes,
                              reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
+        lib.update_community_screenshot(community_id, screenshot_url, screenshot_is_product)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/communities/{e.slug}/edit"))
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/screenshot/recapture")
+def admin_communities_screenshot_recapture(request: Request, community_id: int):
+    """Communities equivalent of admin_tools_screenshot_recapture (Phase 3b)
+    — same synchronous live-capture pattern, own screenshot directory/route
+    (see _COMMUNITY_SCREENSHOT_DIR)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        from linklib.screenshots import capture_homepage
+        dest = os.path.join(_COMMUNITY_SCREENSHOT_DIR, f"{community['slug']}.png")
+        ok = capture_homepage(community["url"], dest)
+        if ok:
+            served_url = f"/tools/communities/screenshot/{community['slug']}.png?v={int(time.time())}"
+            lib.set_community_screenshot_capture(community_id, served_url)
+    finally:
+        lib.close()
+    msg = "screenshot_captured=1" if ok else "screenshot_captured=0"
+    return RedirectResponse(f"/tools/communities/{community['slug']}/edit?{msg}", status_code=303)
 
 
 @app.post("/admin/tools/communities/{community_id}/mark-reviewed")
@@ -18345,6 +18577,18 @@ def tools_software_screenshot(filename: str):
     the Docker image."""
     safe = os.path.basename(filename)
     path = os.path.join(_SCREENSHOT_DIR, safe)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/png")
+
+
+@app.get("/tools/communities/screenshot/{filename}")
+def tools_communities_screenshot(filename: str):
+    """Communities equivalent of tools_software_screenshot (Phase 3b) — its
+    own directory/route rather than sharing _SCREENSHOT_DIR, since Software
+    and Communities slugs can collide (see _COMMUNITY_SCREENSHOT_DIR)."""
+    safe = os.path.basename(filename)
+    path = os.path.join(_COMMUNITY_SCREENSHOT_DIR, safe)
     if not os.path.isfile(path):
         raise HTTPException(status_code=404)
     return FileResponse(path, media_type="image/png")

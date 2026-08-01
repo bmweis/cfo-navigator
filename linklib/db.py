@@ -1189,6 +1189,15 @@ class Library:
             "ALTER TABLE community_profiles DROP COLUMN resources_included_tags",
             "ALTER TABLE community_profiles DROP COLUMN meeting_format_tags",
             "ALTER TABLE community_profiles DROP COLUMN event_style_tags",
+            # Profile-page screenshot (Phase 3b) — built from scratch for
+            # Communities, mirroring tools.screenshot_url/_is_product/
+            # _captured_at exactly (see the tools ALTER TABLE block above for
+            # the full reasoning: two write paths, manual paste vs. automated
+            # homepage capture via linklib.screenshots.capture_homepage,
+            # sharing these three columns).
+            "ALTER TABLE communities ADD COLUMN screenshot_url TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE communities ADD COLUMN screenshot_is_product INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE communities ADD COLUMN screenshot_captured_at TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -2592,6 +2601,29 @@ class Library:
         self.conn.execute(
             "UPDATE communities SET name=?, notes=?, updated_at=? WHERE id=?",
             (name.strip(), notes.strip(), _now(), community_id),
+        )
+        self.conn.commit()
+
+    def update_community_screenshot(self, community_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
+        """Narrow update for the admin edit form's manual screenshot fields —
+        mirrors update_tool_screenshot exactly, including clearing
+        screenshot_captured_at since a hand-pasted URL has no known capture
+        time."""
+        self.conn.execute(
+            "UPDATE communities SET screenshot_url=?, screenshot_is_product=?, screenshot_captured_at='', "
+            "updated_at=? WHERE id=?",
+            (screenshot_url.strip(), screenshot_is_product, _now(), community_id),
+        )
+        self.conn.commit()
+
+    def set_community_screenshot_capture(self, community_id: int, screenshot_url: str) -> None:
+        """Records an automated homepage capture — mirrors
+        set_tool_screenshot_capture exactly, including always-homepage-only
+        (screenshot_is_product=0) by design."""
+        self.conn.execute(
+            "UPDATE communities SET screenshot_url=?, screenshot_is_product=0, screenshot_captured_at=?, "
+            "updated_at=? WHERE id=?",
+            (screenshot_url.strip(), _now(), _now(), community_id),
         )
         self.conn.commit()
 
