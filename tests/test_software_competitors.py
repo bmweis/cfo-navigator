@@ -203,7 +203,7 @@ def test_profile_page_shows_competitors_and_differentiation(env):
     assert "Competitors" in r.text
     assert "/tools/software/datarails" in r.text
     assert "Datarails" in r.text
-    assert "How this differs" in r.text
+    assert "Bottom line" in r.text
     assert "Human-readable formulas set it apart." in r.text
 
 
@@ -217,4 +217,4 @@ def test_profile_page_hides_sections_when_empty(env):
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
     assert "Competitors" not in r.text
-    assert "How this differs" not in r.text
+    assert "Bottom line" not in r.text

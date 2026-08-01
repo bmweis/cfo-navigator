@@ -5971,12 +5971,17 @@ def tools_software_profile(request: Request, slug: str):
   <div class="tp-chip-row">{comp_chips}</div>
 </div>"""
 
+    # "Bottom line" callout — same seafoam treatment as the Communities
+    # profile page's verdict_summary callout (Phase 3b), replacing the old
+    # buried italic sub-paragraph inside the Description card so the
+    # differentiation note actually reads as the scannable takeaway it is.
     differentiation_block = ""
     if (tool.get("differentiation_note") or "").strip():
-        differentiation_block = (
-            f'<p style="margin:14px 0 0;font-style:italic;color:var(--muted);">'
-            f'How this differs from the competition: {_esc(tool["differentiation_note"])}</p>'
-        )
+        differentiation_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
+  border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
+  <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line</div>
+  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;">{_esc(tool['differentiation_note'])}</p>
+</div>"""
 
     agent_taxonomy_block = ""
     if (tool.get("agent_taxonomy_note") or "").strip():
@@ -6204,11 +6209,11 @@ function submitIntroForm() {{
     description_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Description</h2>
   <p style="margin:0;">{_esc(tool['description'])}</p>
-  {differentiation_block}
 </div>"""
 
     lower_band = f"""<div class="tp-band">
   <div class="tp-col-stack">
+    {differentiation_block}
     {description_card}
     {agent_taxonomy_block}
   </div>
