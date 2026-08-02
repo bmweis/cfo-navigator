@@ -4840,7 +4840,7 @@ def privacy_page(request: Request):
 # Library submissions — a public "suggest a piece" form. Submissions land
 # UN-ENRICHED in the Archive Queue (no server-side fetch, no Claude call), so a
 # public endpoint can't be used to run up cost or fetch arbitrary URLs. Brian
-# reviews them in /admin/queue; enrichment happens only on approval.
+# reviews them in /admin/library/queue; enrichment happens only on approval.
 #
 # Public for now; the handler is self-contained, so gating it behind the future
 # paid login is a one-line auth check.
@@ -13799,14 +13799,14 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 # Library management lives on its own page (/admin/library) so the hub stays
 # uncluttered. Ordered as the recommended workflow — top to bottom.
 _LIBRARY_TOOLS = [
-    ("/admin/backup",       "Archive backup",      "Snapshot the database before you start, so you can roll back if needed."),
-    ("/admin/backfill",     "Historical sweep",    "One-time catch-up: crawl each source's sitemap for older articles you saved before this tool existed, and queue them for review. Run once per source; new candidates land in Archive Queue below."),
-    ("/admin/queue",        "Archive Queue",       "Review every proposed save from the historical sweep or an ongoing feed scan—fix dates, edit tags, and approve into the archive or dismiss."),
-    ("/admin/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
-    ("/admin/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
-    ("/admin/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
-    ("/admin/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content—this is the material FP&A Buddy reads from, so depth here pays off there."),
-    ("/admin/review-removals", "Remove content",   "Filter for content the enricher flagged as potentially off-target for this archive (e.g. podcasts, annual predictions, fund/LP content) and confirm or keep each one."),
+    ("/admin/library/backup",       "Archive backup",      "Snapshot the database before you start, so you can roll back if needed."),
+    ("/admin/library/backfill",     "Historical sweep",    "One-time catch-up: crawl each source's sitemap for older articles you saved before this tool existed, and queue them for review. Run once per source; new candidates land in Archive Queue below."),
+    ("/admin/library/queue",        "Archive Queue",       "Review every proposed save from the historical sweep or an ongoing feed scan—fix dates, edit tags, and approve into the archive or dismiss."),
+    ("/admin/library/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
+    ("/admin/library/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
+    ("/admin/library/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
+    ("/admin/library/enrich",       "Enrich archive",      "Generate Claude summaries and tags from each article's content—this is the material FP&A Buddy reads from, so depth here pays off there."),
+    ("/admin/library/review-removals", "Remove content",   "Filter for content the enricher flagged as potentially off-target for this archive (e.g. podcasts, annual predictions, fund/LP content) and confirm or keep each one."),
 ]
 
 # CFO Toolbox items, used as one of the expandable groups below (same pattern
@@ -15026,7 +15026,7 @@ def _suggest_background(source: str) -> None:
         lib.close()
 
 
-@app.get("/admin/queue", response_class=HTMLResponse)
+@app.get("/admin/library/queue", response_class=HTMLResponse)
 def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesting: int = 0):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15128,7 +15128,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
       <h2 style="margin:0;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{s} <span class="grp-count" style="color:var(--muted);font-weight:500;font-size:14px;">({len(cards)})</span></h2>
     </span>
     <span style="display:flex;gap:9px;flex-shrink:0;">
-      <form method="post" action="/admin/queue/suggest" style="margin:0;" onsubmit="event.stopPropagation();"><input type="hidden" name="source" value="{s}"><button type="submit" onclick="event.stopPropagation();" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Suggest</button></form>
+      <form method="post" action="/admin/library/queue/suggest" style="margin:0;" onsubmit="event.stopPropagation();"><input type="hidden" name="source" value="{s}"><button type="submit" onclick="event.stopPropagation();" class="btn btn-ghost" style="font-size:12px;padding:6px 14px;">Suggest</button></form>
       <button class="btn btn-ghost" onclick="event.stopPropagation();addAll(this)" style="font-size:12px;padding:6px 14px;">Add all</button>
       <button class="btn btn-ghost" onclick="event.stopPropagation();dismissAll(this)" style="font-size:12px;padding:6px 14px;">Dismiss all</button>
     </span>
@@ -15186,14 +15186,14 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Archive Queue</h1>
-<p style="color:var(--muted);margin:4px 0 6px;">Proposed saves waiting for your review—from &ldquo;Scan feed&rdquo; below (ongoing) or a <a href="/admin/backfill">Historical sweep</a> (one-time back-catalog catch-up).</p>
+<p style="color:var(--muted);margin:4px 0 6px;">Proposed saves waiting for your review—from &ldquo;Scan feed&rdquo; below (ongoing) or a <a href="/admin/library/backfill">Historical sweep</a> (one-time back-catalog catch-up).</p>
 <p style="color:var(--muted);margin:0 0 22px;">Approve into the archive (edit the tags first if you like), or dismiss what you don&rsquo;t want.</p>
 {scan_notice}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
   <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note} &nbsp; {expand_controls}</div>
-  <form method="post" action="/admin/queue/refresh-feed" style="margin:0;"><button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Scan feed</button></form>
+  <form method="post" action="/admin/library/queue/refresh-feed" style="margin:0;"><button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Scan feed</button></form>
 </div>
-<form method="post" action="/admin/queue/redate" style="margin:0 0 24px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+<form method="post" action="/admin/library/queue/redate" style="margin:0 0 24px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
   <span style="font-size:13px;color:var(--muted);">Dates look wrong? Re-read them from the article pages</span>
   <input type="text" name="source" placeholder="source (blank = all)" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);width:180px;">
   <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">Fix dates</button>
@@ -15228,14 +15228,14 @@ async function addOne(btn){{
   const card = cardOf(btn);
   const addBtn = card.querySelector('.add-btn');
   addBtn.disabled = true; addBtn.textContent = 'Adding…';
-  const ok = await postForm('/admin/queue/add', {{url: card.dataset.url, tags: card.querySelector('.qtags').value}});
+  const ok = await postForm('/admin/library/queue/add', {{url: card.dataset.url, tags: card.querySelector('.qtags').value}});
   if (ok) {{ removeCard(card); }}
   else {{ addBtn.disabled = false; addBtn.textContent = 'Add to archive'; }}
   return ok;
 }}
 async function dismissOne(btn){{
   const card = cardOf(btn);
-  if (await postForm('/admin/queue/dismiss', {{url: card.dataset.url}})) removeCard(card);
+  if (await postForm('/admin/library/queue/dismiss', {{url: card.dataset.url}})) removeCard(card);
 }}
 function setAllGroups(open){{
   document.querySelectorAll('.q-group').forEach(function(g){{ g.open = open; }});
@@ -15272,32 +15272,32 @@ async function dismissAll(btn){{
     return HTMLResponse(_page("Archive Queue—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/queue/refresh-feed")
+@app.post("/admin/library/queue/refresh-feed")
 def admin_queue_refresh(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
     background_tasks.add_task(_scan_feed_background)
-    return RedirectResponse("/admin/queue?scanning=1", status_code=303)
+    return RedirectResponse("/admin/library/queue?scanning=1", status_code=303)
 
 
-@app.post("/admin/queue/redate")
+@app.post("/admin/library/queue/redate")
 async def admin_queue_redate(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
     form = await request.form()
     source = (form.get("source") or "").strip()
     background_tasks.add_task(_redate_background, source)
-    return RedirectResponse("/admin/queue?redating=1", status_code=303)
+    return RedirectResponse("/admin/library/queue?redating=1", status_code=303)
 
 
-@app.post("/admin/queue/suggest")
+@app.post("/admin/library/queue/suggest")
 async def admin_queue_suggest(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
     form = await request.form()
     source = (form.get("source") or "").strip()
     background_tasks.add_task(_suggest_background, source)
-    return RedirectResponse("/admin/queue?suggesting=1", status_code=303)
+    return RedirectResponse("/admin/library/queue?suggesting=1", status_code=303)
 
 
 def _tag_merge_background() -> None:
@@ -15315,7 +15315,7 @@ def _tag_merge_background() -> None:
         lib.close()
 
 
-@app.get("/admin/tags", response_class=HTMLResponse)
+@app.get("/admin/library/tags", response_class=HTMLResponse)
 def admin_tags(request: Request, msg: str = "", merging: int = 0):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15359,7 +15359,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
     <span style="color:var(--muted);"> &rarr; </span><strong>{canon}</strong>
     {f'<span style="color:var(--muted);font-size:12px;"> &middot; {reason}</span>' if reason else ''}
   </div>
-  <form method="post" action="/admin/tags/merge-group" style="margin:0;">
+  <form method="post" action="/admin/library/tags/merge-group" style="margin:0;">
     <input type="hidden" name="canonical" value="{canon}"><textarea name="merge" style="display:none;">{merges_val}</textarea>
     <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;">Merge</button>
   </form>
@@ -15367,7 +15367,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
             merge_html = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 18px;margin-bottom:18px;">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <strong style="font-family:var(--font-head);font-size:15px;color:var(--navy);">Proposed merges ({len(groups)})</strong>
-    <form method="post" action="/admin/tags/merge-all" style="margin:0;" onsubmit="return confirm('Apply all {len(groups)} proposed merges?');"><button type="submit" class="btn" style="font-size:13px;padding:6px 16px;">Apply all</button></form>
+    <form method="post" action="/admin/library/tags/merge-all" style="margin:0;" onsubmit="return confirm('Apply all {len(groups)} proposed merges?');"><button type="submit" class="btn" style="font-size:13px;padding:6px 16px;">Apply all</button></form>
   </div>
   {cards}
 </div>"""
@@ -15379,14 +15379,14 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
   <td style="padding:9px 12px;font-size:14px;font-weight:500;">{t}</td>
   <td style="padding:9px 12px;font-size:13px;color:var(--muted);">{count}</td>
   <td style="padding:9px 12px;">
-    <form method="post" action="/admin/tags/rename" style="display:flex;gap:6px;align-items:center;margin:0;">
+    <form method="post" action="/admin/library/tags/rename" style="display:flex;gap:6px;align-items:center;margin:0;">
       <input type="hidden" name="old" value="{t}">
       <input type="text" name="new" value="{t}" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);width:180px;">
       <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Rename</button>
     </form>
   </td>
   <td style="padding:9px 12px;">
-    <form method="post" action="/admin/tags/delete" style="margin:0;" onsubmit="return confirm('Remove the tag &quot;{t}&quot; from every article?');">
+    <form method="post" action="/admin/library/tags/delete" style="margin:0;" onsubmit="return confirm('Remove the tag &quot;{t}&quot; from every article?');">
       <input type="hidden" name="tag" value="{t}">
       <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
     </form>
@@ -15407,7 +15407,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
 {banner}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap;">
   <p style="font-size:13px;color:var(--muted);margin:0;">{len(tags)} tags across the archive</p>
-  <form method="post" action="/admin/tags/suggest-merges" style="margin:0;"><button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Suggest merges</button></form>
+  <form method="post" action="/admin/library/tags/suggest-merges" style="margin:0;"><button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Suggest merges</button></form>
 </div>
 {merge_html}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
@@ -15425,15 +15425,15 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
     return HTMLResponse(_page("Tag cleanup—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/tags/suggest-merges")
+@app.post("/admin/library/tags/suggest-merges")
 def admin_tags_suggest_merges(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
     background_tasks.add_task(_tag_merge_background)
-    return RedirectResponse("/admin/tags?merging=1", status_code=303)
+    return RedirectResponse("/admin/library/tags?merging=1", status_code=303)
 
 
-@app.post("/admin/tags/merge-group")
+@app.post("/admin/library/tags/merge-group")
 async def admin_tags_merge_group(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15451,10 +15451,10 @@ async def admin_tags_merge_group(request: Request, background_tasks: BackgroundT
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
     msg = f'Merged {len(merges)} tag{"s" if len(merges) != 1 else ""} into “{canonical}” ({total} article updates).'
-    return RedirectResponse(f"/admin/tags?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/library/tags?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/tags/merge-all")
+@app.post("/admin/library/tags/merge-all")
 def admin_tags_merge_all(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15476,11 +15476,11 @@ def admin_tags_merge_all(request: Request, background_tasks: BackgroundTasks):
     finally:
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
-    return RedirectResponse(f"/admin/tags?msg={quote(f'Applied all proposed merges ({applied} tags folded in).')}",
+    return RedirectResponse(f"/admin/library/tags?msg={quote(f'Applied all proposed merges ({applied} tags folded in).')}",
                             status_code=303)
 
 
-@app.post("/admin/tags/rename")
+@app.post("/admin/library/tags/rename")
 async def admin_tags_rename(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15496,10 +15496,10 @@ async def admin_tags_rename(request: Request, background_tasks: BackgroundTasks)
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
     msg = f'Renamed “{old}” → “{new}” on {n} article{"s" if n != 1 else ""}.' if n else f'No change—“{old}” not found.'
-    return RedirectResponse(f"/admin/tags?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/library/tags?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/tags/delete")
+@app.post("/admin/library/tags/delete")
 async def admin_tags_delete(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15514,7 +15514,7 @@ async def admin_tags_delete(request: Request, background_tasks: BackgroundTasks)
         lib.close()
     background_tasks.add_task(backup.maybe_backup, DB_PATH)
     msg = f'Removed “{tag}” from {n} article{"s" if n != 1 else ""}.'
-    return RedirectResponse(f"/admin/tags?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/library/tags?msg={quote(msg)}", status_code=303)
 
 
 def _tag_guide_background() -> None:
@@ -15536,7 +15536,7 @@ def _tag_guide_background() -> None:
         lib.close()
 
 
-@app.get("/admin/tag-style", response_class=HTMLResponse)
+@app.get("/admin/library/tag-style", response_class=HTMLResponse)
 def admin_tag_style(request: Request, generating: int = 0):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15576,25 +15576,25 @@ def admin_tag_style(request: Request, generating: int = 0):
 <p style="color:var(--muted);margin:0 0 18px;">Review and edit anything below—your edits are what the tagger follows.</p>
 {notice}
 
-<form method="post" action="/admin/tag-style/objective" style="margin:0 0 22px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;">
+<form method="post" action="/admin/library/tag-style/objective" style="margin:0 0 22px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;">
   <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging objective&mdash;why these tags exist</label>
   <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">The north star for tagging. It steers both the learning below and live auto-tagging, even before a guide exists. Frame it around the jobs a strategic finance leader gets pulled into.</p>
   <textarea name="objective" rows="5" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(objective)}</textarea>
   <button type="submit" class="btn" style="font-size:14px;padding:8px 18px;margin-top:10px;">Save objective</button>
 </form>
 
-<form method="post" action="/admin/tag-style/generate" style="margin:0 0 18px;">
+<form method="post" action="/admin/library/tag-style/generate" style="margin:0 0 18px;">
   <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" {"disabled style='opacity:.5;'" if is_generating else ""}>{gen_label}</button>
   <span style="font-size:13px;color:var(--muted);margin-left:12px;">Reads your tags + example articles and writes the guide. Runs in the background.</span>
 </form>
 
-<form method="post" action="/admin/tag-style/save" style="margin:0;">
+<form method="post" action="/admin/library/tag-style/save" style="margin:0;">
   <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Tagging guide</label>
   <textarea name="guide" rows="20" placeholder="Click “{gen_label}” to draft this from your archive, or write your own rules here."
     style="width:100%;padding:14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;line-height:1.6;background:var(--bg);resize:vertical;">{_esc(guide)}</textarea>
   <div style="display:flex;gap:10px;margin-top:12px;">
     <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Save guide</button>
-    <button type="submit" formaction="/admin/tag-style/clear" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;color:#b91c1c;border-color:#fca5a5;"
+    <button type="submit" formaction="/admin/library/tag-style/clear" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;color:#b91c1c;border-color:#fca5a5;"
       onclick="return confirm('Clear the tagging guide? Auto-tagging will fall back to vocabulary only.');">Clear</button>
   </div>
 </form>
@@ -15602,7 +15602,7 @@ def admin_tag_style(request: Request, generating: int = 0):
     return HTMLResponse(_page("Tagging style—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/tag-style/generate")
+@app.post("/admin/library/tag-style/generate")
 def admin_tag_style_generate(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15612,10 +15612,10 @@ def admin_tag_style_generate(request: Request, background_tasks: BackgroundTasks
     finally:
         lib.close()
     background_tasks.add_task(_tag_guide_background)
-    return RedirectResponse("/admin/tag-style?generating=1", status_code=303)
+    return RedirectResponse("/admin/library/tag-style?generating=1", status_code=303)
 
 
-@app.post("/admin/tag-style/save")
+@app.post("/admin/library/tag-style/save")
 async def admin_tag_style_save(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15626,10 +15626,10 @@ async def admin_tag_style_save(request: Request):
         lib.set_setting("tag_guide", guide)
     finally:
         lib.close()
-    return RedirectResponse("/admin/tag-style", status_code=303)
+    return RedirectResponse("/admin/library/tag-style", status_code=303)
 
 
-@app.post("/admin/tag-style/objective")
+@app.post("/admin/library/tag-style/objective")
 async def admin_tag_style_objective(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15640,10 +15640,10 @@ async def admin_tag_style_objective(request: Request):
         lib.set_setting("tag_objective", objective)   # blank falls back to the default
     finally:
         lib.close()
-    return RedirectResponse("/admin/tag-style", status_code=303)
+    return RedirectResponse("/admin/library/tag-style", status_code=303)
 
 
-@app.post("/admin/tag-style/clear")
+@app.post("/admin/library/tag-style/clear")
 async def admin_tag_style_clear(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15652,7 +15652,7 @@ async def admin_tag_style_clear(request: Request):
         lib.set_setting("tag_guide", "")
     finally:
         lib.close()
-    return RedirectResponse("/admin/tag-style", status_code=303)
+    return RedirectResponse("/admin/library/tag-style", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -15790,7 +15790,7 @@ async def admin_game_settings_edit(request: Request, rank: str):
 _DEDUPE_PRESETS = {"aggressive": 0.55, "balanced": 0.62, "conservative": 0.72}
 
 
-@app.get("/admin/dedupe", response_class=HTMLResponse)
+@app.get("/admin/library/dedupe", response_class=HTMLResponse)
 def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                  days: int = 90, msg: str = ""):
     if not _is_authed(request):
@@ -15843,7 +15843,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
         f'<option value="{d}"{" selected" if d == days else ""}>±{d} days</option>'
         for d in (30, 90, 180, 365))
 
-    controls = f"""<form method="get" action="/admin/dedupe" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;">
+    controls = f"""<form method="get" action="/admin/library/dedupe" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;">
   <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Source</label>
     <select name="source" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);min-width:180px;"><option value="">Choose a source…</option>{opts}</select></div>
   <div><label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Strictness</label>
@@ -15886,10 +15886,10 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
                                f'<input type="hidden" name="dup_title" value="{_esc(a.get("title") or "")}">'
                                f'<input type="hidden" name="source" value="{_esc(source)}">'
                                f'<input type="hidden" name="back" value="{_esc(source)}|{level}|{days}">')
-                        accept = (f'<form method="post" action="/admin/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this duplicate?\');">'
+                        accept = (f'<form method="post" action="/admin/library/dedupe/remove" style="margin:0;" onsubmit="return confirm(\'Delete this duplicate?\');">'
                                   f'<input type="hidden" name="id" value="{a["id"]}">{ctx}'
                                   f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
-                        reject = (f'<form method="post" action="/admin/dedupe/not-dupe" style="margin:0;">{ctx}'
+                        reject = (f'<form method="post" action="/admin/library/dedupe/not-dupe" style="margin:0;">{ctx}'
                                   f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;color:var(--ink-soft);">Not a dupe</button></form>')
                         tag = f'<div style="display:flex;gap:6px;flex-shrink:0;">{reject}{accept}</div>'
                         pct = round(a.get("_dup_score", 0) * 100)
@@ -15905,7 +15905,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
             verify_banner = (f'<div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;'
                              f'padding:10px 14px;font-size:13px;margin:0 0 16px;line-height:1.5;">{verify_note}</div>'
                              if verify_note else '')
-            bulk = f"""<form method="post" action="/admin/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} duplicate(s), keeping one per group? A backup is taken first.');">
+            bulk = f"""<form method="post" action="/admin/library/dedupe/remove-older" style="margin:0 0 18px;" onsubmit="return confirm('Delete {dupe_total} duplicate(s), keeping one per group? A backup is taken first.');">
   <input type="hidden" name="source" value="{_esc(source)}"><input type="hidden" name="level" value="{level}"><input type="hidden" name="days" value="{days}">
   <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Remove all {dupe_total} duplicate{'s' if dupe_total != 1 else ''} (keep one each)</button>
   <span style="font-size:13px;color:var(--muted);margin-left:10px;">{len(clusters)} duplicate group{'s' if len(clusters) != 1 else ''} found.</span>
@@ -15936,10 +15936,10 @@ def _dedupe_back(form) -> str:
     src = quote(back[0]) if back and back[0] else ""
     lvl = back[1] if len(back) > 1 else "balanced"
     dys = back[2] if len(back) > 2 else "90"
-    return f"/admin/dedupe?source={src}&level={lvl}&days={dys}"
+    return f"/admin/library/dedupe?source={src}&level={lvl}&days={dys}"
 
 
-@app.post("/admin/dedupe/remove")
+@app.post("/admin/library/dedupe/remove")
 async def admin_dedupe_remove(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15962,7 +15962,7 @@ async def admin_dedupe_remove(request: Request, background_tasks: BackgroundTask
     return RedirectResponse(_dedupe_back(form), status_code=303)
 
 
-@app.post("/admin/dedupe/not-dupe")
+@app.post("/admin/library/dedupe/not-dupe")
 async def admin_dedupe_not_dupe(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -15977,7 +15977,7 @@ async def admin_dedupe_not_dupe(request: Request):
     return RedirectResponse(_dedupe_back(form), status_code=303)
 
 
-@app.post("/admin/dedupe/remove-older")
+@app.post("/admin/library/dedupe/remove-older")
 async def admin_dedupe_remove_older(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -16009,7 +16009,7 @@ async def admin_dedupe_remove_older(request: Request, background_tasks: Backgrou
     finally:
         lib.close()
     msg = f"Removed {removed} older duplicate{'s' if removed != 1 else ''} from {source}."
-    return RedirectResponse(f"/admin/dedupe?source={quote(source)}&level={level}&days={days}&msg={quote(msg)}",
+    return RedirectResponse(f"/admin/library/dedupe?source={quote(source)}&level={level}&days={days}&msg={quote(msg)}",
                             status_code=303)
 
 
@@ -17132,7 +17132,7 @@ def admin_users_delete(request: Request, user_id: int):
     return RedirectResponse(f"/admin/users?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/queue/add")
+@app.post("/admin/library/queue/add")
 async def admin_queue_add(request: Request, background_tasks: BackgroundTasks):
     _require_api(request)
     form = await request.form()
@@ -17155,7 +17155,7 @@ async def admin_queue_add(request: Request, background_tasks: BackgroundTasks):
         lib.close()
 
 
-@app.post("/admin/queue/dismiss")
+@app.post("/admin/library/queue/dismiss")
 async def admin_queue_dismiss(request: Request):
     _require_api(request)
     form = await request.form()
@@ -17174,7 +17174,7 @@ async def admin_queue_dismiss(request: Request):
 # Review removals — articles the enricher flagged as off-audience
 # ---------------------------------------------------------------------------
 
-@app.get("/admin/review-removals", response_class=HTMLResponse)
+@app.get("/admin/library/review-removals", response_class=HTMLResponse)
 def admin_review_removals(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -17242,11 +17242,11 @@ function dropCard(card){{
 }}
 async function keepOne(btn){{
   const card = cardOf(btn);
-  if (await postForm('/admin/review-removals/keep', {{id: card.dataset.id}})) dropCard(card);
+  if (await postForm('/admin/library/review-removals/keep', {{id: card.dataset.id}})) dropCard(card);
 }}
 async function removeOne(btn){{
   const card = cardOf(btn);
-  if (await postForm('/admin/review-removals/remove', {{id: card.dataset.id}})) dropCard(card);
+  if (await postForm('/admin/library/review-removals/remove', {{id: card.dataset.id}})) dropCard(card);
 }}
 async function removeAll(){{
   if (!confirm('Remove all flagged articles? This deletes them from the archive.')) return;
@@ -17260,7 +17260,7 @@ async function checkLink(card){{
   const span = card.querySelector('[data-link-status]');
   if (!span) return;
   try {{
-    const r = await fetch('/admin/review-removals/check-link?url=' + encodeURIComponent(card.dataset.url));
+    const r = await fetch('/admin/library/review-removals/check-link?url=' + encodeURIComponent(card.dataset.url));
     const d = await r.json();
     if (d.ok) {{
       span.textContent = '';  // live link — no badge needed
@@ -17284,7 +17284,7 @@ async function checkLink(card){{
     return HTMLResponse(_page("Remove content—Admin", "Admin", body, authed=True))
 
 
-@app.get("/admin/review-removals/check-link")
+@app.get("/admin/library/review-removals/check-link")
 def admin_review_check_link(request: Request, url: str):
     """On-demand dead-link probe for one flagged article, called client-side
     per card so a slow/dead site never blocks the page itself. Restricted to
@@ -17320,7 +17320,7 @@ def admin_review_check_link(request: Request, url: str):
         return JSONResponse({"ok": False, "status": None})
 
 
-@app.post("/admin/review-removals/keep")
+@app.post("/admin/library/review-removals/keep")
 async def admin_review_keep(request: Request):
     _require_api(request)
     form = await request.form()
@@ -17337,7 +17337,7 @@ async def admin_review_keep(request: Request):
         lib.close()
 
 
-@app.post("/admin/review-removals/remove")
+@app.post("/admin/library/review-removals/remove")
 async def admin_review_remove(request: Request, background_tasks: BackgroundTasks):
     _require_api(request)
     form = await request.form()
@@ -17383,7 +17383,7 @@ def _enrich_job(force: bool, model: str, limit: int) -> None:
         lib.close()
 
 
-@app.get("/admin/enrich", response_class=HTMLResponse)
+@app.get("/admin/library/enrich", response_class=HTMLResponse)
 def admin_enrich(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -17463,7 +17463,7 @@ def admin_enrich(request: Request):
   </div>
   <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Current rules version: <strong>{ENRICH_RULES_VERSION}</strong></p>
 
-  <form id="enrich-form" method="post" action="/admin/enrich/start" style="display:grid;gap:18px;">
+  <form id="enrich-form" method="post" action="/admin/library/enrich/start" style="display:grid;gap:18px;">
     <div>
       <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px;">Model</div>
       <div style="display:flex;flex-direction:column;">{model_radios}</div>
@@ -17489,7 +17489,7 @@ def admin_enrich(request: Request):
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
   <p style="font-size:13.5px;color:var(--muted);margin:0;line-height:1.6;">
-    <strong>After finishing:</strong> visit <a href="/admin/review-removals">Review removals</a> to confirm any articles the enricher flagged as off-audience,
+    <strong>After finishing:</strong> visit <a href="/admin/library/review-removals">Review removals</a> to confirm any articles the enricher flagged as off-audience,
     and check the enriched summaries in the <a href="/library/archive">Archive</a>.
   </p>
 </div>
@@ -17530,12 +17530,12 @@ def admin_enrich(request: Request):
     return HTMLResponse(_page("Re-enrich archive—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/enrich/start")
+@app.post("/admin/library/enrich/start")
 async def admin_enrich_start(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     if _job_get("enrich").get("running"):
-        return RedirectResponse("/admin/enrich?running=1", status_code=303)
+        return RedirectResponse("/admin/library/enrich?running=1", status_code=303)
     form = await request.form()
     force = bool(form.get("force"))
     model = (form.get("model") or "").strip()
@@ -17544,10 +17544,10 @@ async def admin_enrich_start(request: Request):
         model = DEFAULT_MODEL
     t = threading.Thread(target=_enrich_job, args=(force, model, 100000), daemon=True)
     t.start()
-    return RedirectResponse("/admin/enrich", status_code=303)
+    return RedirectResponse("/admin/library/enrich", status_code=303)
 
 
-@app.get("/admin/enrich/status")
+@app.get("/admin/library/enrich/status")
 def admin_enrich_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
@@ -17601,7 +17601,7 @@ def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool,
         lib.close()
 
 
-@app.get("/admin/backfill", response_class=HTMLResponse)
+@app.get("/admin/library/backfill", response_class=HTMLResponse)
 def admin_backfill(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -17645,7 +17645,7 @@ def admin_backfill(request: Request):
         total_added = sum(r.get("added", 0) for r in report)
         total_cands = sum(r.get("candidates", 0) for r in report)
         total_scope = sum(r.get("skipped_scope", 0) for r in report)
-        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;{total_added} articles queued from {total_cands} candidates ({total_scope} skipped as off-audience). <a href="/admin/queue">Review in Archive Queue &rarr;</a></div>'
+        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;{total_added} articles queued from {total_cands} candidates ({total_scope} skipped as off-audience). <a href="/admin/library/queue">Review in Archive Queue &rarr;</a></div>'
 
     def _report_row(r):
         added = r.get("added", 0)
@@ -17690,7 +17690,7 @@ def admin_backfill(request: Request):
 <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:22px;font-size:13.5px;color:#92400e;line-height:1.6;">
   <p style="margin:0 0 8px;"><strong>Run this once per source.</strong></p>
   <ul style="margin:0 0 8px;padding-left:20px;">
-    <li>Results land in the <a href="/admin/queue">Archive Queue</a> for you to review—nothing is saved to the archive automatically.</li>
+    <li>Results land in the <a href="/admin/library/queue">Archive Queue</a> for you to review—nothing is saved to the archive automatically.</li>
     <li>After the first sweep, the Archive Queue&rsquo;s own &ldquo;Scan feed&rdquo; button is what keeps you current going forward.</li>
   </ul>
   <p style="margin:0;">Start with a <strong>dry run</strong> to see the reach before any sweep spends API calls.</p>
@@ -17699,7 +17699,7 @@ def admin_backfill(request: Request):
 <div id="poll-container">{status_html}</div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
-  <form id="backfill-form" method="post" action="/admin/backfill/start" style="display:grid;gap:18px;">
+  <form id="backfill-form" method="post" action="/admin/library/backfill/start" style="display:grid;gap:18px;">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div>
         <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Articles published since</label>
@@ -17735,7 +17735,7 @@ def admin_backfill(request: Request):
     </div>
     <div>
       <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {disable}>Run sweep</button>
-      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side&mdash;you can leave this page. Results appear in the <a href="/admin/queue">Archive Queue</a>.</span>
+      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side&mdash;you can leave this page. Results appear in the <a href="/admin/library/queue">Archive Queue</a>.</span>
     </div>
   </form>
 </div>
@@ -17765,7 +17765,7 @@ def admin_backfill(request: Request):
         var totalAdded = s.report.reduce((a, r) => a + (r.added || 0), 0);
         var totalCands = s.report.reduce((a, r) => a + (r.candidates || 0), 0);
         var totalScope = s.report.reduce((a, r) => a + (r.skipped_scope || 0), 0);
-        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/queue\\">Review in Archive Queue &rarr;</a></div>';
+        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/library/queue\\">Review in Archive Queue &rarr;</a></div>';
       }} else if (s.error) {{
         container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
       }}
@@ -17780,12 +17780,12 @@ def admin_backfill(request: Request):
     return HTMLResponse(_page("Historical sweep—Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/backfill/start")
+@app.post("/admin/library/backfill/start")
 async def admin_backfill_start(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     if _job_get("backfill").get("running"):
-        return RedirectResponse("/admin/backfill?running=1", status_code=303)
+        return RedirectResponse("/admin/library/backfill?running=1", status_code=303)
     form = await request.form()
     since = (form.get("since") or "2024-06-01").strip()
     try:
@@ -17798,17 +17798,17 @@ async def admin_backfill_start(request: Request):
     t = threading.Thread(target=_backfill_job,
                          args=(since, per_source, model, dry_run, only_sources), daemon=True)
     t.start()
-    return RedirectResponse("/admin/backfill", status_code=303)
+    return RedirectResponse("/admin/library/backfill", status_code=303)
 
 
-@app.get("/admin/backfill/status")
+@app.get("/admin/library/backfill/status")
 def admin_backfill_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
     return JSONResponse(_job_get("backfill"))
 
 
-@app.get("/admin/backup", response_class=HTMLResponse)
+@app.get("/admin/library/backup", response_class=HTMLResponse)
 def admin_backup(request: Request, uploaded: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -17833,12 +17833,12 @@ def admin_backup(request: Request, uploaded: str = ""):
     <div>
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
-      <a href="/admin/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
+      <a href="/admin/library/backup/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;">Download library.db</a>
     </div>
     <div style="border-left:1px solid var(--line);padding-left:24px;">
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately—no restart needed.</p>
-      <form method="post" action="/admin/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+      <form method="post" action="/admin/library/backup/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
         <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
           style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
         <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Upload and replace</button>
@@ -18828,7 +18828,7 @@ async def admin_emails_save(section_id: str, request: Request):
     return JSONResponse({"ok": True})
 
 
-@app.post("/admin/upload-db", response_class=HTMLResponse)
+@app.post("/admin/library/backup/upload-db", response_class=HTMLResponse)
 async def upload_db(request: Request, file: UploadFile = File(...), token: str | None = None):
     _require_api(request, token)
     import sqlite3
@@ -18864,10 +18864,10 @@ async def upload_db(request: Request, file: UploadFile = File(...), token: str |
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
 
-    return RedirectResponse(f"/admin/backup?uploaded={n}", status_code=303)
+    return RedirectResponse(f"/admin/library/backup?uploaded={n}", status_code=303)
 
 
-@app.get("/admin/download-db")
+@app.get("/admin/library/backup/download-db")
 def download_db(request: Request):
     """Download a consistent snapshot of the live database (manual backup)."""
     if not _is_authed(request):

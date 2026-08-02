@@ -90,7 +90,7 @@ def test_open_task_counts_empty_by_default(lib):
     counts = tasks.open_task_counts(lib)
     # Brand/voice/open-source checks run live against the real app.py — assert
     # only on the signals this test actually manipulates, not the whole dict.
-    assert "/admin/queue" not in counts
+    assert "/admin/library/queue" not in counts
     assert "/admin/tools/software" not in counts
     assert "/admin/tools/communities" not in counts
     assert "/admin/contacts" not in counts
