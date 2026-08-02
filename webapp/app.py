@@ -655,7 +655,7 @@ _CSS = """
   --coral-deep:#B14A30;    /* coral that must carry small text (AA on canvas) */
   --coral:#E8704F;         /* warm accent base — display pop, data-viz R&D series */
   --coral-light:#F4A98F;   /* lighter coral — soft highlights */
-  --coral-wash:#FBEAE3;    /* soft coral fill — callouts (navy text) */
+  --coral-wash:#FBEAE3;    /* soft coral fill — decorative highlight blocks (navy text) */
   /* Text */
   --ink:#1a1a1a;
   --ink-soft:#3a3833;
@@ -663,8 +663,9 @@ _CSS = """
   /* Lines (warm-toned) */
   --line:#E4E0D6;
   --line-strong:#D6D1C4;
-  /* Semantic — GER calculator readout only */
+  /* Semantic — status only (GER calculator readout, form pass/fail, Warnings callouts) */
   --good:#002975; --caution:#9A6B12; --alert:#9E3B30;
+  --alert-wash:#FBEEEC;    /* soft alert fill — Warnings callout background only */
   /* Type */
   --font-head:'Outfit',system-ui,-apple-system,'Segoe UI',sans-serif;
   --font-body:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -751,12 +752,13 @@ p{margin:0 0 16px;color:var(--ink-soft);}
    page needs to break up a block of prose — see BRAND.md §5 "Prose width"
    for the ~250-word break rule an Atlantic-tagged page follows.
 
-   Four-type callout taxonomy (this phase): every box on an Atlantic page is
-   one of exactly four types, distinguished by color/treatment so each reads
-   as what it is rather than as one generic "blue box" — CTA (navy), Tips
-   (seafoam), Warnings (coral), Quotes (no box at all). See BRAND.md's
-   "Callout taxonomy" entry for the full reasoning, including the sanctioned
-   exception letting Warnings appear more than once per screen. */
+   Four-type callout taxonomy: every box on an Atlantic page is one of
+   exactly four types, distinguished by color/treatment so each reads as
+   what it is rather than as one generic "blue box" — CTA (navy), Tips
+   (seafoam), Warnings (alert red), Quotes (no box at all). Warnings uses
+   `--alert`, not coral: a warning is a status signal, and coral is
+   reserved for decorative highlights only. See BRAND.md's "Callout
+   taxonomy" entry for the full reasoning. */
 .article-cta{background:var(--navy-wash);border-left:3px solid var(--navy);border-radius:0 10px 10px 0;padding:18px 22px;margin:0 0 36px;}
 .article-cta p{margin:0;font-size:15px;}
 /* Quotes: the one type that's deliberately NOT a boxed callout — no
@@ -769,8 +771,8 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .article-callout-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;}
 .article-callout p,.article-callout li{font-size:15px;color:var(--ink-soft);margin-bottom:6px;}
 .article-callout ul,.article-callout ol{padding-left:20px;margin:0;}
-.article-warn{background:var(--coral-wash);border-top:2px solid var(--coral);border-radius:0 0 10px 10px;}
-.article-warn-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--coral-deep);}
+.article-warn{background:var(--alert-wash);border-top:2px solid var(--alert);border-radius:0 0 10px 10px;}
+.article-warn-title{font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--alert);}
 .article-warn p{font-size:14px;color:var(--ink-soft);margin:0;}
 
 /* Atlantic long-form tag (Phase 6b) — the simplest viable tagging mechanism
