@@ -52,7 +52,7 @@ measured on the `#F5F4EF` canvas.
 | `--coral-deep` | `#B14A30` | 4.9:1 | Text-capable coral (AA) — *only* when coral must carry small text |
 | `--coral` | `#E8704F` | 3.1:1 | Base — display pop, badges, data-viz; graphics & ≥24px only |
 | `--coral-light` | `#F4A98F` | fill | Lighter coral — soft highlights, fills only (never text) |
-| `--coral-wash` | `#FBEAE3` | fill | Soft fill — callout blocks (put **navy** text on it) |
+| `--coral-wash` | `#FBEAE3` | fill | Soft fill — decorative highlight blocks (put **navy** text on it) |
 
 > **Read the ramps the same way each time:** *deep* shades are dark enough for small text (AA);
 > *base/mid* are for graphics, fills, and large display; *light/wash* are fills only. When in doubt,
@@ -70,7 +70,8 @@ measured on the `#F5F4EF` canvas.
 | `--muted` | `#6F6A60` | Meta, captions, kickers |
 | `--line` | `#E4E0D6` | Warm hairline |
 | `--line-strong` | `#D6D1C4` | Heavier divider — section rules, table borders |
-| `--good` / `--caution` / `--alert` | `#002975` / `#9A6B12` / `#9E3B30` | **Status only** — GER tiers, form errors |
+| `--good` / `--caution` / `--alert` | `#002975` / `#9A6B12` / `#9E3B30` | **Status only** — GER tiers, form errors, Warnings callouts |
+| `--alert-wash` | `#FBEEEC` | Soft alert fill — Warnings callout background only |
 
 > **Semantic ≠ brand.** The alert red `#9E3B30` means *error/danger*. Coral is decorative and
 > never signals status. They're 96 RGB-units apart so they don't read as the same color — keep it
@@ -85,23 +86,13 @@ Coral is the **warm counterweight** to a cool palette. Use it as a graphic/displ
 - A short coral underline or marker under a single hero word or section number
 - Data-viz **third series** (e.g. the R&D lane in the GER contribution diagram)
 - Large display numerals or stat call-outs (≥ 24px)
-- A coral-wash (`#FBEAE3`) **warning box** (`.article-warn` — see "Callout taxonomy" below)
-  — put **navy** text on it (11:1 contrast)
 
 **🚫 Never coral**
 - Body text or any text under ~18px (use `--coral-deep` only if unavoidable)
 - Button fills (buttons are navy or ghost-navy — *no* color buttons, ever)
-- Status/error states (that's `--alert`)
-- More than ~one coral element per viewport — if you see two, remove one, **except**
-  `.article-warn` warning boxes (see the "Callout taxonomy" entry below): a long-form
-  page can legitimately need more than one warning called out in the same view (e.g.
-  Connecting Claude to NetSuite's setup guide has a warning at the top of "The security
-  architecture" plus one nested in each of two later setup steps), and diluting that to
-  "one warning per page" would mean either merging unrelated warnings together or
-  demoting real ones to plain text. This is a **deliberate, sanctioned exception** to the
-  one-per-viewport rule — specific to warning boxes, not a general loosening of the coral
-  rule. Everything else on this list (badges, underlines, data-viz, display numerals,
-  the coral-wash callout/quote block) still holds to one-per-viewport.
+- Status/error states (that's `--alert`). This includes Warnings callouts (`.article-warn`;
+  see "Callout taxonomy" below), which use `--alert`/`--alert-wash`, not coral.
+- More than ~one coral element per viewport — if you see two, remove one
 
 ### 2.4 Data-visualization palette
 
@@ -129,7 +120,7 @@ states, soft panels), ~10% — really less — coral (one highlight per screen).
 | Combination | Ratio | Verdict |
 |---|---|---|
 | Navy text on canvas / white | 12–14:1 | ✅ Anything |
-| Navy text on seafoam-wash / coral-wash | 11:1 | ✅ Anything — preferred for tinted callouts |
+| Navy text on seafoam-wash / coral-wash | 11:1 | ✅ Anything — preferred for tinted highlight blocks |
 | Coral `#E8704F` on canvas | 2.8:1 | ⚠️ Graphics & ≥24px display only — **not text** |
 | Coral-deep `#B14A30` on canvas | 4.9:1 | ✅ AA for normal text (use sparingly) |
 | Seafoam `#A3E5D4` as a fill behind navy | — | ✅ Tag/badge background only |
@@ -346,7 +337,7 @@ and treatment so each reads as what it is:
 |---|---|---|---|---|
 | **CTA** | `.article-cta` | Navy (`--navy-wash` fill, `--navy` left border) | Boxed, `border-radius:0 10px 10px 0`, `padding:18px 22px` — "here's a link to follow" | Body-copy (760px, `.tool-prose`) |
 | **Tips** | `.article-callout` | Seafoam (`--seafoam-wash` fill, `--seafoam-mid` top border) | Boxed, titled (`.article-callout-title`, uppercase seafoam-deep), `border-radius:0 0 10px 10px` — "here's a fact/technique" | Body-copy (760px) |
-| **Warnings** | `.article-warn` | Coral (`--coral-wash` fill, `--coral` top border) | Boxed, titled (`.article-warn-title`, uppercase coral-deep), `border-radius:0 0 10px 10px` — "here's a failure mode to avoid" | Body-copy (760px) |
+| **Warnings** | `.article-warn` | Alert red (`--alert-wash` fill, `--alert` top border) | Boxed, titled (`.article-warn-title`, uppercase `--alert`), `border-radius:0 0 10px 10px` — "here's a failure mode to avoid" | Body-copy (760px) |
 | **Quotes** | `.article-pull` | No fill — `--navy` left border only | Unboxed: `font-family:var(--font-head)`, 600 weight, italic, 22px, `line-height:1.45` — "this is the idea," not a boxed fact. No surrounding quotation marks — the rule/type treatment already signals "this is a quote." | Wider breakout (1040px, centered under `.tool-inner` via `left:50%`/`transform:translateX(-50%)` against `width:calc(100vw - 48px)`) |
 
 **Width is part of the taxonomy.** CTA/Tips/Warnings stay at body-copy width —
@@ -358,6 +349,14 @@ second column, not a design choice. Quotes are short by nature, so widening them
 **Informational asides that aren't warnings or quotable ideas** (e.g. a
 per-person/per-account setup note) belong in the Tips family — don't invent a
 fifth box style for something that's functionally a tip.
+
+**Why Warnings uses `--alert`, not coral:** a Warning box is a status signal
+("here's a failure mode"), and §2.2's rule is that status colors (`--good`/
+`--caution`/`--alert`) are reserved for status, with coral reserved for
+decorative highlights only. Warnings previously used coral, which required a
+one-off exception to coral's "one per viewport" rule. Moving Warnings to
+`--alert` removed the need for that exception: coral is now purely rare and
+decorative everywhere on the site, with no carve-outs.
 
 #### Quote vs. Tip — the test
 
@@ -378,7 +377,7 @@ or a plain break device, even if it originated as a "pull-quote."
 | ✅ Do | 🚫 Don't |
 |---|---|
 | Let navy + off-white do most of the work | Reach for color to fill space |
-| Use coral once per screen, as a pop (`.article-warn` boxes excepted — see §5's Callout taxonomy) | Spread coral across a layout |
+| Use coral once per screen, as a pop | Spread coral across a layout |
 | Keep status colors for status only | Use `--alert` red as a highlight, or coral as a *system* status/error color |
 | Headings in Outfit, reading in Source Serif 4 | Mix the serif into UI, or set body in Outfit |
 | One marker-underline, one or two stickers per page, in a header/hero or card corner | Repeat the graffiti kit decoratively, or put it on admin/data surfaces |
@@ -418,7 +417,7 @@ same category as `--alert`, not a decorative color choice.
   --coral-deep:#B14A30;    /* coral that must carry small text (AA on canvas) */
   --coral:#E8704F;         /* warm accent base — display pop, data-viz R&D series */
   --coral-light:#F4A98F;   /* lighter coral — soft highlights */
-  --coral-wash:#FBEAE3;    /* soft coral fill — callouts (navy text) */
+  --coral-wash:#FBEAE3;    /* soft coral fill — decorative highlight blocks (navy text) */
   /* Text */
   --ink:#1a1a1a;
   --ink-soft:#3a3833;
@@ -426,8 +425,9 @@ same category as `--alert`, not a decorative color choice.
   /* Lines (warm-toned) */
   --line:#E4E0D6;
   --line-strong:#D6D1C4;
-  /* Semantic — GER calculator readout only */
+  /* Semantic — status only (GER calculator readout, form pass/fail, Warnings callouts) */
   --good:#002975; --caution:#9A6B12; --alert:#9E3B30;
+  --alert-wash:#FBEEEC;    /* soft alert fill — Warnings callout background only */
   /* Type */
   --font-head:'Outfit',system-ui,-apple-system,'Segoe UI',sans-serif;
   --font-body:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
