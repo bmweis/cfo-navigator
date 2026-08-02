@@ -26,7 +26,7 @@ root if unset), owned by the Workspace account behind
 
 ### Path A — the app is up (normal case)
 
-The app has a built-in restore endpoint: `POST /admin/upload-db` validates
+The app has a built-in restore endpoint: `POST /admin/library/backup/upload-db` validates
 the upload is a real library DB, then swaps it onto the volume atomically
 and clears stale WAL/SHM sidecars. **No restart or redeploy is needed** —
 the app opens a fresh DB connection per request, so the very next request
@@ -35,23 +35,23 @@ reads the restored file.
 1. **Snapshot the current state first**, even if it's damaged — it may hold
    saves newer than the Drive snapshot that you'll want to merge back later:
 
-   - Browser: log in as admin → `/admin/backup` → **Download library.db**
-     (or hit `/admin/download-db` directly).
+   - Browser: log in as admin → `/admin/library/backup` → **Download library.db**
+     (or hit `/admin/library/backup/download-db` directly).
 
 2. **Download the snapshot from Google Drive** you want to restore
    (normally the newest `library-*.db`).
 
-3. **Upload it.** Either use the upload form on `/admin/backup` (admin
+3. **Upload it.** Either use the upload form on `/admin/library/backup` (admin
    login), or from a terminal:
 
    ```bash
-   curl -si -X POST "https://bmweis.com/admin/upload-db" \
+   curl -si -X POST "https://bmweis.com/admin/library/backup/upload-db" \
         -H "X-Save-Token: $LINKLIB_SAVE_TOKEN" \
         -F "file=@library-YYYYMMDD-HHMMSS.db"
    ```
 
    Expect `HTTP/1.1 303 See Other` with
-   `location: /admin/backup?uploaded=<N>` — **N is the article count the
+   `location: /admin/library/backup?uploaded=<N>` — **N is the article count the
    server found in the uploaded file** (it runs
    `SELECT COUNT(*) FROM articles` before swapping anything). Sanity-check
    it: production should be ~1,500+. A `400` means the file didn't parse as
@@ -87,7 +87,7 @@ shell on the volume:
 - [ ] FTS search works (search something specific on `/library`, or
       `GET /api/search?q=netsuite` with the token) — the FTS index travels
       inside the DB file, so if the file is good, search is good
-- [ ] `/admin/contacts`, `/admin/queue` load (spot-check non-article tables)
+- [ ] `/admin/contacts`, `/admin/library/queue` load (spot-check non-article tables)
 - [ ] If you restored an older snapshot: diff against the step-1 download
       for member saves / contacts / ask history created since the snapshot,
       and re-add anything worth keeping (article re-saves are idempotent —
@@ -217,7 +217,7 @@ badges — outbound email during the outage will have landed in
 ## 4. Restore rehearsal — procedure and July 2026 record
 
 Rehearse the restore roughly yearly (or after any change to
-`linklib/backup.py` / `/admin/upload-db`) so section 1 stays a checklist,
+`linklib/backup.py` / `/admin/library/backup/upload-db`) so section 1 stays a checklist,
 not a theory. The rehearsal never touches production — it's the same code
 paths against scratch files.
 
@@ -234,7 +234,7 @@ paths against scratch files.
    `LINKLIB_DB=.../live.db LINKLIB_SAVE_TOKEN=<anything> uvicorn webapp.app:app --port 8123`
 4. Confirm the pre-restore state through the API
    (`GET /api/search?q=&limit=50&token=…` shows only the live DB's rows).
-5. Restore with section 1's exact curl (`POST /admin/upload-db`).
+5. Restore with section 1's exact curl (`POST /admin/library/backup/upload-db`).
 6. Validate: the 303 redirect's `uploaded=<N>` matches the good DB's
    article count; `/api/search` now returns the snapshot's rows (including
    an FTS query that missed before); the stale row is gone; on the file
@@ -248,8 +248,8 @@ paths against scratch files.
 - Snapshot via `snapshot_to_file()` → 233,472-byte self-contained file, no
   WAL sidecar.
 - Pre-restore: API listed 2 rows; FTS query `netsuite` → 0 hits.
-- `POST /admin/upload-db` with `X-Save-Token` → `303`,
-  `location: /admin/backup?uploaded=5` (count matched the snapshot).
+- `POST /admin/library/backup/upload-db` with `X-Save-Token` → `303`,
+  `location: /admin/library/backup?uploaded=5` (count matched the snapshot).
 - Post-restore, **no restart**: API listed the snapshot's 5 rows; `netsuite`
   → 1 hit; stale row unfindable; `PRAGMA integrity_check` = `ok`; FTS
   self-check passed; `/health` → `{"ok": true}`.

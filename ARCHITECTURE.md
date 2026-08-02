@@ -1323,7 +1323,7 @@ All capture paths converge on `linklib/pipeline.py::ingest_url` or the
   scan and one-time sitemap backfill (`linklib/queue.py`), and member reader
   submissions (`POST /library/submit`, honeypot-protected, deliberately
   un-enriched until review). `linklib/suggest.py` adds an advisory
-  Claude-predicted keep/skip. The admin reviews at `/admin/queue`;
+  Claude-predicted keep/skip. The admin reviews at `/admin/library/queue`;
   **promoting** moves the row into `articles` preserving any enrichment
   already paid for, **dismissing** keeps the row so it's never re-proposed.
   Embedding happens after promotion too, off-request (`background_tasks`,
@@ -1449,7 +1449,7 @@ recorded anywhere, it's flagged rather than invented.
   file — but treat that as inference, not recorded rationale.
 - **SQLite + FTS5 on a Railway volume, not a hosted database.** *Why:* the
   scale is one curator plus a small member base; a single file needs zero
-  operational overhead, backs up by copying (`/admin/download-db`, weekly
+  operational overhead, backs up by copying (`/admin/library/backup/download-db`, weekly
   Drive snapshots), and FTS5 gives ranked full-text search for free.
   `db.py`'s docstring records the exit path: the same schema works on
   libSQL/Turso/D1 later — only the connection changes.

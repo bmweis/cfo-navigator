@@ -35,8 +35,8 @@ def _failing_checks_count() -> int:
 def open_task_counts(lib: Library) -> dict[str, int]:
     """Non-zero open-task counts keyed by the admin href they badge."""
     counts = {
-        "/admin/queue": lib.queue_count(status="pending"),
-        "/admin/review-removals": lib.flagged_count(),
+        "/admin/library/queue": lib.queue_count(status="pending"),
+        "/admin/library/review-removals": lib.flagged_count(),
         "/admin/contacts": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
         "/admin/tools/software": lib.count_pending_tools(),
         "/admin/tools/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),

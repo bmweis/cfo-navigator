@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """One-time historical catch-up: populate the Library Queue from each source's
-sitemap, back to your saves cutoff. Review the results at /admin/queue.
+sitemap, back to your saves cutoff. Review the results at /admin/library/queue.
 
 This is the throwaway companion to the go-forward Library Queue — run it once,
 review what it proposes, and you never need a backfill again. RSS only carries
@@ -101,7 +101,7 @@ def main() -> int:
     if args.dry_run:
         print("\nDry run — nothing saved. Drop --dry-run to enrich and queue these.")
     else:
-        print(f"\nQueued {tot_a} candidates. Review them at /admin/queue.")
+        print(f"\nQueued {tot_a} candidates. Review them at /admin/library/queue.")
 
     lib.close()
     return 0
