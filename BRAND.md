@@ -519,3 +519,22 @@ dash" policy:
   different job (a range, not a sentence-level pause), not a second flavor of em dash. No flagging
   workflow needed for en dashes — a spaced one is a straightforward typo to fix on sight, since
   there's no voice/tone judgment call involved, just a typographic convention.
+
+**Standing disclosure lines.** A few claims on the site carry enough legal/editorial weight that
+they get a short, muted, footnote-style line placed right next to the claim rather than folded
+into the surrounding copy or buried on a separate page — small type, `var(--muted)` color, a
+border-top separator, positioned adjacent to what it's disclosing. Two so far, both on Software
+(and eventually Communities) profile pages:
+
+- **Advisor disclosure** (`tp-footnote`, page-level, shown when `tool.advisor`/`community.advisor`
+  is set): "Brian is a formal advisor to [name]. Advisor relationships are always disclosed and
+  never affect ranking or inclusion." A conflict-of-interest disclosure.
+- **Features sourcing disclaimer** (`tp-footnote`, directly under the Features card,
+  `_FEATURES_SOURCING_DISCLAIMER` in `webapp/app.py`): features and capabilities are drawn from
+  public company websites and marketing materials, not independently tested or confirmed true. A
+  claims-accuracy disclosure — distinct from the per-feature "verify" tag, which only confirms the
+  feature *text* matches what the vendor's site said (extraction accuracy), not that the
+  underlying capability is real. New disclosure lines in this family should draft carefully to
+  keep that distinction (or whatever adjacent distinction applies) legible rather than
+  contradicting an existing badge's meaning, and should get the same "show the wording before it
+  ships" treatment as any neutrality-sensitive copy.

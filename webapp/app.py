@@ -981,6 +981,21 @@ def _profile_admin_nudge(text: str) -> str:
             f'padding:12px 16px;border:1px dashed var(--line-strong);border-radius:10px;">{_esc(text)}</p>')
 
 
+# Claims-accuracy disclaimer for the Features card, distinct from the
+# per-feature `needs_verification` flag: that flag means "the feature text
+# matches what the source site said" (extraction accuracy). This disclaimer
+# means "the underlying claim itself hasn't been independently tested"
+# (claims accuracy) — one level above. Software profile pages only for now;
+# extend to Communities automatically once Phase 8.4 ships a Features card
+# there.
+_FEATURES_SOURCING_DISCLAIMER = (
+    'Features and capabilities are sourced from public company websites and marketing materials, '
+    'not independently tested or confirmed by Brian. The &ldquo;verify&rdquo; tag on individual features '
+    'confirms only that the text matches what the vendor&rsquo;s site says&mdash;not that the underlying '
+    'capability actually works as described.'
+)
+
+
 def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
     """Hand-drawn wavy SVG underline for one hero heading word. Stretches to
     fill its parent's width (`preserveAspectRatio="none"`, a fixed viewBox).
@@ -6074,6 +6089,9 @@ def tools_software_profile(request: Request, slug: str):
     <tbody>{feature_rows}</tbody>
   </table>
   {verify_line}
+</div>
+<div class="tp-footnote" style="margin-top:8px;">
+  <span>{_FEATURES_SOURCING_DISCLAIMER}</span>
 </div>"""
 
     cats = tool.get("categories") or []
