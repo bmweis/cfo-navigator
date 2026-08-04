@@ -13884,7 +13884,7 @@ _ADMIN_GROUPS = [
     ("System", "Accounts, health, and plumbing.", [
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
-        ("/admin/overhead-spend",  "Overhead spend",      "Embedding and enrichment API cost—Brian's operating cost, separate from any user's FP&A Buddy cap."),
+        ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
         ("/admin/system/page-index", "Page Index",        "A live, self-updating map of every route and its width tier."),
@@ -16367,22 +16367,91 @@ def admin_ask_report_export(request: Request, user: str = ""):
 
 
 @app.get("/admin/overhead-spend", response_class=HTMLResponse)
-def admin_overhead_spend(request: Request):
-    """Brian's operating cost, not any user's: embed-on-save/backfill spend
-    (article_embeddings) plus enrichment spend (enrichment_cost, issue 105) —
-    both overhead ledgers that are never summed into ask_questions and never
-    count toward a user's monthly Ask cap. See /admin/ask-report for that
-    separate, user-cap-side cost reporting."""
+def admin_overhead_spend(request: Request, category: str = "", msg: str = "", error: str = ""):
+    """Two sections that are deliberately never added together:
+
+    Section 1, "Vendor totals" (manual_overhead) — every real charge for
+    running the site, typed in from receipts: Railway, Cloudflare, Google
+    Workspace, domain registration, Anthropic, OpenAI, Exa, anything else.
+    Tax-inclusive, actual dollars paid. This is THE total cost of the site —
+    a plain sum, always correct because it's literally what got paid.
+
+    Section 2, "Toolbox usage" (article_embeddings, enrichment_cost,
+    ask_questions) — internal cost attribution computed from token counts
+    and model pricing, showing what's driving AI vendor spend across
+    enrichment, embeddings, and FP&A Buddy queries. This is a different
+    calculation basis than Section 1 (computed token cost vs. actual billed
+    amount, which includes tax and whatever else the vendor's bill includes)
+    and is not expected to tie out to it — it's for understanding usage
+    patterns, not a component of the total cost figure."""
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
     try:
+        entries = lib.list_manual_overhead(category=category or None)
+        categories = lib.manual_overhead_categories()
+        vendor_total = lib.manual_overhead_total(category=category or None)
         breakdown = lib.overhead_cost_breakdown()
         by_month = lib.overhead_cost_by_month()
-        total_cost = sum(s["total_cost"] for s in breakdown)
-        month_cost = sum(s["this_month_cost"] for s in breakdown)
+        usage_total = sum(s["total_cost"] for s in breakdown)
+        usage_month_cost = sum(s["this_month_cost"] for s in breakdown)
     finally:
         lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
+                     f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
+
+    category_opts = "".join(
+        f'<option value="{_esc(c)}"{" selected" if c == category else ""}>{_esc(c)}</option>'
+        for c in categories
+    )
+    filter_bar = f"""<form method="get" style="margin:0 0 12px;display:flex;gap:8px;align-items:center;">
+  <label style="font-size:12px;color:var(--muted);">Filter by category</label>
+  <select name="category" onchange="this.form.submit()"
+    style="padding:5px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+    <option value="">All categories</option>
+    {category_opts}
+  </select>
+  {'<a href="/admin/overhead-spend" style="font-size:12px;color:var(--muted);">Clear</a>' if category else ''}
+</form>"""
+
+    entry_rows = ""
+    for e in entries:
+        eid = e["id"]
+        entry_rows += f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:9px 12px;">
+    <form method="post" action="/admin/overhead-spend/{eid}/edit" style="display:grid;gap:6px;margin:0;max-width:520px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:var(--bg);">
+        <input type="date" name="date" value="{_esc(e['date'])}" required
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
+        <input type="text" name="category" value="{_esc(e['category'])}" maxlength="60" placeholder="Category" list="overhead-categories"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
+      </div>
+      <input type="text" name="note" value="{_esc(e['note'])}" maxlength="300" placeholder="Note (optional)"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);">
+      <div><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button></div>
+    </form>
+  </td>
+  <td style="padding:9px 12px;font-size:13px;font-weight:600;text-align:right;vertical-align:top;">${e['amount']:.2f}</td>
+  <td style="padding:9px 12px;vertical-align:top;">
+    <form method="post" action="/admin/overhead-spend/{eid}/delete" style="margin:0;"
+          onsubmit="return confirm('Delete this {_esc(e['vendor'])} entry?');">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+    if not entries:
+        entry_rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No vendor charges recorded yet—add one below.</td></tr>'
+
+    datalist = f'<datalist id="overhead-categories">{"".join(f"<option value={chr(34)}{_esc(c)}{chr(34)}>" for c in categories)}</datalist>'
 
     source_rows = "".join(f"""<tr>
   <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(s["source"])}</td>
@@ -16395,26 +16464,84 @@ def admin_overhead_spend(request: Request):
   <td style="padding:8px 10px;font-size:13px;">{_esc(m["month"])}</td>
   <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${m["cost_usd"]:.4f}</td>
 </tr>""" for m in by_month) or \
-        '<tr><td colspan="2" style="padding:24px;text-align:center;color:var(--muted);">No overhead spend recorded yet.</td></tr>'
+        '<tr><td colspan="2" style="padding:24px;text-align:center;color:var(--muted);">No usage recorded yet.</td></tr>'
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Overhead spend</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Brian&rsquo;s operating cost for running the archive&mdash;embedding and enrichment API spend, broken out by source and by month.</p>
-<p style="color:var(--muted);margin:0 0 20px;">This is never summed into any user&rsquo;s FP&amp;A Buddy cost cap&mdash;see <a href="/admin/ask-report">the FP&amp;A Buddy report</a> for that separate, user-facing spend.</p>
+{banner}{error_banner}
+
+<h2 style="font-size:16px;margin:18px 0 4px;">Vendor totals</h2>
+<p style="color:var(--muted);margin:0 0 14px;">The total cost of running the site&mdash;every real charge, tax included, exactly as it hit the card. Railway, Cloudflare, Google Workspace, domain registration, Anthropic, OpenAI, Exa, anything else. This is the number that&rsquo;s always right, because it&rsquo;s typed in from receipts rather than derived.</p>
+
+<div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;max-width:260px;margin-bottom:18px;">
+  <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${vendor_total:.2f}</div>
+  <div style="font-size:12px;color:var(--muted);margin-top:2px;">{'Total, ' + category if category else 'Total, all vendors'}</div>
+</div>
+
+{filter_bar}
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:20px;">
+  <table style="width:100%;border-collapse:collapse;min-width:560px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Vendor, date, category &amp; note</th>
+      <th style="padding:9px 12px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Amount</th>
+      <th style="padding:9px 12px;"></th>
+    </tr></thead>
+    <tbody>{entry_rows}</tbody>
+  </table>
+</div>
+{datalist}
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;margin-bottom:32px;">
+  <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
+  <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor *</label>
+      <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
+        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div>
+        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
+        <input type="date" name="date" required
+          style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
+        <input type="number" step="0.01" name="amount" required placeholder="0.00"
+          style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+      </div>
+    </div>
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Category <span style="font-weight:400;color:var(--muted);">(display tag only, e.g. Infrastructure / AI &amp; API / Other)</span></label>
+      <input type="text" name="category" maxlength="60" list="overhead-categories"
+        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+    </div>
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Note</label>
+      <input type="text" name="note" maxlength="300" placeholder="Optional"
+        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+    </div>
+    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add charge</button></div>
+  </form>
+</div>
+
+<h2 style="font-size:16px;margin:0 0 4px;">Toolbox usage</h2>
+<p style="color:var(--muted);margin:0 0 4px;">Internal cost attribution for enrichment, embeddings, and FP&amp;A Buddy queries&mdash;computed from token counts and model pricing, not billed amounts.</p>
+<p style="color:var(--muted);margin:0 0 18px;font-style:italic;">Estimate only, for understanding usage patterns&mdash;this won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
 
 <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px;">
   <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${total_cost:.2f}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Total overhead, all time</div>
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_total:.2f}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Estimated usage, all time</div>
   </div>
   <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${month_cost:.2f}</div>
+    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_month_cost:.2f}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">This calendar month</div>
   </div>
 </div>
 
-<h2 style="font-size:15px;margin:0 0 10px;">By source</h2>
+<h3 style="font-size:14px;margin:0 0 10px;">By source</h3>
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:24px;">
   <table style="width:100%;border-collapse:collapse;min-width:480px;">
     <thead><tr style="background:var(--bg);">
@@ -16427,7 +16554,7 @@ def admin_overhead_spend(request: Request):
   </table>
 </div>
 
-<h2 style="font-size:15px;margin:0 0 10px;">By month</h2>
+<h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;min-width:320px;">
     <thead><tr style="background:var(--bg);">
@@ -16442,6 +16569,65 @@ tbody tr{{border-top:1px solid var(--line);}}
 </style>
 </div>"""
     return HTMLResponse(_page("Overhead spend—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/overhead-spend/new")
+async def admin_overhead_spend_new(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    vendor = (form.get("vendor") or "").strip()
+    date = (form.get("date") or "").strip()
+    category = (form.get("category") or "").strip()
+    note = (form.get("note") or "").strip()
+    try:
+        amount = float(form.get("amount") or 0)
+    except ValueError:
+        return RedirectResponse(f"/admin/overhead-spend?error={quote('Amount must be a number.')}", status_code=303)
+    lib = _lib()
+    try:
+        lib.add_manual_overhead(vendor, date, amount, category, note)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/overhead-spend?error={quote(str(e))}", status_code=303)
+    finally:
+        lib.close()
+    msg = f'Added {vendor}, ${amount:.2f}.'
+    return RedirectResponse(f"/admin/overhead-spend?msg={quote(msg)}", status_code=303)
+
+
+@app.post("/admin/overhead-spend/{entry_id}/edit")
+async def admin_overhead_spend_edit(request: Request, entry_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    vendor = (form.get("vendor") or "").strip()
+    date = (form.get("date") or "").strip()
+    category = (form.get("category") or "").strip()
+    note = (form.get("note") or "").strip()
+    try:
+        amount = float(form.get("amount") or 0)
+    except ValueError:
+        return RedirectResponse(f"/admin/overhead-spend?error={quote('Amount must be a number.')}", status_code=303)
+    lib = _lib()
+    try:
+        lib.update_manual_overhead(entry_id, vendor, date, amount, category, note)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/overhead-spend?error={quote(str(e))}", status_code=303)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/overhead-spend?msg={quote('Saved.')}", status_code=303)
+
+
+@app.post("/admin/overhead-spend/{entry_id}/delete")
+def admin_overhead_spend_delete(request: Request, entry_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_manual_overhead(entry_id)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/overhead-spend?msg={quote('Deleted.')}", status_code=303)
 
 
 # Rating -> (label, badge fg, badge bg) for the feedback triage view.

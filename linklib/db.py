@@ -527,6 +527,29 @@ CREATE TABLE IF NOT EXISTS enrichment_cost (
 );
 CREATE INDEX IF NOT EXISTS idx_enrichment_cost_article ON enrichment_cost(article_id);
 
+-- Manual vendor-spend ledger for /admin/overhead-spend "Vendor totals" —
+-- one row per real charge (Railway, Cloudflare, Google Workspace, domain
+-- registration, Anthropic, OpenAI, Exa, anything else). amount is the actual
+-- dollars paid, tax-inclusive, exactly as it hit the card — this table is
+-- the sole source for "total cost of the site" precisely because it's typed
+-- in from receipts rather than derived, so it always sums correctly and
+-- never needs to reconcile against enrichment_cost/article_embeddings/
+-- ask_questions (those are a separate, explicitly-not-summed-together
+-- "Toolbox usage" view of internal cost attribution — see
+-- overhead_cost_breakdown). category is a display/filter tag only (e.g.
+-- "Infrastructure" / "AI & API" / "Other") — never used to compute a
+-- subtotal, just to filter the list view.
+CREATE TABLE IF NOT EXISTS manual_overhead (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    vendor     TEXT NOT NULL,
+    date       TEXT NOT NULL,               -- ISO date (YYYY-MM-DD), user-entered from the receipt
+    amount     REAL NOT NULL,
+    category   TEXT NOT NULL DEFAULT '',
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_manual_overhead_date ON manual_overhead(date);
+
 -- CFO Toolbox "Communities" directory (/tools/communities), a sibling of
 -- tools/tool_categories above: peer groups, associations, and Slack
 -- communities rather than software vendors. cost_band is one of five fixed
@@ -1617,14 +1640,18 @@ class Library:
         return float(row[0])
 
     def overhead_cost_breakdown(self) -> list[dict]:
-        """One row per overhead-cost source (embeddings, enrichment) for the
-        admin overhead-spend view: count of ledger rows, total cost all-time,
-        and total cost this calendar month. Never touches ask_questions —
-        overhead is deliberately reported separate from the user-cap ledger."""
+        """One row per internal cost-attribution source (embeddings,
+        enrichment, FP&A Buddy queries) for the admin overhead-spend page's
+        "Toolbox usage" section: count of ledger rows, total cost all-time,
+        and total cost this calendar month. This is token-cost math, not
+        billed dollars, and is never summed into manual_overhead's vendor
+        totals — see manual_overhead's schema comment for why those two
+        numbers are deliberately kept apart rather than reconciled."""
         month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
         sources = [
             ("Embeddings", "article_embeddings", "embedded_at"),
             ("Enrichment", "enrichment_cost", "created_at"),
+            ("FP&A Buddy queries", "ask_questions", "created_at"),
         ]
         out = []
         for label, table, ts_col in sources:
@@ -1642,12 +1669,15 @@ class Library:
         return out
 
     def overhead_cost_by_month(self, months: int = 12) -> list[dict]:
-        """Combined embeddings + enrichment overhead spend grouped by
-        calendar month, most recent first, for the admin overhead-spend
-        view's by-month breakdown table."""
+        """Combined embeddings + enrichment + FP&A Buddy internal cost
+        attribution grouped by calendar month, most recent first, for the
+        admin overhead-spend page's "Toolbox usage" by-month table. See
+        overhead_cost_breakdown for why this is kept separate from
+        manual_overhead's vendor totals."""
         totals: dict[str, float] = {}
         for table, ts_col in (("article_embeddings", "embedded_at"),
-                              ("enrichment_cost", "created_at")):
+                              ("enrichment_cost", "created_at"),
+                              ("ask_questions", "created_at")):
             rows = self.conn.execute(
                 f"""SELECT strftime('%Y-%m', {ts_col}) AS ym, SUM(cost_usd)
                     FROM {table} WHERE {ts_col} != '' GROUP BY ym"""
@@ -1657,6 +1687,84 @@ class Library:
                     totals[ym] = totals.get(ym, 0.0) + float(cost)
         return [{"month": ym, "cost_usd": totals[ym]}
                 for ym in sorted(totals, reverse=True)[:months]]
+
+    # -- manual_overhead: vendor totals (Section 1) ---------------------------
+    # The one and only source for "total cost of the site." Every row is a
+    # real receipt amount typed in by hand — see the table's schema comment
+    # for why this is deliberately never reconciled against the token-cost
+    # ledgers in overhead_cost_breakdown/overhead_cost_by_month above.
+
+    def list_manual_overhead(self, category: str | None = None) -> list[dict]:
+        """All vendor-spend rows, most recent charge first. Pass category to
+        filter the list view — purely a display filter, doesn't affect any
+        total."""
+        if category:
+            rows = self.conn.execute(
+                "SELECT * FROM manual_overhead WHERE category=? ORDER BY date DESC, id DESC",
+                (category,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM manual_overhead ORDER BY date DESC, id DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def manual_overhead_categories(self) -> list[str]:
+        """Distinct category tags in use, alphabetical — populates the
+        filter dropdown and the add-form's suggestions."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT category FROM manual_overhead WHERE category != '' ORDER BY category"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def manual_overhead_total(self, category: str | None = None) -> float:
+        """Sum of every vendor-spend row — THE total cost of the site.
+        A plain SQL SUM, always correct because it's literally what got
+        paid; no derivation, no reconciliation possible or needed."""
+        if category:
+            row = self.conn.execute(
+                "SELECT COALESCE(SUM(amount),0) FROM manual_overhead WHERE category=?",
+                (category,),
+            ).fetchone()
+        else:
+            row = self.conn.execute("SELECT COALESCE(SUM(amount),0) FROM manual_overhead").fetchone()
+        return float(row[0])
+
+    def add_manual_overhead(self, vendor: str, date: str, amount: float,
+                             category: str = "", note: str = "") -> int:
+        vendor, date, category, note = vendor.strip(), date.strip(), category.strip(), note.strip()
+        if not vendor:
+            raise ValueError("Vendor is required.")
+        if not date:
+            raise ValueError("Date is required.")
+        cur = self.conn.execute(
+            """INSERT INTO manual_overhead (vendor, date, amount, category, note, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (vendor, date, amount, category, note, datetime.now(timezone.utc).isoformat()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_manual_overhead(self, entry_id: int, vendor: str, date: str, amount: float,
+                                category: str = "", note: str = "") -> None:
+        vendor, date, category, note = vendor.strip(), date.strip(), category.strip(), note.strip()
+        if not vendor:
+            raise ValueError("Vendor is required.")
+        if not date:
+            raise ValueError("Date is required.")
+        row = self.conn.execute("SELECT 1 FROM manual_overhead WHERE id=?", (entry_id,)).fetchone()
+        if not row:
+            raise ValueError("Entry not found.")
+        self.conn.execute(
+            "UPDATE manual_overhead SET vendor=?, date=?, amount=?, category=?, note=? WHERE id=?",
+            (vendor, date, amount, category, note, entry_id),
+        )
+        self.conn.commit()
+
+    def delete_manual_overhead(self, entry_id: int) -> bool:
+        cur = self.conn.execute("DELETE FROM manual_overhead WHERE id=?", (entry_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
 
     def get_article(self, article_id: int) -> Optional[dict]:
         """One article by id, or None. A plain indexed lookup — used by the
