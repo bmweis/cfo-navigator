@@ -1500,6 +1500,27 @@ recorded anywhere, it's flagged rather than invented.
   try/except at all). A generalized overhead-cost schema stays deferred
   until a third real consumer needs one — see `/admin/overhead-spend` for
   the admin view surfacing both ledgers today.
+- **`/admin/overhead-spend`'s "total cost of the site" is hand-entered, not
+  derived from any ledger.** `manual_overhead` is a plain vendor/date/amount/
+  category/note table, one row per real charge, filled in by hand from
+  receipts — tax-inclusive, exactly what hit the card. It is the *only*
+  input to the page's headline total. The token-cost ledgers
+  (`article_embeddings`, `enrichment_cost`, `ask_questions.cost_usd`,
+  surfaced together as "Toolbox usage") are shown alongside it but never
+  summed in and never reconciled against it. *Why:* an earlier design tried
+  to build the total out of the ledgers plus a tax markup, which meant
+  picking a markup convention and made the total only as trustworthy as
+  that reconciliation — deriving nothing means there's nothing to get
+  wrong. `category` on `manual_overhead` is a free-text display/filter tag
+  only (e.g. "Infrastructure" / "AI & API" / "Other"); it never partitions
+  the total into sub-sums, so a new tag can't silently change what's
+  counted. Vendor coverage, so a newly-added vendor has a checklist:
+  Railway (hosting), Cloudflare (DNS/CDN), Google Workspace (the domain's
+  email seat), domain registration, Anthropic (`ANTHROPIC_API_KEY` — funds
+  both enrichment and FP&A Buddy), OpenAI (`OPENAI_API_KEY` — embeddings),
+  Exa (web search) — every one of these gets its charges typed into
+  `manual_overhead` by hand as bills arrive; none is auto-populated from a
+  vendor API.
 - **Citations link to original external URLs only; stored full text is never
   served to members.** The archive's `content` column is an internal
   grounding/search input; the member-facing surface is summary + tags +
