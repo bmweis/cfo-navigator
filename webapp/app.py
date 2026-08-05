@@ -16493,48 +16493,50 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 </div>
 {datalist}
 
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;margin-bottom:32px;">
-  <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
-  <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor *</label>
-      <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+    <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
+    <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
       <div>
-        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
-        <input type="date" name="date" required
+        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor *</label>
+        <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
+          style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div>
+          <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
+          <input type="date" name="date" required
+            style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
+          <input type="number" step="0.01" name="amount" required placeholder="0.00"
+            style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+        </div>
+      </div>
+      <div>
+        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Category <span style="font-weight:400;color:var(--muted);">(display tag only, e.g. Infrastructure / AI &amp; API / Other)</span></label>
+        <input type="text" name="category" maxlength="60" list="overhead-categories"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
       <div>
-        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
-        <input type="number" step="0.01" name="amount" required placeholder="0.00"
+        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Note</label>
+        <input type="text" name="note" maxlength="300" placeholder="Optional"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Category <span style="font-weight:400;color:var(--muted);">(display tag only, e.g. Infrastructure / AI &amp; API / Other)</span></label>
-      <input type="text" name="category" maxlength="60" list="overhead-categories"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Note</label>
-      <input type="text" name="note" maxlength="300" placeholder="Optional"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add charge</button></div>
-  </form>
-</div>
+      <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add charge</button></div>
+    </form>
+  </div>
 
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;margin-bottom:32px;">
-  <h3 style="font-size:15px;font-weight:600;margin:0 0 8px;">Upload CSV</h3>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Batch-import charges instead of typing each one in. Columns: <code>vendor, date, amount, category, note</code> (header row required; category and note optional). Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. You'll get a preview to check before anything is saved. <a href="/admin/overhead-spend/csv/template" style="color:var(--navy);">Download a template &darr;</a></p>
-  <form method="post" action="/admin/overhead-spend/csv/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
-    <input type="file" name="file" accept=".csv,text/csv" required
-      style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-    <div><button type="submit" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;">Preview import</button></div>
-  </form>
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+    <h3 style="font-size:15px;font-weight:600;margin:0 0 8px;">Upload CSV</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Batch-import charges instead of typing each one in. Columns: <code>vendor, date, amount, category, note</code> (header row required; category and note optional). Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. You'll get a preview to check before anything is saved. <a href="/admin/overhead-spend/csv/template" style="color:var(--navy);">Download a template &darr;</a></p>
+    <form method="post" action="/admin/overhead-spend/csv/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+      <input type="file" name="file" accept=".csv,text/csv" required
+        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+      <div><button type="submit" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;">Preview import</button></div>
+    </form>
+  </div>
 </div>
 
 <h2 style="font-size:16px;margin:0 0 4px;">Toolbox usage</h2>
