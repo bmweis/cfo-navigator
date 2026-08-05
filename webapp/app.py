@@ -54,6 +54,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 
 from linklib.db import DuplicateURLError, Library
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
+from linklib.overhead_csv import parse_overhead_csv
 from linklib.pipeline import ingest_url
 from linklib import backup
 from webapp.thought_leadership_data import SECTIONS as TL_SECTIONS, TLItem
@@ -5228,7 +5229,7 @@ function renderTools(tools) {{
     if (AUTHED) {{
       adminControls = '<div class="tool-admin">'
         + '<button type="button" class="tool-admin-btn" onclick="toggleQuickEdit(' + t.id + ')">Quick edit</button>'
-        + '<a href="/tools/software/' + esc(t.slug) + '/edit" class="tool-admin-btn">Full edit</a>'
+        + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Full edit</a>'
         + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:inline;"'
         + ' data-toolname="' + esc(t.name) + '"'
         + ' onsubmit="return confirmDelete(this)">'
@@ -8711,7 +8712,7 @@ def admin_software(request: Request):
           <td data-col="software:vendor_name" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t.get('vendor_name') or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">
             <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-              <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+              <a href="/tools/software/{t['slug']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
               <form method="post" action="/admin/tools/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
@@ -9673,7 +9674,7 @@ def admin_communities(request: Request, filter: str = ""):
   <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
   <td style="padding:10px 12px;">
     <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-      <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+      <a href="/tools/communities/{c['slug']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
       <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="text-align:center;">Profile</a>
       {mark_reviewed}
       <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
@@ -16526,6 +16527,16 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
   </form>
 </div>
 
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;margin-bottom:32px;">
+  <h3 style="font-size:15px;font-weight:600;margin:0 0 8px;">Upload CSV</h3>
+  <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Batch-import charges instead of typing each one in. Columns: <code>vendor, date, amount, category, note</code> (header row required; category and note optional). Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. You'll get a preview to check before anything is saved. <a href="/admin/overhead-spend/csv/template" style="color:var(--navy);">Download a template &darr;</a></p>
+  <form method="post" action="/admin/overhead-spend/csv/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+    <input type="file" name="file" accept=".csv,text/csv" required
+      style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+    <div><button type="submit" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;">Preview import</button></div>
+  </form>
+</div>
+
 <h2 style="font-size:16px;margin:0 0 4px;">Toolbox usage</h2>
 <p style="color:var(--muted);margin:0 0 4px;">Internal cost attribution for enrichment, embeddings, and FP&amp;A Buddy queries&mdash;computed from token counts and model pricing, not billed amounts.</p>
 <p style="color:var(--muted);margin:0 0 18px;font-style:italic;">Estimate only, for understanding usage patterns&mdash;this won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
@@ -16628,6 +16639,168 @@ def admin_overhead_spend_delete(request: Request, entry_id: int):
     finally:
         lib.close()
     return RedirectResponse(f"/admin/overhead-spend?msg={quote('Deleted.')}", status_code=303)
+
+
+@app.get("/admin/overhead-spend/csv/template")
+def admin_overhead_spend_csv_template(request: Request):
+    """A starter file for the Upload CSV card — the required header row plus
+    one filled-in example row, so the expected format (including that
+    category/note are just empty rather than omitted) is obvious without
+    reading the help text."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    content = (
+        "vendor,date,amount,category,note\r\n"
+        "Railway,2026-07-01,5.00,Infrastructure,Hobby plan\r\n"
+    )
+    return Response(
+        content=content, media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="overhead-spend-template.csv"'},
+    )
+
+
+@app.post("/admin/overhead-spend/csv/preview")
+async def admin_overhead_spend_csv_preview(request: Request, file: UploadFile = File(...)):
+    """Parses the uploaded CSV and shows what would be imported — nothing is
+    written to the DB here. Valid rows are round-tripped as hidden fields in
+    a confirm form (this app has no server-side session store, so the parsed
+    state has to live in the page itself rather than behind a token) that
+    posts to the /commit route below; skipped rows are just displayed, never
+    submitted."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    data = await file.read()
+    try:
+        valid_rows, skipped_rows = parse_overhead_csv(data)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/overhead-spend?error={quote(str(e))}", status_code=303)
+
+    if not valid_rows and not skipped_rows:
+        return RedirectResponse(
+            f"/admin/overhead-spend?error={quote('The file had no data rows to import.')}", status_code=303)
+
+    hidden_fields = "".join(
+        f'<input type="hidden" name="vendor" value="{_esc(r["vendor"])}">'
+        f'<input type="hidden" name="date" value="{_esc(r["date"])}">'
+        f'<input type="hidden" name="amount" value="{r["amount"]}">'
+        f'<input type="hidden" name="category" value="{_esc(r["category"])}">'
+        f'<input type="hidden" name="note" value="{_esc(r["note"])}">'
+        for r in valid_rows
+    )
+
+    valid_table_rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(r['vendor'])}</td>
+  <td style="padding:8px 10px;font-size:13px;">{_esc(r['date'])}</td>
+  <td style="padding:8px 10px;font-size:13px;text-align:right;">${r['amount']:.2f}</td>
+  <td style="padding:8px 10px;font-size:13px;">{_esc(r['category']) or '&mdash;'}</td>
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{_esc(r['note']) or '&mdash;'}</td>
+</tr>""" for r in valid_rows) or (
+        '<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--muted);">'
+        'No valid rows found.</td></tr>')
+
+    skipped_section = ""
+    if skipped_rows:
+        skipped_table_rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{r['line']}</td>
+  <td style="padding:8px 10px;font-size:13px;font-family:monospace;">{_esc(r['raw'])}</td>
+  <td style="padding:8px 10px;font-size:13px;color:#b91c1c;">{_esc(r['reason'])}</td>
+</tr>""" for r in skipped_rows)
+        skipped_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Skipped rows ({len(skipped_rows)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won't be imported. Fix them in your CSV and re-upload if needed&mdash;the rows below will still be inserted if you confirm.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:480px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Raw row</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why it was skipped</th>
+    </tr></thead>
+    <tbody>{skipped_table_rows}</tbody>
+  </table>
+</div>"""
+
+    confirm_button = (
+        f'<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">'
+        f'Confirm &amp; import {len(valid_rows)} row{"s" if len(valid_rows) != 1 else ""}</button>'
+        if valid_rows else
+        '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to import</button>'
+    )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/overhead-spend" style="font-size:13px;color:var(--muted);">&larr; Overhead spend</a></p>
+<h1>Preview CSV import</h1>
+<p style="color:var(--muted);margin:0 0 18px;">Nothing has been saved yet. Review the rows below, then confirm to insert them.</p>
+
+<h3 style="font-size:14px;margin:0 0 10px;">Ready to import ({len(valid_rows)})</h3>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+  <table style="width:100%;border-collapse:collapse;min-width:560px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Vendor</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Date</th>
+      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Amount</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Category</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Note</th>
+    </tr></thead>
+    <tbody>{valid_table_rows}</tbody>
+  </table>
+</div>
+
+<form method="post" action="/admin/overhead-spend/csv/commit" style="margin:14px 0 8px;display:flex;gap:10px;">
+  {hidden_fields}
+  {confirm_button}
+  <a href="/admin/overhead-spend" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+</form>
+{skipped_section}
+</div>"""
+    return HTMLResponse(_page("Preview CSV import—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/overhead-spend/csv/commit")
+async def admin_overhead_spend_csv_commit(request: Request):
+    """Inserts the rows the preview step showed. Re-validates each one via
+    the same Library.add_manual_overhead path the manual form uses, rather
+    than trusting the hidden fields round-tripped from the preview page —
+    one bad row is skipped and counted, not allowed to abort the batch."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    vendors = form.getlist("vendor")
+    dates = form.getlist("date")
+    amounts = form.getlist("amount")
+    categories = form.getlist("category")
+    notes = form.getlist("note")
+
+    if not vendors:
+        return RedirectResponse(
+            f"/admin/overhead-spend?error={quote('No rows to import—upload a CSV first.')}", status_code=303)
+
+    lib = _lib()
+    imported = 0
+    failures: list[str] = []
+    try:
+        for i, vendor in enumerate(vendors):
+            try:
+                amount = float(amounts[i])
+            except (IndexError, ValueError):
+                failures.append(f"row {i + 1}: amount must be a number")
+                continue
+            date = dates[i] if i < len(dates) else ""
+            category = categories[i] if i < len(categories) else ""
+            note = notes[i] if i < len(notes) else ""
+            try:
+                lib.add_manual_overhead(vendor, date, amount, category, note)
+                imported += 1
+            except ValueError as e:
+                failures.append(f"row {i + 1} ({vendor or 'no vendor'}): {e}")
+    finally:
+        lib.close()
+
+    msg = f"Imported {imported} row{'s' if imported != 1 else ''}."
+    if failures:
+        msg += f" Skipped {len(failures)}: {'; '.join(failures[:5])}"
+        if len(failures) > 5:
+            msg += f" (+{len(failures) - 5} more)"
+    return RedirectResponse(f"/admin/overhead-spend?msg={quote(msg)}", status_code=303)
 
 
 # Rating -> (label, badge fg, badge bg) for the feedback triage view.
