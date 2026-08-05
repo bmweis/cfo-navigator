@@ -302,7 +302,11 @@ def generate_tool_differentiation(name: str, url: str, description: str,
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=400,
+            max_tokens=1200,  # headroom for Opus 5's on-by-default adaptive thinking (max_tokens
+                              # caps thinking + response together) — the 1-2 sentence output itself
+                              # needs very little, but a starved budget (previously 400) let thinking
+                              # alone exhaust it, leaving zero tokens for the JSON response (issue:
+                              # generate-differentiation silently returning None on empty/unparseable output)
             messages=[{"role": "user",
                        "content": _TOOL_DIFFERENTIATION_PROMPT.format(
                            name=name, url=url, description=description, competitors_block=competitors_block)}],
