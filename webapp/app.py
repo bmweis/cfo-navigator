@@ -9405,7 +9405,11 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
-    <input name="screenshot_url" type="url" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
+    <!-- type="text", not "url": Recapture writes a site-relative served path
+         (e.g. /tools/communities/screenshot/<slug>.png?v=...), which native
+         type="url" validation rejects as invalid (no scheme) and blocks Save
+         with "Please enter a URL"—text still accepts a hand-pasted absolute URL. -->
+    <input name="screenshot_url" type="text" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
@@ -11036,7 +11040,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn">Generate screenshot</button>
       </span>
     </div>
-    <input name="screenshot_url" type="url" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
+    <!-- type="text", not "url": Generate screenshot writes a site-relative
+         served path (e.g. /tools/software/screenshot/<slug>.png?v=...), which
+         native type="url" validation rejects as invalid (no scheme) and
+         blocks Save with "Please enter a URL"—text still accepts a
+         hand-pasted absolute URL. -->
+    <input name="screenshot_url" type="text" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
