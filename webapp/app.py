@@ -11074,13 +11074,13 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </div>
 </div>
 
-<details style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
       <h2 style="font-size:16px;font-weight:600;margin:0;">Features</h2>
       {_features_badge_html}
     </span>
-    <span style="color:var(--navy);font-size:13px;line-height:1;">&#9660;</span>
+    <span class="features-chevron" style="color:var(--navy);font-size:13px;line-height:1;transition:transform .15s;">&#9660;</span>
   </summary>
   <p style="font-size:13px;color:var(--muted);margin:12px 0 16px;">Standalone-vs-bundled availability per feature—feeds the Phase 5 comparison matrix. Rows flagged "Needs verification" came from the LLM enrichment pass and haven't been confirmed yet.</p>
 
@@ -11128,6 +11128,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
+.features-group summary::-webkit-details-marker{{display:none;}}
+.features-group[open] .features-chevron{{transform:rotate(180deg);}}
 </style>
 <script>{_GENERATE_DESC_JS}
 async function generateDifferentiation(toolId, textareaId, statusId) {{
