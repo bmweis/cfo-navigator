@@ -5117,7 +5117,7 @@ Not sure which tool's for you? {(
 .tool-compare-label input{{cursor:pointer;}}
 .tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
-.tool-admin{{display:flex;gap:6px;flex-shrink:0;}}
+.tool-admin{{display:flex;align-items:stretch;gap:6px;flex-shrink:0;}}
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
@@ -5230,7 +5230,13 @@ function renderTools(tools) {{
       adminControls = '<div class="tool-admin">'
         + '<button type="button" class="tool-admin-btn" onclick="toggleQuickEdit(' + t.id + ')">Quick edit</button>'
         + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Full edit</a>'
-        + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:inline;"'
+        // display:contents (not display:inline): .tool-admin is a flex row and
+        // its Quick edit/Full edit siblings stretch to a shared height by
+        // default, but a plain inline <form> still boxes its own child—so the
+        // Delete button never joined that stretch and rendered visibly
+        // shorter than the other two. display:contents drops the form's own
+        // box from layout entirely, so Delete becomes a direct flex item too.
+        + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:contents;"'
         + ' data-toolname="' + esc(t.name) + '"'
         + ' onsubmit="return confirmDelete(this)">'
         + '<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button>'
@@ -5284,12 +5290,17 @@ function renderTools(tools) {{
       + (toolCompareChecked ? ' checked' : '') + (toolCompareDisabled ? ' disabled' : '')
       + ' onchange="toggleToolCompareSelect(this)"> Compare</label>';
     return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '" data-tool-id="' + t.id + '">'
-      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
-      + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
+      // Admin controls used to sit in this header row, next to the name—on a
+      // promoted card the "Featured" badge left too little width for the name
+      // alongside Quick edit/Full edit/Delete, so the name-group wrapped onto
+      // a second line and that card (always row 1, since promoted sorts
+      // first) rendered taller than its row siblings. Moved below instead
+      // (next to Full profile/Compare), which also reads better: this row is
+      // the card's title, not an actions bar.
+      + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;margin-bottom:2px;">'
       + promotedBadge + star
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
       + '</div>'
-      + adminControls + '</div>'
       + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.summary || t.description) + '</p>'
       // Categories and the profile-link/compare row used to share one flex row
       // (justify-content:space-between) — a long category name (e.g. "Treasury/Cash
@@ -5301,6 +5312,7 @@ function renderTools(tools) {{
       + '<div style="margin-top:auto;">'
       + '<div class="tool-cats" style="min-height:24px;margin-bottom:10px;">' + cats + '</div>'
       + '<div style="display:flex;align-items:center;gap:12px;">' + fullProfileLink + compareCheckbox + introBtn + '</div>'
+      + (adminControls ? '<div style="margin-top:10px;">' + adminControls + '</div>' : '')
       + '</div>'
       + adminMeta + quickEditPanel + '</article>';
   }}).join('');
