@@ -552,6 +552,17 @@ def _login_redirect(request: Request) -> RedirectResponse:
     return RedirectResponse(f"/login?next={quote(nxt, safe='')}", status_code=303)
 
 
+def _public_base_url(request: Request) -> str:
+    """Scheme + host, no trailing slash—for building an absolute URL to hand
+    back to an admin (e.g. a freshly captured screenshot's served path).
+    request.base_url alone reports http behind Railway's proxy (uvicorn
+    isn't proxy-aware here), so this checks x-forwarded-proto first, same
+    convention as the cookie-secure check at login."""
+    scheme = "https" if (request.url.scheme == "https"
+                          or request.headers.get("x-forwarded-proto") == "https") else request.url.scheme
+    return f"{scheme}://{request.url.netloc}"
+
+
 def _safe_next(nxt: str | None) -> str | None:
     """Validate a `next` redirect target is a same-app relative path — not an
     open redirect. Rejects absolute URLs, scheme-relative (`//host/...`) and
@@ -9405,7 +9416,11 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
-    <input name="screenshot_url" type="url" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
+    <!-- type="text", not "url": Recapture writes a site-relative served path
+         (e.g. /tools/communities/screenshot/<slug>.png?v=...), which native
+         type="url" validation rejects as invalid (no scheme) and blocks Save
+         with "Please enter a URL"—text still accepts a hand-pasted absolute URL. -->
+    <input name="screenshot_url" type="text" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
@@ -10363,7 +10378,12 @@ def admin_communities_screenshot_recapture(request: Request, community_id: int):
         dest = os.path.join(_COMMUNITY_SCREENSHOT_DIR, f"{community['slug']}.png")
         ok = capture_homepage(community["url"], dest)
         if ok:
-            served_url = f"/tools/communities/screenshot/{community['slug']}.png?v={int(time.time())}"
+            # Absolute, not a bare path: this is what an admin sees and edits
+            # in the Screenshot URL field, and a site-relative path there read
+            # as unexplained/orphaned ("what is this and why is it here?").
+            # See _public_base_url for why the scheme can't just come from
+            # request.base_url directly.
+            served_url = f"{_public_base_url(request)}/tools/communities/screenshot/{community['slug']}.png?v={int(time.time())}"
             lib.set_community_screenshot_capture(community_id, served_url)
     finally:
         lib.close()
@@ -11036,7 +11056,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn">Generate screenshot</button>
       </span>
     </div>
-    <input name="screenshot_url" type="url" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
+    <!-- type="text", not "url": Generate screenshot writes a site-relative
+         served path (e.g. /tools/software/screenshot/<slug>.png?v=...), which
+         native type="url" validation rejects as invalid (no scheme) and
+         blocks Save with "Please enter a URL"—text still accepts a
+         hand-pasted absolute URL. -->
+    <input name="screenshot_url" type="text" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
@@ -11238,7 +11263,9 @@ def admin_tools_screenshot_recapture(request: Request, tool_id: int):
         dest = os.path.join(_SCREENSHOT_DIR, f"{tool['slug']}.png")
         ok = capture_homepage(tool["url"], dest)
         if ok:
-            served_url = f"/tools/software/screenshot/{tool['slug']}.png?v={int(time.time())}"
+            # Absolute, not a bare path—see the matching comment in
+            # admin_communities_screenshot_recapture for why.
+            served_url = f"{_public_base_url(request)}/tools/software/screenshot/{tool['slug']}.png?v={int(time.time())}"
             lib.set_tool_screenshot_capture(tool_id, served_url)
     finally:
         lib.close()
