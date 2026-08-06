@@ -552,6 +552,17 @@ def _login_redirect(request: Request) -> RedirectResponse:
     return RedirectResponse(f"/login?next={quote(nxt, safe='')}", status_code=303)
 
 
+def _public_base_url(request: Request) -> str:
+    """Scheme + host, no trailing slash—for building an absolute URL to hand
+    back to an admin (e.g. a freshly captured screenshot's served path).
+    request.base_url alone reports http behind Railway's proxy (uvicorn
+    isn't proxy-aware here), so this checks x-forwarded-proto first, same
+    convention as the cookie-secure check at login."""
+    scheme = "https" if (request.url.scheme == "https"
+                          or request.headers.get("x-forwarded-proto") == "https") else request.url.scheme
+    return f"{scheme}://{request.url.netloc}"
+
+
 def _safe_next(nxt: str | None) -> str | None:
     """Validate a `next` redirect target is a same-app relative path — not an
     open redirect. Rejects absolute URLs, scheme-relative (`//host/...`) and
@@ -5229,7 +5240,7 @@ function renderTools(tools) {{
     if (AUTHED) {{
       adminControls = '<div class="tool-admin">'
         + '<button type="button" class="tool-admin-btn" onclick="toggleQuickEdit(' + t.id + ')">Quick edit</button>'
-        + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Full edit</a>'
+        + '<a href="/tools/software/' + esc(t.slug) + '/edit" class="tool-admin-btn">Full edit</a>'
         // display:contents (not display:inline): .tool-admin is a flex row and
         // its Quick edit/Full edit siblings stretch to a shared height by
         // default, but a plain inline <form> still boxes its own child—so the
@@ -8726,7 +8737,7 @@ def admin_software(request: Request):
           <td data-col="software:vendor_name" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t.get('vendor_name') or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">
             <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-              <a href="/tools/software/{t['slug']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+              <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
               <form method="post" action="/admin/tools/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
@@ -9419,7 +9430,11 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
-    <input name="screenshot_url" type="url" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
+    <!-- type="text", not "url": Recapture writes a site-relative served path
+         (e.g. /tools/communities/screenshot/<slug>.png?v=...), which native
+         type="url" validation rejects as invalid (no scheme) and blocks Save
+         with "Please enter a URL"—text still accepts a hand-pasted absolute URL. -->
+    <input name="screenshot_url" type="text" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
@@ -9688,7 +9703,7 @@ def admin_communities(request: Request, filter: str = ""):
   <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
   <td style="padding:10px 12px;">
     <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-      <a href="/tools/communities/{c['slug']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+      <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
       <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="text-align:center;">Profile</a>
       {mark_reviewed}
       <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
@@ -10377,7 +10392,12 @@ def admin_communities_screenshot_recapture(request: Request, community_id: int):
         dest = os.path.join(_COMMUNITY_SCREENSHOT_DIR, f"{community['slug']}.png")
         ok = capture_homepage(community["url"], dest)
         if ok:
-            served_url = f"/tools/communities/screenshot/{community['slug']}.png?v={int(time.time())}"
+            # Absolute, not a bare path: this is what an admin sees and edits
+            # in the Screenshot URL field, and a site-relative path there read
+            # as unexplained/orphaned ("what is this and why is it here?").
+            # See _public_base_url for why the scheme can't just come from
+            # request.base_url directly.
+            served_url = f"{_public_base_url(request)}/tools/communities/screenshot/{community['slug']}.png?v={int(time.time())}"
             lib.set_community_screenshot_capture(community_id, served_url)
     finally:
         lib.close()
@@ -11050,7 +11070,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn">Generate screenshot</button>
       </span>
     </div>
-    <input name="screenshot_url" type="url" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
+    <!-- type="text", not "url": Generate screenshot writes a site-relative
+         served path (e.g. /tools/software/screenshot/<slug>.png?v=...), which
+         native type="url" validation rejects as invalid (no scheme) and
+         blocks Save with "Please enter a URL"—text still accepts a
+         hand-pasted absolute URL. -->
+    <input name="screenshot_url" type="text" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
@@ -11088,13 +11113,13 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </div>
 </div>
 
-<details style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
       <h2 style="font-size:16px;font-weight:600;margin:0;">Features</h2>
       {_features_badge_html}
     </span>
-    <span style="color:var(--navy);font-size:13px;line-height:1;">&#9660;</span>
+    <span class="features-chevron" style="color:var(--navy);font-size:13px;line-height:1;transition:transform .15s;">&#9660;</span>
   </summary>
   <p style="font-size:13px;color:var(--muted);margin:12px 0 16px;">Standalone-vs-bundled availability per feature—feeds the Phase 5 comparison matrix. Rows flagged "Needs verification" came from the LLM enrichment pass and haven't been confirmed yet.</p>
 
@@ -11142,6 +11167,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
+.features-group summary::-webkit-details-marker{{display:none;}}
+.features-group[open] .features-chevron{{transform:rotate(180deg);}}
 </style>
 <script>{_GENERATE_DESC_JS}
 async function generateDifferentiation(toolId, textareaId, statusId) {{
@@ -11250,7 +11277,9 @@ def admin_tools_screenshot_recapture(request: Request, tool_id: int):
         dest = os.path.join(_SCREENSHOT_DIR, f"{tool['slug']}.png")
         ok = capture_homepage(tool["url"], dest)
         if ok:
-            served_url = f"/tools/software/screenshot/{tool['slug']}.png?v={int(time.time())}"
+            # Absolute, not a bare path—see the matching comment in
+            # admin_communities_screenshot_recapture for why.
+            served_url = f"{_public_base_url(request)}/tools/software/screenshot/{tool['slug']}.png?v={int(time.time())}"
             lib.set_tool_screenshot_capture(tool_id, served_url)
     finally:
         lib.close()
@@ -16507,48 +16536,50 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 </div>
 {datalist}
 
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;margin-bottom:32px;">
-  <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
-  <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor *</label>
-      <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+    <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
+    <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
       <div>
-        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
-        <input type="date" name="date" required
+        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor *</label>
+        <input type="text" name="vendor" required maxlength="120" placeholder="e.g. Railway"
+          style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div>
+          <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date *</label>
+          <input type="date" name="date" required
+            style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
+          <input type="number" step="0.01" name="amount" required placeholder="0.00"
+            style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+        </div>
+      </div>
+      <div>
+        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Category <span style="font-weight:400;color:var(--muted);">(display tag only, e.g. Infrastructure / AI &amp; API / Other)</span></label>
+        <input type="text" name="category" maxlength="60" list="overhead-categories"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
       <div>
-        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Amount *</label>
-        <input type="number" step="0.01" name="amount" required placeholder="0.00"
+        <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Note</label>
+        <input type="text" name="note" maxlength="300" placeholder="Optional"
           style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
       </div>
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Category <span style="font-weight:400;color:var(--muted);">(display tag only, e.g. Infrastructure / AI &amp; API / Other)</span></label>
-      <input type="text" name="category" maxlength="60" list="overhead-categories"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Note</label>
-      <input type="text" name="note" maxlength="300" placeholder="Optional"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add charge</button></div>
-  </form>
-</div>
+      <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add charge</button></div>
+    </form>
+  </div>
 
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;margin-bottom:32px;">
-  <h3 style="font-size:15px;font-weight:600;margin:0 0 8px;">Upload CSV</h3>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Batch-import charges instead of typing each one in. Columns: <code>vendor, date, amount, category, note</code> (header row required; category and note optional). Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. You'll get a preview to check before anything is saved. <a href="/admin/overhead-spend/csv/template" style="color:var(--navy);">Download a template &darr;</a></p>
-  <form method="post" action="/admin/overhead-spend/csv/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
-    <input type="file" name="file" accept=".csv,text/csv" required
-      style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-    <div><button type="submit" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;">Preview import</button></div>
-  </form>
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+    <h3 style="font-size:15px;font-weight:600;margin:0 0 8px;">Upload CSV</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Batch-import charges instead of typing each one in. Columns: <code>vendor, date, amount, category, note</code> (header row required; category and note optional). Dates can be <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. You'll get a preview to check before anything is saved. <a href="/admin/overhead-spend/csv/template" style="color:var(--navy);">Download a template &darr;</a></p>
+    <form method="post" action="/admin/overhead-spend/csv/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
+      <input type="file" name="file" accept=".csv,text/csv" required
+        style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+      <div><button type="submit" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;">Preview import</button></div>
+    </form>
+  </div>
 </div>
 
 <h2 style="font-size:16px;margin:0 0 4px;">Toolbox usage</h2>

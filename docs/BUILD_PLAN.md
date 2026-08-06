@@ -246,13 +246,13 @@ Two separate tables (Software features, Community features), not shared. Compare
 
 ### Decided (do not re-litigate)
 
-- **Feature families are a pure organizing label** — never themselves a checkable feature. Structural grouping (e.g. Planning, Reporting, Data, Integrations).
-- **Single-parent:** each feature belongs to exactly one family.
+- **Feature Families are a pure organizing label** — never themselves a checkable feature. Structural grouping (e.g. Planning, Reporting, Data, Integrations).
+- **Single-parent:** each feature belongs to exactly one Feature Family.
 - **AI enablement** is a boolean per feature — checkmark on the profile page's Feature/AI table, navy checkmark-with-asterisk in Compare.
 - **New-feature research flow:** shortlist candidates via category + embeddings similarity, admin triggers a targeted rescan or self-tags per candidate. No blanket re-crawling.
-- **Compare view is a single `<table>`** — vendor screenshot + name + category shown once, in the header. Rows grouped under family headers. Footer row reuses each vendor's hand-written "how this differs" field, kept separate from the matrix to stay factual.
+- **Compare view is a single `<table>`** — vendor screenshot + name + category shown once, in the header. Rows grouped under Feature Family headers. Footer row reuses each vendor's hand-written "how this differs" field, kept separate from the matrix to stay factual.
 - **Verification tags don't appear in Compare** — admin-only, profile page only.
-- **Use Cases are a second taxonomy** — many-to-many, outcome-oriented, distinct from Families. Applies to both types with separate per-type lists. **Schema-only in this phase** — directory filter and future matchmaker are separately queued builds.
+- **Use Cases are a second taxonomy** — many-to-many, outcome-oriented, distinct from Feature Families. Applies to both types with separate per-type lists. **Schema-only in this phase** — directory filter and future matchmaker are separately queued builds.
 - **Communities' feature list starts from scratch, not a migration** — Phase 0 confirmed there's no existing free-text Communities feature data to clean up. Curating the canonical Communities feature list (Phase 8.3) should apply the same filter as Phase 3b.0: does this feature genuinely help someone evaluate or compare communities, not just "is this something a community could technically be tagged with."
 
 ### Phase 8.0 — Investigate, report back before coding
@@ -261,14 +261,15 @@ Two separate tables (Software features, Community features), not shared. Compare
 2. Confirm current "needs verification" storage and whether it carries forward cleanly into a join-table model.
 3. Confirm the existing "Manage categories" admin page implementation to mirror.
 4. Confirm reusability of the existing embeddings infrastructure for candidate-suggestion.
-5. **Produce a written cleanup mapping proposal — then stop.** Table: original free-text entry → proposed canonical feature → proposed family → AI-enabled (Y/N) → confidence note for anything ambiguous. Flag ambiguity as a question, don't guess past what the data supports.
+5. **Produce a written cleanup mapping proposal — then stop.** Table: original free-text entry → proposed canonical feature → proposed Feature Family → AI-enabled (Y/N) → confidence note for anything ambiguous. Flag ambiguity as a question, don't guess past what the data supports.
 
 **Hard gate: do not proceed to 8.1 or 8.2 until Brian has explicitly reviewed and approved the mapping.** Expect at least one feedback round.
 
 ### Phase 8.1 — Schema
 
+- Naming: the concept is called "Feature Family" (not "Family") to avoid collision with tool categories — table/column names use `feature_family` (e.g. `feature_families`, `feature_family_id`), per below.
 - `feature_families`: id, name, type, sort_order.
-- `features`: id, name, family_id (FK, required), ai_enabled (boolean), type.
+- `features`: id, name, feature_family_id (FK, required), ai_enabled (boolean), type.
 - `software_feature_links` / `community_feature_links`: entry_id, feature_id, verified (boolean).
 - `use_cases`: id, name, type, sort_order.
 - `feature_use_case_links`: feature_id, use_case_id (many-to-many).
@@ -284,7 +285,7 @@ Two separate tables (Software features, Community features), not shared. Compare
 - Mirrors "Manage categories."
 - Manage Feature Families: per type, single-parent.
 - Manage Use Cases: separate page, per type, multi-select.
-- Manage Features: assign one family, toggle AI-enabled, tag with one or more use cases.
+- Manage Features: assign one Feature Family, toggle AI-enabled, tag with one or more use cases.
 - New-feature candidate-suggestion flow lives here.
 
 ### Phase 8.4 — Update profile pages to read normalized data
@@ -309,7 +310,7 @@ Builds on Phases 5 and 8 — memory is corrections *about* competitors/similar-e
 - **Two retrieval modes, one table.** Direct lookup when regenerating the *same* entity (pull everything — volume per item will be small). Similarity-based lookup when drafting a *brand-new* entity with no memory of its own — reuse the existing embeddings infrastructure (same mechanism as Phase 8's feature-candidate suggestions and FP&A Buddy retrieval), capped at the top 3-5 most similar entries' notes. No new retrieval infrastructure, just a new consumer of what exists.
 - **Capture is cheap and automatic; reasoning is optional and manual.** Every time Brian edits or overwrites an AI draft, capture the before/after diff automatically — no LLM call needed for this part. Add an optional manual note field so Brian can write the "why" when it matters (e.g. "not a competitor — different market segment"), rather than forcing every correction to carry inferred reasoning.
 - **Memory is visible and editable, admin-only, never public.** A "Memory" section on each entity's edit page (Software and Communities both) shows accumulated notes for that item, with the ability to delete or fix a bad one. Same visibility gate as Edit/verification-count/every other admin-only element in this build — **never rendered anywhere a public visitor can see it**, and not exposed via any public API or page.
-- **Categories map to existing schema, not a new ontology.** Memory is keyed to the same structures already being built — Agent taxonomy, Features/Families (Phase 8), Competitors/Similar-entities (Phase 5), and Communities-specific fields like `seniority_band`. This isn't a parallel "learnings" system, it's a correction-history layer on structures that already exist.
+- **Categories map to existing schema, not a new ontology.** Memory is keyed to the same structures already being built — Agent taxonomy, Features/Feature Families (Phase 8), Competitors/Similar-entities (Phase 5), and Communities-specific fields like `seniority_band`. This isn't a parallel "learnings" system, it's a correction-history layer on structures that already exist.
 
 ### Phase 9.0 — Investigate, report back before coding
 
