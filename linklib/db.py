@@ -811,6 +811,30 @@ CREATE INDEX IF NOT EXISTS idx_matchmaker_questions_user ON matchmaker_questions
 CREATE INDEX IF NOT EXISTS idx_matchmaker_questions_session ON matchmaker_questions(session_id);
 CREATE INDEX IF NOT EXISTS idx_matchmaker_questions_created ON matchmaker_questions(created_at);
 CREATE INDEX IF NOT EXISTS idx_matchmaker_questions_conversation ON matchmaker_questions(conversation_id);
+
+-- Admin verdicts on name-based duplicate candidates in the Software directory
+-- (normalize_tool_name() exact-match, not the URL-based dedup above — see
+-- normalize_tool_name's docstring). Mirrors dedupe_decisions' pair-verdict
+-- shape, with one deliberate change: pair_key is built from the two tools'
+-- *ids* (sorted numerically), not their names, so a later name edit (e.g.
+-- dropping a "(WiseLayer)" parenthetical) can never re-open a pair a human
+-- already resolved. Only resolved pairs are ever written here — candidates
+-- are computed live from the current tools table on every view, and this
+-- table just says which of those candidate pairs to stop surfacing. Both
+-- verdicts suppress future resurfacing; 'duplicate' doesn't itself merge or
+-- delete anything, it only flags the pair as "an admin already saw this and
+-- is on it" so /admin/tools/name-duplicates stops nagging about it. Deleting
+-- one of the two tools (the actual resolution of a 'duplicate' verdict) would
+-- otherwise leave its row here permanently orphaned, so delete_tool cascades
+-- a cleanup here too — same pattern as its existing tool_competitors delete.
+CREATE TABLE IF NOT EXISTS tool_name_dedupe_decisions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    pair_key   TEXT NOT NULL UNIQUE,        -- "min(id_a,id_b) newline max(id_a,id_b)"
+    tool_id_a  INTEGER NOT NULL,
+    tool_id_b  INTEGER NOT NULL,
+    verdict    TEXT NOT NULL DEFAULT 'dismissed',  -- 'duplicate' | 'dismissed'
+    created_at TEXT NOT NULL
+);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -865,10 +889,45 @@ def normalize_url(url: str) -> str:
         host = host[4:]
     kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
             if k.lower() not in _TRACKING_PARAMS]
+    # Root-domain special case: urlsplit gives path == "/" when the URL had a
+    # trailing slash and "" when it didn't (e.g. "https://x.io/" vs
+    # "https://x.io"), so a plain `len(path) > 1` guard here never strips a
+    # lone "/" and the two never converge — a real bug that let root-domain
+    # trailing-slash variants (e.g. https://vendor.com vs https://vendor.com/)
+    # slip past the PR #197 duplicate-URL check. Collapse "/" to "" before the
+    # general strip, which already handles any deeper path correctly.
     path = parts.path
-    if len(path) > 1 and path.endswith("/"):
+    if path == "/":
+        path = ""
+    elif path.endswith("/"):
         path = path.rstrip("/")
     return urlunsplit(("https", host, path, urlencode(kept), ""))
+
+
+_ENTITY_SUFFIXES = {
+    "inc", "incorporated", "llc", "l.l.c", "ltd", "limited", "corp",
+    "corporation", "co", "company", "plc", "gmbh", "pbc",
+}
+
+
+def normalize_tool_name(name: str) -> str:
+    """Canonicalize a Software directory name for exact-match duplicate
+    detection: lowercase, drop anything in parentheses (e.g. "(acquired by
+    X)"), strip a trailing common entity suffix (Inc/LLC/Corp/Ltd/Co/...),
+    and collapse whitespace/punctuation. Deliberately exact-match only — no
+    fuzzy/similarity scoring, so spelling variants, spacing, or hyphenation
+    differences won't collide here (see the ARCHITECTURE.md note on this
+    feature for why that's in scope for a later pass, not this one)."""
+    import re
+    name = (name or "").strip().lower()
+    if not name:
+        return ""
+    name = re.sub(r"\([^)]*\)", " ", name)
+    name = re.sub(r"[^\w\s-]", " ", name)
+    words = name.split()
+    if words and words[-1].rstrip(".") in _ENTITY_SUFFIXES:
+        words = words[:-1]
+    return " ".join(words)
 
 
 class DuplicateURLError(Exception):
@@ -2273,6 +2332,101 @@ class Library:
                 return r
         return None
 
+    def find_tool_name_duplicate(self, name: str, exclude_id: int | None = None) -> dict | None:
+        """Save-time warn check (not a block, unlike the URL check above): the
+        first existing tool whose normalize_tool_name() matches. Used by the
+        /admin/tools/new and edit-save routes to show a non-blocking warning
+        banner — callers decide the UX; this is a plain read."""
+        target = normalize_tool_name(name)
+        if not target:
+            return None
+        rows = self.conn.execute("SELECT id, name, slug FROM tools").fetchall()
+        for r in rows:
+            if r["id"] == exclude_id:
+                continue
+            if normalize_tool_name(r["name"]) == target:
+                return dict(r)
+        return None
+
+    @staticmethod
+    def _tool_name_pair_key(tool_id_a: int, tool_id_b: int) -> str:
+        """Order-independent key for a pair of tool ids."""
+        lo, hi = sorted([int(tool_id_a), int(tool_id_b)])
+        return f"{lo}\n{hi}"
+
+    def record_tool_name_dedupe_decision(self, tool_id_a: int, tool_id_b: int, verdict: str) -> None:
+        """Remember the admin's call on a name-duplicate candidate pair:
+        'duplicate' or 'dismissed'. Upserts on the id pair, so re-deciding
+        overwrites the prior verdict. Stored with tool_id_a/b as the smaller
+        id first, for a stable, human-readable row regardless of click order."""
+        lo, hi = sorted([int(tool_id_a), int(tool_id_b)])
+        self.conn.execute(
+            "INSERT INTO tool_name_dedupe_decisions (pair_key, tool_id_a, tool_id_b, verdict, created_at) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT(pair_key) DO UPDATE SET verdict=excluded.verdict, created_at=excluded.created_at",
+            (self._tool_name_pair_key(lo, hi), lo, hi, verdict, _now()),
+        )
+        self.conn.commit()
+
+    def resolved_tool_name_pairs(self) -> set:
+        """pair_keys the admin has already resolved (either verdict) — both
+        stop the pair from resurfacing in find_tool_name_duplicate_candidates."""
+        rows = self.conn.execute("SELECT pair_key FROM tool_name_dedupe_decisions").fetchall()
+        return {r[0] for r in rows}
+
+    def tool_name_dedupe_decisions(self, limit: int = 100) -> list[dict]:
+        """Resolved candidate pairs, newest first, with each tool's current
+        name/slug so a stale row (renamed since) still reads sensibly.
+        delete_tool cascades a cleanup here, so a '(deleted)' side shouldn't
+        normally occur — this is just a defensive fallback (e.g. direct DB
+        edits) rather than erroring on a lookup miss."""
+        rows = self.conn.execute(
+            "SELECT tool_id_a, tool_id_b, verdict, created_at FROM tool_name_dedupe_decisions "
+            "ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        out = []
+        for r in rows:
+            ta = self.get_tool(r["tool_id_a"])
+            tb = self.get_tool(r["tool_id_b"])
+            out.append({
+                "tool_id_a": r["tool_id_a"], "tool_id_b": r["tool_id_b"],
+                "name_a": ta["name"] if ta else "(deleted)",
+                "name_b": tb["name"] if tb else "(deleted)",
+                "verdict": r["verdict"], "created_at": r["created_at"],
+            })
+        return out
+
+    def find_tool_name_duplicate_candidates(self) -> list[dict]:
+        """Scan every current tool (approved or not) for normalize_tool_name()
+        exact matches, grouped, then every pairwise combination within a group
+        minus any pair the admin already resolved (see resolved_tool_name_pairs).
+        Powers the /admin/tools/name-duplicates review view. O(n log n) grouping
+        over ~190 rows — fine to run live on every page load, no caching needed."""
+        from itertools import combinations
+        rows = self.conn.execute("SELECT id, name, slug, url, approved FROM tools").fetchall()
+        groups: dict[str, list[sqlite3.Row]] = {}
+        for r in rows:
+            key = normalize_tool_name(r["name"])
+            if not key:
+                continue
+            groups.setdefault(key, []).append(r)
+        resolved = self.resolved_tool_name_pairs()
+        candidates = []
+        for key, members in groups.items():
+            if len(members) < 2:
+                continue
+            for a, b in combinations(members, 2):
+                pair_key = self._tool_name_pair_key(a["id"], b["id"])
+                if pair_key in resolved:
+                    continue
+                candidates.append({
+                    "normalized_name": key,
+                    "tool_a": dict(a),
+                    "tool_b": dict(b),
+                    "pair_key": pair_key,
+                })
+        candidates.sort(key=lambda c: c["normalized_name"])
+        return candidates
+
     def add_tool(self, name: str, description: str, url: str,
                  categories: list[str], submitted_by: str = "",
                  approved: int = 0, advisor: int = 0,
@@ -2395,6 +2549,14 @@ class Library:
         self.conn.execute("DELETE FROM field_reviews WHERE entity_type='tool' AND entity_id=?", (tool_id,))
         self.conn.execute(
             "DELETE FROM tool_competitors WHERE tool_id=? OR competitor_id=?",
+            (tool_id, tool_id),
+        )
+        # Same cascade as tool_competitors above: a resolved name-dedupe
+        # verdict referencing this id (either side) has nothing left to
+        # point at once the tool's gone, so drop it rather than leave it as
+        # permanent orphaned data.
+        self.conn.execute(
+            "DELETE FROM tool_name_dedupe_decisions WHERE tool_id_a=? OR tool_id_b=?",
             (tool_id, tool_id),
         )
         self.conn.commit()
