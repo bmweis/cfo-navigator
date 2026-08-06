@@ -43,6 +43,46 @@ def test_software_sort_filter_toolbar_renders(admin_client):
     assert 'data-categories="fp&amp;a"' in r.text
 
 
+def test_software_categories_are_always_visible_pills_not_a_dropdown(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.add_tool_category("FP&A")
+    lib.add_tool("Tool A", "desc", "https://a.example", ["FP&A"], approved=1)
+    lib.close()
+
+    r = client.get("/admin/tools/software")
+    # Pills render always-visible (no <details>/<summary> click-to-reveal wrapper
+    # around the Software category filter — that's the old dropdown pattern).
+    assert 'id="software-filter-categories"' in r.text
+    assert 'class="admin-cat-pill"' in r.text
+    cats_pos = r.text.index('id="software-filter-categories"')
+    preceding = r.text[max(0, cats_pos - 200):cats_pos]
+    assert "<details" not in preceding
+    # Live search box, no submit button needed.
+    assert 'id="software-filter-search"' in r.text
+    assert 'type="search"' in r.text
+    assert 'data-search="tool a https://a.example"' in r.text
+
+
+def test_communities_categories_still_use_the_dropdown(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.add_community_category("Peer Group")
+    lib.add_community(name="Comm A", url="https://ca.example", demographic="CFOs",
+                       cost_band="<$1k/yr", categories=["Peer Group"], approved=1,
+                       access="Open", sponsorship_type="Independent", format="Online", reach="National")
+    lib.close()
+
+    r = client.get("/admin/tools/communities")
+    # Communities keeps the existing dropdown affordance — only Software's
+    # category filter switched to always-visible pills.
+    assert '<details style="display:inline-block;">' in r.text
+    assert 'class="admin-cat-pill"' not in r.text
+    assert 'id="communities-filter-search"' not in r.text
+
+
 def test_communities_sort_filter_toolbar_renders(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
