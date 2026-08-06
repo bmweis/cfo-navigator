@@ -26,6 +26,31 @@ DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-5")
 # and re-run rows enriched under older rules. BUMP THIS whenever _PROMPT changes.
 ENRICH_RULES_VERSION = "v4"
 
+# Floor for every generate_*() call's max_tokens below. Claude's on-by-default
+# adaptive thinking shares the same budget as the response (max_tokens caps
+# thinking + response together), so a starved budget lets thinking alone
+# exhaust it, leaving zero tokens for the actual JSON response — that empty
+# string then fails json.loads and gets swallowed by the bare except below,
+# surfacing as a misleading "missing ANTHROPIC_API_KEY" error even when the
+# key and connectivity are fine (generate_tool_differentiation's original
+# max_tokens=400, fixed one-off in PR 260). Every call site here runs its
+# literal through _checked_max_tokens() so a future thin default fails loudly
+# at call time instead of silently misbehaving in production.
+MIN_GENERATE_MAX_TOKENS = 1200
+
+
+def _checked_max_tokens(value: int) -> int:
+    """Guard a generate_*() call's max_tokens against MIN_GENERATE_MAX_TOKENS.
+    Raises immediately (first call) rather than letting a too-thin budget
+    silently starve the response out from under adaptive thinking — see the
+    floor's docstring above."""
+    assert value >= MIN_GENERATE_MAX_TOKENS, (
+        f"max_tokens={value} is below MIN_GENERATE_MAX_TOKENS ({MIN_GENERATE_MAX_TOKENS}) — "
+        "adaptive thinking can consume the whole budget and leave nothing for the response."
+    )
+    return value
+
+
 _PROMPT = """You are enriching a curated research library for a specific audience:
 finance leaders at high-growth technology companies — people running FP&A or
 strategic finance at a startup or scaleup, and the operators and founders growing
@@ -110,9 +135,9 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=2000,  # room for a fuller answer-bearing summary + scope JSON, plus
-                              # headroom for Opus 5's on-by-default adaptive thinking (max_tokens
-                              # caps thinking + response together)
+            max_tokens=_checked_max_tokens(2000),  # room for a fuller answer-bearing summary + scope
+                              # JSON, plus headroom for Opus 5's on-by-default adaptive thinking
+                              # (max_tokens caps thinking + response together)
             messages=[{"role": "user", "content": _PROMPT.format(known=known, guide_block=guide_block, title=title, text=snippet)}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
@@ -214,8 +239,8 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=1600,  # room for an 8-12 sentence description, plus headroom
-                              # for Opus 5's on-by-default adaptive thinking
+            max_tokens=_checked_max_tokens(1600),  # room for an 8-12 sentence description, plus
+                              # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user",
                        "content": _TOOL_DESC_PROMPT.format(name=name, url=url, content_block=content_block)}],
         )
@@ -302,11 +327,12 @@ def generate_tool_differentiation(name: str, url: str, description: str,
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=1200,  # headroom for Opus 5's on-by-default adaptive thinking (max_tokens
-                              # caps thinking + response together) — the 1-2 sentence output itself
-                              # needs very little, but a starved budget (previously 400) let thinking
-                              # alone exhaust it, leaving zero tokens for the JSON response (issue:
-                              # generate-differentiation silently returning None on empty/unparseable output)
+            max_tokens=_checked_max_tokens(1200),  # headroom for Opus 5's on-by-default adaptive
+                              # thinking (max_tokens caps thinking + response together) — the 1-2
+                              # sentence output itself needs very little, but a starved budget
+                              # (previously 400) let thinking alone exhaust it, leaving zero tokens
+                              # for the JSON response (issue: generate-differentiation silently
+                              # returning None on empty/unparseable output; fixed in PR 260)
             messages=[{"role": "user",
                        "content": _TOOL_DIFFERENTIATION_PROMPT.format(
                            name=name, url=url, description=description, competitors_block=competitors_block)}],
@@ -393,7 +419,10 @@ def generate_competitor_matches(name: str, description: str, candidates: list[di
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=500,
+            max_tokens=_checked_max_tokens(MIN_GENERATE_MAX_TOKENS),  # was 500 — below the shared
+                              # floor; a short "list of ids" output still needs headroom for Opus
+                              # 5's on-by-default adaptive thinking, same failure mode as PR 260's
+                              # differentiation fix
             messages=[{"role": "user",
                        "content": _COMPETITOR_MATCH_PROMPT.format(
                            name=name, description=description, candidates_block=candidates_block)}],
@@ -619,7 +648,7 @@ def generate_tool_features(name: str, url: str, description: str = "",
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=6000,  # headroom for Opus 5's on-by-default adaptive thinking
+            max_tokens=_checked_max_tokens(6000),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": prompt}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
@@ -838,7 +867,7 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=6000,  # headroom for Opus 5's on-by-default adaptive thinking
+            max_tokens=_checked_max_tokens(6000),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user",
                        "content": _COMMUNITY_PROFILE_PROMPT.format(
                            name=name, url=url, existing_block=existing_block, content_block=content_block)}],
@@ -1020,7 +1049,7 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=1200,  # headroom for Opus 5's on-by-default adaptive thinking
+            max_tokens=_checked_max_tokens(1200),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": prompt}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
@@ -1145,7 +1174,7 @@ def voice_rewrite_community_fields(name: str, fields: dict, voice_core: str,
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=4000,  # headroom for Opus 5's on-by-default adaptive thinking
+            max_tokens=_checked_max_tokens(4000),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": prompt}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
