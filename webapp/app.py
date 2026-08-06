@@ -8513,7 +8513,7 @@ function renderDeleteSelectedPanel(tableKey, ids, d) {
     var items = d.warnings.map(function(w) {
       return '<li><strong>' + esc(w.name) + '</strong> is listed as a competitor on: ' + w.referenced_by.map(esc).join(', ') + '</li>';
     }).join('');
-    warnHtml = '<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13px;">' +
+    warnHtml = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13px;">' +
       '<strong>Heads up:</strong> deleting these will remove them from other tools&rsquo; competitor lists:' +
       '<ul style="margin:6px 0 0;padding-left:18px;">' + items + '</ul></div>';
   }
