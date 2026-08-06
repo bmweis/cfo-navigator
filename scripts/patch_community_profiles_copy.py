@@ -49,7 +49,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 from scripts._community_profile_copy_fixes import FULL_FIXES, FRAGMENT_FIXES
 
 
@@ -63,10 +63,11 @@ def _apply_fallback(text: str) -> tuple[str, bool]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--apply", action="store_true",
                     help="write changes (default is dry-run: report only)")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     lib = Library(args.db)
 

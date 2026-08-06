@@ -12,19 +12,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 from linklib.agent import answer_question
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Ask your library a finance question.")
     ap.add_argument("question")
-    ap.add_argument("--db", default="library.db")
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     # Source counts are tier-driven now (EFFORT_SETTINGS), not a free-standing
     # number — the old --sources flag mapped to a parameter answer_question
     # lost in the Quick/Standard/Deep redesign, which crashed every CLI run.
     ap.add_argument("--effort", choices=["quick", "standard", "deep"], default="standard")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     lib = Library(args.db)
     ans = answer_question(lib, args.question, effort=args.effort)

@@ -190,6 +190,29 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
 | `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/library/feed` source list |
 
+## One-off admin fixes against the database
+
+Every `scripts/*.py` CLI now resolves its `--db` path via `linklib.db.resolve_db_path`:
+explicit `--db` wins, then `LINKLIB_DB`, and with neither it exits loudly instead of
+silently falling back to a relative `library.db` in whatever the current directory
+happens to be. It also refuses to run against a path that doesn't already exist (sqlite3
+otherwise creates an empty file there with no error) and prints the resolved absolute
+path so it's visible in the run's output. This exists because a July 2026 admin fix
+(Corpay's vendor category) was reported done but never showed up in production — the
+most likely cause was exactly this silent-relative-path failure mode, with no error and
+nothing to catch it after the fact. (A couple of scripts — `import_archive.py`,
+`seed_tools.py`, `seed_communities.py` — are meant to run against a brand-new DB the
+first time, so they pass `allow_missing=True` and skip the existence check.)
+
+That guards the path. It doesn't guard the write itself. **For any single-record admin
+fix — an `UPDATE`/edit against one specific row, not a bulk migration — immediately
+`SELECT` the row back after the write and assert the change actually applied** (e.g.
+`assert cursor.rowcount == 1` right after the `UPDATE`, then print the row you just
+read back). This is standard practice for this class of change: cheap for a one-off, and
+it's the exact check that would have caught the Corpay failure the moment it happened
+instead of a later session discovering production was unchanged. This is guidance for
+scripts you write for a specific fix, not something to build into `linklib` itself.
+
 ## Running locally
 
 ```bash

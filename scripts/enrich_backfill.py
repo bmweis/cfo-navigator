@@ -13,13 +13,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 from linklib.pipeline import enrich_library
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default="library.db")
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--limit", type=int, default=1000)
     ap.add_argument("--no-fetch", action="store_true",
                     help="skip live full-text fetch (summarize from title only)")
@@ -30,6 +30,7 @@ def main() -> int:
                     help="enrichment model override, e.g. claude-opus-4-8 "
                          "(default: LINKLIB_ENRICH_MODEL)")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: set ANTHROPIC_API_KEY first.", file=sys.stderr)

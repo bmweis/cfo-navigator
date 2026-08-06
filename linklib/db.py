@@ -9,13 +9,52 @@ libSQL/Turso/D1 database later — only the connection changes.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 
-DEFAULT_DB_PATH = "library.db"
+
+def resolve_db_path(cli_db: Optional[str], *, allow_missing: bool = False) -> str:
+    """Resolve the database path for a one-off script, and refuse to guess.
+
+    Precedence: an explicit --db value, then the LINKLIB_DB env var. With
+    neither, exit loudly rather than silently falling back to a relative
+    "library.db" that resolves against whatever the current directory
+    happens to be — that silent fallback is exactly the bug that let an
+    earlier admin fix (Corpay's category, July 2026) write to nowhere real
+    without a single error, while production stayed untouched.
+
+    Also refuses to let sqlite3 silently create an empty database file at
+    the resolved path: unless allow_missing=True (only for scripts that are
+    deliberately initializing a database for the first time, e.g.
+    import_archive.py), a missing file is treated as a resolved-to-the-
+    wrong-place error, not a fresh start.
+
+    Prints the resolved absolute path so it's visible in the script's
+    output, not just implied.
+    """
+    path = cli_db or os.environ.get("LINKLIB_DB")
+    if not path:
+        sys.exit(
+            "No database path given — refusing to guess.\n"
+            "Pass --db /path/to/library.db, or set LINKLIB_DB, e.g.:\n"
+            "  LINKLIB_DB=/data/library.db python -m scripts.<name> ...\n"
+            "(A silent relative-path fallback here is what let a past fix "
+            "land nowhere without an error — see CLAUDE.md.)"
+        )
+    abs_path = os.path.abspath(path)
+    if not allow_missing and not os.path.exists(abs_path):
+        sys.exit(
+            f"Database file not found at {abs_path}\n"
+            "Refusing to let sqlite3 silently create an empty database "
+            "here — double-check --db / LINKLIB_DB point at the real file."
+        )
+    print(f"Using database: {abs_path}")
+    return abs_path
 
 # Columns that get indexed for full-text search. tags_text is a flattened
 # copy of the tags list so board names are searchable too.
@@ -921,7 +960,7 @@ class Article:
 
 
 class Library:
-    def __init__(self, path: str = DEFAULT_DB_PATH):
+    def __init__(self, path: str):
         self.path = path
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
@@ -4072,7 +4111,7 @@ class Library:
 
 
 @contextmanager
-def open_library(path: str = DEFAULT_DB_PATH) -> Iterator[Library]:
+def open_library(path: str) -> Iterator[Library]:
     lib = Library(path)
     try:
         yield lib

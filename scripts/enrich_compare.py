@@ -25,7 +25,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib import enrich as enrich_mod
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 
 DEFAULT_MODELS = "claude-opus-4-8,claude-sonnet-4-6"
 
@@ -45,7 +45,9 @@ def _pick_sample(lib: Library) -> dict | None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="", help="article URL to fetch and enrich")
-    ap.add_argument("--db", default="", help="library DB (to pull a saved article / vocab)")
+    ap.add_argument("--db", default=os.environ.get("LINKLIB_DB", ""),
+                    help="library DB (to pull a saved article / vocab) — optional, "
+                         "falls back to LINKLIB_DB if set")
     ap.add_argument("--id", type=int, default=0, help="article id within --db")
     ap.add_argument("--query", default="",
                     help="pick the top library search hit for this query "
@@ -53,6 +55,8 @@ def main() -> int:
     ap.add_argument("--models", default=DEFAULT_MODELS,
                     help="comma-separated model IDs to compare")
     args = ap.parse_args()
+    if args.db:
+        args.db = resolve_db_path(args.db)
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: set ANTHROPIC_API_KEY first (this makes real API calls).", file=sys.stderr)

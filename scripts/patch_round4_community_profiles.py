@@ -68,7 +68,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 
 # Round 4 research (compass_artifact_wf-253b8762-e423-50a7-85b2-cd012549cc88_text_markdown.md)
 # stage_focus doc value -> new vocabulary (Early/seed, Growth, Late stage/pre-IPO,
@@ -148,10 +148,11 @@ JUDGMENT_CALLS = """
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--dry-run", action="store_true",
                      help="print what would happen without writing anything")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     lib = Library(args.db)
     updated = 0

@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib import embeddings as embed_mod
 from linklib.agent import _rrf_merge, _safe_fts_query
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 
 FLAGGED_RATINGS = ("inaccurate", "not_helpful")
 
@@ -70,10 +70,11 @@ def _flagged_questions(lib: Library, limit: int) -> list[dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default="library.db")
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--top", type=int, default=8, help="candidates to show per retrieval path")
     ap.add_argument("--limit", type=int, default=50, help="max flagged questions to replay")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     lib = Library(args.db)
 

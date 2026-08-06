@@ -26,8 +26,10 @@ def _run(monkeypatch, capsys, tmp_path, argv_extra, answer):
         return answer
 
     monkeypatch.setattr(ask_cli, "answer_question", fake_answer_question)
+    db_path = tmp_path / "cli.db"
+    db_path.touch()  # resolve_db_path now requires the file to exist
     monkeypatch.setattr(sys, "argv",
-                        ["ask", "--db", str(tmp_path / "cli.db")] + argv_extra + ["what is NRR?"])
+                        ["ask", "--db", str(db_path)] + argv_extra + ["what is NRR?"])
     assert ask_cli.main() == 0
     return seen, capsys.readouterr().out
 
