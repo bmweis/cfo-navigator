@@ -27,7 +27,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 from linklib import embeddings as embed_mod
 
 BATCH_SIZE = 100
@@ -60,7 +60,7 @@ def _embed_batch_with_retry(texts: list[str], model: str) -> "embed_mod.EmbedRes
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default="library.db")
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--limit", type=int, default=100000, help="max articles to consider")
     ap.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     ap.add_argument("--force", action="store_true",
@@ -69,6 +69,7 @@ def main() -> int:
                     help="embedding model override (default: LINKLIB_EMBED_MODEL / "
                          "text-embedding-3-small)")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     if not os.environ.get("OPENAI_API_KEY"):
         print("ERROR: set OPENAI_API_KEY first.", file=sys.stderr)

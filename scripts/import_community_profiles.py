@@ -41,7 +41,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 from linklib.agent import VOICE_CORE_DEFAULT
 from linklib.enrich import voice_rewrite_community_fields, VOICE_REWRITE_FIELDS
 from scripts._community_profile_data import COMMUNITY_PROFILES, REMOVALS, DO_NOT_IMPORT
@@ -49,7 +49,7 @@ from scripts._community_profile_data import COMMUNITY_PROFILES, REMOVALS, DO_NOT
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--model", default=None,
                     help="voice-rewrite model override (default: LINKLIB_ENRICH_MODEL)")
     ap.add_argument("--dry-run", action="store_true",
@@ -59,6 +59,7 @@ def main() -> int:
                     help="restrict the import to a single community (exact name match), "
                          "so a later addition doesn't re-voice-rewrite everything already done")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     if not args.dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: set ANTHROPIC_API_KEY first (or pass --dry-run).", file=sys.stderr)

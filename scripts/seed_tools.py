@@ -13,7 +13,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from linklib.db import DuplicateURLError, Library, normalize_url
+from linklib.db import DuplicateURLError, Library, normalize_url, resolve_db_path
 
 TOOLS = [
     {
@@ -928,8 +928,11 @@ TOOLS = [
 
 def main():
     parser = argparse.ArgumentParser(description="Seed the CFO Toolbox with curated vendors.")
-    parser.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    parser.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     args = parser.parse_args()
+    # Safe to run against a brand-new DB (first-time seed), so a missing
+    # file at the resolved path isn't treated as a wrong-path error.
+    args.db = resolve_db_path(args.db, allow_missing=True)
 
     lib = Library(args.db)
     added = updated = skipped = 0

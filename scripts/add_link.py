@@ -15,19 +15,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 from linklib.pipeline import ingest_url
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Add one URL to the link library.")
     ap.add_argument("url")
-    ap.add_argument("--db", default="library.db")
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--tags", default="", help="comma-separated")
     ap.add_argument("--note", default="")
     ap.add_argument("--no-fetch", action="store_true", help="skip live full-text fetch")
     ap.add_argument("--no-enrich", action="store_true", help="skip Claude summary/tags")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     tags = [t.strip() for t in args.tags.split(",") if t.strip()]
     lib = Library(args.db)

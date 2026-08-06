@@ -29,7 +29,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 from linklib.screenshots import capture_homepage
 
 
@@ -49,12 +49,13 @@ def _select_tools(lib: Library, names: str, limit: int) -> list[dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--tools", default="", help="comma-separated tool names to run (test batch)")
     ap.add_argument("--limit", type=int, default=0, help="run the first N approved tools instead")
     ap.add_argument("--dry-run", action="store_true", help="print what would be captured, capture nothing")
     ap.add_argument("--force", action="store_true", help="recapture even tools that already have a screenshot")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     if not args.tools and not args.limit:
         print("ERROR: pass --tools \"Name1,Name2\" or --limit N — running against the whole "

@@ -31,7 +31,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 from linklib.agent import VOICE_CORE_DEFAULT
 from linklib.enrich import voice_rewrite_community_fields
 
@@ -61,12 +61,13 @@ ROUND3_UPDATES = [
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--model", default=None,
                     help="voice-rewrite model override (default: claude-sonnet-4-6)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print what would happen without writing anything or calling the API")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     if not args.dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: set ANTHROPIC_API_KEY first (or pass --dry-run).", file=sys.stderr)

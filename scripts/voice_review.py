@@ -21,8 +21,9 @@ from linklib.voice_review import review_text
 def main() -> int:
     ap = argparse.ArgumentParser(description="Review content against Brian's voice.")
     ap.add_argument("file", nargs="?", help="File to review (omit to read stdin).")
-    ap.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"),
-                    help="Library DB to read the saved custom voice from (if any).")
+    ap.add_argument("--db", default=os.environ.get("LINKLIB_DB", ""),
+                    help="Library DB to read the saved custom voice from (if any) — "
+                         "optional, falls back to LINKLIB_DB if set.")
     args = ap.parse_args()
 
     text = (open(args.file, encoding="utf-8").read() if args.file else sys.stdin.read()).strip()

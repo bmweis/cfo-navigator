@@ -276,6 +276,7 @@ def test_script_requires_scope_flag(monkeypatch, db_path):
 def test_script_requires_api_key(monkeypatch, db_path):
     import scripts.enrich_tool_features as script_mod
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    open(db_path, "a").close()  # resolve_db_path now requires the file to exist
     monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--tools", "Runway"])
     rc = script_mod.main()
     assert rc == 2

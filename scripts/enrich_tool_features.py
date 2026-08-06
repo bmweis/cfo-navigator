@@ -37,7 +37,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib import enrich as enrich_mod
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", enrich_mod.DEFAULT_MODEL)
 
@@ -71,7 +71,7 @@ def _select_tools(lib: Library, names: str, limit: int) -> list[dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--tools", default="", help="comma-separated tool names to run (test batch)")
     ap.add_argument("--limit", type=int, default=0, help="run the first N approved tools instead")
     ap.add_argument("--model", default=DEFAULT_MODEL, help="Claude model to use")
@@ -79,6 +79,7 @@ def main() -> int:
     ap.add_argument("--force", action="store_true",
                     help="redraft even tools that already have feature rows")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: set ANTHROPIC_API_KEY first (this makes real API calls).", file=sys.stderr)
