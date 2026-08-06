@@ -109,3 +109,56 @@ def test_manual_overhead_never_touches_toolbox_usage_ledgers(lib, monkeypatch):
     lib.add_manual_overhead("Anthropic", "2026-07-25", 198.12, "AI & API")
     after = lib.overhead_cost_breakdown()
     assert before == after
+
+
+# -- manual_overhead_monthly_by_category (stacked-bar chart data) -----------
+
+def _this_month():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def test_monthly_by_category_zero_fills_months_with_no_data(lib):
+    result = lib.manual_overhead_monthly_by_category(months=3)
+    assert len(result["months"]) == 3
+    assert result["months"][-1] == _this_month()
+    assert result["categories"] == []
+    assert result["series"] == {}
+
+
+def test_monthly_by_category_sums_within_current_month(lib):
+    today = _this_month()
+    lib.add_manual_overhead("Railway", f"{today}-01", 5.00, "Infrastructure")
+    lib.add_manual_overhead("Cloudflare", f"{today}-02", 3.00, "Infrastructure")
+    lib.add_manual_overhead("Anthropic", f"{today}-03", 20.00, "AI & API")
+    result = lib.manual_overhead_monthly_by_category(months=1)
+    assert result["months"] == [today]
+    # largest total first: AI & API (20.00) beats Infrastructure (5+3=8.00)
+    assert result["categories"] == ["AI & API", "Infrastructure"]
+    assert result["series"]["Infrastructure"] == [8.00]
+    assert result["series"]["AI & API"] == [20.00]
+
+
+def test_monthly_by_category_blank_category_becomes_uncategorized(lib):
+    today = _this_month()
+    lib.add_manual_overhead("Domain", f"{today}-01", 12.00, "")
+    result = lib.manual_overhead_monthly_by_category(months=1)
+    assert result["categories"] == ["Uncategorized"]
+    assert result["series"]["Uncategorized"] == [12.00]
+
+
+def test_monthly_by_category_excludes_rows_before_the_window(lib):
+    today = _this_month()
+    lib.add_manual_overhead("OldVendor", "2020-01-15", 999.00, "Ancient")
+    lib.add_manual_overhead("Railway", f"{today}-01", 5.00, "Infrastructure")
+    result = lib.manual_overhead_monthly_by_category(months=1)
+    assert "Ancient" not in result["categories"]
+    assert result["categories"] == ["Infrastructure"]
+
+
+def test_monthly_by_category_series_length_matches_months_param(lib):
+    result = lib.manual_overhead_monthly_by_category(months=12)
+    assert len(result["months"]) == 12
+    result36 = lib.manual_overhead_monthly_by_category(months=36)
+    assert len(result36["months"]) == 36
+    assert result36["months"][-1] == _this_month()
