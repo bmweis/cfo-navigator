@@ -599,6 +599,14 @@ def _duplicate_url_message(e: DuplicateURLError, edit_url: str) -> str:
             f'Edit the existing entry instead of creating a new one: {edit_url}')
 
 
+def _name_duplicate_warning(dup: dict) -> str:
+    """Non-blocking companion to _duplicate_url_message: the save still went
+    through, this just flags a same-name Software entry for the admin to
+    check. See linklib.db.find_tool_name_duplicate / normalize_tool_name."""
+    return (f'Saved—but heads up, "{dup["name"]}" already exists in the Software directory '
+            f'with a matching name: /tools/software/{dup["slug"]}/edit')
+
+
 def _record_ai_drafted_reviews(lib: Library, request: Request, entity_type: str, entity_id: int, form) -> None:
     """Stamps a field_reviews row for every field named in the submitted
     ai_drafted_fields hidden input (see markAiDrafted in the edit-form JS) —
@@ -4990,7 +4998,7 @@ def tools_landing(request: Request):
 
 
 @app.get("/tools/software", response_class=HTMLResponse)
-def tools_directory(request: Request):
+def tools_directory(request: Request, warn: str = ""):
     authed = _is_authed(request)   # admin sees the management controls
     is_member = _is_member(request)  # submit / warm-intro are account-only
     lib = _lib()
@@ -5037,8 +5045,18 @@ def tools_directory(request: Request):
         for c in categories
     )
 
+    # Non-blocking name-duplicate warning from the save routes (see
+    # linklib.db.find_tool_name_duplicate) — admin-only, so a stray ?warn=
+    # on a shared/bookmarked link never shows this to a regular visitor.
+    warn_banner = (
+        f'<p style="background:#fef3c7;color:#92400e;border-radius:10px;padding:10px 16px;'
+        f'font-size:14px;margin:-6px 0 16px;">&#9888;&#65039; {_esc(warn)}</p>'
+        if warn and authed else ''
+    )
+
     body = f"""<div class="page page-grid">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
+{warn_banner}
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
   <h1 style="margin:0;">Software</h1>
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
@@ -8676,6 +8694,7 @@ def admin_software(request: Request):
         approved = [t for t in lib.list_tools(approved_only=True)]
         lead_counts = lib.get_tool_lead_counts()
         tool_categories = lib.list_tool_categories()
+        n_name_dupes = len(lib.find_tool_name_duplicate_candidates())
     finally:
         lib.close()
 
@@ -8762,6 +8781,8 @@ def admin_software(request: Request):
   <a href="/tools/software" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
+  &nbsp;&middot;&nbsp;
+  <a href="/admin/tools/name-duplicates" style="font-size:13px;color:{'#92400e' if n_name_dupes else 'var(--muted)'};font-weight:{'700' if n_name_dupes else '400'};">Check for name duplicates{f' ({n_name_dupes})' if n_name_dupes else ''} →</a>
 </p>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
@@ -8814,6 +8835,129 @@ applySortFilter('software');
 </p>
 </div>"""
     return HTMLResponse(_page("Software—CFO Toolbox Admin", "", body, authed=True))
+
+
+# ---------------------------------------------------------------------------
+# Name-based duplicate detection for the Software directory. Separate from
+# the URL-based DuplicateURLError check above (blocking, exact-URL-match,
+# enforced in linklib.db.add_tool/update_tool): this is an exact-match
+# normalize_tool_name() sweep across every current tool, surfaced here as a
+# reviewable list rather than enforced at save time (see the warn banner on
+# /tools/software wired from the two save routes above for the save-time
+# half). See linklib.db.normalize_tool_name for what "exact-match" covers
+# (case, parentheticals, entity suffixes) and deliberately doesn't (spelling,
+# spacing/hyphenation, or any fuzzy/distance-based matching).
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/tools/name-duplicates", response_class=HTMLResponse)
+def admin_tool_name_duplicates(request: Request, msg: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        candidates = lib.find_tool_name_duplicate_candidates()
+        decisions = lib.tool_name_dedupe_decisions(limit=40)
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+
+    def _tool_cell(t: dict) -> str:
+        approved_tag = '' if t["approved"] else ' <span style="font-size:11px;color:var(--muted);">(pending)</span>'
+        return (f'<a href="/tools/software/{_esc(t["slug"])}/edit" style="font-weight:600;">{_esc(t["name"])}</a>{approved_tag}'
+                f'<div style="font-size:12px;color:var(--muted);word-break:break-all;">{_esc(t["url"])}</div>')
+
+    def _candidate_row(c: dict) -> str:
+        a, b = c["tool_a"], c["tool_b"]
+        return f"""<tr>
+          <td style="padding:12px;border-bottom:1px solid var(--line);">{_tool_cell(a)}</td>
+          <td style="padding:12px;border-bottom:1px solid var(--line);">{_tool_cell(b)}</td>
+          <td style="padding:12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(c['normalized_name'])}</td>
+          <td style="padding:12px;border-bottom:1px solid var(--line);white-space:nowrap;">
+            <form method="post" action="/admin/tools/name-duplicates/resolve" style="display:inline;">
+              <input type="hidden" name="tool_id_a" value="{a['id']}">
+              <input type="hidden" name="tool_id_b" value="{b['id']}">
+              <input type="hidden" name="verdict" value="duplicate">
+              <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Flag as duplicate</button>
+            </form>
+            <form method="post" action="/admin/tools/name-duplicates/resolve" style="display:inline;margin-left:6px;">
+              <input type="hidden" name="tool_id_a" value="{a['id']}">
+              <input type="hidden" name="tool_id_b" value="{b['id']}">
+              <input type="hidden" name="verdict" value="dismissed">
+              <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Not a duplicate, dismiss</button>
+            </form>
+          </td>
+        </tr>"""
+
+    if candidates:
+        candidates_html = f"""<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool A</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool B</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Normalized name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Resolve</th>
+</tr></thead>
+<tbody>{"".join(_candidate_row(c) for c in candidates)}</tbody>
+</table>
+</div>"""
+    else:
+        candidates_html = ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+                           'padding:32px;text-align:center;color:var(--muted);">No unresolved name-duplicate candidates. '
+                           'Every exact normalized-name match across all tools has been flagged or dismissed.</div>')
+
+    def _decision_row(d: dict) -> str:
+        verdict_label = ('<span style="color:#b91c1c;font-weight:600;">Flagged as duplicate</span>' if d["verdict"] == "duplicate"
+                         else '<span style="color:var(--muted);">Dismissed—not a duplicate</span>')
+        return (f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(d["name_a"])} &harr; {_esc(d["name_b"])}</td>'
+                f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{verdict_label}</td>'
+                f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(d["created_at"][:10])}</td></tr>')
+
+    decisions_html = ""
+    if decisions:
+        decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Past decisions</h2>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<tbody>{"".join(_decision_row(d) for d in decisions)}</tbody>
+</table>
+</div>"""
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
+<h1 style="margin:0 0 4px;">Name-duplicate check</h1>
+<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">
+  Exact-match scan of every tool's name (case, parenthetical text, and entity suffixes like Inc/LLC ignored)—catches
+  a same-vendor duplicate saved under a different URL, which the URL-based check can't see. Not fuzzy matching:
+  spelling or spacing differences won't be flagged here.
+</p>
+{banner}
+{candidates_html}
+{decisions_html}
+</div>"""
+    return HTMLResponse(_page("Name-duplicate check—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.post("/admin/tools/name-duplicates/resolve")
+async def admin_tool_name_duplicates_resolve(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    try:
+        tool_id_a = int(form.get("tool_id_a"))
+        tool_id_b = int(form.get("tool_id_b"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid tool ids.")
+    verdict = (form.get("verdict") or "").strip()
+    if verdict not in ("duplicate", "dismissed"):
+        raise HTTPException(status_code=400, detail="Invalid verdict.")
+    lib = _lib()
+    try:
+        lib.record_tool_name_dedupe_decision(tool_id_a, tool_id_b, verdict)
+    finally:
+        lib.close()
+    msg = "Flagged as a duplicate." if verdict == "duplicate" else "Dismissed—won't resurface."
+    return RedirectResponse(f"/admin/tools/name-duplicates?msg={quote(msg)}", status_code=303)
 
 
 # Field allowlist for the Software bulk-edit panel — server-side gate so a
@@ -10784,6 +10928,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     lib = _lib()
     try:
+        name_dup = lib.find_tool_name_duplicate(name)
         tool_id = lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
                                 promoted=promoted, vendor_email=vendor_email,
                                 warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
@@ -10793,7 +10938,10 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     finally:
         lib.close()
     background_tasks.add_task(_run_tool_research, tool_id)
-    return RedirectResponse("/tools/software", status_code=303)
+    redirect_url = "/tools/software"
+    if name_dup:
+        redirect_url += f"?warn={quote(_name_duplicate_warning(name_dup))}"
+    return RedirectResponse(redirect_url, status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/approve")
@@ -11216,6 +11364,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     lib = _lib()
     try:
+        name_dup = lib.find_tool_name_duplicate(name, exclude_id=tool_id)
         lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
                         promoted=promoted, vendor_email=vendor_email,
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
@@ -11228,7 +11377,10 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     finally:
         lib.close()
-    return RedirectResponse("/tools/software", status_code=303)
+    redirect_url = "/tools/software"
+    if name_dup:
+        redirect_url += f"?warn={quote(_name_duplicate_warning(name_dup))}"
+    return RedirectResponse(redirect_url, status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/screenshot/recapture")
