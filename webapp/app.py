@@ -5229,7 +5229,7 @@ function renderTools(tools) {{
     if (AUTHED) {{
       adminControls = '<div class="tool-admin">'
         + '<button type="button" class="tool-admin-btn" onclick="toggleQuickEdit(' + t.id + ')">Quick edit</button>'
-        + '<a href="/admin/tools/' + t.id + '/edit" class="tool-admin-btn">Full edit</a>'
+        + '<a href="/tools/software/' + esc(t.slug) + '/edit" class="tool-admin-btn">Full edit</a>'
         + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:inline;"'
         + ' data-toolname="' + esc(t.name) + '"'
         + ' onsubmit="return confirmDelete(this)">'
@@ -8712,7 +8712,7 @@ def admin_software(request: Request):
           <td data-col="software:vendor_name" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t.get('vendor_name') or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);">
             <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-              <a href="/tools/software/{t['slug']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+              <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
               <form method="post" action="/admin/tools/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
@@ -9674,7 +9674,7 @@ def admin_communities(request: Request, filter: str = ""):
   <td data-col="communities:reach" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['reach'] or '—')}</td>
   <td style="padding:10px 12px;">
     <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
-      <a href="/tools/communities/{c['slug']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
+      <a href="/tools/communities/{c['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
       <a href="/admin/tools/communities/{c['id']}/profile" class="tool-admin-btn" style="text-align:center;">Profile</a>
       {mark_reviewed}
       <form method="post" action="/admin/tools/communities/{c['id']}/delete" style="margin:0;"
