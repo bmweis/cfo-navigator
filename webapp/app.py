@@ -5128,7 +5128,7 @@ Not sure which tool's for you? {(
 .tool-compare-label input{{cursor:pointer;}}
 .tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
-.tool-admin{{display:flex;gap:6px;flex-shrink:0;}}
+.tool-admin{{display:flex;align-items:stretch;gap:6px;flex-shrink:0;margin-top:2px;}}
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
@@ -5241,7 +5241,13 @@ function renderTools(tools) {{
       adminControls = '<div class="tool-admin">'
         + '<button type="button" class="tool-admin-btn" onclick="toggleQuickEdit(' + t.id + ')">Quick edit</button>'
         + '<a href="/tools/software/' + esc(t.slug) + '/edit" class="tool-admin-btn">Full edit</a>'
-        + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:inline;"'
+        // display:contents (not display:inline): .tool-admin is a flex row and
+        // its Quick edit/Full edit siblings stretch to a shared height by
+        // default, but a plain inline <form> still boxes its own child—so the
+        // Delete button never joined that stretch and rendered visibly
+        // shorter than the other two. display:contents drops the form's own
+        // box from layout entirely, so Delete becomes a direct flex item too.
+        + '<form method="post" action="/admin/tools/' + t.id + '/delete" style="display:contents;"'
         + ' data-toolname="' + esc(t.name) + '"'
         + ' onsubmit="return confirmDelete(this)">'
         + '<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button>'
@@ -5273,13 +5279,12 @@ function renderTools(tools) {{
         + '<span id="qe-status-' + t.id + '" class="qe-status"></span>'
         + '</div></div>';
     }}
-    var metaParts = [];
-    if (AUTHED) {{
-      if (t.submitted_by) metaParts.push('Submitted by ' + esc(t.submitted_by));
-      if (t.created_at) metaParts.push('Added ' + t.created_at);
-      if (t.updated_at && t.updated_at !== t.created_at) metaParts.push('Edited ' + t.updated_at);
-    }}
-    var adminMeta = metaParts.length ? '<div class="tool-meta">' + metaParts.join(' &middot; ') + '</div>' : '';
+    // Added/Edited dropped per admin feedback (Aug 2026 card-layout pass)—
+    // Submitted by is kept since it's the one piece here that isn't visible
+    // anywhere else on the card (unlike Added/Edited, which duplicated what
+    // Quick/Full edit already let an admin go check).
+    var adminMeta = (AUTHED && t.submitted_by)
+      ? '<div class="tool-meta">Submitted by ' + esc(t.submitted_by) + '</div>' : '';
     var introBtn = '';
     if (t.has_warm_intro) {{
       introBtn = MEMBER
@@ -5294,24 +5299,33 @@ function renderTools(tools) {{
       + '<input type="checkbox" class="tool-compare-cb" data-id="' + t.id + '"'
       + (toolCompareChecked ? ' checked' : '') + (toolCompareDisabled ? ' disabled' : '')
       + ' onchange="toggleToolCompareSelect(this)"> Compare</label>';
+    // Card layout (Aug 2026 pass, admin feedback on the first cut of this
+    // fix): name and Featured/star badge now sit at opposite ends of the
+    // title row instead of crowding the same wrap group—this is what
+    // actually stops a promoted card from wrapping onto 2 lines in row 1
+    // (the earlier fix just relocated the admin buttons, which helped but
+    // left the badge+name group free to wrap on its own). Categories share
+    // their row with Full profile; Compare/Warm Intro get their own row;
+    // Quick edit/Full edit/Delete moved to the card's last row, replacing
+    // the old Added/Edited meta line entirely (see adminMeta above).
     return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '" data-tool-id="' + t.id + '">'
-      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
-      + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
-      + promotedBadge + star
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;">'
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
+      + (promotedBadge || star
+          ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-top:2px;">' + promotedBadge + star + '</div>'
+          : '')
       + '</div>'
-      + adminControls + '</div>'
       + '<p class="tool-desc" id="desc-' + t.id + '">' + esc(t.summary || t.description) + '</p>'
-      // Categories and the profile-link/compare row used to share one flex row
-      // (justify-content:space-between) — a long category name (e.g. "Treasury/Cash
-      // Management") made that row wrap to 2 lines while a short one (e.g. "FP&A")
-      // stayed on 1, breaking the uniform card height the .tool-name/.tool-desc
-      // clamps above are meant to guarantee. Splitting them into two always-separate
-      // rows means each row's height depends only on category *count* (nearly always
-      // one badge across the catalog), not category name length.
       + '<div style="margin-top:auto;">'
-      + '<div class="tool-cats" style="min-height:24px;margin-bottom:10px;">' + cats + '</div>'
-      + '<div style="display:flex;align-items:center;gap:12px;">' + fullProfileLink + compareCheckbox + introBtn + '</div>'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;min-height:24px;margin-bottom:10px;">'
+      + '<div class="tool-cats">' + cats + '</div>' + fullProfileLink
+      + '</div>'
+      // min-height reserves the Warm Intro button's own height (31px) whether
+      // or not this card has one—without it, a card with Warm Intro sits
+      // taller than its row siblings, the same category of bug as the
+      // Featured-badge wrap above.
+      + '<div style="display:flex;align-items:center;gap:12px;min-height:32px;margin-bottom:10px;">' + compareCheckbox + introBtn + '</div>'
+      + adminControls
       + '</div>'
       + adminMeta + quickEditPanel + '</article>';
   }}).join('');
