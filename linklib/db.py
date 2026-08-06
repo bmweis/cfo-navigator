@@ -1730,6 +1730,62 @@ class Library:
             row = self.conn.execute("SELECT COALESCE(SUM(amount),0) FROM manual_overhead").fetchone()
         return float(row[0])
 
+    def manual_overhead_monthly_by_category(self, months: int = 12) -> dict:
+        """Vendor-spend rows bucketed by calendar month and category, for the
+        last `months` months ending with the current month — feeds the
+        stacked-bar chart on /admin/overhead-spend (and its wider 36-month
+        variant on the details page). Zero-filled: every month in the range
+        appears even if nothing was spent. Blank category is grouped as
+        "Uncategorized" rather than dropped, so a hand-entered row without a
+        category tag doesn't silently vanish from the chart. Categories are
+        ordered by total spend (largest first) so the stack order and the
+        legend order match.
+
+        Returns {"months": [...], "categories": [...], "series": {cat: [...]}}
+        — months oldest-first, each series list parallel to months."""
+        today = datetime.now(timezone.utc).date()
+        start_year, start_month = today.year, today.month - (months - 1)
+        while start_month <= 0:
+            start_month += 12
+            start_year -= 1
+        start_date = f"{start_year:04d}-{start_month:02d}-01"
+
+        month_keys = []
+        y, m = start_year, start_month
+        for _ in range(months):
+            month_keys.append(f"{y:04d}-{m:02d}")
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+
+        rows = self.conn.execute(
+            """SELECT strftime('%Y-%m', date) AS month,
+                      COALESCE(NULLIF(category, ''), 'Uncategorized') AS cat,
+                      SUM(amount) AS amt
+               FROM manual_overhead
+               WHERE date >= ?
+               GROUP BY month, cat""",
+            (start_date,),
+        ).fetchall()
+
+        month_set = set(month_keys)
+        totals_by_cat: dict[str, float] = {}
+        grid: dict[str, dict[str, float]] = {}
+        for r in rows:
+            month, cat, amt = r["month"], r["cat"], float(r["amt"])
+            if month not in month_set:
+                continue  # malformed date string that didn't strftime cleanly
+            grid.setdefault(cat, {})[month] = amt
+            totals_by_cat[cat] = totals_by_cat.get(cat, 0.0) + amt
+
+        categories = sorted(totals_by_cat, key=lambda c: -totals_by_cat[c])
+        series = {
+            cat: [grid.get(cat, {}).get(mk, 0.0) for mk in month_keys]
+            for cat in categories
+        }
+        return {"months": month_keys, "categories": categories, "series": series}
+
     def add_manual_overhead(self, vendor: str, date: str, amount: float,
                              category: str = "", note: str = "") -> int:
         vendor, date, category, note = vendor.strip(), date.strip(), category.strip(), note.strip()

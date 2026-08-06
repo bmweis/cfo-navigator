@@ -16410,6 +16410,85 @@ def admin_ask_report_export(request: Request, user: str = ""):
     )
 
 
+# Categorical palette for the overhead-spend stacked-bar chart, drawn from
+# BRAND.md's data-viz ramp (2.4) rather than an arbitrary rainbow — cool
+# navy/seafoam tones carry most categories, coral surfaces only once it's
+# actually reached (a handful of categories in), matching the "coral is rare"
+# rule. Cycles if there are ever more categories than colors.
+_OVERHEAD_CHART_PALETTE = [
+    "#002975",  # --navy
+    "#2E9C86",  # --seafoam-mid
+    "#3F5C9A",  # --navy-light
+    "#E8704F",  # --coral
+    "#1F7A66",  # --seafoam-deep
+    "#F4A98F",  # --coral-light
+    "#A3E5D4",  # --seafoam
+    "#6F6A60",  # --muted (fallback / "Uncategorized" tends to land here)
+]
+
+
+def _overhead_category_colors(categories: list[str]) -> list[str]:
+    return [_OVERHEAD_CHART_PALETTE[i % len(_OVERHEAD_CHART_PALETTE)] for i in range(len(categories))]
+
+
+def _overhead_month_label(month: str, *, short: bool) -> str:
+    """'2026-08' -> "Aug '26" (short) or "Aug 2026"."""
+    dt = datetime.strptime(month, "%Y-%m")
+    return dt.strftime("%b '%y") if short else dt.strftime("%b %Y")
+
+
+def _overhead_stacked_bar_chart(chart_data: dict, *, width: int, height: int = 220,
+                                 label_every: int = 1, short_labels: bool = True) -> str:
+    """Renders chart_data (see Library.manual_overhead_monthly_by_category)
+    as an inline SVG stacked bar chart plus a color-key legend below it.
+    Server-rendered (no client-side charting library) to match how every
+    other data view on this page works — a plain GET renders the whole
+    page, nothing hydrates after load."""
+    months, categories, series = chart_data["months"], chart_data["categories"], chart_data["series"]
+    n = len(months)
+    if n == 0 or not categories:
+        return '<p style="color:var(--muted);font-size:13px;padding:24px 0;text-align:center;">No vendor spend recorded yet.</p>'
+
+    totals = [sum(series[c][i] for c in categories) for i in range(n)]
+    max_total = max(totals) or 1.0
+    colors = _overhead_category_colors(categories)
+
+    pad_left, pad_right, pad_top, pad_bottom = 6, 6, 10, 34
+    plot_w = width - pad_left - pad_right
+    plot_h = height - pad_top - pad_bottom
+    slot_w = plot_w / n
+    bar_w = max(slot_w * 0.62, 2)
+
+    parts = [f'<line x1="{pad_left}" y1="{pad_top + plot_h:.1f}" x2="{width - pad_right}" y2="{pad_top + plot_h:.1f}" '
+              f'stroke="var(--line-strong)" stroke-width="1"/>']
+    for i, month in enumerate(months):
+        x = pad_left + i * slot_w + (slot_w - bar_w) / 2
+        y_cursor = pad_top + plot_h
+        for cat, color in zip(categories, colors):
+            amt = series[cat][i]
+            if amt <= 0:
+                continue
+            seg_h = (amt / max_total) * plot_h
+            y = y_cursor - seg_h
+            parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{seg_h:.1f}" fill="{color}"/>')
+            y_cursor = y
+        if i % label_every == 0:
+            lx = x + bar_w / 2
+            ly = pad_top + plot_h + 12
+            label = _esc(_overhead_month_label(month, short=short_labels))
+            parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="9" fill="var(--muted)" '
+                          f'text-anchor="end" transform="rotate(-55 {lx:.1f} {ly:.1f})">{label}</text>')
+
+    svg = (f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" '
+           f'xmlns="http://www.w3.org/2000/svg" font-family="var(--font-body)">' + "".join(parts) + '</svg>')
+    legend = "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-soft);margin:0 12px 4px 0;">'
+        f'<span style="width:9px;height:9px;border-radius:2px;background:{color};display:inline-block;flex-shrink:0;"></span>{_esc(cat)}</span>'
+        for cat, color in zip(categories, colors)
+    )
+    return f'<div>{svg}<div style="margin-top:4px;line-height:1.4;">{legend}</div></div>'
+
+
 @app.get("/admin/overhead-spend", response_class=HTMLResponse)
 def admin_overhead_spend(request: Request, category: str = "", msg: str = "", error: str = ""):
     """Two sections that are deliberately never added together:
@@ -16435,6 +16514,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         entries = lib.list_manual_overhead(category=category or None)
         categories = lib.manual_overhead_categories()
         vendor_total = lib.manual_overhead_total(category=category or None)
+        monthly_chart = lib.manual_overhead_monthly_by_category(months=12)
         breakdown = lib.overhead_cost_breakdown()
         by_month = lib.overhead_cost_by_month()
         usage_total = sum(s["total_cost"] for s in breakdown)
@@ -16510,6 +16590,8 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 </tr>""" for m in by_month) or \
         '<tr><td colspan="2" style="padding:24px;text-align:center;color:var(--muted);">No usage recorded yet.</td></tr>'
 
+    monthly_chart_html = _overhead_stacked_bar_chart(monthly_chart, width=420, height=200)
+
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Overhead spend</h1>
@@ -16537,6 +16619,13 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 {datalist}
 
 <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+    <h3 style="font-size:15px;font-weight:600;margin:0 0 4px;">Monthly spend by category</h3>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Last 12 months.</p>
+    {monthly_chart_html}
+    <div style="margin-top:10px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">See full history &amp; edit &rarr;</a></div>
+  </div>
+
   <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
     <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
@@ -16586,45 +16675,162 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 <p style="color:var(--muted);margin:0 0 4px;">Internal cost attribution for enrichment, embeddings, and FP&amp;A Buddy queries&mdash;computed from token counts and model pricing, not billed amounts.</p>
 <p style="color:var(--muted);margin:0 0 18px;font-style:italic;">Estimate only, for understanding usage patterns&mdash;this won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
 
-<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px;">
-  <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_total:.2f}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Estimated usage, all time</div>
+<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;">
+    <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_total:.2f}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;">Estimated usage, all time</div>
+    </div>
+    <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_month_cost:.2f}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;">This calendar month</div>
+    </div>
+    <div>
+      <h3 style="font-size:14px;margin:0 0 10px;">By source</h3>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:400px;">
+          <thead><tr style="background:var(--bg);">
+            <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
+            <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Calls</th>
+            <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">This month</th>
+            <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">All time</th>
+          </tr></thead>
+          <tbody>{source_rows}</tbody>
+        </table>
+      </div>
+    </div>
   </div>
-  <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_month_cost:.2f}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">This calendar month</div>
+
+  <div style="flex:1 1 460px;">
+    <h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;min-width:320px;">
+        <thead><tr style="background:var(--bg);">
+          <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Month</th>
+          <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Combined cost</th>
+        </tr></thead>
+        <tbody>{month_rows}</tbody>
+      </table>
+    </div>
   </div>
-</div>
-
-<h3 style="font-size:14px;margin:0 0 10px;">By source</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:24px;">
-  <table style="width:100%;border-collapse:collapse;min-width:480px;">
-    <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
-      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Calls</th>
-      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">This month</th>
-      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">All time</th>
-    </tr></thead>
-    <tbody>{source_rows}</tbody>
-  </table>
-</div>
-
-<h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
-  <table style="width:100%;border-collapse:collapse;min-width:320px;">
-    <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Month</th>
-      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Combined cost</th>
-    </tr></thead>
-    <tbody>{month_rows}</tbody>
-  </table>
 </div>
 <style>
 tbody tr{{border-top:1px solid var(--line);}}
 </style>
 </div>"""
     return HTMLResponse(_page("Overhead spend—Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/overhead-spend/details", response_class=HTMLResponse)
+def admin_overhead_spend_details(request: Request, msg: str = "", error: str = ""):
+    """Full-history companion to the summary page's compact 12-month chart
+    card: the same stacked-bar chart at roughly 3x the width, covering 36
+    months, plus every vendor-spend row as a table that's read-only until an
+    Edit click reveals the same inline edit form the summary page uses
+    (posting back here via the hidden "back" field — see
+    _overhead_redirect_base)."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        entries = lib.list_manual_overhead()
+        categories = lib.manual_overhead_categories()
+        chart_data = lib.manual_overhead_monthly_by_category(months=36)
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
+                     f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
+
+    chart_html = _overhead_stacked_bar_chart(chart_data, width=1400, height=280, short_labels=True)
+    datalist = f'<datalist id="overhead-categories-details">{"".join(f"<option value={chr(34)}{_esc(c)}{chr(34)}>" for c in categories)}</datalist>'
+
+    rows_html = ""
+    for e in entries:
+        eid = e["id"]
+        rows_html += f"""<tr id="oh-row-{eid}" style="border-top:1px solid var(--line);">
+  <td style="padding:9px 12px;font-size:13px;font-weight:500;">{_esc(e['vendor'])}</td>
+  <td style="padding:9px 12px;font-size:13px;">{_esc(e['date'])}</td>
+  <td style="padding:9px 12px;font-size:13px;">{_esc(e['category']) or '&mdash;'}</td>
+  <td style="padding:9px 12px;font-size:13px;color:var(--muted);">{_esc(e['note']) or '&mdash;'}</td>
+  <td style="padding:9px 12px;font-size:13px;font-weight:600;text-align:right;">${e['amount']:.2f}</td>
+  <td style="padding:9px 12px;text-align:right;">
+    <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;" onclick="toggleOverheadEdit({eid})">Edit</button>
+  </td>
+</tr>
+<tr id="oh-edit-{eid}" style="display:none;border-top:1px solid var(--line);">
+  <td colspan="6" style="padding:12px;background:var(--bg);">
+    <form method="post" action="/admin/overhead-spend/{eid}/edit" style="display:grid;gap:6px;margin:0 0 8px;max-width:640px;">
+      <input type="hidden" name="back" value="details">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;">
+        <input type="date" name="date" value="{_esc(e['date'])}" required
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+        <input type="text" name="category" value="{_esc(e['category'])}" maxlength="60" placeholder="Category" list="overhead-categories-details"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+      </div>
+      <input type="text" name="note" value="{_esc(e['note'])}" maxlength="300" placeholder="Note (optional)"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:#fff;">
+      <div style="display:flex;gap:8px;">
+        <button type="submit" class="btn" style="font-size:12px;padding:5px 12px;">Save</button>
+        <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;" onclick="toggleOverheadEdit({eid})">Cancel</button>
+      </div>
+    </form>
+    <form method="post" action="/admin/overhead-spend/{eid}/delete" style="margin:0;"
+          onsubmit="return confirm('Delete this {_esc(e['vendor'])} entry?');">
+      <input type="hidden" name="back" value="details">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+    if not entries:
+        rows_html = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--muted);">No vendor charges recorded yet.</td></tr>'
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/overhead-spend" style="font-size:13px;color:var(--muted);">&larr; Overhead spend</a></p>
+<h1>Overhead spend&mdash;full history</h1>
+{banner}{error_banner}
+
+<h2 style="font-size:16px;margin:18px 0 4px;">Monthly spend by category</h2>
+<p style="color:var(--muted);margin:0 0 14px;">Last 36 months.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:32px;overflow-x:auto;">
+  {chart_html}
+</div>
+
+<h2 style="font-size:16px;margin:0 0 4px;">All vendor charges</h2>
+<p style="color:var(--muted);margin:0 0 14px;">Click Edit on any row to make changes in place.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:720px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Vendor</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Date</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Category</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Note</th>
+      <th style="padding:9px 12px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Amount</th>
+      <th style="padding:9px 12px;"></th>
+    </tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+</div>
+{datalist}
+<script>
+function toggleOverheadEdit(id) {{
+  var row = document.getElementById('oh-row-' + id);
+  var edit = document.getElementById('oh-edit-' + id);
+  var showEdit = edit.style.display === 'none';
+  row.style.display = showEdit ? 'none' : '';
+  edit.style.display = showEdit ? 'table-row' : 'none';
+}}
+</script>
+</div>"""
+    return HTMLResponse(_page("Overhead spend—full history—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/overhead-spend/new")
@@ -16651,11 +16857,21 @@ async def admin_overhead_spend_new(request: Request):
     return RedirectResponse(f"/admin/overhead-spend?msg={quote(msg)}", status_code=303)
 
 
+def _overhead_redirect_base(form) -> str:
+    """Edit/delete forms are reachable from both the summary page's always-
+    open inline rows and the /details page's click-to-edit table. A hidden
+    "back" field says which one to return to; anything other than "details"
+    (including it being absent, e.g. old cached forms) falls back to the
+    summary page."""
+    return "/admin/overhead-spend/details" if (form.get("back") or "") == "details" else "/admin/overhead-spend"
+
+
 @app.post("/admin/overhead-spend/{entry_id}/edit")
 async def admin_overhead_spend_edit(request: Request, entry_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
+    redirect_base = _overhead_redirect_base(form)
     vendor = (form.get("vendor") or "").strip()
     date = (form.get("date") or "").strip()
     category = (form.get("category") or "").strip()
@@ -16663,27 +16879,29 @@ async def admin_overhead_spend_edit(request: Request, entry_id: int):
     try:
         amount = float(form.get("amount") or 0)
     except ValueError:
-        return RedirectResponse(f"/admin/overhead-spend?error={quote('Amount must be a number.')}", status_code=303)
+        return RedirectResponse(f"{redirect_base}?error={quote('Amount must be a number.')}", status_code=303)
     lib = _lib()
     try:
         lib.update_manual_overhead(entry_id, vendor, date, amount, category, note)
     except ValueError as e:
-        return RedirectResponse(f"/admin/overhead-spend?error={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"{redirect_base}?error={quote(str(e))}", status_code=303)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/overhead-spend?msg={quote('Saved.')}", status_code=303)
+    return RedirectResponse(f"{redirect_base}?msg={quote('Saved.')}", status_code=303)
 
 
 @app.post("/admin/overhead-spend/{entry_id}/delete")
-def admin_overhead_spend_delete(request: Request, entry_id: int):
+async def admin_overhead_spend_delete(request: Request, entry_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    redirect_base = _overhead_redirect_base(form)
     lib = _lib()
     try:
         lib.delete_manual_overhead(entry_id)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/overhead-spend?msg={quote('Deleted.')}", status_code=303)
+    return RedirectResponse(f"{redirect_base}?msg={quote('Deleted.')}", status_code=303)
 
 
 @app.get("/admin/overhead-spend/csv/template")
