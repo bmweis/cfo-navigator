@@ -8404,6 +8404,8 @@ function updateBulkButton(tableKey) {
   var n = document.querySelectorAll('.' + tableKey + '-row-cb:checked').length;
   var btn = document.getElementById(tableKey + '-bulk-btn');
   if (btn) { btn.disabled = n === 0; btn.textContent = 'Edit selected (' + n + ')'; }
+  var delBtn = document.getElementById(tableKey + '-bulk-delete-btn');
+  if (delBtn) { delBtn.disabled = n === 0; delBtn.textContent = 'Delete selected (' + n + ')'; }
 }
 function selectAllRows(tableKey, checked) {
   document.querySelectorAll('.' + tableKey + '-row-cb').forEach(function(cb) { cb.checked = checked; });
@@ -8483,6 +8485,62 @@ async function submitBulkEdit(tableKey, url) {
     btn.disabled = false; btn.textContent = 'Apply';
   }
 }
+async function openDeleteSelectedPanel(tableKey) {
+  var ids = Array.prototype.map.call(document.querySelectorAll('.' + tableKey + '-row-cb:checked'), function(cb) { return parseInt(cb.value, 10); });
+  if (!ids.length) return;
+  document.getElementById(tableKey + '-delete-panel').style.display = 'block';
+  var body = document.getElementById(tableKey + '-delete-body');
+  body.innerHTML = '<p style="font-size:13px;color:var(--muted);">Checking for competitor references…</p>';
+  var confirmBtn = document.getElementById(tableKey + '-delete-confirm-btn');
+  confirmBtn.disabled = true; confirmBtn.textContent = 'Delete';
+  try {
+    var r = await fetch('/admin/tools/' + tableKey + '/bulk-delete-check', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids: ids})
+    });
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error();
+    renderDeleteSelectedPanel(tableKey, ids, d);
+  } catch (e) {
+    body.innerHTML = '<p style="font-size:13px;color:#b91c1c;">Couldn\\'t load delete preview—try again.</p>';
+  }
+}
+function renderDeleteSelectedPanel(tableKey, ids, d) {
+  var esc = function(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  var names = d.tools.map(function(t) { return '<li>' + esc(t.name) + '</li>'; }).join('');
+  var warnHtml = '';
+  if (d.warnings && d.warnings.length) {
+    var items = d.warnings.map(function(w) {
+      return '<li><strong>' + esc(w.name) + '</strong> is listed as a competitor on: ' + w.referenced_by.map(esc).join(', ') + '</li>';
+    }).join('');
+    warnHtml = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13px;">' +
+      '<strong>Heads up:</strong> deleting these will remove them from other tools&rsquo; competitor lists:' +
+      '<ul style="margin:6px 0 0;padding-left:18px;">' + items + '</ul></div>';
+  }
+  document.getElementById(tableKey + '-delete-body').innerHTML =
+    '<p style="font-size:14px;margin:0 0 8px;">Delete these ' + d.tools.length + ' tool' + (d.tools.length === 1 ? '' : 's') + '?</p>' +
+    '<ul style="margin:0 0 8px;padding-left:18px;font-size:14px;">' + names + '</ul>' + warnHtml;
+  var btn = document.getElementById(tableKey + '-delete-confirm-btn');
+  btn.disabled = false; btn.textContent = 'Delete ' + d.tools.length + ' tool' + (d.tools.length === 1 ? '' : 's');
+  btn.onclick = function() { submitBulkDelete(tableKey, ids); };
+}
+async function submitBulkDelete(tableKey, ids) {
+  var btn = document.getElementById(tableKey + '-delete-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {
+    var r = await fetch('/admin/tools/' + tableKey + '/bulk-delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids: ids})
+    });
+    if (!r.ok) throw new Error();
+    window.location.reload();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Delete failed—try again';
+  }
+}
+function closeDeleteSelectedPanel(tableKey) {
+  document.getElementById(tableKey + '-delete-panel').style.display = 'none';
+}
 """
 
 
@@ -8504,10 +8562,18 @@ def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]]) ->
 </details>"""
 
 
-def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], category_options: list[dict] | None = None) -> str:
+def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], category_options: list[dict] | None = None,
+                            show_delete_button: bool = False) -> str:
     """fields: [{key, label, kind: 'select'|'checkbox'|'multi', options?}, ...].
     'multi' fields render a category_options checkbox grid and always replace
-    (not add/remove) the target rows' category set with the checked ones."""
+    (not add/remove) the target rows' category set with the checked ones.
+
+    show_delete_button adds a "Delete selected" button next to "Edit selected"
+    plus its own confirm panel (openDeleteSelectedPanel/renderDeleteSelectedPanel/
+    submitBulkDelete in _ADMIN_BULK_EDIT_JS), wired to
+    POST /admin/tools/{table_key}/bulk-delete-check and .../bulk-delete. Opt-in
+    per table (currently just Software) rather than default-on for every
+    bulk-panel caller."""
     field_options_html = "".join(f'<option value="{f["key"]}">{_esc(f["label"])}</option>' for f in fields)
 
     def _value_control(f: dict) -> str:
@@ -8530,10 +8596,30 @@ def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], ca
 
     values_html = "".join(_value_control(f) for f in fields)
     labels_json = json.dumps({f["key"]: f["label"] for f in fields})
+
+    delete_button_html = (
+        f'<button type="button" id="{table_key}-bulk-delete-btn" class="btn btn-ghost" disabled '
+        f'style="font-size:13px;padding:6px 16px;color:#b91c1c;border-color:#fca5a5;" '
+        f'onclick="openDeleteSelectedPanel(\'{table_key}\')">Delete selected (0)</button>'
+        if show_delete_button else ""
+    )
+    delete_panel_html = (
+        f"""<div id="{table_key}-delete-panel" style="display:none;border:1px solid #fca5a5;border-radius:12px;padding:16px 18px;margin:0 0 20px;background:var(--surface);max-width:520px;">
+  <div id="{table_key}-delete-body"></div>
+  <div style="margin-top:14px;">
+    <button type="button" id="{table_key}-delete-confirm-btn" class="btn" disabled
+      style="font-size:13px;padding:6px 16px;background:#b91c1c;border-color:#b91c1c;">Delete</button>
+    <button type="button" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;margin-left:6px;"
+      onclick="closeDeleteSelectedPanel('{table_key}')">Cancel</button>
+  </div>
+</div>""" if show_delete_button else ""
+    )
+
     return f"""
-<div style="margin:0 0 16px;">
+<div style="margin:0 0 16px;display:flex;gap:10px;flex-wrap:wrap;">
   <button type="button" id="{table_key}-bulk-btn" class="btn btn-ghost" disabled
     style="font-size:13px;padding:6px 16px;" onclick="openBulkPanel('{table_key}')">Edit selected (0)</button>
+  {delete_button_html}
 </div>
 <div id="{table_key}-bulk-panel" style="display:none;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:0 0 20px;background:var(--surface);max-width:480px;">
   <div id="{table_key}-bulk-step1">
@@ -8556,7 +8642,8 @@ def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], ca
     <button type="button" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;margin-left:6px;"
       onclick="backToBulkEdit('{table_key}')">Back</button>
   </div>
-</div>"""
+</div>
+{delete_panel_html}"""
 
 
 # Client-side sort/filter for the same two approved-rows tables — no new route,
@@ -8794,7 +8881,7 @@ def admin_software(request: Request):
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software</h2>
 {_admin_column_picker_html("software", software_cols)}
 {_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories)}
-{_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories)}
+{_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
 <div style="overflow-x:auto;">
 <form id="software-approved-form">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
@@ -8864,6 +8951,69 @@ async def admin_software_bulk_edit(request: Request):
             else:
                 kwargs[field] = 1 if value == "1" else 0
             lib.update_tool(tool_id, **kwargs)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/admin/tools/software/bulk-delete-check")
+async def admin_software_bulk_delete_check(request: Request):
+    """Preview for the Software bulk-delete confirm step: resolves the
+    selected ids to names, plus a lightweight (not exhaustive) check for
+    whether any of them is curated as a competitor on another tool's
+    profile — that tool would silently lose a competitor entry once this
+    batch is deleted. tool_competitors is an undirected pair (see the
+    CREATE TABLE comment in db.py), so list_tool_competitors(tid) already
+    returns both directions; we only flag references from OUTSIDE the
+    selection, since two selected tools being mutual competitors isn't a
+    surprise to anyone."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    try:
+        tool_ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    selected = set(tool_ids)
+    lib = _lib()
+    try:
+        tools = []
+        warnings = []
+        for tid in tool_ids:
+            t = lib.get_tool(tid)
+            if not t:
+                continue
+            tools.append({"id": tid, "name": t["name"]})
+            referencing = [c["name"] for c in lib.list_tool_competitors(tid) if c["id"] not in selected]
+            if referencing:
+                warnings.append({"name": t["name"], "referenced_by": referencing})
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "tools": tools, "warnings": warnings})
+
+
+@app.post("/admin/tools/software/bulk-delete")
+async def admin_software_bulk_delete(request: Request):
+    """Same delete path as the single-row Delete button (lib.delete_tool,
+    which also cascades field_reviews and tool_competitors rows), just
+    looped over the selection made in /admin/tools/software."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    lib = _lib()
+    try:
+        for raw_id in ids:
+            try:
+                tool_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            lib.delete_tool(tool_id)
     finally:
         lib.close()
     return JSONResponse({"ok": True})

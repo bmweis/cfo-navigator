@@ -469,6 +469,23 @@ methods. The confirmation summary ("Set 'Cost band' = 'Free' on 6 rows.") is
 built client-side before the POST fires; the apply itself is a single
 `fetch()` that reloads the page on success.
 
+**Bulk delete (Software only).** `_admin_bulk_panel_html` takes an opt-in
+`show_delete_button` flag (only Software passes it) that renders a second
+"Delete selected" button next to "Edit selected," plus its own confirm panel
+— same enable-when-checked wiring as the bulk-edit button
+(`updateBulkButton()` now also toggles a `{table}-bulk-delete-btn` if one
+exists in the DOM). Clicking it calls `POST /admin/tools/software/bulk-delete-check`,
+which resolves the selected ids to names and does a lightweight check —
+not a full blast-radius report — for whether any selected tool is curated as
+a competitor on another (non-selected) tool's `tool_competitors` row; any hits
+are shown as a non-blocking warning listing which tool is referenced and by
+whom, so the admin isn't surprised after the fact but nothing stops the
+delete. Confirming calls `POST /admin/tools/software/bulk-delete`, which loops
+the selected ids through the same `Library.delete_tool` the single-row Delete
+button already uses (cascades `field_reviews` and `tool_competitors` rows for
+each deleted id) — no new deletion logic, just the existing path applied per
+id in the selection.
+
 **Sort + filter (both tables).** Same client-only approach as the column
 picker above, and for the same reason — neither table paginates, so the full
 row set is already in the DOM and there's no need for a server round-trip.
