@@ -25,7 +25,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 
 # url -> (reach, metros). Only communities present in this mapping are
 # touched. reach is one of "Regional" | "National" | "Global".
@@ -76,9 +76,10 @@ MAPPING: dict[str, tuple[str, list[str]]] = {
 
 def main():
     parser = argparse.ArgumentParser(description="Backfill communities.reach/metros from the approved mapping.")
-    parser.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    parser.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would change without writing.")
     args = parser.parse_args()
+    args.db = resolve_db_path(args.db)
 
     lib = Library(args.db)
     updated = missing = 0

@@ -610,6 +610,14 @@ def _duplicate_url_message(e: DuplicateURLError, edit_url: str) -> str:
             f'Edit the existing entry instead of creating a new one: {edit_url}')
 
 
+def _name_duplicate_warning(dup: dict) -> str:
+    """Non-blocking companion to _duplicate_url_message: the save still went
+    through, this just flags a same-name Software entry for the admin to
+    check. See linklib.db.find_tool_name_duplicate / normalize_tool_name."""
+    return (f'Saved—but heads up, "{dup["name"]}" already exists in the Software directory '
+            f'with a matching name: /tools/software/{dup["slug"]}/edit')
+
+
 def _record_ai_drafted_reviews(lib: Library, request: Request, entity_type: str, entity_id: int, form) -> None:
     """Stamps a field_reviews row for every field named in the submitted
     ai_drafted_fields hidden input (see markAiDrafted in the edit-form JS) —
@@ -5001,7 +5009,7 @@ def tools_landing(request: Request):
 
 
 @app.get("/tools/software", response_class=HTMLResponse)
-def tools_directory(request: Request):
+def tools_directory(request: Request, warn: str = ""):
     authed = _is_authed(request)   # admin sees the management controls
     is_member = _is_member(request)  # submit / warm-intro are account-only
     lib = _lib()
@@ -5048,8 +5056,18 @@ def tools_directory(request: Request):
         for c in categories
     )
 
+    # Non-blocking name-duplicate warning from the save routes (see
+    # linklib.db.find_tool_name_duplicate) — admin-only, so a stray ?warn=
+    # on a shared/bookmarked link never shows this to a regular visitor.
+    warn_banner = (
+        f'<p style="background:#fef3c7;color:#92400e;border-radius:10px;padding:10px 16px;'
+        f'font-size:14px;margin:-6px 0 16px;">&#9888;&#65039; {_esc(warn)}</p>'
+        if warn and authed else ''
+    )
+
     body = f"""<div class="page page-grid">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
+{warn_banner}
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
   <h1 style="margin:0;">Software</h1>
   {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
@@ -8404,6 +8422,8 @@ function updateBulkButton(tableKey) {
   var n = document.querySelectorAll('.' + tableKey + '-row-cb:checked').length;
   var btn = document.getElementById(tableKey + '-bulk-btn');
   if (btn) { btn.disabled = n === 0; btn.textContent = 'Edit selected (' + n + ')'; }
+  var delBtn = document.getElementById(tableKey + '-bulk-delete-btn');
+  if (delBtn) { delBtn.disabled = n === 0; delBtn.textContent = 'Delete selected (' + n + ')'; }
 }
 function selectAllRows(tableKey, checked) {
   document.querySelectorAll('.' + tableKey + '-row-cb').forEach(function(cb) { cb.checked = checked; });
@@ -8483,6 +8503,62 @@ async function submitBulkEdit(tableKey, url) {
     btn.disabled = false; btn.textContent = 'Apply';
   }
 }
+async function openDeleteSelectedPanel(tableKey) {
+  var ids = Array.prototype.map.call(document.querySelectorAll('.' + tableKey + '-row-cb:checked'), function(cb) { return parseInt(cb.value, 10); });
+  if (!ids.length) return;
+  document.getElementById(tableKey + '-delete-panel').style.display = 'block';
+  var body = document.getElementById(tableKey + '-delete-body');
+  body.innerHTML = '<p style="font-size:13px;color:var(--muted);">Checking for competitor references…</p>';
+  var confirmBtn = document.getElementById(tableKey + '-delete-confirm-btn');
+  confirmBtn.disabled = true; confirmBtn.textContent = 'Delete';
+  try {
+    var r = await fetch('/admin/tools/' + tableKey + '/bulk-delete-check', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids: ids})
+    });
+    var d = await r.json();
+    if (!r.ok || !d.ok) throw new Error();
+    renderDeleteSelectedPanel(tableKey, ids, d);
+  } catch (e) {
+    body.innerHTML = '<p style="font-size:13px;color:#b91c1c;">Couldn\\'t load delete preview—try again.</p>';
+  }
+}
+function renderDeleteSelectedPanel(tableKey, ids, d) {
+  var esc = function(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  var names = d.tools.map(function(t) { return '<li>' + esc(t.name) + '</li>'; }).join('');
+  var warnHtml = '';
+  if (d.warnings && d.warnings.length) {
+    var items = d.warnings.map(function(w) {
+      return '<li><strong>' + esc(w.name) + '</strong> is listed as a competitor on: ' + w.referenced_by.map(esc).join(', ') + '</li>';
+    }).join('');
+    warnHtml = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13px;">' +
+      '<strong>Heads up:</strong> deleting these will remove them from other tools&rsquo; competitor lists:' +
+      '<ul style="margin:6px 0 0;padding-left:18px;">' + items + '</ul></div>';
+  }
+  document.getElementById(tableKey + '-delete-body').innerHTML =
+    '<p style="font-size:14px;margin:0 0 8px;">Delete these ' + d.tools.length + ' tool' + (d.tools.length === 1 ? '' : 's') + '?</p>' +
+    '<ul style="margin:0 0 8px;padding-left:18px;font-size:14px;">' + names + '</ul>' + warnHtml;
+  var btn = document.getElementById(tableKey + '-delete-confirm-btn');
+  btn.disabled = false; btn.textContent = 'Delete ' + d.tools.length + ' tool' + (d.tools.length === 1 ? '' : 's');
+  btn.onclick = function() { submitBulkDelete(tableKey, ids); };
+}
+async function submitBulkDelete(tableKey, ids) {
+  var btn = document.getElementById(tableKey + '-delete-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {
+    var r = await fetch('/admin/tools/' + tableKey + '/bulk-delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids: ids})
+    });
+    if (!r.ok) throw new Error();
+    window.location.reload();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Delete failed—try again';
+  }
+}
+function closeDeleteSelectedPanel(tableKey) {
+  document.getElementById(tableKey + '-delete-panel').style.display = 'none';
+}
 """
 
 
@@ -8504,10 +8580,18 @@ def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]]) ->
 </details>"""
 
 
-def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], category_options: list[dict] | None = None) -> str:
+def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], category_options: list[dict] | None = None,
+                            show_delete_button: bool = False) -> str:
     """fields: [{key, label, kind: 'select'|'checkbox'|'multi', options?}, ...].
     'multi' fields render a category_options checkbox grid and always replace
-    (not add/remove) the target rows' category set with the checked ones."""
+    (not add/remove) the target rows' category set with the checked ones.
+
+    show_delete_button adds a "Delete selected" button next to "Edit selected"
+    plus its own confirm panel (openDeleteSelectedPanel/renderDeleteSelectedPanel/
+    submitBulkDelete in _ADMIN_BULK_EDIT_JS), wired to
+    POST /admin/tools/{table_key}/bulk-delete-check and .../bulk-delete. Opt-in
+    per table (currently just Software) rather than default-on for every
+    bulk-panel caller."""
     field_options_html = "".join(f'<option value="{f["key"]}">{_esc(f["label"])}</option>' for f in fields)
 
     def _value_control(f: dict) -> str:
@@ -8530,10 +8614,30 @@ def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], ca
 
     values_html = "".join(_value_control(f) for f in fields)
     labels_json = json.dumps({f["key"]: f["label"] for f in fields})
+
+    delete_button_html = (
+        f'<button type="button" id="{table_key}-bulk-delete-btn" class="btn btn-ghost" disabled '
+        f'style="font-size:13px;padding:6px 16px;color:#b91c1c;border-color:#fca5a5;" '
+        f'onclick="openDeleteSelectedPanel(\'{table_key}\')">Delete selected (0)</button>'
+        if show_delete_button else ""
+    )
+    delete_panel_html = (
+        f"""<div id="{table_key}-delete-panel" style="display:none;border:1px solid #fca5a5;border-radius:12px;padding:16px 18px;margin:0 0 20px;background:var(--surface);max-width:520px;">
+  <div id="{table_key}-delete-body"></div>
+  <div style="margin-top:14px;">
+    <button type="button" id="{table_key}-delete-confirm-btn" class="btn" disabled
+      style="font-size:13px;padding:6px 16px;background:#b91c1c;border-color:#b91c1c;">Delete</button>
+    <button type="button" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;margin-left:6px;"
+      onclick="closeDeleteSelectedPanel('{table_key}')">Cancel</button>
+  </div>
+</div>""" if show_delete_button else ""
+    )
+
     return f"""
-<div style="margin:0 0 16px;">
+<div style="margin:0 0 16px;display:flex;gap:10px;flex-wrap:wrap;">
   <button type="button" id="{table_key}-bulk-btn" class="btn btn-ghost" disabled
     style="font-size:13px;padding:6px 16px;" onclick="openBulkPanel('{table_key}')">Edit selected (0)</button>
+  {delete_button_html}
 </div>
 <div id="{table_key}-bulk-panel" style="display:none;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:0 0 20px;background:var(--surface);max-width:480px;">
   <div id="{table_key}-bulk-step1">
@@ -8556,7 +8660,8 @@ def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], ca
     <button type="button" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;margin-left:6px;"
       onclick="backToBulkEdit('{table_key}')">Back</button>
   </div>
-</div>"""
+</div>
+{delete_panel_html}"""
 
 
 # Client-side sort/filter for the same two approved-rows tables — no new route,
@@ -8726,6 +8831,7 @@ def admin_software(request: Request):
         approved = [t for t in lib.list_tools(approved_only=True)]
         lead_counts = lib.get_tool_lead_counts()
         tool_categories = lib.list_tool_categories()
+        n_name_dupes = len(lib.find_tool_name_duplicate_candidates())
     finally:
         lib.close()
 
@@ -8813,6 +8919,8 @@ def admin_software(request: Request):
   <a href="/tools/software" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
   <a href="/admin/tools/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
+  &nbsp;&middot;&nbsp;
+  <a href="/admin/tools/name-duplicates" style="font-size:13px;color:{'#92400e' if n_name_dupes else 'var(--muted)'};font-weight:{'700' if n_name_dupes else '400'};">Check for name duplicates{f' ({n_name_dupes})' if n_name_dupes else ''} →</a>
 </p>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
@@ -8835,7 +8943,7 @@ def admin_software(request: Request):
 {_admin_column_picker_html("software", software_cols)}
 {_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
-{_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories)}
+{_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
 <div style="overflow-x:auto;">
 <form id="software-approved-form">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
@@ -8866,6 +8974,129 @@ applySortFilter('software');
 </p>
 </div>"""
     return HTMLResponse(_page("Software—CFO Toolbox Admin", "", body, authed=True))
+
+
+# ---------------------------------------------------------------------------
+# Name-based duplicate detection for the Software directory. Separate from
+# the URL-based DuplicateURLError check above (blocking, exact-URL-match,
+# enforced in linklib.db.add_tool/update_tool): this is an exact-match
+# normalize_tool_name() sweep across every current tool, surfaced here as a
+# reviewable list rather than enforced at save time (see the warn banner on
+# /tools/software wired from the two save routes above for the save-time
+# half). See linklib.db.normalize_tool_name for what "exact-match" covers
+# (case, parentheticals, entity suffixes) and deliberately doesn't (spelling,
+# spacing/hyphenation, or any fuzzy/distance-based matching).
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/tools/name-duplicates", response_class=HTMLResponse)
+def admin_tool_name_duplicates(request: Request, msg: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        candidates = lib.find_tool_name_duplicate_candidates()
+        decisions = lib.tool_name_dedupe_decisions(limit=40)
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+
+    def _tool_cell(t: dict) -> str:
+        approved_tag = '' if t["approved"] else ' <span style="font-size:11px;color:var(--muted);">(pending)</span>'
+        return (f'<a href="/tools/software/{_esc(t["slug"])}/edit" style="font-weight:600;">{_esc(t["name"])}</a>{approved_tag}'
+                f'<div style="font-size:12px;color:var(--muted);word-break:break-all;">{_esc(t["url"])}</div>')
+
+    def _candidate_row(c: dict) -> str:
+        a, b = c["tool_a"], c["tool_b"]
+        return f"""<tr>
+          <td style="padding:12px;border-bottom:1px solid var(--line);">{_tool_cell(a)}</td>
+          <td style="padding:12px;border-bottom:1px solid var(--line);">{_tool_cell(b)}</td>
+          <td style="padding:12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(c['normalized_name'])}</td>
+          <td style="padding:12px;border-bottom:1px solid var(--line);white-space:nowrap;">
+            <form method="post" action="/admin/tools/name-duplicates/resolve" style="display:inline;">
+              <input type="hidden" name="tool_id_a" value="{a['id']}">
+              <input type="hidden" name="tool_id_b" value="{b['id']}">
+              <input type="hidden" name="verdict" value="duplicate">
+              <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Flag as duplicate</button>
+            </form>
+            <form method="post" action="/admin/tools/name-duplicates/resolve" style="display:inline;margin-left:6px;">
+              <input type="hidden" name="tool_id_a" value="{a['id']}">
+              <input type="hidden" name="tool_id_b" value="{b['id']}">
+              <input type="hidden" name="verdict" value="dismissed">
+              <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Not a duplicate, dismiss</button>
+            </form>
+          </td>
+        </tr>"""
+
+    if candidates:
+        candidates_html = f"""<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool A</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool B</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Normalized name</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Resolve</th>
+</tr></thead>
+<tbody>{"".join(_candidate_row(c) for c in candidates)}</tbody>
+</table>
+</div>"""
+    else:
+        candidates_html = ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+                           'padding:32px;text-align:center;color:var(--muted);">No unresolved name-duplicate candidates. '
+                           'Every exact normalized-name match across all tools has been flagged or dismissed.</div>')
+
+    def _decision_row(d: dict) -> str:
+        verdict_label = ('<span style="color:#b91c1c;font-weight:600;">Flagged as duplicate</span>' if d["verdict"] == "duplicate"
+                         else '<span style="color:var(--muted);">Dismissed—not a duplicate</span>')
+        return (f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(d["name_a"])} &harr; {_esc(d["name_b"])}</td>'
+                f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{verdict_label}</td>'
+                f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(d["created_at"][:10])}</td></tr>')
+
+    decisions_html = ""
+    if decisions:
+        decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Past decisions</h2>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<tbody>{"".join(_decision_row(d) for d in decisions)}</tbody>
+</table>
+</div>"""
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
+<h1 style="margin:0 0 4px;">Name-duplicate check</h1>
+<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">
+  Exact-match scan of every tool's name (case, parenthetical text, and entity suffixes like Inc/LLC ignored)—catches
+  a same-vendor duplicate saved under a different URL, which the URL-based check can't see. Not fuzzy matching:
+  spelling or spacing differences won't be flagged here.
+</p>
+{banner}
+{candidates_html}
+{decisions_html}
+</div>"""
+    return HTMLResponse(_page("Name-duplicate check—CFO Toolbox Admin", "", body, authed=True))
+
+
+@app.post("/admin/tools/name-duplicates/resolve")
+async def admin_tool_name_duplicates_resolve(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    try:
+        tool_id_a = int(form.get("tool_id_a"))
+        tool_id_b = int(form.get("tool_id_b"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid tool ids.")
+    verdict = (form.get("verdict") or "").strip()
+    if verdict not in ("duplicate", "dismissed"):
+        raise HTTPException(status_code=400, detail="Invalid verdict.")
+    lib = _lib()
+    try:
+        lib.record_tool_name_dedupe_decision(tool_id_a, tool_id_b, verdict)
+    finally:
+        lib.close()
+    msg = "Flagged as a duplicate." if verdict == "duplicate" else "Dismissed—won't resurface."
+    return RedirectResponse(f"/admin/tools/name-duplicates?msg={quote(msg)}", status_code=303)
 
 
 # Field allowlist for the Software bulk-edit panel — server-side gate so a
@@ -8905,6 +9136,69 @@ async def admin_software_bulk_edit(request: Request):
             else:
                 kwargs[field] = 1 if value == "1" else 0
             lib.update_tool(tool_id, **kwargs)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/admin/tools/software/bulk-delete-check")
+async def admin_software_bulk_delete_check(request: Request):
+    """Preview for the Software bulk-delete confirm step: resolves the
+    selected ids to names, plus a lightweight (not exhaustive) check for
+    whether any of them is curated as a competitor on another tool's
+    profile — that tool would silently lose a competitor entry once this
+    batch is deleted. tool_competitors is an undirected pair (see the
+    CREATE TABLE comment in db.py), so list_tool_competitors(tid) already
+    returns both directions; we only flag references from OUTSIDE the
+    selection, since two selected tools being mutual competitors isn't a
+    surprise to anyone."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    try:
+        tool_ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    selected = set(tool_ids)
+    lib = _lib()
+    try:
+        tools = []
+        warnings = []
+        for tid in tool_ids:
+            t = lib.get_tool(tid)
+            if not t:
+                continue
+            tools.append({"id": tid, "name": t["name"]})
+            referencing = [c["name"] for c in lib.list_tool_competitors(tid) if c["id"] not in selected]
+            if referencing:
+                warnings.append({"name": t["name"], "referenced_by": referencing})
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "tools": tools, "warnings": warnings})
+
+
+@app.post("/admin/tools/software/bulk-delete")
+async def admin_software_bulk_delete(request: Request):
+    """Same delete path as the single-row Delete button (lib.delete_tool,
+    which also cascades field_reviews and tool_competitors rows), just
+    looped over the selection made in /admin/tools/software."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    lib = _lib()
+    try:
+        for raw_id in ids:
+            try:
+                tool_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            lib.delete_tool(tool_id)
     finally:
         lib.close()
     return JSONResponse({"ok": True})
@@ -10845,6 +11139,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     lib = _lib()
     try:
+        name_dup = lib.find_tool_name_duplicate(name)
         tool_id = lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
                                 promoted=promoted, vendor_email=vendor_email,
                                 warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
@@ -10854,7 +11149,10 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     finally:
         lib.close()
     background_tasks.add_task(_run_tool_research, tool_id)
-    return RedirectResponse("/tools/software", status_code=303)
+    redirect_url = "/tools/software"
+    if name_dup:
+        redirect_url += f"?warn={quote(_name_duplicate_warning(name_dup))}"
+    return RedirectResponse(redirect_url, status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/approve")
@@ -11284,6 +11582,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     lib = _lib()
     try:
+        name_dup = lib.find_tool_name_duplicate(name, exclude_id=tool_id)
         lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
                         promoted=promoted, vendor_email=vendor_email,
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
@@ -11296,7 +11595,10 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     finally:
         lib.close()
-    return RedirectResponse("/tools/software", status_code=303)
+    redirect_url = "/tools/software"
+    if name_dup:
+        redirect_url += f"?warn={quote(_name_duplicate_warning(name_dup))}"
+    return RedirectResponse(redirect_url, status_code=303)
 
 
 @app.post("/admin/tools/{tool_id}/screenshot/recapture")
@@ -16451,6 +16753,85 @@ def admin_ask_report_export(request: Request, user: str = ""):
     )
 
 
+# Categorical palette for the overhead-spend stacked-bar chart, drawn from
+# BRAND.md's data-viz ramp (2.4) rather than an arbitrary rainbow — cool
+# navy/seafoam tones carry most categories, coral surfaces only once it's
+# actually reached (a handful of categories in), matching the "coral is rare"
+# rule. Cycles if there are ever more categories than colors.
+_OVERHEAD_CHART_PALETTE = [
+    "#002975",  # --navy
+    "#2E9C86",  # --seafoam-mid
+    "#3F5C9A",  # --navy-light
+    "#E8704F",  # --coral
+    "#1F7A66",  # --seafoam-deep
+    "#F4A98F",  # --coral-light
+    "#A3E5D4",  # --seafoam
+    "#6F6A60",  # --muted (fallback / "Uncategorized" tends to land here)
+]
+
+
+def _overhead_category_colors(categories: list[str]) -> list[str]:
+    return [_OVERHEAD_CHART_PALETTE[i % len(_OVERHEAD_CHART_PALETTE)] for i in range(len(categories))]
+
+
+def _overhead_month_label(month: str, *, short: bool) -> str:
+    """'2026-08' -> "Aug '26" (short) or "Aug 2026"."""
+    dt = datetime.strptime(month, "%Y-%m")
+    return dt.strftime("%b '%y") if short else dt.strftime("%b %Y")
+
+
+def _overhead_stacked_bar_chart(chart_data: dict, *, width: int, height: int = 220,
+                                 label_every: int = 1, short_labels: bool = True) -> str:
+    """Renders chart_data (see Library.manual_overhead_monthly_by_category)
+    as an inline SVG stacked bar chart plus a color-key legend below it.
+    Server-rendered (no client-side charting library) to match how every
+    other data view on this page works — a plain GET renders the whole
+    page, nothing hydrates after load."""
+    months, categories, series = chart_data["months"], chart_data["categories"], chart_data["series"]
+    n = len(months)
+    if n == 0 or not categories:
+        return '<p style="color:var(--muted);font-size:13px;padding:24px 0;text-align:center;">No vendor spend recorded yet.</p>'
+
+    totals = [sum(series[c][i] for c in categories) for i in range(n)]
+    max_total = max(totals) or 1.0
+    colors = _overhead_category_colors(categories)
+
+    pad_left, pad_right, pad_top, pad_bottom = 6, 6, 10, 34
+    plot_w = width - pad_left - pad_right
+    plot_h = height - pad_top - pad_bottom
+    slot_w = plot_w / n
+    bar_w = max(slot_w * 0.62, 2)
+
+    parts = [f'<line x1="{pad_left}" y1="{pad_top + plot_h:.1f}" x2="{width - pad_right}" y2="{pad_top + plot_h:.1f}" '
+              f'stroke="var(--line-strong)" stroke-width="1"/>']
+    for i, month in enumerate(months):
+        x = pad_left + i * slot_w + (slot_w - bar_w) / 2
+        y_cursor = pad_top + plot_h
+        for cat, color in zip(categories, colors):
+            amt = series[cat][i]
+            if amt <= 0:
+                continue
+            seg_h = (amt / max_total) * plot_h
+            y = y_cursor - seg_h
+            parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{seg_h:.1f}" fill="{color}"/>')
+            y_cursor = y
+        if i % label_every == 0:
+            lx = x + bar_w / 2
+            ly = pad_top + plot_h + 12
+            label = _esc(_overhead_month_label(month, short=short_labels))
+            parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="9" fill="var(--muted)" '
+                          f'text-anchor="end" transform="rotate(-55 {lx:.1f} {ly:.1f})">{label}</text>')
+
+    svg = (f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" '
+           f'xmlns="http://www.w3.org/2000/svg" font-family="var(--font-body)">' + "".join(parts) + '</svg>')
+    legend = "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-soft);margin:0 12px 4px 0;">'
+        f'<span style="width:9px;height:9px;border-radius:2px;background:{color};display:inline-block;flex-shrink:0;"></span>{_esc(cat)}</span>'
+        for cat, color in zip(categories, colors)
+    )
+    return f'<div>{svg}<div style="margin-top:4px;line-height:1.4;">{legend}</div></div>'
+
+
 @app.get("/admin/overhead-spend", response_class=HTMLResponse)
 def admin_overhead_spend(request: Request, category: str = "", msg: str = "", error: str = ""):
     """Two sections that are deliberately never added together:
@@ -16476,6 +16857,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         entries = lib.list_manual_overhead(category=category or None)
         categories = lib.manual_overhead_categories()
         vendor_total = lib.manual_overhead_total(category=category or None)
+        monthly_chart = lib.manual_overhead_monthly_by_category(months=12)
         breakdown = lib.overhead_cost_breakdown()
         by_month = lib.overhead_cost_by_month()
         usage_total = sum(s["total_cost"] for s in breakdown)
@@ -16551,6 +16933,8 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 </tr>""" for m in by_month) or \
         '<tr><td colspan="2" style="padding:24px;text-align:center;color:var(--muted);">No usage recorded yet.</td></tr>'
 
+    monthly_chart_html = _overhead_stacked_bar_chart(monthly_chart, width=420, height=200)
+
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Overhead spend</h1>
@@ -16578,6 +16962,13 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 {datalist}
 
 <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
+    <h3 style="font-size:15px;font-weight:600;margin:0 0 4px;">Monthly spend by category</h3>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Last 12 months.</p>
+    {monthly_chart_html}
+    <div style="margin-top:10px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">See full history &amp; edit &rarr;</a></div>
+  </div>
+
   <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;flex:1 1 400px;max-width:460px;">
     <h3 style="font-size:15px;font-weight:600;margin:0 0 14px;">Add a charge</h3>
     <form method="post" action="/admin/overhead-spend/new" style="display:grid;gap:12px;">
@@ -16627,45 +17018,162 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 <p style="color:var(--muted);margin:0 0 4px;">Internal cost attribution for enrichment, embeddings, and FP&amp;A Buddy queries&mdash;computed from token counts and model pricing, not billed amounts.</p>
 <p style="color:var(--muted);margin:0 0 18px;font-style:italic;">Estimate only, for understanding usage patterns&mdash;this won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
 
-<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px;">
-  <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_total:.2f}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Estimated usage, all time</div>
+<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+  <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;">
+    <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_total:.2f}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;">Estimated usage, all time</div>
+    </div>
+    <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_month_cost:.2f}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;">This calendar month</div>
+    </div>
+    <div>
+      <h3 style="font-size:14px;margin:0 0 10px;">By source</h3>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:400px;">
+          <thead><tr style="background:var(--bg);">
+            <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
+            <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Calls</th>
+            <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">This month</th>
+            <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">All time</th>
+          </tr></thead>
+          <tbody>{source_rows}</tbody>
+        </table>
+      </div>
+    </div>
   </div>
-  <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${usage_month_cost:.2f}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">This calendar month</div>
+
+  <div style="flex:1 1 460px;">
+    <h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;min-width:320px;">
+        <thead><tr style="background:var(--bg);">
+          <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Month</th>
+          <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Combined cost</th>
+        </tr></thead>
+        <tbody>{month_rows}</tbody>
+      </table>
+    </div>
   </div>
-</div>
-
-<h3 style="font-size:14px;margin:0 0 10px;">By source</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:24px;">
-  <table style="width:100%;border-collapse:collapse;min-width:480px;">
-    <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
-      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Calls</th>
-      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">This month</th>
-      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">All time</th>
-    </tr></thead>
-    <tbody>{source_rows}</tbody>
-  </table>
-</div>
-
-<h3 style="font-size:14px;margin:0 0 10px;">By month</h3>
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
-  <table style="width:100%;border-collapse:collapse;min-width:320px;">
-    <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Month</th>
-      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Combined cost</th>
-    </tr></thead>
-    <tbody>{month_rows}</tbody>
-  </table>
 </div>
 <style>
 tbody tr{{border-top:1px solid var(--line);}}
 </style>
 </div>"""
     return HTMLResponse(_page("Overhead spend—Admin", "Admin", body, authed=True))
+
+
+@app.get("/admin/overhead-spend/details", response_class=HTMLResponse)
+def admin_overhead_spend_details(request: Request, msg: str = "", error: str = ""):
+    """Full-history companion to the summary page's compact 12-month chart
+    card: the same stacked-bar chart at roughly 3x the width, covering 36
+    months, plus every vendor-spend row as a table that's read-only until an
+    Edit click reveals the same inline edit form the summary page uses
+    (posting back here via the hidden "back" field — see
+    _overhead_redirect_base)."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        entries = lib.list_manual_overhead()
+        categories = lib.manual_overhead_categories()
+        chart_data = lib.manual_overhead_monthly_by_category(months=36)
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
+                     f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
+
+    chart_html = _overhead_stacked_bar_chart(chart_data, width=1400, height=280, short_labels=True)
+    datalist = f'<datalist id="overhead-categories-details">{"".join(f"<option value={chr(34)}{_esc(c)}{chr(34)}>" for c in categories)}</datalist>'
+
+    rows_html = ""
+    for e in entries:
+        eid = e["id"]
+        rows_html += f"""<tr id="oh-row-{eid}" style="border-top:1px solid var(--line);">
+  <td style="padding:9px 12px;font-size:13px;font-weight:500;">{_esc(e['vendor'])}</td>
+  <td style="padding:9px 12px;font-size:13px;">{_esc(e['date'])}</td>
+  <td style="padding:9px 12px;font-size:13px;">{_esc(e['category']) or '&mdash;'}</td>
+  <td style="padding:9px 12px;font-size:13px;color:var(--muted);">{_esc(e['note']) or '&mdash;'}</td>
+  <td style="padding:9px 12px;font-size:13px;font-weight:600;text-align:right;">${e['amount']:.2f}</td>
+  <td style="padding:9px 12px;text-align:right;">
+    <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;" onclick="toggleOverheadEdit({eid})">Edit</button>
+  </td>
+</tr>
+<tr id="oh-edit-{eid}" style="display:none;border-top:1px solid var(--line);">
+  <td colspan="6" style="padding:12px;background:var(--bg);">
+    <form method="post" action="/admin/overhead-spend/{eid}/edit" style="display:grid;gap:6px;margin:0 0 8px;max-width:640px;">
+      <input type="hidden" name="back" value="details">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:#fff;">
+        <input type="date" name="date" value="{_esc(e['date'])}" required
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+        <input type="text" name="category" value="{_esc(e['category'])}" maxlength="60" placeholder="Category" list="overhead-categories-details"
+          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">
+      </div>
+      <input type="text" name="note" value="{_esc(e['note'])}" maxlength="300" placeholder="Note (optional)"
+        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:#fff;">
+      <div style="display:flex;gap:8px;">
+        <button type="submit" class="btn" style="font-size:12px;padding:5px 12px;">Save</button>
+        <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;" onclick="toggleOverheadEdit({eid})">Cancel</button>
+      </div>
+    </form>
+    <form method="post" action="/admin/overhead-spend/{eid}/delete" style="margin:0;"
+          onsubmit="return confirm('Delete this {_esc(e['vendor'])} entry?');">
+      <input type="hidden" name="back" value="details">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+    if not entries:
+        rows_html = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--muted);">No vendor charges recorded yet.</td></tr>'
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/overhead-spend" style="font-size:13px;color:var(--muted);">&larr; Overhead spend</a></p>
+<h1>Overhead spend&mdash;full history</h1>
+{banner}{error_banner}
+
+<h2 style="font-size:16px;margin:18px 0 4px;">Monthly spend by category</h2>
+<p style="color:var(--muted);margin:0 0 14px;">Last 36 months.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:32px;overflow-x:auto;">
+  {chart_html}
+</div>
+
+<h2 style="font-size:16px;margin:0 0 4px;">All vendor charges</h2>
+<p style="color:var(--muted);margin:0 0 14px;">Click Edit on any row to make changes in place.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:720px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Vendor</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Date</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Category</th>
+      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Note</th>
+      <th style="padding:9px 12px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Amount</th>
+      <th style="padding:9px 12px;"></th>
+    </tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+</div>
+{datalist}
+<script>
+function toggleOverheadEdit(id) {{
+  var row = document.getElementById('oh-row-' + id);
+  var edit = document.getElementById('oh-edit-' + id);
+  var showEdit = edit.style.display === 'none';
+  row.style.display = showEdit ? 'none' : '';
+  edit.style.display = showEdit ? 'table-row' : 'none';
+}}
+</script>
+</div>"""
+    return HTMLResponse(_page("Overhead spend—full history—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/overhead-spend/new")
@@ -16692,11 +17200,21 @@ async def admin_overhead_spend_new(request: Request):
     return RedirectResponse(f"/admin/overhead-spend?msg={quote(msg)}", status_code=303)
 
 
+def _overhead_redirect_base(form) -> str:
+    """Edit/delete forms are reachable from both the summary page's always-
+    open inline rows and the /details page's click-to-edit table. A hidden
+    "back" field says which one to return to; anything other than "details"
+    (including it being absent, e.g. old cached forms) falls back to the
+    summary page."""
+    return "/admin/overhead-spend/details" if (form.get("back") or "") == "details" else "/admin/overhead-spend"
+
+
 @app.post("/admin/overhead-spend/{entry_id}/edit")
 async def admin_overhead_spend_edit(request: Request, entry_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
+    redirect_base = _overhead_redirect_base(form)
     vendor = (form.get("vendor") or "").strip()
     date = (form.get("date") or "").strip()
     category = (form.get("category") or "").strip()
@@ -16704,27 +17222,29 @@ async def admin_overhead_spend_edit(request: Request, entry_id: int):
     try:
         amount = float(form.get("amount") or 0)
     except ValueError:
-        return RedirectResponse(f"/admin/overhead-spend?error={quote('Amount must be a number.')}", status_code=303)
+        return RedirectResponse(f"{redirect_base}?error={quote('Amount must be a number.')}", status_code=303)
     lib = _lib()
     try:
         lib.update_manual_overhead(entry_id, vendor, date, amount, category, note)
     except ValueError as e:
-        return RedirectResponse(f"/admin/overhead-spend?error={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"{redirect_base}?error={quote(str(e))}", status_code=303)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/overhead-spend?msg={quote('Saved.')}", status_code=303)
+    return RedirectResponse(f"{redirect_base}?msg={quote('Saved.')}", status_code=303)
 
 
 @app.post("/admin/overhead-spend/{entry_id}/delete")
-def admin_overhead_spend_delete(request: Request, entry_id: int):
+async def admin_overhead_spend_delete(request: Request, entry_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    redirect_base = _overhead_redirect_base(form)
     lib = _lib()
     try:
         lib.delete_manual_overhead(entry_id)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/overhead-spend?msg={quote('Deleted.')}", status_code=303)
+    return RedirectResponse(f"{redirect_base}?msg={quote('Deleted.')}", status_code=303)
 
 
 @app.get("/admin/overhead-spend/csv/template")

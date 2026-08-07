@@ -17,13 +17,14 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 
 
 def main():
     parser = argparse.ArgumentParser(description="Dump communities.name/url/slug.")
-    parser.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    parser.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     args = parser.parse_args()
+    args.db = resolve_db_path(args.db)
 
     lib = Library(args.db)
     try:

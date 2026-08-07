@@ -36,7 +36,7 @@ import sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 
 # Old category name -> new taxonomy name. Every category ever seeded via
 # scripts/seed_tools.py or added by hand at /admin/tools/categories should
@@ -97,9 +97,10 @@ NEW_NAMES = {name for name, _ in NEW_CATEGORIES}
 
 def main():
     parser = argparse.ArgumentParser(description="Migrate CFO Toolbox Software tags to the 15-tag taxonomy.")
-    parser.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    parser.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     parser.add_argument("--dry-run", action="store_true", help="Report what would change without writing.")
     args = parser.parse_args()
+    args.db = resolve_db_path(args.db)
 
     lib = Library(args.db)
     try:

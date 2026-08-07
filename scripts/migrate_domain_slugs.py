@@ -36,7 +36,7 @@ import sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from linklib.db import Library, _domain_slug_base, _domain_slug_full, _slugify
+from linklib.db import Library, _domain_slug_base, _domain_slug_full, _slugify, resolve_db_path
 
 
 def _assign_slugs(rows: list[tuple[int, str, str, str]]) -> dict[int, str]:
@@ -96,9 +96,10 @@ def _migrate_table(lib: Library, table: str, dry_run: bool) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Migrate Software/Communities slugs to domain-derived values.")
-    parser.add_argument("--db", default=os.environ.get("LINKLIB_DB", "library.db"))
+    parser.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     parser.add_argument("--dry-run", action="store_true", help="Report what would change without writing.")
     args = parser.parse_args()
+    args.db = resolve_db_path(args.db)
 
     lib = Library(args.db)
     try:

@@ -23,14 +23,14 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from linklib.db import Library
+from linklib.db import Library, resolve_db_path
 from linklib.feed import parse_opml
 from linklib.queue import QUEUE_ENRICH_MODEL, scan_sitemaps_into_queue
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default="library.db")
+    ap.add_argument("--db", default=None, help="Path to library.db (or set LINKLIB_DB)")
     ap.add_argument("--opml", default=os.environ.get("LINKLIB_SITES_OPML", "preferred_sites.opml"))
     ap.add_argument("--since", default="",
                     help="cutoff date YYYY-MM-DD (default: your most recent saved_at)")
@@ -43,6 +43,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="report coverage without enriching or saving")
     args = ap.parse_args()
+    args.db = resolve_db_path(args.db)
 
     lib = Library(args.db)
 
