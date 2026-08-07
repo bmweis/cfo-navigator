@@ -11278,11 +11278,19 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         # silently orphaning every field/button after this point (Save
         # changes included) from #tool-edit-form. That was the root cause of
         # "Save changes does nothing" once a tool's agent taxonomy needed
-        # verification (#265).
+        # verification, and is also why the hidden form below only renders
+        # in this same branch — once verified, no verify action (or its URL)
+        # should be present on the page at all.
         _taxonomy_verify_action = (
             '<button type="submit" form="agent-taxonomy-verify-form" '
             'class="tool-admin-btn" style="margin-top:8px;">Mark verified</button>'
         )
+        _taxonomy_verify_form_html = (
+            f'<form id="agent-taxonomy-verify-form" method="post" '
+            f'action="/admin/tools/{tool_id}/agent-taxonomy/verify" style="display:none;"></form>'
+        )
+    else:
+        _taxonomy_verify_form_html = ""
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -11404,7 +11412,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 </form>
 <form id="research-refresh-form" method="post" action="/admin/tools/{tool_id}/research/refresh" style="display:none;"></form>
 <form id="screenshot-recapture-form" method="post" action="/admin/tools/{tool_id}/screenshot/recapture" style="display:none;"></form>
-<form id="agent-taxonomy-verify-form" method="post" action="/admin/tools/{tool_id}/agent-taxonomy/verify" style="display:none;"></form>
+{_taxonomy_verify_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Competitors</h2>
@@ -11491,7 +11499,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 // edit-in-progress in every other field (Name, URL, Description, Short
 // summary, Differentiation, category checkboxes, etc.) — including a draft
 // from Generate summary above that hasn't been saved yet. Warn before that
-// happens rather than eating the edit with no explanation (#265).
+// happens rather than eating the edit with no explanation.
 function confirmDiscardsUnsavedEdits(button) {{
   var form = document.getElementById('tool-edit-form');
   if (!form) return true;
