@@ -8426,7 +8426,15 @@ function updateBulkButton(tableKey) {
   if (delBtn) { delBtn.disabled = n === 0; delBtn.textContent = 'Delete selected (' + n + ')'; }
 }
 function selectAllRows(tableKey, checked) {
-  document.querySelectorAll('.' + tableKey + '-row-cb').forEach(function(cb) { cb.checked = checked; });
+  // Only touch rows the sort/filter toolbar (applySortFilter) currently
+  // shows — a filtered-out <tr> is display:none, not removed from the DOM,
+  // so "select all" must skip it or it'd silently select hidden rows the
+  // admin never saw checked.
+  document.querySelectorAll('.' + tableKey + '-row-cb').forEach(function(cb) {
+    var row = cb.closest('tr');
+    if (row && row.style.display === 'none') return;
+    cb.checked = checked;
+  });
   updateBulkButton(tableKey);
 }
 function openBulkPanel(tableKey) {

@@ -71,6 +71,22 @@ def test_communities_sort_filter_toolbar_renders(admin_client):
     assert 'data-categories="peer group"' in r.text
 
 
+def test_select_all_skips_rows_hidden_by_filter(admin_client):
+    """selectAllRows() must only check rows the sort/filter toolbar currently
+    shows. applySortFilter() hides a filtered-out row via
+    `row.style.display = 'none'` on the <tr> (not removing it from the DOM),
+    so "select all" has to skip any checkbox whose row is hidden that way —
+    otherwise checking the header box after filtering silently selects rows
+    the admin never saw, and a bulk delete could hit unintended entries."""
+    client, appmod, db = admin_client
+    r = client.get("/admin/tools/software")
+    assert "function selectAllRows(tableKey, checked) {" in r.text
+    body = r.text[r.text.index("function selectAllRows(tableKey, checked) {"):]
+    body = body[:body.index("\n}\n")]
+    assert "row.style.display === 'none'" in body
+    assert "cb.closest('tr')" in body
+
+
 def test_default_sort_field_is_name_for_both_tables(admin_client):
     client, appmod, db = admin_client
     r1 = client.get("/admin/tools/software")
