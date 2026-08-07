@@ -11441,10 +11441,29 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
             'background:#fef3c7;color:#92400e;border-radius:5px;padding:2px 7px;margin-left:8px;">Needs verification</span>'
         )
+        # A bare button pointing at the hidden agent-taxonomy-verify-form
+        # below (same pattern as the Generate summary/Generate screenshot
+        # buttons' research-refresh-form / screenshot-recapture-form) rather
+        # than an inline <form>...</form> here: this whole block renders
+        # inside #tool-edit-form, and a <form> nested inside another <form>
+        # is invalid HTML — browsers handle it by having the nested form's
+        # closing tag pop the *outer* form off the parse stack early,
+        # silently orphaning every field/button after this point (Save
+        # changes included) from #tool-edit-form. That was the root cause of
+        # "Save changes does nothing" once a tool's agent taxonomy needed
+        # verification, and is also why the hidden form below only renders
+        # in this same branch — once verified, no verify action (or its URL)
+        # should be present on the page at all.
         _taxonomy_verify_action = (
-            f'<form method="post" action="/admin/tools/{tool_id}/agent-taxonomy/verify" style="margin-top:8px;">'
-            f'<button type="submit" class="tool-admin-btn">Mark verified</button></form>'
+            '<button type="submit" form="agent-taxonomy-verify-form" '
+            'class="tool-admin-btn" style="margin-top:8px;">Mark verified</button>'
         )
+        _taxonomy_verify_form_html = (
+            f'<form id="agent-taxonomy-verify-form" method="post" '
+            f'action="/admin/tools/{tool_id}/agent-taxonomy/verify" style="display:none;"></form>'
+        )
+    else:
+        _taxonomy_verify_form_html = ""
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -11524,7 +11543,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(standalone feature, agent-assisted, or fully independent agent; searchable)</span>{_taxonomy_verify_badge}</label>
       <span>
-        <button type="submit" form="research-refresh-form" class="tool-admin-btn">Generate summary</button>
+        <button type="submit" form="research-refresh-form" class="tool-admin-btn"
+          onclick="return confirmDiscardsUnsavedEdits(this)">Generate summary</button>
       </span>
     </div>
     <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Crawls the vendor's homepage plus its real Product/Solutions-type nav pages to draft this note and the Feature rows below in one pass—runs automatically when a tool is added; use this button to re-run it (e.g. after a vendor redesigns their site).</p>
@@ -11538,7 +11558,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
       <span>
-        <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn">Generate screenshot</button>
+        <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn"
+          onclick="return confirmDiscardsUnsavedEdits(this)">Generate screenshot</button>
       </span>
     </div>
     <!-- type="text", not "url": Generate screenshot writes a site-relative
@@ -11564,6 +11585,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 </form>
 <form id="research-refresh-form" method="post" action="/admin/tools/{tool_id}/research/refresh" style="display:none;"></form>
 <form id="screenshot-recapture-form" method="post" action="/admin/tools/{tool_id}/screenshot/recapture" style="display:none;"></form>
+{_taxonomy_verify_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Competitors</h2>
@@ -11642,6 +11664,29 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 .features-group[open] .features-chevron{{transform:rotate(180deg);}}
 </style>
 <script>{_GENERATE_DESC_JS}
+// Generate summary (Description) and Generate summary (Differentiation)
+// draft into the form via fetch — no navigation, nothing else on the page
+// is touched. Refresh AI research (Agent taxonomy) and Generate screenshot
+// are different: they're real form submits that reload this whole page
+// from the database once the server responds, which silently discards any
+// edit-in-progress in every other field (Name, URL, Description, Short
+// summary, Differentiation, category checkboxes, etc.) — including a draft
+// from Generate summary above that hasn't been saved yet. Warn before that
+// happens rather than eating the edit with no explanation.
+function confirmDiscardsUnsavedEdits(button) {{
+  var form = document.getElementById('tool-edit-form');
+  if (!form) return true;
+  var dirty = Array.from(form.elements).some(function(el) {{
+    if (!el.name || el.disabled) return false;
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked !== el.defaultChecked;
+    if ('defaultValue' in el) return el.value !== el.defaultValue;
+    return false;
+  }});
+  if (!dirty) return true;
+  return confirm('This reloads the page with fresh data, which will discard any unsaved '
+    + 'edits above (including anything just drafted with Generate summary). '
+    + 'Save changes first, or continue and lose them?');
+}}
 async function generateDifferentiation(toolId, textareaId, statusId) {{
   var status = document.getElementById(statusId);
   status.textContent = 'Generating…';
