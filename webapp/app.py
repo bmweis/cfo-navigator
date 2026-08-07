@@ -8697,6 +8697,8 @@ function applySortFilter(tableKey) {
   });
   var catBoxes = document.querySelectorAll('#' + tableKey + '-filter-categories input:checked');
   var activeCats = Array.prototype.map.call(catBoxes, function(c) { return c.value.toLowerCase(); });
+  var searchBox = document.getElementById(tableKey + '-filter-search');
+  var q = searchBox ? searchBox.value.trim().toLowerCase() : '';
 
   var visible = 0;
   rows.forEach(function(row) {
@@ -8708,6 +8710,7 @@ function applySortFilter(tableKey) {
       var rowCats = (row.getAttribute('data-categories') || '').split('|');
       if (!activeCats.some(function(c) { return rowCats.indexOf(c) !== -1; })) ok = false;
     }
+    if (ok && q && (row.getAttribute('data-search') || '').indexOf(q) === -1) ok = false;
     row.style.display = ok ? '' : 'none';
     if (ok) visible++;
   });
@@ -8739,6 +8742,8 @@ function toggleSortDir(tableKey) {
 function resetSortFilter(tableKey) {
   document.querySelectorAll('#' + tableKey + '-filter-scalars select').forEach(function(sel) { sel.value = ''; });
   document.querySelectorAll('#' + tableKey + '-filter-categories input').forEach(function(cb) { cb.checked = false; });
+  var searchBox = document.getElementById(tableKey + '-filter-search');
+  if (searchBox) searchBox.value = '';
   var sortSel = document.getElementById(tableKey + '-sort-field');
   if (sortSel) sortSel.value = sortSel.options[0].value;
   var dirBtn = document.getElementById(tableKey + '-sort-dir');
@@ -8756,11 +8761,22 @@ def _admin_row_data_attrs(fields: dict[str, str]) -> str:
 
 
 def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str, str]],
-                                     scalar_filters: list[dict], category_options: list[dict] | None = None) -> str:
+                                     scalar_filters: list[dict], category_options: list[dict] | None = None,
+                                     category_style: str = "dropdown", search_placeholder: str | None = None) -> str:
     """sort_fields: (field_key, label) pairs, first is the default (Name, matching
     the tables' existing server-side ORDER BY). scalar_filters: [{key, label, options}].
     category_options: if given, adds an OR-matched category filter alongside the
-    scalar (AND-matched) filters."""
+    scalar (AND-matched) filters.
+
+    category_style: 'dropdown' (default, a click-to-reveal <details> — kept as-is
+    for existing callers) or 'pills' — always-visible, multi-select toggle pills
+    mirroring the .tcat-btn pattern on the public /tools/software directory
+    (same OR-within-categories, AND-with-everything-else semantics either way;
+    only the affordance changes).
+
+    search_placeholder: if given, adds a live text-search box (no submit button)
+    that AND-filters against each row's data-search attribute (see
+    _admin_row_data_attrs) alongside the category/scalar filters."""
     sort_options = "".join(f'<option value="{k}">{_esc(label)}</option>' for k, label in sort_fields)
     scalar_html = "".join(
         f'<select data-filter-field="{f["key"]}" onchange="applySortFilter(\'{table_key}\')" '
@@ -8771,7 +8787,23 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
         for f in scalar_filters
     )
     category_html = ""
-    if category_options:
+    pills_html = ""
+    if category_options and category_style == "pills":
+        boxes = "".join(
+            f'<label class="admin-cat-pill">'
+            f'<input type="checkbox" value="{_esc(c["name"])}" onchange="applySortFilter(\'{table_key}\')"> {_esc(c["name"])}</label>'
+            for c in category_options
+        )
+        pills_html = (f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:8px;'
+                      f'align-items:center;margin:-2px 0 12px;">{boxes}</div>'
+                      '<style>.admin-cat-pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;'
+                      'font-weight:500;padding:6px 14px;border-radius:999px;border:1px solid var(--line);'
+                      'color:var(--muted);cursor:pointer;white-space:nowrap;}'
+                      '.admin-cat-pill:hover{background:var(--accent-light);color:var(--ink);}'
+                      '.admin-cat-pill input{position:absolute;opacity:0;width:0;height:0;}'
+                      '.admin-cat-pill:has(input:checked){background:var(--accent);color:#fff;border-color:var(--accent);}'
+                      '</style>')
+    elif category_options:
         boxes = "".join(
             f'<label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;white-space:nowrap;">'
             f'<input type="checkbox" value="{_esc(c["name"])}" onchange="applySortFilter(\'{table_key}\')"> {_esc(c["name"])}</label>'
@@ -8782,7 +8814,13 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
                           f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:6px 12px;'
                           f'margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;'
                           f'background:var(--surface);max-width:420px;">{boxes}</div></details>')
-    return f"""<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 12px;">
+    search_html = ""
+    if search_placeholder:
+        search_html = (f'<input id="{table_key}-filter-search" type="search" '
+                        f'placeholder="{_esc(search_placeholder)}" oninput="applySortFilter(\'{table_key}\')" '
+                        'style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;'
+                        'min-width:220px;">')
+    return f"""{pills_html}<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 12px;">
   <label style="font-size:13px;color:var(--muted);">Sort by</label>
   <select id="{table_key}-sort-field" onchange="applySortFilter('{table_key}')"
     style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;">{sort_options}</select>
@@ -8790,6 +8828,7 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
     class="btn btn-ghost" style="font-size:13px;padding:5px 12px;">Ascending</button>
   <span style="width:1px;height:20px;background:var(--line);"></span>
   <div id="{table_key}-filter-scalars" style="display:flex;flex-wrap:wrap;gap:10px;">{scalar_html}</div>
+  {search_html}
   {category_html}
   <button type="button" onclick="resetSortFilter('{table_key}')" class="btn btn-ghost" style="font-size:13px;padding:5px 12px;">Reset</button>
   <span id="{table_key}-sort-filter-count" style="font-size:13px;color:var(--muted);margin-left:auto;"></span>
@@ -8842,6 +8881,7 @@ def admin_software(request: Request):
         row_attrs = _admin_row_data_attrs({
             "name": t["name"], "promoted": "1" if t.get("promoted") else "0",
             "categories": "|".join(t["categories"]),
+            "search": f"{t['name']} {t['url']}",
         })
         return f"""<tr {row_attrs}>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
@@ -8915,7 +8955,8 @@ def admin_software(request: Request):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software</h2>
 {_admin_column_picker_html("software", software_cols)}
-{_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories)}
+{_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories,
+                                  category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
 <div style="overflow-x:auto;">
 <form id="software-approved-form">
@@ -10043,6 +10084,7 @@ def admin_communities(request: Request, filter: str = ""):
             "name": c["name"], "cost_band": c["cost_band"], "access": c["access"] or "",
             "sponsorship_type": c["sponsorship_type"] or "", "format": c["format"] or "",
             "reach": c["reach"] or "", "categories": "|".join(c["categories"]),
+            "search": f"{c['name']} {c['url']}",
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
@@ -10154,7 +10196,8 @@ def admin_communities(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved communities{' needing review' if filter == 'needs_review' else ''}</h2>
 {_admin_column_picker_html("communities", communities_cols)}
-{_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories)}
+{_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories,
+                                  category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories)}
 <div style="overflow-x:auto;">
 <form id="communities-approved-form">
