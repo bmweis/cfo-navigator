@@ -65,7 +65,10 @@ def test_software_categories_are_always_visible_pills_not_a_dropdown(admin_clien
     assert 'data-search="tool a https://a.example"' in r.text
 
 
-def test_communities_categories_still_use_the_dropdown(admin_client):
+def test_communities_categories_also_use_pills_and_search(admin_client):
+    # Changes to Software's admin filter UI are replicated on Communities
+    # where relevant — same always-visible pills + live search, not just
+    # Software's own table.
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
@@ -76,11 +79,13 @@ def test_communities_categories_still_use_the_dropdown(admin_client):
     lib.close()
 
     r = client.get("/admin/tools/communities")
-    # Communities keeps the existing dropdown affordance — only Software's
-    # category filter switched to always-visible pills.
-    assert '<details style="display:inline-block;">' in r.text
-    assert 'class="admin-cat-pill"' not in r.text
-    assert 'id="communities-filter-search"' not in r.text
+    assert 'id="communities-filter-categories"' in r.text
+    assert 'class="admin-cat-pill"' in r.text
+    cats_pos = r.text.index('id="communities-filter-categories"')
+    preceding = r.text[max(0, cats_pos - 200):cats_pos]
+    assert "<details" not in preceding
+    assert 'id="communities-filter-search"' in r.text
+    assert 'data-search="comm a https://ca.example"' in r.text
 
 
 def test_communities_sort_filter_toolbar_renders(admin_client):

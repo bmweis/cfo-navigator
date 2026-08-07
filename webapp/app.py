@@ -10020,6 +10020,7 @@ def admin_communities(request: Request, filter: str = ""):
             "name": c["name"], "cost_band": c["cost_band"], "access": c["access"] or "",
             "sponsorship_type": c["sponsorship_type"] or "", "format": c["format"] or "",
             "reach": c["reach"] or "", "categories": "|".join(c["categories"]),
+            "search": f"{c['name']} {c['url']}",
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
@@ -10131,7 +10132,8 @@ def admin_communities(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved communities{' needing review' if filter == 'needs_review' else ''}</h2>
 {_admin_column_picker_html("communities", communities_cols)}
-{_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories)}
+{_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories,
+                                  category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories)}
 <div style="overflow-x:auto;">
 <form id="communities-approved-form">

@@ -502,29 +502,32 @@ the toolbar is a pure client-side view on top of that default, not a
 replacement for it (a no-JS load still shows the same alphabetical order).
 Sort/filter targets: Communities gets `cost_band`/`access`/`sponsorship_type`/
 `format`/`reach` (scalar `<select>`s, AND-combined) plus `categories`
-(checkbox filter, OR-combined) — the same field set the Phase 1 column picker
+(pill filter, OR-combined) — the same field set the Phase 1 column picker
 already exposes. Software has no comparable enum field (Phase 0 found no
 pricing/tags column distinct from `categories_json`), so its filter is
-`categories` plus a live name/URL search box, with `promoted` (Featured)
-added as a second sort option alongside Name. Sorting re-orders `<tr>`s via
-repeated `tbody.appendChild()` — appending an already-attached node moves it
-rather than duplicating it, so this reorders in place; filtering toggles
-`style.display`. A `Showing N of M` counter and a `Reset` button read the
-same row set the sort/filter logic does.
+`categories` only, with `promoted` (Featured) added as a second sort option
+alongside Name. Both tables also get a live name/URL search box. Sorting
+re-orders `<tr>`s via repeated `tbody.appendChild()` — appending an
+already-attached node moves it rather than duplicating it, so this reorders
+in place; filtering toggles `style.display`. A `Showing N of M` counter and a
+`Reset` button read the same row set the sort/filter logic does.
 
-`_admin_sort_filter_toolbar_html` takes two opt-in params callers can mix in
-per table: `category_style="pills"` renders the categories checkboxes as
+`_admin_sort_filter_toolbar_html` takes two opt-in params, both tables use
+them: `category_style="pills"` renders the categories checkboxes as
 always-visible, multi-select toggle pills (`.admin-cat-pill`, mirroring the
 `.tcat-btn` pattern on the public `/tools/software` directory) instead of the
-default click-to-reveal `<details>` dropdown, and `search_placeholder` adds a
-live `<input type="search">` (no submit button) that AND-filters against a
-`data-search` attribute (`_admin_row_data_attrs`, lowercased name + URL).
-Software's admin table (`/admin/tools/software`) opts into both — the
-dropdown was hard to discover and didn't render reliably; Communities keeps
-the original dropdown, unchanged. Both the pills and the dropdown feed the
-same `#{table_key}-filter-categories input:checked` read in
-`applySortFilter()`, so the OR-within-categories / AND-with-everything-else
-filtering semantics are identical either way — only the affordance differs.
+function's default click-to-reveal `<details>` dropdown (kept as the
+fallback for any future caller that doesn't opt in), and `search_placeholder`
+adds a live `<input type="search">` (no submit button) that AND-filters
+against a `data-search` attribute (`_admin_row_data_attrs`, lowercased name +
+URL). Software adopted pills + search first (the dropdown was hard to
+discover and didn't render reliably); Communities' admin table picked up the
+identical treatment right after, per the working agreement that a UI/UX fix
+made on one admin table gets checked against the other and ported over where
+it applies. Pills and the dropdown both feed the same
+`#{table_key}-filter-categories input:checked` read in `applySortFilter()`,
+so the OR-within-categories / AND-with-everything-else filtering semantics
+are identical either way — only the affordance differs.
 
 **Duplicate-URL blocking on save (both tables, create and edit).**
 `linklib.db.DuplicateURLError` and a `_find_tool_by_normalized_url`/
