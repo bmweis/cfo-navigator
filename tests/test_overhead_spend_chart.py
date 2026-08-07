@@ -87,6 +87,48 @@ def test_category_colors_cycle_and_are_from_the_brand_palette(client):
     assert many[0] == many[len(appmod._OVERHEAD_CHART_PALETTE)]
 
 
+# -- y-axis gridlines + per-bar totals ---------------------------------------
+
+def test_nice_axis_step_lands_on_25_for_a_roughly_100_max(client):
+    appmod = client._appmod
+    # matches the feedback's own example: ~$100 max -> $25 steps (4 lines)
+    assert appmod._nice_axis_step(95) == 25
+    assert appmod._nice_axis_step(100) == 25
+
+
+def test_nice_axis_step_scales_for_smaller_and_larger_maxima(client):
+    appmod = client._appmod
+    assert appmod._nice_axis_step(38) == 10
+    assert appmod._nice_axis_step(1900) == 500
+
+
+def test_chart_draws_gridlines_and_axis_labels(client):
+    appmod = client._appmod
+    chart_data = {
+        "months": ["2026-07"],
+        "categories": ["AI & API"],
+        "series": {"AI & API": [95.0]},
+    }
+    html = appmod._overhead_stacked_bar_chart(chart_data, width=420)
+    # $0/$25/$50/$75/$100 gridline labels
+    for label in ("$0", "$25", "$50", "$75", "$100"):
+        assert label in html, f"missing gridline label {label}"
+    assert html.count("<line") >= 5  # one per gridline
+
+
+def test_chart_prints_total_above_each_nonzero_bar(client):
+    appmod = client._appmod
+    chart_data = {
+        "months": ["2026-06", "2026-07"],
+        "categories": ["AI & API", "Infrastructure"],
+        "series": {"AI & API": [10.0, 0.0], "Infrastructure": [5.0, 0.0]},
+    }
+    html = appmod._overhead_stacked_bar_chart(chart_data, width=420)
+    assert '$15' in html  # 10 + 5 total for the one populated month
+    # the all-zero month gets no total label
+    assert html.count('text-anchor="middle">$0<') == 0
+
+
 # -- page layout ---------------------------------------------------------
 
 def test_summary_page_card_order_chart_then_add_then_csv(client):
@@ -102,6 +144,19 @@ def test_summary_page_card_order_chart_then_add_then_csv(client):
 def test_summary_page_links_to_details(client):
     r = client.get("/admin/overhead-spend")
     assert "/admin/overhead-spend/details" in r.text
+
+
+def test_summary_page_no_longer_shows_the_per_row_editable_table(client):
+    """The full editable ledger moved to /details once it gained click-to-edit
+    rows — the summary page keeps the total card, category filter, and a
+    link to /details, but not a second copy of the row-by-row table."""
+    _add(client, "Railway", "2026-07-01", 5.00, "Infrastructure")
+    r = client.get("/admin/overhead-spend")
+    html = r.text
+    assert "Vendor, date, category &amp; note" not in html  # old table's column header
+    assert "View &amp; edit every charge" in html
+    assert "Total, all vendors" in html  # total card still present
+    assert "Filter by category" in html  # filter still present
 
 
 def test_toolbox_usage_left_column_order_then_by_month_on_right(client):
