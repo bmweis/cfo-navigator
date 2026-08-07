@@ -236,6 +236,33 @@ def test_admin_edit_tool_no_warn_against_itself(admin_client):
     assert "warn=" not in r.headers["location"]
 
 
+# --- Library.pending_tool_name_merges (legacy 'duplicate' rows) --------------
+
+def test_pending_tool_name_merges_surfaces_legacy_duplicate_verdict(lib):
+    a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
+    b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
+    lib.record_tool_name_dedupe_decision(a, b, "duplicate")
+    pending = lib.pending_tool_name_merges()
+    assert len(pending) == 1
+    ids = {pending[0]["tool_a"]["id"], pending[0]["tool_b"]["id"]}
+    assert ids == {a, b}
+
+
+def test_pending_tool_name_merges_excludes_dismissed(lib):
+    a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
+    b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
+    lib.record_tool_name_dedupe_decision(a, b, "dismissed")
+    assert lib.pending_tool_name_merges() == []
+
+
+def test_pending_tool_name_merges_empty_once_deleted(lib):
+    a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
+    b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
+    lib.record_tool_name_dedupe_decision(a, b, "duplicate")
+    lib.delete_tool(b)
+    assert lib.pending_tool_name_merges() == []
+
+
 # --- Route-level: admin review + resolve --------------------------------------
 
 def test_name_duplicates_page_lists_candidate(admin_client):
@@ -248,8 +275,22 @@ def test_name_duplicates_page_lists_candidate(admin_client):
     r = client.get("/admin/tools/name-duplicates")
     assert r.status_code == 200
     assert "Dealhub" in r.text
-    assert "Flag as duplicate" in r.text
+    assert 'Keep &quot;Dealhub&quot;' in r.text
+    assert 'Keep &quot;Dealhub Inc&quot;' in r.text
     assert "Not a duplicate, dismiss" in r.text
+
+
+def test_name_duplicates_page_shows_pending_merges_section(admin_client):
+    client, appmod, db = admin_client
+    lib = Library(db)
+    a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
+    b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
+    lib.record_tool_name_dedupe_decision(a, b, "duplicate")
+    lib.close()
+
+    r = client.get("/admin/tools/name-duplicates")
+    assert r.status_code == 200
+    assert "Confirmed duplicates awaiting cleanup" in r.text
 
 
 def test_name_duplicates_page_requires_auth(monkeypatch):
@@ -275,7 +316,7 @@ def test_resolve_dismiss_removes_candidate_from_list(admin_client):
     lib.close()
 
     r = client.post("/admin/tools/name-duplicates/resolve", data={
-        "tool_id_a": a, "tool_id_b": b, "verdict": "dismissed",
+        "tool_id_a": a, "tool_id_b": b,
     }, follow_redirects=False)
     assert r.status_code == 303
 
@@ -286,14 +327,121 @@ def test_resolve_dismiss_removes_candidate_from_list(admin_client):
     lib.close()
 
 
-def test_resolve_rejects_invalid_verdict(admin_client):
+def test_resolve_rejects_invalid_tool_ids(admin_client):
+    client, appmod, db = admin_client
+    r = client.post("/admin/tools/name-duplicates/resolve", data={
+        "tool_id_a": "not-a-number", "tool_id_b": "1",
+    })
+    assert r.status_code == 400
+
+
+def test_resolve_requires_auth(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    client = TestClient(appmod.app, raise_server_exceptions=True)
+    r = client.post("/admin/tools/name-duplicates/resolve", data={"tool_id_a": 1, "tool_id_b": 2})
+    assert r.status_code == 401
+    if os.path.exists(db):
+        os.remove(db)
+
+
+# --- Route-level: admin merge (confirm-a-duplicate deletes immediately) ------
+
+def test_merge_keeps_one_and_deletes_the_other(admin_client):
     client, appmod, db = admin_client
     lib = Library(db)
     a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
     b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/name-duplicates/resolve", data={
-        "tool_id_a": a, "tool_id_b": b, "verdict": "bogus",
-    })
+    r = client.post("/admin/tools/name-duplicates/merge", data={
+        "keep_id": a, "delete_id": b,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert "msg=" in r.headers["location"]
+
+    lib = Library(db)
+    assert lib.get_tool(a) is not None
+    assert lib.get_tool(b) is None
+    lib.close()
+
+
+def test_merge_removes_the_pair_from_candidates(admin_client):
+    client, appmod, db = admin_client
+    lib = Library(db)
+    a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
+    b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
+    lib.close()
+
+    client.post("/admin/tools/name-duplicates/merge", data={"keep_id": a, "delete_id": b})
+
+    lib = Library(db)
+    assert lib.find_tool_name_duplicate_candidates() == []
+    assert lib.pending_tool_name_merges() == []
+    lib.close()
+
+
+def test_merge_resolves_a_pending_legacy_merge(admin_client):
+    """A legacy 'duplicate'-verdict row (confirmed before this action deleted
+    anything) is cleaned up like any other merge."""
+    client, appmod, db = admin_client
+    lib = Library(db)
+    a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
+    b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
+    lib.record_tool_name_dedupe_decision(a, b, "duplicate")
+    lib.close()
+
+    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": a, "delete_id": b}, follow_redirects=False)
+    assert r.status_code == 303
+
+    lib = Library(db)
+    assert lib.pending_tool_name_merges() == []
+    assert lib.get_tool(a) is not None
+    assert lib.get_tool(b) is None
+    lib.close()
+
+
+def test_merge_rejects_same_keep_and_delete_id(admin_client):
+    client, appmod, db = admin_client
+    lib = Library(db)
+    a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
+    lib.close()
+
+    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": a, "delete_id": a})
     assert r.status_code == 400
+
+
+def test_merge_rejects_nonexistent_tool(admin_client):
+    client, appmod, db = admin_client
+    lib = Library(db)
+    a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
+    lib.close()
+
+    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": a, "delete_id": 999999})
+    assert r.status_code == 404
+
+
+def test_merge_rejects_invalid_ids(admin_client):
+    client, appmod, db = admin_client
+    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": "x", "delete_id": "1"})
+    assert r.status_code == 400
+
+
+def test_merge_requires_auth(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    client = TestClient(appmod.app, raise_server_exceptions=True)
+    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": 1, "delete_id": 2})
+    assert r.status_code == 401
+    if os.path.exists(db):
+        os.remove(db)
