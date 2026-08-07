@@ -52,7 +52,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-from linklib.db import DuplicateURLError, Library
+from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.pipeline import ingest_url
@@ -296,10 +296,17 @@ def _seed_toolbox():
         for cat_name, cat_desc in COMMUNITY_CATEGORIES:
             if cat_name not in existing_community_cats:
                 lib.add_community_category(cat_name, cat_desc)
+        # Normalized comparison (not exact string), same fix as scripts/seed_tools.py
+        # and scripts/seed_communities.py (see pull request 197) — a trailing-slash/www/http
+        # variant of an already-seeded URL must be recognized as the same row, or
+        # this trips add_community's own duplicate check below and crash-loops
+        # every restart (this startup-event copy of the re-seed logic was missed
+        # by that fix; the standalone CLI scripts already did this).
+        existing_communities_by_url = {
+            normalize_url(r["url"]): r for r in lib.conn.execute("SELECT * FROM communities").fetchall()
+        }
         for c in COMMUNITIES:
-            crow = lib.conn.execute(
-                "SELECT * FROM communities WHERE url = ?", (c["url"],)
-            ).fetchone()
+            crow = existing_communities_by_url.get(normalize_url(c["url"]))
             if not crow:
                 lib.add_community(
                     name=c["name"], url=c["url"],
@@ -331,10 +338,17 @@ def _seed_toolbox():
             elif brow["name"] != b["name"] or brow["description"] != b["description"]:
                 lib.update_benchmark_content(brow["id"], b["name"], b["description"])
         lib.seed_game_rank_settings()
+        # Same normalized-URL fix as the communities loop above (and
+        # scripts/seed_tools.py) — exact-string WHERE url = ? can miss an
+        # already-seeded row that differs only by a normalize_url-covered
+        # variant (trailing slash, www, http vs https), and add_tool's own
+        # duplicate check then crashes startup instead of just skipping it.
+        existing_tools_by_url = {
+            normalize_url(r["url"]): r for r in lib.conn.execute(
+                "SELECT id, name, description, advisor, categories_json, url FROM tools").fetchall()
+        }
         for t in TOOLS:
-            row = lib.conn.execute(
-                "SELECT id, name, description, advisor, categories_json FROM tools WHERE url = ?", (t["url"],)
-            ).fetchone()
+            row = existing_tools_by_url.get(normalize_url(t["url"]))
             if not row:
                 lib.add_tool(t["name"], t["description"], t["url"], t["categories"],
                              approved=1, advisor=int(t.get("advisor", False)))
