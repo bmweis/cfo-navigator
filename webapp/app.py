@@ -38,6 +38,7 @@ import hashlib
 import hmac
 import inspect
 import json
+import math
 import os
 import re
 import secrets
@@ -16911,30 +16912,61 @@ def _overhead_month_label(month: str, *, short: bool) -> str:
     return dt.strftime("%b '%y") if short else dt.strftime("%b %Y")
 
 
+def _nice_axis_step(max_value: float, target_lines: int = 4) -> float:
+    """Picks a "nice" gridline step (1/2/2.5/5/10 x a power of ten) so the
+    y-axis gets roughly `target_lines` gridlines instead of an arbitrary
+    fraction of the data max — e.g. a ~$100 chart naturally lands on $25
+    steps (4 lines), a ~$40 chart lands on $10 steps, a ~$900 chart on $250
+    steps, without hard-coding any single scale."""
+    if max_value <= 0:
+        return 25.0
+    raw_step = max_value / target_lines
+    magnitude = 10 ** math.floor(math.log10(raw_step))
+    for mult in (1, 2, 2.5, 5, 10):
+        step = mult * magnitude
+        if step >= raw_step:
+            return step
+    return 10 * magnitude
+
+
 def _overhead_stacked_bar_chart(chart_data: dict, *, width: int, height: int = 220,
                                  label_every: int = 1, short_labels: bool = True) -> str:
     """Renders chart_data (see Library.manual_overhead_monthly_by_category)
     as an inline SVG stacked bar chart plus a color-key legend below it.
     Server-rendered (no client-side charting library) to match how every
     other data view on this page works — a plain GET renders the whole
-    page, nothing hydrates after load."""
+    page, nothing hydrates after load. Includes a y-axis with ~4 "nice"
+    dollar gridlines and each bar's total printed just above it."""
     months, categories, series = chart_data["months"], chart_data["categories"], chart_data["series"]
     n = len(months)
     if n == 0 or not categories:
         return '<p style="color:var(--muted);font-size:13px;padding:24px 0;text-align:center;">No vendor spend recorded yet.</p>'
 
     totals = [sum(series[c][i] for c in categories) for i in range(n)]
-    max_total = max(totals) or 1.0
+    max_total = max(totals)
+    step = _nice_axis_step(max_total)
+    line_count = max(1, math.ceil(max_total / step)) if max_total > 0 else 4
+    axis_max = step * line_count
     colors = _overhead_category_colors(categories)
 
-    pad_left, pad_right, pad_top, pad_bottom = 6, 6, 10, 34
+    pad_left, pad_right, pad_top, pad_bottom = 34, 6, 18, 34
     plot_w = width - pad_left - pad_right
     plot_h = height - pad_top - pad_bottom
     slot_w = plot_w / n
     bar_w = max(slot_w * 0.62, 2)
 
-    parts = [f'<line x1="{pad_left}" y1="{pad_top + plot_h:.1f}" x2="{width - pad_right}" y2="{pad_top + plot_h:.1f}" '
-              f'stroke="var(--line-strong)" stroke-width="1"/>']
+    def _axis_label(value: float) -> str:
+        return f"${value:,.0f}" if value == int(value) else f"${value:,.2f}"
+
+    parts = []
+    for gi in range(line_count + 1):
+        value = gi * step
+        gy = pad_top + plot_h - (value / axis_max) * plot_h
+        parts.append(f'<line x1="{pad_left}" y1="{gy:.1f}" x2="{width - pad_right}" y2="{gy:.1f}" '
+                      f'stroke="{"var(--line-strong)" if gi == 0 else "var(--line)"}" stroke-width="1"/>')
+        parts.append(f'<text x="{pad_left - 6:.1f}" y="{gy + 3:.1f}" font-size="9" fill="var(--muted)" '
+                      f'text-anchor="end">{_axis_label(value)}</text>')
+
     for i, month in enumerate(months):
         x = pad_left + i * slot_w + (slot_w - bar_w) / 2
         y_cursor = pad_top + plot_h
@@ -16942,10 +16974,15 @@ def _overhead_stacked_bar_chart(chart_data: dict, *, width: int, height: int = 2
             amt = series[cat][i]
             if amt <= 0:
                 continue
-            seg_h = (amt / max_total) * plot_h
+            seg_h = (amt / axis_max) * plot_h
             y = y_cursor - seg_h
             parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{seg_h:.1f}" fill="{color}"/>')
             y_cursor = y
+        if totals[i] > 0:
+            tx = x + bar_w / 2
+            ty = y_cursor - 4
+            parts.append(f'<text x="{tx:.1f}" y="{ty:.1f}" font-size="9" fill="var(--ink-soft)" '
+                          f'text-anchor="middle">{_axis_label(totals[i])}</text>')
         if i % label_every == 0:
             lx = x + bar_w / 2
             ly = pad_top + plot_h + 12
@@ -16985,7 +17022,6 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         return _login_redirect(request)
     lib = _lib()
     try:
-        entries = lib.list_manual_overhead(category=category or None)
         categories = lib.manual_overhead_categories()
         vendor_total = lib.manual_overhead_total(category=category or None)
         monthly_chart = lib.manual_overhead_monthly_by_category(months=12)
@@ -17015,40 +17051,6 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
   {'<a href="/admin/overhead-spend" style="font-size:12px;color:var(--muted);">Clear</a>' if category else ''}
 </form>"""
 
-    entry_rows = ""
-    for e in entries:
-        eid = e["id"]
-        entry_rows += f"""<tr style="border-top:1px solid var(--line);">
-  <td style="padding:9px 12px;">
-    <form method="post" action="/admin/overhead-spend/{eid}/edit" style="display:grid;gap:6px;margin:0;max-width:520px;">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-        <input type="text" name="vendor" value="{_esc(e['vendor'])}" required maxlength="120" placeholder="Vendor"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:var(--bg);">
-        <input type="date" name="date" value="{_esc(e['date'])}" required
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-        <input type="number" step="0.01" name="amount" value="{e['amount']:.2f}" required placeholder="Amount"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
-        <input type="text" name="category" value="{_esc(e['category'])}" maxlength="60" placeholder="Category" list="overhead-categories"
-          style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
-      </div>
-      <input type="text" name="note" value="{_esc(e['note'])}" maxlength="300" placeholder="Note (optional)"
-        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);">
-      <div><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button></div>
-    </form>
-  </td>
-  <td style="padding:9px 12px;font-size:13px;font-weight:600;text-align:right;vertical-align:top;">${e['amount']:.2f}</td>
-  <td style="padding:9px 12px;vertical-align:top;">
-    <form method="post" action="/admin/overhead-spend/{eid}/delete" style="margin:0;"
-          onsubmit="return confirm('Delete this {_esc(e['vendor'])} entry?');">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
-    </form>
-  </td>
-</tr>"""
-    if not entries:
-        entry_rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No vendor charges recorded yet—add one below.</td></tr>'
-
     datalist = f'<datalist id="overhead-categories">{"".join(f"<option value={chr(34)}{_esc(c)}{chr(34)}>" for c in categories)}</datalist>'
 
     source_rows = "".join(f"""<tr>
@@ -17074,22 +17076,13 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 <h2 style="font-size:16px;margin:18px 0 4px;">Vendor totals</h2>
 <p style="color:var(--muted);margin:0 0 14px;">The total cost of running the site&mdash;every real charge, tax included, exactly as it hit the card. Railway, Cloudflare, Google Workspace, domain registration, Anthropic, OpenAI, Exa, anything else. This is the number that&rsquo;s always right, because it&rsquo;s typed in from receipts rather than derived.</p>
 
-<div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;max-width:260px;margin-bottom:18px;">
+<div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;max-width:260px;margin-bottom:10px;">
   <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${vendor_total:.2f}</div>
   <div style="font-size:12px;color:var(--muted);margin-top:2px;">{'Total, ' + category if category else 'Total, all vendors'}</div>
 </div>
 
 {filter_bar}
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:20px;">
-  <table style="width:100%;border-collapse:collapse;min-width:560px;">
-    <thead><tr style="background:var(--bg);">
-      <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Vendor, date, category &amp; note</th>
-      <th style="padding:9px 12px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Amount</th>
-      <th style="padding:9px 12px;"></th>
-    </tr></thead>
-    <tbody>{entry_rows}</tbody>
-  </table>
-</div>
+<p style="margin:0 0 20px;"><a href="/admin/overhead-spend/details" style="font-size:13px;color:var(--navy);">View &amp; edit every charge &rarr;</a></p>
 {datalist}
 
 <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:32px;">
