@@ -8440,7 +8440,15 @@ function updateBulkButton(tableKey) {
   if (delBtn) { delBtn.disabled = n === 0; delBtn.textContent = 'Delete selected (' + n + ')'; }
 }
 function selectAllRows(tableKey, checked) {
-  document.querySelectorAll('.' + tableKey + '-row-cb').forEach(function(cb) { cb.checked = checked; });
+  // Only touch rows the sort/filter toolbar (applySortFilter) currently
+  // shows — a filtered-out <tr> is display:none, not removed from the DOM,
+  // so "select all" must skip it or it'd silently select hidden rows the
+  // admin never saw checked.
+  document.querySelectorAll('.' + tableKey + '-row-cb').forEach(function(cb) {
+    var row = cb.closest('tr');
+    if (row && row.style.display === 'none') return;
+    cb.checked = checked;
+  });
   updateBulkButton(tableKey);
 }
 function openBulkPanel(tableKey) {
@@ -10198,7 +10206,7 @@ def admin_communities(request: Request, filter: str = ""):
 {_admin_column_picker_html("communities", communities_cols)}
 {_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
-{_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories)}
+{_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
 <div style="overflow-x:auto;">
 <form id="communities-approved-form">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
@@ -10281,6 +10289,63 @@ async def admin_communities_bulk_edit(request: Request):
             else:
                 kwargs[field] = value
             lib.update_community(community_id, **kwargs)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/admin/tools/communities/bulk-delete-check")
+async def admin_communities_bulk_delete_check(request: Request):
+    """Communities mirror of admin_software_bulk_delete_check — same
+    lightweight (not exhaustive) "is this referenced as similar on another,
+    non-selected community's profile" check, over community_competitors
+    instead of tool_competitors."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    try:
+        community_ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    selected = set(community_ids)
+    lib = _lib()
+    try:
+        communities = []
+        warnings = []
+        for cid in community_ids:
+            c = lib.get_community(cid)
+            if not c:
+                continue
+            communities.append({"id": cid, "name": c["name"]})
+            referencing = [x["name"] for x in lib.list_community_competitors(cid) if x["id"] not in selected]
+            if referencing:
+                warnings.append({"name": c["name"], "referenced_by": referencing})
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "tools": communities, "warnings": warnings})
+
+
+@app.post("/admin/tools/communities/bulk-delete")
+async def admin_communities_bulk_delete(request: Request):
+    """Same delete path as the single-row Delete button (lib.delete_community),
+    just looped over the selection made in /admin/tools/communities."""
+    if not _is_authed(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    payload = await request.json()
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
+    lib = _lib()
+    try:
+        for raw_id in ids:
+            try:
+                community_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            lib.delete_community(community_id)
     finally:
         lib.close()
     return JSONResponse({"ok": True})

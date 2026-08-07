@@ -247,6 +247,80 @@ def test_communities_bulk_edit_categories(admin_client):
     lib.close()
 
 
+# --- Communities bulk delete --------------------------------------------------
+
+def test_communities_bulk_delete_check_flags_outside_competitor_references(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    c1 = lib.add_community(name="Comm A", url="https://ca.example", demographic="CFOs",
+                            cost_band="Free", categories=[], approved=1)
+    c2 = lib.add_community(name="Comm B", url="https://cb.example", demographic="CFOs",
+                            cost_band="Free", categories=[], approved=1)
+    c3 = lib.add_community(name="Comm C", url="https://cc.example", demographic="CFOs",
+                            cost_band="Free", categories=[], approved=1)
+    lib.add_community_competitor(c1, c3)  # C references A as a similar community
+    lib.close()
+
+    r = client.post("/admin/tools/communities/bulk-delete-check", json={"ids": [c1]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["tools"] == [{"id": c1, "name": "Comm A"}]
+    assert body["warnings"] == [{"name": "Comm A", "referenced_by": ["Comm C"]}]
+
+    # Deleting the referencer alongside the referenced row clears the warning.
+    r2 = client.post("/admin/tools/communities/bulk-delete-check", json={"ids": [c1, c3]})
+    assert r2.status_code == 200
+    assert r2.json()["warnings"] == []
+
+    r3 = client.post("/admin/tools/communities/bulk-delete-check", json={"ids": [c2]})
+    assert r3.status_code == 200
+    assert r3.json()["warnings"] == []
+
+
+def test_communities_bulk_delete_removes_selected_rows_via_delete_community(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    c1 = lib.add_community(name="Comm A", url="https://ca.example", demographic="CFOs",
+                            cost_band="Free", categories=[], approved=1)
+    c2 = lib.add_community(name="Comm B", url="https://cb.example", demographic="CFOs",
+                            cost_band="Free", categories=[], approved=1)
+    c3 = lib.add_community(name="Comm C", url="https://cc.example", demographic="CFOs",
+                            cost_band="Free", categories=[], approved=1)
+    lib.add_community_competitor(c1, c3)
+    lib.close()
+
+    r = client.post("/admin/tools/communities/bulk-delete", json={"ids": [c1, c2]})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+
+    lib = Library(db)
+    assert lib.get_community(c1) is None
+    assert lib.get_community(c2) is None
+    assert lib.get_community(c3) is not None
+    assert lib.list_community_competitors(c3) == []
+    lib.close()
+
+
+def test_communities_bulk_delete_requires_auth(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    client = TestClient(appmod.app, raise_server_exceptions=False)
+    r = client.post("/admin/tools/communities/bulk-delete-check", json={"ids": [1]})
+    assert r.status_code == 401
+    r2 = client.post("/admin/tools/communities/bulk-delete", json={"ids": [1]})
+    assert r2.status_code == 401
+    if os.path.exists(db):
+        os.remove(db)
+
+
 def test_get_community_sorts_categories_alphabetically(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
