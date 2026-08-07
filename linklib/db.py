@@ -2379,7 +2379,10 @@ class Library:
         name/slug so a stale row (renamed since) still reads sensibly.
         delete_tool cascades a cleanup here, so a '(deleted)' side shouldn't
         normally occur — this is just a defensive fallback (e.g. direct DB
-        edits) rather than erroring on a lookup miss."""
+        edits) rather than erroring on a lookup miss. Note 'duplicate' rows
+        found here are legacy, from before the confirm-a-duplicate action
+        started deleting immediately (see pending_tool_name_merges) — the
+        admin view only ever writes 'dismissed' through this path now."""
         rows = self.conn.execute(
             "SELECT tool_id_a, tool_id_b, verdict, created_at FROM tool_name_dedupe_decisions "
             "ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
@@ -2392,6 +2395,28 @@ class Library:
                 "name_a": ta["name"] if ta else "(deleted)",
                 "name_b": tb["name"] if tb else "(deleted)",
                 "verdict": r["verdict"], "created_at": r["created_at"],
+            })
+        return out
+
+    def pending_tool_name_merges(self) -> list[dict]:
+        """Legacy 'duplicate'-verdict rows where both tools are still live —
+        i.e. an admin confirmed a pair as duplicates before the merge-on-confirm
+        UI existed, so nothing was actually deleted. Surfaced in
+        /admin/tools/name-duplicates as an actionable "pick which to keep" row,
+        same shape as a fresh candidate. Drains to empty naturally: once one
+        side is deleted, delete_tool's cascade removes the row here too."""
+        rows = self.conn.execute(
+            "SELECT tool_id_a, tool_id_b FROM tool_name_dedupe_decisions WHERE verdict='duplicate'"
+        ).fetchall()
+        out = []
+        for r in rows:
+            ta = self.get_tool(r["tool_id_a"])
+            tb = self.get_tool(r["tool_id_b"])
+            if not ta or not tb:
+                continue
+            out.append({
+                "normalized_name": normalize_tool_name(ta["name"]),
+                "tool_a": ta, "tool_b": tb,
             })
         return out
 

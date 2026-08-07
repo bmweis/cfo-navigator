@@ -52,7 +52,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-from linklib.db import DuplicateURLError, Library
+from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.pipeline import ingest_url
@@ -296,10 +296,17 @@ def _seed_toolbox():
         for cat_name, cat_desc in COMMUNITY_CATEGORIES:
             if cat_name not in existing_community_cats:
                 lib.add_community_category(cat_name, cat_desc)
+        # Normalized comparison (not exact string), same fix as scripts/seed_tools.py
+        # and scripts/seed_communities.py (see pull request 197) — a trailing-slash/www/http
+        # variant of an already-seeded URL must be recognized as the same row, or
+        # this trips add_community's own duplicate check below and crash-loops
+        # every restart (this startup-event copy of the re-seed logic was missed
+        # by that fix; the standalone CLI scripts already did this).
+        existing_communities_by_url = {
+            normalize_url(r["url"]): r for r in lib.conn.execute("SELECT * FROM communities").fetchall()
+        }
         for c in COMMUNITIES:
-            crow = lib.conn.execute(
-                "SELECT * FROM communities WHERE url = ?", (c["url"],)
-            ).fetchone()
+            crow = existing_communities_by_url.get(normalize_url(c["url"]))
             if not crow:
                 lib.add_community(
                     name=c["name"], url=c["url"],
@@ -331,10 +338,17 @@ def _seed_toolbox():
             elif brow["name"] != b["name"] or brow["description"] != b["description"]:
                 lib.update_benchmark_content(brow["id"], b["name"], b["description"])
         lib.seed_game_rank_settings()
+        # Same normalized-URL fix as the communities loop above (and
+        # scripts/seed_tools.py) — exact-string WHERE url = ? can miss an
+        # already-seeded row that differs only by a normalize_url-covered
+        # variant (trailing slash, www, http vs https), and add_tool's own
+        # duplicate check then crashes startup instead of just skipping it.
+        existing_tools_by_url = {
+            normalize_url(r["url"]): r for r in lib.conn.execute(
+                "SELECT id, name, description, advisor, categories_json, url FROM tools").fetchall()
+        }
         for t in TOOLS:
-            row = lib.conn.execute(
-                "SELECT id, name, description, advisor, categories_json FROM tools WHERE url = ?", (t["url"],)
-            ).fetchone()
+            row = existing_tools_by_url.get(normalize_url(t["url"]))
             if not row:
                 lib.add_tool(t["name"], t["description"], t["url"], t["categories"],
                              approved=1, advisor=int(t.get("advisor", False)))
@@ -8691,6 +8705,8 @@ function applySortFilter(tableKey) {
   });
   var catBoxes = document.querySelectorAll('#' + tableKey + '-filter-categories input:checked');
   var activeCats = Array.prototype.map.call(catBoxes, function(c) { return c.value.toLowerCase(); });
+  var searchBox = document.getElementById(tableKey + '-filter-search');
+  var q = searchBox ? searchBox.value.trim().toLowerCase() : '';
 
   var visible = 0;
   rows.forEach(function(row) {
@@ -8702,6 +8718,7 @@ function applySortFilter(tableKey) {
       var rowCats = (row.getAttribute('data-categories') || '').split('|');
       if (!activeCats.some(function(c) { return rowCats.indexOf(c) !== -1; })) ok = false;
     }
+    if (ok && q && (row.getAttribute('data-search') || '').indexOf(q) === -1) ok = false;
     row.style.display = ok ? '' : 'none';
     if (ok) visible++;
   });
@@ -8733,6 +8750,8 @@ function toggleSortDir(tableKey) {
 function resetSortFilter(tableKey) {
   document.querySelectorAll('#' + tableKey + '-filter-scalars select').forEach(function(sel) { sel.value = ''; });
   document.querySelectorAll('#' + tableKey + '-filter-categories input').forEach(function(cb) { cb.checked = false; });
+  var searchBox = document.getElementById(tableKey + '-filter-search');
+  if (searchBox) searchBox.value = '';
   var sortSel = document.getElementById(tableKey + '-sort-field');
   if (sortSel) sortSel.value = sortSel.options[0].value;
   var dirBtn = document.getElementById(tableKey + '-sort-dir');
@@ -8750,11 +8769,22 @@ def _admin_row_data_attrs(fields: dict[str, str]) -> str:
 
 
 def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str, str]],
-                                     scalar_filters: list[dict], category_options: list[dict] | None = None) -> str:
+                                     scalar_filters: list[dict], category_options: list[dict] | None = None,
+                                     category_style: str = "dropdown", search_placeholder: str | None = None) -> str:
     """sort_fields: (field_key, label) pairs, first is the default (Name, matching
     the tables' existing server-side ORDER BY). scalar_filters: [{key, label, options}].
     category_options: if given, adds an OR-matched category filter alongside the
-    scalar (AND-matched) filters."""
+    scalar (AND-matched) filters.
+
+    category_style: 'dropdown' (default, a click-to-reveal <details> — kept as-is
+    for existing callers) or 'pills' — always-visible, multi-select toggle pills
+    mirroring the .tcat-btn pattern on the public /tools/software directory
+    (same OR-within-categories, AND-with-everything-else semantics either way;
+    only the affordance changes).
+
+    search_placeholder: if given, adds a live text-search box (no submit button)
+    that AND-filters against each row's data-search attribute (see
+    _admin_row_data_attrs) alongside the category/scalar filters."""
     sort_options = "".join(f'<option value="{k}">{_esc(label)}</option>' for k, label in sort_fields)
     scalar_html = "".join(
         f'<select data-filter-field="{f["key"]}" onchange="applySortFilter(\'{table_key}\')" '
@@ -8765,7 +8795,23 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
         for f in scalar_filters
     )
     category_html = ""
-    if category_options:
+    pills_html = ""
+    if category_options and category_style == "pills":
+        boxes = "".join(
+            f'<label class="admin-cat-pill">'
+            f'<input type="checkbox" value="{_esc(c["name"])}" onchange="applySortFilter(\'{table_key}\')"> {_esc(c["name"])}</label>'
+            for c in category_options
+        )
+        pills_html = (f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:8px;'
+                      f'align-items:center;margin:-2px 0 12px;">{boxes}</div>'
+                      '<style>.admin-cat-pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;'
+                      'font-weight:500;padding:6px 14px;border-radius:999px;border:1px solid var(--line);'
+                      'color:var(--muted);cursor:pointer;white-space:nowrap;}'
+                      '.admin-cat-pill:hover{background:var(--accent-light);color:var(--ink);}'
+                      '.admin-cat-pill input{position:absolute;opacity:0;width:0;height:0;}'
+                      '.admin-cat-pill:has(input:checked){background:var(--accent);color:#fff;border-color:var(--accent);}'
+                      '</style>')
+    elif category_options:
         boxes = "".join(
             f'<label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;white-space:nowrap;">'
             f'<input type="checkbox" value="{_esc(c["name"])}" onchange="applySortFilter(\'{table_key}\')"> {_esc(c["name"])}</label>'
@@ -8776,7 +8822,13 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
                           f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:6px 12px;'
                           f'margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;'
                           f'background:var(--surface);max-width:420px;">{boxes}</div></details>')
-    return f"""<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 12px;">
+    search_html = ""
+    if search_placeholder:
+        search_html = (f'<input id="{table_key}-filter-search" type="search" '
+                        f'placeholder="{_esc(search_placeholder)}" oninput="applySortFilter(\'{table_key}\')" '
+                        'style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;'
+                        'min-width:220px;">')
+    return f"""{pills_html}<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 12px;">
   <label style="font-size:13px;color:var(--muted);">Sort by</label>
   <select id="{table_key}-sort-field" onchange="applySortFilter('{table_key}')"
     style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;">{sort_options}</select>
@@ -8784,6 +8836,7 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
     class="btn btn-ghost" style="font-size:13px;padding:5px 12px;">Ascending</button>
   <span style="width:1px;height:20px;background:var(--line);"></span>
   <div id="{table_key}-filter-scalars" style="display:flex;flex-wrap:wrap;gap:10px;">{scalar_html}</div>
+  {search_html}
   {category_html}
   <button type="button" onclick="resetSortFilter('{table_key}')" class="btn btn-ghost" style="font-size:13px;padding:5px 12px;">Reset</button>
   <span id="{table_key}-sort-filter-count" style="font-size:13px;color:var(--muted);margin-left:auto;"></span>
@@ -8836,6 +8889,7 @@ def admin_software(request: Request):
         row_attrs = _admin_row_data_attrs({
             "name": t["name"], "promoted": "1" if t.get("promoted") else "0",
             "categories": "|".join(t["categories"]),
+            "search": f"{t['name']} {t['url']}",
         })
         return f"""<tr {row_attrs}>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
@@ -8909,7 +8963,8 @@ def admin_software(request: Request):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software</h2>
 {_admin_column_picker_html("software", software_cols)}
-{_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories)}
+{_admin_sort_filter_toolbar_html("software", software_sort_fields, [], category_options=tool_categories,
+                                  category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
 <div style="overflow-x:auto;">
 <form id="software-approved-form">
@@ -8962,7 +9017,8 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
     lib = _lib()
     try:
         candidates = lib.find_tool_name_duplicate_candidates()
-        decisions = lib.tool_name_dedupe_decisions(limit=40)
+        pending_merges = lib.pending_tool_name_merges()
+        decisions = [d for d in lib.tool_name_dedupe_decisions(limit=40) if d["verdict"] == "dismissed"]
     finally:
         lib.close()
 
@@ -8974,55 +9030,73 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
         return (f'<a href="/tools/software/{_esc(t["slug"])}/edit" style="font-weight:600;">{_esc(t["name"])}</a>{approved_tag}'
                 f'<div style="font-size:12px;color:var(--muted);word-break:break-all;">{_esc(t["url"])}</div>')
 
-    def _candidate_row(c: dict) -> str:
-        a, b = c["tool_a"], c["tool_b"]
+    def _confirm(keep: dict, delete: dict) -> str:
+        return (f'return confirm(\'Keep &quot;{_esc(keep["name"])}&quot; and delete &quot;{_esc(delete["name"])}&quot;? '
+                f'This removes it from the public directory.\');')
+
+    # Confirming a duplicate goes straight to "which one do you want to keep"
+    # — no separate flag-then-merge step, so a confirmed duplicate can't sit
+    # in the directory unresolved. Each row is a live decision: keep A (and
+    # delete B), keep B (and delete A), or it's not actually a duplicate.
+    def _actionable_row(a: dict, b: dict, normalized_name: str) -> str:
         return f"""<tr>
           <td style="padding:12px;border-bottom:1px solid var(--line);">{_tool_cell(a)}</td>
           <td style="padding:12px;border-bottom:1px solid var(--line);">{_tool_cell(b)}</td>
-          <td style="padding:12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(c['normalized_name'])}</td>
+          <td style="padding:12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(normalized_name)}</td>
           <td style="padding:12px;border-bottom:1px solid var(--line);white-space:nowrap;">
-            <form method="post" action="/admin/tools/name-duplicates/resolve" style="display:inline;">
-              <input type="hidden" name="tool_id_a" value="{a['id']}">
-              <input type="hidden" name="tool_id_b" value="{b['id']}">
-              <input type="hidden" name="verdict" value="duplicate">
-              <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Flag as duplicate</button>
+            <form method="post" action="/admin/tools/name-duplicates/merge" style="display:inline;" onsubmit="{_confirm(a, b)}">
+              <input type="hidden" name="keep_id" value="{a['id']}">
+              <input type="hidden" name="delete_id" value="{b['id']}">
+              <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Keep &quot;{_esc(a['name'])}&quot;</button>
+            </form>
+            <form method="post" action="/admin/tools/name-duplicates/merge" style="display:inline;margin-left:6px;" onsubmit="{_confirm(b, a)}">
+              <input type="hidden" name="keep_id" value="{b['id']}">
+              <input type="hidden" name="delete_id" value="{a['id']}">
+              <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Keep &quot;{_esc(b['name'])}&quot;</button>
             </form>
             <form method="post" action="/admin/tools/name-duplicates/resolve" style="display:inline;margin-left:6px;">
               <input type="hidden" name="tool_id_a" value="{a['id']}">
               <input type="hidden" name="tool_id_b" value="{b['id']}">
-              <input type="hidden" name="verdict" value="dismissed">
               <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Not a duplicate, dismiss</button>
             </form>
           </td>
         </tr>"""
 
-    if candidates:
-        candidates_html = f"""<div style="overflow-x:auto;">
+    def _actionable_table(rows: list[dict]) -> str:
+        return f"""<div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool A</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool B</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Normalized name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Resolve</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Resolve—keep one, or dismiss</th>
 </tr></thead>
-<tbody>{"".join(_candidate_row(c) for c in candidates)}</tbody>
+<tbody>{"".join(_actionable_row(c["tool_a"], c["tool_b"], c["normalized_name"]) for c in rows)}</tbody>
 </table>
 </div>"""
+
+    pending_html = ""
+    if pending_merges:
+        pending_html = f"""<h2 style="font-size:16px;font-weight:600;margin:0 0 4px;color:#92400e;">Confirmed duplicates awaiting cleanup</h2>
+<p style="color:var(--muted);margin:4px 0 12px;font-size:13px;">Confirmed as a duplicate before this page could delete one for you—still live in the directory. Pick which to keep.</p>
+{_actionable_table(pending_merges)}
+<div style="margin:32px 0 0;"></div>"""
+
+    if candidates:
+        candidates_html = _actionable_table(candidates)
     else:
         candidates_html = ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
                            'padding:32px;text-align:center;color:var(--muted);">No unresolved name-duplicate candidates. '
-                           'Every exact normalized-name match across all tools has been flagged or dismissed.</div>')
+                           'Every exact normalized-name match across all tools has been merged or dismissed.</div>')
 
     def _decision_row(d: dict) -> str:
-        verdict_label = ('<span style="color:#b91c1c;font-weight:600;">Flagged as duplicate</span>' if d["verdict"] == "duplicate"
-                         else '<span style="color:var(--muted);">Dismissed—not a duplicate</span>')
         return (f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(d["name_a"])} &harr; {_esc(d["name_b"])}</td>'
-                f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{verdict_label}</td>'
+                f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;"><span style="color:var(--muted);">Dismissed—not a duplicate</span></td>'
                 f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(d["created_at"][:10])}</td></tr>')
 
     decisions_html = ""
     if decisions:
-        decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Past decisions</h2>
+        decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Dismissed—not duplicates</h2>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <tbody>{"".join(_decision_row(d) for d in decisions)}</tbody>
@@ -9035,17 +9109,51 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">
   Exact-match scan of every tool's name (case, parenthetical text, and entity suffixes like Inc/LLC ignored)—catches
   a same-vendor duplicate saved under a different URL, which the URL-based check can't see. Not fuzzy matching:
-  spelling or spacing differences won't be flagged here.
+  spelling or spacing differences won't be flagged here. Confirming a duplicate deletes one right away—pick which
+  to keep; nothing lingers half-resolved in the directory.
 </p>
 {banner}
+{pending_html}
 {candidates_html}
 {decisions_html}
 </div>"""
     return HTMLResponse(_page("Name-duplicate check—CFO Toolbox Admin", "", body, authed=True))
 
 
+@app.post("/admin/tools/name-duplicates/merge")
+async def admin_tool_name_duplicates_merge(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    try:
+        keep_id = int(form.get("keep_id"))
+        delete_id = int(form.get("delete_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid tool ids.")
+    if keep_id == delete_id:
+        raise HTTPException(status_code=400, detail="Keep and delete must be different tools.")
+    lib = _lib()
+    try:
+        keep_tool = lib.get_tool(keep_id)
+        delete_tool_row = lib.get_tool(delete_id)
+        if not keep_tool or not delete_tool_row:
+            raise HTTPException(status_code=404, detail="Tool not found.")
+        # delete_tool cascades a cleanup of any tool_name_dedupe_decisions row
+        # referencing delete_id, so this pair can never resurface as a
+        # candidate or a pending merge — no separate bookkeeping needed here.
+        lib.delete_tool(delete_id)
+        msg = f'Kept "{keep_tool["name"]}", deleted duplicate "{delete_tool_row["name"]}".'
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/name-duplicates?msg={quote(msg)}", status_code=303)
+
+
 @app.post("/admin/tools/name-duplicates/resolve")
 async def admin_tool_name_duplicates_resolve(request: Request):
+    """Only 'not a duplicate' runs through here now — confirming a duplicate
+    goes straight to /merge above and deletes immediately, so this route no
+    longer accepts a 'duplicate' verdict (that state used to leave a
+    confirmed-but-undeleted pair sitting in the directory indefinitely)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
@@ -9054,15 +9162,12 @@ async def admin_tool_name_duplicates_resolve(request: Request):
         tool_id_b = int(form.get("tool_id_b"))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid tool ids.")
-    verdict = (form.get("verdict") or "").strip()
-    if verdict not in ("duplicate", "dismissed"):
-        raise HTTPException(status_code=400, detail="Invalid verdict.")
     lib = _lib()
     try:
-        lib.record_tool_name_dedupe_decision(tool_id_a, tool_id_b, verdict)
+        lib.record_tool_name_dedupe_decision(tool_id_a, tool_id_b, "dismissed")
     finally:
         lib.close()
-    msg = "Flagged as a duplicate." if verdict == "duplicate" else "Dismissed—won't resurface."
+    msg = "Dismissed—won't resurface."
     return RedirectResponse(f"/admin/tools/name-duplicates?msg={quote(msg)}", status_code=303)
 
 
@@ -9987,6 +10092,7 @@ def admin_communities(request: Request, filter: str = ""):
             "name": c["name"], "cost_band": c["cost_band"], "access": c["access"] or "",
             "sponsorship_type": c["sponsorship_type"] or "", "format": c["format"] or "",
             "reach": c["reach"] or "", "categories": "|".join(c["categories"]),
+            "search": f"{c['name']} {c['url']}",
         })
         return f"""<tr style="border-top:1px solid var(--line);" {row_attrs}>
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
@@ -10098,7 +10204,8 @@ def admin_communities(request: Request, filter: str = ""):
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved communities{' needing review' if filter == 'needs_review' else ''}</h2>
 {_admin_column_picker_html("communities", communities_cols)}
-{_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories)}
+{_admin_sort_filter_toolbar_html("communities", communities_sort_fields, communities_scalar_filters, category_options=community_categories,
+                                  category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("communities", "/admin/tools/communities/bulk-edit", communities_bulk_fields, category_options=community_categories, show_delete_button=True)}
 <div style="overflow-x:auto;">
 <form id="communities-approved-form">
