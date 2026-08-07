@@ -469,22 +469,33 @@ methods. The confirmation summary ("Set 'Cost band' = 'Free' on 6 rows.") is
 built client-side before the POST fires; the apply itself is a single
 `fetch()` that reloads the page on success.
 
-**Bulk delete (Software only).** `_admin_bulk_panel_html` takes an opt-in
-`show_delete_button` flag (only Software passes it) that renders a second
-"Delete selected" button next to "Edit selected," plus its own confirm panel
-— same enable-when-checked wiring as the bulk-edit button
+**Bulk delete (both tables).** `_admin_bulk_panel_html` takes an opt-in
+`show_delete_button` flag (both Software and Communities pass it) that
+renders a second "Delete selected" button next to "Edit selected," plus its
+own confirm panel — same enable-when-checked wiring as the bulk-edit button
 (`updateBulkButton()` now also toggles a `{table}-bulk-delete-btn` if one
-exists in the DOM). Clicking it calls `POST /admin/tools/software/bulk-delete-check`,
+exists in the DOM). Clicking it calls `POST /admin/tools/{software|communities}/bulk-delete-check`,
 which resolves the selected ids to names and does a lightweight check —
-not a full blast-radius report — for whether any selected tool is curated as
-a competitor on another (non-selected) tool's `tool_competitors` row; any hits
-are shown as a non-blocking warning listing which tool is referenced and by
-whom, so the admin isn't surprised after the fact but nothing stops the
-delete. Confirming calls `POST /admin/tools/software/bulk-delete`, which loops
-the selected ids through the same `Library.delete_tool` the single-row Delete
-button already uses (cascades `field_reviews` and `tool_competitors` rows for
-each deleted id) — no new deletion logic, just the existing path applied per
-id in the selection.
+not a full blast-radius report — for whether any selected row is curated as
+a competitor/similar-entity on another (non-selected) row's
+`tool_competitors`/`community_competitors` row; any hits are shown as a
+non-blocking warning listing which entry is referenced and by whom, so the
+admin isn't surprised after the fact but nothing stops the delete. Confirming
+calls `POST /admin/tools/{software|communities}/bulk-delete`, which loops the
+selected ids through the same `Library.delete_tool`/`delete_community` the
+single-row Delete button already uses (cascades `field_reviews` and the
+competitor-pair table for each deleted id) — no new deletion logic, just the
+existing path applied per id in the selection. The response's `tools` key
+name is shared by both tables' JSON (the client-side `renderDeleteSelectedPanel`
+is table-key-generic, same as the rest of `_ADMIN_BULK_EDIT_JS`), even for
+Communities rows.
+
+**Select-all respects the sort/filter toolbar (both tables).** `selectAllRows()`
+skips any `.{table}-row-cb` checkbox whose `<tr>` is currently `display: none`
+— a filtered-out row `applySortFilter()` hides rather than removes from the
+DOM — so checking the header box means "select all visible," not "select
+all," on either table. Fixed after #268 shipped bulk delete and a filtered
+"select all" was found to silently include hidden rows.
 
 **Sort + filter (both tables).** Same client-only approach as the column
 picker above, and for the same reason — neither table paginates, so the full
