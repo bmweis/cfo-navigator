@@ -52,7 +52,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-from linklib.db import DuplicateURLError, Library
+from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.pipeline import ingest_url
@@ -296,10 +296,17 @@ def _seed_toolbox():
         for cat_name, cat_desc in COMMUNITY_CATEGORIES:
             if cat_name not in existing_community_cats:
                 lib.add_community_category(cat_name, cat_desc)
+        # Normalized comparison (not exact string), same fix as scripts/seed_tools.py
+        # and scripts/seed_communities.py (see pull request 197) — a trailing-slash/www/http
+        # variant of an already-seeded URL must be recognized as the same row, or
+        # this trips add_community's own duplicate check below and crash-loops
+        # every restart (this startup-event copy of the re-seed logic was missed
+        # by that fix; the standalone CLI scripts already did this).
+        existing_communities_by_url = {
+            normalize_url(r["url"]): r for r in lib.conn.execute("SELECT * FROM communities").fetchall()
+        }
         for c in COMMUNITIES:
-            crow = lib.conn.execute(
-                "SELECT * FROM communities WHERE url = ?", (c["url"],)
-            ).fetchone()
+            crow = existing_communities_by_url.get(normalize_url(c["url"]))
             if not crow:
                 lib.add_community(
                     name=c["name"], url=c["url"],
@@ -331,10 +338,17 @@ def _seed_toolbox():
             elif brow["name"] != b["name"] or brow["description"] != b["description"]:
                 lib.update_benchmark_content(brow["id"], b["name"], b["description"])
         lib.seed_game_rank_settings()
+        # Same normalized-URL fix as the communities loop above (and
+        # scripts/seed_tools.py) — exact-string WHERE url = ? can miss an
+        # already-seeded row that differs only by a normalize_url-covered
+        # variant (trailing slash, www, http vs https), and add_tool's own
+        # duplicate check then crashes startup instead of just skipping it.
+        existing_tools_by_url = {
+            normalize_url(r["url"]): r for r in lib.conn.execute(
+                "SELECT id, name, description, advisor, categories_json, url FROM tools").fetchall()
+        }
         for t in TOOLS:
-            row = lib.conn.execute(
-                "SELECT id, name, description, advisor, categories_json FROM tools WHERE url = ?", (t["url"],)
-            ).fetchone()
+            row = existing_tools_by_url.get(normalize_url(t["url"]))
             if not row:
                 lib.add_tool(t["name"], t["description"], t["url"], t["categories"],
                              approved=1, advisor=int(t.get("advisor", False)))
@@ -8995,7 +9009,8 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
     lib = _lib()
     try:
         candidates = lib.find_tool_name_duplicate_candidates()
-        decisions = lib.tool_name_dedupe_decisions(limit=40)
+        pending_merges = lib.pending_tool_name_merges()
+        decisions = [d for d in lib.tool_name_dedupe_decisions(limit=40) if d["verdict"] == "dismissed"]
     finally:
         lib.close()
 
@@ -9007,55 +9022,73 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
         return (f'<a href="/tools/software/{_esc(t["slug"])}/edit" style="font-weight:600;">{_esc(t["name"])}</a>{approved_tag}'
                 f'<div style="font-size:12px;color:var(--muted);word-break:break-all;">{_esc(t["url"])}</div>')
 
-    def _candidate_row(c: dict) -> str:
-        a, b = c["tool_a"], c["tool_b"]
+    def _confirm(keep: dict, delete: dict) -> str:
+        return (f'return confirm(\'Keep &quot;{_esc(keep["name"])}&quot; and delete &quot;{_esc(delete["name"])}&quot;? '
+                f'This removes it from the public directory.\');')
+
+    # Confirming a duplicate goes straight to "which one do you want to keep"
+    # — no separate flag-then-merge step, so a confirmed duplicate can't sit
+    # in the directory unresolved. Each row is a live decision: keep A (and
+    # delete B), keep B (and delete A), or it's not actually a duplicate.
+    def _actionable_row(a: dict, b: dict, normalized_name: str) -> str:
         return f"""<tr>
           <td style="padding:12px;border-bottom:1px solid var(--line);">{_tool_cell(a)}</td>
           <td style="padding:12px;border-bottom:1px solid var(--line);">{_tool_cell(b)}</td>
-          <td style="padding:12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(c['normalized_name'])}</td>
+          <td style="padding:12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(normalized_name)}</td>
           <td style="padding:12px;border-bottom:1px solid var(--line);white-space:nowrap;">
-            <form method="post" action="/admin/tools/name-duplicates/resolve" style="display:inline;">
-              <input type="hidden" name="tool_id_a" value="{a['id']}">
-              <input type="hidden" name="tool_id_b" value="{b['id']}">
-              <input type="hidden" name="verdict" value="duplicate">
-              <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Flag as duplicate</button>
+            <form method="post" action="/admin/tools/name-duplicates/merge" style="display:inline;" onsubmit="{_confirm(a, b)}">
+              <input type="hidden" name="keep_id" value="{a['id']}">
+              <input type="hidden" name="delete_id" value="{b['id']}">
+              <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Keep &quot;{_esc(a['name'])}&quot;</button>
+            </form>
+            <form method="post" action="/admin/tools/name-duplicates/merge" style="display:inline;margin-left:6px;" onsubmit="{_confirm(b, a)}">
+              <input type="hidden" name="keep_id" value="{b['id']}">
+              <input type="hidden" name="delete_id" value="{a['id']}">
+              <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Keep &quot;{_esc(b['name'])}&quot;</button>
             </form>
             <form method="post" action="/admin/tools/name-duplicates/resolve" style="display:inline;margin-left:6px;">
               <input type="hidden" name="tool_id_a" value="{a['id']}">
               <input type="hidden" name="tool_id_b" value="{b['id']}">
-              <input type="hidden" name="verdict" value="dismissed">
               <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Not a duplicate, dismiss</button>
             </form>
           </td>
         </tr>"""
 
-    if candidates:
-        candidates_html = f"""<div style="overflow-x:auto;">
+    def _actionable_table(rows: list[dict]) -> str:
+        return f"""<div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool A</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Tool B</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Normalized name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">Resolve</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Resolve—keep one, or dismiss</th>
 </tr></thead>
-<tbody>{"".join(_candidate_row(c) for c in candidates)}</tbody>
+<tbody>{"".join(_actionable_row(c["tool_a"], c["tool_b"], c["normalized_name"]) for c in rows)}</tbody>
 </table>
 </div>"""
+
+    pending_html = ""
+    if pending_merges:
+        pending_html = f"""<h2 style="font-size:16px;font-weight:600;margin:0 0 4px;color:#92400e;">Confirmed duplicates awaiting cleanup</h2>
+<p style="color:var(--muted);margin:4px 0 12px;font-size:13px;">Confirmed as a duplicate before this page could delete one for you—still live in the directory. Pick which to keep.</p>
+{_actionable_table(pending_merges)}
+<div style="margin:32px 0 0;"></div>"""
+
+    if candidates:
+        candidates_html = _actionable_table(candidates)
     else:
         candidates_html = ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
                            'padding:32px;text-align:center;color:var(--muted);">No unresolved name-duplicate candidates. '
-                           'Every exact normalized-name match across all tools has been flagged or dismissed.</div>')
+                           'Every exact normalized-name match across all tools has been merged or dismissed.</div>')
 
     def _decision_row(d: dict) -> str:
-        verdict_label = ('<span style="color:#b91c1c;font-weight:600;">Flagged as duplicate</span>' if d["verdict"] == "duplicate"
-                         else '<span style="color:var(--muted);">Dismissed—not a duplicate</span>')
         return (f'<tr><td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(d["name_a"])} &harr; {_esc(d["name_b"])}</td>'
-                f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{verdict_label}</td>'
+                f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;"><span style="color:var(--muted);">Dismissed—not a duplicate</span></td>'
                 f'<td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(d["created_at"][:10])}</td></tr>')
 
     decisions_html = ""
     if decisions:
-        decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Past decisions</h2>
+        decisions_html = f"""<h2 style="font-size:16px;font-weight:600;margin:32px 0 12px;">Dismissed—not duplicates</h2>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <tbody>{"".join(_decision_row(d) for d in decisions)}</tbody>
@@ -9068,17 +9101,51 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
 <p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">
   Exact-match scan of every tool's name (case, parenthetical text, and entity suffixes like Inc/LLC ignored)—catches
   a same-vendor duplicate saved under a different URL, which the URL-based check can't see. Not fuzzy matching:
-  spelling or spacing differences won't be flagged here.
+  spelling or spacing differences won't be flagged here. Confirming a duplicate deletes one right away—pick which
+  to keep; nothing lingers half-resolved in the directory.
 </p>
 {banner}
+{pending_html}
 {candidates_html}
 {decisions_html}
 </div>"""
     return HTMLResponse(_page("Name-duplicate check—CFO Toolbox Admin", "", body, authed=True))
 
 
+@app.post("/admin/tools/name-duplicates/merge")
+async def admin_tool_name_duplicates_merge(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    try:
+        keep_id = int(form.get("keep_id"))
+        delete_id = int(form.get("delete_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid tool ids.")
+    if keep_id == delete_id:
+        raise HTTPException(status_code=400, detail="Keep and delete must be different tools.")
+    lib = _lib()
+    try:
+        keep_tool = lib.get_tool(keep_id)
+        delete_tool_row = lib.get_tool(delete_id)
+        if not keep_tool or not delete_tool_row:
+            raise HTTPException(status_code=404, detail="Tool not found.")
+        # delete_tool cascades a cleanup of any tool_name_dedupe_decisions row
+        # referencing delete_id, so this pair can never resurface as a
+        # candidate or a pending merge — no separate bookkeeping needed here.
+        lib.delete_tool(delete_id)
+        msg = f'Kept "{keep_tool["name"]}", deleted duplicate "{delete_tool_row["name"]}".'
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/tools/name-duplicates?msg={quote(msg)}", status_code=303)
+
+
 @app.post("/admin/tools/name-duplicates/resolve")
 async def admin_tool_name_duplicates_resolve(request: Request):
+    """Only 'not a duplicate' runs through here now — confirming a duplicate
+    goes straight to /merge above and deletes immediately, so this route no
+    longer accepts a 'duplicate' verdict (that state used to leave a
+    confirmed-but-undeleted pair sitting in the directory indefinitely)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
@@ -9087,15 +9154,12 @@ async def admin_tool_name_duplicates_resolve(request: Request):
         tool_id_b = int(form.get("tool_id_b"))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid tool ids.")
-    verdict = (form.get("verdict") or "").strip()
-    if verdict not in ("duplicate", "dismissed"):
-        raise HTTPException(status_code=400, detail="Invalid verdict.")
     lib = _lib()
     try:
-        lib.record_tool_name_dedupe_decision(tool_id_a, tool_id_b, verdict)
+        lib.record_tool_name_dedupe_decision(tool_id_a, tool_id_b, "dismissed")
     finally:
         lib.close()
-    msg = "Flagged as a duplicate." if verdict == "duplicate" else "Dismissed—won't resurface."
+    msg = "Dismissed—won't resurface."
     return RedirectResponse(f"/admin/tools/name-duplicates?msg={quote(msg)}", status_code=303)
 
 
