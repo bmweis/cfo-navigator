@@ -112,3 +112,43 @@ def test_seed_toolbox_no_longer_inserts_on_a_fresh_db(app_client):
     assert tools == []
     assert communities == []
     assert benchmarks == []
+
+
+def test_seed_toolbox_does_not_reinstate_a_deleted_community_category(app_client):
+    """Phase L follow-up: the community-category seed loop used to have no
+    empty-table guard (unlike the tools-category loop right above it), so it
+    unconditionally re-added any seed-list category missing from the DB on
+    every startup — silently undoing a deliberate admin deletion at
+    /admin/tools/communities on the very next restart/deploy. Seed once
+    (matching the tools-category loop's existing, already-correct pattern:
+    only seed when the whole table is empty), then confirm a deleted category
+    stays deleted across a second startup pass."""
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    from linklib.db import Library
+    from scripts.seed_communities import CATEGORIES
+
+    # First boot: seeds the community_categories vocabulary from empty.
+    with TestClient(appmod.app):
+        pass
+
+    seeded_name = CATEGORIES[0][0]
+    lib = Library(app_client)
+    cats = {c["name"]: c["id"] for c in lib.list_community_categories()}
+    assert seeded_name in cats  # sanity: first boot did seed it
+
+    # Simulate the admin deliberately deleting it at /admin/tools/communities.
+    lib.delete_community_category(cats[seeded_name])
+    assert seeded_name not in {c["name"] for c in lib.list_community_categories()}
+    lib.close()
+
+    # Second boot (deploy/restart): must NOT reinstate the deleted category.
+    importlib.reload(appmod)
+    with TestClient(appmod.app):
+        pass
+
+    lib = Library(app_client)
+    remaining = {c["name"] for c in lib.list_community_categories()}
+    lib.close()
+    assert seeded_name not in remaining
