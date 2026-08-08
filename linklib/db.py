@@ -155,7 +155,8 @@ CREATE INDEX IF NOT EXISTS idx_tools_approved ON tools(approved);
 -- The controlled vocabulary of category pills shown on /tools. Independent of
 -- which tools currently use them, so a category can be created empty and
 -- tagged onto tools afterward — unlike article tags (all_tags()), which are
--- purely derived from usage. sort_order controls pill/checkbox display order.
+-- purely derived from usage. sort_order is insertion order only; display order
+-- is always alphabetical, applied at render time in list_tool_categories().
 CREATE TABLE IF NOT EXISTS tool_categories (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL UNIQUE,
@@ -2799,8 +2800,12 @@ class Library:
     # a category can exist with zero tools tagged to it, ready to assign.
 
     def list_tool_categories(self) -> list[dict]:
+        # Always alphabetical by name, not sort_order (insertion order)—so the
+        # filter pills on /tools/software and the rows on /admin/tools/categories
+        # self-correct on any future add/rename/delete without a persisted
+        # display-order field to keep in sync.
         rows = self.conn.execute(
-            "SELECT id, name, description, sort_order FROM tool_categories ORDER BY sort_order, name"
+            "SELECT id, name, description, sort_order FROM tool_categories ORDER BY name COLLATE NOCASE"
         ).fetchall()
         counts: dict[str, int] = {}
         for (cj,) in self.conn.execute("SELECT categories_json FROM tools"):

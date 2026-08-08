@@ -5092,17 +5092,19 @@ Not sure which tool's for you? {(
     '<a href="/tools/software/find" style="font-weight:500;">Software Matchmaker &rarr;</a>'
     if is_member else
     '<a href="/login?next=%2Ftools%2Fsoftware%2Ffind" style="font-weight:500;">Sign in for access to Software Matchmaker &rarr;</a>'
-)}
-{'<a href="/admin/tools/categories" style="margin-left:12px;font-size:14px;font-weight:500;">Manage categories →</a>' if authed else ''}</p>
+)}</p>
 
-<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
-  <input id="tool-search" type="search" placeholder="Search tools…"
-    oninput="filterTools()"
-    style="flex:1;min-width:200px;max-width:400px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+<input id="tool-search" type="search" placeholder="Search tools…"
+  oninput="filterTools()"
+  style="display:block;width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;box-sizing:border-box;margin-bottom:10px;">
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
   <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#9733; Advisor</button>
   <button class="tcat-btn tcat-all tcat-active" data-cat="" onclick="filterCat(this)">All</button>
   {cat_buttons}
 </div>
+
+{'<p style="color:var(--muted);margin:0 0 16px;"><a href="/admin/tools/categories" style="font-weight:500;">Manage categories &rarr;</a></p>' if authed else ''}
 
 <div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
@@ -5167,8 +5169,8 @@ Not sure which tool's for you? {(
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 .tool-meta{{font-size:12px;color:var(--muted);margin-top:10px;}}
 .tool-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
-.tool-intro-btn{{font-size:13px;font-weight:600;color:var(--navy);background:none;border:1px solid var(--navy);
-  border-radius:8px;padding:6px 14px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
+.tool-intro-btn{{font-size:12px;font-weight:600;color:var(--navy);background:none;border:1px solid var(--navy);
+  border-radius:6px;padding:3px 10px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
 .tool-intro-btn:hover{{background:var(--navy-wash);}}
 .tool-intro-btn:disabled{{color:var(--muted);border-color:var(--line);cursor:not-allowed;}}
 .tool-intro-btn:disabled:hover{{background:none;}}
@@ -5208,7 +5210,7 @@ var AUTHED = {'true' if authed else 'false'};
 var MEMBER = {'true' if is_member else 'false'};
 var activeCats = new Set();
 var advisorOnly = false;
-var PAGE_SIZE = 10;
+var PAGE_SIZE = 12;
 var currentPage = 0;
 var TOOL_COMPARE_MAX = 4;
 var toolCompareSelected = [];
@@ -5338,9 +5340,10 @@ function renderTools(tools) {{
     // actually stops a promoted card from wrapping onto 2 lines in row 1
     // (the earlier fix just relocated the admin buttons, which helped but
     // left the badge+name group free to wrap on its own). Categories share
-    // their row with Full profile; Compare/Warm Intro get their own row;
-    // Quick edit/Full edit/Delete moved to the card's last row, replacing
-    // the old Added/Edited meta line entirely (see adminMeta above).
+    // their row with Full profile; Compare gets its own row. Warm Intro
+    // shares the card's last row with Quick edit/Full edit/Delete (same
+    // .tool-admin-btn sizing, pinned lower-right), replacing the old
+    // Added/Edited meta line entirely (see adminMeta above).
     return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '" data-tool-id="' + t.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;">'
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
@@ -5353,12 +5356,16 @@ function renderTools(tools) {{
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;min-height:24px;margin-bottom:10px;">'
       + '<div class="tool-cats">' + cats + '</div>' + fullProfileLink
       + '</div>'
-      // min-height reserves the Warm Intro button's own height (31px) whether
-      // or not this card has one—without it, a card with Warm Intro sits
-      // taller than its row siblings, the same category of bug as the
-      // Featured-badge wrap above.
-      + '<div style="display:flex;align-items:center;gap:12px;min-height:32px;margin-bottom:10px;">' + compareCheckbox + introBtn + '</div>'
-      + adminControls
+      + (compareCheckbox ? '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">' + compareCheckbox + '</div>' : '')
+      // Quick edit/Full edit/Delete (admin-only) and Warm Intro share this
+      // bottom row—Warm Intro pinned to the right via margin-left:auto so it
+      // still lands lower-right even on a non-admin card where adminControls
+      // is empty. Both use .tool-admin-btn's size (Warm Intro overrides just
+      // color/border to stay visually distinct as the primary action).
+      + ((adminControls || introBtn)
+          ? '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' + adminControls
+            + (introBtn ? '<span style="margin-left:auto;">' + introBtn + '</span>' : '') + '</div>'
+          : '')
       + '</div>'
       + adminMeta + quickEditPanel + '</article>';
   }}).join('');
@@ -6374,7 +6381,7 @@ function submitIntroForm() {{
 .tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
 .tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
-  padding:10px 16px;font:600 14px var(--font-body);cursor:pointer;text-decoration:none;display:inline-flex;
+  padding:11px 22px;font:600 15px var(--font-body);cursor:pointer;text-decoration:none;display:inline-flex;
   align-items:center;gap:6px;white-space:nowrap;}}
 .tp-admin-btn:hover{{background:var(--navy-wash);color:var(--ink);text-decoration:none;}}
 .tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
@@ -7946,7 +7953,7 @@ def tools_community_profile(request: Request, slug: str):
 .tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
 .tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
-  padding:10px 16px;font:600 14px var(--font-body);cursor:pointer;text-decoration:none;display:inline-flex;
+  padding:11px 22px;font:600 15px var(--font-body);cursor:pointer;text-decoration:none;display:inline-flex;
   align-items:center;gap:6px;white-space:nowrap;}}
 .tp-admin-btn:hover{{background:var(--navy-wash);color:var(--ink);text-decoration:none;}}
 .tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
@@ -8543,7 +8550,7 @@ async function openDeleteSelectedPanel(tableKey) {
     if (!r.ok || !d.ok) throw new Error();
     renderDeleteSelectedPanel(tableKey, ids, d);
   } catch (e) {
-    body.innerHTML = '<p style="font-size:13px;color:#b91c1c;">Couldn\\'t load delete preview—try again.</p>';
+    body.innerHTML = '<p style="font-size:13px;color:#b91c1c;">Couldn\'t load delete preview—try again.</p>';
   }
 }
 function renderDeleteSelectedPanel(tableKey, ids, d) {
@@ -8890,22 +8897,28 @@ def admin_software(request: Request):
         row_attrs = _admin_row_data_attrs({
             "name": t["name"], "promoted": "1" if t.get("promoted") else "0",
             "categories": "|".join(t["categories"]),
+            "url": t["url"], "summary": t.get("summary") or "",
+            # Zero-padded so the shared string sort in _ADMIN_SORT_FILTER_JS
+            # orders "10" after "9" instead of before it.
+            "intros": f"{n_leads:04d}",
             "search": f"{t['name']} {t['url']}",
         })
-        return f"""<tr {row_attrs}>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;max-width:200px;">
+        # data-label on each <td> feeds the stacked-card layout at the
+        # .admin-table-responsive breakpoint (see its CSS)—unused above that
+        # breakpoint, where the table renders normally.
+        return f"""<tr class="admin-table-row" {row_attrs}>
+          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
+          <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;max-width:200px;">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
               <span>{_esc(t['name'])}</span>{featured_badge}
             </div>
           </td>
-          <td data-col="software:url" style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(t['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(t['url'][:50])}{'…' if len(t['url']) > 50 else ''}</a></td>
-          <td data-col="software:summary" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:260px;">{_esc(t.get('summary') or '—')}</td>
-          <td data-col="software:categories" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
-          <td data-col="software:intros" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
-          <td data-col="software:vendor_name" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t.get('vendor_name') or '—')}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);">
-            <div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
+          <td data-col="software:url" data-label="URL" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(t['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(t['url'][:50])}{'…' if len(t['url']) > 50 else ''}</a></td>
+          <td data-col="software:summary" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:260px;">{_esc(t.get('summary') or '—')}</td>
+          <td data-col="software:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
+          <td data-col="software:intros" data-label="Intros" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
+          <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
+            <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
               <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
               <form method="post" action="/admin/tools/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
@@ -8922,14 +8935,17 @@ def admin_software(request: Request):
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No approved software yet.</td></tr>'
     total_leads = sum(lead_counts.values())
 
-    software_cols = [("url", "URL"), ("summary", "Short description"), ("categories", "Categories"), ("intros", "Intros"), ("vendor_name", "Vendor name")]
+    software_cols = [("url", "URL"), ("summary", "Short description"), ("categories", "Categories"), ("intros", "Intros")]
     software_bulk_fields = [
         {"key": "categories", "label": "Categories", "kind": "multi"},
         {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
         {"key": "promoted", "label": "Featured", "kind": "checkbox"},
         {"key": "warm_intro_enabled", "label": "Warm Intro enabled", "kind": "checkbox"},
     ]
-    software_sort_fields = [("name", "Name"), ("promoted", "Featured")]
+    # Featured is a boolean/tag, not a sortable column—kept out of this list
+    # entirely (see the Cost band/Access/etc. pattern on the Communities
+    # table above, which likewise never lists its own Featured checkbox).
+    software_sort_fields = [("name", "Name"), ("url", "URL"), ("summary", "Short description"), ("intros", "Intros")]
 
     body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}</script>
 <div class="page page-admin">
@@ -8969,7 +8985,7 @@ def admin_software(request: Request):
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
 <div style="overflow-x:auto;">
 <form id="software-approved-form">
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<table class="admin-table-responsive" style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
@@ -8977,7 +8993,6 @@ def admin_software(request: Request):
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
-  <th data-col="software:vendor_name" style="padding:10px 12px;text-align:left;font-size:13px;">Vendor name</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
 </tr></thead>
 <tbody id="software-approved-tbody">{approved_rows}</tbody>
@@ -8995,6 +9010,29 @@ applySortFilter('software');
   <strong>Categories, Advisor, Featured, and Warm Intro are database-only</strong>: edit them here
   (Full edit / Quick edit on <a href="/tools/software">/tools/software</a>), and this sync will never touch them.
 </p>
+
+<style>
+/* Stacked-card responsive table (no equivalent pattern existed elsewhere in
+   the codebase to reuse): below the breakpoint, rows become blocks and each
+   cell gets a label from its data-label attribute instead of relying on a
+   <thead> the layout no longer has room for. Column-picker visibility
+   (toggleColumn, in _ADMIN_BULK_EDIT_JS) still works unchanged—it only ever
+   toggled a per-cell inline display style, and that's exactly as meaningful
+   in block layout as in table layout. Fixes the URL column wrapping badly
+   and the Edit/Delete actions rendering unusably small on mobile.
+*/
+@media(max-width:700px){{
+  .admin-table-responsive thead{{display:none;}}
+  .admin-table-responsive, .admin-table-responsive tbody,
+  .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;}}
+  .admin-table-responsive tr{{border-bottom:2px solid var(--line);padding:10px 0;}}
+  .admin-table-cell{{border-bottom:none!important;padding:6px 12px!important;}}
+  .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
+    font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin-bottom:3px;}}
+  .admin-table-actions .admin-table-actions-grid{{grid-template-columns:1fr!important;}}
+}}
+</style>
 </div>"""
     return HTMLResponse(_page("Software—CFO Toolbox Admin", "", body, authed=True))
 
@@ -9345,26 +9383,34 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     rows = ""
     for c in categories:
         cid = c["id"]
+        edit_form_id = f"cat-edit-{cid}"
+        # Save lives in the Tools/Save/Delete column, not under the inputs—it
+        # submits the name/description form above via the form="" attribute
+        # (a plain HTML association, no JS needed) so the two edit fields can
+        # render at full column width instead of being capped to fit a
+        # button stacked underneath them.
         rows += f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:9px 12px;">
-    <form method="post" action="/admin/tools/categories/{cid}/edit" style="display:grid;gap:6px;margin:0;max-width:420px;">
+    <form id="{edit_form_id}" method="post" action="/admin/tools/categories/{cid}/edit" style="display:grid;gap:6px;margin:0;">
       <input type="text" name="name" value="{_esc(c['name'])}" required maxlength="80"
-        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;font-weight:500;background:var(--bg);">
+        style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:14px;font-weight:500;background:var(--bg);">
       <input type="text" name="description" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
-        style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:var(--bg);">
-      <div><button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button></div>
+        style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:var(--bg);">
     </form>
   </td>
-  <td style="padding:9px 12px;font-size:13px;color:var(--muted);vertical-align:top;">{c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}</td>
   <td style="padding:9px 12px;vertical-align:top;">
-    <form method="post" action="/admin/tools/categories/{cid}/delete" style="margin:0;"
-          onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}—they stay in the directory under All, just untagged for this category.');">
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
-    </form>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:13px;color:var(--muted);white-space:nowrap;">{c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}</span>
+      <button type="submit" form="{edit_form_id}" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
+      <form method="post" action="/admin/tools/categories/{cid}/delete" style="margin:0;"
+            onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}—they stay in the directory under All, just untagged for this category.');">
+        <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
+      </form>
+    </div>
   </td>
 </tr>"""
     if not categories:
-        rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one below.</td></tr>'
+        rows = '<tr><td colspan="2" style="padding:24px;text-align:center;color:var(--muted);">No categories yet—add one below.</td></tr>'
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -9380,7 +9426,6 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     <thead><tr style="background:var(--bg);">
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Name &amp; description</th>
       <th style="padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Tools</th>
-      <th style="padding:9px 12px;"></th>
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
@@ -14739,11 +14784,9 @@ def admin_system_database(request: Request):
     )
 
     body = f"""<div class="page page-admin">
-<div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Database</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, and row counts, introspected from the schema on every page load. This schema declares no SQL foreign keys, so relationship lines below come from a small hand-maintained map (see <code>_DB_RELATIONSHIPS</code> in <code>webapp/app.py</code>) rather than the database itself. Summary-level by design&mdash;see <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for full schema detail.</p>
-</div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px;">
 {stat_cards}
@@ -14890,11 +14933,9 @@ def admin_system_page_index(request: Request):
     )
 
     body = f"""<div class="page page-admin">
-<div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Page Index</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every route and its width tier&mdash;introspected from <code>app.routes</code> on every page load, not a maintained list. Skips non-page endpoints (redirects, JSON/AJAX APIs, file downloads); flags any page route that doesn't carry a recognized width tier, so a newly added page that never got tiered doesn't go unnoticed. See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for the tier system itself.</p>
-</div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
 {stat_cards}
