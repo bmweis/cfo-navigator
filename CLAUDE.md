@@ -57,8 +57,11 @@ scripts/           # CLI entry points
   eval_retrieval.py   # manual QA: replay flagged Ask questions through FTS5-only vs.
                       #   hybrid retrieval side by side (no Claude calls)
   backfill_queue.py   # one-time sitemap sweep to queue historical articles
-  seed_tools.py       # seed/refresh the CFO Toolbox vendor list (TOOLS is also
-                      #   imported live by webapp/app.py)
+  seed_tools.py       # seed the CFO Toolbox vendor list — run once, by hand, against a
+                      #   fresh DB. TOOLS is also imported by webapp/app.py's startup
+                      #   hook, but only to sync name/description/advisor on rows that
+                      #   already exist; the hook never inserts, so a deliberately
+                      #   deleted tool doesn't come back on the next restart
   ask.py              # FP&A Buddy from the terminal
   voice_review.py     # check a file/stdin against the voice standards
   mcp_server.py       # stdio MCP server wrapping GET /api/search for Claude Desktop/Code
@@ -123,6 +126,23 @@ library.db            # NOT in git (personal data, large). Lives beside the code
 - **The `/library/feed` reader caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
   item dicts are shallow-copied before mutation — never mutate a cached entry in place.
   Editing the OPML won't show up live until the cache expires or the app restarts.
+- **The CFO Toolbox startup sync (`_seed_toolbox` in `webapp/app.py`) never inserts —
+  only syncs.** It runs on every process boot (any deploy, restart, or crash recovery,
+  not just a first run) and re-syncs `name`/`description`/`advisor` on any `tools` /
+  `communities` / `benchmarks` row that already matches a seed entry by URL. It used to
+  also insert a row when no match was found, on the assumption that only meant "never
+  seeded" — but since none of those three tables has a soft-delete column, a manually
+  deleted tool/community/benchmark looked identical to an unseeded one, so it silently
+  reappeared on the very next restart. Fixed: a seed entry with no matching row is now
+  skipped, never inserted. First-time seeding of a brand-new DB is `scripts/seed_tools.py`
+  / `scripts/seed_communities.py`'s job, run once by hand — this hook no longer
+  duplicates that. New tools/communities are added going forward exclusively through the
+  admin UI's "+ Add tool" / equivalent flow, never by editing the seed files directly.
+  Every `tools`/`communities` deletion (single-row delete, bulk delete, a pending
+  submission's Reject, a name-duplicate merge) now also writes a row to
+  `tool_audit_log`/`community_audit_log` — snapshotting name/url/categories immediately
+  before the hard `DELETE`, since that's the only record of what was removed once the row
+  is gone. See `ARCHITECTURE.md`'s CFO Toolbox table for the full shape.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

@@ -210,6 +210,33 @@ CREATE TABLE IF NOT EXISTS tool_leads (
 CREATE INDEX IF NOT EXISTS idx_tool_leads_tool_id ON tool_leads(tool_id);
 CREATE INDEX IF NOT EXISTS idx_tool_leads_created  ON tool_leads(created_at);
 
+-- Deletion audit trail for Software entries (the seed-reappearance
+-- investigation). Same shape as archive_audit_log/contact_audit_log below
+-- (admin_id/action/item_id/detail/created_at), kept as its own table for the
+-- same reason contact_audit_log is separate from archive_audit_log: item_id
+-- would be ambiguous about which table it references if these were merged.
+-- action is always 'delete' for now but distinguishes context in practice —
+-- the single-row admin Delete button, a bulk delete, a pending-submission
+-- Reject, and a name-duplicate merge's "delete the loser" step all route
+-- through Library.delete_tool, so the audit write lives inside that method
+-- (not at each call site, unlike archive/contact audit) to guarantee no
+-- caller can add a new delete path and forget to log it. Since this is a
+-- hard delete (no deleted_at column on tools — see delete_tool), the row
+-- itself is gone after this fires, so detail carries a name/url/categories
+-- snapshot taken immediately before the DELETE — the only record of what
+-- was removed.
+CREATE TABLE IF NOT EXISTS tool_audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_id   INTEGER,
+    action     TEXT NOT NULL,             -- 'delete' | 'reject' | 'merge'
+    item_id    INTEGER,                    -- the deleted tools.id; row no longer exists
+    detail     TEXT NOT NULL DEFAULT '',   -- name/url/categories snapshot at deletion time
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_audit_admin ON tool_audit_log(admin_id);
+CREATE INDEX IF NOT EXISTS idx_tool_audit_created ON tool_audit_log(created_at);
+
 -- Manually curated competitor cross-links between Software entries (search
 -- overhaul Phase 3). One undirected edge per pair, normalized so tool_id is
 -- always the smaller id (see Library.add_tool_competitor) — that's what
@@ -622,6 +649,23 @@ CREATE TABLE IF NOT EXISTS communities (
 );
 
 CREATE INDEX IF NOT EXISTS idx_communities_approved ON communities(approved);
+
+-- Deletion audit trail for Communities entries — exact structural mirror of
+-- tool_audit_log above (same reasoning: hard delete with no deleted_at
+-- column, audit write lives inside Library.delete_community so every call
+-- site — single-row delete, bulk delete, pending-submission reject — is
+-- covered without relying on each route to remember to log it).
+CREATE TABLE IF NOT EXISTS community_audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_id   INTEGER,
+    action     TEXT NOT NULL,             -- 'delete' | 'reject'
+    item_id    INTEGER,                    -- the deleted communities.id; row no longer exists
+    detail     TEXT NOT NULL DEFAULT '',   -- name/url/categories snapshot at deletion time
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_community_audit_admin ON community_audit_log(admin_id);
+CREATE INDEX IF NOT EXISTS idx_community_audit_created ON community_audit_log(created_at);
 
 -- The controlled vocabulary of category pills shown on /tools/communities,
 -- same shape and same reasoning as tool_categories above: independent of
@@ -2570,7 +2614,20 @@ class Library:
     def count_pending_tools(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM tools WHERE approved=0").fetchone()[0]
 
-    def delete_tool(self, tool_id: int) -> None:
+    def delete_tool(self, tool_id: int, admin_id: Optional[int] = None,
+                     action: str = "delete") -> None:
+        """Hard-deletes a tools row (no soft-delete column exists — see the
+        tools CREATE TABLE). Snapshots name/url/categories into
+        tool_audit_log *before* the DELETE, since that's the only record of
+        what was removed once this returns. Logged here rather than at each
+        call site (unlike archive/contact audit) because every delete path —
+        the single-row admin Delete button, bulk delete, a pending
+        submission's Reject, and a name-duplicate merge's "delete the loser"
+        step — routes through this one method; logging inside it means a
+        future new call site can't forget to record the deletion. `action`
+        lets a caller note which of those paths this was ('delete' default,
+        'reject', or 'merge')."""
+        row = self.get_tool(tool_id)
         self.conn.execute("DELETE FROM tools WHERE id=?", (tool_id,))
         self.conn.execute("DELETE FROM field_reviews WHERE entity_type='tool' AND entity_id=?", (tool_id,))
         self.conn.execute(
@@ -2585,7 +2642,23 @@ class Library:
             "DELETE FROM tool_name_dedupe_decisions WHERE tool_id_a=? OR tool_id_b=?",
             (tool_id, tool_id),
         )
+        if row:
+            detail = f"{row['name']} | {row['url']} | categories: {', '.join(row['categories'])}"
+            self.conn.execute(
+                "INSERT INTO tool_audit_log (admin_id, action, item_id, detail, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (admin_id, action, tool_id, detail, _now()),
+            )
         self.conn.commit()
+
+    def list_tool_audit_log(self, limit: int = 500) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT a.*, u.username AS admin_username, u.name AS admin_name
+               FROM tool_audit_log a LEFT JOIN users u ON u.id = a.admin_id
+               ORDER BY a.created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def update_tool_differentiation(self, tool_id: int, differentiation_note: str) -> None:
         """Narrow update for the admin full-edit form's "How this differs from
@@ -3105,7 +3178,15 @@ class Library:
     def count_pending_communities(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM communities WHERE approved=0").fetchone()[0]
 
-    def delete_community(self, community_id: int) -> None:
+    def delete_community(self, community_id: int, admin_id: Optional[int] = None,
+                          action: str = "delete") -> None:
+        """Hard-deletes a communities row (no soft-delete column exists — see
+        the communities CREATE TABLE). Same snapshot-before-delete audit
+        contract as delete_tool above, and the same reasoning for logging
+        inside this method rather than at each call site: the single-row
+        admin Delete button, bulk delete, and a pending submission's Reject
+        all route through here."""
+        row = self.get_community(community_id)
         self.conn.execute("DELETE FROM communities WHERE id=?", (community_id,))
         self.conn.execute("DELETE FROM community_profiles WHERE community_id=?", (community_id,))
         self.conn.execute("DELETE FROM field_reviews WHERE entity_type='community' AND entity_id=?", (community_id,))
@@ -3113,7 +3194,23 @@ class Library:
             "DELETE FROM community_competitors WHERE community_id=? OR competitor_id=?",
             (community_id, community_id),
         )
+        if row:
+            detail = f"{row['name']} | {row['url']} | categories: {', '.join(row['categories'])}"
+            self.conn.execute(
+                "INSERT INTO community_audit_log (admin_id, action, item_id, detail, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (admin_id, action, community_id, detail, _now()),
+            )
         self.conn.commit()
+
+    def list_community_audit_log(self, limit: int = 500) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT a.*, u.username AS admin_username, u.name AS admin_name
+               FROM community_audit_log a LEFT JOIN users u ON u.id = a.admin_id
+               ORDER BY a.created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     @staticmethod
     def _community_to_dict(r: sqlite3.Row) -> dict:
