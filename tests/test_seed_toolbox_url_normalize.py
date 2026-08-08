@@ -9,9 +9,20 @@ trailing slash/www/http variant caused this exact-match lookup to miss it,
 fall through to add_tool/add_community, and crash the whole app on startup
 via the (correct) DuplicateURLError — a real outage, not a hypothetical.
 
-These tests seed a tools/communities row with a URL variant of a real seed
-entry, then boot the app through its actual startup event (TestClient's
-lifespan) and confirm it comes up healthy instead of crash-looping.
+The first two tests below seed a tools/communities row with a URL variant
+of a real seed entry, then boot the app through its actual startup event
+(TestClient's lifespan) and confirm it comes up healthy instead of
+crash-looping.
+
+The third test guards a *different* fix (deleted tools/communities
+reappearing after a deploy): _seed_toolbox used to also INSERT a row for
+any seed entry missing from the DB, which meant a manually deleted
+tool/community — hard-deleted, no soft-delete column — silently came back
+on the very next restart, since "missing by URL" was indistinguishable
+from "never seeded." _seed_toolbox now only ever syncs name/description/
+advisor on a *matching* row and never inserts; first-time seeding of a
+brand-new DB is scripts/seed_tools.py/scripts/seed_communities.py's job,
+run once by hand, not something the startup hook duplicates.
 """
 import os
 import tempfile
@@ -78,9 +89,14 @@ def test_seed_toolbox_survives_a_community_url_www_variant(app_client):
         assert r.status_code == 200
 
 
-def test_seed_toolbox_still_seeds_on_a_fresh_db(app_client):
-    """Not just crash-safety — the normalized lookup must still add tools
-    that are genuinely new (empty DB), same as before this fix."""
+def test_seed_toolbox_no_longer_inserts_on_a_fresh_db(app_client):
+    """_seed_toolbox must never INSERT a tools/communities/benchmarks row,
+    even against a brand-new (empty) DB — only sync fields on a row that
+    already matches by URL. Inserting on "missing" was exactly the bug that
+    let a manually deleted tool/community reappear on the next restart,
+    since a hard-deleted row and a never-seeded one look identical to a
+    URL lookup. First-time seeding is scripts/seed_tools.py's /
+    scripts/seed_communities.py's job now, run once by hand."""
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     from fastapi.testclient import TestClient
@@ -90,5 +106,9 @@ def test_seed_toolbox_still_seeds_on_a_fresh_db(app_client):
 
     lib = Library(app_client)
     tools = lib.list_tools(approved_only=False)
+    communities = lib.list_communities(approved_only=False)
+    benchmarks = lib.list_benchmarks()
     lib.close()
-    assert len(tools) > 0
+    assert tools == []
+    assert communities == []
+    assert benchmarks == []

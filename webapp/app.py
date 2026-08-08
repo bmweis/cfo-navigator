@@ -271,21 +271,33 @@ async def _no_store_admin_pages(request: Request, call_next):
 
 @app.on_event("startup")
 def _seed_toolbox():
-    """Seed tools, benchmarks, and the tool_categories vocabulary on first run,
-    and communities on first run, and keep the advisor flag and name/
-    description (for tools) or name/description (for benchmarks) in sync with
-    their seed lists on every restart/deploy. categories_json is NOT re-synced
-    from the seed list for tools that already exist — once seeded, categories
-    are owned by the DB and edited at /admin/tools/categories, so this must
-    not clobber changes made there. Same for promoted/vendor/warm-intro fields
-    (tools) and coverage/pricing (benchmarks), which are admin-site-only and
-    never touched here. Communities follow the identical name+description+
-    advisor contract: name/notes/advisor re-sync from
-    scripts/seed_communities.py's COMMUNITIES on every restart (advisor the
-    same way tools.advisor does, just below); every other field —
-    reach, local_markets, featured, cost_band, cost_note, sponsorship_type,
-    sponsor_name, access, format, categories_json, approved — is admin-owned,
-    edited at /admin/tools/communities, and never touched here."""
+    """Seed the tool_categories/community_categories vocabulary on first run,
+    and keep the advisor flag and name/description (tools, communities) or
+    name/description (benchmarks) in sync with their seed lists on every
+    restart/deploy. categories_json is NOT re-synced from the seed list for
+    tools/communities that already exist — once seeded, categories are
+    owned by the DB and edited at /admin/tools/categories or
+    /admin/tools/communities, so this must not clobber changes made there.
+    Same for promoted/vendor/warm-intro fields (tools) and coverage/pricing
+    (benchmarks), which are admin-site-only and never touched here.
+
+    Deleted tools/communities/benchmarks reappearing after a deploy:
+    this used to also INSERT a row for any seed entry whose URL wasn't found
+    in the live DB, on the theory that was purely a first-run seed. But this
+    hook runs on *every* process startup — any deploy, restart, or crash
+    recovery, not just a first boot — and tools/communities/benchmarks are
+    all hard-deleted (no deleted_at column), so "URL missing from the DB"
+    is indistinguishable from "an admin deleted this on purpose." Every
+    restart was silently re-inserting anything still sitting in the static
+    seed list, regardless of why it was missing. Brian confirmed new
+    tools/communities/benchmarks are only ever added through the admin UI
+    ("+ Add tool" / equivalent), never by editing these seed files directly,
+    so there's no first-run-seed case this hook still needs to cover — sync
+    (name/description/advisor on a matching row) is the only job left here.
+    A seed entry with no matching row by URL is now silently skipped, not
+    inserted. First-time seeding of a brand-new DB is scripts/seed_tools.py
+    and scripts/seed_communities.py's job (run once, by hand, against a
+    fresh database) — this hook no longer duplicates that."""
     from scripts.seed_tools import TOOLS
     from scripts.seed_communities import CATEGORIES as COMMUNITY_CATEGORIES, COMMUNITIES
     lib = _lib()
@@ -299,51 +311,43 @@ def _seed_toolbox():
                 lib.add_community_category(cat_name, cat_desc)
         # Normalized comparison (not exact string), same fix as scripts/seed_tools.py
         # and scripts/seed_communities.py (see pull request 197) — a trailing-slash/www/http
-        # variant of an already-seeded URL must be recognized as the same row, or
-        # this trips add_community's own duplicate check below and crash-loops
-        # every restart (this startup-event copy of the re-seed logic was missed
-        # by that fix; the standalone CLI scripts already did this).
+        # variant of an already-seeded URL must be recognized as the same row.
         existing_communities_by_url = {
             normalize_url(r["url"]): r for r in lib.conn.execute("SELECT * FROM communities").fetchall()
         }
         for c in COMMUNITIES:
             crow = existing_communities_by_url.get(normalize_url(c["url"]))
             if not crow:
-                lib.add_community(
-                    name=c["name"], url=c["url"],
-                    demographic=c["demographic"], cost_band=c["cost_band"],
-                    categories=c["categories"], cost_note=c.get("cost_note", ""),
-                    sponsorship_type=c.get("sponsorship_type", "Independent"),
-                    sponsor_name=c.get("sponsor_name", ""), access=c.get("access", ""),
-                    format=c.get("format", ""), notes=c.get("notes", ""), approved=1,
-                    advisor=int(c.get("advisor", False)),
+                # No matching row — either never seeded (fresh DB; not this
+                # hook's job, see docstring) or deliberately deleted by an
+                # admin. Either way: skip, never insert.
+                continue
+            new_adv = int(c.get("advisor", False))
+            if crow["advisor"] != new_adv:
+                lib.conn.execute(
+                    "UPDATE communities SET advisor=? WHERE id=?",
+                    (new_adv, crow["id"]),
                 )
-            else:
-                new_adv = int(c.get("advisor", False))
-                if crow["advisor"] != new_adv:
-                    lib.conn.execute(
-                        "UPDATE communities SET advisor=? WHERE id=?",
-                        (new_adv, crow["id"]),
-                    )
-                    lib.conn.commit()
-                notes = c.get("notes", "")
-                if crow["name"] != c["name"] or crow["notes"] != notes:
-                    lib.update_community_content(crow["id"], c["name"], notes)
+                lib.conn.commit()
+            notes = c.get("notes", "")
+            if crow["name"] != c["name"] or crow["notes"] != notes:
+                lib.update_community_content(crow["id"], c["name"], notes)
         for b in _DEFAULT_BENCHMARKS:
             brow = lib.conn.execute(
                 "SELECT id, name, description FROM benchmarks WHERE url = ?", (b["url"],)
             ).fetchone()
             if not brow:
-                lib.add_benchmark(b["name"], b["url"], b["description"],
-                                  b.get("coverage", "Private"), b.get("pricing", "free"))
-            elif brow["name"] != b["name"] or brow["description"] != b["description"]:
+                # Same reasoning as the communities loop above — a missing
+                # benchmark row might be a deliberate admin delete, not an
+                # unseeded one. Skip, never insert.
+                continue
+            if brow["name"] != b["name"] or brow["description"] != b["description"]:
                 lib.update_benchmark_content(brow["id"], b["name"], b["description"])
         lib.seed_game_rank_settings()
         # Same normalized-URL fix as the communities loop above (and
         # scripts/seed_tools.py) — exact-string WHERE url = ? can miss an
         # already-seeded row that differs only by a normalize_url-covered
-        # variant (trailing slash, www, http vs https), and add_tool's own
-        # duplicate check then crashes startup instead of just skipping it.
+        # variant (trailing slash, www, http vs https).
         existing_tools_by_url = {
             normalize_url(r["url"]): r for r in lib.conn.execute(
                 "SELECT id, name, description, advisor, categories_json, url FROM tools").fetchall()
@@ -351,18 +355,19 @@ def _seed_toolbox():
         for t in TOOLS:
             row = existing_tools_by_url.get(normalize_url(t["url"]))
             if not row:
-                lib.add_tool(t["name"], t["description"], t["url"], t["categories"],
-                             approved=1, advisor=int(t.get("advisor", False)))
-            else:
-                new_adv = int(t.get("advisor", False))
-                if row["advisor"] != new_adv:
-                    lib.conn.execute(
-                        "UPDATE tools SET advisor=? WHERE id=?",
-                        (new_adv, row["id"]),
-                    )
-                    lib.conn.commit()
-                if row["name"] != t["name"] or row["description"] != t["description"]:
-                    lib.update_tool_content(row["id"], t["name"], t["description"])
+                # No matching row — either never seeded (fresh DB; not this
+                # hook's job, see docstring) or deliberately deleted by an
+                # admin. Either way: skip, never insert.
+                continue
+            new_adv = int(t.get("advisor", False))
+            if row["advisor"] != new_adv:
+                lib.conn.execute(
+                    "UPDATE tools SET advisor=? WHERE id=?",
+                    (new_adv, row["id"]),
+                )
+                lib.conn.commit()
+            if row["name"] != t["name"] or row["description"] != t["description"]:
+                lib.update_tool_content(row["id"], t["name"], t["description"])
     finally:
         lib.close()
 
@@ -9185,7 +9190,7 @@ async def admin_tool_name_duplicates_merge(request: Request):
         # delete_tool cascades a cleanup of any tool_name_dedupe_decisions row
         # referencing delete_id, so this pair can never resurface as a
         # candidate or a pending merge — no separate bookkeeping needed here.
-        lib.delete_tool(delete_id)
+        lib.delete_tool(delete_id, admin_id=_current_user_id(lib, request), action="merge")
         msg = f'Kept "{keep_tool["name"]}", deleted duplicate "{delete_tool_row["name"]}".'
     finally:
         lib.close()
@@ -9309,12 +9314,13 @@ async def admin_software_bulk_delete(request: Request):
         return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
     lib = _lib()
     try:
+        admin_id = _current_user_id(lib, request)
         for raw_id in ids:
             try:
                 tool_id = int(raw_id)
             except (TypeError, ValueError):
                 continue
-            lib.delete_tool(tool_id)
+            lib.delete_tool(tool_id, admin_id=admin_id)
     finally:
         lib.close()
     return JSONResponse({"ok": True})
@@ -10391,12 +10397,13 @@ async def admin_communities_bulk_delete(request: Request):
         return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
     lib = _lib()
     try:
+        admin_id = _current_user_id(lib, request)
         for raw_id in ids:
             try:
                 community_id = int(raw_id)
             except (TypeError, ValueError):
                 continue
-            lib.delete_community(community_id)
+            lib.delete_community(community_id, admin_id=admin_id)
     finally:
         lib.close()
     return JSONResponse({"ok": True})
@@ -10940,7 +10947,7 @@ def admin_communities_delete(request: Request, community_id: int):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
     try:
-        lib.delete_community(community_id)
+        lib.delete_community(community_id, admin_id=_current_user_id(lib, request))
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -10967,7 +10974,7 @@ def admin_communities_reject(request: Request, community_id: int):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
     try:
-        lib.delete_community(community_id)
+        lib.delete_community(community_id, admin_id=_current_user_id(lib, request), action="reject")
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/communities", status_code=303)
@@ -11355,7 +11362,7 @@ def admin_tools_reject(request: Request, tool_id: int):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
     try:
-        lib.delete_tool(tool_id)
+        lib.delete_tool(tool_id, admin_id=_current_user_id(lib, request), action="reject")
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/software", status_code=303)
@@ -12084,7 +12091,7 @@ async def admin_tools_delete(request: Request, tool_id: int):
         redirect_to = "/tools/software"
     lib = _lib()
     try:
-        lib.delete_tool(tool_id)
+        lib.delete_tool(tool_id, admin_id=_current_user_id(lib, request))
     finally:
         lib.close()
     return RedirectResponse(redirect_to, status_code=303)
