@@ -1,28 +1,43 @@
-"""Regression for a production crash: webapp.app._seed_toolbox (the
-@app.on_event("startup") re-seed hook) looked up existing tools/communities
-by exact `WHERE url = ?` instead of normalize_url(), unlike
-scripts/seed_tools.py and scripts/seed_communities.py (PR #197), which
-already made that fix. Once normalize_url()'s root-slash bug was fixed
-(making it correctly recognize more variants as duplicates), any existing
-row whose stored URL differed from its seed-list entry by exactly a
-trailing slash/www/http variant caused this exact-match lookup to miss it,
-fall through to add_tool/add_community, and crash the whole app on startup
-via the (correct) DuplicateURLError — a real outage, not a hypothetical.
+"""Regression coverage for webapp.app._seed_toolbox — the
+@app.on_event("startup") hook that seeds/re-syncs the CFO Toolbox
+(tools/communities/benchmarks + their category vocabularies) on every
+process boot. Three separate bugs found in this hook over time, all
+covered here rather than split across files since they're all "boot the
+app for real and check what _seed_toolbox actually did" tests:
 
-The first two tests below seed a tools/communities row with a URL variant
-of a real seed entry, then boot the app through its actual startup event
-(TestClient's lifespan) and confirm it comes up healthy instead of
-crash-looping.
+1. URL-lookup crash (first two tests below): _seed_toolbox looked up
+   existing tools/communities by exact `WHERE url = ?` instead of
+   normalize_url(), unlike scripts/seed_tools.py and
+   scripts/seed_communities.py (PR #197), which already made that fix.
+   Once normalize_url()'s root-slash bug was fixed (making it correctly
+   recognize more variants as duplicates), any existing row whose stored
+   URL differed from its seed-list entry by exactly a trailing
+   slash/www/http variant caused this exact-match lookup to miss it, fall
+   through to add_tool/add_community, and crash the whole app on startup
+   via the (correct) DuplicateURLError — a real outage, not a
+   hypothetical. These two tests seed a tools/communities row with a URL
+   variant of a real seed entry, then boot the app through its actual
+   startup event (TestClient's lifespan) and confirm it comes up healthy
+   instead of crash-looping.
 
-The third test guards a *different* fix (deleted tools/communities
-reappearing after a deploy): _seed_toolbox used to also INSERT a row for
-any seed entry missing from the DB, which meant a manually deleted
-tool/community — hard-deleted, no soft-delete column — silently came back
-on the very next restart, since "missing by URL" was indistinguishable
-from "never seeded." _seed_toolbox now only ever syncs name/description/
-advisor on a *matching* row and never inserts; first-time seeding of a
-brand-new DB is scripts/seed_tools.py/scripts/seed_communities.py's job,
-run once by hand, not something the startup hook duplicates.
+2. Deleted rows reappearing after a deploy (third test): _seed_toolbox
+   used to also INSERT a row for any seed entry missing from the DB,
+   which meant a manually deleted tool/community/benchmark — hard-deleted,
+   no soft-delete column — silently came back on the very next restart,
+   since "missing by URL" was indistinguishable from "never seeded."
+   _seed_toolbox now only ever syncs name/description/advisor on a
+   *matching* row and never inserts; first-time seeding of a brand-new DB
+   is scripts/seed_tools.py's/scripts/seed_communities.py's job, run once
+   by hand, not something the startup hook duplicates.
+
+3. Deleted category reappearing after a deploy (fourth test): the same
+   bug class one level up, on the community_categories vocabulary table
+   rather than a tools/communities row. The community-category seed loop
+   had no empty-table guard, unlike the tools-category loop right next to
+   it, so it unconditionally re-added any seed-list category missing from
+   the DB on every restart — silently undoing a deliberate admin deletion
+   at /admin/tools/communities. Both category loops are now gated the same
+   way: seed once, on a genuinely empty table, never again.
 """
 import os
 import tempfile
