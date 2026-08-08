@@ -30,7 +30,6 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from linklib.db import Library, resolve_db_path
-from scripts.seed_tools import TOOLS
 
 FLAGGED_CATEGORIES = {
     "BI/Analytics",
