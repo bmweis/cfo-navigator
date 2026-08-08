@@ -297,7 +297,18 @@ def _seed_toolbox():
     A seed entry with no matching row by URL is now silently skipped, not
     inserted. First-time seeding of a brand-new DB is scripts/seed_tools.py
     and scripts/seed_communities.py's job (run once, by hand, against a
-    fresh database) — this hook no longer duplicates that."""
+    fresh database) — this hook no longer duplicates that.
+
+    The two category-vocabulary loops (tool_categories, community_categories)
+    have the identical bug class, one level up: a deleted category row has no
+    soft-delete column either, so "name missing from the DB" was
+    indistinguishable from "never seeded" there too. The tools-category loop
+    already had the right guard (only seed when the whole table is empty —
+    i.e. a fresh DB); the community-category loop didn't, and unconditionally
+    re-added any seed-list category missing from the DB on every restart,
+    silently undoing a deliberate deletion at /admin/tools/communities. Both
+    loops are now gated the same way: seed once, on an empty table, never
+    again."""
     from scripts.seed_tools import TOOLS
     from scripts.seed_communities import CATEGORIES as COMMUNITY_CATEGORIES, COMMUNITIES
     lib = _lib()
@@ -305,9 +316,8 @@ def _seed_toolbox():
         if not lib.list_tool_categories():
             for name in _DEFAULT_TOOL_CATEGORIES:
                 lib.add_tool_category(name, _DEFAULT_CATEGORY_DESCRIPTIONS.get(name, ""))
-        existing_community_cats = {c["name"] for c in lib.list_community_categories()}
-        for cat_name, cat_desc in COMMUNITY_CATEGORIES:
-            if cat_name not in existing_community_cats:
+        if not lib.list_community_categories():
+            for cat_name, cat_desc in COMMUNITY_CATEGORIES:
                 lib.add_community_category(cat_name, cat_desc)
         # Normalized comparison (not exact string), same fix as scripts/seed_tools.py
         # and scripts/seed_communities.py (see pull request 197) — a trailing-slash/www/http
