@@ -213,6 +213,32 @@ it's the exact check that would have caught the Corpay failure the moment it hap
 instead of a later session discovering production was unchanged. This is guidance for
 scripts you write for a specific fix, not something to build into `linklib` itself.
 
+## Script-block syntax validation
+
+All shared inline `<script>` blocks in `webapp/app.py` (every module-level constant
+named `*_JS` — `_ADMIN_BULK_EDIT_JS`, `_GENERATE_DESC_JS`, `_SDR_JS`, and so on —
+plus any `<script>{A}{B}</script>` that concatenates two of them into one tag) are
+syntax-checked against Node (`webapp.checks.script_syntax_problems`,
+`tests/test_admin_js_syntax.py`). Runs in CI on every PR (GitHub-hosted runners ship
+Node by default) and live on `/admin/checks` wherever Node happens to be on `PATH` in
+dev — skipped, not failed, when it isn't, since the production Docker image
+(`python:3.11-slim`) has no reason to add Node just for this.
+
+**Lesson learned (2026-08):** a fix validated a shared script block by regexing
+`webapp/app.py`'s raw source text and reported success — but every `*_JS` constant is
+a plain (non-f-string) Python string, so Python resolves its own escape sequences
+(`\'`, `\\`, etc.) between the source on disk and the value actually embedded in the
+page. Regexing the source checks a different string than the one the browser
+receives; the "fix" flipped `\\'` to `\'` (correct-looking in the source, broken once
+Python resolved it) and shipped a regression through the exact check meant to catch
+one. **Always validate what the browser actually receives — the resolved Python
+string or the live rendered response — never an approximation reconstructed from
+source text.** The failure mode compounds the stakes: a syntax error anywhere in a
+shared `<script>` tag aborts parsing of the *entire* tag, so no function in it gets
+defined — not just the one nearest the typo — which is how one truncated apostrophe
+silently took out search, select-all, and bulk edit/delete together, on two separate
+admin pages, with no exception thrown anywhere a person would see it.
+
 ## Running locally
 
 ```bash
