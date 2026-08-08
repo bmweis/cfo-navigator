@@ -233,6 +233,25 @@ it's the exact check that would have caught the Corpay failure the moment it hap
 instead of a later session discovering production was unchanged. This is guidance for
 scripts you write for a specific fix, not something to build into `linklib` itself.
 
+**Every one-off production data fix must leave a trace, whatever mechanism performs
+it.** A committed script (per the above) is preferred, but going straight at production
+via `railway ssh`/shell for a genuinely one-off correction is also fine — that's not the
+problem. The problem is a fix that leaves **zero record anywhere**: not git, not a
+script, not a chat note findable later. At minimum, say in the session what was
+changed and why, so it's in that project's chat history — even a fix that feels too
+small or too obvious to bother writing down.
+
+**Lesson learned (2026-08):** a Lumos category investigation spanning several sessions
+of code archaeology eventually concluded the most likely explanation was a correct,
+deliberate manual production fix — probably several tools' categories corrected in one
+`railway ssh` sitting — that happened to leave no trace anywhere: not in git, not in any
+script, not in any chat transcript a keyword search could find, and not in an audit log
+(the audit log didn't even exist yet at the time). The fix itself was almost certainly
+fine. The entire cost was in not being able to tell that quickly — an untraceable
+correct fix and a silent data-corruption bug look identical from the outside. Writing
+down "changed X's category from A to B, here's why" at the time is nearly free;
+reconstructing it after the fact from timestamps and git history is not.
+
 ## Script-block syntax validation
 
 All shared inline `<script>` blocks in `webapp/app.py` (every module-level constant
