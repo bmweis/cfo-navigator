@@ -8550,7 +8550,7 @@ async function openDeleteSelectedPanel(tableKey) {
     if (!r.ok || !d.ok) throw new Error();
     renderDeleteSelectedPanel(tableKey, ids, d);
   } catch (e) {
-    body.innerHTML = '<p style="font-size:13px;color:#b91c1c;">Couldn\'t load delete preview—try again.</p>';
+    body.innerHTML = '<p style="font-size:13px;color:#b91c1c;">Couldn\\'t load delete preview—try again.</p>';
   }
 }
 function renderDeleteSelectedPanel(tableKey, ids, d) {
@@ -8596,10 +8596,15 @@ def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]]) ->
     """columns: (col_key, label) pairs, all default-visible. Toggled client-side
     via data-col="{table_key}:{col_key}" on the corresponding <th>/<td>s and
     persisted to localStorage by toggleColumn() in _ADMIN_BULK_EDIT_JS."""
+    # json.dumps() quotes with ", same as the onchange="" attribute itself—
+    # unescaped, that closes the attribute early at the first array element
+    # and leaves toggleColumn's 4th argument truncated, so the checkbox's
+    # onchange handler never actually runs. _esc() turns those into &quot;
+    # so the attribute parses whole.
     checks = "".join(
         f'<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">'
         f'<input type="checkbox" id="colpick-{table_key}-{key}" checked '
-        f'onchange="toggleColumn(\'{table_key}\',\'{key}\',this.checked,{json.dumps([k for k, _ in columns])})"> {_esc(label)}</label>'
+        f'onchange="toggleColumn(\'{table_key}\',\'{key}\',this.checked,{_esc(json.dumps([k for k, _ in columns]))})"> {_esc(label)}</label>'
         for key, label in columns
     )
     return f"""<details style="margin:0 0 12px;">
