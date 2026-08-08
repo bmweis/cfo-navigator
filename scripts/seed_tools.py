@@ -486,7 +486,15 @@ TOOLS = [
         "name": "Corpay",
         "url": "https://www.corpay.com",
         "description": "Global corporate payments and FX risk management: cross-border payments, currency hedging, and international AP automation for companies with significant foreign currency exposure.",
-        "categories": ["Treasury/Cash Management"],
+        # Deliberately Procurement/Spend + Travel Management, not
+        # Treasury/Cash Management (the seed file's stale original value) —
+        # this is a named exception from the original out-of-scope cleanup
+        # (see the deleted-tools-reappearing fix). categories_json isn't
+        # re-synced from this list for existing rows (see _seed_toolbox's
+        # docstring), so this only matters for a brand-new DB's first-time
+        # seed or a row that was hard-deleted and needs re-adding by hand —
+        # but it should read correctly either way.
+        "categories": ["Procurement/Spend", "Travel Management"],
     },
     {
         "name": "TreasurySpring",
