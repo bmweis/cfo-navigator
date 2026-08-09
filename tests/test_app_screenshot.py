@@ -105,14 +105,48 @@ _FAKE_PNG = (
 
 # -- linklib.db: migration -------------------------------------------------
 
-def test_migration_moves_legacy_product_flag_to_app_slot(tmp_path):
+def test_migration_not_run_automatically_on_boot(tmp_path):
+    """Reopening the DB (which re-runs every migration in Library.__init__)
+    must NOT touch a legacy screenshot_is_product=1 row — this migration is
+    manual-trigger only (scripts/migrate_app_screenshot_from_product_flag.py),
+    per the standing "human review before a production data write" rule."""
     lib = Library(str(tmp_path / "t.db"))
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.update_tool_screenshot(a, "https://example.com/product-shot.png", 1)  # legacy is_product=1
     lib.close()
 
-    # Reopening the DB re-runs Library.__init__'s migration loop.
+    lib = Library(str(tmp_path / "t.db"))  # a boot / reopen
+    tool = lib.get_tool(a)
+    assert tool["screenshot_url"] == "https://example.com/product-shot.png"  # untouched
+    assert tool["app_screenshot_url"] == ""  # untouched
+    lib.close()
+
+
+def test_find_legacy_product_screenshot_rows_is_read_only(tmp_path):
     lib = Library(str(tmp_path / "t.db"))
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.update_tool_screenshot(a, "https://example.com/product-shot.png", 1)
+    candidates = lib.find_legacy_product_screenshot_rows()
+    assert len(candidates) == 1
+    assert candidates[0]["table"] == "tools"
+    assert candidates[0]["id"] == a
+    assert candidates[0]["screenshot_url"] == "https://example.com/product-shot.png"
+    # Read-only — no write happened.
+    tool = lib.get_tool(a)
+    assert tool["screenshot_url"] == "https://example.com/product-shot.png"
+    assert tool["app_screenshot_url"] == ""
+    lib.close()
+
+
+def test_migrate_app_screenshot_from_product_flag_moves_row(tmp_path):
+    lib = Library(str(tmp_path / "t.db"))
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.update_tool_screenshot(a, "https://example.com/product-shot.png", 1)  # legacy is_product=1
+
+    touched = lib.migrate_app_screenshot_from_product_flag()
+    assert len(touched) == 1
+    assert touched[0]["id"] == a
+
     tool = lib.get_tool(a)
     assert tool["screenshot_url"] == ""  # homepage slot cleared
     assert tool["app_screenshot_url"] == "https://example.com/product-shot.png"
@@ -120,31 +154,78 @@ def test_migration_moves_legacy_product_flag_to_app_slot(tmp_path):
     lib.close()
 
 
-def test_migration_is_idempotent(tmp_path):
+def test_migrate_app_screenshot_from_product_flag_is_idempotent(tmp_path):
     lib = Library(str(tmp_path / "t.db"))
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.update_tool_screenshot(a, "https://example.com/product-shot.png", 1)
-    lib.close()
-    lib = Library(str(tmp_path / "t.db"))
-    lib.close()
-    # A second reopen must not re-touch or duplicate anything.
-    lib = Library(str(tmp_path / "t.db"))
+    lib.migrate_app_screenshot_from_product_flag()
+    # A second run must not re-touch or duplicate anything.
+    touched_again = lib.migrate_app_screenshot_from_product_flag()
+    assert touched_again == []
     tool = lib.get_tool(a)
     assert tool["app_screenshot_url"] == "https://example.com/product-shot.png"
     lib.close()
 
 
-def test_migration_leaves_non_flagged_rows_alone(tmp_path):
+def test_migrate_app_screenshot_from_product_flag_leaves_non_flagged_rows_alone(tmp_path):
     lib = Library(str(tmp_path / "t.db"))
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.set_tool_screenshot_capture(a, "https://example.com/homepage.png")  # ordinary auto-capture
-    lib.close()
-
-    lib = Library(str(tmp_path / "t.db"))
+    touched = lib.migrate_app_screenshot_from_product_flag()
+    assert touched == []
     tool = lib.get_tool(a)
     assert tool["screenshot_url"] == "https://example.com/homepage.png"
     assert tool["app_screenshot_url"] == ""
     lib.close()
+
+
+# -- scripts/migrate_app_screenshot_from_product_flag.py ---------------------
+
+def test_script_preview_makes_no_writes(monkeypatch, tmp_path):
+    import scripts.migrate_app_screenshot_from_product_flag as script_mod
+    db_path = str(tmp_path / "t.db")
+    lib = Library(db_path)
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.update_tool_screenshot(a, "https://example.com/product-shot.png", 1)
+    lib.close()
+
+    monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path])
+    rc = script_mod.main()
+    assert rc == 0
+
+    lib = Library(db_path)
+    tool = lib.get_tool(a)
+    assert tool["screenshot_url"] == "https://example.com/product-shot.png"  # untouched
+    assert tool["app_screenshot_url"] == ""
+    lib.close()
+
+
+def test_script_apply_writes_and_verifies(monkeypatch, tmp_path):
+    import scripts.migrate_app_screenshot_from_product_flag as script_mod
+    db_path = str(tmp_path / "t.db")
+    lib = Library(db_path)
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.update_tool_screenshot(a, "https://example.com/product-shot.png", 1)
+    lib.close()
+
+    monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--apply"])
+    rc = script_mod.main()
+    assert rc == 0
+
+    lib = Library(db_path)
+    tool = lib.get_tool(a)
+    assert tool["screenshot_url"] == ""
+    assert tool["app_screenshot_url"] == "https://example.com/product-shot.png"
+    lib.close()
+
+
+def test_script_no_candidates_exits_clean(monkeypatch, tmp_path):
+    import scripts.migrate_app_screenshot_from_product_flag as script_mod
+    db_path = str(tmp_path / "t.db")
+    Library(db_path).close()
+    monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--apply"])
+    rc = script_mod.main()
+    assert rc == 0
 
 
 # -- linklib.db: writers -----------------------------------------------------
@@ -186,7 +267,6 @@ def test_admin_app_screenshot_recapture_success(env, monkeypatch):
     _mock_playwright_success(monkeypatch)
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
-    a_slug = lib.get_tool(a)["slug"]
     lib.update_tool_app_screenshot_source(a, "https://runway.com/demo")
     lib.close()
 

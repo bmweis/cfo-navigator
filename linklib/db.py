@@ -1440,8 +1440,10 @@ class Library:
             # Dual screenshot capture (Phase E): a second, independent
             # screenshot slot for the actual product/app UI, alongside the
             # existing homepage slot above. screenshot_is_product is retired
-            # by this phase (see _migrate_app_screenshot_from_product_flag
-            # below) but deliberately NOT dropped — same non-destructive
+            # by this phase (see migrate_app_screenshot_from_product_flag
+            # below — a manual-trigger data migration, not an automatic
+            # boot one; see scripts/migrate_app_screenshot_from_product_flag.py)
+            # but deliberately NOT dropped — same non-destructive
             # precedent as the retired community_profiles *_tags columns:
             # the column stays in place, frozen, as a historical marker of
             # which pre-Phase-E rows were manually flagged as a product
@@ -1483,7 +1485,18 @@ class Library:
         # _POST_MIGRATION_INDEXES, which assumes user_id already exists.
         self._migrate_read_later_user_scope()
         self._migrate_community_local_markets()
-        self._migrate_app_screenshot_from_product_flag()
+        # migrate_app_screenshot_from_product_flag is deliberately NOT called
+        # here, unlike the two migrations above — it's a one-time DATA
+        # migration touching pre-existing production rows (moving a legacy
+        # screenshot_is_product=1 row's screenshot into the new app slot),
+        # not a schema/column backfill. The standing rule (CLAUDE.md, "One-
+        # off admin fixes against the database") requires Brian's explicit
+        # review of a production data write before it happens, not after —
+        # an automatic boot hook would fire the moment this deploys, before
+        # anyone has seen the affected-row count. Run it by hand instead via
+        # scripts/migrate_app_screenshot_from_product_flag.py (preview by
+        # default, --apply to actually write, same convention as
+        # scripts/backfill_logos.py). See that script's docstring.
         # Indexes on any column added by the ALTER TABLE loop above must be
         # created here, never inside _SCHEMA — see the NOTE above the
         # password_reset_requests table in _SCHEMA for why (a real incident:
@@ -1599,33 +1612,65 @@ class Library:
         if rows:
             self.conn.commit()
 
-    def _migrate_app_screenshot_from_product_flag(self) -> None:
-        """One-time backfill (Phase E): before this phase, a manually-pasted
-        screenshot flagged screenshot_is_product=1 was the ONLY way to show
-        an actual product/app shot — it lived in the single screenshot_url
-        slot and replaced whatever homepage capture was there. Now that
-        app_screenshot_url is its own slot, every pre-existing row like that
-        is semantically an app screenshot, not a homepage one, so this moves
-        screenshot_url/screenshot_captured_at over to
-        app_screenshot_url/app_screenshot_captured_at and clears the
+    def find_legacy_product_screenshot_rows(self) -> list[dict]:
+        """Preview query for migrate_app_screenshot_from_product_flag below —
+        every tools/communities row a Phase E migration run would touch,
+        with enough context (name/slug/url) to review before anything is
+        written. Read-only; safe to call any time, as often as you like."""
+        out: list[dict] = []
+        for table in ("tools", "communities"):
+            rows = self.conn.execute(
+                f"SELECT id, name, slug, screenshot_url, screenshot_captured_at FROM {table} "
+                f"WHERE screenshot_is_product = 1 AND app_screenshot_url = '' AND screenshot_url != ''"
+            ).fetchall()
+            for row in rows:
+                out.append({
+                    "table": table,
+                    "id": row["id"],
+                    "name": row["name"],
+                    "slug": row["slug"],
+                    "screenshot_url": row["screenshot_url"],
+                    "screenshot_captured_at": row["screenshot_captured_at"],
+                })
+        return out
+
+    def migrate_app_screenshot_from_product_flag(self) -> list[dict]:
+        """One-time data migration (Phase E): before this phase, a manually-
+        pasted screenshot flagged screenshot_is_product=1 was the ONLY way to
+        show an actual product/app shot — it lived in the single
+        screenshot_url slot and replaced whatever homepage capture was
+        there. Now that app_screenshot_url is its own slot, every
+        pre-existing row like that is semantically an app screenshot, not a
+        homepage one, so this moves screenshot_url/screenshot_captured_at
+        over to app_screenshot_url/app_screenshot_captured_at and clears the
         homepage slot (a record that had a product shot standing in for its
         homepage shot goes back to having no homepage shot at all, until one
         is captured for real — see CLAUDE.md/ARCHITECTURE.md for why this
         isn't a "no screenshot" regression, it's the correct read of what
         that row actually had).
 
-        Idempotent — guarded by app_screenshot_url = '' , so this only ever
-        touches a row once, on whichever boot first runs Phase E's migration
-        against a given DB. Non-destructive: screenshot_is_product itself is
-        never cleared or dropped (see the ALTER TABLE comment above), so
-        which rows this touched stays visible/reconstructable afterward
-        purely by re-querying for screenshot_is_product=1. Prints a one-line
-        count to stdout (Railway captures this in the deploy logs) — the
-        nearest thing to a trace this migration can leave, since it runs on
-        every boot rather than as a standalone one-off script."""
+        Deliberately NOT called from Library.__init__ (contrast with the two
+        migrations above it) — this is a production DATA write, not a
+        schema/column backfill, and the standing rule (CLAUDE.md, "One-off
+        admin fixes against the database") requires Brian's review of the
+        affected rows BEFORE a production write, not an after-the-fact
+        deploy-log line. The only caller is
+        scripts/migrate_app_screenshot_from_product_flag.py, run by hand
+        (preview by default, --apply to actually write — same convention as
+        scripts/backfill_logos.py). Idempotent regardless: guarded by
+        app_screenshot_url = '', so a re-run only ever touches a row once.
+        Non-destructive: screenshot_is_product itself is never cleared or
+        dropped (see the ALTER TABLE comment above), so which rows this
+        touched stays visible/reconstructable afterward purely by
+        re-querying for screenshot_is_product=1.
+
+        Returns the same row-dict shape as find_legacy_product_screenshot_rows
+        — i.e. exactly what was (or, called with no candidates, would have
+        been) touched — so a caller can print/log/assert against it."""
+        touched: list[dict] = []
         for table in ("tools", "communities"):
             rows = self.conn.execute(
-                f"SELECT id, screenshot_url, screenshot_captured_at FROM {table} "
+                f"SELECT id, name, slug, screenshot_url, screenshot_captured_at FROM {table} "
                 f"WHERE screenshot_is_product = 1 AND app_screenshot_url = '' AND screenshot_url != ''"
             ).fetchall()
             for row in rows:
@@ -1634,10 +1679,17 @@ class Library:
                     f"screenshot_url='', screenshot_captured_at='' WHERE id=?",
                     (row["screenshot_url"], row["screenshot_captured_at"], row["id"]),
                 )
+                touched.append({
+                    "table": table,
+                    "id": row["id"],
+                    "name": row["name"],
+                    "slug": row["slug"],
+                    "screenshot_url": row["screenshot_url"],
+                    "screenshot_captured_at": row["screenshot_captured_at"],
+                })
             if rows:
                 self.conn.commit()
-                print(f"[db migration] Phase E: moved {len(rows)} legacy product-screenshot "
-                      f"flag(s) on {table} into app_screenshot_url.")
+        return touched
 
     # -- writes -------------------------------------------------------------
 

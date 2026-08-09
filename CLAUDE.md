@@ -182,10 +182,16 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `{slug}-app.png` in the same `_SCREENSHOT_DIR`/`_COMMUNITY_SCREENSHOT_DIR` and served by
   the existing homepage screenshot routes — no new serving route, just a filename suffix.
   The pre-Phase-E `screenshot_is_product` flag (a single slot doing double duty as
-  "homepage or product, whichever's pasted") is retired: a one-time boot migration moves
-  any legacy `screenshot_is_product=1` row into the new app slot and clears the homepage
-  slot, and the column itself stays in the schema, unused, as a non-destructive historical
-  marker — see `linklib/db.py`'s `_migrate_app_screenshot_from_product_flag`. Desktop
+  "homepage or product, whichever's pasted") is retired: `Library.
+  migrate_app_screenshot_from_product_flag` moves a legacy `screenshot_is_product=1` row
+  into the new app slot and clears the homepage slot, and the column itself stays in the
+  schema, unused, as a non-destructive historical marker. This is a one-time PRODUCTION
+  DATA write, so — per the standing "human review before a production write" rule below —
+  it is deliberately **not** wired into an automatic boot hook the way schema/column
+  backfills are; it only runs when Brian invokes
+  `scripts/migrate_app_screenshot_from_product_flag.py` by hand (preview by default,
+  `--apply` to write for real, write-then-read-back verified — same convention as
+  `scripts/backfill_logos.py`), after reviewing the affected-row list it prints. Desktop
   stacks both screenshots in one card when the app slot is populated; mobile shows one at
   a time with a tap-to-toggle button (the existing Phase J1 expand/collapse convention,
   not a new swipe-gesture pattern). A record with only a homepage screenshot — the common
