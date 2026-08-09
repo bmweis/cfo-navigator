@@ -1127,10 +1127,16 @@ def _logo_box(name: str, logo_url: str, size: int, radius: int = 10) -> str:
                 f'style="width:{size}px;height:{size}px;border-radius:{radius}px;object-fit:contain;'
                 f'background:#fff;border:1px solid var(--line);flex-shrink:0;">')
     if size >= 48:
-        font_size = max(11, round(size * 0.22))
-        return (f'<div style="height:{size}px;border-radius:{radius}px;flex-shrink:0;'
+        # Square, matching what a real logo renders at in this same slot
+        # (review follow-up — this used to be an auto-width pill, visibly
+        # wider than tall, which didn't match the aspect ratio a populated
+        # logo takes here). The full phrase wraps across 2-3 short lines
+        # inside the square rather than running off to one wide line.
+        font_size = max(7, round(size * 0.15))
+        return (f'<div style="width:{size}px;height:{size}px;border-radius:{radius}px;flex-shrink:0;'
                 f'background:var(--surface-2);border:1px solid var(--line);color:var(--muted);'
-                f'display:flex;align-items:center;justify-content:center;padding:0 14px;white-space:nowrap;'
+                f'display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;'
+                f'box-sizing:border-box;line-height:1.15;'
                 f'font-family:var(--font-body);font-weight:500;font-size:{font_size}px;">{_esc(_LOGO_MISSING_LABEL)}</div>')
     icon = _LOGO_MISSING_ICON_SVG.format(w=max(12, round(size * 0.55)))
     return (f'<div role="img" aria-label="{_esc(_LOGO_MISSING_LABEL)}" title="{_esc(_LOGO_MISSING_LABEL)}" '
