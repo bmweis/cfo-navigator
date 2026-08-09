@@ -1071,10 +1071,13 @@ def _profile_admin_nudge(text: str) -> str:
 
 # CFO Toolbox logo rendering (Phase F) — turns a tools.logo_path/
 # communities.logo_path value into the served URL, and provides one shared
-# fallback (an understated initial-monogram box, same "neutral placeholder"
-# spirit as .tp-shot-frame's "No screenshot yet" state — deliberately not
-# styled like _avatar()'s bold navy-circle Brian monogram, since a directory
-# of ~90 unbacked records shouldn't read like ~90 little logos-that-aren't).
+# fallback: a text placeholder, same "neutral placeholder" spirit as
+# .tp-shot-frame's "No screenshot yet" state (post-review follow-up — an
+# initial-monogram fallback shipped first, but Brian asked for text instead:
+# a monogram invites reading it as "the logo," where the point is to say
+# plainly that there isn't one). Deliberately not styled like _avatar()'s
+# bold navy-circle Brian monogram either way — a directory of ~90 unbacked
+# records shouldn't read like a design centerpiece.
 # logo_path is stored as "logos/tools/{slug}.ext" / "logos/communities/{slug}.ext"
 # (scripts/backfill_logos.py) — only the basename matters here since the
 # serving routes are filename-based, mirroring the screenshot routes exactly.
@@ -1088,21 +1091,52 @@ def _community_logo_url(c: dict) -> str:
     return f"/tools/communities/logo/{os.path.basename(lp)}" if lp else ""
 
 
+_LOGO_MISSING_LABEL = "Logo not available"
+
+# "Image off" glyph (Feather-style: picture frame + a diagonal slash) for the
+# compact fallback below — the full "Logo not available" phrase doesn't fit
+# legibly in a 28-32px card/table slot, so small sizes get this icon instead,
+# with the full phrase carried as its title/aria-label tooltip rather than
+# crammed into the box. Kept as one constant so the Python and JS renderers
+# below draw the identical glyph.
+_LOGO_MISSING_ICON_SVG = (
+    '<svg width="{w}" height="{w}" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" '
+    'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<rect x="3" y="3" width="18" height="18" rx="3"></rect>'
+    '<circle cx="8.5" cy="8.5" r="1.4"></circle>'
+    '<polyline points="21 15 16 10 5 21"></polyline>'
+    '<line x1="2" y1="2" x2="22" y2="22"></line>'
+    '</svg>'
+)
+
+
 def _logo_box(name: str, logo_url: str, size: int, radius: int = 10) -> str:
-    """A logo <img> if logo_url is set, else a monogram placeholder box (first
-    letter of `name`). Shared by profile-page headers (F2), directory cards
-    (F3), and the Competitors table (F6) so there's exactly one fallback
-    treatment across the whole feature rather than three near-duplicates."""
+    """A logo <img> if logo_url is set, else a text-based "Logo not
+    available" fallback. Shared by profile-page headers (F2), directory
+    cards (F3), and the Competitors table (F6) so there's exactly one
+    fallback treatment across the whole feature.
+
+    Two renderings, picked by `size` rather than a caller-supplied flag —
+    every call site already sizes for its context (56px header vs. 28-32px
+    card/table slot), so the same threshold that decides visual weight also
+    decides which fallback fits: the full phrase at header size, a small
+    icon (with the phrase as a tooltip/aria-label) below it, where the text
+    wouldn't be legible."""
     if logo_url:
         return (f'<img src="{_esc(logo_url)}" alt="{_esc(name)} logo" loading="lazy" '
                 f'style="width:{size}px;height:{size}px;border-radius:{radius}px;object-fit:contain;'
                 f'background:#fff;border:1px solid var(--line);flex-shrink:0;">')
-    letter = (name or "?").strip()[:1].upper() or "?"
-    font_size = max(11, round(size * 0.42))
-    return (f'<div aria-hidden="true" style="width:{size}px;height:{size}px;border-radius:{radius}px;'
-            f'flex-shrink:0;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);'
-            f'display:flex;align-items:center;justify-content:center;font-family:var(--font-head);'
-            f'font-weight:600;font-size:{font_size}px;">{_esc(letter)}</div>')
+    if size >= 48:
+        font_size = max(11, round(size * 0.22))
+        return (f'<div style="height:{size}px;border-radius:{radius}px;flex-shrink:0;'
+                f'background:var(--surface-2);border:1px solid var(--line);color:var(--muted);'
+                f'display:flex;align-items:center;justify-content:center;padding:0 14px;white-space:nowrap;'
+                f'font-family:var(--font-body);font-weight:500;font-size:{font_size}px;">{_esc(_LOGO_MISSING_LABEL)}</div>')
+    icon = _LOGO_MISSING_ICON_SVG.format(w=max(12, round(size * 0.55)))
+    return (f'<div role="img" aria-label="{_esc(_LOGO_MISSING_LABEL)}" title="{_esc(_LOGO_MISSING_LABEL)}" '
+            f'style="width:{size}px;height:{size}px;border-radius:{radius}px;flex-shrink:0;'
+            f'background:var(--surface-2);border:1px solid var(--line);display:flex;'
+            f'align-items:center;justify-content:center;">{icon}</div>')
 
 
 # Claims-accuracy disclaimer for the Features card, distinct from the
@@ -5314,19 +5348,30 @@ function esc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }}
 
-// Card-size logo (Phase F3) — same monogram fallback as the server-rendered
-// _logo_box() on the profile page and Competitors table, reimplemented here
-// since directory cards render client-side from ALL_TOOLS JSON.
+// Card-size logo (Phase F3) — same "Logo not available" fallback as the
+// server-rendered _logo_box() on the profile page and Competitors table,
+// reimplemented here since directory cards render client-side from
+// ALL_TOOLS JSON. Cards are always small (32px), so this is always the
+// compact icon+tooltip form — the full phrase never has to fit here.
+var LOGO_MISSING_LABEL = 'Logo not available';
+var LOGO_MISSING_ICON_SVG = '<svg width="{{w}}" height="{{w}}" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" '
+  + 'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+  + '<rect x="3" y="3" width="18" height="18" rx="3"></rect>'
+  + '<circle cx="8.5" cy="8.5" r="1.4"></circle>'
+  + '<polyline points="21 15 16 10 5 21"></polyline>'
+  + '<line x1="2" y1="2" x2="22" y2="22"></line>'
+  + '</svg>';
+
 function logoBox(name, logoUrl, size) {{
   if (logoUrl) {{
     return '<img src="' + esc(logoUrl) + '" alt="' + esc(name) + ' logo" loading="lazy" style="width:' + size + 'px;height:' + size + 'px;'
       + 'border-radius:8px;object-fit:contain;background:#fff;border:1px solid var(--line);flex-shrink:0;">';
   }}
-  var letter = esc((name || '?').trim().charAt(0).toUpperCase() || '?');
-  var fontSize = Math.max(11, Math.round(size * 0.42));
-  return '<div aria-hidden="true" style="width:' + size + 'px;height:' + size + 'px;border-radius:8px;flex-shrink:0;'
-    + 'background:var(--surface-2);border:1px solid var(--line);color:var(--muted);display:flex;align-items:center;'
-    + 'justify-content:center;font-family:var(--font-head);font-weight:600;font-size:' + fontSize + 'px;">' + letter + '</div>';
+  var icon = LOGO_MISSING_ICON_SVG.replace(/\{{w\}}/g, Math.max(12, Math.round(size * 0.55)));
+  return '<div role="img" aria-label="' + esc(LOGO_MISSING_LABEL) + '" title="' + esc(LOGO_MISSING_LABEL) + '" '
+    + 'style="width:' + size + 'px;height:' + size + 'px;border-radius:8px;flex-shrink:0;'
+    + 'background:var(--surface-2);border:1px solid var(--line);display:flex;align-items:center;'
+    + 'justify-content:center;">' + icon + '</div>';
 }}
 
 function confirmDelete(form) {{
@@ -6841,18 +6886,29 @@ function commEsc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }}
 
-// Card-size logo (Phase F3) — same monogram fallback as logoBox() on the
-// Software directory and _logo_box() on the server-rendered profile pages.
+// Card-size logo (Phase F3) — same "Logo not available" fallback as
+// logoBox() on the Software directory and _logo_box() on the
+// server-rendered profile pages. Community cards are always small (28px),
+// so this is always the compact icon+tooltip form.
+var COMM_LOGO_MISSING_LABEL = 'Logo not available';
+var COMM_LOGO_MISSING_ICON_SVG = '<svg width="{{w}}" height="{{w}}" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" '
+  + 'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+  + '<rect x="3" y="3" width="18" height="18" rx="3"></rect>'
+  + '<circle cx="8.5" cy="8.5" r="1.4"></circle>'
+  + '<polyline points="21 15 16 10 5 21"></polyline>'
+  + '<line x1="2" y1="2" x2="22" y2="22"></line>'
+  + '</svg>';
+
 function commLogoBox(name, logoUrl, size) {{
   if (logoUrl) {{
     return '<img src="' + commEsc(logoUrl) + '" alt="' + commEsc(name) + ' logo" loading="lazy" style="width:' + size + 'px;height:' + size + 'px;'
       + 'border-radius:8px;object-fit:contain;background:#fff;border:1px solid var(--line);flex-shrink:0;">';
   }}
-  var letter = commEsc((name || '?').trim().charAt(0).toUpperCase() || '?');
-  var fontSize = Math.max(11, Math.round(size * 0.42));
-  return '<div aria-hidden="true" style="width:' + size + 'px;height:' + size + 'px;border-radius:8px;flex-shrink:0;'
-    + 'background:var(--surface-2);border:1px solid var(--line);color:var(--muted);display:flex;align-items:center;'
-    + 'justify-content:center;font-family:var(--font-head);font-weight:600;font-size:' + fontSize + 'px;">' + letter + '</div>';
+  var icon = COMM_LOGO_MISSING_ICON_SVG.replace(/\{{w\}}/g, Math.max(12, Math.round(size * 0.55)));
+  return '<div role="img" aria-label="' + commEsc(COMM_LOGO_MISSING_LABEL) + '" title="' + commEsc(COMM_LOGO_MISSING_LABEL) + '" '
+    + 'style="width:' + size + 'px;height:' + size + 'px;border-radius:8px;flex-shrink:0;'
+    + 'background:var(--surface-2);border:1px solid var(--line);display:flex;align-items:center;'
+    + 'justify-content:center;">' + icon + '</div>';
 }}
 
 // Renders a Community listing field for the directory card: the escaped
