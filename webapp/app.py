@@ -5367,7 +5367,7 @@ function logoBox(name, logoUrl, size) {{
     return '<img src="' + esc(logoUrl) + '" alt="' + esc(name) + ' logo" loading="lazy" style="width:' + size + 'px;height:' + size + 'px;'
       + 'border-radius:8px;object-fit:contain;background:#fff;border:1px solid var(--line);flex-shrink:0;">';
   }}
-  var icon = LOGO_MISSING_ICON_SVG.replace(/\{{w\}}/g, Math.max(12, Math.round(size * 0.55)));
+  var icon = LOGO_MISSING_ICON_SVG.split('{{w}}').join(Math.max(12, Math.round(size * 0.55)));
   return '<div role="img" aria-label="' + esc(LOGO_MISSING_LABEL) + '" title="' + esc(LOGO_MISSING_LABEL) + '" '
     + 'style="width:' + size + 'px;height:' + size + 'px;border-radius:8px;flex-shrink:0;'
     + 'background:var(--surface-2);border:1px solid var(--line);display:flex;align-items:center;'
@@ -6904,7 +6904,7 @@ function commLogoBox(name, logoUrl, size) {{
     return '<img src="' + commEsc(logoUrl) + '" alt="' + commEsc(name) + ' logo" loading="lazy" style="width:' + size + 'px;height:' + size + 'px;'
       + 'border-radius:8px;object-fit:contain;background:#fff;border:1px solid var(--line);flex-shrink:0;">';
   }}
-  var icon = COMM_LOGO_MISSING_ICON_SVG.replace(/\{{w\}}/g, Math.max(12, Math.round(size * 0.55)));
+  var icon = COMM_LOGO_MISSING_ICON_SVG.split('{{w}}').join(Math.max(12, Math.round(size * 0.55)));
   return '<div role="img" aria-label="' + commEsc(COMM_LOGO_MISSING_LABEL) + '" title="' + commEsc(COMM_LOGO_MISSING_LABEL) + '" '
     + 'style="width:' + size + 'px;height:' + size + 'px;border-radius:8px;flex-shrink:0;'
     + 'background:var(--surface-2);border:1px solid var(--line);display:flex;align-items:center;'
