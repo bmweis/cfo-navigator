@@ -870,6 +870,20 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
   .site-nav a.nav-cta{background:transparent;color:rgba(255,255,255,.82);padding:13px 24px;border-radius:0;font-weight:400;}
   .site-nav a.nav-cta:hover{background:rgba(255,255,255,.06);color:#fff;}
 }
+
+/* Standard expand/collapse indicator (Phase J1) — one shape, one rotation
+   convention, used by every <details>/<summary> disclosure site-wide.
+   Convention: collapsed points right, expanded points down (rotate 90deg),
+   matching the pre-existing .q-group/.convo pattern rather than the old
+   .admin-group/.features-group one (those pointed down when collapsed and
+   rotated to point up when expanded — backwards from this convention, and
+   now fixed to match it). The details[open] > summary combinator targets
+   any disclosure without needing a per-instance wrapper class. */
+details > summary{list-style:none;}
+details > summary::-webkit-details-marker{display:none;}
+details > summary .disclosure-caret{display:inline-block;flex-shrink:0;font-size:15px;
+  font-weight:700;line-height:1;color:var(--navy);transition:transform .15s;}
+details[open] > summary .disclosure-caret{transform:rotate(90deg);}
 """
 
 # Trailing brand suffixes baked into individual page titles over time — now
@@ -5085,6 +5099,10 @@ def tools_directory(request: Request, warn: str = ""):
         f' title="{_esc(c["description"])}">{_esc(c["name"])}</button>'
         for c in categories
     )
+    # "Uncategorized" is a hygiene filter (Phase J3), not a real category — a
+    # reserved data-cat sentinel the JS OR-matches against an empty
+    # categories array instead of a category name (see filtered() below).
+    cat_buttons += '<button class="tcat-btn" data-cat="__uncategorized__" onclick="filterCat(this)">Uncategorized</button>'
 
     # Non-blocking name-duplicate warning from the save routes (see
     # linklib.db.find_tool_name_duplicate) — admin-only, so a stray ?warn=
@@ -5113,11 +5131,14 @@ Not sure which tool's for you? {(
   oninput="filterTools()"
   style="display:block;width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;box-sizing:border-box;margin-bottom:10px;">
 
-<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-  <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#9733; Advisor</button>
-  <button class="tcat-btn tcat-all tcat-active" data-cat="" onclick="filterCat(this)">All</button>
-  {cat_buttons}
-</div>
+<details open style="margin-bottom:8px;">
+  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#9733; Advisor</button>
+    <button class="tcat-btn tcat-all tcat-active" data-cat="" onclick="filterCat(this)">All</button>
+    {cat_buttons}
+  </div>
+</details>
 
 {'<p style="color:var(--muted);margin:0 0 16px;"><a href="/admin/tools/categories" style="font-weight:500;">Manage categories &rarr;</a></p>' if authed else ''}
 
@@ -5430,6 +5451,7 @@ function filtered() {{
       var cats = t.categories || [];
       var hit = false;
       for (var i = 0; i < cats.length; i++) {{ if (activeCats.has(cats[i])) {{ hit = true; break; }} }}
+      if (!hit && activeCats.has('__uncategorized__') && cats.length === 0) hit = true;
       if (!hit) return false;
     }}
     if (!q) return true;
@@ -6573,6 +6595,10 @@ def tools_communities(request: Request):
         f' title="{_esc(c["description"])}">{_esc(c["name"])}</button>'
         for c in categories
     )
+    # "Uncategorized" is a hygiene filter (Phase J3), not a real category — a
+    # reserved data-cat sentinel the JS OR-matches against an empty
+    # categories array instead of a category name (see commFiltered() below).
+    cat_buttons += '<button class="ccat-btn" data-cat="__uncategorized__" onclick="filterCommCat(this)">Uncategorized</button>'
     cost_bands = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
     cost_buttons = "".join(
         f'<button class="ccat-btn" data-cost="{_esc(b)}" onclick="filterCommCost(this)">{_esc(b)}</button>'
@@ -6604,10 +6630,13 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
   </select>
 </div>
 
-<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-  <button class="ccat-btn ccat-all ccat-active" data-cat="" onclick="filterCommCat(this)">All categories</button>
-  {cat_buttons}
-</div>
+<details open style="margin-bottom:8px;">
+  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <button class="ccat-btn ccat-all ccat-active" data-cat="" onclick="filterCommCat(this)">All categories</button>
+    {cat_buttons}
+  </div>
+</details>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
   <button class="ccat-btn ccat-all ccat-active" data-cost="" onclick="filterCommCost(this)">All cost bands</button>
@@ -6850,6 +6879,7 @@ function commFiltered() {{
       var cats = c.categories || [];
       var hit = false;
       for (var i = 0; i < cats.length; i++) {{ if (activeCommCats.has(cats[i])) {{ hit = true; break; }} }}
+      if (!hit && activeCommCats.has('__uncategorized__') && cats.length === 0) hit = true;
       if (!hit) return false;
     }}
     if (!q) return true;
@@ -8272,7 +8302,8 @@ def admin_contacts(request: Request):
         preview = flat[:PREVIEW_LEN].rstrip() + "…" if len(flat) > PREVIEW_LEN else flat
         return (
             f'<td style="padding:10px 12px;border-bottom:1px solid var(--line);">'
-            f'<details><summary style="cursor:pointer;color:var(--ink-soft);">{_esc(preview)}</summary>'
+            f'<details><summary style="cursor:pointer;color:var(--ink-soft);display:flex;align-items:baseline;gap:6px;">'
+            f'<span class="disclosure-caret" style="font-size:11px;">&#9654;</span>{_esc(preview)}</summary>'
             f'<div style="white-space:pre-wrap;margin-top:8px;color:var(--ink-soft);">{_esc(message)}</div></details></td>'
         )
 
@@ -8623,7 +8654,7 @@ def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]]) ->
         for key, label in columns
     )
     return f"""<details style="margin:0 0 12px;">
-  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-block;">Columns &#9662;</summary>
+  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;">Columns <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
   <div style="display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:8px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);max-width:520px;">
     {checks}
   </div>
@@ -8743,8 +8774,10 @@ function applySortFilter(tableKey) {
       if ((row.getAttribute('data-' + field) || '') !== activeFilters[field]) ok = false;
     });
     if (ok && activeCats.length) {
-      var rowCats = (row.getAttribute('data-categories') || '').split('|');
-      if (!activeCats.some(function(c) { return rowCats.indexOf(c) !== -1; })) ok = false;
+      var rowCats = (row.getAttribute('data-categories') || '').split('|').filter(function(c) { return c; });
+      var matched = activeCats.some(function(c) { return rowCats.indexOf(c) !== -1; })
+        || (activeCats.indexOf('__uncategorized__') !== -1 && rowCats.length === 0);
+      if (!matched) ok = false;
     }
     if (ok && q && (row.getAttribute('data-search') || '').indexOf(q) === -1) ok = false;
     row.style.display = ok ? '' : 'none';
@@ -8830,8 +8863,21 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
             f'<input type="checkbox" value="{_esc(c["name"])}" onchange="applySortFilter(\'{table_key}\')"> {_esc(c["name"])}</label>'
             for c in category_options
         )
-        pills_html = (f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:8px;'
-                      f'align-items:center;margin:-2px 0 12px;">{boxes}</div>'
+        # "Uncategorized" is a hygiene filter (Phase J3), not a real category —
+        # a reserved sentinel value the JS OR-matches against an empty
+        # data-categories attribute instead of a category name (see
+        # applySortFilter in _ADMIN_SORT_FILTER_JS).
+        boxes += (f'<label class="admin-cat-pill">'
+                  f'<input type="checkbox" value="__uncategorized__" onchange="applySortFilter(\'{table_key}\')"> Uncategorized</label>')
+        # Collapsed by default (Phase J2) — same disclosure affordance as the
+        # "Columns ▾" toggle above, just click-to-reveal rather than
+        # always-visible, since admins have less use for the pill row than
+        # public visitors browsing the directory.
+        pills_html = (f'<details style="margin:-2px 0 12px;">'
+                      f'<summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;'
+                      f'align-items:center;gap:5px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>'
+                      f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:8px;'
+                      f'align-items:center;margin-top:10px;">{boxes}</div></details>'
                       '<style>.admin-cat-pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;'
                       'font-weight:500;padding:6px 14px;border-radius:999px;border:1px solid var(--line);'
                       'color:var(--muted);cursor:pointer;white-space:nowrap;}'
@@ -8846,7 +8892,8 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
             for c in category_options
         )
         category_html = (f'<details style="display:inline-block;"><summary style="cursor:pointer;font-size:13px;'
-                          f'color:var(--muted);display:inline-block;">Categories &#9662;</summary>'
+                          f'color:var(--muted);display:inline-flex;align-items:center;gap:5px;">Categories '
+                          f'<span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>'
                           f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:6px 12px;'
                           f'margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;'
                           f'background:var(--surface);max-width:420px;">{boxes}</div></details>')
@@ -9024,7 +9071,7 @@ initColPicker('software', {json.dumps([k for k, _ in software_cols])});
 applySortFilter('software');
 </script>
 
-<p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
+<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
   Editing <code>scripts/seed_tools.py</code> updates a tool&rsquo;s <strong>name</strong> and
   <strong>description</strong> here automatically on the next deploy. No manual re-seed needed.
   <strong>Categories, Advisor, Featured, and Warm Intro are database-only</strong>: edit them here
@@ -9607,7 +9654,7 @@ def admin_benchmarks(request: Request):
 </table>
 </div>
 
-<p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
+<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
   Editing <code>_DEFAULT_BENCHMARKS</code> in <code>webapp/app.py</code> updates a resource&rsquo;s
   <strong>name</strong> and <strong>description</strong> here automatically on the next deploy.
   No manual re-seed needed. <strong>Coverage and Pricing are database-only</strong>: edit them here
@@ -10247,7 +10294,7 @@ def admin_communities(request: Request, filter: str = ""):
 </p>
 
 <details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
-  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);">How this works: every prompt/CTA across the feature, and the anonymous tracking behind it</summary>
+  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>How this works: every prompt/CTA across the feature, and the anonymous tracking behind it</summary>
   <div style="margin-top:16px;">
     {_COMMUNITIES_REFERENCE_HTML}
   </div>
@@ -10299,7 +10346,7 @@ initColPicker('communities', {json.dumps([k for k, _ in communities_cols])});
 applySortFilter('communities');
 </script>
 
-<p style="font-size:12px;color:var(--muted);margin:16px 0 0;max-width:720px;">
+<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
   Editing <code>scripts/seed_communities.py</code> updates a community&rsquo;s <strong>name</strong> and
   <strong>notes</strong> here automatically on the next deploy. No manual re-seed needed.
   <strong>Everything else is database-only</strong>: edit it here (Edit above), and this sync will never touch it.
@@ -11679,7 +11726,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       <h2 style="font-size:16px;font-weight:600;margin:0;">Features</h2>
       {_features_badge_html}
     </span>
-    <span class="features-chevron" style="color:var(--navy);font-size:13px;line-height:1;transition:transform .15s;">&#9660;</span>
+    <span class="disclosure-caret">&#9654;</span>
   </summary>
   <p style="font-size:13px;color:var(--muted);margin:12px 0 16px;">Standalone-vs-bundled availability per feature—feeds the Phase 5 comparison matrix. Rows flagged "Needs verification" came from the LLM enrichment pass and haven't been confirmed yet.</p>
 
@@ -11727,8 +11774,6 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
-.features-group summary::-webkit-details-marker{{display:none;}}
-.features-group[open] .features-chevron{{transform:rotate(180deg);}}
 </style>
 <script>{_GENERATE_DESC_JS}
 // Generate summary (Description) and Generate summary (Differentiation)
@@ -13586,7 +13631,7 @@ def ask_page(request: Request, q: str = ""):
 <div class="ask-value">
   <ul class="ask-value-list ask-value-list-static">{ask_value_bullets}</ul>
   <details class="ask-value-details">
-    <summary>What can FP&amp;A Buddy do?</summary>
+    <summary><span class="disclosure-caret">&#9654;</span>What can FP&amp;A Buddy do?</summary>
     <ul class="ask-value-list">{ask_value_bullets}</ul>
   </details>
 </div>
@@ -13634,7 +13679,7 @@ def ask_page(request: Request, q: str = ""):
 .ask-value-list li{{font-size:13px;line-height:1.5;color:var(--ink-soft);}}
 .ask-value-list strong{{color:var(--ink);}}
 .ask-value-details{{display:none;}}
-.ask-value-details summary{{cursor:pointer;font:600 13px var(--font-body);color:var(--navy);}}
+.ask-value-details summary{{cursor:pointer;font:600 13px var(--font-body);color:var(--navy);display:flex;align-items:baseline;gap:6px;}}
 .ask-value-details[open] summary{{margin-bottom:10px;}}
 @media (max-width:640px){{
   .ask-value{{padding:14px 16px;}}
@@ -14390,7 +14435,7 @@ def ask_history(request: Request):
       <div style="font-weight:600;color:var(--navy);font-size:14.5px;flex:1 1 180px;">{q}</div>
       <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])} &middot; ${total:.3f} total</div>
     </div>
-    <span class="convo-chip"><span class="arr">&#9656;</span>&nbsp;{label}</span>
+    <span class="convo-chip"><span class="disclosure-caret">&#9654;</span>&nbsp;{label}</span>
   </summary>
   <div style="padding:0 18px 6px;">
     {"".join(_turn_block(t) for t in turns)}
@@ -14413,11 +14458,8 @@ def ask_history(request: Request):
 {rows_html}
 </div>
 <style>
-.convo > summary{{list-style:none;}}
-.convo > summary::-webkit-details-marker{{display:none;}}
 .convo-chip{{display:inline-flex;align-items:center;margin-top:10px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:4px 12px;}}
-.convo .arr{{display:inline-block;transition:transform .15s;}}
-.convo[open] .arr{{transform:rotate(90deg);}}
+.convo-chip .disclosure-caret{{font-size:11px;}}
 </style>
 </div>"""
     return HTMLResponse(_page("Your FP&A Buddy history—Brian Weisberg", "Library", body, role=_role(request)))
@@ -15427,7 +15469,7 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'<span class="group-badge">{group_badge_html}</span>'
             f'<span style="font-size:12px;color:var(--muted);">{len(items)} {"tool" if len(items)==1 else "tools"}</span>'
             f'</span>'
-            f'<span class="admin-chevron" style="color:var(--navy);font-size:13px;line-height:1;transition:transform .15s;">&#9660;</span>'
+            f'<span class="disclosure-caret">&#9654;</span>'
             f'</summary>'
             f'<div style="padding:0 20px 20px;">'
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
@@ -15453,8 +15495,6 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 
     body = f"""<div class="page page-admin">
 <style>
-.admin-group summary::-webkit-details-marker{{display:none;}}
-.admin-group[open] .admin-chevron{{transform:rotate(180deg);}}
 .admin-group summary:hover{{background:var(--surface);}}
 .admin-group[open] .group-badge{{display:none;}}
 .admin-cols{{display:grid;grid-template-columns:1fr;}}
@@ -15528,7 +15568,7 @@ def admin_library(request: Request):
 <p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong>&mdash;the old copies embed the old values. Set them up again from this page's instructions.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
-<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);">Desktop&mdash;the bookmarklet</summary>
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>Desktop&mdash;the bookmarklet</summary>
 <div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
 <p style="margin:0 0 10px;">A bookmarklet is an ordinary browser bookmark whose &ldquo;URL&rdquo; is a tiny program instead of a web address. Clicking it runs the program on whatever page you're reading&mdash;it grabs that page's address and saves it to the archive.</p>
 <ol style="margin:0 0 10px;padding-left:20px;">
@@ -15542,7 +15582,7 @@ def admin_library(request: Request):
 </details>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
-<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);">iPhone / iPad&mdash;Share-Sheet shortcut</summary>
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>iPhone / iPad&mdash;Share-Sheet shortcut</summary>
 <div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
 <p style="margin:0 0 10px;">One-time setup in the <strong>Shortcuts</strong> app (~5 minutes); afterwards &ldquo;Save to CFO Library&rdquo; appears in Safari's share sheet.</p>
 <ol style="margin:0 0 10px;padding-left:20px;">
@@ -15771,7 +15811,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
         group_blocks += f"""<details data-group class="q-group" style="margin-bottom:12px;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;">
     <span style="display:flex;align-items:center;gap:10px;min-width:0;">
-      <span class="q-chevron" style="color:var(--navy);font-size:12px;line-height:1;transition:transform .15s;flex-shrink:0;">&#9654;</span>
+      <span class="disclosure-caret">&#9654;</span>
       <h2 style="margin:0;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{s} <span class="grp-count" style="color:var(--muted);font-weight:500;font-size:14px;">({len(cards)})</span></h2>
     </span>
     <span style="display:flex;gap:9px;flex-shrink:0;">
@@ -15827,8 +15867,6 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
 
     body = f"""<div class="page page-admin">
 <style>
-.q-group summary::-webkit-details-marker{{display:none;}}
-.q-group[open] .q-chevron{{transform:rotate(90deg);}}
 .q-group summary:hover{{background:var(--surface);}}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
@@ -16839,7 +16877,7 @@ def admin_ask_report(request: Request, user: str = ""):
   <td style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])}</td>
   <td style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(first))}</td>
   <td style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(first.get("question") or "") > 160 else ''}
-    <span id="chip-{_esc(gid)}" style="margin-left:8px;font-size:11px;font-weight:700;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:2px 10px;white-space:nowrap;">&#9656; {len(turns)} turns</span></td>
+    <span id="chip-{_esc(gid)}" style="margin-left:8px;font-size:11px;font-weight:700;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:2px 10px;white-space:nowrap;"><span class="disclosure-caret" style="font-size:10px;">&#9654;</span> {len(turns)} turns</span></td>
   <td style="padding:8px 10px;font-size:12px;white-space:nowrap;color:var(--muted);">{_esc(", ".join(models))}</td>
   <td style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${total:.4f}{rw_note}</td>
 </tr>"""
@@ -16912,11 +16950,9 @@ function toggleConvo(g) {{
   document.querySelectorAll('tr[data-convo="' + g + '"]').forEach(function(tr) {{
     tr.style.display = tr.style.display === 'none' ? '' : 'none';
   }});
-  var chip = document.getElementById('chip-' + g);
-  if (chip) {{
-    chip.textContent = chip.textContent.indexOf('\\u25B8') !== -1
-      ? chip.textContent.replace('\\u25B8', '\\u25BE')
-      : chip.textContent.replace('\\u25BE', '\\u25B8');
+  var caret = document.querySelector('#chip-' + g + ' .disclosure-caret');
+  if (caret) {{
+    caret.style.transform = caret.style.transform ? '' : 'rotate(90deg)';
   }}
 }}
 </script>
@@ -17680,8 +17716,8 @@ def admin_ask_feedback(request: Request, rating: str = ""):
         answer = r.get("answer") or ""
         a_html, src_html = _render_cited_answer(answer, r.get("citations_json") or "[]")
         answer_html = (
-            f'<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">'
-            f'Answer ({len(answer):,} chars)&mdash;expand</summary>'
+            f'<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);display:flex;align-items:baseline;gap:5px;">'
+            f'<span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Answer ({len(answer):,} chars)&mdash;expand</summary>'
             f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:8px 0 0;">{a_html}</p></details>'
             if len(answer) > 300 else
             f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;margin:8px 0 0;">{a_html}</p>'
@@ -17804,8 +17840,8 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
         if not text:
             return ""
         body_html = (
-            f'<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">'
-            f'{_esc(label)} ({len(text):,} chars)&mdash;expand</summary>'
+            f'<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);display:flex;align-items:baseline;gap:5px;">'
+            f'<span class="disclosure-caret" style="font-size:11px;">&#9654;</span>{_esc(label)} ({len(text):,} chars)&mdash;expand</summary>'
             f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:6px 0 0;">{_esc(text)}</p></details>'
             if len(text) > 300 else
             f'<div style="margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;">{_esc(label)}</div>'
@@ -19397,7 +19433,7 @@ def admin_voice_page(request: Request):
 {reset_btn}
 <span id="{field_id}-status" style="font-size:13px;color:var(--muted);"></span></div>
 <details style="margin-top:14px;">
-<summary style="cursor:pointer;font-size:13px;color:var(--muted);">Default voice guide (used when the field above is empty)</summary>
+<summary style="cursor:pointer;font-size:13px;color:var(--muted);display:flex;align-items:baseline;gap:5px;"><span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Default voice guide (used when the field above is empty)</summary>
 <pre style="white-space:pre-wrap;font:12px/1.6 ui-monospace,monospace;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:10px;color:var(--muted);">{_esc(default_value)}</pre>
 </details>
 </div>"""
@@ -19936,7 +19972,7 @@ def admin_emails_page(request: Request):
 <span id="{section_id}-status" style="font-size:13px;color:var(--muted);"></span></div>
 
 <details style="margin-top:18px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 16px;">
-<summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--navy);">Built-in default (read-only reference)</summary>
+<summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:5px;"><span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Built-in default (read-only reference)</summary>
 <div style="margin-top:12px;font-size:13px;color:var(--ink-soft);">
 <p style="margin:0 0 4px;"><strong>Subject:</strong></p>
 <pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(row["subject_default"])}</pre>
