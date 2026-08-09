@@ -44,6 +44,25 @@ def test_add_empty_name_rejected(lib):
         lib.add_tool_category("   ")
 
 
+def test_add_reserved_uncategorized_name_rejected_case_insensitive(lib):
+    # "Uncategorized" is the directory's built-in hygiene filter (Phase J3,
+    # the __uncategorized__ sentinel in the /tools/software and
+    # /admin/tools/software pill filters) — a real category with this name
+    # would be indistinguishable from it, so creation is blocked.
+    with pytest.raises(ValueError):
+        lib.add_tool_category("Uncategorized")
+    with pytest.raises(ValueError):
+        lib.add_tool_category("uncategorized")
+    with pytest.raises(ValueError):
+        lib.add_tool_category("  UNCATEGORIZED  ")
+
+
+def test_rename_to_reserved_uncategorized_name_rejected(lib):
+    cat_id = lib.add_tool_category("Billing")
+    with pytest.raises(ValueError):
+        lib.rename_tool_category(cat_id, "Uncategorized")
+
+
 def test_tool_count_reflects_usage(lib):
     lib.add_tool_category("Billing")
     lib.add_tool_category("Procurement")

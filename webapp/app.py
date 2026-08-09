@@ -9514,6 +9514,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     </div>
     <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add category</button></div>
   </form>
+  <p style="font-size:12px;color:var(--muted);margin:12px 0 0;">&ldquo;Uncategorized&rdquo; is reserved&mdash;it's the directory's built-in filter for tools with no categories, not a real category, so that name can't be used here.</p>
 </div>
 </div>"""
     return HTMLResponse(_page("Toolbox categories—CFO Toolbox Admin", "Admin", body, authed=True))
@@ -10540,6 +10541,7 @@ def admin_communities_categories(request: Request, msg: str = "", error: str = "
     </div>
     <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add category</button></div>
   </form>
+  <p style="font-size:12px;color:var(--muted);margin:12px 0 0;">&ldquo;Uncategorized&rdquo; is reserved&mdash;it's the directory's built-in filter for communities with no categories, not a real category, so that name can't be used here.</p>
 </div>
 </div>"""
     return HTMLResponse(_page("Community categories—CFO Toolbox Admin", "Admin", body, authed=True))
