@@ -53,7 +53,9 @@ def test_update_tool_screenshot(env):
 def test_admin_edit_saves_screenshot_fields(env):
     """Phase E: the admin edit form no longer submits screenshot_is_product
     (the checkbox was removed) — a POST that still includes it (e.g. a stale
-    client) is simply ignored, since the submit route hardcodes 0 now."""
+    client) is simply ignored, since the submit route no longer reads it at
+    all (see the regression test below for why "ignored" specifically means
+    "never touches the column")."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -73,6 +75,43 @@ def test_admin_edit_saves_screenshot_fields(env):
     tool = lib.get_tool(a)
     assert tool["screenshot_url"] == "https://example.com/shot.png"
     assert tool["screenshot_is_product"] == 0
+    lib.close()
+
+
+def test_admin_edit_save_does_not_clobber_legacy_product_flag(env):
+    """Regression test (2026-08 incident): an unrelated full-form "Save
+    changes" on a tool that still carries a legacy screenshot_is_product=1
+    must NOT silently reset it to 0. The Phase E submit route originally
+    called update_tool_screenshot with a hardcoded screenshot_is_product=0
+    on every save regardless of what was actually edited — which meant a
+    row could vanish from scripts/migrate_app_screenshot_from_product_flag.py's
+    preview between two runs, with no --apply in between, purely because an
+    admin resaved the page for an unrelated reason. Fixed by having the
+    submit route call the new update_tool_screenshot_url (which never
+    touches screenshot_is_product) instead of update_tool_screenshot."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    a_slug = lib.get_tool(a)["slug"]
+    lib.update_tool_screenshot(a, "https://example.com/product-shot.png", 1)  # legacy flag set
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    # A save that doesn't touch the screenshot section at all — just a
+    # routine edit to an unrelated field.
+    r = client.post(f"/tools/software/{a_slug}/edit", data={
+        "name": "Runway", "url": "https://runway.com", "description": "Updated description",
+        "summary": "FP&A",
+        "screenshot_url": "https://example.com/product-shot.png",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool = lib.get_tool(a)
+    assert tool["description"] == "Updated description"
+    assert tool["screenshot_url"] == "https://example.com/product-shot.png"
+    assert tool["screenshot_is_product"] == 1  # survives the unrelated save
     lib.close()
 
 

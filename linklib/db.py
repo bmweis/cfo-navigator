@@ -2863,15 +2863,42 @@ class Library:
         self.conn.commit()
 
     def update_tool_screenshot(self, tool_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
-        """Narrow update for the admin full-edit form's manual screenshot
-        fields — same bulk-edit-safety reasoning as update_tool_differentiation.
-        Clears screenshot_captured_at: a hand-pasted URL has no known capture
-        time, and leaving a stale timestamp on it would misrepresent it as a
-        fresh automated capture."""
+        """Legacy narrow update, kept for pre-Phase-E callers/tests only —
+        DO NOT call this from the admin edit-form submit path. Writes
+        screenshot_is_product unconditionally, which is exactly the bug a
+        2026-08 incident traced back to this method: the Phase E submit
+        route called it with a hardcoded screenshot_is_product=0 on EVERY
+        full-form save (any field, not just the screenshot ones), silently
+        clearing the retired flag on rows the one-time migration script
+        (scripts/migrate_app_screenshot_from_product_flag.py) hadn't been
+        run against yet — so a row could vanish from that script's preview
+        between two runs seconds apart, with no --apply in between, just
+        because someone resaved the tool's edit page for an unrelated
+        reason. update_tool_screenshot_url below is what the live app
+        actually calls now; this one stays only so
+        tests/test_screenshot_capture.py's and
+        tests/test_software_screenshot.py's coverage of the pre-Phase-E
+        write path (and any future one-off script that genuinely needs to
+        set screenshot_is_product) still has a method to call."""
         self.conn.execute(
             "UPDATE tools SET screenshot_url=?, screenshot_is_product=?, screenshot_captured_at='', "
             "updated_at=? WHERE id=?",
             (screenshot_url.strip(), screenshot_is_product, _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def update_tool_screenshot_url(self, tool_id: int, screenshot_url: str) -> None:
+        """Narrow update for the admin full-edit form's homepage Screenshot
+        URL field (Phase E fix) — same bulk-edit-safety reasoning as
+        update_tool_differentiation, and deliberately does NOT touch
+        screenshot_is_product at all (contrast with update_tool_screenshot
+        above, which does and is why this method exists — see its
+        docstring). Clears screenshot_captured_at: a hand-pasted URL has no
+        known capture time, and leaving a stale timestamp on it would
+        misrepresent it as a fresh automated capture."""
+        self.conn.execute(
+            "UPDATE tools SET screenshot_url=?, screenshot_captured_at='', updated_at=? WHERE id=?",
+            (screenshot_url.strip(), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -3344,14 +3371,25 @@ class Library:
         self.conn.commit()
 
     def update_community_screenshot(self, community_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
-        """Narrow update for the admin edit form's manual screenshot fields —
-        mirrors update_tool_screenshot exactly, including clearing
-        screenshot_captured_at since a hand-pasted URL has no known capture
-        time."""
+        """Legacy narrow update, kept for pre-Phase-E callers/tests only —
+        mirrors update_tool_screenshot exactly, including the "DO NOT call
+        from the admin edit-form submit path" warning in its docstring; see
+        there for the 2026-08 incident this caused. update_community_screenshot_url
+        below is what the live app actually calls now."""
         self.conn.execute(
             "UPDATE communities SET screenshot_url=?, screenshot_is_product=?, screenshot_captured_at='', "
             "updated_at=? WHERE id=?",
             (screenshot_url.strip(), screenshot_is_product, _now(), community_id),
+        )
+        self.conn.commit()
+
+    def update_community_screenshot_url(self, community_id: int, screenshot_url: str) -> None:
+        """Narrow update for the admin edit form's homepage Screenshot URL
+        field (Phase E fix) — mirrors update_tool_screenshot_url exactly,
+        deliberately not touching screenshot_is_product."""
+        self.conn.execute(
+            "UPDATE communities SET screenshot_url=?, screenshot_captured_at='', updated_at=? WHERE id=?",
+            (screenshot_url.strip(), _now(), community_id),
         )
         self.conn.commit()
 

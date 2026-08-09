@@ -11312,9 +11312,6 @@ async def admin_communities_edit_submit(request: Request, slug: str):
     featured = 1 if form.get("featured") == "1" else 0
     advisor = 1 if form.get("advisor") == "1" else 0
     screenshot_url = (form.get("screenshot_url") or "").strip()
-    # screenshot_is_product retired (Phase E) — see the matching comment in
-    # admin_tools_edit_submit.
-    screenshot_is_product = 0
     app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
     if not (name and demographic):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
@@ -11325,7 +11322,7 @@ async def admin_communities_edit_submit(request: Request, slug: str):
                              sponsorship_type=sponsorship_type, sponsor_name=sponsor_name,
                              access=access, format=format_, notes=notes,
                              reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
-        lib.update_community_screenshot(community_id, screenshot_url, screenshot_is_product)
+        lib.update_community_screenshot_url(community_id, screenshot_url)
         lib.update_community_app_screenshot_source(community_id, app_screenshot_source_url)
         _record_ai_drafted_reviews(lib, request, "community", community_id, form)
     except DuplicateURLError as e:
@@ -12424,13 +12421,6 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     differentiation_note = (form.get("differentiation_note") or "").strip()
     agent_taxonomy_note = (form.get("agent_taxonomy_note") or "").strip()
     screenshot_url = (form.get("screenshot_url") or "").strip()
-    # screenshot_is_product retired (Phase E) — the checkbox no longer
-    # renders on this form (an app screenshot now has its own dedicated slot
-    # below), so this always writes 0 going forward. The DB method itself
-    # still takes the parameter unchanged, since existing legacy rows /
-    # tests reference it; see linklib/db.py's ALTER TABLE comment for the
-    # non-destructive retirement.
-    screenshot_is_product = 0
     app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
@@ -12443,7 +12433,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         summary=summary)
         lib.update_tool_differentiation(tool_id, differentiation_note)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
-        lib.update_tool_screenshot(tool_id, screenshot_url, screenshot_is_product)
+        lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
         _record_ai_drafted_reviews(lib, request, "tool", tool_id, form)
     except DuplicateURLError as e:
