@@ -75,6 +75,16 @@ _SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".",
 # type's screenshot with the other's.
 _COMMUNITY_SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "community_screenshots")
 
+# Brandfetch-sourced logos (Phase D backfill, scripts/backfill_logos.py) live
+# under a "logos/" directory next to library.db, split into tools/communities
+# subdirectories for the same reason as the screenshot dirs above (slugs are
+# separate namespaces per entity type but can collide on the same value —
+# e.g. airbase/datarails/rillet exist in both). tools.logo_path/
+# communities.logo_path store a path like "logos/tools/abacum.svg" relative
+# to the database's parent directory — i.e. exactly os.path.join(dirname(DB_PATH), logo_path).
+_LOGO_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "logos", "tools")
+_COMMUNITY_LOGO_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "logos", "communities")
+
 # /contact spam controls (see _contact_rate_limited and _is_contact_spam below).
 CONTACT_RATE_LIMIT_PER_HOUR = int(os.environ.get("LINKLIB_CONTACT_RATE_LIMIT_PER_HOUR", "5"))
 CONTACT_TIME_TRAP_SECONDS = float(os.environ.get("LINKLIB_CONTACT_TIME_TRAP_SECONDS", "3"))
@@ -728,6 +738,18 @@ _CSS = """
   --font-wordmark:'Permanent Marker',cursive;
 }
 *{box-sizing:border-box;}
+/* Phase F8: mobile browsers (WebKit and Chromium alike) auto-boost font
+   size on a per-text-block basis when a page has no explicit opinion here —
+   the heuristic weighs a block's rendered width against the viewport, so it
+   fires inconsistently block-to-block rather than uniformly. That's the
+   likely cause of a landscape-only bug where one card's body text grows
+   relative to the rest of the page (see the tp-card investigation note in
+   the Phase F PR description) — nothing in this file set the property
+   before this line existed anywhere in the app. Locking it to 100% makes
+   type size fully explicit and CSS-driven, matching every other page.
+   Unverified against the real device the bug was reported on — flagged in
+   the PR for confirmation once deployed. */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;}
 html,body{height:100%;}
 body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:var(--bg);-webkit-font-smoothing:antialiased;
   min-height:100vh;display:flex;flex-direction:column;}
@@ -1045,6 +1067,42 @@ def _profile_admin_nudge(text: str) -> str:
     "doesn't apply here," not a research gap)."""
     return (f'<p style="font-size:12px;color:var(--muted);font-style:italic;margin:0;'
             f'padding:12px 16px;border:1px dashed var(--line-strong);border-radius:10px;">{_esc(text)}</p>')
+
+
+# CFO Toolbox logo rendering (Phase F) — turns a tools.logo_path/
+# communities.logo_path value into the served URL, and provides one shared
+# fallback (an understated initial-monogram box, same "neutral placeholder"
+# spirit as .tp-shot-frame's "No screenshot yet" state — deliberately not
+# styled like _avatar()'s bold navy-circle Brian monogram, since a directory
+# of ~90 unbacked records shouldn't read like ~90 little logos-that-aren't).
+# logo_path is stored as "logos/tools/{slug}.ext" / "logos/communities/{slug}.ext"
+# (scripts/backfill_logos.py) — only the basename matters here since the
+# serving routes are filename-based, mirroring the screenshot routes exactly.
+def _tool_logo_url(t: dict) -> str:
+    lp = (t.get("logo_path") or "").strip()
+    return f"/tools/software/logo/{os.path.basename(lp)}" if lp else ""
+
+
+def _community_logo_url(c: dict) -> str:
+    lp = (c.get("logo_path") or "").strip()
+    return f"/tools/communities/logo/{os.path.basename(lp)}" if lp else ""
+
+
+def _logo_box(name: str, logo_url: str, size: int, radius: int = 10) -> str:
+    """A logo <img> if logo_url is set, else a monogram placeholder box (first
+    letter of `name`). Shared by profile-page headers (F2), directory cards
+    (F3), and the Competitors table (F6) so there's exactly one fallback
+    treatment across the whole feature rather than three near-duplicates."""
+    if logo_url:
+        return (f'<img src="{_esc(logo_url)}" alt="{_esc(name)} logo" loading="lazy" '
+                f'style="width:{size}px;height:{size}px;border-radius:{radius}px;object-fit:contain;'
+                f'background:#fff;border:1px solid var(--line);flex-shrink:0;">')
+    letter = (name or "?").strip()[:1].upper() or "?"
+    font_size = max(11, round(size * 0.42))
+    return (f'<div aria-hidden="true" style="width:{size}px;height:{size}px;border-radius:{radius}px;'
+            f'flex-shrink:0;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);'
+            f'display:flex;align-items:center;justify-content:center;font-family:var(--font-head);'
+            f'font-weight:600;font-size:{font_size}px;">{_esc(letter)}</div>')
 
 
 # Claims-accuracy disclaimer for the Features card, distinct from the
@@ -5073,6 +5131,7 @@ def tools_directory(request: Request, warn: str = ""):
             "summary": t.get("summary") or "",
             "url": t["url"],
             "slug": t["slug"],
+            "logo_url": _tool_logo_url(t),
             "categories": t["categories"],
             "agent_taxonomy_note": t.get("agent_taxonomy_note") or "",
             "advisor": bool(t.get("advisor")),
@@ -5255,6 +5314,21 @@ function esc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }}
 
+// Card-size logo (Phase F3) — same monogram fallback as the server-rendered
+// _logo_box() on the profile page and Competitors table, reimplemented here
+// since directory cards render client-side from ALL_TOOLS JSON.
+function logoBox(name, logoUrl, size) {{
+  if (logoUrl) {{
+    return '<img src="' + esc(logoUrl) + '" alt="' + esc(name) + ' logo" loading="lazy" style="width:' + size + 'px;height:' + size + 'px;'
+      + 'border-radius:8px;object-fit:contain;background:#fff;border:1px solid var(--line);flex-shrink:0;">';
+  }}
+  var letter = esc((name || '?').trim().charAt(0).toUpperCase() || '?');
+  var fontSize = Math.max(11, Math.round(size * 0.42));
+  return '<div aria-hidden="true" style="width:' + size + 'px;height:' + size + 'px;border-radius:8px;flex-shrink:0;'
+    + 'background:var(--surface-2);border:1px solid var(--line);color:var(--muted);display:flex;align-items:center;'
+    + 'justify-content:center;font-family:var(--font-head);font-weight:600;font-size:' + fontSize + 'px;">' + letter + '</div>';
+}}
+
 function confirmDelete(form) {{
   return confirm('Delete ' + form.dataset.toolname + '?');
 }}
@@ -5383,7 +5457,10 @@ function renderTools(tools) {{
     // Added/Edited meta line entirely (see adminMeta above).
     return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '" data-tool-id="' + t.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;">'
+      + '<div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">'
+      + logoBox(t.name, t.logo_url, 32)
       + '<a class="tool-name" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>'
+      + '</div>'
       + (promotedBadge || star
           ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-top:2px;">' + promotedBadge + star + '</div>'
           : '')
@@ -6123,15 +6200,25 @@ def tools_software_profile(request: Request, slug: str):
     # single empty field inside an otherwise-populated section (see the
     # Community Profile cards further down), which shows muted text to
     # everyone instead of hiding.
+    # Competitors: a Logo/Name table rather than the old chip row (Phase F),
+    # moved up next to Bottom Line (see lower_band composition below) instead
+    # of sitting at the bottom of the right column. Competitors are always
+    # full `tools` rows (list_tool_competitors joins tool_competitors back to
+    # tools), never free text, so each row is a real profile link with its
+    # own logo_path — the same _logo_box fallback as F2/F3 covers a
+    # competitor that hasn't been through the Brandfetch backfill yet.
     competitors_block = ""
     if competitors:
-        comp_chips = "".join(
-            f'<a href="/tools/software/{_esc(c["slug"])}" class="tp-chip">{_esc(c["name"])}</a>'
+        comp_rows = "".join(
+            f"""<tr>
+  <td class="tp-comp-logo-cell"><a href="/tools/software/{_esc(c["slug"])}">{_logo_box(c["name"], _tool_logo_url(c), 32, radius=8)}</a></td>
+  <td><a href="/tools/software/{_esc(c["slug"])}" class="tp-comp-name">{_esc(c["name"])}</a></td>
+</tr>"""
             for c in competitors
         )
         competitors_block = f"""<div class="tp-card">
   <h2 class="tp-card-h">Competitors</h2>
-  <div class="tp-chip-row">{comp_chips}</div>
+  <table class="tp-competitor-table"><tbody>{comp_rows}</tbody></table>
 </div>"""
     elif authed:
         competitors_block = _profile_admin_nudge("No competitors curated yet.")
@@ -6145,7 +6232,7 @@ def tools_software_profile(request: Request, slug: str):
         differentiation_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line</div>
-  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;">{_esc(tool['differentiation_note'])}</p>
+  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(tool['differentiation_note'])}</p>
 </div>"""
     elif authed:
         differentiation_block = (f'<div style="margin-bottom:22px;">'
@@ -6200,14 +6287,15 @@ def tools_software_profile(request: Request, slug: str):
   <span>{_FEATURES_SOURCING_DISCLAIMER}</span>
 </div>"""
 
+    # Category tags (Phase F4): moved from their own right-column card down
+    # next to the Visit/Compare/Edit button group instead — the card by
+    # itself was one of the two things (along with the missing logo) leaving
+    # the hero band visibly sparser than the screenshot card beside it. Chips
+    # render right after tp-hero-actions in source order, so the same
+    # placement holds on mobile once the two-column grid collapses to one.
     cats = tool.get("categories") or []
-    categories_card = ""
-    if cats:
-        cat_items = "".join(f'<li>{_esc(c)}</li>' for c in cats)
-        categories_card = f"""<div class="tp-card">
-  <h2 class="tp-card-h">Categories</h2>
-  <ul class="tp-cat-list">{cat_items}</ul>
-</div>"""
+    cats_html = ("".join(f'<span class="tp-cat-pill">{_esc(c)}</span>' for c in cats)
+                 if cats else "")
 
     screenshot_caption = ""
     if (tool.get("screenshot_url") or "").strip():
@@ -6372,9 +6460,19 @@ function submitIntroForm() {{
 
     subhead = (tool.get("summary") or tool.get("description") or "").strip()
 
-    hero_text = f"""<h1 class="tp-h1">{_esc(tool['name'])}{advisor_mark_html}</h1>
-{f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
-<div class="tp-hero-actions">{action_row}</div>"""
+    # Header row: logo (F2) beside the name/subhead, same understated
+    # monogram fallback as the directory cards and Competitors table when
+    # logo_path is still empty.
+    tool_logo_url = _tool_logo_url(tool)
+    hero_text = f"""<div class="tp-header-row">
+  {_logo_box(tool['name'], tool_logo_url, 56, radius=12)}
+  <div>
+    <h1 class="tp-h1">{_esc(tool['name'])}{advisor_mark_html}</h1>
+    {f'<p class="tp-subhead">{_esc(subhead)}</p>' if subhead else ''}
+  </div>
+</div>
+<div class="tp-hero-actions">{action_row}</div>
+{f'<div class="tp-hero-cats">{cats_html}</div>' if cats_html else ''}"""
 
     top_band = f"""<div class="tp-band">
   <div>{hero_text}</div>
@@ -6386,18 +6484,34 @@ function submitIntroForm() {{
   <p style="margin:0;">{_esc(tool['description'])}</p>
 </div>"""
 
-    lower_band = f"""<div class="tp-band">
+    # Competitors sits right under Bottom Line now (Phase F6), not at the
+    # bottom of the right column — both are "how does this stack up" content,
+    # so grouping them reads as one thought instead of two.
+    #
+    # F5 follow-up: Categories and Competitors used to be what filled this
+    # right column; now that both moved (F4 to the hero, F6 up next to
+    # Bottom Line), Features is the column's only remaining occupant — and
+    # for a public visitor on a tool with no features yet, that's nothing at
+    # all, which is a wasted-whitespace regression, not a fix. Collapse to a
+    # single full-width column whenever the right side would otherwise be
+    # empty, rather than leaving a dead 1fr gap beside a full left column.
+    lower_band_left = f"""{differentiation_block}
+{competitors_block}
+{description_card}
+{agent_taxonomy_block}"""
+    if features_card.strip():
+        lower_band = f"""<div class="tp-band">
   <div class="tp-col-stack">
-    {differentiation_block}
-    {description_card}
-    {agent_taxonomy_block}
+    {lower_band_left}
   </div>
   <div class="tp-col-stack">
     {features_card}
-    {categories_card}
-    {competitors_block}
   </div>
 </div>"""
+    else:
+        lower_band = f"""<div class="tp-col-stack" style="margin-top:22px;">
+    {lower_band_left}
+  </div>"""
 
     main_content = f"""<p style="margin:0 0 4px;"><a href="/tools/software" style="font-size:13px;color:var(--muted);">&larr; Software</a></p>
 {top_band}
@@ -6410,13 +6524,18 @@ function submitIntroForm() {{
 </div>
 <style>
 .tp-band{{display:grid;grid-template-columns:2fr 1fr;gap:22px;align-items:start;margin-top:22px;}}
+.tp-band>div{{min-width:0;}}
 .tp-band:first-of-type{{margin-top:20px;}}
 @media(max-width:800px){{.tp-band{{grid-template-columns:1fr;}}}}
-.tp-col-stack{{display:flex;flex-direction:column;gap:22px;}}
-.tp-h1{{margin:0 0 8px;display:inline-flex;align-items:flex-start;}}
+.tp-col-stack{{display:flex;flex-direction:column;gap:22px;min-width:0;}}
+.tp-header-row{{display:flex;align-items:flex-start;gap:14px;margin-bottom:8px;}}
+.tp-header-row>div{{min-width:0;}}
+.tp-h1{{margin:0 0 8px;display:inline-flex;align-items:flex-start;overflow-wrap:break-word;word-break:break-word;}}
 .tp-fn-mark{{font-size:18px;color:var(--navy-light);font-weight:600;margin-left:3px;transform:translateY(2px);line-height:1;}}
-.tp-subhead{{font-size:17px;color:var(--ink-soft);margin:0 0 18px;}}
+.tp-subhead{{font-size:17px;color:var(--ink-soft);margin:0 0 18px;overflow-wrap:break-word;word-break:break-word;}}
 .tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
+.tp-hero-cats{{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}}
+.tp-cat-pill{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
 .tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
   padding:11px 22px;font:600 15px var(--font-body);cursor:pointer;text-decoration:none;display:inline-flex;
@@ -6426,7 +6545,7 @@ function submitIntroForm() {{
 .tp-card-h{{font-family:var(--font-head);font-weight:600;font-size:18px;color:var(--ink);margin:0 0 14px;letter-spacing:-0.01em;}}
 .tp-card-h small{{display:block;font-family:var(--font-body);font-weight:500;font-size:12px;color:var(--muted);
   text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}}
-.tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;}}
+.tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;overflow-wrap:break-word;word-break:break-word;}}
 .tp-shot-card{{padding:12px;text-align:center;position:relative;overflow:visible;}}
 .tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
   aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
@@ -6443,13 +6562,13 @@ function submitIntroForm() {{
   border-radius:4px;margin-left:6px;white-space:nowrap;}}
 .tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
   background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
-.tp-cat-list{{list-style:none;margin:0;padding:0;}}
-.tp-cat-list li{{font-size:14px;color:var(--ink-soft);padding:5px 0 5px 16px;position:relative;}}
-.tp-cat-list li::before{{content:"\\2022";color:var(--seafoam-deep);position:absolute;left:0;font-weight:700;}}
-.tp-chip-row{{display:flex;gap:8px;flex-wrap:wrap;}}
-.tp-chip{{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:6px 14px;
-  font-size:13px;color:var(--ink-soft);font-weight:500;text-decoration:none;}}
-.tp-chip:hover{{background:var(--navy-wash);text-decoration:none;}}
+.tp-competitor-table{{width:100%;border-collapse:collapse;}}
+.tp-competitor-table td{{padding:9px 0;border-bottom:1px solid var(--line);vertical-align:middle;}}
+.tp-competitor-table tr:last-child td{{border-bottom:none;}}
+.tp-comp-logo-cell{{width:44px;}}
+.tp-comp-name{{font-size:14.5px;font-weight:500;color:var(--ink);text-decoration:none;padding-left:12px;
+  overflow-wrap:break-word;word-break:break-word;}}
+.tp-comp-name:hover{{color:var(--accent);text-decoration:underline;}}
 .tp-footnote{{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);
   display:flex;gap:6px;}}
 .tp-footnote .tp-fn-mark{{color:var(--navy-light);font-weight:600;flex-shrink:0;}}
@@ -6585,6 +6704,7 @@ def tools_communities(request: Request):
             "access": c.get("access") or "",
             "format": c.get("format") or "",
             "notes": c.get("notes") or "",
+            "logo_url": _community_logo_url(c),
             "categories": c["categories"],
             "featured": bool(c.get("featured")),
             "advisor": bool(c.get("advisor")),
@@ -6721,6 +6841,20 @@ function commEsc(s) {{
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }}
 
+// Card-size logo (Phase F3) — same monogram fallback as logoBox() on the
+// Software directory and _logo_box() on the server-rendered profile pages.
+function commLogoBox(name, logoUrl, size) {{
+  if (logoUrl) {{
+    return '<img src="' + commEsc(logoUrl) + '" alt="' + commEsc(name) + ' logo" loading="lazy" style="width:' + size + 'px;height:' + size + 'px;'
+      + 'border-radius:8px;object-fit:contain;background:#fff;border:1px solid var(--line);flex-shrink:0;">';
+  }}
+  var letter = commEsc((name || '?').trim().charAt(0).toUpperCase() || '?');
+  var fontSize = Math.max(11, Math.round(size * 0.42));
+  return '<div aria-hidden="true" style="width:' + size + 'px;height:' + size + 'px;border-radius:8px;flex-shrink:0;'
+    + 'background:var(--surface-2);border:1px solid var(--line);color:var(--muted);display:flex;align-items:center;'
+    + 'justify-content:center;font-family:var(--font-head);font-weight:600;font-size:' + fontSize + 'px;">' + letter + '</div>';
+}}
+
 // Renders a Community listing field for the directory card: the escaped
 // value normally, or a muted "Needs verification" flag (not the vivid
 // comm-cost/comm-cat styling of a confirmed value) when it still carries
@@ -6844,6 +6978,7 @@ function renderCommunities(list) {{
     return '<article class="comm-card' + (c.featured ? ' comm-card-featured' : '') + '" data-comm-id="' + c.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px;">'
       + '<div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">'
+      + commLogoBox(c.name, c.logo_url, 28)
       + featuredBadge + advisorStar
       + '<a class="comm-name" href="/tools/communities/' + commEsc(c.slug) + '" target="_blank" rel="noopener">' + commEsc(c.name) + '</a>'
       + '</div>'
@@ -7810,8 +7945,14 @@ def tools_community_profile(request: Request, slug: str):
     action_row = "".join(action_row_parts)
 
     demographic_html = _verify_html(community["demographic"], "tp-verify-inline")
-    hero_text = f"""<h1 class="tp-h1">{featured_badge} {_esc(community['name'])}{advisor_mark_html}</h1>
-<p class="tp-subhead">{demographic_html}</p>
+    community_logo_url = _community_logo_url(community)
+    hero_text = f"""<div class="tp-header-row">
+  {_logo_box(community['name'], community_logo_url, 56, radius=12)}
+  <div>
+    <h1 class="tp-h1">{featured_badge} {_esc(community['name'])}{advisor_mark_html}</h1>
+    <p class="tp-subhead">{demographic_html}</p>
+  </div>
+</div>
 <div class="tp-hero-actions">{action_row}</div>"""
 
     screenshot_caption = ""
@@ -7856,7 +7997,7 @@ def tools_community_profile(request: Request, slug: str):
         verdict_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line</div>
-  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;">{_esc(profile['verdict_summary'])}</p>
+  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(profile['verdict_summary'])}</p>
 </div>"""
     elif authed:
         verdict_block = (f'<div style="margin-bottom:22px;">'
@@ -7991,11 +8132,14 @@ def tools_community_profile(request: Request, slug: str):
 </div>
 <style>
 .tp-band{{display:grid;grid-template-columns:2fr 1fr;gap:22px;align-items:start;margin-top:22px;}}
+.tp-band>div{{min-width:0;}}
 @media(max-width:800px){{.tp-band{{grid-template-columns:1fr;}}}}
 .tp-col-stack{{display:flex;flex-direction:column;gap:22px;}}
-.tp-h1{{margin:0 0 8px;display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;}}
+.tp-header-row{{display:flex;align-items:flex-start;gap:14px;margin-bottom:8px;}}
+.tp-header-row>div{{min-width:0;}}
+.tp-h1{{margin:0 0 8px;display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;overflow-wrap:break-word;word-break:break-word;}}
 .tp-fn-mark{{font-size:18px;color:var(--navy-light);font-weight:600;margin-left:3px;transform:translateY(2px);line-height:1;}}
-.tp-subhead{{font-size:17px;color:var(--ink-soft);margin:0 0 18px;}}
+.tp-subhead{{font-size:17px;color:var(--ink-soft);margin:0 0 18px;overflow-wrap:break-word;word-break:break-word;}}
 .tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
 .tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
@@ -8004,7 +8148,7 @@ def tools_community_profile(request: Request, slug: str):
 .tp-admin-btn:hover{{background:var(--navy-wash);color:var(--ink);text-decoration:none;}}
 .tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
 .tp-card-h{{font-family:var(--font-head);font-weight:600;font-size:18px;color:var(--ink);margin:0 0 14px;letter-spacing:-0.01em;}}
-.tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;}}
+.tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;overflow-wrap:break-word;word-break:break-word;}}
 .tp-shot-card{{padding:12px;text-align:center;position:relative;overflow:visible;}}
 .tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
   aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
@@ -8018,7 +8162,7 @@ def tools_community_profile(request: Request, slug: str):
 .tp-detail-row{{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;}}
 .tp-detail-row:last-child{{border-bottom:none;}}
 .tp-detail-label{{color:var(--muted);font-weight:500;}}
-.tp-detail-value{{color:var(--ink-soft);text-align:right;}}
+.tp-detail-value{{color:var(--ink-soft);text-align:right;overflow-wrap:break-word;word-break:break-word;min-width:0;}}
 .tp-verify-inline{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
 </style>"""
     resp = HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request)))
@@ -20362,6 +20506,39 @@ def tools_communities_screenshot(filename: str):
     if not os.path.isfile(path):
         raise HTTPException(status_code=404)
     return FileResponse(path, media_type="image/png")
+
+
+@app.get("/tools/software/logo/{filename}")
+def tools_software_logo(filename: str):
+    """Serves Brandfetch-sourced tool logos from _LOGO_DIR — same
+    basename-only traversal guard and filename-based URL shape as
+    tools_software_screenshot above (Phase F), kept as its own directory/
+    route pair since these also live on the persistent volume, not inside
+    the Docker image, and are populated by a separate script
+    (scripts/backfill_logos.py) on its own cadence."""
+    safe = os.path.basename(filename)
+    path = os.path.join(_LOGO_DIR, safe)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    ext = filename.rsplit(".", 1)[-1].lower()
+    media = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg",
+             "jpeg": "image/jpeg", "webp": "image/webp"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media)
+
+
+@app.get("/tools/communities/logo/{filename}")
+def tools_communities_logo(filename: str):
+    """Communities equivalent of tools_software_logo — its own directory
+    rather than sharing _LOGO_DIR, since Software and Communities slugs can
+    collide (see _COMMUNITY_LOGO_DIR)."""
+    safe = os.path.basename(filename)
+    path = os.path.join(_COMMUNITY_LOGO_DIR, safe)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    ext = filename.rsplit(".", 1)[-1].lower()
+    media = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg",
+             "jpeg": "image/jpeg", "webp": "image/webp"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media)
 
 
 @app.get("/favicon.ico")
