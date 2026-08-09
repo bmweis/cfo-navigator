@@ -1407,6 +1407,26 @@ class Library:
             "ALTER TABLE communities ADD COLUMN screenshot_url TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE communities ADD COLUMN screenshot_is_product INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE communities ADD COLUMN screenshot_captured_at TEXT NOT NULL DEFAULT ''",
+            # Company logo backfill (Phase D). Stores a relative path, e.g.
+            # "logos/tools/abacum.svg", to a locally-downloaded logo asset —
+            # never a hotlinked external URL, since scripts/backfill_logos.py
+            # downloads and stores the asset itself rather than pointing at
+            # Brandfetch's CDN long-term (see that script's docstring for why:
+            # Brandfetch's free CDN Logo API is browser-embed-only and
+            # disallows programmatic access; the Brand API used here is a
+            # real, storable JSON+asset response). The path is relative to a
+            # "logos/" directory next to library.db (same Railway volume as
+            # tool_screenshots/community_screenshots — see backfill_logos.py's
+            # docstring for why NOT webapp/static/, despite the original Phase
+            # D investigation assuming that), not to webapp/static/ itself —
+            # Phase F picks the actual serving route later, same as the
+            # screenshot precedent's dedicated GET route. ''  = no logo yet.
+            # set_tool_logo/set_community_logo are the only writers, and the
+            # backfill script's selection query only ever targets rows where
+            # this is still empty — a manually uploaded logo (future admin UI,
+            # Phase F) is never silently overwritten by a re-run.
+            "ALTER TABLE tools ADD COLUMN logo_path TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE communities ADD COLUMN logo_path TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -2738,6 +2758,18 @@ class Library:
         )
         self.conn.commit()
 
+    def set_tool_logo(self, tool_id: int, logo_path: str) -> None:
+        """Records a downloaded-and-stored logo asset (Phase D backfill —
+        scripts/backfill_logos.py is the only caller today). `logo_path` is a
+        relative path under webapp/static/ (e.g. "logos/tools/abacum.svg"),
+        never an external URL — see the logo_path ALTER TABLE comment in
+        __init__ for the full reasoning."""
+        self.conn.execute(
+            "UPDATE tools SET logo_path=?, updated_at=? WHERE id=?",
+            (logo_path.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
     # -- competitor cross-links (Phase 3) ------------------------------------
     # See the tool_competitors CREATE TABLE comment for the normalized-pair
     # storage shape. This is the source of truth rendered on a Software
@@ -3168,6 +3200,15 @@ class Library:
             "UPDATE communities SET screenshot_url=?, screenshot_is_product=0, screenshot_captured_at=?, "
             "updated_at=? WHERE id=?",
             (screenshot_url.strip(), _now(), _now(), community_id),
+        )
+        self.conn.commit()
+
+    def set_community_logo(self, community_id: int, logo_path: str) -> None:
+        """Records a downloaded-and-stored logo asset — mirrors set_tool_logo
+        exactly (Phase D backfill, scripts/backfill_logos.py)."""
+        self.conn.execute(
+            "UPDATE communities SET logo_path=?, updated_at=? WHERE id=?",
+            (logo_path.strip(), _now(), community_id),
         )
         self.conn.commit()
 
