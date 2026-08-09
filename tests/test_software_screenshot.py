@@ -1,7 +1,11 @@
-"""Software profile page screenshot box (Phase 5 follow-up): a hotlinked
-external image URL + a "this is a product screenshot vs. homepage fallback"
-flag, rendered in a bordered sidebar box only when a URL is actually set.
-"""
+"""Software profile page screenshot box (Phase 5 follow-up; captions
+redesigned in Phase E for the dual homepage+app screenshot feature — see
+tests/test_app_screenshot.py for the app-slot-specific coverage). A hotlinked
+external image URL, rendered in a bordered sidebar box only when a URL is
+actually set. screenshot_is_product is retired as of Phase E (its DB column
+and update_tool_screenshot's parameter are left in place, non-destructively,
+for legacy rows — see linklib/db.py — but the admin UI no longer exposes it
+and the profile page no longer reads it for captioning)."""
 import os
 import pathlib
 import sys
@@ -47,6 +51,9 @@ def test_update_tool_screenshot(env):
 
 
 def test_admin_edit_saves_screenshot_fields(env):
+    """Phase E: the admin edit form no longer submits screenshot_is_product
+    (the checkbox was removed) — a POST that still includes it (e.g. a stale
+    client) is simply ignored, since the submit route hardcodes 0 now."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -65,26 +72,30 @@ def test_admin_edit_saves_screenshot_fields(env):
     lib = Library(os.environ["LINKLIB_DB"])
     tool = lib.get_tool(a)
     assert tool["screenshot_url"] == "https://example.com/shot.png"
-    assert tool["screenshot_is_product"] == 1
+    assert tool["screenshot_is_product"] == 0
     lib.close()
 
 
-def test_profile_page_shows_product_screenshot_caption(env):
+def test_profile_page_shows_homepage_captured_caption(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     a_slug = lib.get_tool(a)["slug"]
-    lib.update_tool_screenshot(a, "https://example.com/product-shot.png", 1)
+    lib.set_tool_screenshot_capture(a, "https://example.com/homepage.png")
     lib.close()
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
-    assert "https://example.com/product-shot.png" in r.text
-    assert "Product screenshot" in r.text
+    assert "https://example.com/homepage.png" in r.text
+    assert "Homepage screenshot, captured" in r.text
+    assert "App screenshot" not in r.text
     assert "no product screenshot available" not in r.text.lower()
 
 
-def test_profile_page_shows_homepage_fallback_caption(env):
+def test_profile_page_shows_homepage_not_yet_captured_caption(env):
+    """A manually-pasted homepage URL with no capture timestamp — the old
+    caption here was 'Homepage screenshot (no product screenshot available
+    yet)', which anticipated this exact phase and is now obsolete wording."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -94,7 +105,8 @@ def test_profile_page_shows_homepage_fallback_caption(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert "https://example.com/homepage.png" in r.text
-    assert "no product screenshot available yet" in r.text.lower()
+    assert "Homepage screenshot (not yet captured)" in r.text
+    assert "no product screenshot available" not in r.text.lower()
 
 
 def test_profile_page_shows_placeholder_when_screenshot_unset(env):

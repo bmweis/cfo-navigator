@@ -75,6 +75,14 @@ _SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".",
 # type's screenshot with the other's.
 _COMMUNITY_SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "community_screenshots")
 
+# App screenshots (Phase E) reuse these exact same two directories/routes —
+# just a "-app" filename suffix ({slug}-app.png vs {slug}.png) — rather than
+# a third directory/route pair. Both the homepage and app slot for a given
+# entity type share one namespace already guarded by the traversal-safe
+# serving routes below, so a distinct filename is all a second screenshot
+# needs.
+_APP_SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024  # 8MB — a manually uploaded screenshot, pre-crop, has more headroom than the 3MB avatar cap
+
 # Brandfetch-sourced logos (Phase D backfill, scripts/backfill_logos.py) live
 # under a "logos/" directory next to library.db, split into tools/communities
 # subdirectories for the same reason as the screenshot dirs above (slugs are
@@ -1089,6 +1097,242 @@ def _tool_logo_url(t: dict) -> str:
 def _community_logo_url(c: dict) -> str:
     lp = (c.get("logo_path") or "").strip()
     return f"/tools/communities/logo/{os.path.basename(lp)}" if lp else ""
+
+
+# Dual screenshot card (Phase E) — shared by both the Software and Communities
+# profile pages, since both entities carry the exact same four screenshot
+# fields (screenshot_url/_captured_at, app_screenshot_url/_captured_at) and
+# render them identically. Replaces the single-screenshot .tp-shot-card
+# rendering that used to be duplicated inline on each profile page.
+
+def _screenshot_slot_caption(url: str, captured_at: str, label: str) -> str:
+    """Caption for one screenshot slot ('Homepage' or 'App'). Empty string
+    when the slot itself is empty — the caller renders nothing for an empty
+    slot, same as the pre-Phase-E 'no screenshot' placeholder. Replaces the
+    retired screenshot_is_product-driven caption logic: with two named slots
+    now, the label itself (not a boolean flag) says what's being shown, so
+    there's no more "(no product screenshot available yet)" hedge — that
+    sentence was anticipating this exact feature and reads as obsolete once
+    an app screenshot is a real, separate thing rather than a hoped-for
+    override."""
+    if not (url or "").strip():
+        return ""
+    if (captured_at or "").strip():
+        return f"{label} screenshot, captured {captured_at[:10]}"
+    return f"{label} screenshot (not yet captured)"
+
+
+def _screenshot_card_html(entity: dict, featured_sticker: str = "") -> str:
+    """Renders the .tp-shot-card for a tool or community profile page.
+    Single-screenshot records (the common case at launch — no app screenshot
+    curated yet) render exactly as before Phase E: one frame, one caption, no
+    toggle. Once an app screenshot exists, both frames stack inside the same
+    card (desktop) with a tap-to-toggle button that shows one at a time on
+    mobile (<=800px, the existing .tp-band collapse breakpoint) — see
+    .tp-shot-card.has-app / .tp-shot-toggle in the profile page CSS."""
+    homepage_url = (entity.get("screenshot_url") or "").strip()
+    app_url = (entity.get("app_screenshot_url") or "").strip()
+    homepage_caption = _screenshot_slot_caption(homepage_url, entity.get("screenshot_captured_at") or "", "Homepage")
+    app_caption = _screenshot_slot_caption(app_url, entity.get("app_screenshot_captured_at") or "", "App")
+
+    def _slide(url: str, caption: str, active: bool) -> str:
+        frame_inner = (
+            f'<img src="{_esc(url)}" alt="{_esc(entity["name"])} screenshot" '
+            f'style="width:100%;height:100%;object-fit:cover;display:block;">'
+        ) if url else "No screenshot yet"
+        caption_html = f'<div class="tp-shot-caption">{_esc(caption)}</div>' if caption else ""
+        return (f'<div class="tp-shot-slide{" tp-shot-active" if active else ""}">'
+                f'<div class="tp-shot-frame">{frame_inner}</div>'
+                f'{caption_html}'
+                f'</div>')
+
+    if not app_url:
+        # No app screenshot yet: render identically to the pre-Phase-E
+        # single-screenshot card — no has-app class, no toggle button, so
+        # this is a strictly additive change for every record without one.
+        slides_html = _slide(homepage_url, homepage_caption, True)
+        toggle_html = ""
+        card_class = "tp-card tp-shot-card"
+    else:
+        slides_html = _slide(homepage_url, homepage_caption, True) + _slide(app_url, app_caption, False)
+        toggle_html = ('<button type="button" class="tp-shot-toggle" onclick="toggleShotSlide(this)">'
+                       'Show app screenshot</button>'
+                       # Self-contained <script>, emitted only when there are
+                       # two slides to toggle between (mirrors the Phase J1
+                       # expand/collapse convention: swap which element is
+                       # visible, swap the trigger's own label) — placed here
+                       # rather than in an authed-only script region, since
+                       # the toggle must work for every visitor, not just
+                       # Brian signed in.
+                       '<script>function toggleShotSlide(btn) {'
+                       'var card = btn.closest(".tp-shot-card");'
+                       'var slides = card.querySelectorAll(".tp-shot-slide");'
+                       'slides.forEach(function(s) { s.classList.toggle("tp-shot-active"); });'
+                       'var homepageActive = slides[0].classList.contains("tp-shot-active");'
+                       'btn.textContent = homepageActive ? "Show app screenshot" : "Show homepage screenshot";'
+                       '}</script>')
+        card_class = "tp-card tp-shot-card has-app"
+
+    return f"""<div class="{card_class}">
+  {featured_sticker}
+  {slides_html}
+  {toggle_html}
+</div>"""
+
+
+def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banner_html: str = "") -> tuple[str, str]:
+    """Renders the admin edit page's "App screenshot" section (Phase E).
+    Returns (in_form_html, after_form_html):
+      - in_form_html goes inside the main #tool-edit-form/#comm-edit-form —
+        the source URL input needs to submit with the rest of the form's
+        fields via the normal Save changes button, same as the homepage
+        Screenshot URL field beside it.
+      - after_form_html holds the two hidden action forms (recapture,
+        upload) plus the crop modal — these must render OUTSIDE the main
+        form, same reasoning as the existing screenshot-recapture-form: a
+        <form> can't nest inside another <form> (see the standing comment
+        above _taxonomy_verify_form_html for the "Save changes does
+        nothing" incident that taught this). Their triggering buttons stay
+        inside the main form and point at these via the `form=` attribute,
+        exactly like the existing "Generate screenshot" button does.
+
+    kind is "tools" or "communities" — picks the route prefix. idsfx
+    ("tools-14", "communities-3") keeps element ids unique in case a future
+    page ever renders more than one of these (defensive; today each edit
+    page only has one)."""
+    route_prefix = f"/admin/tools/{entity_id}" if kind == "tools" else f"/admin/tools/communities/{entity_id}"
+    source_url = (entity.get("app_screenshot_source_url") or "").strip()
+    app_url = (entity.get("app_screenshot_url") or "").strip()
+    idsfx = f"{kind}-{entity_id}"
+
+    preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No app screenshot yet.</p>'
+    if app_url:
+        cap_note = (f"Captured {entity['app_screenshot_captured_at'][:10]}"
+                    if entity.get("app_screenshot_captured_at") else "Manually set—no capture date")
+        preview_html = (
+            f'<div style="max-width:320px;">'
+            f'<img src="{_esc(app_url)}" alt="Current app screenshot" '
+            f'style="width:100%;height:auto;border:1px solid var(--line);border-radius:10px;display:block;">'
+            f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">{_esc(cap_note)}</p></div>'
+        )
+    recapture_disabled = "" if source_url else ' disabled title="Enter a source URL above, then Save changes, first."'
+
+    in_form_html = f"""  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">App screenshot <span style="font-weight:400;color:var(--muted);">(shown stacked below the homepage screenshot on the profile page)</span></label>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">No single reliable URL for "the app"—a login/demo/product-tour page you have public access to. This is inherently manual/curated, not something to fill in for every record.</p>
+    <input name="app_screenshot_source_url" type="text" maxlength="500" value="{_esc(source_url)}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…/demo">
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="submit" form="app-screenshot-recapture-form-{idsfx}" class="tool-admin-btn"{recapture_disabled}
+        onclick="return confirmDiscardsUnsavedEdits(this)">Generate app screenshot</button>
+      <button type="button" class="tool-admin-btn" onclick="document.getElementById('app-screenshot-file-{idsfx}').click()">Upload app screenshot&hellip;</button>
+    </div>
+    <input type="file" id="app-screenshot-file-{idsfx}" accept="image/jpeg,image/png,image/webp" style="display:none;"
+      onchange="handleAppScreenshotFile(this, '{idsfx}')">
+    <p id="app-screenshot-upload-err-{idsfx}" style="display:none;"></p>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Generate captures the source URL above at the same fixed size as the homepage screenshot. Upload lets you crop your own image instead (a vendor press kit shot, a screenshot you took yourself)&mdash;either way overwrites whatever app screenshot is already saved.</p>
+    {banner_html}
+    <div style="margin-top:8px;">{preview_html}</div>
+  </div>"""
+
+    after_form_html = f"""<form id="app-screenshot-recapture-form-{idsfx}" method="post" action="{route_prefix}/app-screenshot/recapture" style="display:none;"></form>
+<form id="app-screenshot-upload-form-{idsfx}" method="post" action="{route_prefix}/app-screenshot/upload" enctype="multipart/form-data" style="display:none;">
+  <input type="file" name="file" id="app-screenshot-upload-input-{idsfx}">
+</form>
+<div id="app-screenshot-crop-overlay-{idsfx}" class="shot-crop-overlay">
+  <div class="shot-crop-modal">
+    <p class="shot-crop-title">Crop app screenshot</p>
+    <div class="shot-crop-stage"><img id="app-screenshot-crop-img-{idsfx}"></div>
+    <div class="shot-crop-actions">
+      <button type="button" class="btn btn-ghost" onclick="cancelAppScreenshotCrop('{idsfx}')">Cancel</button>
+      <button type="button" class="btn" onclick="confirmAppScreenshotCrop('{idsfx}')">Use this crop</button>
+    </div>
+  </div>
+</div>"""
+    return in_form_html, after_form_html
+
+
+# Shared client-side crop flow (Phase E) for the "Upload app screenshot"
+# button on both edit pages. Cropper.js (CDN, no pip dependency — see
+# requirements.txt for why this phase didn't need one) drives the crop UI;
+# the confirmed crop is rendered to a fixed-size PNG canvas client-side
+# (matching .tp-shot-frame's 4:3 ratio) and submitted as a File via
+# DataTransfer, so no server-side image-processing library (e.g. Pillow) is
+# needed either — the upload route only validates and saves what the browser
+# already produced at the right size. Validation (size/type) happens twice:
+# here, before the crop modal even opens (Phase M's showGenError/
+# clearGenError coral-box treatment), and again server-side in the upload
+# route (_sniff_image_mime, same as the brand avatar upload) — never trust
+# client-side validation alone.
+_APP_SCREENSHOT_CROP_JS = """
+var _shotCroppers = {};
+function handleAppScreenshotFile(input, idsfx) {
+  var errBoxId = 'app-screenshot-upload-err-' + idsfx;
+  clearGenError(errBoxId);
+  var file = input.files && input.files[0];
+  if (!file) return;
+  var maxBytes = 8 * 1024 * 1024;
+  var okTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (file.size > maxBytes) {
+    showGenError(errBoxId, 'That image is too large (max 8MB). Pick a smaller file.');
+    input.value = '';
+    return;
+  }
+  if (okTypes.indexOf(file.type) === -1) {
+    showGenError(errBoxId, 'Only JPEG, PNG, or WebP images are accepted.');
+    input.value = '';
+    return;
+  }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var overlay = document.getElementById('app-screenshot-crop-overlay-' + idsfx);
+    var img = document.getElementById('app-screenshot-crop-img-' + idsfx);
+    img.src = e.target.result;
+    overlay.classList.add('open');
+    if (_shotCroppers[idsfx]) _shotCroppers[idsfx].destroy();
+    _shotCroppers[idsfx] = new Cropper(img, {aspectRatio: 4 / 3, viewMode: 1, autoCropArea: 1, background: false});
+  };
+  reader.readAsDataURL(file);
+}
+function cancelAppScreenshotCrop(idsfx) {
+  document.getElementById('app-screenshot-crop-overlay-' + idsfx).classList.remove('open');
+  if (_shotCroppers[idsfx]) { _shotCroppers[idsfx].destroy(); delete _shotCroppers[idsfx]; }
+  document.getElementById('app-screenshot-file-' + idsfx).value = '';
+}
+function confirmAppScreenshotCrop(idsfx) {
+  var cropper = _shotCroppers[idsfx];
+  if (!cropper) return;
+  cropper.getCroppedCanvas({width: 1280, height: 960}).toBlob(function(blob) {
+    var dt = new DataTransfer();
+    dt.items.add(new File([blob], 'app-screenshot.png', {type: 'image/png'}));
+    document.getElementById('app-screenshot-upload-input-' + idsfx).files = dt.files;
+    cancelAppScreenshotCrop(idsfx);
+    document.getElementById('app-screenshot-upload-form-' + idsfx).submit();
+  }, 'image/png');
+}
+"""
+
+# CDN include for the crop UI above — pre-approved for this phase (see
+# CLAUDE.md's standing "no new dependencies without discussing first"
+# exception). Same CDN-script pattern already used for mermaid.js on the
+# admin architecture pages (cdnjs, pinned version, no build step) — not a
+# new integration pattern for this codebase.
+_CROPPER_CDN_HTML = (
+    '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css">'
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>'
+)
+
+# Crop modal chrome, shared by both edit pages' local <style> blocks.
+_SHOT_CROP_CSS = """
+.shot-crop-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;align-items:center;justify-content:center;padding:20px;}
+.shot-crop-overlay.open{display:flex;}
+.shot-crop-modal{background:#fff;border-radius:16px;padding:20px;width:100%;max-width:520px;}
+.shot-crop-title{font-size:15px;font-weight:600;color:var(--navy);margin:0 0 12px;}
+.shot-crop-stage{max-height:60vh;overflow:hidden;}
+.shot-crop-stage img{display:block;max-width:100%;}
+.shot-crop-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;}
+"""
 
 
 _LOGO_MISSING_LABEL = "Logo not available"
@@ -6348,25 +6592,8 @@ def tools_software_profile(request: Request, slug: str):
     cats_html = ("".join(f'<span class="tp-cat-pill">{_esc(c)}</span>' for c in cats)
                  if cats else "")
 
-    screenshot_caption = ""
-    if (tool.get("screenshot_url") or "").strip():
-        if tool.get("screenshot_is_product"):
-            screenshot_caption = "Product screenshot"
-        elif (tool.get("screenshot_captured_at") or "").strip():
-            screenshot_caption = f"Homepage screenshot, captured {tool['screenshot_captured_at'][:10]}"
-        else:
-            screenshot_caption = "Homepage screenshot (no product screenshot available yet)"
-    screenshot_frame_inner = (
-        f'<img src="{_esc(tool["screenshot_url"])}" alt="{_esc(tool["name"])} screenshot" '
-        f'style="width:100%;height:100%;object-fit:cover;display:block;">'
-        if (tool.get("screenshot_url") or "").strip() else "No screenshot yet"
-    )
     featured_sticker = _sticker("Featured", rotate=8, top="-14px", right="-16px", size=14) if tool.get("promoted") else ""
-    screenshot_block = f"""<div class="tp-card tp-shot-card">
-  {featured_sticker}
-  <div class="tp-shot-frame">{screenshot_frame_inner}</div>
-  {f'<div class="tp-shot-caption">{_esc(screenshot_caption)}</div>' if screenshot_caption else ''}
-</div>"""
+    screenshot_block = _screenshot_card_html(tool, featured_sticker)
 
     advisor_mark_html = '<span class="tp-fn-mark">*</span>' if tool.get("advisor") else ""
     footnote_block = ""
@@ -6601,6 +6828,15 @@ function submitIntroForm() {{
 .tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
   aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
 .tp-shot-caption{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:10px;}}
+.tp-shot-slide+.tp-shot-slide{{margin-top:14px;}}
+.tp-shot-toggle{{display:none;margin-top:12px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam-wash);
+  border:1px solid var(--line-strong);border-radius:8px;padding:7px 14px;cursor:pointer;white-space:nowrap;}}
+.tp-shot-toggle:hover{{background:var(--navy-wash);}}
+@media(max-width:800px){{
+  .tp-shot-card.has-app .tp-shot-slide{{display:none;}}
+  .tp-shot-card.has-app .tp-shot-slide.tp-shot-active{{display:block;}}
+  .tp-shot-card.has-app .tp-shot-toggle{{display:inline-block;}}
+}}
 .tp-feature-table{{width:100%;border-collapse:collapse;font-size:13px;}}
 .tp-feature-table th{{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
   font-weight:600;padding-bottom:7px;border-bottom:1px solid var(--line);}}
@@ -8017,25 +8253,8 @@ def tools_community_profile(request: Request, slug: str):
 </div>
 <div class="tp-hero-actions">{action_row}</div>"""
 
-    screenshot_caption = ""
-    if (community.get("screenshot_url") or "").strip():
-        if community.get("screenshot_is_product"):
-            screenshot_caption = "Product screenshot"
-        elif (community.get("screenshot_captured_at") or "").strip():
-            screenshot_caption = f"Homepage screenshot, captured {community['screenshot_captured_at'][:10]}"
-        else:
-            screenshot_caption = "Homepage screenshot (no product screenshot available yet)"
-    screenshot_frame_inner = (
-        f'<img src="{_esc(community["screenshot_url"])}" alt="{_esc(community["name"])} screenshot" '
-        f'style="width:100%;height:100%;object-fit:cover;display:block;">'
-        if (community.get("screenshot_url") or "").strip() else "No screenshot yet"
-    )
     featured_sticker = _sticker("Featured", rotate=8, top="-14px", right="-16px", size=14) if community.get("featured") else ""
-    screenshot_block = f"""<div class="tp-card tp-shot-card">
-  {featured_sticker}
-  <div class="tp-shot-frame">{screenshot_frame_inner}</div>
-  {f'<div class="tp-shot-caption">{_esc(screenshot_caption)}</div>' if screenshot_caption else ''}
-</div>"""
+    screenshot_block = _screenshot_card_html(community, featured_sticker)
 
     top_band = f"""<div class="tp-band">
   <div>{hero_text}</div>
@@ -8215,6 +8434,15 @@ def tools_community_profile(request: Request, slug: str):
 .tp-shot-frame{{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2);
   aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;}}
 .tp-shot-caption{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:10px;}}
+.tp-shot-slide+.tp-shot-slide{{margin-top:14px;}}
+.tp-shot-toggle{{display:none;margin-top:12px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam-wash);
+  border:1px solid var(--line-strong);border-radius:8px;padding:7px 14px;cursor:pointer;white-space:nowrap;}}
+.tp-shot-toggle:hover{{background:var(--navy-wash);}}
+@media(max-width:800px){{
+  .tp-shot-card.has-app .tp-shot-slide{{display:none;}}
+  .tp-shot-card.has-app .tp-shot-slide.tp-shot-active{{display:block;}}
+  .tp-shot-card.has-app .tp-shot-toggle{{display:inline-block;}}
+}}
 .tp-cat-list{{list-style:none;margin:0;padding:0;}}
 .tp-cat-list li{{font-size:14px;color:var(--ink-soft);padding:5px 0 5px 16px;position:relative;}}
 .tp-cat-list li::before{{content:"\\2022";color:var(--seafoam-deep);position:absolute;left:0;font-weight:700;}}
@@ -10186,7 +10414,7 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
     </label>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Homepage screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
     <!-- type="text", not "url": Recapture writes a site-relative served path
          (e.g. /tools/communities/screenshot/<slug>.png?v=...), which native
          type="url" validation rejects as invalid (no scheme) and blocks Save
@@ -10194,10 +10422,6 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
     <input name="screenshot_url" type="text" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
-      <input type="checkbox" name="screenshot_is_product" value="1"{'checked' if c.get('screenshot_is_product') else ''}>
-      This is an actual product screenshot (unchecked = homepage/other, captioned as such)
-    </label>
   </div>"""
 
 
@@ -10892,7 +11116,8 @@ async def admin_communities_new_submit(request: Request):
 
 
 @app.get("/tools/communities/{slug}/edit", response_class=HTMLResponse)
-def admin_communities_edit(request: Request, slug: str, screenshot_captured: str = ""):
+def admin_communities_edit(request: Request, slug: str, screenshot_captured: str = "",
+                            app_screenshot_captured: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -11011,11 +11236,24 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
             f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">{_esc(cap_note)}</p></div>'
         )
 
+    app_screenshot_banner_html = ""
+    if app_screenshot_captured == "1":
+        app_screenshot_banner_html = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
+                                      'padding:10px 16px;font-size:14px;margin:0 0 16px;">App screenshot saved.</p>')
+    elif app_screenshot_captured == "0":
+        app_screenshot_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                                      'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture that URL—'
+                                      'the site may block headless browsers or timed out. Try again, or upload an image instead.</p>')
+    app_screenshot_in_form_html, app_screenshot_after_form_html = _app_screenshot_admin_section(
+        c, c["id"], "communities", app_screenshot_banner_html)
+
     body = f"""<div class="page page-form">
 <h1>Edit community</h1>
+{_CROPPER_CDN_HTML}
 <form method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
 {_community_form_fields(c, categories)}
+{app_screenshot_in_form_html}
   <div>
     <button type="submit" class="btn">Save changes</button>
     <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
@@ -11031,6 +11269,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     <button type="submit" class="tool-admin-btn">Generate screenshot</button>
   </form>
 </div>
+{app_screenshot_after_form_html}
 
 {_competitors_card_html}
 </div>
@@ -11038,8 +11277,9 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
+{_SHOT_CROP_CSS}
 </style>
-<script>{_GENERATE_LISTING_JS}</script>"""
+<script>{_GENERATE_LISTING_JS}{_APP_SCREENSHOT_CROP_JS}</script>"""
     return HTMLResponse(_page(f"Edit {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
 
 
@@ -11072,7 +11312,10 @@ async def admin_communities_edit_submit(request: Request, slug: str):
     featured = 1 if form.get("featured") == "1" else 0
     advisor = 1 if form.get("advisor") == "1" else 0
     screenshot_url = (form.get("screenshot_url") or "").strip()
-    screenshot_is_product = 1 if form.get("screenshot_is_product") == "1" else 0
+    # screenshot_is_product retired (Phase E) — see the matching comment in
+    # admin_tools_edit_submit.
+    screenshot_is_product = 0
+    app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
     if not (name and demographic):
         raise HTTPException(status_code=400, detail="Name and demographic are required.")
     lib = _lib()
@@ -11083,6 +11326,7 @@ async def admin_communities_edit_submit(request: Request, slug: str):
                              access=access, format=format_, notes=notes,
                              reach=reach, local_markets=local_markets, featured=featured, advisor=advisor)
         lib.update_community_screenshot(community_id, screenshot_url, screenshot_is_product)
+        lib.update_community_app_screenshot_source(community_id, app_screenshot_source_url)
         _record_ai_drafted_reviews(lib, request, "community", community_id, form)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/communities/{e.slug}/edit"))
@@ -11224,6 +11468,59 @@ def admin_communities_screenshot_recapture(request: Request, community_id: int):
     finally:
         lib.close()
     msg = "screenshot_captured=1" if ok else "screenshot_captured=0"
+    return RedirectResponse(f"/tools/communities/{community['slug']}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/app-screenshot/recapture")
+def admin_communities_app_screenshot_recapture(request: Request, community_id: int):
+    """App-screenshot equivalent of admin_communities_screenshot_recapture
+    (Phase E) — mirrors admin_tools_app_screenshot_recapture exactly, own
+    directory (_COMMUNITY_SCREENSHOT_DIR)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        source_url = (community.get("app_screenshot_source_url") or "").strip()
+        ok = False
+        if source_url:
+            from linklib.screenshots import capture_homepage
+            dest = os.path.join(_COMMUNITY_SCREENSHOT_DIR, f"{community['slug']}-app.png")
+            ok = capture_homepage(source_url, dest)
+            if ok:
+                served_url = f"{_public_base_url(request)}/tools/communities/screenshot/{community['slug']}-app.png?v={int(time.time())}"
+                lib.set_community_app_screenshot(community_id, served_url)
+    finally:
+        lib.close()
+    msg = "app_screenshot_captured=1" if ok else "app_screenshot_captured=0"
+    return RedirectResponse(f"/tools/communities/{community['slug']}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/communities/{community_id}/app-screenshot/upload")
+async def admin_communities_app_screenshot_upload(request: Request, community_id: int, file: UploadFile = File(...)):
+    """App-screenshot upload equivalent for Communities — mirrors
+    admin_tools_app_screenshot_upload exactly."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        community = lib.get_community(community_id)
+        if not community:
+            raise HTTPException(status_code=404, detail="Community not found")
+        data = await file.read()
+        ok = len(data) <= _APP_SCREENSHOT_MAX_BYTES and _sniff_image_mime(data) is not None
+        if ok:
+            dest = os.path.join(_COMMUNITY_SCREENSHOT_DIR, f"{community['slug']}-app.png")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(data)
+            served_url = f"{_public_base_url(request)}/tools/communities/screenshot/{community['slug']}-app.png?v={int(time.time())}"
+            lib.set_community_app_screenshot(community_id, served_url)
+    finally:
+        lib.close()
+    msg = "app_screenshot_captured=1" if ok else "app_screenshot_captured=0"
     return RedirectResponse(f"/tools/communities/{community['slug']}/edit?{msg}", status_code=303)
 
 
@@ -11668,7 +11965,8 @@ def admin_tools_reject(request: Request, tool_id: int):
 
 
 @app.get("/tools/software/{slug}/edit", response_class=HTMLResponse)
-def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "", research_refreshed: str = ""):
+def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "", research_refreshed: str = "",
+                      app_screenshot_captured: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -11833,8 +12131,20 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">{_esc(_cap_note)}</p></div>'
         )
 
+    _app_screenshot_banner_html = ""
+    if app_screenshot_captured == "1":
+        _app_screenshot_banner_html = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
+                                       'padding:10px 16px;font-size:14px;margin:0 0 16px;">App screenshot saved.</p>')
+    elif app_screenshot_captured == "0":
+        _app_screenshot_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                                       'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture that URL—'
+                                       'the site may block headless browsers or timed out. Try again, or upload an image instead.</p>')
+    _app_screenshot_in_form_html, _app_screenshot_after_form_html = _app_screenshot_admin_section(
+        tool, tool_id, "tools", _app_screenshot_banner_html)
+
     body = f"""<div class="page page-grid">
 <h1>Edit software</h1>
+{_CROPPER_CDN_HTML}
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
@@ -11915,10 +12225,10 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Homepage screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
       <span>
         <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn"
-          onclick="return confirmDiscardsUnsavedEdits(this)">Generate screenshot</button>
+          onclick="return confirmDiscardsUnsavedEdits(this)">Generate homepage screenshot</button>
       </span>
     </div>
     <!-- type="text", not "url": Generate screenshot writes a site-relative
@@ -11929,14 +12239,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <input name="screenshot_url" type="text" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;cursor:pointer;">
-      <input type="checkbox" name="screenshot_is_product" value="1"{'checked' if tool.get('screenshot_is_product') else ''}>
-      This is an actual product screenshot (unchecked = homepage/other, captioned as such)
-    </label>
     <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture pulls a fresh homepage screenshot at a fixed size, same as the bulk backfill script—use this for a one-off refresh. Paste a different URL above (then Save changes) to override with something else entirely.</p>
     {_screenshot_banner_html}
     <div style="margin-top:8px;">{_screenshot_preview_html}</div>
   </div>
+{_app_screenshot_in_form_html}
   <div>
     <button type="submit" class="btn">Save changes</button>
     <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
@@ -11944,6 +12251,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 </form>
 <form id="research-refresh-form" method="post" action="/admin/tools/{tool_id}/research/refresh" style="display:none;"></form>
 <form id="screenshot-recapture-form" method="post" action="/admin/tools/{tool_id}/screenshot/recapture" style="display:none;"></form>
+{_app_screenshot_after_form_html}
 {_taxonomy_verify_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
@@ -12019,8 +12327,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
 .tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
 .tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
+{_SHOT_CROP_CSS}
 </style>
-<script>{_GENERATE_DESC_JS}
+<script>{_GENERATE_DESC_JS}{_APP_SCREENSHOT_CROP_JS}
 // Generate summary (Description) and Generate summary (Differentiation)
 // draft into the form via fetch — no navigation, nothing else on the page
 // is touched. Refresh AI research (Agent taxonomy) and Generate screenshot
@@ -12115,7 +12424,14 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     differentiation_note = (form.get("differentiation_note") or "").strip()
     agent_taxonomy_note = (form.get("agent_taxonomy_note") or "").strip()
     screenshot_url = (form.get("screenshot_url") or "").strip()
-    screenshot_is_product = 1 if form.get("screenshot_is_product") == "1" else 0
+    # screenshot_is_product retired (Phase E) — the checkbox no longer
+    # renders on this form (an app screenshot now has its own dedicated slot
+    # below), so this always writes 0 going forward. The DB method itself
+    # still takes the parameter unchanged, since existing legacy rows /
+    # tests reference it; see linklib/db.py's ALTER TABLE comment for the
+    # non-destructive retirement.
+    screenshot_is_product = 0
+    app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
     lib = _lib()
@@ -12128,6 +12444,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         lib.update_tool_differentiation(tool_id, differentiation_note)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot(tool_id, screenshot_url, screenshot_is_product)
+        lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
         _record_ai_drafted_reviews(lib, request, "tool", tool_id, form)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
@@ -12165,6 +12482,69 @@ def admin_tools_screenshot_recapture(request: Request, tool_id: int):
     finally:
         lib.close()
     msg = "screenshot_captured=1" if ok else "screenshot_captured=0"
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/app-screenshot/recapture")
+def admin_tools_app_screenshot_recapture(request: Request, tool_id: int):
+    """App-screenshot equivalent of admin_tools_screenshot_recapture (Phase
+    E) — same synchronous-Playwright-in-request pattern and the same
+    capture_homepage() function (URL-agnostic despite the name — every
+    existing caller just always happened to pass the homepage url; this is
+    the first caller that doesn't), the only difference is the source URL
+    (app_screenshot_source_url, not the tool's own url) and the destination
+    filename ({slug}-app.png, not {slug}.png — same directory, no new
+    serving route needed, see _SCREENSHOT_DIR/_APP_SCREENSHOT_MAX_BYTES)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        source_url = (tool.get("app_screenshot_source_url") or "").strip()
+        ok = False
+        if source_url:
+            from linklib.screenshots import capture_homepage
+            dest = os.path.join(_SCREENSHOT_DIR, f"{tool['slug']}-app.png")
+            ok = capture_homepage(source_url, dest)
+            if ok:
+                served_url = f"{_public_base_url(request)}/tools/software/screenshot/{tool['slug']}-app.png?v={int(time.time())}"
+                lib.set_tool_app_screenshot(tool_id, served_url)
+    finally:
+        lib.close()
+    msg = "app_screenshot_captured=1" if ok else "app_screenshot_captured=0"
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/app-screenshot/upload")
+async def admin_tools_app_screenshot_upload(request: Request, tool_id: int, file: UploadFile = File(...)):
+    """Manual app-screenshot upload (Phase E) — the alternative to
+    auto-capture for a tool with no publicly-reachable app URL. The uploaded
+    file has already been cropped/resized client-side (Cropper.js,
+    _APP_SCREENSHOT_CROP_JS) to the fixed size the profile page displays at,
+    so this route only validates and saves it — same
+    validate-magic-bytes-not-Pillow approach as admin_brand_avatar_upload,
+    no server-side image-processing dependency needed."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        data = await file.read()
+        ok = len(data) <= _APP_SCREENSHOT_MAX_BYTES and _sniff_image_mime(data) is not None
+        if ok:
+            dest = os.path.join(_SCREENSHOT_DIR, f"{tool['slug']}-app.png")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(data)
+            served_url = f"{_public_base_url(request)}/tools/software/screenshot/{tool['slug']}-app.png?v={int(time.time())}"
+            lib.set_tool_app_screenshot(tool_id, served_url)
+    finally:
+        lib.close()
+    msg = "app_screenshot_captured=1" if ok else "app_screenshot_captured=0"
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
 
 
