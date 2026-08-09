@@ -16,8 +16,11 @@ LINKLIB_ENRICH_MODEL. The web pickers source their options from
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
+
+_logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-5")
 
@@ -160,7 +163,8 @@ def enrich(title: str, text: str, known_tags: list[str] | None = None,
             scope_reason=str(data.get("scope_reason", "")).strip(),
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
-    except Exception:
+    except Exception as e:
+        _logger.warning("enrich() failed: %s: %s", type(e).__name__, e)
         return None
 
 
@@ -262,7 +266,8 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
-    except Exception:
+    except Exception as e:
+        _logger.warning("generate_tool_description() failed: %s: %s", type(e).__name__, e)
         return None
 
 
@@ -354,7 +359,8 @@ def generate_tool_differentiation(name: str, url: str, description: str,
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
-    except Exception:
+    except Exception as e:
+        _logger.warning("generate_tool_differentiation() failed: %s: %s", type(e).__name__, e)
         return None
 
 
@@ -447,7 +453,8 @@ def generate_competitor_matches(name: str, description: str, candidates: list[di
             competitor_ids=matched, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
-    except Exception:
+    except Exception as e:
+        _logger.warning("generate_competitor_matches() failed: %s: %s", type(e).__name__, e)
         return None
 
 
@@ -691,7 +698,8 @@ def generate_tool_features(name: str, url: str, description: str = "",
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
-    except Exception:
+    except Exception as e:
+        _logger.warning("generate_tool_features() failed: %s: %s", type(e).__name__, e)
         return None
 
 
@@ -917,7 +925,8 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
-    except Exception:
+    except Exception as e:
+        _logger.warning("generate_community_profile() failed: %s: %s", type(e).__name__, e)
         return None
 
 
@@ -1088,7 +1097,8 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
-    except Exception:
+    except Exception as e:
+        _logger.warning("generate_community_listing() failed: %s: %s", type(e).__name__, e)
         return None
 
 
@@ -1192,5 +1202,6 @@ def voice_rewrite_community_fields(name: str, fields: dict, voice_core: str,
         rewritten = {k: str(data.get(k, present[k])).strip() for k in present}
         return VoiceRewriteResult(fields=rewritten, model=model,
                                   input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost)
-    except Exception:
+    except Exception as e:
+        _logger.warning("voice_rewrite_community_fields() failed: %s: %s", type(e).__name__, e)
         return None
