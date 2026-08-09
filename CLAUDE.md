@@ -166,6 +166,30 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `tools.logo_path`/`communities.logo_path` store the resulting relative path; actually
   rendering a logo on a profile page or directory card, and the fallback UI for a record
   that never resolves one, is deferred to a later phase.
+- **CFO Toolbox profile pages show two screenshots (Phase E): homepage and app/product,
+  independently sourced.** The homepage slot (`screenshot_url`/`screenshot_captured_at`)
+  is unchanged — always captured from the record's own `url`. The app slot
+  (`app_screenshot_source_url`/`app_screenshot_url`/`app_screenshot_captured_at`) is
+  additive, not automatable the way the homepage slot is: there's no single reliable
+  "the app's URL" the way there's a homepage URL, so it's inherently manual/curated —
+  Brian supplies a login/demo/product-tour URL per record (or skips it; most records have
+  none at launch), then either auto-captures against it (same `linklib/screenshots.py::
+  capture_homepage`, now genuinely URL-agnostic rather than homepage-only in practice) or
+  crops-and-uploads his own image via a client-side Cropper.js modal (CDN script, no
+  server-side image-processing dependency — the browser produces the final fixed-size PNG
+  before it ever reaches the server, so no Pillow was needed). Both write paths land on
+  the same `app_screenshot_url`, with no provenance tracking between them. Saved as
+  `{slug}-app.png` in the same `_SCREENSHOT_DIR`/`_COMMUNITY_SCREENSHOT_DIR` and served by
+  the existing homepage screenshot routes — no new serving route, just a filename suffix.
+  The pre-Phase-E `screenshot_is_product` flag (a single slot doing double duty as
+  "homepage or product, whichever's pasted") is retired: a one-time boot migration moves
+  any legacy `screenshot_is_product=1` row into the new app slot and clears the homepage
+  slot, and the column itself stays in the schema, unused, as a non-destructive historical
+  marker — see `linklib/db.py`'s `_migrate_app_screenshot_from_product_flag`. Desktop
+  stacks both screenshots in one card when the app slot is populated; mobile shows one at
+  a time with a tap-to-toggle button (the existing Phase J1 expand/collapse convention,
+  not a new swipe-gesture pattern). A record with only a homepage screenshot — the common
+  case at launch — renders identically to pre-Phase-E, no toggle, no second frame.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

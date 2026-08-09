@@ -1437,6 +1437,34 @@ class Library:
             # Phase F) is never silently overwritten by a re-run.
             "ALTER TABLE tools ADD COLUMN logo_path TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE communities ADD COLUMN logo_path TEXT NOT NULL DEFAULT ''",
+            # Dual screenshot capture (Phase E): a second, independent
+            # screenshot slot for the actual product/app UI, alongside the
+            # existing homepage slot above. screenshot_is_product is retired
+            # by this phase (see _migrate_app_screenshot_from_product_flag
+            # below) but deliberately NOT dropped — same non-destructive
+            # precedent as the retired community_profiles *_tags columns:
+            # the column stays in place, frozen, as a historical marker of
+            # which pre-Phase-E rows were manually flagged as a product
+            # shot, in case that's ever needed to reconstruct/audit the
+            # one-time migration. Naming deliberately does NOT mirror
+            # screenshot_url/screenshot_captured_at 1:1: the homepage slot
+            # has no separate "source URL" column because it always reuses
+            # the tool's/community's own `url` field as the capture target.
+            # The app slot has no such built-in source (there's no single
+            # "the app's URL" the way there's a homepage URL), so it needs
+            # its own field to hold whatever login/demo/product-tour URL
+            # Brian supplies. app_screenshot_url mirrors screenshot_url
+            # exactly (the served path, populated by either auto-capture or
+            # a manual crop-and-upload — same field either way, no
+            # provenance tracking, mirroring how screenshot_url doesn't
+            # distinguish its own two write paths). app_screenshot_captured_at
+            # mirrors screenshot_captured_at exactly.
+            "ALTER TABLE tools ADD COLUMN app_screenshot_source_url TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE tools ADD COLUMN app_screenshot_url TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE tools ADD COLUMN app_screenshot_captured_at TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE communities ADD COLUMN app_screenshot_source_url TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE communities ADD COLUMN app_screenshot_url TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE communities ADD COLUMN app_screenshot_captured_at TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -1455,6 +1483,7 @@ class Library:
         # _POST_MIGRATION_INDEXES, which assumes user_id already exists.
         self._migrate_read_later_user_scope()
         self._migrate_community_local_markets()
+        self._migrate_app_screenshot_from_product_flag()
         # Indexes on any column added by the ALTER TABLE loop above must be
         # created here, never inside _SCHEMA — see the NOTE above the
         # password_reset_requests table in _SCHEMA for why (a real incident:
@@ -1569,6 +1598,46 @@ class Library:
             )
         if rows:
             self.conn.commit()
+
+    def _migrate_app_screenshot_from_product_flag(self) -> None:
+        """One-time backfill (Phase E): before this phase, a manually-pasted
+        screenshot flagged screenshot_is_product=1 was the ONLY way to show
+        an actual product/app shot — it lived in the single screenshot_url
+        slot and replaced whatever homepage capture was there. Now that
+        app_screenshot_url is its own slot, every pre-existing row like that
+        is semantically an app screenshot, not a homepage one, so this moves
+        screenshot_url/screenshot_captured_at over to
+        app_screenshot_url/app_screenshot_captured_at and clears the
+        homepage slot (a record that had a product shot standing in for its
+        homepage shot goes back to having no homepage shot at all, until one
+        is captured for real — see CLAUDE.md/ARCHITECTURE.md for why this
+        isn't a "no screenshot" regression, it's the correct read of what
+        that row actually had).
+
+        Idempotent — guarded by app_screenshot_url = '' , so this only ever
+        touches a row once, on whichever boot first runs Phase E's migration
+        against a given DB. Non-destructive: screenshot_is_product itself is
+        never cleared or dropped (see the ALTER TABLE comment above), so
+        which rows this touched stays visible/reconstructable afterward
+        purely by re-querying for screenshot_is_product=1. Prints a one-line
+        count to stdout (Railway captures this in the deploy logs) — the
+        nearest thing to a trace this migration can leave, since it runs on
+        every boot rather than as a standalone one-off script."""
+        for table in ("tools", "communities"):
+            rows = self.conn.execute(
+                f"SELECT id, screenshot_url, screenshot_captured_at FROM {table} "
+                f"WHERE screenshot_is_product = 1 AND app_screenshot_url = '' AND screenshot_url != ''"
+            ).fetchall()
+            for row in rows:
+                self.conn.execute(
+                    f"UPDATE {table} SET app_screenshot_url=?, app_screenshot_captured_at=?, "
+                    f"screenshot_url='', screenshot_captured_at='' WHERE id=?",
+                    (row["screenshot_url"], row["screenshot_captured_at"], row["id"]),
+                )
+            if rows:
+                self.conn.commit()
+                print(f"[db migration] Phase E: moved {len(rows)} legacy product-screenshot "
+                      f"flag(s) on {table} into app_screenshot_url.")
 
     # -- writes -------------------------------------------------------------
 
@@ -2768,6 +2837,34 @@ class Library:
         )
         self.conn.commit()
 
+    def update_tool_app_screenshot_source(self, tool_id: int, app_screenshot_source_url: str) -> None:
+        """Narrow update for the admin edit form's app-screenshot source URL
+        field (Phase E) — the login/demo/product-tour page Brian wants
+        auto-capture to run against. Deliberately doesn't touch
+        app_screenshot_url/app_screenshot_captured_at: editing the source URL
+        doesn't invalidate whatever's currently captured/uploaded until a
+        recapture actually runs, same reasoning as update_tool_differentiation
+        (a narrow single-field update, safe to call from the bulk-edit form)."""
+        self.conn.execute(
+            "UPDATE tools SET app_screenshot_source_url=?, updated_at=? WHERE id=?",
+            (app_screenshot_source_url.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def set_tool_app_screenshot(self, tool_id: int, app_screenshot_url: str) -> None:
+        """Records an app screenshot — either an automated capture against
+        app_screenshot_source_url, or a manually cropped-and-uploaded file
+        (Phase E). Both write paths call this same setter: unlike the
+        homepage slot's screenshot_is_product distinction, there's no need to
+        track which path populated the app slot (a hand-uploaded shot and an
+        auto-captured one are equally "the app screenshot" once saved)."""
+        self.conn.execute(
+            "UPDATE tools SET app_screenshot_url=?, app_screenshot_captured_at=?, "
+            "updated_at=? WHERE id=?",
+            (app_screenshot_url.strip(), _now(), _now(), tool_id),
+        )
+        self.conn.commit()
+
     def set_tool_logo(self, tool_id: int, logo_path: str) -> None:
         """Records a downloaded-and-stored logo asset (Phase D backfill —
         scripts/backfill_logos.py is the only caller today). `logo_path` is a
@@ -3214,6 +3311,25 @@ class Library:
             "UPDATE communities SET screenshot_url=?, screenshot_is_product=0, screenshot_captured_at=?, "
             "updated_at=? WHERE id=?",
             (screenshot_url.strip(), _now(), _now(), community_id),
+        )
+        self.conn.commit()
+
+    def update_community_app_screenshot_source(self, community_id: int, app_screenshot_source_url: str) -> None:
+        """Narrow update for the app-screenshot source URL field (Phase E) —
+        mirrors update_tool_app_screenshot_source exactly."""
+        self.conn.execute(
+            "UPDATE communities SET app_screenshot_source_url=?, updated_at=? WHERE id=?",
+            (app_screenshot_source_url.strip(), _now(), community_id),
+        )
+        self.conn.commit()
+
+    def set_community_app_screenshot(self, community_id: int, app_screenshot_url: str) -> None:
+        """Records an app screenshot (auto-captured or uploaded) — mirrors
+        set_tool_app_screenshot exactly."""
+        self.conn.execute(
+            "UPDATE communities SET app_screenshot_url=?, app_screenshot_captured_at=?, "
+            "updated_at=? WHERE id=?",
+            (app_screenshot_url.strip(), _now(), _now(), community_id),
         )
         self.conn.commit()
 
