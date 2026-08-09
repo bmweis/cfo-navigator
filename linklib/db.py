@@ -975,6 +975,16 @@ def normalize_tool_name(name: str) -> str:
     return " ".join(words)
 
 
+# Reserved category name (Phase J3): the CFO Toolbox directories' "Uncategorized"
+# filter pill is a client-side sentinel (see webapp/app.py's __uncategorized__
+# handling in filtered()/applySortFilter) that OR-matches an empty categories
+# list, not a real category row. A real category literally named "Uncategorized"
+# would be indistinguishable from that sentinel in the filter UI, so category
+# creation/rename rejects the name (case-insensitive) for both tools and
+# communities.
+RESERVED_CATEGORY_NAME = "uncategorized"
+
+
 class DuplicateURLError(Exception):
     """Raised by add_tool/update_tool/add_community/update_community when the
     given URL normalize_url()-matches an existing row (a different row, on
@@ -2927,6 +2937,8 @@ class Library:
         name, description = name.strip(), description.strip()
         if not name:
             raise ValueError("Category name is required.")
+        if name.lower() == RESERVED_CATEGORY_NAME:
+            raise ValueError('"Uncategorized" is reserved for the directory\'s built-in filter and can\'t be used as a category name.')
         existing = self.conn.execute(
             "SELECT 1 FROM tool_categories WHERE name = ? COLLATE NOCASE", (name,)
         ).fetchone()
@@ -2950,6 +2962,8 @@ class Library:
         new_name, description = new_name.strip(), description.strip()
         if not new_name:
             raise ValueError("Category name is required.")
+        if new_name.lower() == RESERVED_CATEGORY_NAME:
+            raise ValueError('"Uncategorized" is reserved for the directory\'s built-in filter and can\'t be used as a category name.')
         row = self.conn.execute(
             "SELECT name FROM tool_categories WHERE id = ?", (category_id,)
         ).fetchone()
@@ -3568,6 +3582,8 @@ class Library:
         name, description = name.strip(), description.strip()
         if not name:
             raise ValueError("Category name is required.")
+        if name.lower() == RESERVED_CATEGORY_NAME:
+            raise ValueError('"Uncategorized" is reserved for the directory\'s built-in filter and can\'t be used as a category name.')
         existing = self.conn.execute(
             "SELECT 1 FROM community_categories WHERE name = ? COLLATE NOCASE", (name,)
         ).fetchone()
@@ -3590,6 +3606,8 @@ class Library:
         new_name, description = new_name.strip(), description.strip()
         if not new_name:
             raise ValueError("Category name is required.")
+        if new_name.lower() == RESERVED_CATEGORY_NAME:
+            raise ValueError('"Uncategorized" is reserved for the directory\'s built-in filter and can\'t be used as a category name.')
         row = self.conn.execute(
             "SELECT name FROM community_categories WHERE id = ?", (category_id,)
         ).fetchone()

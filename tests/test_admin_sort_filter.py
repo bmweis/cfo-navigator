@@ -43,7 +43,7 @@ def test_software_sort_filter_toolbar_renders(admin_client):
     assert 'data-categories="fp&amp;a"' in r.text
 
 
-def test_software_categories_are_always_visible_pills_not_a_dropdown(admin_client):
+def test_software_categories_are_pills_collapsed_behind_a_details_toggle(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
@@ -52,13 +52,18 @@ def test_software_categories_are_always_visible_pills_not_a_dropdown(admin_clien
     lib.close()
 
     r = client.get("/admin/tools/software")
-    # Pills render always-visible (no <details>/<summary> click-to-reveal wrapper
-    # around the Software category filter — that's the old dropdown pattern).
+    # Pills render as always-visible-once-expanded checkboxes (not the old
+    # click-to-reveal dropdown), but the whole pill row is now behind a
+    # Columns-▾-style <details> toggle, collapsed by default (Phase J2) —
+    # not the open-by-default '<details open>' the public directory uses.
     assert 'id="software-filter-categories"' in r.text
     assert 'class="admin-cat-pill"' in r.text
     cats_pos = r.text.index('id="software-filter-categories"')
-    preceding = r.text[max(0, cats_pos - 200):cats_pos]
-    assert "<details" not in preceding
+    preceding = r.text[max(0, cats_pos - 400):cats_pos]
+    assert "<details style=" in preceding
+    assert "<details open" not in preceding
+    # An "Uncategorized" pill is always present (Phase J3 hygiene filter).
+    assert 'value="__uncategorized__"' in r.text
     # Live search box, no submit button needed.
     assert 'id="software-filter-search"' in r.text
     assert 'type="search"' in r.text
@@ -67,8 +72,8 @@ def test_software_categories_are_always_visible_pills_not_a_dropdown(admin_clien
 
 def test_communities_categories_also_use_pills_and_search(admin_client):
     # Changes to Software's admin filter UI are replicated on Communities
-    # where relevant — same always-visible pills + live search, not just
-    # Software's own table.
+    # where relevant — same collapsed-by-default pills + live search, not
+    # just Software's own table.
     client, appmod, db = admin_client
     from linklib.db import Library
     lib = Library(db)
@@ -82,8 +87,10 @@ def test_communities_categories_also_use_pills_and_search(admin_client):
     assert 'id="communities-filter-categories"' in r.text
     assert 'class="admin-cat-pill"' in r.text
     cats_pos = r.text.index('id="communities-filter-categories"')
-    preceding = r.text[max(0, cats_pos - 200):cats_pos]
-    assert "<details" not in preceding
+    preceding = r.text[max(0, cats_pos - 400):cats_pos]
+    assert "<details style=" in preceding
+    assert "<details open" not in preceding
+    assert 'value="__uncategorized__"' in r.text
     assert 'id="communities-filter-search"' in r.text
     assert 'data-search="comm a https://ca.example"' in r.text
 
