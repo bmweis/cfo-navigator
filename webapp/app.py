@@ -5332,9 +5332,10 @@ function renderTools(tools) {{
         + '<label style="margin:0;">Description</label>'
         + '<span><button type="button" class="tool-admin-btn" onclick="generateDescription('
         + esc(JSON.stringify(t.name)) + ',' + esc(JSON.stringify(t.url))
-        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\')">Generate summary</button>'
+        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\',\\'qe-gen-err-' + t.id + '\\')">Generate summary</button>'
         + ' <span id="qe-gen-status-' + t.id + '" class="qe-status"></span></span>'
         + '</div>'
+        + '<p id="qe-gen-err-' + t.id + '" style="display:none;"></p>'
         + '<textarea id="qe-desc-' + t.id + '" rows="4">' + esc(t.description) + '</textarea>'
         + '<label style="margin:8px 0 0;">Short summary <span style="font-weight:400;color:var(--muted);">(directory card + search)</span></label>'
         + '<textarea id="qe-summary-' + t.id + '" rows="2">' + esc(t.summary || '') + '</textarea>'
@@ -8054,13 +8055,35 @@ function markAiDrafted(fieldName) {
   if (fields.indexOf(fieldName) === -1) fields.push(fieldName);
   el.value = fields.join(',');
 }
+// Shared error-box treatment for every Generate-button failure (Phase M):
+// a coral callout in the same spot the box occupies when shown, styled to
+// match the existing green AI-taxonomy-refresh banner (background/text
+// swapped to --coral-wash/--navy, the sanctioned coral pairing already used
+// elsewhere for this exact page-level-adjacent failure case — see the
+// screenshot-recapture and AI-research-refresh banners). Set via inline
+// cssText rather than a shared CSS class since each admin page defines its
+// own local <style> block rather than importing one global stylesheet.
+function showGenError(boxId, message) {
+  var box = document.getElementById(boxId);
+  if (!box || !message) return;
+  box.textContent = message;
+  box.style.cssText = 'display:block;background:var(--coral-wash);color:var(--navy);'
+    + 'border-radius:10px;padding:10px 16px;font-size:14px;margin:0 0 16px;line-height:1.5;';
+}
+function clearGenError(boxId) {
+  var box = document.getElementById(boxId);
+  if (!box) return;
+  box.style.display = 'none';
+  box.textContent = '';
+}
 """
 
 _GENERATE_DESC_JS = _MARK_AI_DRAFTED_JS + """
-async function generateDescription(name, url, descId, statusId, summaryId) {
+async function generateDescription(name, url, descId, statusId, summaryId, errBoxId) {
   name = (name || '').trim();
   url = (url || '').trim();
   var status = document.getElementById(statusId);
+  clearGenError(errBoxId);
   if (!name || !url) { status.textContent = 'Enter a name and URL first.'; return; }
   status.textContent = 'Generating…';
   try {
@@ -8080,7 +8103,8 @@ async function generateDescription(name, url, descId, statusId, summaryId) {
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
       : 'Drafted. Review before saving.';
   } catch (e) {
-    status.textContent = e.message || 'Generation failed. Write the description by hand.';
+    status.textContent = '';
+    showGenError(errBoxId, e.message || 'Generation failed. Write the description by hand.');
   }
 }
 """
@@ -8099,10 +8123,11 @@ _COMMUNITY_PROFILE_FIELD_IDS = [
 ]
 _GENERATE_PROFILE_JS = _MARK_AI_DRAFTED_JS + """
 var COMMUNITY_PROFILE_FIELDS = """ + json.dumps(_COMMUNITY_PROFILE_FIELD_IDS) + """;
-async function generateCommunityProfile(name, url, statusId) {
+async function generateCommunityProfile(name, url, statusId, errBoxId) {
   name = (name || '').trim();
   url = (url || '').trim();
   var status = document.getElementById(statusId);
+  clearGenError(errBoxId);
   if (!name || !url) { status.textContent = 'Missing name or URL.'; return; }
   status.textContent = 'Generating…';
   var existing = {};
@@ -8129,7 +8154,8 @@ async function generateCommunityProfile(name, url, statusId) {
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
       : 'Drafted. Review before saving.';
   } catch (e) {
-    status.textContent = e.message || 'Generation failed. Write the profile by hand.';
+    status.textContent = '';
+    showGenError(errBoxId, e.message || 'Generation failed. Write the profile by hand.');
   }
 }
 """
@@ -8142,10 +8168,11 @@ async function generateCommunityProfile(name, url, statusId) {
 # on the page; categories is the one remaining checkbox group, synced by
 # checking membership in the returned list instead.
 _GENERATE_LISTING_JS = _MARK_AI_DRAFTED_JS + """
-async function generateCommunityListing(name, url, statusId) {
+async function generateCommunityListing(name, url, statusId, errBoxId) {
   name = (name || '').trim();
   url = (url || '').trim();
   var status = document.getElementById(statusId);
+  clearGenError(errBoxId);
   if (!name || !url) { status.textContent = 'Enter a name and URL first.'; return; }
   status.textContent = 'Generating…';
   try {
@@ -8168,7 +8195,8 @@ async function generateCommunityListing(name, url, statusId) {
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
       : 'Drafted. Review before saving—anything marked "Needs verification" needs a manual check.';
   } catch (e) {
-    status.textContent = e.message || 'Generation failed. Fill in the form by hand.';
+    status.textContent = '';
+    showGenError(errBoxId, e.message || 'Generation failed. Fill in the form by hand.');
   }
 }
 """
@@ -9862,8 +9890,9 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
       placeholder="https://…">
   </div>
   <div>
-    <button type="button" class="tool-admin-btn" onclick="generateCommunityListing(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'comm-gen-status')">Auto-fill from URL</button>
+    <button type="button" class="tool-admin-btn" onclick="generateCommunityListing(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'comm-gen-status', 'comm-gen-err')">Auto-fill from URL</button>
     <span id="comm-gen-status" class="qe-status"></span>
+    <p id="comm-gen-err" style="display:none;"></p>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
@@ -10001,10 +10030,11 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
     <span style="white-space:nowrap;">
       <input type="hidden" id="cp-name" value="{_esc(community.get('name', ''))}">
       <input type="hidden" id="cp-url" value="{_esc(community.get('url', ''))}">
-      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status')">Generate summary</button>
+      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status', 'cp-gen-err')">Generate summary</button>
       <span id="cp-gen-status" class="qe-status"></span>
     </span>
   </div>
+  <p id="cp-gen-err" style="display:none;"></p>
 {_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True)}
 {_field('anti_fit', 'Anti-fit', 'Who should probably skip it')}
 {_field('value_prop', 'Value proposition', 'The primary thing members get out of it')}
@@ -10697,9 +10727,10 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—shares a tag</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\')">Suggest similar communities</button>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\', \'community-competitor-gen-err\')">Suggest similar communities</button>'
             '</div>'
             '<p id="community-competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
+            '<p id="community-competitor-gen-err" style="display:none;"></p>'
             f'<form method="post" action="/admin/tools/communities/{community_id}/competitors/add-selected">'
             '<input type="hidden" id="community-competitor-ai-drafted-fields" name="ai_drafted_fields" value="">'
             + "".join(_suggestion_row(s) for s in suggestions) +
@@ -10729,8 +10760,9 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
   </div>
 </div>
 <script>
-async function generateCommunityCompetitorMatches(communityId, statusId) {{
+async function generateCommunityCompetitorMatches(communityId, statusId, errBoxId) {{
   var status = document.getElementById(statusId);
+  clearGenError(errBoxId);
   status.textContent = 'Generating…';
   try {{
     var r = await fetch('/admin/tools/communities/' + communityId + '/competitors/generate-matches', {{method: 'POST'}});
@@ -10747,7 +10779,8 @@ async function generateCommunityCompetitorMatches(communityId, statusId) {{
       ? 'Pre-checked ' + matched.length + ' AI-matched candidate' + (matched.length === 1 ? '' : 's') + '. Review before adding.'
       : 'No confident matches found. Pick similar communities by hand.';
   }} catch (e) {{
-    status.textContent = e.message || 'Generation failed. Pick similar communities by hand.';
+    status.textContent = '';
+    showGenError(errBoxId, e.message || 'Generation failed. Pick similar communities by hand.');
   }}
 }}
 </script>"""
@@ -11252,10 +11285,11 @@ def admin_tools_new(request: Request):
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate summary</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
+    <p id="tool-desc-gen-err" style="display:none;"></p>
     <textarea id="tool-desc" name="description" required maxlength="2500" rows="7"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences."></textarea>
@@ -11478,9 +11512,10 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—shares a tag</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\')">Suggest competitors</button>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\', \'competitor-gen-err\')">Suggest competitors</button>'
             '</div>'
             '<p id="competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
+            '<p id="competitor-gen-err" style="display:none;"></p>'
             f'<form method="post" action="/admin/tools/{tool_id}/competitors/add-selected">'
             '<input type="hidden" id="competitor-ai-drafted-fields" name="ai_drafted_fields" value="">'
             + "".join(_suggestion_row(s) for s in suggestions) +
@@ -11611,10 +11646,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary')">Generate summary</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
+    <p id="tool-desc-gen-err" style="display:none;"></p>
     <textarea id="tool-desc" name="description" required maxlength="2500" rows="7"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
@@ -11647,10 +11683,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">How this differs from the competition <span style="font-weight:400;color:var(--muted);">(shown on the profile page as the Bottom line callout)</span></label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status')">Generate summary</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>
       </span>
     </div>
+    <p id="diff-gen-err" style="display:none;"></p>
     <textarea id="tool-differentiation" name="differentiation_note" maxlength="600" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('differentiation_note') or '')}</textarea>
@@ -11801,8 +11838,9 @@ function confirmDiscardsUnsavedEdits(button) {{
     + 'edits above (including anything just drafted with Generate summary). '
     + 'Save changes first, or continue and lose them?');
 }}
-async function generateDifferentiation(toolId, textareaId, statusId) {{
+async function generateDifferentiation(toolId, textareaId, statusId, errBoxId) {{
   var status = document.getElementById(statusId);
+  clearGenError(errBoxId);
   status.textContent = 'Generating…';
   try {{
     var r = await fetch('/admin/tools/' + toolId + '/generate-differentiation', {{method: 'POST'}});
@@ -11814,11 +11852,13 @@ async function generateDifferentiation(toolId, textareaId, statusId) {{
       ? 'Drafted. No competitors curated yet, so this is weaker than it could be—review carefully.'
       : 'Drafted. Review before saving.';
   }} catch (e) {{
-    status.textContent = e.message || 'Generation failed. Write it by hand.';
+    status.textContent = '';
+    showGenError(errBoxId, e.message || 'Generation failed. Write it by hand.');
   }}
 }}
-async function generateCompetitorMatches(toolId, statusId) {{
+async function generateCompetitorMatches(toolId, statusId, errBoxId) {{
   var status = document.getElementById(statusId);
+  clearGenError(errBoxId);
   status.textContent = 'Generating…';
   try {{
     var r = await fetch('/admin/tools/' + toolId + '/competitors/generate-matches', {{method: 'POST'}});
@@ -11835,7 +11875,8 @@ async function generateCompetitorMatches(toolId, statusId) {{
       ? 'Pre-checked ' + matched.length + ' AI-matched candidate' + (matched.length === 1 ? '' : 's') + '. Review before adding.'
       : 'No confident matches found. Pick competitors by hand.';
   }} catch (e) {{
-    status.textContent = e.message || 'Generation failed. Pick competitors by hand.';
+    status.textContent = '';
+    showGenError(errBoxId, e.message || 'Generation failed. Pick competitors by hand.');
   }}
 }}
 </script>"""
