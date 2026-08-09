@@ -143,6 +143,29 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `tool_audit_log`/`community_audit_log` — snapshotting name/url/categories immediately
   before the hard `DELETE`, since that's the only record of what was removed once the row
   is gone. See `ARCHITECTURE.md`'s CFO Toolbox table for the full shape.
+- **CFO Toolbox logos (Phase D) come from Brandfetch's Brand API, not its free CDN Logo
+  API, and are stored beside `library.db`, not under `webapp/static/`.** The original
+  investigation assumed `cdn.brandfetch.io?c={client_id}` (500K free requests/month) —
+  that turned out to be browser-embed-only and explicitly disallows programmatic/backend
+  access per Brandfetch's own docs and ToS; a dry-run against it (`scripts/
+  report_brandfetch_coverage.py`) came back with a uniform blocked-request response for
+  all 216 records, not real per-company misses. The correct product is the **Brand API**
+  (`api.brandfetch.io/v2/brands/domain/{domain}`, `Authorization: Bearer
+  BRANDFETCH_API_KEY` — a separate credential from the unrelated `BRANDFETCH_CLIENT_ID`),
+  which returns real logo asset URLs meant for exactly this kind of one-time server-side
+  fetch, but whose free tier is only 100 requests/month — well under the 216-record
+  catalog. `scripts/backfill_logos.py` is deliberately built around that limit: it
+  processes software tools before communities, `--limit` (default 90) records per run,
+  and is meant to be run three separate times a month apart via `railway ssh`, never in
+  bulk. Downloaded assets are saved to a `logos/` directory next to `library.db` on the
+  Railway volume (`logos/tools/` and `logos/communities/` subdirectories — the two
+  entity types' slugs can collide, same reasoning as `_SCREENSHOT_DIR`/
+  `_COMMUNITY_SCREENSHOT_DIR`), not under `webapp/static/logos/` as the build prompt
+  originally specified — that directory ships baked into the Docker image and is wiped
+  on every deploy, which would have silently destroyed each month's backfill progress.
+  `tools.logo_path`/`communities.logo_path` store the resulting relative path; actually
+  rendering a logo on a profile page or directory card, and the fallback UI for a record
+  that never resolves one, is deferred to a later phase.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -200,6 +223,8 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 | `ANTHROPIC_API_KEY` | — | Required for enrichment, Q&A, and post drafting |
 | `OPENAI_API_KEY` | — | Required for embed-on-save, `embed_backfill`, and the vector half of hybrid retrieval. Absent → FTS5-only, no error. |
 | `EXA_API_KEY` | — | Exa search API key for FP&A Buddy's preferred web retrieval mechanism (`linklib/agent.py`'s `retrieve_exa`). Absent, or the `exa_enabled` setting toggled off at `/admin/exa-settings` → Claude's native `web_search_20250305` tool handles the web tier instead (Phase 7 kill switch); web search itself is never disabled, only which engine runs. No error either way. |
+| `BRANDFETCH_API_KEY` | — | Brandfetch **Brand API** Bearer token, required only for `scripts/backfill_logos.py --apply` (CFO Toolbox logo backfill, Phase D). A different product/credential from `BRANDFETCH_CLIENT_ID` below — do not confuse them. |
+| `BRANDFETCH_CLIENT_ID` | — | Public client ID for Brandfetch's free CDN Logo API (`cdn.brandfetch.io`). Kept for reference/potential future browser-embed use, but **not** used by the logo backfill — that product is browser-embed-only and blocks programmatic access (see the Key architecture decisions bullet above). |
 | `LINKLIB_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model for `linklib/embeddings.py` |
 | `LINKLIB_DB` | `library.db` | Path to the SQLite database |
 | `LINKLIB_SAVE_TOKEN` | (none) | Token for `POST /save` + bookmarklet; also the default login password. Set when hosted. |
