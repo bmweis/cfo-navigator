@@ -784,6 +784,42 @@ CREATE TABLE IF NOT EXISTS field_reviews (
     PRIMARY KEY (entity_type, entity_id, field_name)
 );
 
+-- Phase G: explicit "Mark verified" audit trail for the *public-facing*
+-- unverified badge on AI-drafted narrative fields (Agent taxonomy note here;
+-- Description, Differentiation, and the Community profile draft join it in
+-- the Phase G follow-up). Deliberately NOT the same thing as field_reviews
+-- above, even though both are "AI-drafted content, review it" tables —
+-- field_reviews is a passive by-product of saving the edit form after a
+-- Generate click (the standing "the save that follows is what makes
+-- reviewed real" principle), written automatically and never surfaced
+-- anywhere in the UI. This table backs a *requested* gate instead: a
+-- {field}_needs_verification boolean column stays true (and drives a public
+-- "unverified" badge on the profile/compare/directory pages) until an admin
+-- explicitly clicks "Mark verified" — a distinct action from Save, which a
+-- draft the admin never actually scrutinized can otherwise sail through.
+-- One shared table with field_type/entity_type discriminators, mirroring
+-- tool_audit_log/community_audit_log/backup_log's shape (id/admin_id
+-- nullable-FK-to-users/detail/created_at) rather than a
+-- {field}_review_log table per field — same reasoning those tables gave for
+-- being one generic shape apiece: four near-identical tables for what's
+-- structurally one concern isn't worth it. Append-only: re-verifying after a
+-- fresh AI draft writes a new row rather than updating one in place, so
+-- "who verified this and when" has real history, not just a last-write-wins
+-- snapshot — Library.get_latest_narrative_review reads the newest row per
+-- (entity_type, field_type, item_id) for display.
+CREATE TABLE IF NOT EXISTS narrative_review_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_id    INTEGER,
+    entity_type TEXT NOT NULL,             -- 'tool' | 'community'
+    field_type  TEXT NOT NULL,             -- 'agent_taxonomy' | 'description' | 'differentiation' | 'community_profile'
+    item_id     INTEGER NOT NULL,          -- tools.id or communities.id — no REFERENCES, same as tool_audit_log/community_audit_log
+    detail      TEXT NOT NULL DEFAULT '',  -- the reviewed text snapshot at verification time
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_review_log_lookup
+    ON narrative_review_log(entity_type, field_type, item_id, created_at);
+
 -- Gap-collection (Phase 5): the native replacement for the old /community
 -- waitlist page's Google Form, folded into the live directory instead of a
 -- separate parked page. current_communities/gaps/looking_for are the
@@ -1952,6 +1988,51 @@ class Library:
             (entity_type, entity_id),
         ).fetchall()
         return {r["field_name"]: {"reviewed_at": r["reviewed_at"], "reviewed_by": r["reviewed_by"]} for r in rows}
+
+    # -- Narrative-field "Mark verified" audit trail (Phase G) — distinct from
+    # field_reviews above; see the narrative_review_log schema comment for why
+    # these two AI-drafted-content tables coexist. -----------------------------
+
+    def record_narrative_review(self, admin_id: Optional[int], entity_type: str,
+                                 field_type: str, item_id: int, detail: str = "") -> None:
+        """Log one explicit "Mark verified" click. Append-only — a field
+        verified once, re-drafted by a later AI refresh, and verified again
+        gets two rows, so get_latest_narrative_review always reflects the
+        most recent human confirmation rather than the first one ever made."""
+        self.conn.execute(
+            """INSERT INTO narrative_review_log
+               (admin_id, entity_type, field_type, item_id, detail, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (admin_id, entity_type, field_type, item_id, detail.strip(), _now()),
+        )
+        self.conn.commit()
+
+    def get_latest_narrative_review(self, entity_type: str, field_type: str,
+                                     item_id: int) -> Optional[dict]:
+        """Most recent "Mark verified" row for one field on one entity, with
+        the verifying admin's username joined in — the "Verified by X on Y"
+        line on the edit page. None if it's never been explicitly verified."""
+        row = self.conn.execute(
+            """SELECT a.*, u.username AS admin_username, u.name AS admin_name
+               FROM narrative_review_log a LEFT JOIN users u ON u.id = a.admin_id
+               WHERE a.entity_type=? AND a.field_type=? AND a.item_id=?
+               ORDER BY a.created_at DESC, a.id DESC LIMIT 1""",
+            (entity_type, field_type, item_id),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_narrative_review_log(self, limit: int = 500) -> list[dict]:
+        """Full log, newest first — mirrors list_tool_audit_log's shape.
+        No dedicated history view yet (Phase G scope), but this is here for
+        the same reason list_tool_audit_log/list_community_audit_log are:
+        so one exists when a history view is eventually wanted."""
+        rows = self.conn.execute(
+            """SELECT a.*, u.username AS admin_username, u.name AS admin_name
+               FROM narrative_review_log a LEFT JOIN users u ON u.id = a.admin_id
+               ORDER BY a.created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def enrichment_cost_total(self, since: Optional[str] = None) -> float:
         """Total enrichment overhead spend, optionally since an ISO date/datetime

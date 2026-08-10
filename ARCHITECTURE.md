@@ -129,7 +129,7 @@ Every table in the file, grouped by feature area:
 | FP&A Buddy (Ask) | `ask_questions`, `ask_feedback` |
 | Chat Matchmaker | `matchmaker_questions` |
 | Accounts | `users`, `password_reset_requests` |
-| CFO Toolbox | `tools`, `tool_categories`, `tool_audit_log`, `benchmarks`, `tool_leads`, `communities`, `community_categories`, `community_audit_log`, `community_profiles`, `community_gap_submissions`, `community_profile_views` |
+| CFO Toolbox | `tools`, `tool_categories`, `tool_audit_log`, `benchmarks`, `tool_leads`, `communities`, `community_categories`, `community_audit_log`, `community_profiles`, `community_gap_submissions`, `community_profile_views`, `field_reviews`, `narrative_review_log` |
 | Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log`, `backup_log` |
 | "Sail, Don't Row" (`/play`) | `game_rank_settings`, `game_runs` |
 
@@ -256,6 +256,7 @@ Cost figures are computed from **real API token usage** at call time
 | `community_gap_submissions` | Gap-collection (Phase 5): the native replacement for the old `/community` page's Google Form, folded into the live directory rather than a separate parked page. Submitted at `POST /tools/communities/gap`, triaged at `/admin/community-gaps` (mirrors `/admin/ask-feedback`'s layout). No login required — anyone can submit. Also doubles (Phase 7) as the log for every completed Recommender quiz at `/tools/communities/find` — same table, distinguished by `submission_type` rather than a second table, since a zero/thin recommender result is the same kind of gap signal as a zero-result directory search. Doubles a third way (best-fit weighting) for the quiz's optional "What matters most to you?" step: a visitor's checked values, logged only when they set at least one (never on a skip), for Brian's own aggregate insight into what finance leaders say matters most — not shown to other visitors. Doubles a fourth way as the per-listing correction report from `POST /tools/communities/correct`, since it's the same kind of free-text triage signal, just about factual accuracy on one specific listing rather than a gap in the directory. | `current_communities`/`gaps`/`looking_for` (free text, the visitor's own words — always `''` on a `submission_type='recommender'` or `'weight_preferences'` row, since neither collects free text; on a `'correction'` row, only `gaps` is populated, holding the correction report itself), `search_context_json` (on a `'gap'` row: directory search/filter state at submission time, built client-side from JS-only filter state and carried through a hidden form field; on a `'recommender'` row: the quiz answers plus `result_count`; on a `'weight_preferences'` row: `{"weights": {dimension_key: [chosen values]}}`; always `''` on a `'correction'` row, since it isn't a directory search), `viewed_community_ids_json` (server-computed at submission from `community_profile_views`, not client-supplied), `closest_community_id` (nullable, no FK — always `NULL` on a recommender/weight_preferences row; always populated on a `'correction'` row, since a correction is always about one specific listing), `email` (nullable), `reviewed`, `submission_type` (added by migration — `'gap'`\|`'recommender'`\|`'weight_preferences'`\|`'correction'`, defaults `'gap'` so every pre-existing row keeps its meaning) |
 | `community_profile_views` | Session-scoped, no-login view tracking for `/tools/communities/{slug}`: which profile pages a visitor opened before (maybe) submitting the gap form above. Keyed by an anonymous `cfo_visitor` cookie (`webapp/app.py`, 30-day TTL, not signed — the first anonymous-session primitive in the codebase; everything else, e.g. `read_later`, requires a logged-in `user_id`). No cleanup job for stale sessions yet — rows are small and carry no PII. | `session_id` + `community_id` (composite PK, dedups repeat views), `viewed_at` |
 | `field_reviews` | Review-status audit trail for every AI-drafted field on Software/Communities profiles — the standing principle that AI drafts a first pass into the edit form and nothing publishes without Brian reviewing and saving it. One generic table rather than a `{field}_reviewed_at`/`_by` column pair per field, since there are 15+ generatable fields across two record types (Software's `description`/`summary`/`differentiation_note`, Communities' full narrative profile) and more likely to come later. Written by `Library.record_field_review`, called from an edit-submit route whenever the submitted form's `ai_drafted_fields` hidden input names a field — that input is populated client-side by `markAiDrafted()` inside each Generate button's success handler (`_MARK_AI_DRAFTED_JS`, shared across every generate-button script), never inferred from content after the fact. Read by `Library.list_field_reviews` for a future "last reviewed" admin display. Cleaned up on delete alongside `tools`/`communities` rows, no SQL-level FK (same pattern as `community_profiles`). | `entity_type` (`'tool'`\|`'community'`), `entity_id`, `field_name` (composite PK), `reviewed_at`, `reviewed_by` (stored even though there's only one admin today, so the schema doesn't need revisiting if that changes) |
+| `narrative_review_log` | Phase G: explicit "Mark verified" audit trail, deliberately separate from `field_reviews` above — that table is a passive by-product of saving the edit form after a Generate click (the save itself counts as "reviewed"), never surfaced in the UI. This table backs a stricter, opt-in gate: `tools.agent_taxonomy_needs_verification` (the only narrative field with a public-facing "unverified" badge — shown on the tool profile page, the compare-tools table, and the directory admin table) stays true until an admin explicitly clicks "Mark verified" on `/tools/software/{slug}/edit`, distinct from just saving the form. One shared table with `field_type`/`entity_type` discriminators rather than a `{field}_review_log` table per field, mirroring `tool_audit_log`/`community_audit_log`/`backup_log`'s `id`/`admin_id`(nullable FK to `users`)/`detail`/`created_at` shape. Append-only — re-verifying after a fresh AI draft writes a new row rather than updating one in place, so `Library.get_latest_narrative_review` (the "Verified by X on Y" line next to the button) always reflects the most recent confirmation, not the first one ever made. As of Phase G, only `field_type='agent_taxonomy'` writes here; extending the same boolean-flag-plus-log pattern to Description/Differentiation/the Community profile draft was investigated as a Phase G follow-up (folding it into `field_reviews` instead is on the table too — see CLAUDE.md's Phase G note) but not built in this pass. | `admin_id` (nullable, same break-glass-login caveat as `tool_audit_log`), `entity_type` (`'tool'`\|`'community'`), `field_type` (`'agent_taxonomy'` today), `item_id` (a `tools.id`/`communities.id`, no SQL-level FK, same as `tool_audit_log`), `detail` (the reviewed text snapshot at verification time), `created_at` |
 
 **Domain-derived slugs (Phase 2).** `tools.slug` and `communities.slug` were
 originally generated from the entry's *name* (`linklib.db._slugify`,
@@ -1063,6 +1064,7 @@ erDiagram
     users ||--o{ contact_audit_log : "admin_id (nullable)"
     users ||--o{ tool_audit_log : "admin_id (nullable)"
     users ||--o{ community_audit_log : "admin_id (nullable)"
+    users ||--o{ narrative_review_log : "admin_id (nullable)"
     articles ||--|| articles_fts : "rowid, via triggers"
     articles ||--o| articles_vec : "rowid, written from Python (#93)"
     articles ||--o| article_embeddings : "article_id"
@@ -1074,6 +1076,7 @@ erDiagram
     tools }o--o{ tools : "tool_competitors, normalized pair"
     tools ||--o{ tool_features : "tool_id"
     tools ||--o{ tool_audit_log : "item_id (nullable — row deleted by the time this is read)"
+    tools ||--o{ narrative_review_log : "item_id, entity_type='tool'"
     tool_categories }o--o{ tools : "by name in categories_json"
     community_categories }o--o{ communities : "by name in categories_json"
     communities ||--o| community_profiles : "community_id"
@@ -1770,6 +1773,31 @@ recorded anywhere, it's flagged rather than invented.
   `/admin/library/backup` uses to show the live folder link — it never
   creates a folder as a side effect of a page view, only `backup_now()`
   does, mid-upload.
+- **Phase G: the Agent taxonomy "unverified" banner's call-to-action was
+  unconditional, the button it referred to wasn't.** The green banner shown
+  after `/admin/tools/{id}/research/refresh` used to always say "review the
+  drafted feature rows and agent taxonomy below before marking them
+  verified," regardless of whether anything actually ended up flagged
+  `needs_verification` — `agent_taxonomy_needs_verification` is set per-run
+  from the LLM's own self-reported confidence
+  (`agent_taxonomy.get("confident")` in `linklib/enrich.py`), so a confident
+  run left the flag (and the "Mark verified" button, and every public
+  "unverified" badge) at 0 while the banner still promised a step with
+  nothing on the page to do it. Fixed by making the clause conditional on
+  the same flags `_features_badge_html`'s "N needs verification" text
+  already checks (`tools.agent_taxonomy_needs_verification` OR any feature
+  row's `needs_verification`), rather than only on whether the refresh
+  itself succeeded. Also added `narrative_review_log` (see §2) so the "Mark
+  verified" click leaves an auditable "Verified by X on Y" trail, the same
+  way `tool_audit_log`/`community_audit_log`/`backup_log` already do for
+  their respective actions — investigated but explicitly not built in this
+  pass: extending that same flag-plus-log pattern to Description,
+  Differentiation, and the Community profile draft, since those three
+  already have a *different*, pre-existing review mechanism
+  (`field_reviews`, added Aug 1 2026) that a straight copy of the
+  Agent-taxonomy pattern would duplicate rather than extend — see CLAUDE.md's
+  Phase G note for the reconciliation question this raises before that
+  follow-up gets built.
 
 ## 5. Directory map
 

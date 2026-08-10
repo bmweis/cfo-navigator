@@ -264,3 +264,171 @@ def test_edit_page_hides_badge_once_verified(env):
     r = client.get(f"/tools/software/{tool_slug}/edit")
     assert "Agent taxonomy" in r.text
     assert 'agent-taxonomy/verify' not in r.text   # no verify action rendered once confirmed
+
+
+# -- Phase G: banner-conditional bug fix -------------------------------------
+# The banner used to say "before marking them verified" on every successful
+# refresh regardless of whether anything actually ended up flagged
+# needs_verification — so a confident LLM run left admins staring at a
+# promise with no button anywhere on the page to fulfill it. The clause must
+# now track the real flag(s), the same way _features_badge_html's own
+# "N needs verification" clause already does.
+
+def test_research_refresh_banner_drops_verify_clause_when_confident(env, monkeypatch):
+    # Both the taxonomy note and the one feature row come back confident —
+    # nothing on the page ends up needing verification.
+    _mock_generate_tool_features(monkeypatch, taxonomy_confident=True, features=[
+        enrich.ToolFeatureDraft(feature_name="Scenario modeling",
+                                 standalone_available=True, needs_verification=False),
+    ])
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    client.post(f"/admin/tools/{tool_id}/research/refresh", follow_redirects=False)
+
+    r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
+    assert "AI research refreshed" in r.text
+    assert "before marking them verified" not in r.text
+    # And, matching that: no verify button/badge should be on the page either
+    # (the static helper copy below the Features list always says "flagged
+    # 'Needs verification'..." regardless of state, so check for the actual
+    # badge/button instead of that static string).
+    assert "Mark verified" not in r.text
+    assert 'background:#fef3c7' not in r.text   # the needs-verification badge's styling
+
+
+def test_research_refresh_banner_keeps_verify_clause_when_unconfident(env, monkeypatch):
+    _mock_generate_tool_features(monkeypatch, taxonomy_confident=False, features=[
+        enrich.ToolFeatureDraft(feature_name="Scenario modeling",
+                                 standalone_available=True, needs_verification=True),
+    ])
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    client.post(f"/admin/tools/{tool_id}/research/refresh", follow_redirects=False)
+
+    r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
+    assert "before marking them verified" in r.text
+    assert "Mark verified" in r.text
+
+
+def test_research_refresh_banner_keeps_clause_when_only_feature_row_unconfident(env, monkeypatch):
+    # Taxonomy itself is confident, but a feature row isn't — the sentence
+    # covers both, so the clause must stay.
+    _mock_generate_tool_features(monkeypatch, taxonomy_confident=True, features=[
+        enrich.ToolFeatureDraft(feature_name="Scenario modeling",
+                                 standalone_available=True, needs_verification=True),
+    ])
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    client.post(f"/admin/tools/{tool_id}/research/refresh", follow_redirects=False)
+
+    r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
+    assert "before marking them verified" in r.text
+
+
+# -- Phase G: narrative_review_log audit trail --------------------------------
+
+def test_agent_taxonomy_verify_writes_narrative_review_log(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Drafted note.", needs_verification=1)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    review = lib.get_latest_narrative_review("tool", "agent_taxonomy", tool_id)
+    assert review is not None
+    assert review["entity_type"] == "tool"
+    assert review["field_type"] == "agent_taxonomy"
+    assert review["item_id"] == tool_id
+    assert review["detail"] == "Drafted note."
+    log = lib.list_narrative_review_log()
+    assert len(log) == 1
+    lib.close()
+
+
+def test_agent_taxonomy_verify_logs_reviewer_username(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.create_user("brian", "pw", role="admin", name="Brian")
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Drafted note.", needs_verification=1)
+    lib.close()
+
+    client = _client(env)
+    client.post("/login", data={"username": "brian", "password": "pw"}, follow_redirects=False)
+    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    review = lib.get_latest_narrative_review("tool", "agent_taxonomy", tool_id)
+    assert review["admin_username"] == "brian"
+    lib.close()
+
+
+def test_agent_taxonomy_verify_reverify_appends_not_overwrites(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(tool_id, "First draft.", needs_verification=1)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Refreshed draft.", needs_verification=1)
+    lib.close()
+
+    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    log = lib.list_narrative_review_log()
+    assert len(log) == 2
+    latest = lib.get_latest_narrative_review("tool", "agent_taxonomy", tool_id)
+    assert latest["detail"] == "Refreshed draft."
+    lib.close()
+
+
+def test_edit_page_shows_verified_by_line_after_verify(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.create_user("brian", "pw", role="admin", name="Brian")
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Drafted note.", needs_verification=1)
+    lib.close()
+
+    client = _client(env)
+    client.post("/login", data={"username": "brian", "password": "pw"}, follow_redirects=False)
+    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+
+    r = client.get(f"/tools/software/{tool_slug}/edit")
+    assert "Verified by brian on" in r.text
+
+
+def test_edit_page_no_verified_by_line_when_never_verified(env):
+    lib = Library(os.environ["LINKLIB_DB"])
+    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    tool_slug = lib.get_tool(tool_id)["slug"]
+    lib.set_tool_agent_taxonomy_draft(tool_id, "Drafted note.", needs_verification=1)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/{tool_slug}/edit")
+    assert "Verified by" not in r.text
