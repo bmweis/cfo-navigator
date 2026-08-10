@@ -11979,6 +11979,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             if t["id"] != tool_id and t["id"] not in {c["id"] for c in competitors}
         ] if tool else []
         features = lib.list_tool_features(tool_id) if tool else []
+        latest_taxonomy_review = (
+            lib.get_latest_narrative_review("tool", "agent_taxonomy", tool_id) if tool else None
+        )
     finally:
         lib.close()
     if not tool:
@@ -12079,9 +12082,21 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
     _research_banner_html = ""
     if research_refreshed == "1":
-        _research_banner_html = ('<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
-                                 'padding:10px 16px;font-size:14px;margin:0 0 16px;">AI research refreshed—review the '
-                                 'drafted feature rows and agent taxonomy below before marking them verified.</p>')
+        # The "before marking them verified" clause only makes sense when
+        # there's actually something to mark: a feature row still flagged
+        # needs_verification, or the taxonomy note itself. When the LLM
+        # reported high confidence on every part of this run, needs_verify
+        # is false for all of it and no "Mark verified" control renders
+        # anywhere on the page — so the banner shouldn't promise one either
+        # (this is the Phase G banner-bug fix; see _features_badge_html just
+        # above for the same true/false conditional-clause pattern reused here).
+        _research_needs_review = bool(tool.get("agent_taxonomy_needs_verification")) or _n_features_needs_verify > 0
+        _research_banner_html = (
+            '<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
+            'padding:10px 16px;font-size:14px;margin:0 0 16px;">AI research refreshed—review the '
+            'drafted feature rows and agent taxonomy below'
+            + (' before marking them verified.</p>' if _research_needs_review else '.</p>')
+        )
     elif research_refreshed == "0":
         _research_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                                  'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t complete the research pass—'
@@ -12117,6 +12132,21 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         )
     else:
         _taxonomy_verify_form_html = ""
+
+    # "Verified by X on Y" — the narrative_review_log entry, if any, for the
+    # current taxonomy note. Shown regardless of whether the note currently
+    # needs verification again (a fresh AI refresh can re-flag it), so the
+    # admin can see it was checked before rather than only ever seeing
+    # "Needs verification" with no history. No dedicated history view yet —
+    # just the single most recent confirmation (Phase G scope).
+    _taxonomy_review_line_html = ""
+    if latest_taxonomy_review:
+        _reviewer = latest_taxonomy_review.get("admin_username") or "admin"
+        _reviewed_date = (latest_taxonomy_review.get("created_at") or "")[:10]
+        _taxonomy_review_line_html = (
+            f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
+            f'Verified by {_esc(_reviewer)} on {_esc(_reviewed_date)}</p>'
+        )
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -12220,6 +12250,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
     {_taxonomy_verify_action}
+    {_taxonomy_review_line_html}
   </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
@@ -12560,7 +12591,10 @@ def admin_tools_research_refresh(request: Request, tool_id: int):
 def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
     """One-click "Mark verified" for the agent-taxonomy note, mirroring the
     equivalent tool_features action — clears the needs_verification flag
-    without touching the text itself."""
+    without touching the text itself. Also logs the click to
+    narrative_review_log (Phase G) so the edit page can show who verified it
+    and when — a snapshot of the note text as of this click, not a live
+    pointer, so the log stays meaningful even if the note is edited later."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
@@ -12569,6 +12603,10 @@ def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         lib.mark_tool_agent_taxonomy_verified(tool_id)
+        lib.record_narrative_review(
+            _current_user_id(lib, request), "tool", "agent_taxonomy", tool_id,
+            detail=tool.get("agent_taxonomy_note") or "",
+        )
     finally:
         lib.close()
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)

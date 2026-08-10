@@ -245,6 +245,62 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `GOOGLE_DRIVE_FOLDER_ID` still overrides this if set — normally left unset now.
   `/admin/library/backup` shows a live link to whichever folder is currently in use. The
   old hand-made "Library Backup" folder is abandoned, not deleted or referenced anywhere.
+- **Phase G — the Agent taxonomy "unverified" banner promised a step that
+  sometimes had no button behind it; fixed, plus a real "Mark verified" audit
+  trail.** An investigation (2026-08) confirmed the green banner on a
+  Software tool's edit page after "Generate summary"/Refresh AI research —
+  "review the drafted feature rows and agent taxonomy below before marking
+  them verified" — fired unconditionally on a successful refresh
+  (`research_refreshed=1`), while the actual "Mark verified" button (and
+  every public "unverified" badge — profile page, compare-tools table,
+  directory admin table) is gated on `tools.agent_taxonomy_needs_verification`,
+  which is set per-run from the LLM's own self-reported confidence
+  (`agent_taxonomy.get("confident")` in `linklib/enrich.py`'s
+  `generate_tool_features`). A confident run zeroes the flag, so the button
+  and every badge disappear — but the banner kept telling the admin to go
+  mark something verified regardless. Not a missing feature or copy drift:
+  the mechanism (`agent_taxonomy_needs_verification`,
+  `mark_tool_agent_taxonomy_verified`, `POST /admin/tools/{id}/agent-taxonomy/verify`)
+  is real and was already wired to a real button — the banner's condition and
+  the button's condition were just two different flags the copy assumed were
+  the same. Fixed by making the "before marking them verified" clause
+  conditional on the same flags `_features_badge_html`'s "N needs
+  verification" text already checks (`agent_taxonomy_needs_verification` OR
+  any feature row's `needs_verification`) — same conditional-clause pattern,
+  not a new one. Also added `narrative_review_log` (a shared table with
+  `field_type`/`entity_type` discriminators, mirroring
+  `tool_audit_log`/`community_audit_log`/`backup_log`'s shape) so clicking
+  "Mark verified" leaves an actual "who verified it and when" trail, shown as
+  a "Verified by X on Y" line on the edit page — the flag existed before, but
+  nothing recorded who cleared it. **Mid-build discovery that reshapes the
+  planned follow-up:** extending this same needs-verification-boolean +
+  "Mark verified" pattern to Description, Differentiation, and the Community
+  profile draft (the other three AI-drafted narrative fields, per the
+  investigation's Part 4 inventory) turns out to collide with a *different*,
+  already-shipped mechanism — `field_reviews` (added 2026-08-01, "AI-first-pass-then-review:
+  Bottom Line generate, review tracking, Communities field-coverage
+  extension"), a generic `entity_type`/`entity_id`/`field_name`/`reviewed_at`/
+  `reviewed_by` table already written on every save-after-Generate for
+  exactly those three fields (`markAiDrafted()`/`_MARK_AI_DRAFTED_JS` +
+  `_record_ai_drafted_reviews`). It predates this investigation and wasn't
+  surfaced by it, because it isn't wired to Agent taxonomy or to the banner
+  bug at all — it only turned up while tracing the actual save-submit paths
+  during the build. It's real but inert: written faithfully, `list_field_reviews`
+  exists, but nothing in `webapp/app.py` ever calls it, so none of it is
+  displayed anywhere today — same "logged but never surfaced" shape as
+  `tool_audit_log`/`community_audit_log` before this phase. It also
+  conflates "saved after clicking Generate" with "a human actually
+  scrutinized it," which is a looser bar than Agent taxonomy's explicit,
+  separate "Mark verified" click — and for the Community profile draft
+  specifically, it's already per-field (23 rows), not the single whole-draft
+  flag the Phase G build brief calls for. Building `description_needs_verification`
+  and friends as literally specified would leave two overlapping, semantically
+  different tracking mechanisms live for the same three fields going forward.
+  Flagged to Brian before writing that code rather than either silently
+  duplicating `field_reviews` or silently redesigning around it — the
+  Description/Differentiation/Community-profile-draft rollout is paused
+  pending that call; Agent taxonomy's fix above is unaffected and shipped on
+  its own.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
