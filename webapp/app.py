@@ -9398,8 +9398,7 @@ def admin_software(request: Request):
         cats = ", ".join(t["categories"]) or "—"
         return f"""<tr>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(t['created_at'][:10])}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(t['name'])}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(t['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(t['url'][:60])}{'…' if len(t['url']) > 60 else ''}</a></td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;"><a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a></td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px;">{_esc(t['description'])}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t['submitted_by'] or '—')}</td>
@@ -9458,7 +9457,7 @@ def admin_software(request: Request):
         </tr>"""
 
     pending_rows = "".join(_tool_row(t) for t in pending) or \
-        '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
+        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
     approved_rows = "".join(_approved_row(t) for t in approved) or \
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No approved software yet.</td></tr>'
     total_leads = sum(lead_counts.values())
@@ -9496,7 +9495,6 @@ def admin_software(request: Request):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Description</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Submitted by</th>
@@ -10628,8 +10626,7 @@ def admin_communities(request: Request, filter: str = ""):
         cats = ", ".join(c["categories"]) or "—"
         return f"""<tr>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">{_esc(c['created_at'][:10])}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;">{_esc(c['name'])}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(c['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(c['url'][:60])}{'…' if len(c['url']) > 60 else ''}</a></td>
+          <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;"><a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a></td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px;">{_esc(c['notes'] or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(c['submitted_by'] or '—')}</td>
@@ -10695,7 +10692,7 @@ def admin_communities(request: Request, filter: str = ""):
 </tr>"""
 
     pending_rows = "".join(_pending_row(c) for c in pending) or \
-        '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
+        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No pending submissions.</td></tr>'
     approved_rows = "".join(_approved_row(c) for c in approved) or \
         '<tr><td colspan="11" style="padding:20px;color:var(--muted);">No communities yet.</td></tr>' if filter != "needs_review" else \
         '<tr><td colspan="11" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
@@ -10764,7 +10761,6 @@ def admin_communities(request: Request, filter: str = ""):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Description</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Submitted by</th>
