@@ -1521,11 +1521,26 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
 - If **no password is configured at all**, private routes are open — a
   local-development convenience, never the hosted configuration.
 - Two middlewares wrap everything: a canonical-host 301 (www + legacy Railway
-  hostname → apex, guarded so dev instances and `/health` never redirect —
-  for proxied www traffic Cloudflare's edge Redirect Rule fires first, so this
-  middleware is the backstop for the legacy hostname and direct-origin hits)
-  and `Cache-Control: no-store` on `/admin/*` (so task badges are never
-  served stale from the back-forward cache).
+  hostname → apex, guarded so dev instances, `/health`, and `/admin/backup-now`
+  never redirect — for proxied www traffic Cloudflare's edge Redirect Rule
+  fires first, so this middleware is the backstop for the legacy hostname and
+  direct-origin hits) and `Cache-Control: no-store` on `/admin/*` (so task
+  badges are never served stale from the back-forward cache).
+- **`/admin/backup-now` is a deliberate, narrowly-scoped exception to the
+  canonical-host redirect (Phase O).** The weekly backup GitHub Action calls
+  this one route directly on the legacy Railway hostname on purpose, to
+  route around Cloudflare's Bot Fight Mode (see the "publicly reachable
+  Railway origin" note above) — without this exception, the 301 the
+  canonical-host middleware would otherwise issue silently defeats that,
+  since the Action's `curl -f` treats a 3xx as success and never follows
+  it. This is exactly what happened on the first live run after the Action
+  was pointed at the Railway origin: `curl` reported success, but
+  `backup_log` stayed empty, because the redirect meant `backup_now_route`
+  never executed at all — caught only by checking `/admin/library/backup`'s
+  banner directly rather than trusting the Action's exit code. The
+  exemption is scoped to this exact path, not a general carve-out for
+  token-authenticated routes — widening it needs the same deliberateness as
+  adding it did.
 
 ## 4. Design decisions and their reasons
 

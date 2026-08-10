@@ -1,8 +1,12 @@
 """Canonical-host redirect: legacy hostnames 301 to bmweis.com.
 
 The middleware must redirect ONLY the two known legacy hosts, ONLY when
-PUBLIC_BASE is a real https base, and never for /health — so local dev and
-Railway's healthcheck are untouched.
+PUBLIC_BASE is a real https base, and never for /health or /admin/backup-now
+(Phase O — the weekly backup GitHub Action calls the latter directly on the
+legacy Railway hostname on purpose, to route around Cloudflare's Bot Fight
+Mode; a redirect there would silently no-op the backup, since the Action's
+`curl -f` treats a 3xx as success and never follows it — exactly what
+happened on the first live run before this exemption existed).
 """
 import pathlib
 import sys
@@ -57,6 +61,34 @@ def test_health_never_redirects(appmod):
     r = _client(appmod).get("/health", headers={"host": "www.bmweis.com"},
                             follow_redirects=False)
     assert r.status_code == 200
+
+
+def test_backup_now_never_redirects_even_on_legacy_railway_host(appmod):
+    """Phase O regression pin: the weekly backup Action calls this route
+    directly on cfo-navigator-production.up.railway.app on purpose (to
+    bypass Cloudflare's Bot Fight Mode against bmweis.com). A 301 here
+    would silently defeat that — curl -f treats a 3xx as success and never
+    follows it, so the Action would report green while the backup logic
+    never ran at all (exactly what happened before this exemption)."""
+    r = _client(appmod).post("/admin/backup-now",
+                              headers={"host": "cfo-navigator-production.up.railway.app"},
+                              follow_redirects=False)
+    # The route itself must have executed — whatever status it returns
+    # (401 unauthorized, 503 not configured, ...) — rather than the
+    # middleware short-circuiting with a 301 that never reaches it.
+    assert r.status_code != 301
+    assert "location" not in r.headers
+
+
+def test_other_admin_routes_on_legacy_host_still_redirect(appmod):
+    """The exemption is scoped to exactly /admin/backup-now, not admin
+    routes generally — pins that this stays narrow rather than quietly
+    widening."""
+    r = _client(appmod).get("/admin/library/backup",
+                             headers={"host": "cfo-navigator-production.up.railway.app"},
+                             follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "https://bmweis.com/admin/library/backup"
 
 
 def test_no_redirect_when_base_is_localhost(monkeypatch):
