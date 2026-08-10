@@ -15449,6 +15449,87 @@ def _mermaid_er_diagram(schema: dict) -> str:
     return "\n".join(lines)
 
 
+# Click-to-expand lightbox for a rendered Mermaid diagram (Phase I, Part 1 —
+# option B from the investigation: Mermaid itself has no built-in pan/zoom in
+# the pinned 10.9.1 (confirmed against its release notes), and its only
+# interactivity hook (the `click` directive) is per-node and doesn't apply to
+# erDiagram anyway, so this doesn't lean on Mermaid for it. Deliberately not
+# true pan/zoom — no new dependency (a candidate like svg-pan-zoom stays
+# parked unless this turns out insufficient in practice). Same overlay
+# show/hide-by-class pattern as `_SHOT_CROP_CSS`/the app-screenshot crop
+# modal: `display:none` by default, `.open` flips it to `display:flex`,
+# toggled by adding/removing that class rather than a second stylesheet
+# concept. The stage clones the already-rendered <svg> at click time (mermaid
+# has finished rendering by the time a user can click it) rather than
+# re-rendering the diagram, so there's no dependency on mermaid's API here
+# either — it works against plain SVG.
+_DIAGRAM_LIGHTBOX_CSS = """
+.diagram-frame{position:relative;margin-bottom:20px;}
+.diagram-expand-btn{position:absolute;top:12px;right:12px;z-index:5;background:#fff;
+  border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;
+  color:var(--navy);cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+.diagram-expand-btn:hover{background:var(--bg);}
+.diagram-lightbox-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;
+  align-items:center;justify-content:center;padding:24px;}
+.diagram-lightbox-overlay.open{display:flex;}
+.diagram-lightbox-modal{background:#fff;border-radius:16px;padding:16px 20px 20px;width:100%;
+  max-width:95vw;max-height:90vh;display:flex;flex-direction:column;}
+.diagram-lightbox-head{display:flex;justify-content:flex-end;}
+.diagram-lightbox-close{background:none;border:none;font-size:24px;line-height:1;color:var(--muted);
+  cursor:pointer;padding:4px 8px;}
+.diagram-lightbox-close:hover{color:var(--navy);}
+.diagram-lightbox-stage{overflow:auto;flex:1;}
+.diagram-lightbox-stage svg{width:100%;height:auto;min-width:800px;}
+"""
+
+_DIAGRAM_LIGHTBOX_JS = """
+function openDiagramLightbox(frameId, overlayId) {
+  var svg = document.getElementById(frameId).querySelector('svg');
+  if (!svg) return;
+  var overlay = document.getElementById(overlayId);
+  var stage = overlay.querySelector('.diagram-lightbox-stage');
+  stage.innerHTML = '';
+  stage.appendChild(svg.cloneNode(true));
+  overlay.classList.add('open');
+  document.addEventListener('keydown', _diagramLightboxEscHandler);
+}
+function closeDiagramLightbox(overlayId) {
+  document.getElementById(overlayId).classList.remove('open');
+  document.removeEventListener('keydown', _diagramLightboxEscHandler);
+}
+function _diagramLightboxEscHandler(e) {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.diagram-lightbox-overlay.open').forEach(function (o) { o.classList.remove('open'); });
+  }
+}
+"""
+
+
+def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Diagram") -> str:
+    """Wraps a `<pre class="mermaid">` block in an expand button + its
+    matching lightbox overlay. `frame_id` must be unique per page (a page
+    with more than one diagram needs a distinct id per diagram)."""
+    overlay_id = f"{frame_id}-lightbox"
+    return f"""<div class="diagram-frame" id="{frame_id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;overflow-x:auto;">
+<button type="button" class="diagram-expand-btn" onclick="openDiagramLightbox('{frame_id}','{overlay_id}')" aria-label="Expand {_esc(label)}">&#10530; Expand</button>
+<pre class="mermaid" style="margin:0;">
+{diagram_markup}
+</pre>
+</div>
+
+<div class="diagram-lightbox-overlay" id="{overlay_id}" onclick="if(event.target===this) closeDiagramLightbox('{overlay_id}')">
+<div class="diagram-lightbox-modal">
+<div class="diagram-lightbox-head">
+<button type="button" class="diagram-lightbox-close" onclick="closeDiagramLightbox('{overlay_id}')" aria-label="Close">&times;</button>
+</div>
+<div class="diagram-lightbox-stage"></div>
+</div>
+</div>
+
+<style>{_DIAGRAM_LIGHTBOX_CSS}</style>
+<script>{_DIAGRAM_LIGHTBOX_JS}</script>"""
+
+
 @app.get("/admin/system/database", response_class=HTMLResponse)
 def admin_system_database(request: Request):
     if not _is_authed(request):
@@ -15521,11 +15602,7 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
 
 {stat_table}
 
-<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;overflow-x:auto;">
-<pre class="mermaid" style="margin:0;">
-{diagram}
-</pre>
-</div>
+{_diagram_lightbox_html("db-diagram-frame", diagram, "the schema diagram")}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
 <script>
@@ -15692,6 +15769,24 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
     return HTMLResponse(_page("Page Index—Admin", "Admin", body, authed=True))
 
 
+# Static Mermaid source for the page below — pulled out to a module constant
+# (rather than left inline in the f-string) so `_diagram_lightbox_html` can
+# take it as a plain argument the same way `admin_system_database` passes its
+# live-generated `diagram` string.
+_FPA_FLOW_DIAGRAM = """flowchart LR
+    Q[Your question] --> L[Library<br/>curated archive]
+    Q --> F[Feed<br/>recent RSS]
+    Q --> W[Web<br/>Exa search, trusted sites only]
+    L --> C[Claude<br/>synthesizes an answer]
+    F --> C
+    W --> C
+    C --> A[Answer<br/>numbered citations]
+    T[Quick / Standard / Deep<br/>sets how much of each tier runs] -.-> C
+
+    classDef annotation fill:#F5F4EF,stroke:#6F6A60,stroke-dasharray: 3 3,color:#6F6A60;
+    class T annotation;"""
+
+
 @app.get("/admin/system/how-fpa-buddy-works", response_class=HTMLResponse)
 def admin_how_fpa_buddy_works(request: Request):
     """A plain-language technical explainer for FP&A Buddy's mechanism (Exa
@@ -15742,22 +15837,7 @@ def admin_how_fpa_buddy_works(request: Request):
 <p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">The real mechanism behind <a href="/library/ask" style="color:var(--accent);">/library/ask</a>, for anyone who wants more than the marketing description&mdash;a PM, an engineer, or a technically comfortable CFO. Retrieval-tier counts and the default cost cap below are read live from the code, so this page can't quietly drift out of date the way a hand-typed number would.</p>
 </div>
 
-<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;overflow-x:auto;margin-bottom:20px;">
-<pre class="mermaid" style="margin:0;">
-flowchart LR
-    Q[Your question] --> L[Library<br/>curated archive]
-    Q --> F[Feed<br/>recent RSS]
-    Q --> W[Web<br/>Exa search, trusted sites only]
-    L --> C[Claude<br/>synthesizes an answer]
-    F --> C
-    W --> C
-    C --> A[Answer<br/>numbered citations]
-    T[Quick / Standard / Deep<br/>sets how much of each tier runs] -.-> C
-
-    classDef annotation fill:#F5F4EF,stroke:#6F6A60,stroke-dasharray: 3 3,color:#6F6A60;
-    class T annotation;
-</pre>
-</div>
+{_diagram_lightbox_html("fpa-flow-diagram-frame", _FPA_FLOW_DIAGRAM, "the retrieval flow diagram")}
 <div class="tool-prose">
 <p style="color:var(--muted);margin:-14px 0 24px;font-size:12.5px;line-height:1.5;">A concept-level view&mdash;see the &ldquo;FP&amp;A Buddy&rdquo; section of <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for the full request/response sequence (API calls, token usage, cost guards, follow-up handling).</p>
 </div>
