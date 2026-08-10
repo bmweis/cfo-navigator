@@ -211,7 +211,18 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Railway origin (`*.up.railway.app`), not `bmweis.com`: the first live verification run
   against the Cloudflare-fronted hostname got a `403` from Bot Fight Mode before ever
   reaching the app — confirmed as Cloudflare, not the app, since a bad token gets `401`,
-  never `403`. See ARCHITECTURE.md's "publicly reachable Railway origin" note. Two more gaps closed
+  never `403`. See ARCHITECTURE.md's "publicly reachable Railway origin" note. **That fix
+  was incomplete on its own** — the app's own canonical-host middleware (`_LEGACY_HOSTS`)
+  already 301-redirects that exact Railway hostname back to `bmweis.com` for every path
+  except `/health`, so the very next live run "succeeded" (`curl -f` doesn't fail on a
+  3xx, and the Action didn't pass `-L`) while silently never reaching `backup_now_route`
+  at all — `backup_log` stayed empty despite a green Action run. Fixed with a narrowly-
+  scoped exemption: `/admin/backup-now` is now excluded from the legacy-host redirect
+  alongside `/health`, and only that one path — deliberately not a blanket exemption for
+  every token-authenticated route (see `webapp/app.py`'s `_canonical_host_redirect`
+  docstring). **Lesson carried forward: a green CI/Action run is not verification** — the
+  only way this was caught was checking `/admin/library/backup`'s banner and history table
+  directly against what actually landed, not trusting an exit code. Two more gaps closed
   in the same phase: (1) every backup attempt, success or failure, now writes a row to the
   new `backup_log` table (`Library.record_backup_attempt`/`list_backup_log`) from inside
   `backup.py` itself, rather than only `print()`ing to stdout where nothing in the app

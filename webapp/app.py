@@ -256,17 +256,26 @@ _LEGACY_HOSTS = {"www.bmweis.com", "cfo-navigator-production.up.railway.app"}
 async def _canonical_host_redirect(request: Request, call_next):
     """301 legacy hostnames to the canonical domain, preserving path + query.
 
-    Guarded three ways so it can never misfire: only the two known legacy
+    Guarded four ways so it can never misfire: only the two known legacy
     hosts redirect (localhost/dev and the canonical host pass through
     untouched), only when PUBLIC_BASE is a real https base (so a dev
-    instance with the default localhost base never redirects anywhere), and
-    never for /health (Railway's healthcheck must always see a 200).
+    instance with the default localhost base never redirects anywhere),
+    never for /health (Railway's healthcheck must always see a 200), and
+    never for /admin/backup-now (Phase O — the weekly GitHub Action calls
+    this route directly on cfo-navigator-production.up.railway.app,
+    deliberately bypassing Cloudflare's Bot Fight Mode; a 301 here would
+    silently no-op the backup, since the Action's `curl -f` treats a 3xx as
+    success and never follows it — which is exactly what happened on the
+    first live run after PR #292, discovered only because backup_log stayed
+    empty despite the Action reporting green). Scoped to this one path on
+    purpose, not a blanket exemption for every token-authenticated route —
+    see CLAUDE.md's Phase O bullet before widening this list.
     """
     host = (request.headers.get("host") or "").split(":")[0].lower()
     if (host in _LEGACY_HOSTS
             and PUBLIC_BASE.startswith("https://")
             and host != PUBLIC_BASE.removeprefix("https://").split("/")[0]
-            and request.url.path != "/health"):
+            and request.url.path not in ("/health", "/admin/backup-now")):
         target = PUBLIC_BASE.rstrip("/") + request.url.path
         if request.url.query:
             target += "?" + request.url.query
