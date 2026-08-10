@@ -36,7 +36,7 @@ flowchart LR
     R -->|"RSS/Atom + article<br/>full-text fetches"| F["Publisher sites"]
     R -->|"outbound email"| G["Gmail REST API"]
     R -->|"weekly DB snapshot"| D["Google Drive"]
-    GH["GitHub Actions<br/>backup.yml, weekly cron"] -->|"POST /admin/backup-now<br/>(X-Save-Token)"| R
+    GH["GitHub Actions<br/>backup.yml, weekly cron"] -->|"POST /admin/backup-now<br/>(X-Save-Token, direct to<br/>Railway origin — bypasses CF)"| R
 ```
 
 Notes on the edges:
@@ -63,6 +63,17 @@ Notes on the edges:
   `CF-Connecting-IP` (set by Cloudflare on proxied requests) is a trustworthy
   client IP — `X-Forwarded-For` can be spoofed by anyone hitting the origin
   directly (see Known limitations).
+  **This is also why `.github/workflows/backup.yml` (Phase O) deliberately
+  targets `cfo-navigator-production.up.railway.app`, not `bmweis.com`:** the
+  first live run against `bmweis.com` got a `403` from Cloudflare's Bot
+  Fight Mode before the request ever reached the app (confirmed via the
+  app's own auth path, which returns `401` for a bad token, never `403` —
+  so this wasn't the app rejecting the token). Cloudflare was never meant to
+  gate this one authenticated backend-to-backend call — `X-Save-Token`
+  remains the actual auth boundary either way — so the Action routes around
+  the CDN on purpose rather than trying to carve out a Bot Fight Mode
+  exception for GitHub's rotating runner IP ranges. This is the first
+  deliberate consumer of the "accepted risk" above, not an accident.
 - **The volume path** is Railway configuration, not code: the app reads
   `LINKLIB_DB` (default `./library.db`); production points it at the mounted
   volume. The DB is deliberately not in git — it's personal reading history.
@@ -1718,7 +1729,11 @@ recorded anywhere, it's flagged rather than invented.
   to write a log row. `/admin/backup-now` now returns a real non-2xx status
   on failure (`503` not configured, `502` upload failed) instead of always
   `200`, specifically so `curl -f` in the Action (and any future monitoring)
-  can tell success from failure without parsing HTML.
+  can tell success from failure without parsing HTML. **Targets the Railway
+  origin, not `bmweis.com`** — see the "publicly reachable Railway origin"
+  bullet above for why; the first live verification run against the
+  Cloudflare-fronted hostname got a `403` from Bot Fight Mode before ever
+  reaching the app.
 
 ## 5. Directory map
 

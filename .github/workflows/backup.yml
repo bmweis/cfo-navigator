@@ -17,6 +17,15 @@ name: Weekly off-site backup
 # into a failed Action run, visible in this repo's Actions tab, independent
 # of whatever the in-app backup_log table says (if the site is unreachable,
 # there's no in-app record at all, so this is a genuinely separate signal).
+#
+# Targets the Railway origin (*.up.railway.app), not bmweis.com, deliberately
+# — see ARCHITECTURE.md's "publicly reachable Railway origin" note. The
+# first live run against bmweis.com got a 403 from Cloudflare's Bot Fight
+# Mode before the request ever reached the app (confirmed via the app's own
+# auth path, which returns 401 for a bad token, never 403). Cloudflare was
+# never meant to gate this call — X-Save-Token is the real auth boundary
+# either way — so this routes around the CDN instead of trying to carve out
+# a Bot Fight Mode exception for a rotating set of GitHub-runner IPs.
 on:
   schedule:
     - cron: "0 9 * * 1"   # Monday 09:00 UTC — adjust to taste
@@ -28,5 +37,5 @@ jobs:
     steps:
       - name: Trigger POST /admin/backup-now
         run: |
-          curl -fsS -X POST "https://bmweis.com/admin/backup-now" \
+          curl -fsS -X POST "https://cfo-navigator-production.up.railway.app/admin/backup-now" \
             -H "X-Save-Token: ${{ secrets.LINKLIB_SAVE_TOKEN }}"
