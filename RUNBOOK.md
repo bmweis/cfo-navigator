@@ -95,7 +95,13 @@ shell on the volume:
 - [ ] Trigger a fresh off-site snapshot: `POST /admin/backup-now`
       (admin cookie or `?token=`), so Drive holds a copy of the restored
       state. Note the weekly auto-backup won't fire on its own right away if
-      the `.last_backup` marker on the volume is recent.
+      the `.last_backup` marker on the volume is recent — but the weekly
+      GitHub Action (`.github/workflows/backup.yml`, Phase O) bypasses that
+      debounce, so it isn't the only path back to a fresh snapshot.
+- [ ] Confirm that snapshot on `/admin/library/backup` — the status banner
+      should read green with this restore's timestamp, and the history table's
+      top row should show `status=success` with a row count matching what you
+      just validated above (not just that the request returned 200).
 
 ---
 

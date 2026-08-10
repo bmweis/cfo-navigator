@@ -1,0 +1,32 @@
+name: Weekly off-site backup
+
+# Phase O — the reliable primary trigger for the Google Drive backup.
+# linklib/backup.py's maybe_backup() is still wired into ~18 admin/save
+# routes in webapp/app.py as a debounced bonus trigger, but that alone
+# turned out not to fire reliably (it only rides Library/Archive-side admin
+# traffic, which doesn't happen every week). This Action calls the same
+# POST /admin/backup-now route by hand, on a schedule, so the backup no
+# longer depends on which admin pages happen to get used.
+#
+# Requires a repo secret LINKLIB_SAVE_TOKEN matching the live site's
+# LINKLIB_SAVE_TOKEN — the same token RUNBOOK.md's manual curl example uses
+# via X-Save-Token. Set it at Settings → Secrets and variables → Actions.
+#
+# /admin/backup-now returns a real non-2xx status on failure (503 if Drive
+# isn't configured, 502 if the upload itself failed) — curl -f turns that
+# into a failed Action run, visible in this repo's Actions tab, independent
+# of whatever the in-app backup_log table says (if the site is unreachable,
+# there's no in-app record at all, so this is a genuinely separate signal).
+on:
+  schedule:
+    - cron: "0 9 * * 1"   # Monday 09:00 UTC — adjust to taste
+  workflow_dispatch: {}    # manual "Run workflow" button, for on-demand backups
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger POST /admin/backup-now
+        run: |
+          curl -fsS -X POST "https://bmweis.com/admin/backup-now" \
+            -H "X-Save-Token: ${{ secrets.LINKLIB_SAVE_TOKEN }}"

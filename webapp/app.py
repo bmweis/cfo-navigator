@@ -19672,6 +19672,44 @@ def admin_backfill_status(request: Request):
     return JSONResponse(_job_get("backfill"))
 
 
+def _backup_status_banner(backup_rows: list[dict]) -> str:
+    """Green/amber/red status for the off-site Drive backup, deliberately
+    distinguishing "never configured" from "configured but failing" — see
+    Phase O's build prompt. Amber covers two different situations (folder
+    ID missing vs. most recent attempt failed); the message text always
+    says which."""
+    last = backup_rows[0] if backup_rows else None
+    coral_wash, coral = "var(--coral-wash)", "var(--coral)"
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+
+    if not backup.is_configured():
+        bg, border, color = coral_wash, coral, "inherit"
+        html = ('Backups are <strong>off</strong>&mdash;set <code>GOOGLE_OAUTH_CLIENT_ID</code>, '
+                '<code>GOOGLE_OAUTH_CLIENT_SECRET</code>, and <code>GOOGLE_OAUTH_REFRESH_TOKEN</code> '
+                '(shared with contact-form email) to enable Google Drive backups.')
+    elif last and last["status"] == "failure":
+        bg, border, color = amber_wash, amber_border, amber_text
+        when = _esc(last["created_at"][:16].replace("T", " "))
+        err = _esc(last["error"]) or "no error message recorded"
+        html = f'Backups are configured, but the most recent attempt ({when} UTC) <strong>failed</strong>: {err}'
+    elif not backup.folder_configured():
+        bg, border, color = amber_wash, amber_border, amber_text
+        html = ('Backups are running but <code>GOOGLE_DRIVE_FOLDER_ID</code> isn&rsquo;t set&mdash;'
+                'snapshots are landing in My Drive root, not the Library Backup folder.')
+    elif not last:
+        bg, border, color = amber_wash, amber_border, amber_text
+        html = 'Backups are configured, but none have run yet.'
+    else:
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        when = _esc(last["created_at"][:16].replace("T", " "))
+        html = (f'Backups are <strong>on</strong>&mdash;last successful backup {when} UTC '
+                f'(<code>{_esc(last["filename"])}</code>, {last["bytes"]:,} bytes, {last["row_count"]:,} articles). '
+                f'Scheduled weekly via GitHub Action (see the repo’s Actions tab for run history).')
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
+
+
 @app.get("/admin/library/backup", response_class=HTMLResponse)
 def admin_backup(request: Request, uploaded: str = ""):
     if not _is_authed(request):
@@ -19679,6 +19717,7 @@ def admin_backup(request: Request, uploaded: str = ""):
     lib = _lib()
     try:
         count = lib.count()
+        backup_rows = lib.list_backup_log(limit=100)
     finally:
         lib.close()
     uploaded_banner = (
@@ -19686,6 +19725,24 @@ def admin_backup(request: Request, uploaded: str = ""):
         f'font-size:14px;margin:-6px 0 16px;">Database replaced—{_esc(uploaded)} articles now live.</p>'
         if uploaded else ''
     )
+    backup_log_rows_html = "".join(
+        f"""<tr>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:13px;">{_esc(b['created_at'][:16].replace('T',' '))}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(b['filename']) or '—'}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
+            f'<a href="https://drive.google.com/file/d/{quote(b["drive_file_id"])}/view" target="_blank" rel="noopener">Open in Drive &rarr;</a>'
+            if b['drive_file_id'] else '—'
+          }</td>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
+            '<span style="color:var(--seafoam-deep);font-weight:600;">Success</span>' if b['status'] == 'success'
+            else '<span style="color:var(--alert);font-weight:600;">Failed</span>'
+          }</td>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-soft);">{
+            _esc(f"{b['bytes']:,} bytes · {b['row_count']:,} articles") if b['status'] == 'success' else _esc(b['error'])
+          }</td>
+        </tr>"""
+        for b in backup_rows
+    ) or '<tr><td colspan="5" style="padding:16px;color:var(--muted);font-size:13px;">No off-site backups recorded yet.</td></tr>'
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
 <h1>Archive backup</h1>
@@ -19710,6 +19767,20 @@ def admin_backup(request: Request, uploaded: str = ""):
     </div>
   </div>
 </div>
+
+<h2 style="font-size:16px;margin:0 0 4px;">Off-site backup (Google Drive)</h2>
+<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Weekly consistent snapshots, uploaded automatically. See RUNBOOK.md §1 to restore from one.</p>
+{_backup_status_banner(backup_rows)}
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">Filename</th>
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">Location</th>
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">Status</th>
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">Notes</th>
+</tr></thead>
+<tbody>{backup_log_rows_html}</tbody>
+</table>
 </div>"""
     return HTMLResponse(_page("Archive backup—Admin", "Admin", body, authed=True))
 
@@ -20750,20 +20821,28 @@ def download_db(request: Request):
 
 @app.post("/admin/backup-now", response_class=HTMLResponse)
 def backup_now_route(request: Request, token: str | None = None):
+    """Force an immediate off-site backup, bypassing the debounce.
+    Also the target of the weekly GitHub Action (.github/workflows/backup.yml)
+    — the status code below is not decorative: it's how the Action (and any
+    future monitoring) tells success from failure, since a browser click
+    used to get 200 either way and only the rendered message differed."""
     _require_api(request, token)
     if not backup.is_configured():
         body = """<div class="page page-admin"><h1>Backup not configured</h1>
   <p class="muted">Set <code>GOOGLE_OAUTH_CLIENT_ID</code>, <code>GOOGLE_OAUTH_CLIENT_SECRET</code>,
   and <code>GOOGLE_OAUTH_REFRESH_TOKEN</code> to enable Google Drive backups.</p></div>"""
-        return HTMLResponse(_page("Backup", "", body, authed=True))
+        return HTMLResponse(_page("Backup", "", body, authed=True), status_code=503)
     try:
         result = backup.backup_now(DB_PATH)
-        msg = f"Uploaded <strong>{result['name']}</strong> ({result['bytes']:,} bytes) to Google Drive."
+        msg = (f"Uploaded <strong>{result['name']}</strong> ({result['bytes']:,} bytes, "
+               f"{result['row_count']:,} articles) to Google Drive.")
+        status_code = 200
     except Exception as e:
         msg = f"Backup failed: {e}"
+        status_code = 502
     body = f"""<div class="page page-admin"><h1>Backup</h1><p>{msg}</p>
   <p style="margin-top:1rem;"><a href="/library/archive">Back to the archive →</a></p></div>"""
-    return HTMLResponse(_page("Backup", "", body, authed=True))
+    return HTMLResponse(_page("Backup", "", body, authed=True), status_code=status_code)
 
 
 @app.get("/bookmarklet", response_class=PlainTextResponse)
