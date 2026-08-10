@@ -20,9 +20,17 @@ Drive, named `library-YYYYMMDD-HHMMSS.db`. They're produced by
 `linklib/backup.py::maybe_backup` (debounced to once per 168 h, tracked by a
 `.last_backup` marker beside the DB) using SQLite's online backup API, so
 every snapshot is a consistent, self-contained file — no WAL sidecar needed.
-They land in the Drive folder `GOOGLE_DRIVE_FOLDER_ID` points at (My Drive
-root if unset), owned by the Workspace account behind
-`GOOGLE_OAUTH_REFRESH_TOKEN`.
+They land in a Drive folder named **"CFO Navigator — Library Backups"**,
+owned by the Workspace account behind `GOOGLE_OAUTH_REFRESH_TOKEN`. The app
+creates this folder itself on the first successful backup and remembers its
+id in the `settings` table (`backup_drive_folder_id`) — it deliberately
+doesn't target a folder made by hand in the Drive UI, since the refresh
+token is minted with the narrow `drive.file` scope, which can only see
+files/folders the app created via the API (a hand-made folder 404s no
+matter how correct its id is — see `linklib/backup.py`'s module docstring
+for the full story). `/admin/library/backup` shows a live link to the
+current folder. `GOOGLE_DRIVE_FOLDER_ID`, if set, overrides this and takes
+priority — normally left unset.
 
 ### Path A — the app is up (normal case)
 

@@ -81,11 +81,41 @@ def test_is_configured_true_when_all_three_set(configured_env):
     assert backup.is_configured()
 
 
-def test_folder_configured_independent_of_oauth(monkeypatch, configured_env):
+def test_resolve_folder_id_env_override_wins(lib, monkeypatch, configured_env):
+    monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "explicit-folder")
+    # Token/db_path unused on this path — env var short-circuits before any
+    # Drive call or DB lookup.
+    assert backup._resolve_folder_id(lib.path, "faketoken") == "explicit-folder"
+
+
+def test_resolve_folder_id_creates_and_persists_when_unset(lib, monkeypatch, configured_env):
     monkeypatch.delenv("GOOGLE_DRIVE_FOLDER_ID", raising=False)
-    assert not backup.folder_configured()
-    monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "folder123")
-    assert backup.folder_configured()
+    monkeypatch.setattr(backup, "_create_backup_folder", lambda token: "created-folder-id")
+
+    folder_id = backup._resolve_folder_id(lib.path, "faketoken")
+    assert folder_id == "created-folder-id"
+    assert lib.get_setting(backup._FOLDER_SETTING_KEY) == "created-folder-id"
+
+
+def test_resolve_folder_id_reuses_persisted_folder(lib, monkeypatch, configured_env):
+    monkeypatch.delenv("GOOGLE_DRIVE_FOLDER_ID", raising=False)
+    lib.set_setting(backup._FOLDER_SETTING_KEY, "already-created")
+
+    def _fail_if_called(token):
+        raise AssertionError("should reuse the persisted folder, not create a new one")
+
+    monkeypatch.setattr(backup, "_create_backup_folder", _fail_if_called)
+    assert backup._resolve_folder_id(lib.path, "faketoken") == "already-created"
+
+
+def test_known_folder_id_never_creates(lib, monkeypatch, configured_env):
+    """known_folder_id is the read-only display lookup — must never call
+    the Drive API, even indirectly, since it's called on every page view
+    of /admin/library/backup."""
+    monkeypatch.delenv("GOOGLE_DRIVE_FOLDER_ID", raising=False)
+    assert backup.known_folder_id(lib.path) == ""
+    lib.set_setting(backup._FOLDER_SETTING_KEY, "persisted-id")
+    assert backup.known_folder_id(lib.path) == "persisted-id"
 
 
 # --- linklib.backup.backup_now: logs to backup_log on both outcomes ---------
@@ -254,19 +284,31 @@ def test_admin_backup_page_shows_amber_banner_on_last_failure(admin_client, monk
     assert "token expired" in r.text
 
 
-def test_admin_backup_page_shows_amber_banner_when_folder_id_missing(admin_client, monkeypatch):
+def test_admin_backup_page_folder_line_before_any_run(admin_client, monkeypatch):
+    """No folder created/known yet — shows the "created on first run"
+    fallback, not a broken link, and doesn't call the Drive API to find out."""
+    client, appmod, db = admin_client
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
+    monkeypatch.setenv("GOOGLE_OAUTH_REFRESH_TOKEN", "rtoken")
+    monkeypatch.delenv("GOOGLE_DRIVE_FOLDER_ID", raising=False)
+    r = client.get("/admin/library/backup")
+    assert "created on the first successful run" in r.text.lower()
+    assert "drive.google.com/drive/folders" not in r.text
+
+
+def test_admin_backup_page_folder_line_shows_persisted_folder(admin_client, monkeypatch):
     client, appmod, db = admin_client
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "cid")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
     monkeypatch.setenv("GOOGLE_OAUTH_REFRESH_TOKEN", "rtoken")
     monkeypatch.delenv("GOOGLE_DRIVE_FOLDER_ID", raising=False)
     lib = appmod._lib()
-    lib.record_backup_attempt(status="success", filename="library-x.db",
-                               drive_file_id="abc", size_bytes=100, row_count=5)
+    lib.set_setting(appmod.backup._FOLDER_SETTING_KEY, "created-folder-xyz")
     lib.close()
     r = client.get("/admin/library/backup")
-    assert "google_drive_folder_id" in r.text.lower()
-    assert "my drive root" in r.text.lower()
+    assert 'href="https://drive.google.com/drive/folders/created-folder-xyz"' in r.text
+    assert "cfo navigator" in r.text.lower() and "library backups" in r.text.lower()
 
 
 def test_admin_backup_page_shows_green_banner_when_healthy(admin_client, monkeypatch):

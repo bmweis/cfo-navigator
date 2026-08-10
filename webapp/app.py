@@ -19684,9 +19684,10 @@ def admin_backfill_status(request: Request):
 def _backup_status_banner(backup_rows: list[dict]) -> str:
     """Green/amber/red status for the off-site Drive backup, deliberately
     distinguishing "never configured" from "configured but failing" — see
-    Phase O's build prompt. Amber covers two different situations (folder
-    ID missing vs. most recent attempt failed); the message text always
-    says which."""
+    Phase O's build prompt. The target folder is self-managed (backup.py
+    creates and remembers its own Drive folder, since the drive.file OAuth
+    scope can't see a hand-made one), so there's no separate "folder not
+    set" warning state anymore — only "off" and "last attempt failed"."""
     last = backup_rows[0] if backup_rows else None
     coral_wash, coral = "var(--coral-wash)", "var(--coral)"
     amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
@@ -19702,10 +19703,6 @@ def _backup_status_banner(backup_rows: list[dict]) -> str:
         when = _esc(last["created_at"][:16].replace("T", " "))
         err = _esc(last["error"]) or "no error message recorded"
         html = f'Backups are configured, but the most recent attempt ({when} UTC) <strong>failed</strong>: {err}'
-    elif not backup.folder_configured():
-        bg, border, color = amber_wash, amber_border, amber_text
-        html = ('Backups are running but <code>GOOGLE_DRIVE_FOLDER_ID</code> isn&rsquo;t set&mdash;'
-                'snapshots are landing in My Drive root, not the Library Backup folder.')
     elif not last:
         bg, border, color = amber_wash, amber_border, amber_text
         html = 'Backups are configured, but none have run yet.'
@@ -19729,6 +19726,15 @@ def admin_backup(request: Request, uploaded: str = ""):
         backup_rows = lib.list_backup_log(limit=100)
     finally:
         lib.close()
+    folder_id = backup.known_folder_id(DB_PATH)
+    folder_line = (
+        f'Weekly consistent snapshots, uploaded automatically to '
+        f'<a href="https://drive.google.com/drive/folders/{quote(folder_id)}" target="_blank" rel="noopener">'
+        f'&ldquo;{_esc(backup.FOLDER_NAME)}&rdquo; in Drive</a>. See RUNBOOK.md §1 to restore from one.'
+        if folder_id else
+        'Weekly consistent snapshots, uploaded automatically&mdash;the destination folder is created on the '
+        'first successful run (see RUNBOOK.md §1 to restore from one).'
+    )
     uploaded_banner = (
         f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
         f'font-size:14px;margin:-6px 0 16px;">Database replaced—{_esc(uploaded)} articles now live.</p>'
@@ -19778,7 +19784,7 @@ def admin_backup(request: Request, uploaded: str = ""):
 </div>
 
 <h2 style="font-size:16px;margin:0 0 4px;">Off-site backup (Google Drive)</h2>
-<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Weekly consistent snapshots, uploaded automatically. See RUNBOOK.md §1 to restore from one.</p>
+<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">{folder_line}</p>
 {_backup_status_banner(backup_rows)}
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">

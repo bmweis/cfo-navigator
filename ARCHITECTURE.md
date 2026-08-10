@@ -1036,7 +1036,7 @@ effect.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `settings` | Generic key/value store (global Ask cap default, `matchmaker_default_cap_usd`, editable email copy, tag-style guide, `voice_core`/`voice_fpa_buddy`/`voice_matchmaker` voice guide, …). | `key`/`value` |
+| `settings` | Generic key/value store (global Ask cap default, `matchmaker_default_cap_usd`, editable email copy, tag-style guide, `voice_core`/`voice_fpa_buddy`/`voice_matchmaker` voice guide, `backup_drive_folder_id` — the self-created Drive backup folder's id, Phase O, …). | `key`/`value` |
 | `contacts` | Contact-form submissions. | `deleted_at` (`''` = live — soft delete for spam, never hard delete) |
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
@@ -1749,6 +1749,27 @@ recorded anywhere, it's flagged rather than invented.
   bullet above for why; the first live verification run against the
   Cloudflare-fronted hostname got a `403` from Bot Fight Mode before ever
   reaching the app.
+- **The Drive backup folder is created and owned by the app, never a
+  folder made by hand (Phase O).** The OAuth refresh token is minted with
+  the `drive.file` scope — deliberately the narrowest Drive scope, not
+  full `drive` access — which only grants visibility into files/folders
+  *the app itself created via the API*. The original setup pointed
+  `GOOGLE_DRIVE_FOLDER_ID` at a folder created by hand in the Drive web
+  UI; every upload against it got a `404` (Google's Drive API returns 404,
+  not 403, for a resource the caller can't see — deliberately, to avoid
+  confirming it exists), even though the account and folder id were both
+  correct. Fixed by having `backup_now()` create and remember its own
+  folder instead: `linklib.backup._resolve_folder_id` reuses an id already
+  persisted in `settings` (`backup_drive_folder_id`) if one exists, or
+  creates a folder named "CFO Navigator — Library Backups" in My Drive
+  root on first use and persists its id for every run after.
+  `GOOGLE_DRIVE_FOLDER_ID` still overrides this if set (e.g. a folder
+  explicitly granted to the app some other way, such as a Drive Picker
+  consent flow), but the default is now a folder the app can actually
+  write into. `linklib.backup.known_folder_id` is the read-only lookup
+  `/admin/library/backup` uses to show the live folder link — it never
+  creates a folder as a side effect of a page view, only `backup_now()`
+  does, mid-upload.
 
 ## 5. Directory map
 

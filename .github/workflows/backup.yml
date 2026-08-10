@@ -36,6 +36,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger POST /admin/backup-now
+        # Always prints the real HTTP status + response body, success or
+        # failure — plain `curl -f` only reports its own exit code, which
+        # burned us twice in a row on 2026-08-10 (a 301 redirect and a
+        # silent container-swap race both looked like "success" to `-f`
+        # with no visible evidence either way in this log). Never trust
+        # this job's green checkmark alone — cross-check
+        # /admin/library/backup's banner + history table too.
         run: |
-          curl -fsS -X POST "https://cfo-navigator-production.up.railway.app/admin/backup-now" \
-            -H "X-Save-Token: ${{ secrets.LINKLIB_SAVE_TOKEN }}"
+          response=$(curl -sS -w '\n%{http_code}' -X POST "https://cfo-navigator-production.up.railway.app/admin/backup-now" \
+            -H "X-Save-Token: ${{ secrets.LINKLIB_SAVE_TOKEN }}")
+          status="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          echo "HTTP status: $status"
+          echo "Response body:"
+          echo "$body"
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::POST /admin/backup-now returned HTTP $status"
+            exit 1
+          fi

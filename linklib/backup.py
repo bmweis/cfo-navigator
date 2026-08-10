@@ -30,18 +30,37 @@ Design notes
   harmless bonus trigger — they fire only when an admin action happens to
   land more than a week after the last success, which historically hasn't
   been reliable on its own (Phase O investigation).
+- **The target Drive folder is self-managed, not hand-picked.** The OAuth
+  refresh token is minted with the ``drive.file`` scope (see below) —
+  deliberately the narrowest Drive scope, not full ``drive`` access — which
+  only grants visibility into files/folders *the app itself created via the
+  API*. A folder made by hand in the Drive web UI (even in the same
+  account) is invisible to ``drive.file``: referencing it as a snapshot's
+  ``parents`` gets a ``404`` from Google (which deliberately returns 404
+  rather than 403 for an inaccessible resource, to avoid confirming it
+  exists). This bit a hand-made "Library Backup" folder from the original
+  Phase O setup — every upload 404'd against it, account and folder ID
+  both correct, purely a scope mismatch. Fixed by having ``backup_now()``
+  create and own its own folder (``_resolve_folder_id`` below) instead of
+  targeting a pre-existing one: the first successful run creates a folder
+  named "CFO Navigator — Library Backups" in My Drive root and remembers
+  its id in the ``settings`` table (key ``backup_drive_folder_id``); every
+  run after that reuses it. ``GOOGLE_DRIVE_FOLDER_ID`` still wins if set —
+  useful if a folder is ever explicitly granted to the app some other way
+  (e.g. a Drive Picker consent flow) — but the default, unset case is now a
+  folder the app can actually see, not My Drive root.
 
 Configuration (environment variables — all three required to enable backups):
     GOOGLE_OAUTH_CLIENT_ID       Google Cloud OAuth client ID
     GOOGLE_OAUTH_CLIENT_SECRET   Google Cloud OAuth client secret
     GOOGLE_OAUTH_REFRESH_TOKEN   OAuth refresh token (drive.file + gmail.send scopes)
 
-Optional but strongly recommended:
-    GOOGLE_DRIVE_FOLDER_ID       Drive folder ID for snapshots (default: My Drive
-                                  root — see folder_configured() below; the admin
-                                  status banner flags this as a separate warning
-                                  from "not configured at all", since backups
-                                  keep working either way, just to the wrong place)
+Optional:
+    GOOGLE_DRIVE_FOLDER_ID       Explicit Drive folder id override. Leave unset —
+                                  the app creates and remembers its own folder
+                                  (see the design note above); this is only for
+                                  pointing at a folder some other mechanism has
+                                  already explicitly granted the app access to.
 
 If the variables aren't set, every function here is a safe no-op — the app runs
 exactly as before.
@@ -71,12 +90,69 @@ def is_configured() -> bool:
     )
 
 
-def folder_configured() -> bool:
-    """Whether GOOGLE_DRIVE_FOLDER_ID is set. Separate from is_configured()
-    on purpose: backups still work with this unset (they land in My Drive
-    root), so it's a distinct warning state in the admin UI, not a hard
-    "backups are off" condition."""
-    return bool(os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip())
+FOLDER_NAME = "CFO Navigator — Library Backups"
+_FOLDER_SETTING_KEY = "backup_drive_folder_id"
+_FILES_URL = "https://www.googleapis.com/drive/v3/files"
+
+
+def _create_backup_folder(token: str) -> str:
+    """Create the dedicated Drive folder for snapshots, in My Drive root.
+    A folder the app creates itself via the API is automatically visible
+    to it under the drive.file scope — unlike a folder made by hand in the
+    Drive UI, which drive.file can't see or write into (see this module's
+    docstring)."""
+    r = requests.post(
+        f"{_FILES_URL}?fields=id",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"name": FOLDER_NAME, "mimeType": "application/vnd.google-apps.folder"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()["id"]
+
+
+def _resolve_folder_id(db_path: str, token: str) -> str:
+    """Which Drive folder id snapshots upload into this run.
+
+    GOOGLE_DRIVE_FOLDER_ID wins if set — an explicit override for a folder
+    granted to the app some other way. Otherwise the app manages its own
+    folder: reuse the id already recorded in `settings` (a prior run
+    created one), or create a fresh one now and persist its id for next
+    time. Never targets the pre-existing hand-made "Library Backup"
+    folder — drive.file's scope can't see it regardless of what id is
+    configured for it."""
+    env_folder = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+    if env_folder:
+        return env_folder
+
+    from linklib.db import Library
+    lib = Library(db_path)
+    try:
+        existing = lib.get_setting(_FOLDER_SETTING_KEY)
+        if existing:
+            return existing
+        folder_id = _create_backup_folder(token)
+        lib.set_setting(_FOLDER_SETTING_KEY, folder_id)
+        return folder_id
+    finally:
+        lib.close()
+
+
+def known_folder_id(db_path: str) -> str:
+    """Read-only lookup of the folder snapshots upload into, for display
+    (e.g. /admin/library/backup) — never creates a folder as a side effect
+    of a page view, unlike _resolve_folder_id which is called mid-upload
+    and will create one on first use. Returns '' if nothing's been
+    configured or created yet."""
+    env_folder = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+    if env_folder:
+        return env_folder
+    from linklib.db import Library
+    lib = Library(db_path)
+    try:
+        return lib.get_setting(_FOLDER_SETTING_KEY)
+    finally:
+        lib.close()
 
 
 def _marker_path(db_path: str) -> str:
@@ -177,10 +253,10 @@ def backup_now(db_path: str) -> dict:
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         name = f"library-{stamp}.db"
-        metadata = {"name": name}
-        folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
-        if folder_id:
-            metadata["parents"] = [folder_id]
+
+        token = _access_token()
+        folder_id = _resolve_folder_id(db_path, token)
+        metadata = {"name": name, "parents": [folder_id]}
 
         # Drive's multipart upload wants a metadata JSON part + a media part,
         # joined by a boundary — there's no `requests` helper for this shape
@@ -194,7 +270,6 @@ def backup_now(db_path: str) -> dict:
             f"Content-Type: application/octet-stream\r\n\r\n"
         ).encode("utf-8") + data + f"\r\n--{boundary}--".encode("utf-8")
 
-        token = _access_token()
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": f"multipart/related; boundary={boundary}",
