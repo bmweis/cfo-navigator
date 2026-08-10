@@ -363,7 +363,7 @@ def test_software_page_renders_column_picker_and_bulk_edit_markup(admin_client):
     r = client.get("/admin/tools/software")
     assert 'class="software-row-cb"' in r.text
     assert "software-bulk-panel" in r.text
-    assert 'colpick-software-url' in r.text
+    assert 'colpick-software-summary' in r.text
 
 
 def test_communities_page_renders_column_picker_and_bulk_edit_markup(admin_client):
@@ -400,17 +400,17 @@ def test_software_column_picker_onchange_is_not_truncated(admin_client):
     lib.close()
 
     r = client.get("/admin/tools/software")
-    finder = _AttrFinder("colpick-software-url")
+    finder = _AttrFinder("colpick-software-summary")
     finder.feed(r.text)
     onchange = finder.found
-    assert onchange is not None, "colpick-software-url checkbox not found"
-    assert onchange.startswith("toggleColumn('software','url',this.checked,")
+    assert onchange is not None, "colpick-software-summary checkbox not found"
+    assert onchange.startswith("toggleColumn('software','summary',this.checked,")
     assert onchange.endswith(")")
     # The 4th argument must itself be valid, complete JSON—not truncated at
     # the first embedded double quote.
-    array_json = onchange[len("toggleColumn('software','url',this.checked,"):-1]
+    array_json = onchange[len("toggleColumn('software','summary',this.checked,"):-1]
     parsed = json.loads(array_json)
-    assert "url" in parsed and "summary" in parsed
+    assert "summary" in parsed and "categories" in parsed
 
 
 def test_communities_column_picker_onchange_is_not_truncated(admin_client):

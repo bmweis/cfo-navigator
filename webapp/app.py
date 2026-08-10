@@ -8452,7 +8452,7 @@ def tools_community_profile(request: Request, slug: str):
 .tp-detail-row{{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;}}
 .tp-detail-row:last-child{{border-bottom:none;}}
 .tp-detail-label{{color:var(--muted);font-weight:500;}}
-.tp-detail-value{{color:var(--ink-soft);text-align:right;overflow-wrap:break-word;word-break:break-word;min-width:0;}}
+.tp-detail-value{{color:var(--ink-soft);text-align:left;overflow-wrap:break-word;word-break:break-word;min-width:0;}}
 .tp-verify-inline{{font-size:11px;font-weight:600;font-style:italic;color:var(--muted);background:none;border:1px dashed var(--line);border-radius:6px;padding:2px 8px;white-space:nowrap;}}
 </style>"""
     resp = HTMLResponse(_page(f"{community['name']}—Communities", "CFO Toolbox", body, role=_role(request)))
@@ -9439,10 +9439,9 @@ def admin_software(request: Request):
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><input type="checkbox" name="ids" value="{t['id']}" class="software-row-cb" onchange="updateBulkButton('software')"></td>
           <td class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;max-width:200px;">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-              <span>{_esc(t['name'])}</span>{featured_badge}
+              <a href="{_esc(t['url'])}" target="_blank" rel="noopener" title="{_esc(t['url'])}">{_esc(t['name'])}</a>{featured_badge}
             </div>
           </td>
-          <td data-col="software:url" data-label="URL" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);"><a href="{_esc(t['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(t['url'][:50])}{'…' if len(t['url']) > 50 else ''}</a></td>
           <td data-col="software:summary" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:260px;">{_esc(t.get('summary') or '—')}</td>
           <td data-col="software:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td data-col="software:intros" data-label="Intros" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
@@ -9464,7 +9463,7 @@ def admin_software(request: Request):
         '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No approved software yet.</td></tr>'
     total_leads = sum(lead_counts.values())
 
-    software_cols = [("url", "URL"), ("summary", "Short description"), ("categories", "Categories"), ("intros", "Intros")]
+    software_cols = [("summary", "Short description"), ("categories", "Categories"), ("intros", "Intros")]
     software_bulk_fields = [
         {"key": "categories", "label": "Categories", "kind": "multi"},
         {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
@@ -9518,7 +9517,6 @@ def admin_software(request: Request):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('software',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th data-col="software:url" style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
@@ -10673,10 +10671,9 @@ def admin_communities(request: Request, filter: str = ""):
   <td style="padding:10px 12px;"><input type="checkbox" name="ids" value="{c['id']}" class="communities-row-cb" onchange="updateBulkButton('communities')"></td>
   <td style="padding:10px 12px;font-weight:600;max-width:200px;">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;">
-      <span>{_esc(c['name'])}</span>{featured_badge}{review_badge}{gap_badge}
+      <a href="{_esc(c['url'])}" target="_blank" rel="noopener" title="{_esc(c['url'])}">{_esc(c['name'])}</a>{featured_badge}{review_badge}{gap_badge}
     </div>
   </td>
-  <td data-col="communities:url" style="padding:10px 12px;font-size:13px;"><a href="{_esc(c['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(c['url'][:50])}{'…' if len(c['url']) > 50 else ''}</a></td>
   <td data-col="communities:notes" style="padding:10px 12px;font-size:13px;color:var(--muted);min-width:260px;">{_esc(c['notes'] or '—')}</td>
   <td data-col="communities:cost_band" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['cost_band'])}</td>
   <td data-col="communities:access" style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(c['access'] or '—')}</td>
@@ -10704,7 +10701,7 @@ def admin_communities(request: Request, filter: str = ""):
         '<tr><td colspan="11" style="padding:20px;color:var(--muted);">Nothing left to review.</td></tr>'
 
     communities_cols = [
-        ("url", "URL"), ("notes", "Short description"), ("cost_band", "Cost band"), ("access", "Access"), ("categories", "Categories"),
+        ("notes", "Short description"), ("cost_band", "Cost band"), ("access", "Access"), ("categories", "Categories"),
         ("sponsorship_type", "Sponsorship type"), ("format", "Format"), ("reach", "Reach"),
     ]
     communities_bulk_fields = [
@@ -10788,7 +10785,6 @@ def admin_communities(request: Request, filter: str = ""):
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;"><input type="checkbox" onchange="selectAllRows('communities',this.checked)"></th>
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
-  <th data-col="communities:url" style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
   <th data-col="communities:notes" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
   <th data-col="communities:cost_band" style="padding:10px 12px;text-align:left;font-size:13px;">Cost band</th>
   <th data-col="communities:access" style="padding:10px 12px;text-align:left;font-size:13px;">Access</th>
