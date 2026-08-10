@@ -146,6 +146,12 @@ passwords are their own (scrypt, in the DB).
    - The MCP server config for Claude Desktop / Claude Code
      (`scripts/mcp_server.py` reads `LINKLIB_SAVE_TOKEN` from its env —
      it's set in the client's MCP config JSON).
+   - The GitHub repo secret backing the weekly backup Action
+     (`.github/workflows/backup.yml`, Phase O) — Settings → Secrets and
+     variables → Actions → `LINKLIB_SAVE_TOKEN`. Miss this and the Action
+     starts failing with `401` on the next scheduled run, silently, until
+     someone checks the Actions tab or `/admin/library/backup`'s status
+     banner shows a stale "last successful backup."
    - Any personal shell exports / scripts that call `/save`, `/api/search`,
      or `/ask` with `X-Save-Token` or `?token=`.
 
