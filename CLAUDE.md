@@ -230,10 +230,21 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   red — "off" and "configured but failing" are deliberately different colors, not
   collapsed into one) and a history table. (2) `POST /admin/backup-now` now returns a real
   `503`/`502` on failure instead of always `200`, so the Action (and `curl -f`) can tell
-  success from failure without parsing HTML. `GOOGLE_DRIVE_FOLDER_ID` being unset was a
-  live candidate explanation for the empty folder (backups still succeed unset, just land
-  in My Drive root) — confirm the actual Railway value before assuming; the admin banner
-  flags an unset folder ID as its own warning state going forward either way.
+  success from failure without parsing HTML. **The actual root cause of the empty folder,
+  found once the trigger/redirect issues above stopped masking it:** the refresh token is
+  minted with the `drive.file` OAuth scope — deliberately the narrowest Drive scope, which
+  only grants visibility into files/folders *the app itself created via the API*. The
+  original setup pointed `GOOGLE_DRIVE_FOLDER_ID` at a folder made by hand in the Drive
+  web UI ("Library Backup"); every upload against it 404'd (Google's Drive API returns
+  404, not 403, for a resource the caller can't see, to avoid confirming it exists) even
+  with the correct account and folder id — `drive.file` simply can't see a folder it
+  didn't create. Fixed by having `backup_now()` create and own its own folder instead of
+  targeting a pre-existing one: `linklib.backup._resolve_folder_id` reuses an id already
+  persisted in `settings` (`backup_drive_folder_id`) if a prior run created one, or
+  creates a folder named "CFO Navigator — Library Backups" in My Drive root on first use.
+  `GOOGLE_DRIVE_FOLDER_ID` still overrides this if set — normally left unset now.
+  `/admin/library/backup` shows a live link to whichever folder is currently in use. The
+  old hand-made "Library Backup" folder is abandoned, not deleted or referenced anywhere.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -305,7 +316,7 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 | `GOOGLE_OAUTH_CLIENT_ID` | — | Google Cloud OAuth client ID. Required (with the two below) for `linklib/backup.py`'s weekly off-site Drive backup and `linklib/email_utils.py`'s outbound contact-form email — one client, both scopes. Absent → both features are a safe no-op, no error. |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | — | Google Cloud OAuth client secret, paired with the above. |
 | `GOOGLE_OAUTH_REFRESH_TOKEN` | — | OAuth refresh token (`drive.file` + `gmail.send` scopes), paired with the above. Mint once with both scopes — see `.env.example` for the exact steps. |
-| `GOOGLE_DRIVE_FOLDER_ID` | (My Drive root) | Drive folder ID snapshots upload into. **Strongly recommended, not just optional** — left unset, backups still succeed but land in My Drive root instead of wherever you're actually checking for them (a real candidate explanation, per Phase O, for "the Library Backup folder is empty" — verify the live Railway value directly rather than assuming). `/admin/library/backup`'s status banner flags an unset folder ID as a distinct warning from "not configured at all". |
+| `GOOGLE_DRIVE_FOLDER_ID` | (self-managed) | Explicit override for the Drive folder id snapshots upload into. **Normally left unset** — the app creates its own folder ("CFO Navigator — Library Backups", in My Drive root) on the first successful backup and remembers its id in the `settings` table, since the `drive.file` OAuth scope can't see a folder made by hand in the Drive UI (Phase O — see the Key architecture decisions bullet above for the full 404 story). Only set this if a folder has been explicitly granted to the app some other way (e.g. a Drive Picker consent flow) and you want backups to target it instead. |
 
 ## One-off admin fixes against the database
 
