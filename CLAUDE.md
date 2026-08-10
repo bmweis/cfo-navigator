@@ -207,7 +207,11 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   had essentially no opportunity to fire. Fixed with a weekly GitHub Action
   (`.github/workflows/backup.yml`) calling the existing `POST /admin/backup-now` route
   (`X-Save-Token` auth, a repo secret named `LINKLIB_SAVE_TOKEN`) as the reliable primary
-  trigger — the ~18 call sites stay as-is, a harmless bonus trigger. Two more gaps closed
+  trigger — the ~18 call sites stay as-is, a harmless bonus trigger. The Action targets the
+  Railway origin (`*.up.railway.app`), not `bmweis.com`: the first live verification run
+  against the Cloudflare-fronted hostname got a `403` from Bot Fight Mode before ever
+  reaching the app — confirmed as Cloudflare, not the app, since a bad token gets `401`,
+  never `403`. See ARCHITECTURE.md's "publicly reachable Railway origin" note. Two more gaps closed
   in the same phase: (1) every backup attempt, success or failure, now writes a row to the
   new `backup_log` table (`Library.record_backup_attempt`/`list_backup_log`) from inside
   `backup.py` itself, rather than only `print()`ing to stdout where nothing in the app
