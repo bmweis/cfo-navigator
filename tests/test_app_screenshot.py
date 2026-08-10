@@ -445,6 +445,32 @@ def test_admin_edit_saves_app_screenshot_source_url(env):
     lib.close()
 
 
+def test_admin_communities_edit_save_does_not_clobber_legacy_product_flag(env):
+    """Communities equivalent of the tools regression test in
+    tests/test_software_screenshot.py — same 2026-08 incident, same fix
+    (update_community_screenshot_url instead of update_community_screenshot)."""
+    lib = Library(os.environ["LINKLIB_DB"])
+    c = lib.add_community("FP&A Club", "https://fpaclub.example", "CFOs", "Free", ["FP&A"], approved=1)
+    c_slug = lib.get_community(c)["slug"]
+    lib.update_community_screenshot(c, "https://example.com/product-shot.png", 1)  # legacy flag set
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.post(f"/tools/communities/{c_slug}/edit", data={
+        "name": "FP&A Club Renamed", "demographic": "CFOs",
+        "screenshot_url": "https://example.com/product-shot.png",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+
+    lib = Library(os.environ["LINKLIB_DB"])
+    community = lib.get_community(c)
+    assert community["name"] == "FP&A Club Renamed"
+    assert community["screenshot_url"] == "https://example.com/product-shot.png"
+    assert community["screenshot_is_product"] == 1  # survives the unrelated save
+    lib.close()
+
+
 # -- profile page: dual-screenshot card --------------------------------------
 
 def test_profile_page_single_screenshot_unchanged_when_no_app_shot(env):
