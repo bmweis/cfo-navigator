@@ -15457,24 +15457,69 @@ def admin_system_database(request: Request):
     schema = _db_schema_snapshot()
     diagram = _mermaid_er_diagram(schema)
 
-    stat_cards = "".join(
-        f'<div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;'
-        f'padding:10px 14px;">'
-        f'<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">'
-        f'{_esc(name)}{" (index)" if info["virtual"] else ""}</div>'
-        f'<div style="font-size:20px;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;">'
-        f'{info["row_count"]:,}</div></div>'
-        for name, info in sorted(schema.items())
+    # Two of these tables are cost ledgers, not content — enrichment_cost logs
+    # every enrichment API call, manual_overhead logs real vendor receipts.
+    # Their row counts (ledger entry counts) aren't the number a CFO wants at
+    # a glance; the dollar total is. Both totals already exist as Library
+    # methods (used by /admin/overhead-spend), so this reuses them rather
+    # than summing cost_usd/amount again here.
+    lib = _lib()
+    try:
+        cost_totals = {
+            "enrichment_cost": lib.enrichment_cost_total(),
+            "manual_overhead": lib.manual_overhead_total(),
+        }
+    finally:
+        lib.close()
+
+    def _stat_row(name: str, info: dict) -> str:
+        label = f'{_esc(name)}{" (index)" if info["virtual"] else ""}'
+        cost = cost_totals.get(name)
+        cost_cell = f"${cost:,.2f}" if cost is not None else '<span class="cc-empty">&mdash;</span>'
+        return (
+            f'<tr><td class="cc-cell" style="font-family:ui-monospace,monospace;">{label}</td>'
+            f'<td class="cc-cell" style="text-align:right;font-variant-numeric:tabular-nums;">{info["row_count"]:,}</td>'
+            f'<td class="cc-cell" style="text-align:right;font-variant-numeric:tabular-nums;">{cost_cell}</td></tr>'
+        )
+
+    cost_rows = "".join(
+        _stat_row(name, schema[name]) for name in ("enrichment_cost", "manual_overhead") if name in schema
     )
+    content_rows = "".join(
+        _stat_row(name, info) for name, info in sorted(schema.items()) if name not in cost_totals
+    )
+
+    stat_table = f"""<div style="overflow-x:auto;margin-bottom:28px;">
+<table class="cc-table">
+<thead><tr style="background:var(--bg);">
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Table</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:right;">Rows</th>
+<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:right;">Total spend</th>
+</tr></thead>
+<tbody>
+<tr><td class="cc-cell cc-section" colspan="3">Cost &amp; spend</td></tr>
+{cost_rows}
+<tr><td class="cc-cell cc-section" colspan="3">Content volume</td></tr>
+{content_rows}
+</tbody>
+</table>
+</div>
+
+<style>
+.cc-table{{border-collapse:collapse;width:100%;min-width:520px;background:#fff;border:1px solid var(--line);border-radius:12px;}}
+.cc-cell{{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px;}}
+.cc-empty{{color:var(--muted);font-style:italic;}}
+.cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);
+  background:var(--seafoam);padding:8px 16px;}}
+thead .cc-cell{{border-bottom:2px solid var(--line);}}
+</style>"""
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Database</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, and row counts, introspected from the schema on every page load. This schema declares no SQL foreign keys, so relationship lines below come from a small hand-maintained map (see <code>_DB_RELATIONSHIPS</code> in <code>webapp/app.py</code>) rather than the database itself. Summary-level by design&mdash;see <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for full schema detail.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, and row counts, introspected from the schema on every page load. This schema declares no SQL foreign keys, so relationship lines below come from a small hand-maintained map (see <code>_DB_RELATIONSHIPS</code> in <code>webapp/app.py</code>) rather than the database itself. Summary-level by design&mdash;see <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for full schema detail. <code>enrichment_cost</code> and <code>manual_overhead</code> are cost ledgers&mdash;their &ldquo;Total spend&rdquo; is the sum of every logged charge, not a count of ledger rows.</p>
 
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px;">
-{stat_cards}
-</div>
+{stat_table}
 
 <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;overflow-x:auto;">
 <pre class="mermaid" style="margin:0;">
