@@ -266,7 +266,7 @@ async def _canonical_host_redirect(request: Request, call_next):
     deliberately bypassing Cloudflare's Bot Fight Mode; a 301 here would
     silently no-op the backup, since the Action's `curl -f` treats a 3xx as
     success and never follows it — which is exactly what happened on the
-    first live run after PR #292, discovered only because backup_log stayed
+    first live run after the previous fix, discovered only because backup_log stayed
     empty despite the Action reporting green). Scoped to this one path on
     purpose, not a blanket exemption for every token-authenticated route —
     see CLAUDE.md's Phase O bullet before widening this list.
