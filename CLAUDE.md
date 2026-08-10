@@ -42,7 +42,8 @@ linklib/           # core library (the only thing that matters long-term)
   tagstyle.py      # learns Brian's tagging style; feeds the enrichment prompt
   passwords.py     # scrypt password hashing (stdlib only)
   authcheck.py     # probes subscriber-auth cookies so a stale paywall cookie surfaces
-  backup.py        # weekly off-site snapshot to Google Drive (OAuth refresh token, no SDK)
+  backup.py        # off-site snapshot to Google Drive (OAuth refresh token, no SDK); logs
+                   #   every attempt (success/failure) to backup_log — see Phase O below
   email_utils.py   # outbound email via the Gmail REST API (NOT SMTP — Railway Hobby
                    #   blocks SMTP ports; same OAuth client as backup.py)
   brand_check.py   # deterministic scanner for BRAND.md palette/font rules
@@ -196,6 +197,28 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   a time with a tap-to-toggle button (the existing Phase J1 expand/collapse convention,
   not a new swipe-gesture pattern). A record with only a homepage screenshot — the common
   case at launch — renders identically to pre-Phase-E, no toggle, no second frame.
+- **Off-site backup automation (Phase O) — the mechanism was real, the scheduling wasn't.**
+  A 2026-08 investigation (triggered by finding the "Library Backup" Drive folder empty)
+  confirmed `linklib/backup.py` (SQLite online-backup API for a consistent snapshot, raw
+  multipart upload to Drive, refresh-token auth — no new dependency) was complete and
+  working, but had never actually been scheduled: it only ran as a debounced side effect
+  of ~18 admin/save routes in `webapp/app.py` (article save, tag edits, dedupe, enrichment
+  backfill, feed scan, …), and Brian's actual admin usage doesn't touch any of them, so it
+  had essentially no opportunity to fire. Fixed with a weekly GitHub Action
+  (`.github/workflows/backup.yml`) calling the existing `POST /admin/backup-now` route
+  (`X-Save-Token` auth, a repo secret named `LINKLIB_SAVE_TOKEN`) as the reliable primary
+  trigger — the ~18 call sites stay as-is, a harmless bonus trigger. Two more gaps closed
+  in the same phase: (1) every backup attempt, success or failure, now writes a row to the
+  new `backup_log` table (`Library.record_backup_attempt`/`list_backup_log`) from inside
+  `backup.py` itself, rather than only `print()`ing to stdout where nothing in the app
+  could see it; `/admin/library/backup` reads that table for a status banner (green/amber/
+  red — "off" and "configured but failing" are deliberately different colors, not
+  collapsed into one) and a history table. (2) `POST /admin/backup-now` now returns a real
+  `503`/`502` on failure instead of always `200`, so the Action (and `curl -f`) can tell
+  success from failure without parsing HTML. `GOOGLE_DRIVE_FOLDER_ID` being unset was a
+  live candidate explanation for the empty folder (backups still succeed unset, just land
+  in My Drive root) — confirm the actual Railway value before assuming; the admin banner
+  flags an unset folder ID as its own warning state going forward either way.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
@@ -264,6 +287,10 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 | `LINKLIB_CHAT_MODEL` | `claude-sonnet-4-6` | Claude model for Q&A and post drafting |
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
 | `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/library/feed` source list |
+| `GOOGLE_OAUTH_CLIENT_ID` | — | Google Cloud OAuth client ID. Required (with the two below) for `linklib/backup.py`'s weekly off-site Drive backup and `linklib/email_utils.py`'s outbound contact-form email — one client, both scopes. Absent → both features are a safe no-op, no error. |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | — | Google Cloud OAuth client secret, paired with the above. |
+| `GOOGLE_OAUTH_REFRESH_TOKEN` | — | OAuth refresh token (`drive.file` + `gmail.send` scopes), paired with the above. Mint once with both scopes — see `.env.example` for the exact steps. |
+| `GOOGLE_DRIVE_FOLDER_ID` | (My Drive root) | Drive folder ID snapshots upload into. **Strongly recommended, not just optional** — left unset, backups still succeed but land in My Drive root instead of wherever you're actually checking for them (a real candidate explanation, per Phase O, for "the Library Backup folder is empty" — verify the live Railway value directly rather than assuming). `/admin/library/backup`'s status banner flags an unset folder ID as a distinct warning from "not configured at all". |
 
 ## One-off admin fixes against the database
 
@@ -376,6 +403,9 @@ python -m scripts.mcp_server
 - Hosting/deployment on Railway (see Deployment below)
 - bmweis.com custom domain pointed at Railway (July 2026)
 - MCP server (`scripts/mcp_server.py`) wrapping `/api/search` for Claude Desktop/Code
+- Weekly off-site Drive backup, scheduled via GitHub Action (Phase O — see Key
+  architecture decisions above), with a persistent `backup_log` audit trail and a
+  status banner + history table on `/admin/library/backup`
 
 **Not yet built (from the migration plan):**
 - iOS Share Sheet shortcut

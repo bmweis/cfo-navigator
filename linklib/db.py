@@ -550,6 +550,36 @@ CREATE TABLE IF NOT EXISTS contact_audit_log (
 CREATE INDEX IF NOT EXISTS idx_contact_audit_admin ON contact_audit_log(admin_id);
 CREATE INDEX IF NOT EXISTS idx_contact_audit_created ON contact_audit_log(created_at);
 
+-- Off-site backup audit trail (Phase O). One row per linklib.backup.
+-- backup_now() attempt, success or failure — the actual audit trail for
+-- "did the Google Drive backup work." Written from linklib/backup.py
+-- itself (not from webapp/app.py call sites) so every trigger path is
+-- covered by one code path: the weekly GitHub Action hitting
+-- POST /admin/backup-now, an admin clicking the same route by hand, and
+-- the ~18 debounced maybe_backup() call sites in webapp/app.py that fire
+-- it as a side effect of a Library/Archive write. Before this table
+-- existed, the only record of an attempt was a print() to stdout inside
+-- maybe_backup()'s exception handler — invisible to anyone not tailing
+-- Railway's runtime logs. Those print() calls stay as a secondary signal;
+-- this table is the one the admin UI (/admin/library/backup) reads from.
+-- drive_file_id/bytes/row_count are populated on success only; error is
+-- populated on failure only. row_count is SELECT COUNT(*) FROM articles
+-- against the snapshot at backup time — the sanity check the Phase O
+-- investigation recommended, reusing the same check the restore path
+-- (/admin/library/backup/upload-db) already runs on upload.
+CREATE TABLE IF NOT EXISTS backup_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    status        TEXT NOT NULL,              -- 'success' | 'failure'
+    filename      TEXT NOT NULL DEFAULT '',    -- library-YYYYMMDD-HHMMSS.db
+    drive_file_id TEXT NOT NULL DEFAULT '',    -- Drive file id (success only)
+    bytes         INTEGER NOT NULL DEFAULT 0,
+    row_count     INTEGER NOT NULL DEFAULT 0,  -- articles count at backup time
+    error         TEXT NOT NULL DEFAULT '',    -- failure only
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_backup_log_created ON backup_log(created_at);
+
 -- Overhead cost ledger for embed-on-save + the one-off backfill (#93) — one
 -- row per embedded article, upserted by article_id. content_hash is the
 -- SHA-256 of the exact text that was embedded (linklib.embeddings.
@@ -2511,6 +2541,27 @@ class Library:
                FROM contact_audit_log a LEFT JOIN users u ON u.id = a.admin_id
                ORDER BY a.created_at DESC LIMIT ?""",
             (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -- off-site backups (Phase O) ------------------------------------------
+
+    def record_backup_attempt(self, status: str, filename: str = "", drive_file_id: str = "",
+                               size_bytes: int = 0, row_count: int = 0, error: str = "") -> int:
+        """Log one linklib.backup.backup_now() attempt, success or failure.
+        See the backup_log CREATE TABLE comment for why this exists and who
+        calls it."""
+        cur = self.conn.execute(
+            "INSERT INTO backup_log (status, filename, drive_file_id, bytes, row_count, error, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (status, filename, drive_file_id, size_bytes, row_count, error, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_backup_log(self, limit: int = 100) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM backup_log ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
 

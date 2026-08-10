@@ -36,6 +36,7 @@ flowchart LR
     R -->|"RSS/Atom + article<br/>full-text fetches"| F["Publisher sites"]
     R -->|"outbound email"| G["Gmail REST API"]
     R -->|"weekly DB snapshot"| D["Google Drive"]
+    GH["GitHub Actions<br/>backup.yml, weekly cron"] -->|"POST /admin/backup-now<br/>(X-Save-Token)"| R
 ```
 
 Notes on the edges:
@@ -84,6 +85,20 @@ Notes on the edges:
   badge instead of dying in a log. At the DNS level (Cloudflare-managed) the
   domain has SPF and DKIM in place, plus DMARC in `p=none` monitoring mode —
   collecting reports, not yet enforcing.
+- **The weekly Drive backup is triggered by a GitHub Action, not a Railway
+  cron service.** `.github/workflows/backup.yml` calls `POST
+  /admin/backup-now` on a weekly schedule (`X-Save-Token` auth, same as
+  RUNBOOK.md's manual curl example) — this is Phase O's fix for the original
+  mechanism (`linklib.backup.maybe_backup`, debounced and only fired as a
+  side effect of ~18 admin/save routes in `webapp/app.py`) never getting a
+  reliable weekly opportunity to run in practice. Those ~18 call sites are
+  unchanged and still fire opportunistically as a harmless bonus trigger.
+  Every attempt from either path — success or failure — is logged to the
+  `backup_log` table (see the Site operations table below) and surfaced on
+  `/admin/library/backup`'s status banner + history table; the Action's own
+  run history in the repo's Actions tab is a second, independent signal that
+  catches the case where the site itself is unreachable and there's no
+  in-app record at all.
 
 ## 2. Database
 
@@ -104,7 +119,7 @@ Every table in the file, grouped by feature area:
 | Chat Matchmaker | `matchmaker_questions` |
 | Accounts | `users`, `password_reset_requests` |
 | CFO Toolbox | `tools`, `tool_categories`, `tool_audit_log`, `benchmarks`, `tool_leads`, `communities`, `community_categories`, `community_audit_log`, `community_profiles`, `community_gap_submissions`, `community_profile_views` |
-| Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log` |
+| Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log`, `backup_log` |
 | "Sail, Don't Row" (`/play`) | `game_rank_settings`, `game_runs` |
 
 `linklib/db.py` defines and migrates all of it — the `Library` class is the
@@ -1015,6 +1030,7 @@ effect.
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
 | `contact_audit_log` | Same shape for contact deletions — kept separate so `item_id` is never ambiguous about which table it references. | as above, `item_id` → `contacts.id` |
+| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the weekly GitHub Action, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled Action run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
 
 ### "Sail, Don't Row" (the /play game)
 
@@ -1688,6 +1704,21 @@ recorded anywhere, it's flagged rather than invented.
   generation (`linklib/social.py`, `scripts/post.py`) was removed entirely in
   the same change — superseded by Brian's `write-like-brian` skill used
   directly in Claude, so the app no longer needs its own drafting surface.
+- **The backup trigger is a scheduled GitHub Action, not a Railway cron
+  service or an in-process scheduler (Phase O).** A Phase O investigation
+  found the Drive backup mechanism itself (`linklib/backup.py`) was real and
+  working, but had never actually been *scheduled* — it only fired as a
+  debounced side effect of ~18 unrelated admin/save routes, which in
+  practice went weeks without tripping. *Why a GitHub Action over the
+  alternatives:* it reuses the existing `POST /admin/backup-now` route and
+  auth verbatim (no new code path), needs no second Railway service, and its
+  own run history in the Actions tab is a second, independent visibility
+  layer beyond the in-app `backup_log` table — if the site itself is down,
+  the Action still fails visibly even though the app never got the chance
+  to write a log row. `/admin/backup-now` now returns a real non-2xx status
+  on failure (`503` not configured, `502` upload failed) instead of always
+  `200`, specifically so `curl -f` in the Action (and any future monitoring)
+  can tell success from failure without parsing HTML.
 
 ## 5. Directory map
 
@@ -1717,7 +1748,7 @@ linklib/                    # the core library — everything durable lives here
   models.py                 # curated model registry reconciled with the live Models API
   passwords.py              # scrypt hashing (stdlib only)
   email_utils.py            # outbound email via Gmail REST API (Railway blocks SMTP)
-  backup.py                 # weekly off-site DB snapshot to Google Drive
+  backup.py                 # off-site DB snapshot to Google Drive; every attempt logged to backup_log (Phase O)
   authcheck.py              # probes paywall auth cookies so a stale one surfaces
   brand_check.py, voice_review.py  # deterministic BRAND.md palette/voice checks
 scripts/                    # CLI entry points (import, add_link, enrich_backfill,
