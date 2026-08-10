@@ -19785,6 +19785,7 @@ def admin_backup(request: Request, uploaded: str = ""):
 
 <h2 style="font-size:16px;margin:0 0 4px;">Off-site backup (Google Drive)</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">{folder_line}</p>
+<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Setting <code>GOOGLE_DRIVE_FOLDER_ID</code> in Railway overrides this and points backups at that folder instead, starting with the next attempt&mdash;no redeploy needed. Leave it unset to keep using the folder above.</p>
 {_backup_status_banner(backup_rows)}
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">

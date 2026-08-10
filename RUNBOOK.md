@@ -30,7 +30,9 @@ files/folders the app created via the API (a hand-made folder 404s no
 matter how correct its id is — see `linklib/backup.py`'s module docstring
 for the full story). `/admin/library/backup` shows a live link to the
 current folder. `GOOGLE_DRIVE_FOLDER_ID`, if set, overrides this and takes
-priority — normally left unset.
+priority — normally left unset. The override is read fresh on every backup
+attempt (not cached at startup), so setting or clearing it in Railway takes
+effect on the very next attempt — no redeploy needed.
 
 ### Path A — the app is up (normal case)
 
