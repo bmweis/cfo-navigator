@@ -153,6 +153,35 @@ sqlite-vec's shadow tables (`articles_fts_data`/`_idx`/`_docsize`/`_config`,
 `articles_vec`'s equivalents) are filtered out of the diagram since they're
 SQLite implementation detail, not schema.
 
+The diagram's click-to-expand modal (`_diagram_lightbox_html` in
+`webapp/app.py`, shared with the FP&A Buddy flowchart below) got real
+pan/zoom in a Phase I follow-up, after direct testing showed a bigger
+static view alone didn't solve anything — individual table fields on the
+~39-table diagram stayed illegible even fully expanded, because the
+problem was density/layout, not size. Pan/zoom/fullscreen-style navigation
+is `svg-pan-zoom` (CDN script, MIT, same no-build-step pattern as
+Cropper.js and Mermaid itself) wrapping the already-rendered SVG. The
+modal also carries a search box: typing a table name finds its erDiagram
+entity node (`g[id^="entity-{name}-"]`, matched by stripping non-
+alphanumeric characters the same way Mermaid sanitizes the id), gives it a
+coral highlight border, and pans/zooms the view to center it — cleared
+when the search box empties or the modal is closed. The FP&A Buddy
+flowchart below gets the same pan/zoom but not the search box, since a
+flowchart has no "find a table" concept.
+
+The Content volume table below the diagram is grouped into collapsible
+sections (same `<details class="admin-group">` disclosure the admin hub's
+own nav groups use), collapsed by default — the flat 39-row table pushed
+the diagram far down the page. `_TABLE_GROUPS` in `webapp/app.py` is the
+grouping map; `_grouped_table_sections` buckets the live schema against
+it and puts anything the map hasn't caught up with in a trailing "Other"
+group rather than dropping it silently. A separate "Cost & spend" section
+with dollar totals for `enrichment_cost`/`manual_overhead` used to live on
+this page too — removed as a duplicate of `/admin/overhead-spend`, which
+already owns cost reporting; the page now just links there, and both
+tables appear in the regular grouped listing with their row counts like
+any other table.
+
 **`/admin/system/page-index`** (System nav group) is the same live-introspection
 pattern applied to routes instead of tables: on every page load it walks
 `app.routes`, keeps GET routes whose `response_class` is `HTMLResponse`
