@@ -675,18 +675,91 @@ def _name_duplicate_warning(dup: dict) -> str:
             f'with a matching name: /tools/software/{dup["slug"]}/edit')
 
 
+def _narrative_verify_widget(needs_verification: bool, verify_form_id: str, verify_url: str,
+                              latest_review: dict | None,
+                              badge_label: str = "Needs verification",
+                              action_label: str = "Mark verified",
+                              past_tense_verb: str = "Verified",
+                              extra_hidden_fields_html: str = "") -> tuple[str, str, str, str]:
+    """Shared "Needs verification" badge / "Mark [verified/reviewed]" button /
+    hidden verify-form / "Verified by X on Y" line for one AI-drafted
+    narrative field — the widget PR 1 built once for Agent taxonomy and
+    Phase G PR 2 reuses for Description and Differentiation (Community
+    profile draft reuses only the button+line half, via its own existing
+    needs_review checkbox instead of a badge — see
+    _community_profile_form_fields).
+
+    Returns (badge_html, action_html, hidden_form_html, review_line_html).
+    Every rendering site lives inside a <form> of its own (#tool-edit-form
+    or #community-edit-form), so the verify action is always a bare button
+    pointing at a hidden, empty <form> placed elsewhere on the page —
+    never a <form> nested inside the enclosing one. A nested <form>'s
+    closing tag pops the *outer* form off the browser's parse stack early,
+    silently orphaning every field/button after that point (Save changes
+    included) — see the original agent-taxonomy-verify-form comment this
+    generalizes for the "Save changes does nothing" bug that pattern fixed."""
+    badge_html = ""
+    action_html = ""
+    form_html = ""
+    if needs_verification:
+        badge_html = (
+            f'<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
+            f'background:#fef3c7;color:#92400e;border-radius:5px;padding:2px 7px;margin-left:8px;">{_esc(badge_label)}</span>'
+        )
+        action_html = (
+            f'<button type="submit" form="{verify_form_id}" '
+            f'class="tool-admin-btn" style="margin-top:8px;">{_esc(action_label)}</button>'
+        )
+        form_html = (
+            f'<form id="{verify_form_id}" method="post" action="{verify_url}" '
+            f'style="display:none;">{extra_hidden_fields_html}</form>'
+        )
+    review_line_html = ""
+    if latest_review:
+        reviewer = latest_review.get("admin_username") or "admin"
+        reviewed_date = (latest_review.get("created_at") or "")[:10]
+        review_line_html = (
+            f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
+            f'{_esc(past_tense_verb)} by {_esc(reviewer)} on {_esc(reviewed_date)}</p>'
+        )
+    return badge_html, action_html, form_html, review_line_html
+
+
+def _ai_drafted_field_names(form) -> set[str]:
+    """The submitted ai_drafted_fields hidden input (see markAiDrafted in the
+    edit-form JS), parsed into a set of field names — shared by
+    _record_ai_drafted_reviews below and by the edit-submit routes that need
+    to know, at save time, whether a specific field's current value is a
+    freshly-generated-this-session AI draft (Description/Differentiation/
+    the Community profile draft's needs-verification flags, Phase G PR 2)."""
+    raw = (form.get("ai_drafted_fields") or "").strip()
+    return {f.strip() for f in raw.split(",") if f.strip()}
+
+
 def _record_ai_drafted_reviews(lib: Library, request: Request, entity_type: str, entity_id: int, form) -> None:
     """Stamps a field_reviews row for every field named in the submitted
-    ai_drafted_fields hidden input (see markAiDrafted in the edit-form JS) —
-    standing principle: AI drafts into the form, the save that follows is
-    what makes "reviewed" real. A no-op when the field is empty, e.g. a save
-    that never touched a Generate button."""
-    raw = (form.get("ai_drafted_fields") or "").strip()
-    if not raw:
+    ai_drafted_fields hidden input — standing principle: AI drafts into the
+    form, the save that follows is what makes "reviewed" real. A no-op when
+    the field is empty, e.g. a save that never touched a Generate button.
+
+    Phase G PR 2: skips any (entity_type, field_name) in
+    _RETIRED_FIELD_REVIEW_FIELDS — Description, Differentiation, and the
+    Community profile draft's 23 fields moved to the stricter
+    needs_verification-column + narrative_review_log "Mark verified" gate
+    (set directly by the edit-submit routes below, not here), so field_reviews
+    stops growing for them going forward. field_reviews itself is NOT
+    dropped — it stays in place, frozen as of this cutover, as a historical
+    record for those fields plus everything still using it unmodified
+    (the Community "Auto-fill from URL" listing fields, competitor-match
+    suggestions) — see CLAUDE.md's Phase G note."""
+    field_names = _ai_drafted_field_names(form)
+    if not field_names:
         return
     claims = _current_claims(request)
     reviewed_by = (claims.get("username") if claims else "") or "admin"
-    for field_name in {f.strip() for f in raw.split(",") if f.strip()}:
+    for field_name in field_names:
+        if (entity_type, field_name) in _RETIRED_FIELD_REVIEW_FIELDS:
+            continue
         lib.record_field_review(entity_type, entity_id, field_name, reviewed_by)
 
 
@@ -8564,6 +8637,24 @@ _COMMUNITY_PROFILE_FIELD_IDS = [
     "seniority_band", "primary_purpose", "resources_included",
     "platform_type", "meeting_format", "event_style", "cpe_eligible",
 ]
+
+# Phase G PR 2: (entity_type, field_name) pairs that no longer get a
+# field_reviews row on save — they moved to a stricter needs_verification +
+# narrative_review_log "Mark verified" gate instead (Description,
+# Differentiation on the tool side; the Community profile draft as a whole,
+# reusing community_profiles.needs_review rather than a new column — see
+# _record_ai_drafted_reviews and CLAUDE.md's Phase G note). `summary` rides
+# along with `description` — generateDescription() drafts and marks both in
+# one Generate click, so it shares description's flag rather than being
+# left tracked nowhere. Everything else that calls markAiDrafted
+# (the Community listing "Auto-fill from URL" fields, competitor-match
+# suggestions on both entity types) is deliberately NOT in this set —
+# field_reviews keeps tracking those exactly as before.
+_RETIRED_FIELD_REVIEW_FIELDS = (
+    {("tool", "description"), ("tool", "summary"), ("tool", "differentiation_note")}
+    | {("community", f) for f in _COMMUNITY_PROFILE_FIELD_IDS}
+)
+
 _GENERATE_PROFILE_JS = _MARK_AI_DRAFTED_JS + """
 var COMMUNITY_PROFILE_FIELDS = """ + json.dumps(_COMMUNITY_PROFILE_FIELD_IDS) + """;
 async function generateCommunityProfile(name, url, statusId, errBoxId) {
@@ -10430,12 +10521,44 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
   </div>"""
 
 
-def _community_profile_form_fields(p: dict | None, community: dict) -> str:
+def _community_profile_form_fields(p: dict | None, community: dict,
+                                    latest_review: dict | None = None) -> tuple[str, str]:
     """The Community Profile edit form (deep qualitative fields, distinct from
     the directory metadata in _community_form_fields above). Field ids are
     'cp-<column name>' — generateCommunityProfile (_GENERATE_PROFILE_JS)
-    reads/writes them by that convention."""
+    reads/writes them by that convention.
+
+    latest_review (Phase G PR 2): the narrative_review_log entry, if any,
+    for this profile's field_type='community_profile' — powers the
+    "Reviewed by X on Y" line next to the needs_review checkbox below. The
+    admin-list "Mark reviewed" button (POST .../mark-reviewed) already
+    existed pre-Phase-G; this adds the *same* one-click action inline on
+    this edit page too, since that button living only on the list row
+    (never on the page where the content actually is) is exactly the
+    discoverability gap the Phase G investigation flagged for Agent
+    taxonomy — reusing needs_review rather than a new column deliberately
+    avoids repeating that gap for a second flag.
+
+    Returns (fields_html, hidden_verify_form_html) rather than one string —
+    fields_html renders inside the page's main <form>, but the "Mark
+    reviewed" button's target <form> must NOT be nested inside it (see
+    _narrative_verify_widget's docstring for why), so the caller renders
+    hidden_verify_form_html after the main form's closing tag instead."""
     p = p or {}
+    _, _community_profile_mark_reviewed_action, _community_profile_mark_reviewed_form_html, _community_profile_review_line_html = (
+        _narrative_verify_widget(
+            bool(p.get("needs_review")),
+            "community-profile-mark-reviewed-form",
+            f"/admin/tools/communities/{community['id']}/mark-reviewed",
+            latest_review, action_label="Mark reviewed", past_tense_verb="Reviewed",
+            # Return here rather than the admin list's default redirect —
+            # this button lives on the profile edit page itself.
+            extra_hidden_fields_html=(
+                f'<input type="hidden" name="redirect_to" '
+                f'value="/admin/tools/communities/{community["id"]}/profile">'
+            ),
+        )
+    )
 
     def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2) -> str:
         req_mark = " *" if required else ""
@@ -10511,9 +10634,11 @@ def _community_profile_form_fields(p: dict | None, community: dict) -> str:
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" id="cp-needs_review" name="needs_review" value="1"{' checked' if p.get('needs_review') else ''}>
-      <span>Needs review: flagged for Brian to personally read and approve before treating this profile as final.</span>
+      <span>Needs review: flagged for Brian to personally read and approve before treating this profile as final. Auto-checked whenever "Generate summary" above drafts new content—uncheck and save, or use "Mark reviewed" below, once it's been read.</span>
     </label>
-  </div>"""
+    {_community_profile_mark_reviewed_action if p.get('needs_review') else ''}
+    {_community_profile_review_line_html}
+  </div>""", _community_profile_mark_reviewed_form_html
 
 
 # Reference content for the "How this works" block on /admin/tools/communities
@@ -11523,15 +11648,36 @@ async def admin_communities_app_screenshot_upload(request: Request, community_id
 
 
 @app.post("/admin/tools/communities/{community_id}/mark-reviewed")
-def admin_communities_mark_reviewed(request: Request, community_id: int):
+async def admin_communities_mark_reviewed(request: Request, community_id: int):
+    """Clears community_profiles.needs_review — pre-existing action, now
+    also logged to narrative_review_log (Phase G PR 2, field_type=
+    'community_profile') so "Reviewed by X on Y" can render wherever this
+    flag is shown, same as Agent taxonomy/Description/Differentiation's
+    "Mark verified". detail snapshots verdict_summary (the profile's
+    one-line "Best for X, not for Y" takeaway) as of this click — the most
+    representative single field to keep, mirroring how the other verify
+    routes snapshot their field's own text."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    # Called from both the admin list row (no redirect_to — stay on the
+    # list, its original behavior) and the profile edit page itself
+    # (Phase G PR 2 addition) — validated against an allowlist since it
+    # echoes into a redirect, same convention as admin_tools_delete.
+    redirect_to = form.get("redirect_to") or "/admin/tools/communities"
+    if redirect_to not in ("/admin/tools/communities", f"/admin/tools/communities/{community_id}/profile"):
+        redirect_to = "/admin/tools/communities"
     lib = _lib()
     try:
+        profile = lib.get_community_profile(community_id)
         lib.mark_community_profile_reviewed(community_id)
+        lib.record_narrative_review(
+            _current_user_id(lib, request), "community", "community_profile", community_id,
+            detail=(profile or {}).get("verdict_summary") or "",
+        )
     finally:
         lib.close()
-    return RedirectResponse("/admin/tools/communities", status_code=303)
+    return RedirectResponse(redirect_to, status_code=303)
 
 
 @app.post("/admin/tools/communities/{community_id}/delete")
@@ -11581,21 +11727,24 @@ def admin_community_profile_edit(request: Request, community_id: int):
     try:
         c = lib.get_community(community_id)
         p = lib.get_community_profile(community_id)
+        latest_review = lib.get_latest_narrative_review("community", "community_profile", community_id)
     finally:
         lib.close()
     if not c:
         raise HTTPException(status_code=404, detail="Community not found")
+    _profile_fields_html, _profile_mark_reviewed_form_html = _community_profile_form_fields(p, c, latest_review)
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <h1>Profile: {_esc(c['name'])}</h1>
 <form method="post" action="/admin/tools/communities/{community_id}/profile" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
-{_community_profile_form_fields(p, c)}
+{_profile_fields_html}
   <div>
     <button type="submit" class="btn">Save profile</button>
     <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
+{_profile_mark_reviewed_form_html}
 </div>
 <script>{_GENERATE_PROFILE_JS}</script>"""
     return HTMLResponse(_page(f"Profile: {_esc(c['name'])}—CFO Toolbox Admin", "", body, authed=True))
@@ -11612,6 +11761,16 @@ async def admin_community_profile_submit(request: Request, community_id: int):
         form = await request.form()
         founded_year_raw = (form.get("founded_year") or "").strip()
         founded_year = int(founded_year_raw) if founded_year_raw.isdigit() else None
+        # Phase G PR 2: reuses needs_review (pre-existing, whole-profile,
+        # manual-only until now) as the Community profile draft's
+        # needs-verification flag rather than adding a new column — OR'd
+        # with the submitted checkbox value rather than replacing it, so
+        # this save can only ever ADD the flag, never silently clear a
+        # manual one Brian set for an unrelated reason (e.g. flagged from a
+        # bulk import); the checkbox itself, unchecked and saved, is still
+        # the "I reviewed it" action, same as before this phase.
+        profile_ai_drafted = bool(_ai_drafted_field_names(form) & set(_COMMUNITY_PROFILE_FIELD_IDS))
+        needs_review = 1 if (form.get("needs_review") == "1" or profile_ai_drafted) else 0
         lib.upsert_community_profile(
             community_id,
             ideal_member=(form.get("ideal_member") or "").strip(),
@@ -11635,7 +11794,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             event_style=(form.get("event_style") or "").strip(),
             seniority_band=(form.get("seniority_band") or "").strip(),
             resources_included=(form.get("resources_included") or "").strip(),
-            needs_review=1 if form.get("needs_review") == "1" else 0,
+            needs_review=needs_review,
             stage_focus=(form.get("stage_focus") or "").strip(),
             jobs_program=(form.get("jobs_program") or "").strip(),
             team_or_individual=(form.get("team_or_individual") or "").strip(),
@@ -11982,6 +12141,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         latest_taxonomy_review = (
             lib.get_latest_narrative_review("tool", "agent_taxonomy", tool_id) if tool else None
         )
+        latest_description_review = (
+            lib.get_latest_narrative_review("tool", "description", tool_id) if tool else None
+        )
+        latest_differentiation_review = (
+            lib.get_latest_narrative_review("tool", "differentiation", tool_id) if tool else None
+        )
     finally:
         lib.close()
     if not tool:
@@ -12102,51 +12267,37 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
                                  'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t complete the research pass—'
                                  'the site may block fetches, or the Anthropic API key/SDK is unavailable. Try again later.</p>')
 
-    _taxonomy_verify_badge = ""
-    _taxonomy_verify_action = ""
-    if tool.get("agent_taxonomy_needs_verification"):
-        _taxonomy_verify_badge = (
-            '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
-            'background:#fef3c7;color:#92400e;border-radius:5px;padding:2px 7px;margin-left:8px;">Needs verification</span>'
+    # Needs-verification badge / Mark verified button / hidden verify-form /
+    # "Verified by X on Y" line — shown regardless of whether the field
+    # currently needs verification again (a fresh AI draft can re-flag it),
+    # so the admin can see it was checked before rather than only ever
+    # seeing "Needs verification" with no history. No dedicated history view
+    # yet — just the single most recent confirmation (Phase G scope). Phase
+    # G PR 2 generalized this into _narrative_verify_widget and reuses it
+    # for Description/Differentiation below — see that function's docstring
+    # for why the verify action is always a bare button against a hidden
+    # form, never a <form> nested inside #tool-edit-form.
+    _taxonomy_verify_badge, _taxonomy_verify_action, _taxonomy_verify_form_html, _taxonomy_review_line_html = (
+        _narrative_verify_widget(
+            bool(tool.get("agent_taxonomy_needs_verification")),
+            "agent-taxonomy-verify-form", f"/admin/tools/{tool_id}/agent-taxonomy/verify",
+            latest_taxonomy_review,
         )
-        # A bare button pointing at the hidden agent-taxonomy-verify-form
-        # below (same pattern as the Generate summary/Generate screenshot
-        # buttons' research-refresh-form / screenshot-recapture-form) rather
-        # than an inline <form>...</form> here: this whole block renders
-        # inside #tool-edit-form, and a <form> nested inside another <form>
-        # is invalid HTML — browsers handle it by having the nested form's
-        # closing tag pop the *outer* form off the parse stack early,
-        # silently orphaning every field/button after this point (Save
-        # changes included) from #tool-edit-form. That was the root cause of
-        # "Save changes does nothing" once a tool's agent taxonomy needed
-        # verification, and is also why the hidden form below only renders
-        # in this same branch — once verified, no verify action (or its URL)
-        # should be present on the page at all.
-        _taxonomy_verify_action = (
-            '<button type="submit" form="agent-taxonomy-verify-form" '
-            'class="tool-admin-btn" style="margin-top:8px;">Mark verified</button>'
+    )
+    _description_verify_badge, _description_verify_action, _description_verify_form_html, _description_review_line_html = (
+        _narrative_verify_widget(
+            bool(tool.get("description_needs_verification")),
+            "description-verify-form", f"/admin/tools/{tool_id}/description/verify",
+            latest_description_review,
         )
-        _taxonomy_verify_form_html = (
-            f'<form id="agent-taxonomy-verify-form" method="post" '
-            f'action="/admin/tools/{tool_id}/agent-taxonomy/verify" style="display:none;"></form>'
+    )
+    _differentiation_verify_badge, _differentiation_verify_action, _differentiation_verify_form_html, _differentiation_review_line_html = (
+        _narrative_verify_widget(
+            bool(tool.get("differentiation_needs_verification")),
+            "differentiation-verify-form", f"/admin/tools/{tool_id}/differentiation/verify",
+            latest_differentiation_review,
         )
-    else:
-        _taxonomy_verify_form_html = ""
-
-    # "Verified by X on Y" — the narrative_review_log entry, if any, for the
-    # current taxonomy note. Shown regardless of whether the note currently
-    # needs verification again (a fresh AI refresh can re-flag it), so the
-    # admin can see it was checked before rather than only ever seeing
-    # "Needs verification" with no history. No dedicated history view yet —
-    # just the single most recent confirmation (Phase G scope).
-    _taxonomy_review_line_html = ""
-    if latest_taxonomy_review:
-        _reviewer = latest_taxonomy_review.get("admin_username") or "admin"
-        _reviewed_date = (latest_taxonomy_review.get("created_at") or "")[:10]
-        _taxonomy_review_line_html = (
-            f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
-            f'Verified by {_esc(_reviewer)} on {_esc(_reviewed_date)}</p>'
-        )
+    )
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -12188,7 +12339,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *{_description_verify_badge}</label>
       <span>
         <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
@@ -12198,12 +12349,15 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <textarea id="tool-desc" name="description" required maxlength="2500" rows="7"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
+    {_description_verify_action}
+    {_description_review_line_html}
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
     <textarea id="tool-summary" name="summary" required maxlength="400" rows="2"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
+    <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description above—shares its verification status, not tracked separately.</p>
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
@@ -12225,7 +12379,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">How this differs from the competition <span style="font-weight:400;color:var(--muted);">(shown on the profile page as the Bottom line callout)</span></label>
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">How this differs from the competition <span style="font-weight:400;color:var(--muted);">(shown on the profile page as the Bottom line callout)</span>{_differentiation_verify_badge}</label>
       <span>
         <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>
@@ -12235,6 +12389,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <textarea id="tool-differentiation" name="differentiation_note" maxlength="600" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('differentiation_note') or '')}</textarea>
+    {_differentiation_verify_action}
+    {_differentiation_review_line_html}
   </div>
   <div>
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
@@ -12282,6 +12438,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <form id="screenshot-recapture-form" method="post" action="/admin/tools/{tool_id}/screenshot/recapture" style="display:none;"></form>
 {_app_screenshot_after_form_html}
 {_taxonomy_verify_form_html}
+{_description_verify_form_html}
+{_differentiation_verify_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Competitors</h2>
@@ -12456,14 +12614,28 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
+    # Phase G PR 2: a field saved right after a fresh Generate click (named
+    # in ai_drafted_fields this submit) is unconfirmed until an explicit
+    # "Mark verified" — same contract Agent taxonomy already has, just set
+    # here instead of a separate Refresh route since Description/
+    # Differentiation have no such route (Generate is AJAX-only; this Save
+    # is the only place a draft is ever persisted). Any other save (no fresh
+    # draft this session) clears it — editing/saving a field by hand is
+    # itself a confirmation, same convention update_tool_agent_taxonomy
+    # already uses.
+    ai_drafted = _ai_drafted_field_names(form)
+    description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
+    differentiation_needs_verification = 1 if "differentiation_note" in ai_drafted else 0
     lib = _lib()
     try:
         name_dup = lib.find_tool_name_duplicate(name, exclude_id=tool_id)
         lib.update_tool(tool_id, name, description, url, categories, advisor=advisor,
                         promoted=promoted, vendor_email=vendor_email,
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
-                        summary=summary)
-        lib.update_tool_differentiation(tool_id, differentiation_note)
+                        summary=summary,
+                        description_needs_verification=description_needs_verification)
+        lib.update_tool_differentiation(tool_id, differentiation_note,
+                                        needs_verification=differentiation_needs_verification)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
@@ -12606,6 +12778,50 @@ def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
         lib.record_narrative_review(
             _current_user_id(lib, request), "tool", "agent_taxonomy", tool_id,
             detail=tool.get("agent_taxonomy_note") or "",
+        )
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/description/verify")
+def admin_tools_description_verify(request: Request, tool_id: int):
+    """One-click "Mark verified" for the Description field (Phase G PR 2) —
+    same shape as admin_tools_agent_taxonomy_verify. Covers `summary` too
+    (drafted together, not tracked separately — see
+    _RETIRED_FIELD_REVIEW_FIELDS)."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        lib.mark_tool_description_verified(tool_id)
+        lib.record_narrative_review(
+            _current_user_id(lib, request), "tool", "description", tool_id,
+            detail=tool.get("description") or "",
+        )
+    finally:
+        lib.close()
+    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
+
+
+@app.post("/admin/tools/{tool_id}/differentiation/verify")
+def admin_tools_differentiation_verify(request: Request, tool_id: int):
+    """One-click "Mark verified" for the Differentiation/Bottom-line field
+    (Phase G PR 2) — same shape as admin_tools_agent_taxonomy_verify."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        tool = lib.get_tool(tool_id)
+        if not tool:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        lib.mark_tool_differentiation_verified(tool_id)
+        lib.record_narrative_review(
+            _current_user_id(lib, request), "tool", "differentiation", tool_id,
+            detail=tool.get("differentiation_note") or "",
         )
     finally:
         lib.close()
