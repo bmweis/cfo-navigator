@@ -301,6 +301,57 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Description/Differentiation/Community-profile-draft rollout is paused
   pending that call; Agent taxonomy's fix above is unaffected and shipped on
   its own.
+- **Phase G PR 2 — Description, Differentiation, and the Community profile
+  draft join the "Mark verified" gate; `field_reviews` goes frozen, not
+  dropped.** Resolution of the reconciliation question above. Confirmed
+  (Option 3): no backfill of `field_reviews`' existing rows into
+  `narrative_review_log` — the two tables record different things (a save
+  that happened to follow a Generate click vs. a deliberate confirm click),
+  and translating one into the other would fabricate confirmations that
+  never actually happened. `field_reviews` itself is **not dropped** —
+  same non-destructive-retirement precedent as `screenshot_is_product`
+  (see the Key architecture decisions bullet above): it stays in the schema
+  as a frozen historical record for the fields it no longer tracks
+  (Description, `summary`, `differentiation_note`, the 23 Community profile
+  fields — `_RETIRED_FIELD_REVIEW_FIELDS` in `webapp/app.py`), while it
+  keeps growing normally for everything this phase didn't touch (the
+  Community "Auto-fill from URL" listing fields, competitor-match
+  suggestions on both entity types). New columns `tools.
+  description_needs_verification`/`differentiation_needs_verification`
+  default to 0 for every existing row (no retroactive flagging, same
+  precedent `agent_taxonomy_needs_verification`'s own migration set) — only
+  the *next* AI draft of each field trips the gate. `summary` shares
+  `description_needs_verification` rather than getting a column of its own,
+  since `generateDescription()` drafts and marks both fields in one click.
+  Since neither field has a separate Refresh route the way Agent taxonomy
+  does — Generate is AJAX-only, and the main edit-submit route is the only
+  place a draft is ever saved — that one route sets the flag directly at
+  save time: `1` when this submit's `ai_drafted_fields` names the field, `0`
+  otherwise (a hand-edited or untouched save is itself a confirmation, the
+  same convention `update_tool_agent_taxonomy` already used). **A second
+  structural discovery surfaced mid-build, specific to the Community
+  profile draft:** `community_profiles.needs_review` already existed as a
+  working whole-profile "flag for later" mechanism — its own "Mark
+  reviewed" button, an admin-list badge, a count, and a `?filter=
+  needs_review` view — built for flagging profiles from a bulk import,
+  manual-only, never auto-set by AI generation. Adding a fourth, separate
+  `community_profile_needs_verification` column alongside it would have put
+  two similar-looking badges on the same admin row for related concerns.
+  Flagged before building past it; Brian's call was to reuse `needs_review`
+  instead: `POST /admin/tools/communities/{id}/profile` now OR's it to `1`
+  whenever the save's `ai_drafted_fields` names any of the 23 profile
+  fields (never overriding a manually-set `1` to `0`), and the pre-existing
+  "Mark reviewed" action now also writes a `narrative_review_log` row and —
+  new in this phase — is reachable directly from the profile edit page
+  itself (`/admin/tools/communities/{id}/profile`), not only the admin-list
+  row, closing the same discoverability gap the original Phase G
+  investigation flagged for Agent taxonomy's missing button in the first
+  place. `_narrative_verify_widget` (`webapp/app.py`) generalizes the
+  badge/button/hidden-form/review-line markup PR 1 built once for Agent
+  taxonomy into one shared helper — reused directly for Description and
+  Differentiation, and in reduced form (button + review line only, no
+  badge, since the existing checkbox already shows state) for the Community
+  profile draft.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

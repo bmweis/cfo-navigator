@@ -1533,6 +1533,21 @@ class Library:
             "ALTER TABLE communities ADD COLUMN app_screenshot_source_url TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE communities ADD COLUMN app_screenshot_url TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE communities ADD COLUMN app_screenshot_captured_at TEXT NOT NULL DEFAULT ''",
+            # Phase G PR 2: Description and Differentiation join Agent taxonomy
+            # (agent_taxonomy_needs_verification above) with their own
+            # needs_verification flags, gated by the same narrative_review_log
+            # "Mark verified" pattern PR 1 established. Both default to 0 so
+            # existing content isn't retroactively flagged — same reasoning as
+            # agent_taxonomy_needs_verification's own migration, and consistent
+            # with the decision not to backfill field_reviews history into
+            # narrative_review_log (see CLAUDE.md's Phase G note). The
+            # Community profile draft does NOT get an equivalent
+            # `community_profiles` column here — it reuses the pre-existing
+            # `community_profiles.needs_review` flag instead (see
+            # set_tool_agent_taxonomy_draft's sibling logic in the edit-submit
+            # routes below for how these get set to 1).
+            "ALTER TABLE tools ADD COLUMN description_needs_verification INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tools ADD COLUMN differentiation_needs_verification INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -2844,7 +2859,19 @@ class Library:
                     url: str, categories: list[str], advisor: int = 0,
                     promoted: int = 0, vendor_email: str = "",
                     warm_intro_enabled: int = 0, vendor_name: str = "",
-                    summary: str = "") -> None:
+                    summary: str = "",
+                    description_needs_verification: Optional[int] = None) -> None:
+        # description_needs_verification defaults to None ("leave the column
+        # alone") rather than 0/1, because update_tool is also the bulk-edit
+        # panel's write path (every row resaved at once) and
+        # scripts/fix_corpay_category.py's one-off fix path — neither of
+        # those callers knows or should guess whether this particular save
+        # followed a fresh Generate click, so they simply don't pass it and
+        # the flag stays whatever it already was. Only the admin edit-submit
+        # route (which reads the ai_drafted_fields signal) passes an explicit
+        # 0 or 1. COALESCE keeps that "unless told otherwise" behavior a
+        # plain UPDATE can't express on its own.
+        #
         # Only check when the URL is actually changing — callers that resave a
         # row unchanged (e.g. the bulk-edit routes, which always pass the
         # row's own current url back) must never trip on a pre-existing
@@ -2857,10 +2884,13 @@ class Library:
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
                advisor=?, promoted=?, vendor_email=?, warm_intro_enabled=?, vendor_name=?,
-               summary=?, updated_at=? WHERE id=?""",
+               summary=?,
+               description_needs_verification=COALESCE(?, description_needs_verification),
+               updated_at=? WHERE id=?""",
             (name.strip(), description.strip(), url.strip(),
              json.dumps(categories), advisor, promoted, vendor_email.strip(),
-             warm_intro_enabled, vendor_name.strip(), summary.strip(), _now(), tool_id),
+             warm_intro_enabled, vendor_name.strip(), summary.strip(),
+             description_needs_verification, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -2943,15 +2973,28 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def update_tool_differentiation(self, tool_id: int, differentiation_note: str) -> None:
+    def update_tool_differentiation(self, tool_id: int, differentiation_note: str,
+                                     needs_verification: int = 0) -> None:
         """Narrow update for the admin full-edit form's "How this differs from
         the competition" field (Phase 3) — same reasoning as
         quick_update_tool: kept separate from update_tool so the Software
         bulk-edit panel, which re-saves every other field on every call, can
-        never silently blank this one out just because it doesn't know about it."""
+        never silently blank this one out just because it doesn't know about it.
+        needs_verification defaults to 0 (verified) so every existing caller
+        that predates Phase G PR 2 — tests, scripts — keeps its old
+        behavior unchanged; the edit-submit route is the only caller that
+        passes an explicit 1, when this save's `ai_drafted_fields` names
+        `differentiation_note` (a fresh AI draft this session, not yet
+        confirmed) — same "unconfirmed until an explicit Mark verified click"
+        contract agent_taxonomy_needs_verification already established,
+        just collapsed into this one write path since, unlike Agent
+        taxonomy, Differentiation has no separate Refresh route — Generate
+        is AJAX-only and this Save is the only place a draft ever gets
+        persisted."""
         self.conn.execute(
-            "UPDATE tools SET differentiation_note=?, updated_at=? WHERE id=?",
-            (differentiation_note.strip(), _now(), tool_id),
+            "UPDATE tools SET differentiation_note=?, differentiation_needs_verification=?, "
+            "updated_at=? WHERE id=?",
+            (differentiation_note.strip(), needs_verification, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -2990,6 +3033,24 @@ class Library:
         tool_features action — clears the flag without touching the text."""
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_needs_verification=0, updated_at=? WHERE id=?",
+            (_now(), tool_id),
+        )
+        self.conn.commit()
+
+    def mark_tool_description_verified(self, tool_id: int) -> None:
+        """One-click "Mark verified" for the Description field (Phase G PR 2)
+        — same shape as mark_tool_agent_taxonomy_verified."""
+        self.conn.execute(
+            "UPDATE tools SET description_needs_verification=0, updated_at=? WHERE id=?",
+            (_now(), tool_id),
+        )
+        self.conn.commit()
+
+    def mark_tool_differentiation_verified(self, tool_id: int) -> None:
+        """One-click "Mark verified" for the Differentiation/Bottom-line
+        field (Phase G PR 2) — same shape as mark_tool_agent_taxonomy_verified."""
+        self.conn.execute(
+            "UPDATE tools SET differentiation_needs_verification=0, updated_at=? WHERE id=?",
             (_now(), tool_id),
         )
         self.conn.commit()
