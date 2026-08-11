@@ -15703,20 +15703,33 @@ def _mermaid_er_diagram(schema: dict) -> str:
     return "\n".join(lines)
 
 
-# Click-to-expand lightbox for a rendered Mermaid diagram (Phase I, Part 1 —
-# option B from the investigation: Mermaid itself has no built-in pan/zoom in
-# the pinned 10.9.1 (confirmed against its release notes), and its only
-# interactivity hook (the `click` directive) is per-node and doesn't apply to
-# erDiagram anyway, so this doesn't lean on Mermaid for it. Deliberately not
-# true pan/zoom — no new dependency (a candidate like svg-pan-zoom stays
-# parked unless this turns out insufficient in practice). Same overlay
-# show/hide-by-class pattern as `_SHOT_CROP_CSS`/the app-screenshot crop
-# modal: `display:none` by default, `.open` flips it to `display:flex`,
-# toggled by adding/removing that class rather than a second stylesheet
-# concept. The stage clones the already-rendered <svg> at click time (mermaid
-# has finished rendering by the time a user can click it) rather than
-# re-rendering the diagram, so there's no dependency on mermaid's API here
-# either — it works against plain SVG.
+# Click-to-expand lightbox for a rendered Mermaid diagram, now with real
+# pan/zoom inside the expanded view (Phase I Part 2 follow-up). The original
+# Part 1 build (option B from the investigation) shipped click-to-expand
+# only — confirmed by direct testing that a bigger static view alone doesn't
+# solve the actual problem: individual table fields on the ~35-table ER
+# diagram stayed illegible even at "expanded" size, because the problem is
+# density/layout, not size. This is the upgrade to real pan/zoom (option A),
+# using `svg-pan-zoom` (github.com/bumbu/svg-pan-zoom, MIT) — the same
+# CDN-script-no-build-step pattern already used for Cropper.js and Mermaid
+# itself. It's the de-facto standard library for exactly this (wrap an
+# existing rendered SVG, no React/build tooling, ~10KB min+gzip) and was
+# confirmed against the *actual* Mermaid-rendered SVG output (not assumed):
+# Mermaid sets `width="100%"` with an inline `style="max-width:...px"` cap
+# and no `height` attribute, which makes svg-pan-zoom's own container-size
+# detection collapse to the diagram's intrinsic size instead of the modal's
+# real dimensions — `_normalizeSvgForPanZoom` below strips that cap before
+# handing the SVG to the library. erDiagram entity nodes render as
+# `<g id="entity-{name}-{uuid}">` wrapping a `rect.er.entityBox` — the name
+# segment strips every non-alphanumeric character (so `read_later` becomes
+# `readlater`), which is what the search-and-highlight matching below
+# replicates. Same overlay show/hide-by-class pattern as
+# `_SHOT_CROP_CSS`/the app-screenshot crop modal: `display:none` by
+# default, `.open` flips it to `display:flex`. The stage clones the
+# already-rendered <svg> at click time (mermaid has finished rendering by
+# the time a user can click it) rather than re-rendering the diagram, so
+# there's no dependency on mermaid's API for any of this — it works against
+# plain SVG, same as before.
 _DIAGRAM_LIGHTBOX_CSS = """
 .diagram-frame{position:relative;margin-bottom:20px;}
 .diagram-expand-btn{position:absolute;top:12px;right:12px;z-index:5;background:#fff;
@@ -15727,43 +15740,194 @@ _DIAGRAM_LIGHTBOX_CSS = """
   align-items:center;justify-content:center;padding:24px;}
 .diagram-lightbox-overlay.open{display:flex;}
 .diagram-lightbox-modal{background:#fff;border-radius:16px;padding:16px 20px 20px;width:100%;
-  max-width:95vw;max-height:90vh;display:flex;flex-direction:column;}
-.diagram-lightbox-head{display:flex;justify-content:flex-end;}
+  max-width:95vw;max-height:92vh;display:flex;flex-direction:column;}
+.diagram-lightbox-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;}
+.diagram-lightbox-search{flex:1;min-width:180px;max-width:320px;padding:8px 12px;font-size:14px;
+  border:1px solid var(--line);border-radius:8px;font-family:var(--font-body);}
+.diagram-lightbox-search:focus{outline:2px solid var(--accent);outline-offset:1px;}
+.diagram-lightbox-controls{display:flex;align-items:center;gap:6px;}
+.diagram-zoom-btn{background:#fff;border:1px solid var(--line);border-radius:8px;width:32px;height:32px;
+  font-size:16px;font-weight:600;color:var(--navy);cursor:pointer;line-height:1;}
+.diagram-zoom-btn:hover{background:var(--bg);}
+.diagram-zoom-btn.wide{width:auto;padding:0 12px;font-size:12px;}
 .diagram-lightbox-close{background:none;border:none;font-size:24px;line-height:1;color:var(--muted);
   cursor:pointer;padding:4px 8px;}
 .diagram-lightbox-close:hover{color:var(--navy);}
-.diagram-lightbox-stage{overflow:auto;flex:1;}
-.diagram-lightbox-stage svg{width:100%;height:auto;min-width:800px;}
+.diagram-lightbox-stage{overflow:hidden;flex:1;min-height:60vh;position:relative;border:1px solid var(--line);
+  border-radius:10px;background:#fff;touch-action:none;cursor:grab;}
+.diagram-lightbox-stage:active{cursor:grabbing;}
+.diagram-lightbox-stage svg{width:100%;height:100%;display:block;}
+.diagram-lightbox-hint{margin:8px 0 0;font-size:12px;color:var(--muted);}
 """
 
+# One svg-pan-zoom instance + a bit of state per open overlay, keyed by
+# overlayId — a page can carry more than one diagram lightbox (database +
+# how-fpa-buddy-works are on separate pages today, but nothing stops a
+# future page from having two), so this can't be module-level singletons.
 _DIAGRAM_LIGHTBOX_JS = """
+var _diagramLightboxState = {};
+
+function _diagramStrip(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+function _normalizeSvgForPanZoom(svg, container) {
+  // Mermaid's rendered SVG carries width="100%" plus an inline
+  // style="max-width:{diagram's own intrinsic px}" — that cap is what
+  // makes svg.clientWidth (and so svg-pan-zoom's container-size read)
+  // collapse to the diagram's own size instead of the modal's actual
+  // available space. Confirmed against real rendered output, not assumed.
+  //
+  // A plain `height:100%` doesn't fix it either — also confirmed against
+  // real rendered output: this SVG carries a viewBox, which gives it an
+  // intrinsic aspect ratio, and a percentage height on a replaced element
+  // resolves against that ratio instead of the (flex-computed, not a
+  // plain fixed CSS length) container height here, collapsing it back to
+  // the diagram's own proportions. Setting explicit pixel dimensions from
+  // the container's actual measured size sidesteps the ambiguity entirely.
+  svg.removeAttribute('width');
+  svg.removeAttribute('height');
+  svg.style.maxWidth = 'none';
+  svg.style.display = 'block';
+  var rect = container.getBoundingClientRect();
+  svg.style.width = rect.width + 'px';
+  svg.style.height = rect.height + 'px';
+}
+
+function _diagramCenterOn(pz, g) {
+  var bbox = g.getBBox();
+  // getBBox() is in the <g>'s own local coordinate system — it does NOT
+  // include the translate() Mermaid positions the node at, so that has to
+  // be added back in to get the node's true position in diagram space.
+  var tf = g.getAttribute('transform') || '';
+  var m = /translate\\(([-\\d.]+)[,\\s]+([-\\d.]+)/.exec(tf);
+  var tx = m ? parseFloat(m[1]) : 0, ty = m ? parseFloat(m[2]) : 0;
+  var cx = tx + bbox.x + bbox.width / 2, cy = ty + bbox.y + bbox.height / 2;
+
+  // svg-pan-zoom's `zoom(value)` is relative to its own fit baseline
+  // (value 1 == whatever "fit" computed), not an absolute screen scale —
+  // confirmed against real output: a fixed `zoom(2)` looked great on a
+  // small diagram (fit realZoom already near 1) but barely moved the
+  // needle on the full ~39-table diagram (fit realZoom ~0.18, so zoom(2)
+  // only reached realZoom ~0.36 — still tiny). realZoom / zoom is a
+  // constant scale factor intrinsic to this diagram/container pairing
+  // regardless of current pan/zoom state, so solving for the zoom() value
+  // that hits a fixed absolute realZoom keeps table text legible no
+  // matter how many tables are in the diagram.
+  var before = pz.getSizes();
+  var scalePerZoomUnit = before.realZoom / pz.getZoom();
+  var desiredRealZoom = 2.2;
+  pz.zoom(desiredRealZoom / scalePerZoomUnit);
+
+  var sizes = pz.getSizes();
+  pz.pan({ x: sizes.width / 2 - cx * sizes.realZoom, y: sizes.height / 2 - cy * sizes.realZoom });
+}
+
 function openDiagramLightbox(frameId, overlayId) {
   var svg = document.getElementById(frameId).querySelector('svg');
   if (!svg) return;
   var overlay = document.getElementById(overlayId);
   var stage = overlay.querySelector('.diagram-lightbox-stage');
   stage.innerHTML = '';
-  stage.appendChild(svg.cloneNode(true));
+  var clone = svg.cloneNode(true);
+  stage.appendChild(clone);
+  // The overlay must already be visible (`.open` → display:flex) before
+  // measuring the stage — while it's still display:none the whole subtree
+  // has no layout box, so getBoundingClientRect() inside
+  // _normalizeSvgForPanZoom would read 0x0 and every pan/zoom computation
+  // downstream collapses to a singular (non-invertible) matrix.
   overlay.classList.add('open');
+  _normalizeSvgForPanZoom(clone, stage);
+
+  var pz = window.svgPanZoom ? window.svgPanZoom(clone, {
+    zoomEnabled: true, panEnabled: true, controlIconsEnabled: false,
+    fit: true, center: true, minZoom: 0.3, maxZoom: 15, zoomScaleSensitivity: 0.3
+  }) : null;
+  _diagramLightboxState[overlayId] = { svg: clone, pz: pz, highlighted: null };
+
+  var input = document.getElementById(overlayId + '-search');
+  if (input) input.value = '';
+
   document.addEventListener('keydown', _diagramLightboxEscHandler);
 }
+
 function closeDiagramLightbox(overlayId) {
   document.getElementById(overlayId).classList.remove('open');
+  var state = _diagramLightboxState[overlayId];
+  if (state && state.pz) state.pz.destroy();
+  delete _diagramLightboxState[overlayId];
   document.removeEventListener('keydown', _diagramLightboxEscHandler);
 }
+
 function _diagramLightboxEscHandler(e) {
   if (e.key === 'Escape') {
-    document.querySelectorAll('.diagram-lightbox-overlay.open').forEach(function (o) { o.classList.remove('open'); });
+    document.querySelectorAll('.diagram-lightbox-overlay.open').forEach(function (o) { closeDiagramLightbox(o.id); });
   }
+}
+
+function diagramZoomIn(overlayId) {
+  var s = _diagramLightboxState[overlayId];
+  if (s && s.pz) s.pz.zoomIn();
+}
+function diagramZoomOut(overlayId) {
+  var s = _diagramLightboxState[overlayId];
+  if (s && s.pz) s.pz.zoomOut();
+}
+function diagramResetView(overlayId) {
+  var s = _diagramLightboxState[overlayId];
+  if (!s || !s.pz) return;
+  if (s.highlighted) { s.highlighted.style.stroke = ''; s.highlighted.style.strokeWidth = ''; s.highlighted = null; }
+  var input = document.getElementById(overlayId + '-search');
+  if (input) input.value = '';
+  s.pz.resetZoom(); s.pz.resetPan(); s.pz.fit(); s.pz.center();
+}
+
+// Search-and-highlight (database ER diagram only — `tableNames` is only
+// passed for that diagram; other Mermaid diagrams on the site don't carry
+// erDiagram entity nodes for this to match against). Finds the table by
+// exact name first, then by prefix, then by substring, so a partial name
+// still finds something as the admin types.
+function searchDiagramTable(overlayId, tableNamesJson) {
+  var s = _diagramLightboxState[overlayId];
+  if (!s) return;
+  if (s.highlighted) { s.highlighted.style.stroke = ''; s.highlighted.style.strokeWidth = ''; s.highlighted = null; }
+  var input = document.getElementById(overlayId + '-search');
+  var raw = input ? input.value.trim() : '';
+  if (!raw) return;
+  var needle = _diagramStrip(raw);
+  var tables = JSON.parse(tableNamesJson);
+  var match = tables.filter(function (t) { return _diagramStrip(t) === needle; })[0]
+    || tables.filter(function (t) { return _diagramStrip(t).indexOf(needle) === 0; })[0]
+    || tables.filter(function (t) { return _diagramStrip(t).indexOf(needle) !== -1; })[0];
+  if (!match) return;
+  var g = s.svg.querySelector('g[id^="entity-' + _diagramStrip(match) + '-"]');
+  if (!g) return;
+  var rect = g.querySelector('rect.er.entityBox');
+  if (!rect) return;
+  rect.style.stroke = '#E8704F';
+  rect.style.strokeWidth = '3px';
+  s.highlighted = rect;
+  if (s.pz) _diagramCenterOn(s.pz, g);
 }
 """
 
 
-def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Diagram") -> str:
+def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Diagram",
+                            table_names: list[str] | None = None) -> str:
     """Wraps a `<pre class="mermaid">` block in an expand button + its
-    matching lightbox overlay. `frame_id` must be unique per page (a page
-    with more than one diagram needs a distinct id per diagram)."""
+    matching lightbox overlay, with real pan/zoom (svg-pan-zoom) inside the
+    expanded view. `frame_id` must be unique per page (a page with more
+    than one diagram needs a distinct id per diagram). Pass `table_names`
+    (the ER diagram's entity names) to get the search-and-highlight box —
+    omit it for a diagram with no "find a table" concept (e.g. the FP&A
+    Buddy flowchart), which then gets pan/zoom only."""
     overlay_id = f"{frame_id}-lightbox"
+    search_html = ""
+    if table_names is not None:
+        names_json = _esc(json.dumps(table_names))
+        search_html = (
+            f'<input type="text" class="diagram-lightbox-search" id="{overlay_id}-search" '
+            f'placeholder="Find a table&hellip;" autocomplete="off" '
+            f'oninput="searchDiagramTable(\'{overlay_id}\', this.dataset.tables)" data-tables="{names_json}">'
+        )
     return f"""<div class="diagram-frame" id="{frame_id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;overflow-x:auto;">
 <button type="button" class="diagram-expand-btn" onclick="openDiagramLightbox('{frame_id}','{overlay_id}')" aria-label="Expand {_esc(label)}">&#10530; Expand</button>
 <pre class="mermaid" style="margin:0;">
@@ -15774,14 +15938,79 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 <div class="diagram-lightbox-overlay" id="{overlay_id}" onclick="if(event.target===this) closeDiagramLightbox('{overlay_id}')">
 <div class="diagram-lightbox-modal">
 <div class="diagram-lightbox-head">
+{search_html}
+<div class="diagram-lightbox-controls">
+<button type="button" class="diagram-zoom-btn" onclick="diagramZoomOut('{overlay_id}')" aria-label="Zoom out">&minus;</button>
+<button type="button" class="diagram-zoom-btn" onclick="diagramZoomIn('{overlay_id}')" aria-label="Zoom in">+</button>
+<button type="button" class="diagram-zoom-btn wide" onclick="diagramResetView('{overlay_id}')">Fit to screen</button>
 <button type="button" class="diagram-lightbox-close" onclick="closeDiagramLightbox('{overlay_id}')" aria-label="Close">&times;</button>
 </div>
+</div>
 <div class="diagram-lightbox-stage"></div>
+<p class="diagram-lightbox-hint">Drag to pan, scroll or pinch to zoom{" — or search for a table to jump to it" if table_names is not None else ""}.</p>
 </div>
 </div>
 
 <style>{_DIAGRAM_LIGHTBOX_CSS}</style>
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
 <script>{_DIAGRAM_LIGHTBOX_JS}</script>"""
+
+
+# Content-volume grouping for /admin/system/database (Phase I follow-up,
+# Part 3) — mirrors the admin hub's own "System ▼"-style collapsible
+# sections (`.admin-group`/`<details>`, see _group_html above) rather than
+# inventing a new disclosure pattern. Any table not listed here (a future
+# addition this list hasn't caught up with yet) falls into "Other" so the
+# page can never silently drop a table — see _grouped_table_sections below.
+#
+# Placement notes for the tables that don't obviously belong to one bucket:
+#   - read_later lives under Users & auth, not Library/Archive — it's a
+#     per-user list (user_id FK), not archive content itself.
+#   - benchmarks sits under Toolbox — Software: it's the Benchmarking
+#     Resources list managed at /admin/tools/benchmarks, part of the
+#     software side of CFO Toolbox, not a Communities concept.
+#   - tool_name_dedupe_decisions is Toolbox — Software's duplicate-merge
+#     log; dedupe_decisions (no "tool_name_" prefix) is the unrelated
+#     Library archive-dedupe log and stays under Library/Archive.
+#   - field_reviews, narrative_review_log, and matchmaker_questions are all
+#     genuinely shared between Toolbox — Software and Toolbox —
+#     Communities (field_reviews/narrative_review_log track AI-drafted
+#     narrative fields on both entity types; matchmaker_questions serves
+#     both a software-find quiz and a communities-find quiz via a `kind`
+#     column) — splitting them into either Toolbox bucket would be
+#     arbitrary, so they sit in Site utilities & system alongside the
+#     other audit/log tables instead.
+_TABLE_GROUPS: list[tuple[str, list[str]]] = [
+    ("Users & auth", ["users", "password_reset_requests", "read_later"]),
+    ("Toolbox — Software", ["tools", "tool_categories", "tool_leads", "tool_audit_log",
+                             "tool_competitors", "tool_features", "tool_name_dedupe_decisions",
+                             "benchmarks"]),
+    ("Toolbox — Communities", ["communities", "community_audit_log", "community_categories",
+                                "community_competitors", "community_profiles",
+                                "community_gap_submissions", "community_profile_views"]),
+    ("Thought Leadership / Game", ["game_rank_settings", "game_runs"]),
+    ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
+                            "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback"]),
+    ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
+                                  "email_failures", "backup_log", "enrichment_cost", "manual_overhead",
+                                  "field_reviews", "narrative_review_log", "matchmaker_questions"]),
+]
+
+
+def _grouped_table_sections(schema: dict) -> list[tuple[str, list[str]]]:
+    """Buckets live schema table names per `_TABLE_GROUPS`, preserving each
+    group's declared order; any table the map hasn't caught up with yet
+    lands in a trailing "Other" group instead of silently vanishing."""
+    placed: set[str] = set()
+    sections = []
+    for gname, names in _TABLE_GROUPS:
+        present = [n for n in names if n in schema]
+        placed.update(present)
+        sections.append((gname, present))
+    leftover = sorted(n for n in schema if n not in placed)
+    if leftover:
+        sections.append(("Other", leftover))
+    return sections
 
 
 @app.get("/admin/system/database", response_class=HTMLResponse)
@@ -15792,71 +16021,58 @@ def admin_system_database(request: Request):
     schema = _db_schema_snapshot()
     diagram = _mermaid_er_diagram(schema)
 
-    # Two of these tables are cost ledgers, not content — enrichment_cost logs
-    # every enrichment API call, manual_overhead logs real vendor receipts.
-    # Their row counts (ledger entry counts) aren't the number a CFO wants at
-    # a glance; the dollar total is. Both totals already exist as Library
-    # methods (used by /admin/overhead-spend), so this reuses them rather
-    # than summing cost_usd/amount again here.
-    lib = _lib()
-    try:
-        cost_totals = {
-            "enrichment_cost": lib.enrichment_cost_total(),
-            "manual_overhead": lib.manual_overhead_total(),
-        }
-    finally:
-        lib.close()
-
     def _stat_row(name: str, info: dict) -> str:
         label = f'{_esc(name)}{" (index)" if info["virtual"] else ""}'
-        cost = cost_totals.get(name)
-        cost_cell = f"${cost:,.2f}" if cost is not None else '<span class="cc-empty">&mdash;</span>'
         return (
             f'<tr><td class="cc-cell" style="font-family:ui-monospace,monospace;">{label}</td>'
-            f'<td class="cc-cell" style="text-align:right;font-variant-numeric:tabular-nums;">{info["row_count"]:,}</td>'
-            f'<td class="cc-cell" style="text-align:right;font-variant-numeric:tabular-nums;">{cost_cell}</td></tr>'
+            f'<td class="cc-cell" style="text-align:right;font-variant-numeric:tabular-nums;">{info["row_count"]:,}</td></tr>'
         )
 
-    cost_rows = "".join(
-        _stat_row(name, schema[name]) for name in ("enrichment_cost", "manual_overhead") if name in schema
-    )
-    content_rows = "".join(
-        _stat_row(name, info) for name, info in sorted(schema.items()) if name not in cost_totals
-    )
-
-    stat_table = f"""<div style="overflow-x:auto;margin-bottom:28px;">
+    def _section_html(gname: str, names: list[str]) -> str:
+        rows = "".join(_stat_row(n, schema[n]) for n in names)
+        total_rows = sum(schema[n]["row_count"] for n in names)
+        return f"""<details class="admin-group" style="margin-bottom:10px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;">
+<summary style="list-style:none;cursor:pointer;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
+<span style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(gname)}</span>
+<span style="font-size:12px;color:var(--muted);">{len(names)} {"table" if len(names) == 1 else "tables"}, {total_rows:,} rows</span>
+</span>
+<span class="disclosure-caret">&#9654;</span>
+</summary>
+<div style="padding:0 18px 14px;overflow-x:auto;">
 <table class="cc-table">
 <thead><tr style="background:var(--bg);">
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Table</th>
 <th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:right;">Rows</th>
-<th class="cc-cell" style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:right;">Total spend</th>
 </tr></thead>
-<tbody>
-<tr><td class="cc-cell cc-section" colspan="3">Cost &amp; spend</td></tr>
-{cost_rows}
-<tr><td class="cc-cell cc-section" colspan="3">Content volume</td></tr>
-{content_rows}
-</tbody>
+<tbody>{rows}</tbody>
 </table>
+</div>
+</details>"""
+
+    # Collapsed by default (Part 3) — 39 tables across six sections pushed
+    # the diagram far down the page when the old flat table was fully open.
+    sections_html = "".join(_section_html(gname, names) for gname, names in _grouped_table_sections(schema) if names)
+
+    stat_table = f"""<div style="margin-bottom:28px;">
+{sections_html}
 </div>
 
 <style>
-.cc-table{{border-collapse:collapse;width:100%;min-width:520px;background:#fff;border:1px solid var(--line);border-radius:12px;}}
+.cc-table{{border-collapse:collapse;width:100%;min-width:420px;background:#fff;}}
 .cc-cell{{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px;}}
-.cc-empty{{color:var(--muted);font-style:italic;}}
-.cc-section{{font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--navy);
-  background:var(--seafoam);padding:8px 16px;}}
 thead .cc-cell{{border-bottom:2px solid var(--line);}}
 </style>"""
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Database</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, and row counts, introspected from the schema on every page load. This schema declares no SQL foreign keys, so relationship lines below come from a small hand-maintained map (see <code>_DB_RELATIONSHIPS</code> in <code>webapp/app.py</code>) rather than the database itself. Summary-level by design&mdash;see <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for full schema detail. <code>enrichment_cost</code> and <code>manual_overhead</code> are cost ledgers&mdash;their &ldquo;Total spend&rdquo; is the sum of every logged charge, not a count of ledger rows.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 8px;font-size:15px;line-height:1.6;">A live snapshot of <code>library.db</code>&mdash;table names, key columns, and row counts, introspected from the schema on every page load. This schema declares no SQL foreign keys, so relationship lines below come from a small hand-maintained map (see <code>_DB_RELATIONSHIPS</code> in <code>webapp/app.py</code>) rather than the database itself. Summary-level by design&mdash;see <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for full schema detail.</p>
+<p style="color:var(--muted);margin:0 0 20px;font-size:13px;">Looking for dollar totals on <code>enrichment_cost</code>/<code>manual_overhead</code>? That lives on <a href="/admin/overhead-spend" style="color:var(--accent);">Overhead spend</a>&mdash;this page shows every table's row count only.</p>
 
 {stat_table}
 
-{_diagram_lightbox_html("db-diagram-frame", diagram, "the schema diagram")}
+{_diagram_lightbox_html("db-diagram-frame", diagram, "the schema diagram", table_names=sorted(schema.keys()))}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
 <script>
