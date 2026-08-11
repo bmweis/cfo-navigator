@@ -328,7 +328,11 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   place a draft is ever saved — that one route sets the flag directly at
   save time: `1` when this submit's `ai_drafted_fields` names the field, `0`
   otherwise (a hand-edited or untouched save is itself a confirmation, the
-  same convention `update_tool_agent_taxonomy` already used). **A second
+  same convention `update_tool_agent_taxonomy` already used). Regenerating
+  an AI-drafted field always re-flags it for review on save, even if it was
+  previously marked reviewed — this is intentional, not a bug: fresh AI
+  output always needs a fresh human look, regardless of what the field's
+  prior state was. **A second
   structural discovery surfaced mid-build, specific to the Community
   profile draft:** `community_profiles.needs_review` already existed as a
   working whole-profile "flag for later" mechanism — its own "Mark
