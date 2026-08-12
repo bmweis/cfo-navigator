@@ -137,6 +137,7 @@ def test_capture_homepage_injects_cookie_banner_hide_css(monkeypatch, tmp_path):
         "#truste-consent-track",      # TrustArc
         "#qc-cmp2-container",         # Quantcast/IAB-TCF
         "#didomi-host",               # Didomi
+        "#hs-eu-cookie-confirmation", # HubSpot
         "[id*='cookie-banner' i]",    # generic catch-all
     ):
         assert selector in css

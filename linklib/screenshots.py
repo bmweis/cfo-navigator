@@ -20,16 +20,28 @@ universal fix — every site implements consent differently — so this is
 deliberately a best-effort CSS-injection hide, not a click-through-and-accept
 flow: `_COOKIE_BANNER_HIDE_CSS` targets the handful of dominant
 consent-management platforms (OneTrust, Cookiebot, Osano, TrustArc,
-Quantcast/IAB-TCF) by their known container selectors, plus a generic
-class/id substring catch-all for common homegrown implementations, and is
-injected before the screenshot is taken. This covers a meaningful share of
-bannered sites, not all of them — a fully custom banner with no recognizable
-selector, or one rendered inside a cross-origin iframe, won't be hidden by
-this and still needs the manual re-capture/crop-and-upload path (Phase E).
-Deliberately not click-to-accept: a failed/mis-timed click risks landing on
-a worse screenshot (e.g. an opened preferences panel) than just hiding the
-banner outright, and CMP button markup drifts over time in a way a CSS
-selector for the banner *container* is less exposed to.
+Quantcast/IAB-TCF, HubSpot) by their known container selectors, plus a
+generic class/id substring catch-all for common homegrown implementations,
+and is injected before the screenshot is taken. This covers a meaningful
+share of bannered sites, not all of them — a fully custom banner with no
+recognizable selector, or one rendered inside a cross-origin iframe or a
+shadow root, won't be hidden by this and still needs the manual
+re-capture/crop-and-upload path (Phase E). Deliberately not click-to-accept:
+a failed/mis-timed click risks landing on a worse screenshot (e.g. an opened
+preferences panel) than just hiding the banner outright, and CMP button
+markup drifts over time in a way a CSS selector for the banner *container*
+is less exposed to.
+
+ApprovalMax follow-up (2026-08): the original six-CMP list didn't catch
+ApprovalMax's banner. Geolocation was investigated and ruled out (Railway's
+egress confirmed via ipinfo.io as plain US, AWS us-west-1 — same region as
+manual browser testing that never showed the banner). `scripts/
+diagnose_cookie_banner.py` (run via `railway ssh`, real egress) confirmed
+the real cause: it's HubSpot's own cookie-consent widget
+(`#hs-eu-cookie-confirmation` / `#hs-banner-parent`) — plain light-DOM
+markup, no shadow root, no blocking iframe — just a CMP outside the
+originally-curated six. Added below; see PR history for the actual
+re-verification against ApprovalMax before this was called done.
 """
 from __future__ import annotations
 
@@ -55,6 +67,9 @@ _COOKIE_BANNER_SELECTORS = [
     "#qc-cmp2-container", "#qc-cmp2-main",
     # Didomi
     "#didomi-host", "#didomi-notice",
+    # HubSpot (confirmed against ApprovalMax, 2026-08 — see the module
+    # docstring's "ApprovalMax follow-up" note)
+    "#hs-eu-cookie-confirmation", "#hs-banner-parent",
     # Generic homegrown catch-all: common naming conventions for cookie
     # banners that aren't a recognized third-party CMP.
     "[id*='cookie-banner' i]", "[class*='cookie-banner' i]",
