@@ -11536,7 +11536,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 
   <div>
     <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community Details</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;align-items:start;">
       <div style="display:grid;gap:14px;align-content:start;">
 {_parts['identity']}
       </div>
@@ -12519,7 +12519,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
   <div>
     <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Company Details</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;">
+    <!-- align-items:start (not the grid default of stretch): without it every
+         column stretches to match Warm Intro, the tallest of the three, which
+         reads as dead space under Name/URL and Disclosures once populated with
+         real data. Same fix applies to the two-column Community Details row
+         in admin_communities_edit below. -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;align-items:start;">
       <div style="display:grid;gap:14px;align-content:start;">
         <div>
           <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
