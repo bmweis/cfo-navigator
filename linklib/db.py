@@ -1548,6 +1548,20 @@ class Library:
             # routes below for how these get set to 1).
             "ALTER TABLE tools ADD COLUMN description_needs_verification INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tools ADD COLUMN differentiation_needs_verification INTEGER NOT NULL DEFAULT 0",
+            # Phase P (edit-page layout reorg): the Software edit page's
+            # "How this differs from the competition" field is relabeled
+            # "Competitive differentiation" to match the new "Competition"
+            # section heading, so the backing column follows the same name
+            # rather than leaving code and UI copy permanently mismatched.
+            # SQLite's RENAME COLUMN raises OperationalError (no such column)
+            # on a DB that already ran this rename on a prior boot — caught
+            # by the same try/except every ADD COLUMN line above relies on
+            # for idempotency, so this fits the existing convention without
+            # a special case. A fresh DB runs the two ADD COLUMN lines above
+            # under their original names first, then these rename them in
+            # the same pass — order matters, so this must stay after them.
+            "ALTER TABLE tools RENAME COLUMN differentiation_note TO competitive_differentiation",
+            "ALTER TABLE tools RENAME COLUMN differentiation_needs_verification TO competitive_differentiation_needs_verification",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -2973,7 +2987,7 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def update_tool_differentiation(self, tool_id: int, differentiation_note: str,
+    def update_tool_differentiation(self, tool_id: int, competitive_differentiation: str,
                                      needs_verification: int = 0) -> None:
         """Narrow update for the admin full-edit form's "How this differs from
         the competition" field (Phase 3) — same reasoning as
@@ -2984,7 +2998,7 @@ class Library:
         that predates Phase G PR 2 — tests, scripts — keeps its old
         behavior unchanged; the edit-submit route is the only caller that
         passes an explicit 1, when this save's `ai_drafted_fields` names
-        `differentiation_note` (a fresh AI draft this session, not yet
+        `competitive_differentiation` (a fresh AI draft this session, not yet
         confirmed) — same "unconfirmed until an explicit Mark verified click"
         contract agent_taxonomy_needs_verification already established,
         just collapsed into this one write path since, unlike Agent
@@ -2992,9 +3006,9 @@ class Library:
         is AJAX-only and this Save is the only place a draft ever gets
         persisted."""
         self.conn.execute(
-            "UPDATE tools SET differentiation_note=?, differentiation_needs_verification=?, "
+            "UPDATE tools SET competitive_differentiation=?, competitive_differentiation_needs_verification=?, "
             "updated_at=? WHERE id=?",
-            (differentiation_note.strip(), needs_verification, _now(), tool_id),
+            (competitive_differentiation.strip(), needs_verification, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -3050,7 +3064,7 @@ class Library:
         """One-click "Mark verified" for the Differentiation/Bottom-line
         field (Phase G PR 2) — same shape as mark_tool_agent_taxonomy_verified."""
         self.conn.execute(
-            "UPDATE tools SET differentiation_needs_verification=0, updated_at=? WHERE id=?",
+            "UPDATE tools SET competitive_differentiation_needs_verification=0, updated_at=? WHERE id=?",
             (_now(), tool_id),
         )
         self.conn.commit()

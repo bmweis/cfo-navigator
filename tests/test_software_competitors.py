@@ -110,7 +110,7 @@ def test_suggest_empty_when_tool_has_no_categories(lib):
 def test_update_tool_differentiation(lib):
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.update_tool_differentiation(a, "  Faster onboarding.  ")
-    assert lib.get_tool(a)["differentiation_note"] == "Faster onboarding."
+    assert lib.get_tool(a)["competitive_differentiation"] == "Faster onboarding."
 
 
 # -- admin routes --------------------------------------------------------------
@@ -201,7 +201,7 @@ def test_generate_matches_returns_matched_ids(env, monkeypatch):
     assert r.json() == {"ok": True, "competitor_ids": [b]}
 
 
-def test_admin_edit_saves_differentiation_note(env):
+def test_admin_edit_saves_competitive_differentiation(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -212,12 +212,12 @@ def test_admin_edit_saves_differentiation_note(env):
     _login(client)
     r = client.post(f"/tools/software/{a_slug}/edit", data={
         "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
-        "differentiation_note": "Human-readable formulas, real-time sync.",
+        "competitive_differentiation": "Human-readable formulas, real-time sync.",
     }, follow_redirects=False)
     assert r.status_code == 303
 
     lib = Library(os.environ["LINKLIB_DB"])
-    assert lib.get_tool(a)["differentiation_note"] == "Human-readable formulas, real-time sync."
+    assert lib.get_tool(a)["competitive_differentiation"] == "Human-readable formulas, real-time sync."
     lib.close()
 
 
@@ -226,9 +226,9 @@ def test_admin_edit_unauthenticated_rejected(env):
     assert r.status_code == 401
 
 
-def test_bulk_edit_does_not_clobber_differentiation_note(env):
+def test_bulk_edit_does_not_clobber_competitive_differentiation(env):
     """The Software bulk-edit panel resaves every field via update_tool on
-    every call — differentiation_note deliberately lives on a separate narrow
+    every call — competitive_differentiation deliberately lives on a separate narrow
     update method so bulk edit can never blank it out just by not knowing
     about it."""
     from linklib.db import Library
@@ -245,7 +245,7 @@ def test_bulk_edit_does_not_clobber_differentiation_note(env):
     lib = Library(os.environ["LINKLIB_DB"])
     tool = lib.get_tool(a)
     assert tool["advisor"] == 1
-    assert tool["differentiation_note"] == "Keeps its edge on real-time sync."
+    assert tool["competitive_differentiation"] == "Keeps its edge on real-time sync."
     lib.close()
 
 

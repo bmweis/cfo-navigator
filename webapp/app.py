@@ -1262,7 +1262,8 @@ def _screenshot_card_html(entity: dict, featured_sticker: str = "") -> str:
 </div>"""
 
 
-def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banner_html: str = "") -> tuple[str, str]:
+def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banner_html: str = "",
+                                   standalone_form_id: str = "") -> tuple[str, str]:
     """Renders the admin edit page's "App screenshot" section (Phase E).
     Returns (in_form_html, after_form_html):
       - in_form_html goes inside the main #tool-edit-form/#comm-edit-form —
@@ -1281,11 +1282,21 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     kind is "tools" or "communities" — picks the route prefix. idsfx
     ("tools-14", "communities-3") keeps element ids unique in case a future
     page ever renders more than one of these (defensive; today each edit
-    page only has one)."""
+    page only has one).
+
+    standalone_form_id (Phase P): the Software edit page's "Screenshots"
+    section now renders below the main `#tool-edit-form`'s closing tag (so
+    it can sit under one heading together with the "Competition" section,
+    which also has to live outside the form—see the software edit route's
+    layout comment), so its source-URL input needs an explicit form=
+    attribute to still submit with the rest of the page. The Community edit
+    page still nests this section directly inside its own unnamed <form>,
+    so it passes nothing and gets the original behavior unchanged."""
     route_prefix = f"/admin/tools/{entity_id}" if kind == "tools" else f"/admin/tools/communities/{entity_id}"
     source_url = (entity.get("app_screenshot_source_url") or "").strip()
     app_url = (entity.get("app_screenshot_url") or "").strip()
     idsfx = f"{kind}-{entity_id}"
+    _form_attr = f' form="{standalone_form_id}"' if standalone_form_id else ""
 
     preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No app screenshot yet.</p>'
     if app_url:
@@ -1300,9 +1311,9 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     recapture_disabled = "" if source_url else ' disabled title="Enter a source URL above, then Save changes, first."'
 
     in_form_html = f"""  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">App screenshot <span style="font-weight:400;color:var(--muted);">(shown stacked below the homepage screenshot on the profile page)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Product</label>
     <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">No single reliable URL for "the app"—a login/demo/product-tour page you have public access to. This is inherently manual/curated, not something to fill in for every record.</p>
-    <input name="app_screenshot_source_url" type="text" maxlength="500" value="{_esc(source_url)}"
+    <input name="app_screenshot_source_url"{_form_attr} type="text" maxlength="500" value="{_esc(source_url)}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/demo">
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
@@ -6203,7 +6214,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
 
     other_rows = (
         _row("Description", [t.get("summary") or t.get("description", "") for t in tools])
-        + _row("How this differs", [t.get("differentiation_note", "") for t in tools])
+        + _row("How this differs", [t.get("competitive_differentiation", "") for t in tools])
     )
 
     # Features: union of every feature name across the selected tools (sorted
@@ -6605,11 +6616,11 @@ def tools_software_profile(request: Request, slug: str):
     # buried italic sub-paragraph inside the Description card so the
     # differentiation note actually reads as the scannable takeaway it is.
     differentiation_block = ""
-    if (tool.get("differentiation_note") or "").strip():
+    if (tool.get("competitive_differentiation") or "").strip():
         differentiation_block = f"""<div style="background:var(--seafoam-wash);border-top:2px solid var(--seafoam-mid);
   border-radius:0 0 10px 10px;padding:18px 22px;margin-bottom:22px;">
   <div style="font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">Bottom line</div>
-  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(tool['differentiation_note'])}</p>
+  <p style="margin:0;color:var(--navy);font-size:16px;line-height:1.5;overflow-wrap:break-word;word-break:break-word;">{_esc(tool['competitive_differentiation'])}</p>
 </div>"""
     elif authed:
         differentiation_block = (f'<div style="margin-bottom:22px;">'
@@ -8651,7 +8662,7 @@ _COMMUNITY_PROFILE_FIELD_IDS = [
 # suggestions on both entity types) is deliberately NOT in this set —
 # field_reviews keeps tracking those exactly as before.
 _RETIRED_FIELD_REVIEW_FIELDS = (
-    {("tool", "description"), ("tool", "summary"), ("tool", "differentiation_note")}
+    {("tool", "description"), ("tool", "summary"), ("tool", "competitive_differentiation")}
     | {("community", f) for f in _COMMUNITY_PROFILE_FIELD_IDS}
 )
 
@@ -10380,6 +10391,28 @@ def _community_category_checkboxes(categories: list[dict], selected: list[str] |
 
 
 def _community_form_fields(c: dict | None = None, categories: list[dict] | None = None) -> str:
+    """Full field list in its original flat order — used unchanged by the
+    "Add community" form (/admin/tools/communities/new), which the Phase P
+    edit-page reorg deliberately left alone (see admin_communities_edit's
+    layout comment). Just concatenates the same five fragments
+    _community_form_fields_parts returns, in their original order, so this
+    keeps rendering byte-identical output for that caller."""
+    parts = _community_form_fields_parts(c, categories)
+    return (parts["identity"] + parts["details"] + parts["categories"]
+            + parts["disclosures"] + parts["screenshot"])
+
+
+def _community_form_fields_parts(c: dict | None = None, categories: list[dict] | None = None) -> dict:
+    """Phase P: the same field markup _community_form_fields used to return
+    as one flat string, split into named fragments so the redesigned Edit
+    community page (admin_communities_edit) can regroup them under new
+    section headings — Name/URL + Disclosures in a condensed top row,
+    Categories on its own, the Reach/Cost/Sponsorship/Access/Format/Notes
+    block under "Program details", the homepage screenshot URL input moved
+    next to its existing recapture button/preview under "Screenshots" —
+    without changing a single field's name, id, or behavior. No dict key
+    here is new user-facing copy; the surrounding page composes these with
+    its own headings."""
     c = c or {}
     categories = categories or []
     # _NEEDS_VERIFICATION is appended as a literal, selectable option on every
@@ -10408,7 +10441,7 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
         f'<option value="{_esc(fm)}"{" selected" if c.get("format", "") == fm else ""}>{_esc(fm)}</option>'
         for fm in _COMMUNITY_FORMAT + [_NEEDS_VERIFICATION]
     )
-    return f"""  <div>
+    identity_html = f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
     <input id="comm-name" name="name" required maxlength="200" value="{_esc(c.get('name', ''))}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
@@ -10423,8 +10456,9 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
     <button type="button" class="tool-admin-btn" onclick="generateCommunityListing(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'comm-gen-status', 'comm-gen-err')">Auto-fill from URL</button>
     <span id="comm-gen-status" class="qe-status"></span>
     <p id="comm-gen-err" style="display:none;"></p>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+  </div>"""
+
+    details_html = f"""  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Reach *</label>
       <select name="reach" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
@@ -10490,14 +10524,16 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Notes</label>
     <textarea name="notes" maxlength="500" rows="3"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(c.get('notes', ''))}</textarea>
-  </div>
-  <div>
+  </div>"""
+
+    categories_html = f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:8px;">Categories</label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
       {_community_category_checkboxes(categories, c.get('categories') or [])}
     </div>
-  </div>
-  <div>
+  </div>"""
+
+    disclosures_html = f"""  <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="featured" value="1"{' checked' if c.get('featured') else ''}>
       <span>&#10024; Featured: pin to top of directory with coral badge</span>
@@ -10508,8 +10544,9 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
       <input type="checkbox" name="advisor" value="1"{' checked' if c.get('advisor') else ''}>
       <span>&#9733; Formal advisor: marks this community with an advisor star</span>
     </label>
-  </div>
-  <div>
+  </div>"""
+
+    screenshot_html = f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Homepage screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
     <!-- type="text", not "url": Recapture writes a site-relative served path
          (e.g. /tools/communities/screenshot/<slug>.png?v=...), which native
@@ -10519,6 +10556,14 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…/screenshot.png">
   </div>"""
+
+    return {
+        "identity": identity_html,
+        "details": details_html,
+        "categories": categories_html,
+        "disclosures": disclosures_html,
+        "screenshot": screenshot_html,
+    }
 
 
 def _community_profile_form_fields(p: dict | None, community: dict,
@@ -11371,33 +11416,94 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
                                       'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture that URL—'
                                       'the site may block headless browsers or timed out. Try again, or upload an image instead.</p>')
     app_screenshot_in_form_html, app_screenshot_after_form_html = _app_screenshot_admin_section(
-        c, c["id"], "communities", app_screenshot_banner_html)
+        c, c["id"], "communities", app_screenshot_banner_html, standalone_form_id="comm-edit-form")
 
+    # Phase P: same section-heading treatment as the Software edit page
+    # (admin_tools_edit), adapted to Communities' different field set — see
+    # that route's layout comment for the shared reasoning (form has to
+    # close before a section that contains its own nested <form>s, so later
+    # sections bind stray inputs back to it via form="comm-edit-form", the
+    # same trick Warm Intro already used on the Software page). No Agent
+    # taxonomy here (Communities don't have one) and no Warm-Intro-equivalent
+    # (no vendor-contact concept for a community), so the top identity row is
+    # two columns, not three: Name/URL + Disclosures. The structured
+    # Reach/Cost/Sponsorship/Access/Format/Notes block — the closest thing
+    # Communities have to Software's "Business summary" — gets its own
+    # "Program details" heading rather than reusing that label, since none of
+    # it is prose Brian writes; it's the factual/categorical fields a listing
+    # needs. "Similar communities" (curated Community-to-Community links,
+    # structurally identical to Software's Competitors block) is intentionally
+    # NOT relabeled "Core competition"—that Software rename tracks a display
+    # label change on the Software profile page ("Competitors" -> "Core
+    # competition"); the Community profile page has always said "Similar
+    # communities" instead, on the reasoning that communities don't compete
+    # for a buyer's dollar the way software tools do, so there's no matching
+    # display-label rename to mirror here. The 23-field Community profile
+    # draft (ideal member, value prop, etc.) lives on its own separate page
+    # (/admin/tools/communities/{id}/profile, linked from this page's meta
+    # line below) and is out of scope for this reorg — flagged in the PR
+    # rather than restructured on assumption.
+    _parts = _community_form_fields_parts(c, categories)
     body = f"""<div class="page page-form">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
-<form method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
+<p style="font-size:13px;color:var(--muted);margin:-8px 0 24px;"><a href="/admin/tools/communities/{c['id']}/profile">Edit the 23-field community profile draft &rarr;</a></p>
+<form id="comm-edit-form" method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
-{_community_form_fields(c, categories)}
-{app_screenshot_in_form_html}
+
   <div>
-    <button type="submit" class="btn">Save changes</button>
-    <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community Details</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;">
+      <div style="display:grid;gap:14px;align-content:start;">
+{_parts['identity']}
+      </div>
+      <div style="display:grid;gap:14px;align-content:start;">
+        <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Disclosures</div>
+{_parts['disclosures']}
+      </div>
+    </div>
+  </div>
+
+{_parts['categories']}
+
+  <div>
+    <h2 style="font-size:16px;font-weight:600;margin:32px 0 16px;padding-top:24px;border-top:1px solid var(--line);">Program details</h2>
+    <div style="display:grid;gap:14px;">
+{_parts['details']}
+    </div>
   </div>
 </form>
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Screenshot</h2>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Recapture pulls a fresh homepage screenshot at a fixed size. Paste a different URL above (then Save changes) to override with something else entirely.</p>
-  {screenshot_banner_html}
-  {screenshot_preview_html}
-  <form method="post" action="/admin/tools/communities/{c['id']}/screenshot/recapture" style="margin-top:12px;">
-    <button type="submit" class="tool-admin-btn">Generate screenshot</button>
-  </form>
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Screenshots</h2>
+
+  <div style="margin-bottom:28px;">
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Homepage</label>
+    <!-- type="text", not "url": Recapture writes a site-relative served path
+         (e.g. /tools/communities/screenshot/<slug>.png?v=...), which native
+         type="url" validation rejects as invalid (no scheme) and blocks Save
+         with "Please enter a URL"—text still accepts a hand-pasted absolute URL. -->
+    <input name="screenshot_url" form="comm-edit-form" type="text" maxlength="500" value="{_esc(c.get('screenshot_url') or '')}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…/screenshot.png">
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture pulls a fresh homepage screenshot at a fixed size. Paste a different URL above (then Save changes) to override with something else entirely.</p>
+    {screenshot_banner_html}
+    {screenshot_preview_html}
+    <form method="post" action="/admin/tools/communities/{c['id']}/screenshot/recapture" style="margin-top:12px;">
+      <button type="submit" class="tool-admin-btn">Generate screenshot</button>
+    </form>
+  </div>
+
+{app_screenshot_in_form_html}
 </div>
 {app_screenshot_after_form_html}
 
 {_competitors_card_html}
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <button type="submit" form="comm-edit-form" class="btn">Save changes</button>
+  <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+</div>
 </div>
 <style>
 .tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
@@ -11962,7 +12068,7 @@ def admin_tools_new(request: Request):
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
       {_tool_category_checkboxes(categories)}
     </div>
   </div>
@@ -12293,7 +12399,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     )
     _differentiation_verify_badge, _differentiation_verify_action, _differentiation_verify_form_html, _differentiation_review_line_html = (
         _narrative_verify_widget(
-            bool(tool.get("differentiation_needs_verification")),
+            bool(tool.get("competitive_differentiation_needs_verification")),
             "differentiation-verify-form", f"/admin/tools/{tool_id}/differentiation/verify",
             latest_differentiation_review,
         )
@@ -12319,7 +12425,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
                                        'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t capture that URL—'
                                        'the site may block headless browsers or timed out. Try again, or upload an image instead.</p>')
     _app_screenshot_in_form_html, _app_screenshot_after_form_html = _app_screenshot_admin_section(
-        tool, tool_id, "tools", _app_screenshot_banner_html)
+        tool, tool_id, "tools", _app_screenshot_banner_html, standalone_form_id="tool-edit-form")
 
     body = f"""<div class="page page-grid">
 <h1>Edit software</h1>
@@ -12327,111 +12433,104 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
+
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
-    <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
-    <input id="tool-url" name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>
-  <div>
-    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *{_description_verify_badge}</label>
-      <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err')">Generate summary</button>
-        <span id="tool-gen-status" class="qe-status"></span>
-      </span>
+    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Company Details</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;">
+      <div style="display:grid;gap:14px;align-content:start;">
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
+          <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
+            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        </div>
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
+          <input id="tool-url" name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
+            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        </div>
+      </div>
+      <div style="display:grid;gap:14px;align-content:start;">
+        <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Disclosures</div>
+        <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+          <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
+          <span>&#9733; Formal advisor—mark this tool with an advisor star</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+          <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
+          <span>&#10024; Featured—pin to top of directory with coral badge</span>
+        </label>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
+        <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Warm Intro</div>
+        <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+          <input type="checkbox" name="warm_intro_enabled" value="1"{'checked' if tool.get('warm_intro_enabled') else ''}>
+          <span>&#10024; Offer a Warm Intro button for this tool</span>
+        </label>
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
+          <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
+            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+            placeholder="Jane Smith">
+        </div>
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
+          <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
+            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+            placeholder="contact@vendor.com">
+        </div>
+      </div>
     </div>
-    <p id="tool-desc-gen-err" style="display:none;"></p>
-    <textarea id="tool-desc" name="description" required maxlength="2500" rows="7"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-      placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
-    {_description_verify_action}
-    {_description_review_line_html}
   </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
-    <textarea id="tool-summary" name="summary" required maxlength="400" rows="2"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-      placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
-    <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description above—shares its verification status, not tracked separately.</p>
-  </div>
+
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
       {_tool_category_checkboxes(categories, tool['categories'])}
     </div>
   </div>
+
   <div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
-      <span>&#9733; Formal advisor—mark this tool with an advisor star</span>
-    </label>
-  </div>
-  <div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
-      <span>&#10024; Featured—pin to top of directory with coral badge</span>
-    </label>
-  </div>
-  <div>
-    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">How this differs from the competition <span style="font-weight:400;color:var(--muted);">(shown on the profile page as the Bottom line callout)</span>{_differentiation_verify_badge}</label>
-      <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err')">Generate summary</button>
-        <span id="diff-gen-status" class="qe-status"></span>
-      </span>
+    <h2 style="font-size:16px;font-weight:600;margin:32px 0 16px;padding-top:24px;border-top:1px solid var(--line);">Business summary</h2>
+    <div style="display:grid;gap:20px;">
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
+        <textarea id="tool-summary" name="summary" required maxlength="400" rows="4"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+          placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
+        <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—shares its verification status, not tracked separately.</p>
+      </div>
+      <div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+          <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *{_description_verify_badge}</label>
+          <span>
+            <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err')">Generate summary</button>
+            <span id="tool-gen-status" class="qe-status"></span>
+          </span>
+        </div>
+        <p id="tool-desc-gen-err" style="display:none;"></p>
+        <textarea id="tool-desc" name="description" required maxlength="2500" rows="14"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+          placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
+        {_description_verify_action}
+        {_description_review_line_html}
+      </div>
+      <div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+          <label style="font-size:14px;font-weight:500;color:var(--navy);">Agent taxonomy{_taxonomy_verify_badge}</label>
+          <span>
+            <button type="submit" form="research-refresh-form" class="tool-admin-btn"
+              onclick="return confirmDiscardsUnsavedEdits(this)">Generate summary</button>
+          </span>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Crawls the vendor's site to draft this note and the Feature rows below—runs automatically when a tool is added; use this button to re-run it after a vendor redesign.</p>
+        {_research_banner_html}
+        <textarea name="agent_taxonomy_note" maxlength="1200" rows="4"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+          placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
+        {_taxonomy_verify_action}
+        {_taxonomy_review_line_html}
+      </div>
     </div>
-    <p id="diff-gen-err" style="display:none;"></p>
-    <textarea id="tool-differentiation" name="differentiation_note" maxlength="600" rows="3"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-      placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('differentiation_note') or '')}</textarea>
-    {_differentiation_verify_action}
-    {_differentiation_review_line_html}
-  </div>
-  <div>
-    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Agent taxonomy <span style="font-weight:400;color:var(--muted);">(standalone feature, agent-assisted, or fully independent agent; searchable)</span>{_taxonomy_verify_badge}</label>
-      <span>
-        <button type="submit" form="research-refresh-form" class="tool-admin-btn"
-          onclick="return confirmDiscardsUnsavedEdits(this)">Generate summary</button>
-      </span>
-    </div>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Crawls the vendor's homepage plus its real Product/Solutions-type nav pages to draft this note and the Feature rows below in one pass—runs automatically when a tool is added; use this button to re-run it (e.g. after a vendor redesigns their site).</p>
-    {_research_banner_html}
-    <textarea name="agent_taxonomy_note" maxlength="1200" rows="4"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-      placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
-    {_taxonomy_verify_action}
-    {_taxonomy_review_line_html}
-  </div>
-  <div>
-    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label style="font-size:14px;font-weight:500;color:var(--navy);">Homepage screenshot URL <span style="font-weight:400;color:var(--muted);">(shown in a bordered box on the profile page)</span></label>
-      <span>
-        <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn"
-          onclick="return confirmDiscardsUnsavedEdits(this)">Generate homepage screenshot</button>
-      </span>
-    </div>
-    <!-- type="text", not "url": Generate screenshot writes a site-relative
-         served path (e.g. /tools/software/screenshot/<slug>.png?v=...), which
-         native type="url" validation rejects as invalid (no scheme) and
-         blocks Save with "Please enter a URL"—text still accepts a
-         hand-pasted absolute URL. -->
-    <input name="screenshot_url" type="text" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-      placeholder="https://…/screenshot.png">
-    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture pulls a fresh homepage screenshot at a fixed size, same as the bulk backfill script—use this for a one-off refresh. Paste a different URL above (then Save changes) to override with something else entirely.</p>
-    {_screenshot_banner_html}
-    <div style="margin-top:8px;">{_screenshot_preview_html}</div>
-  </div>
-{_app_screenshot_in_form_html}
-  <div>
-    <button type="submit" class="btn">Save changes</button>
-    <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 <form id="research-refresh-form" method="post" action="/admin/tools/{tool_id}/research/refresh" style="display:none;"></form>
@@ -12442,22 +12541,69 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 {_differentiation_verify_form_html}
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Competitors</h2>
-  <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Closest competitors" on {_esc(tool['name'])}'s profile page. Curating from either tool's edit page links both directions.</p>
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Competition</h2>
 
-  {_competitors_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No competitors curated yet.</p>'}
+  <div style="margin-bottom:28px;">
+    <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Core competition</div>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Closest competitors" on {_esc(tool['name'])}'s profile page. Curating from either tool's edit page links both directions.</p>
 
-  {_suggestions_block_html}
+    {_competitors_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No competitors curated yet.</p>'}
 
-  <div style="margin-top:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-    <form method="post" action="/admin/tools/{tool_id}/competitors/add" style="display:flex;gap:10px;align-items:center;">
-      <select name="competitor_id" style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;min-width:220px;">
-        <option value="">Add a competitor by name&hellip;</option>
-        {_other_tools_options_html}
-      </select>
-      <button type="submit" class="tool-admin-btn">+ Add</button>
-    </form>
+    {_suggestions_block_html}
+
+    <div style="margin-top:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <form method="post" action="/admin/tools/{tool_id}/competitors/add" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <select name="competitor_id" style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;min-width:220px;">
+          <option value="">Add a competitor by name&hellip;</option>
+          {_other_tools_options_html}
+        </select>
+        <button type="submit" class="tool-admin-btn">+ Add</button>
+      </form>
+    </div>
   </div>
+
+  <div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Competitive differentiation{_differentiation_verify_badge}</label>
+      <span>
+        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err')">Generate summary</button>
+        <span id="diff-gen-status" class="qe-status"></span>
+      </span>
+    </div>
+    <p id="diff-gen-err" style="display:none;"></p>
+    <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" maxlength="600" rows="3"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('competitive_differentiation') or '')}</textarea>
+    {_differentiation_verify_action}
+    {_differentiation_review_line_html}
+  </div>
+</div>
+
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Screenshots</h2>
+
+  <div style="margin-bottom:28px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+      <label style="font-size:14px;font-weight:500;color:var(--navy);">Homepage</label>
+      <span>
+        <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn"
+          onclick="return confirmDiscardsUnsavedEdits(this)">Generate homepage screenshot</button>
+      </span>
+    </div>
+    <!-- type="text", not "url": Generate screenshot writes a site-relative
+         served path (e.g. /tools/software/screenshot/<slug>.png?v=...), which
+         native type="url" validation rejects as invalid (no scheme) and
+         blocks Save with "Please enter a URL"—text still accepts a
+         hand-pasted absolute URL. -->
+    <input name="screenshot_url" form="tool-edit-form" type="text" maxlength="500" value="{_esc(tool.get('screenshot_url') or '')}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://…/screenshot.png">
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Recapture pulls a fresh homepage screenshot at a fixed size, same as the bulk backfill script—use this for a one-off refresh. Paste a different URL above (then Save changes) to override with something else entirely.</p>
+    {_screenshot_banner_html}
+    <div style="margin-top:8px;">{_screenshot_preview_html}</div>
+  </div>
+
+  {_app_screenshot_in_form_html}
 </div>
 
 <details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
@@ -12489,25 +12635,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </form>
 </details>
 
-<div style="margin-top:32px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
-  <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Warm Intro</div>
-  <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-    <input type="checkbox" name="warm_intro_enabled" value="1" form="tool-edit-form"{'checked' if tool.get('warm_intro_enabled') else ''}>
-    <span>&#10024; Offer a Warm Intro button for this tool</span>
-  </label>
-  <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below—either alone isn&rsquo;t enough.</p>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
-    <input name="vendor_name" form="tool-edit-form" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-      placeholder="Jane Smith">
-  </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
-    <input name="vendor_email" form="tool-edit-form" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-      placeholder="contact@vendor.com">
-  </div>
+<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+  <button type="submit" form="tool-edit-form" class="btn">Save changes</button>
+  <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
 </div>
 </div>
 <style>
@@ -12548,8 +12678,8 @@ async function generateDifferentiation(toolId, textareaId, statusId, errBoxId) {
     var r = await fetch('/admin/tools/' + toolId + '/generate-differentiation', {{method: 'POST'}});
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
-    document.getElementById(textareaId).value = d.differentiation_note;
-    markAiDrafted('differentiation_note');
+    document.getElementById(textareaId).value = d.competitive_differentiation;
+    markAiDrafted('competitive_differentiation');
     status.textContent = d.low_confidence
       ? 'Drafted. No competitors curated yet, so this is weaker than it could be—review carefully.'
       : 'Drafted. Review before saving.';
@@ -12608,7 +12738,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     vendor_email = (form.get("vendor_email") or "").strip()
     warm_intro_enabled = 1 if form.get("warm_intro_enabled") == "1" else 0
     vendor_name = (form.get("vendor_name") or "").strip()
-    differentiation_note = (form.get("differentiation_note") or "").strip()
+    competitive_differentiation = (form.get("competitive_differentiation") or "").strip()
     agent_taxonomy_note = (form.get("agent_taxonomy_note") or "").strip()
     screenshot_url = (form.get("screenshot_url") or "").strip()
     app_screenshot_source_url = (form.get("app_screenshot_source_url") or "").strip()
@@ -12625,7 +12755,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     # already uses.
     ai_drafted = _ai_drafted_field_names(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
-    differentiation_needs_verification = 1 if "differentiation_note" in ai_drafted else 0
+    competitive_differentiation_needs_verification = 1 if "competitive_differentiation" in ai_drafted else 0
     lib = _lib()
     try:
         name_dup = lib.find_tool_name_duplicate(name, exclude_id=tool_id)
@@ -12634,8 +12764,8 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
                         summary=summary,
                         description_needs_verification=description_needs_verification)
-        lib.update_tool_differentiation(tool_id, differentiation_note,
-                                        needs_verification=differentiation_needs_verification)
+        lib.update_tool_differentiation(tool_id, competitive_differentiation,
+                                        needs_verification=competitive_differentiation_needs_verification)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
@@ -12821,7 +12951,7 @@ def admin_tools_differentiation_verify(request: Request, tool_id: int):
         lib.mark_tool_differentiation_verified(tool_id)
         lib.record_narrative_review(
             _current_user_id(lib, request), "tool", "differentiation", tool_id,
-            detail=tool.get("differentiation_note") or "",
+            detail=tool.get("competitive_differentiation") or "",
         )
     finally:
         lib.close()
@@ -13118,7 +13248,7 @@ def admin_tools_generate_differentiation(request: Request, tool_id: int):
     finally:
         lib.close()
 
-    return JSONResponse({"ok": True, "differentiation_note": draft.differentiation_note,
+    return JSONResponse({"ok": True, "competitive_differentiation": draft.competitive_differentiation,
                          "low_confidence": draft.low_confidence})
 
 

@@ -114,7 +114,7 @@ def _build_software_context(lib: Library) -> str:
         lines.append(_line("URL", t.get("url")))
         lines.append(_line("Categories", ", ".join(t.get("categories") or [])))
         lines.append(_line("What it does", t.get("summary") or t.get("description")))
-        lines.append(_line("How it differs from competitors", t.get("differentiation_note")))
+        lines.append(_line("How it differs from competitors", t.get("competitive_differentiation")))
         lines.append(_line("Agent/automation taxonomy", t.get("agent_taxonomy_note")))
         if features:
             feature_bits = []

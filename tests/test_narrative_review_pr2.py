@@ -2,7 +2,7 @@
 profile draft join Agent taxonomy's needs_verification + narrative_review_log
 "Mark verified" pattern established in PR 1.
 
-- tools.description_needs_verification / differentiation_needs_verification
+- tools.description_needs_verification / competitive_differentiation_needs_verification
   (new columns), set at save time from whether this submit's ai_drafted_fields
   named the field — a fresh AI draft is unconfirmed until an explicit "Mark
   verified" click; any other save (hand-edited or untouched) clears it, same
@@ -84,12 +84,12 @@ def test_update_tool_description_needs_verification_explicit_zero_clears(lib):
     assert lib.get_tool(tool_id)["description_needs_verification"] == 0
 
 
-def test_update_tool_differentiation_needs_verification_param(lib):
+def test_update_tool_competitive_differentiation_needs_verification_param(lib):
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.update_tool_differentiation(tool_id, "Faster onboarding.", needs_verification=1)
-    assert lib.get_tool(tool_id)["differentiation_needs_verification"] == 1
+    assert lib.get_tool(tool_id)["competitive_differentiation_needs_verification"] == 1
     lib.update_tool_differentiation(tool_id, "Faster onboarding.", needs_verification=0)
-    assert lib.get_tool(tool_id)["differentiation_needs_verification"] == 0
+    assert lib.get_tool(tool_id)["competitive_differentiation_needs_verification"] == 0
 
 
 def test_update_tool_differentiation_defaults_to_zero(lib):
@@ -97,7 +97,7 @@ def test_update_tool_differentiation_defaults_to_zero(lib):
     must keep behaving as "verified"."""
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.update_tool_differentiation(tool_id, "Faster onboarding.")
-    assert lib.get_tool(tool_id)["differentiation_needs_verification"] == 0
+    assert lib.get_tool(tool_id)["competitive_differentiation_needs_verification"] == 0
 
 
 def test_mark_tool_description_verified(lib):
@@ -115,8 +115,8 @@ def test_mark_tool_differentiation_verified(lib):
     lib.update_tool_differentiation(tool_id, "Faster onboarding.", needs_verification=1)
     lib.mark_tool_differentiation_verified(tool_id)
     tool = lib.get_tool(tool_id)
-    assert tool["differentiation_needs_verification"] == 0
-    assert tool["differentiation_note"] == "Faster onboarding."
+    assert tool["competitive_differentiation_needs_verification"] == 0
+    assert tool["competitive_differentiation"] == "Faster onboarding."
 
 
 # -- Edit-submit route: sets the flag from ai_drafted_fields --------------------
@@ -165,7 +165,7 @@ def test_edit_submit_clears_description_needs_verification_when_not_ai_drafted(e
     lib.close()
 
 
-def test_edit_submit_sets_differentiation_needs_verification_when_ai_drafted(env):
+def test_edit_submit_sets_competitive_differentiation_needs_verification_when_ai_drafted(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -176,11 +176,11 @@ def test_edit_submit_sets_differentiation_needs_verification_when_ai_drafted(env
     _login(client)
     client.post(f"/tools/software/{slug}/edit", data={
         "name": "Runway", "url": "https://runway.com", "description": "d", "summary": "s",
-        "differentiation_note": "AI drafted note", "ai_drafted_fields": "differentiation_note",
+        "competitive_differentiation": "AI drafted note", "ai_drafted_fields": "competitive_differentiation",
     }, follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
-    assert lib.get_tool(tool_id)["differentiation_needs_verification"] == 1
+    assert lib.get_tool(tool_id)["competitive_differentiation_needs_verification"] == 1
     lib.close()
 
 
@@ -224,7 +224,7 @@ def test_differentiation_verify_route_clears_flag_and_logs(env):
 
     lib = Library(os.environ["LINKLIB_DB"])
     tool = lib.get_tool(tool_id)
-    assert tool["differentiation_needs_verification"] == 0
+    assert tool["competitive_differentiation_needs_verification"] == 0
     review = lib.get_latest_narrative_review("tool", "differentiation", tool_id)
     assert review is not None and review["detail"] == "AI note"
     lib.close()
@@ -305,8 +305,8 @@ def test_field_reviews_not_written_for_retired_tool_fields(env):
     _login(client)
     client.post(f"/tools/software/{slug}/edit", data={
         "name": "Runway", "url": "https://runway.com", "description": "d", "summary": "s",
-        "differentiation_note": "n",
-        "ai_drafted_fields": "description,summary,differentiation_note",
+        "competitive_differentiation": "n",
+        "ai_drafted_fields": "description,summary,competitive_differentiation",
     }, follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
