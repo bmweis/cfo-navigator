@@ -114,7 +114,7 @@ def main() -> int:
         conn.execute(f"ALTER TABLE tools RENAME COLUMN {_OLD_COL} TO {_NEW_COL}")
         conn.execute(f"ALTER TABLE tools RENAME COLUMN {_OLD_FLAG_COL} TO {_NEW_FLAG_COL}")
         conn.commit()
-        print(f"\nApplied — renamed both columns on `tools`.\n")
+        print("\nApplied — renamed both columns on `tools`.\n")
 
         # Write-then-read-back: re-read the schema and a sample of rows,
         # assert the rename actually landed and no data moved/vanished.
