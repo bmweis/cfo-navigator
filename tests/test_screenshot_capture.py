@@ -52,6 +52,9 @@ def _mock_playwright_success(monkeypatch):
         def wait_for_timeout(self, ms):
             pass
 
+        def add_style_tag(self, content=None):
+            written["style_tag_css"] = content
+
         def screenshot(self, path):
             written["path"] = path
             with open(path, "wb") as f:
@@ -115,6 +118,80 @@ def test_capture_homepage_creates_parent_dirs(monkeypatch, tmp_path):
     _mock_playwright_success(monkeypatch)
     dest = str(tmp_path / "nested" / "dir" / "shot.png")
     ok = screenshots.capture_homepage("https://runway.com", dest)
+    assert ok is True
+    assert os.path.isfile(dest)
+
+
+def test_capture_homepage_injects_cookie_banner_hide_css(monkeypatch, tmp_path):
+    written = _mock_playwright_success(monkeypatch)
+    dest = str(tmp_path / "shot.png")
+    ok = screenshots.capture_homepage("https://runway.com", dest)
+    assert ok is True
+    css = written["style_tag_css"]
+    # Spot-check a selector from each major consent-management platform, plus
+    # the generic homegrown catch-all, rather than asserting the whole string.
+    for selector in (
+        "#onetrust-banner-sdk",       # OneTrust
+        "#CybotCookiebotDialog",      # Cookiebot
+        ".osano-cm-window",           # Osano
+        "#truste-consent-track",      # TrustArc
+        "#qc-cmp2-container",         # Quantcast/IAB-TCF
+        "#didomi-host",               # Didomi
+        "[id*='cookie-banner' i]",    # generic catch-all
+    ):
+        assert selector in css
+    assert "display: none !important" in css
+
+
+def test_capture_homepage_succeeds_even_if_style_injection_fails(monkeypatch, tmp_path):
+    written = _mock_playwright_success(monkeypatch)
+
+    def _boom(content=None):
+        raise RuntimeError("page closed mid-injection")
+
+    # Patch the mock Page class's add_style_tag to raise, simulating a
+    # Playwright failure — the capture should still succeed.
+    import linklib.screenshots as screenshots_mod
+    orig_capture = screenshots_mod.capture_homepage
+
+    class _PageBoom:
+        def goto(self, url, timeout=None, wait_until=None):
+            written["url"] = url
+
+        def wait_for_timeout(self, ms):
+            pass
+
+        def add_style_tag(self, content=None):
+            _boom(content)
+
+        def screenshot(self, path):
+            written["path"] = path
+            with open(path, "wb") as f:
+                f.write(b"fake-png-bytes")
+
+    class _Browser:
+        def new_page(self, viewport=None):
+            return _PageBoom()
+
+        def close(self):
+            pass
+
+    class _Chromium:
+        def launch(self):
+            return _Browser()
+
+    class _PW:
+        def __enter__(self):
+            return types.SimpleNamespace(chromium=_Chromium())
+
+        def __exit__(self, *a):
+            return False
+
+    fake = types.SimpleNamespace(sync_playwright=lambda: _PW())
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+
+    dest = str(tmp_path / "shot.png")
+    ok = orig_capture("https://runway.com", dest)
     assert ok is True
     assert os.path.isfile(dest)
 
