@@ -290,12 +290,12 @@ Vendor: {name} ({url})
 Description: {description}
 {competitors_block}
 
-Respond with JSON only: {{"differentiation_note": "..."}}"""
+Respond with JSON only: {{"competitive_differentiation": "..."}}"""
 
 
 @dataclass
 class ToolDifferentiationDraft:
-    differentiation_note: str
+    competitive_differentiation: str
     low_confidence: bool = False
     model: str = ""
     input_tokens: int = 0
@@ -355,7 +355,7 @@ def generate_tool_differentiation(name: str, url: str, description: str,
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
         return ToolDifferentiationDraft(
-            differentiation_note=str(data.get("differentiation_note", "")).strip(),
+            competitive_differentiation=str(data.get("competitive_differentiation", "")).strip(),
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )

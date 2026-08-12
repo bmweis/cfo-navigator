@@ -312,12 +312,12 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   same non-destructive-retirement precedent as `screenshot_is_product`
   (see the Key architecture decisions bullet above): it stays in the schema
   as a frozen historical record for the fields it no longer tracks
-  (Description, `summary`, `differentiation_note`, the 23 Community profile
+  (Description, `summary`, `competitive_differentiation`, the 23 Community profile
   fields — `_RETIRED_FIELD_REVIEW_FIELDS` in `webapp/app.py`), while it
   keeps growing normally for everything this phase didn't touch (the
   Community "Auto-fill from URL" listing fields, competitor-match
   suggestions on both entity types). New columns `tools.
-  description_needs_verification`/`differentiation_needs_verification`
+  description_needs_verification`/`competitive_differentiation_needs_verification`
   default to 0 for every existing row (no retroactive flagging, same
   precedent `agent_taxonomy_needs_verification`'s own migration set) — only
   the *next* AI draft of each field trips the gate. `summary` shares
@@ -356,6 +356,57 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Differentiation, and in reduced form (button + review line only, no
   badge, since the existing checkbox already shows state) for the Community
   profile draft.
+- **Phase P — edit-page layout reorg, and why `tool_competitors`/
+  `community_competitors` did NOT get renamed alongside `differentiation_note`.**
+  Both Software's and Communities' edit pages were reorganized into labeled
+  sections (Company/Community Details, Categories, Business summary/Program
+  details, Competition, Screenshots) matching new display labels on the
+  Software profile page: "Competitors" -> "Core competition" and "How this
+  differs from the competition" -> "Competitive differentiation." The
+  Part 0 investigation before this build treated those two renames very
+  differently. `differentiation_note` is a single free-text column with one
+  obvious backing field, so it and its companion
+  `differentiation_needs_verification` were renamed to
+  `competitive_differentiation`/`competitive_differentiation_needs_verification`
+  via a real migration (`ALTER TABLE tools RENAME COLUMN`, added to the
+  existing migration list in `linklib/db.py` — SQLite raises the same
+  `OperationalError` on a column that's already been renamed as it does for
+  `ADD COLUMN` on a column that already exists, so this fits the established
+  idempotent-migration-list pattern with no new mechanism). "Competitors" is
+  different: there's no single column to rename, only a join table
+  (`tool_competitors`/`community_competitors`) plus a cluster of function/
+  route names (`list_tool_competitors`, `suggest_tool_competitors`,
+  `generateCompetitorMatches`, `/admin/tools/{id}/competitors/*`, and their
+  Communities mirrors) — renaming all of that to track a Software-profile-
+  page display-label change would be broad, code-only churn with no
+  corresponding user-facing payoff, and Communities' "Similar communities"
+  label was deliberately never "Competitors" in the first place (communities
+  don't compete for a buyer's dollar the way software tools do), so a
+  mechanical `tool_competitors` -> `tool_core_competitors` rename would have
+  had to either also relabel Communities' internals to match (wrong — no
+  Community display-label changed) or leave the two entity types' internal
+  naming inconsistent with each other for no benefit. Kept as-is: only the
+  Software edit page's on-screen copy changed ("Competitors" heading ->
+  "Core competition" subheading); the schema, every function name, and every
+  route path are untouched. `scripts/rename_differentiation_columns.py`
+  (dry-run/apply/write-then-read-back, same convention as
+  `scripts/backfill_logos.py`/`scripts/migrate_app_screenshot_from_product_flag.py`)
+  exists alongside the automatic migration for manual pre-migration of a
+  standalone DB copy via `railway ssh`, not as a substitute for it — see
+  that script's docstring for the distinction. A stray `repeat(4,1fr)` CSS
+  Grid on the Categories checklist (both the Software "Add" and "Edit" forms)
+  was the actual cause of the pre-existing mobile-portrait horizontal-scroll
+  bug on the edit page — `1fr` tracks have an implicit min-width based on
+  each cell's own min-content size, so four columns of checkbox labels
+  couldn't shrink below their un-wrapped text width and forced the whole
+  page wider than a narrow viewport ("CSS Grid blowout"); fixed by switching
+  to `repeat(auto-fit,minmax(150px,1fr))`, whose explicit non-`auto` minimum
+  overrides that implicit behavior. The reported footer gap on mobile was
+  the SAME root cause, not a separate bug: `.site-footer` has no `max-width`
+  of its own, so once the grid blowout forced the page to scroll
+  horizontally, the footer rendered at the page's normal (un-scrolled)
+  width while everything else extended past it — confirmed by the fix
+  eliminating both symptoms together.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
