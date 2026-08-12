@@ -996,6 +996,28 @@ details > summary::-webkit-details-marker{display:none;}
 details > summary .disclosure-caret{display:inline-block;flex-shrink:0;font-size:15px;
   font-weight:700;line-height:1;color:var(--navy);transition:transform .15s;}
 details[open] > summary .disclosure-caret{transform:rotate(90deg);}
+
+/* Phase Q: shared "generating" loading treatment for every AI-generate
+   button across the Software/Community admin edit pages (Description,
+   Differentiation, research-taxonomy refresh, competitor
+   suggestions, Community profile/listing drafts, screenshot capture — see
+   startGenAnim/stopGenAnim). A rotating dashed border laid over the field/
+   area being generated into, absolutely positioned so it never affects the
+   host's box size — the host keeps whatever layout it already had
+   (position:relative is the only property this adds, which is a no-op
+   visually since nothing here sets top/left/etc.). Brand-neutral: the old
+   rope-rule motif is retired sitewide (BRAND.md §4) and forms stay
+   undecorated even under the current graffiti-layer motifs, so this reuses
+   a plain core token (--navy-light, already sanctioned for borders/
+   secondary accents) rather than reviving or inventing a motif. */
+.gen-anim-host{position:relative;}
+.gen-anim-svg{position:absolute;inset:-6px;width:calc(100% + 12px);height:calc(100% + 12px);
+  pointer-events:none;z-index:2;overflow:visible;}
+.gen-anim-svg rect{fill:none;stroke:var(--navy-light);stroke-width:1.5px;stroke-dasharray:5 4;
+  x:1px;y:1px;width:calc(100% - 2px);height:calc(100% - 2px);rx:10px;ry:10px;
+  animation:gen-anim-march 2.6s linear infinite;}
+@keyframes gen-anim-march{to{stroke-dashoffset:-36px;}}
+@media (prefers-reduced-motion: reduce){.gen-anim-svg rect{animation:none;}}
 """
 
 # Trailing brand suffixes baked into individual page titles over time — now
@@ -1309,8 +1331,15 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
             f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">{_esc(cap_note)}</p></div>'
         )
     recapture_disabled = "" if source_url else ' disabled title="Enter a source URL above, then Save changes, first."'
+    # Phase Q: confirmDiscardsUnsavedEdits checks a specific form's dirty
+    # state, so the shared helper needs the right form id per entity type —
+    # the Software edit page's own 'tool-edit-form' isn't the Community edit
+    # page's 'comm-edit-form' (see confirmDiscardsUnsavedEdits's own comment
+    # for how this was generalized).
+    _confirm_form_id = "tool-edit-form" if kind == "tools" else "comm-edit-form"
+    _gen_host_id = f"gen-host-app-screenshot-{idsfx}"
 
-    in_form_html = f"""  <div>
+    in_form_html = f"""  <div id="{_gen_host_id}">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Product</label>
     <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">No single reliable URL for "the app"—a login/demo/product-tour page you have public access to. This is inherently manual/curated, not something to fill in for every record.</p>
     <input name="app_screenshot_source_url"{_form_attr} type="text" maxlength="500" value="{_esc(source_url)}"
@@ -1318,7 +1347,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
       placeholder="https://…/demo">
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
       <button type="submit" form="app-screenshot-recapture-form-{idsfx}" class="tool-admin-btn"{recapture_disabled}
-        onclick="return confirmDiscardsUnsavedEdits(this)">Generate app screenshot</button>
+        onclick="return confirmDiscardsUnsavedEdits(this, '{_confirm_form_id}') && startGenAnim('{_gen_host_id}')">Generate app screenshot</button>
       <button type="button" class="tool-admin-btn" onclick="document.getElementById('app-screenshot-file-{idsfx}').click()">Upload app screenshot&hellip;</button>
     </div>
     <input type="file" id="app-screenshot-file-{idsfx}" accept="image/jpeg,image/png,image/webp" style="display:none;"
@@ -5790,15 +5819,21 @@ function renderTools(tools) {{
       // else (name, URL, categories, advisor/featured) stays on the full
       // edit page, since those change far less often.
       quickEditPanel = '<div class="tool-quickedit" id="qe-' + t.id + '" style="display:none;">'
+        // gen-host wraps just the label row/err/textarea trio as one grid
+        // item (matching .tool-quickedit's own gap:10px so wrapping them
+        // doesn't collapse the spacing between them) so the loading border
+        // has a host that already exists on this page — see startGenAnim.
+        + '<div id="qe-genhost-' + t.id + '" style="display:grid;gap:10px;">'
         + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;">'
         + '<label style="margin:0;">Description</label>'
         + '<span><button type="button" class="tool-admin-btn" onclick="generateDescription('
         + esc(JSON.stringify(t.name)) + ',' + esc(JSON.stringify(t.url))
-        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\',\\'qe-gen-err-' + t.id + '\\')">Generate summary</button>'
+        + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\',\\'qe-gen-err-' + t.id + '\\',\\'qe-genhost-' + t.id + '\\')">Generate summary</button>'
         + ' <span id="qe-gen-status-' + t.id + '" class="qe-status"></span></span>'
         + '</div>'
         + '<p id="qe-gen-err-' + t.id + '" style="display:none;"></p>'
         + '<textarea id="qe-desc-' + t.id + '" rows="4">' + esc(t.description) + '</textarea>'
+        + '</div>'
         + '<label style="margin:8px 0 0;">Short summary <span style="font-weight:400;color:var(--muted);">(directory card + search)</span></label>'
         + '<textarea id="qe-summary-' + t.id + '" rows="2">' + esc(t.summary || '') + '</textarea>'
         + '<label class="qe-checkbox"><input type="checkbox" id="qe-warm-' + t.id + '"' + (t.warm_intro_enabled ? ' checked' : '') + '> Offer a Warm Intro button</label>'
@@ -8603,16 +8638,45 @@ function clearGenError(boxId) {
   box.style.display = 'none';
   box.textContent = '';
 }
+// Phase Q: shared loading animation for every Generate-type button — a
+// rotating dashed border (see .gen-anim-host/.gen-anim-svg in the global
+// stylesheet) drawn around the field/area a click is about to draft into.
+// hostId is an existing element (almost always a <div> already wrapping the
+// label/button/field for that section) — never the button itself, and never
+// an <input>/<textarea> directly, since those can't render child elements.
+// Appending an inline SVG and letting CSS animate its stroke-dashoffset
+// keeps this JS-free once started: no rAF loop, no interval, nothing to
+// clean up but the element itself. startGenAnim always returns true so it
+// can be chained in an onclick, e.g.
+// onclick="return confirmDiscardsUnsavedEdits(this) && startGenAnim('host-id')".
+function startGenAnim(hostId) {
+  var host = document.getElementById(hostId);
+  if (!host || host.querySelector('.gen-anim-svg')) return true;
+  host.classList.add('gen-anim-host');
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'gen-anim-svg');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = '<rect></rect>';
+  host.appendChild(svg);
+  return true;
+}
+function stopGenAnim(hostId) {
+  var host = document.getElementById(hostId);
+  if (!host) return;
+  var svg = host.querySelector('.gen-anim-svg');
+  if (svg) svg.remove();
+}
 """
 
 _GENERATE_DESC_JS = _MARK_AI_DRAFTED_JS + """
-async function generateDescription(name, url, descId, statusId, summaryId, errBoxId) {
+async function generateDescription(name, url, descId, statusId, summaryId, errBoxId, hostId) {
   name = (name || '').trim();
   url = (url || '').trim();
   var status = document.getElementById(statusId);
   clearGenError(errBoxId);
   if (!name || !url) { status.textContent = 'Enter a name and URL first.'; return; }
   status.textContent = 'Generating…';
+  if (hostId) startGenAnim(hostId);
   try {
     var r = await fetch('/admin/tools/generate-description', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -8632,6 +8696,8 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
   } catch (e) {
     status.textContent = '';
     showGenError(errBoxId, e.message || 'Generation failed. Write the description by hand.');
+  } finally {
+    if (hostId) stopGenAnim(hostId);
   }
 }
 """
@@ -8668,13 +8734,14 @@ _RETIRED_FIELD_REVIEW_FIELDS = (
 
 _GENERATE_PROFILE_JS = _MARK_AI_DRAFTED_JS + """
 var COMMUNITY_PROFILE_FIELDS = """ + json.dumps(_COMMUNITY_PROFILE_FIELD_IDS) + """;
-async function generateCommunityProfile(name, url, statusId, errBoxId) {
+async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
   name = (name || '').trim();
   url = (url || '').trim();
   var status = document.getElementById(statusId);
   clearGenError(errBoxId);
   if (!name || !url) { status.textContent = 'Missing name or URL.'; return; }
   status.textContent = 'Generating…';
+  if (hostId) startGenAnim(hostId);
   var existing = {};
   COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
     var el = document.getElementById('cp-' + k);
@@ -8701,6 +8768,8 @@ async function generateCommunityProfile(name, url, statusId, errBoxId) {
   } catch (e) {
     status.textContent = '';
     showGenError(errBoxId, e.message || 'Generation failed. Write the profile by hand.');
+  } finally {
+    if (hostId) stopGenAnim(hostId);
   }
 }
 """
@@ -8713,13 +8782,14 @@ async function generateCommunityProfile(name, url, statusId, errBoxId) {
 # on the page; categories is the one remaining checkbox group, synced by
 # checking membership in the returned list instead.
 _GENERATE_LISTING_JS = _MARK_AI_DRAFTED_JS + """
-async function generateCommunityListing(name, url, statusId, errBoxId) {
+async function generateCommunityListing(name, url, statusId, errBoxId, hostId) {
   name = (name || '').trim();
   url = (url || '').trim();
   var status = document.getElementById(statusId);
   clearGenError(errBoxId);
   if (!name || !url) { status.textContent = 'Enter a name and URL first.'; return; }
   status.textContent = 'Generating…';
+  if (hostId) startGenAnim(hostId);
   try {
     var r = await fetch('/admin/tools/communities/generate-listing', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -8742,6 +8812,8 @@ async function generateCommunityListing(name, url, statusId, errBoxId) {
   } catch (e) {
     status.textContent = '';
     showGenError(errBoxId, e.message || 'Generation failed. Fill in the form by hand.');
+  } finally {
+    if (hostId) stopGenAnim(hostId);
   }
 }
 """
@@ -10398,7 +10470,13 @@ def _community_form_fields(c: dict | None = None, categories: list[dict] | None 
     _community_form_fields_parts returns, in their original order, so this
     keeps rendering byte-identical output for that caller."""
     parts = _community_form_fields_parts(c, categories)
-    return (parts["identity"] + parts["details"] + parts["categories"]
+    # Phase Q: wrapped in its own grid (matching the caller's 20px form gap,
+    # so internal spacing between these fields is unchanged) so
+    # generateCommunityListing has one host to draw its loading border
+    # around — same id the Edit-community page's own details wrapper uses,
+    # since only one of the two templates is ever on screen at a time.
+    details_host = f'<div id="gen-host-community-listing" style="display:grid;gap:20px;">{parts["details"]}</div>'
+    return (parts["identity"] + details_host + parts["categories"]
             + parts["disclosures"] + parts["screenshot"])
 
 
@@ -10453,7 +10531,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
       placeholder="https://…">
   </div>
   <div>
-    <button type="button" class="tool-admin-btn" onclick="generateCommunityListing(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'comm-gen-status', 'comm-gen-err')">Auto-fill from URL</button>
+    <button type="button" class="tool-admin-btn" onclick="generateCommunityListing(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'comm-gen-status', 'comm-gen-err', 'gen-host-community-listing')">Auto-fill from URL</button>
     <span id="comm-gen-status" class="qe-status"></span>
     <p id="comm-gen-err" style="display:none;"></p>
   </div>"""
@@ -10633,11 +10711,12 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     <span style="white-space:nowrap;">
       <input type="hidden" id="cp-name" value="{_esc(community.get('name', ''))}">
       <input type="hidden" id="cp-url" value="{_esc(community.get('url', ''))}">
-      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status', 'cp-gen-err')">Generate summary</button>
+      <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('cp-name').value, document.getElementById('cp-url').value, 'cp-gen-status', 'cp-gen-err', 'gen-host-community-profile')">Generate summary</button>
       <span id="cp-gen-status" class="qe-status"></span>
     </span>
   </div>
   <p id="cp-gen-err" style="display:none;"></p>
+  <div id="gen-host-community-profile" style="display:grid;gap:20px;">
 {_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True)}
 {_field('anti_fit', 'Anti-fit', 'Who should probably skip it')}
 {_field('value_prop', 'Value proposition', 'The primary thing members get out of it')}
@@ -10683,6 +10762,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     </label>
     {_community_profile_mark_reviewed_action if p.get('needs_review') else ''}
     {_community_profile_review_line_html}
+  </div>
   </div>""", _community_profile_mark_reviewed_form_html
 
 
@@ -11329,7 +11409,7 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—shares a tag</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\', \'community-competitor-gen-err\')">Suggest similar communities</button>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\', \'community-competitor-gen-err\', \'gen-host-community-competitors\')">Suggest similar communities</button>'
             '</div>'
             '<p id="community-competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
             '<p id="community-competitor-gen-err" style="display:none;"></p>'
@@ -11343,7 +11423,7 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
         f'<option value="{x["id"]}">{_esc(x["name"])}</option>' for x in other_communities
     )
     _competitors_card_html = f"""
-<div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
+<div id="gen-host-community-competitors" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 4px;">Similar communities</h2>
   <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Similar communities" on {_esc(c['name'])}'s profile page. Curating from either community's edit page links both directions.</p>
 
@@ -11362,10 +11442,11 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
   </div>
 </div>
 <script>
-async function generateCommunityCompetitorMatches(communityId, statusId, errBoxId) {{
+async function generateCommunityCompetitorMatches(communityId, statusId, errBoxId, hostId) {{
   var status = document.getElementById(statusId);
   clearGenError(errBoxId);
   status.textContent = 'Generating…';
+  if (hostId) startGenAnim(hostId);
   try {{
     var r = await fetch('/admin/tools/communities/' + communityId + '/competitors/generate-matches', {{method: 'POST'}});
     var d = await r.json();
@@ -11383,6 +11464,8 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
   }} catch (e) {{
     status.textContent = '';
     showGenError(errBoxId, e.message || 'Generation failed. Pick similar communities by hand.');
+  }} finally {{
+    if (hostId) stopGenAnim(hostId);
   }}
 }}
 </script>"""
@@ -11468,7 +11551,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 
   <div>
     <h2 style="font-size:16px;font-weight:600;margin:32px 0 16px;padding-top:24px;border-top:1px solid var(--line);">Program details</h2>
-    <div style="display:grid;gap:14px;">
+    <div id="gen-host-community-listing" style="display:grid;gap:14px;">
 {_parts['details']}
     </div>
   </div>
@@ -11477,7 +11560,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Screenshots</h2>
 
-  <div style="margin-bottom:28px;">
+  <div id="gen-host-community-screenshot-home" style="margin-bottom:28px;">
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Homepage</label>
     <!-- type="text", not "url": Recapture writes a site-relative served path
          (e.g. /tools/communities/screenshot/<slug>.png?v=...), which native
@@ -11490,7 +11573,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     {screenshot_banner_html}
     {screenshot_preview_html}
     <form method="post" action="/admin/tools/communities/{c['id']}/screenshot/recapture" style="margin-top:12px;">
-      <button type="submit" class="tool-admin-btn">Generate screenshot</button>
+      <button type="submit" class="tool-admin-btn" onclick="return startGenAnim('gen-host-community-screenshot-home')">Generate screenshot</button>
     </form>
   </div>
 
@@ -12047,11 +12130,11 @@ def admin_tools_new(request: Request):
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="https://…">
   </div>
-  <div>
+  <div id="gen-host-tool-desc-new">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err')">Generate summary</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err', 'gen-host-tool-desc-new')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -12288,7 +12371,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—shares a tag</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\', \'competitor-gen-err\')">Suggest competitors</button>'
+            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\', \'competitor-gen-err\', \'gen-host-tool-competitors\')">Suggest competitors</button>'
             '</div>'
             '<p id="competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
             '<p id="competitor-gen-err" style="display:none;"></p>'
@@ -12499,11 +12582,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
         <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—shares its verification status, not tracked separately.</p>
       </div>
-      <div>
+      <div id="gen-host-tool-desc-edit">
         <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
           <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *{_description_verify_badge}</label>
           <span>
-            <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err')">Generate summary</button>
+            <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err', 'gen-host-tool-desc-edit')">Generate summary</button>
             <span id="tool-gen-status" class="qe-status"></span>
           </span>
         </div>
@@ -12514,12 +12597,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         {_description_verify_action}
         {_description_review_line_html}
       </div>
-      <div>
+      <div id="gen-host-tool-taxonomy">
         <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
           <label style="font-size:14px;font-weight:500;color:var(--navy);">Agent taxonomy{_taxonomy_verify_badge}</label>
           <span>
             <button type="submit" form="research-refresh-form" class="tool-admin-btn"
-              onclick="return confirmDiscardsUnsavedEdits(this)">Generate summary</button>
+              onclick="return confirmDiscardsUnsavedEdits(this, 'tool-edit-form') && startGenAnim('gen-host-tool-taxonomy')">Generate summary</button>
           </span>
         </div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Crawls the vendor's site to draft this note and the Feature rows below—runs automatically when a tool is added; use this button to re-run it after a vendor redesign.</p>
@@ -12543,7 +12626,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Competition</h2>
 
-  <div style="margin-bottom:28px;">
+  <div id="gen-host-tool-competitors" style="margin-bottom:28px;">
     <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Core competition</div>
     <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Shown as "Closest competitors" on {_esc(tool['name'])}'s profile page. Curating from either tool's edit page links both directions.</p>
 
@@ -12562,11 +12645,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     </div>
   </div>
 
-  <div>
+  <div id="gen-host-tool-differentiation">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Competitive differentiation{_differentiation_verify_badge}</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err')">Generate summary</button>
+        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err', 'gen-host-tool-differentiation')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -12582,12 +12665,12 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Screenshots</h2>
 
-  <div style="margin-bottom:28px;">
+  <div id="gen-host-tool-screenshot-home" style="margin-bottom:28px;">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Homepage</label>
       <span>
         <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn"
-          onclick="return confirmDiscardsUnsavedEdits(this)">Generate homepage screenshot</button>
+          onclick="return confirmDiscardsUnsavedEdits(this, 'tool-edit-form') && startGenAnim('gen-host-tool-screenshot-home')">Generate homepage screenshot</button>
       </span>
     </div>
     <!-- type="text", not "url": Generate screenshot writes a site-relative
@@ -12656,8 +12739,13 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 // summary, Differentiation, category checkboxes, etc.) — including a draft
 // from Generate summary above that hasn't been saved yet. Warn before that
 // happens rather than eating the edit with no explanation.
-function confirmDiscardsUnsavedEdits(button) {{
-  var form = document.getElementById('tool-edit-form');
+// formId (Phase Q): the Software edit page's own form is 'tool-edit-form';
+// generalized (default kept for back-compat) so the same function also
+// covers the Community edit page's app-screenshot button, which shares this
+// exact onclick markup via _app_screenshot_admin_section but dirties
+// 'comm-edit-form' instead.
+function confirmDiscardsUnsavedEdits(button, formId) {{
+  var form = document.getElementById(formId || 'tool-edit-form');
   if (!form) return true;
   var dirty = Array.from(form.elements).some(function(el) {{
     if (!el.name || el.disabled) return false;
@@ -12670,10 +12758,11 @@ function confirmDiscardsUnsavedEdits(button) {{
     + 'edits above (including anything just drafted with Generate summary). '
     + 'Save changes first, or continue and lose them?');
 }}
-async function generateDifferentiation(toolId, textareaId, statusId, errBoxId) {{
+async function generateDifferentiation(toolId, textareaId, statusId, errBoxId, hostId) {{
   var status = document.getElementById(statusId);
   clearGenError(errBoxId);
   status.textContent = 'Generating…';
+  if (hostId) startGenAnim(hostId);
   try {{
     var r = await fetch('/admin/tools/' + toolId + '/generate-differentiation', {{method: 'POST'}});
     var d = await r.json();
@@ -12686,12 +12775,15 @@ async function generateDifferentiation(toolId, textareaId, statusId, errBoxId) {
   }} catch (e) {{
     status.textContent = '';
     showGenError(errBoxId, e.message || 'Generation failed. Write it by hand.');
+  }} finally {{
+    if (hostId) stopGenAnim(hostId);
   }}
 }}
-async function generateCompetitorMatches(toolId, statusId, errBoxId) {{
+async function generateCompetitorMatches(toolId, statusId, errBoxId, hostId) {{
   var status = document.getElementById(statusId);
   clearGenError(errBoxId);
   status.textContent = 'Generating…';
+  if (hostId) startGenAnim(hostId);
   try {{
     var r = await fetch('/admin/tools/' + toolId + '/competitors/generate-matches', {{method: 'POST'}});
     var d = await r.json();
@@ -12709,6 +12801,8 @@ async function generateCompetitorMatches(toolId, statusId, errBoxId) {{
   }} catch (e) {{
     status.textContent = '';
     showGenError(errBoxId, e.message || 'Generation failed. Pick competitors by hand.');
+  }} finally {{
+    if (hostId) stopGenAnim(hostId);
   }}
 }}
 </script>"""
