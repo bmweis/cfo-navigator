@@ -108,7 +108,7 @@ _FAKE_PNG = (
 def test_migration_not_run_automatically_on_boot(tmp_path):
     """Reopening the DB (which re-runs every migration in Library.__init__)
     must NOT touch a legacy screenshot_is_product=1 row — this migration is
-    manual-trigger only (scripts/migrate_app_screenshot_from_product_flag.py),
+    manual-trigger only (scripts/archive/migrate_app_screenshot_from_product_flag.py),
     per the standing "human review before a production data write" rule."""
     lib = Library(str(tmp_path / "t.db"))
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -179,10 +179,10 @@ def test_migrate_app_screenshot_from_product_flag_leaves_non_flagged_rows_alone(
     lib.close()
 
 
-# -- scripts/migrate_app_screenshot_from_product_flag.py ---------------------
+# -- scripts/archive/migrate_app_screenshot_from_product_flag.py ---------------------
 
 def test_script_preview_makes_no_writes(monkeypatch, tmp_path):
-    import scripts.migrate_app_screenshot_from_product_flag as script_mod
+    import scripts.archive.migrate_app_screenshot_from_product_flag as script_mod
     db_path = str(tmp_path / "t.db")
     lib = Library(db_path)
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -201,7 +201,7 @@ def test_script_preview_makes_no_writes(monkeypatch, tmp_path):
 
 
 def test_script_apply_writes_and_verifies(monkeypatch, tmp_path):
-    import scripts.migrate_app_screenshot_from_product_flag as script_mod
+    import scripts.archive.migrate_app_screenshot_from_product_flag as script_mod
     db_path = str(tmp_path / "t.db")
     lib = Library(db_path)
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -220,7 +220,7 @@ def test_script_apply_writes_and_verifies(monkeypatch, tmp_path):
 
 
 def test_script_no_candidates_exits_clean(monkeypatch, tmp_path):
-    import scripts.migrate_app_screenshot_from_product_flag as script_mod
+    import scripts.archive.migrate_app_screenshot_from_product_flag as script_mod
     db_path = str(tmp_path / "t.db")
     Library(db_path).close()
     monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--apply"])

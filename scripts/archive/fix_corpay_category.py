@@ -17,8 +17,8 @@ reviewed the report. Per the write-then-read-back standing practice, an
 took, printing the row it just read back.
 
 Usage:
-    python -m scripts.fix_corpay_category [--db library.db]              # check only (no writes)
-    python -m scripts.fix_corpay_category [--db library.db] --apply      # check, then correct if needed
+    python -m scripts.archive.fix_corpay_category [--db library.db]              # check only (no writes)
+    python -m scripts.archive.fix_corpay_category [--db library.db] --apply      # check, then correct if needed
 """
 from __future__ import annotations
 

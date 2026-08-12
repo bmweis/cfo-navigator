@@ -101,7 +101,7 @@ CONTACT_TIME_TRAP_SECONDS = float(os.environ.get("LINKLIB_CONTACT_TIME_TRAP_SECO
 # Not read directly anywhere else — once seeded, the DB is the source of
 # truth and categories are managed at /admin/tools/categories. Consolidated
 # from a 21-tag ad hoc list to this fixed 15-tag taxonomy (#Software search
-# overhaul Phase 1) — scripts/migrate_software_tags.py carries the mapping
+# overhaul Phase 1) — scripts/archive/migrate_software_tags.py carries the mapping
 # and remaps every existing tool's categories_json on a one-off run against
 # a live DB; this list only matters for a fresh DB's first-time seed. Always
 # alphabetical — that's a UI contract (the filter pills on /tools/software),
@@ -10404,7 +10404,7 @@ _COMMUNITY_SPONSORSHIP_TYPES = ["Independent", "Vendor-sponsored", "Investor-spo
 # Derived from the actual access/format values across the existing 35
 # communities (each value's own leading word/phrase), not invented — every
 # existing entry maps cleanly onto one of these with no lossy leftover, so
-# the one-off reconciliation script (scripts/backfill_community_access_format.py)
+# the one-off reconciliation script (scripts/archive/backfill_community_access_format.py)
 # needed no "Needs verification" fallback for any pre-existing row. Converting
 # these from free text drops each entry's qualifier detail (e.g. "Invite-only
 # (~10% acceptance, ~95% referral rate)" -> "Invite-only") by design — a
@@ -15664,6 +15664,7 @@ _ADMIN_GROUPS = [
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
         ("/admin/system/page-index", "Page Index",        "A live, self-updating map of every route and its width tier."),
+        ("/admin/system/scripts",   "Scripts",             "The recurring CLI scripts still worth running&mdash;purpose, cadence, env vars, and how to invoke each."),
     ]),
 ]
 
@@ -15844,6 +15845,187 @@ def admin_open_source(request: Request):
 {love}
 </div>"""
     return HTMLResponse(_page("Open source", "Admin", body, role=_role(request)))
+
+
+# Scripts registry for /admin/system/scripts (Phase N). Static, hand-maintained
+# — deliberately NOT a docstring-scanning/auto-generated page. Rationale (from
+# the Phase N investigation): the corpus is small (a dozen scripts) and
+# changes rarely, so a static list is cheap to keep in sync; a scanning
+# approach would need a new structured-docstring convention retrofitted onto
+# every script plus ongoing discipline to keep it valid, which is more
+# mechanism than this corpus's size or churn rate justifies. Same
+# hand-maintained-reference-content precedent as `_OPEN_SOURCE` above.
+#
+# STANDING RULE (mirrors CLAUDE.md's Documentation rules 1-4 for
+# ARCHITECTURE.md/BRAND.md): any PR that adds a new script to `scripts/`, or
+# changes what an existing recurring script here does (purpose, required env
+# vars, or invocation), must update this registry in the same PR. Any PR that
+# makes a recurring script's job "done" (a one-time migration completes, a
+# diagnostic's question gets answered for good) should `git mv` it into
+# `scripts/archive/` and remove its entry here, in that same PR — not as a
+# follow-up cleanup. See CLAUDE.md's Documentation section for the full rule.
+#
+# Each entry: (name, module path, bucket, purpose, cadence, env vars, invocation lines).
+# bucket is "Recurring & actively useful" or "Reusable diagnostic".
+_SCRIPT_REGISTRY = [
+    ("backfill_logos.py", "scripts.backfill_logos", "Recurring & actively useful",
+     "Fetches a company logo for every Software tool/community still missing one, via "
+     "Brandfetch's Brand API. The free tier is 100 requests/month against a 216-record "
+     "catalog, so runs are deliberately split into ~90-record monthly batches.",
+     "Recurring-manual — roughly monthly, until the catalog's logo coverage is complete.",
+     ["BRANDFETCH_API_KEY (required for --apply; not needed for a preview or --status)"],
+     ["python -m scripts.backfill_logos --db library.db                 # preview (default limit 90)",
+      "python -m scripts.backfill_logos --db library.db --apply          # fetch + save for real",
+      "python -m scripts.backfill_logos --db library.db --status         # coverage report only"]),
+    ("capture_tool_screenshots.py", "scripts.capture_tool_screenshots", "Recurring & actively useful",
+     "Bulk homepage screenshot capture for the Software directory — the same "
+     "capture_homepage() logic the live \"Recapture\" admin button uses, run across many "
+     "tools in one pass instead of clicking the button repeatedly.",
+     "Recurring-manual — whenever a batch of new tools needs a first screenshot, or "
+     "existing ones need a refresh.",
+     ["None required, but needs Playwright's Chromium installed and real network egress — "
+      "run from a dev machine or railway ssh, not a sandboxed build session."],
+     ["python -m scripts.capture_tool_screenshots --db library.db --tools \"Ramp,Brex\" --dry-run",
+      "python -m scripts.capture_tool_screenshots --db library.db --limit 20"]),
+    ("seed_tools.py", "scripts.seed_tools", "Recurring & actively useful",
+     "Seeds the CFO Toolbox Software directory from a curated vendor list. Safe to "
+     "re-run — skips any tool whose URL is already in the DB.",
+     "Recurring-manual — run by hand whenever the curated seed list gains new tools, and "
+     "once against a brand-new database.",
+     ["LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.seed_tools --db library.db"]),
+    ("seed_communities.py", "scripts.seed_communities", "Recurring & actively useful",
+     "Seeds the CFO Toolbox Communities directory from a curated list. Safe to re-run — "
+     "adds any community missing by URL and syncs name/notes/advisor on existing rows; "
+     "every admin-owned field (reach, categories, approved, etc.) is left untouched.",
+     "Recurring-manual — run by hand whenever the curated seed list changes, and once "
+     "against a brand-new database.",
+     ["LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.seed_communities --db library.db"]),
+    ("enrich_community_profiles.py", "scripts.enrich_community_profiles", "Recurring & actively useful",
+     "Bulk/backfill Community Profile drafting — the Communities equivalent of "
+     "enrich_tool_features.py. One Claude call per community drafts the sixteen "
+     "qualitative profile fields; every draft is saved needs_review=1, same review "
+     "contract as the live \"Auto-fill from URL\" admin button.",
+     "Recurring-manual — whenever a batch of communities needs profile drafts.",
+     ["ANTHROPIC_API_KEY", "LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.enrich_community_profiles --db library.db --communities \"Chief,Rho Community\" --dry-run",
+      "python -m scripts.enrich_community_profiles --db library.db --limit 10"]),
+    ("enrich_tool_features.py", "scripts.enrich_tool_features", "Recurring & actively useful",
+     "Feature-comparison + agent-taxonomy research for Software tools — the exact same "
+     "drafting logic the live app runs automatically on a new tool, or on-demand via the "
+     "\"Refresh AI research\" admin button; this script is the bulk/backfill path.",
+     "Recurring-manual — whenever a batch of tools needs feature/taxonomy research.",
+     ["ANTHROPIC_API_KEY", "LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.enrich_tool_features --db library.db --tools \"Ramp,Brex\" --dry-run",
+      "python -m scripts.enrich_tool_features --db library.db --limit 10"]),
+    ("mcp_server.py", "scripts.mcp_server", "Recurring & actively useful",
+     "Stdio MCP server wrapping the hosted CFO Library search (GET /api/search) — lets "
+     "Claude Desktop/Code search the archive directly, without going through the "
+     "/library/ask web UI.",
+     "Long-running — launched by the MCP client (Claude Desktop/Code) per its own config, "
+     "not invoked manually per-use.",
+     ["LINKLIB_PUBLIC_BASE (default http://localhost:8000)", "LINKLIB_SAVE_TOKEN"],
+     ["python -m scripts.mcp_server   # normally launched by the MCP client's own config, not run directly"]),
+    ("generate_brand_docs.py", "scripts.generate_brand_docs", "Recurring & actively useful",
+     "Regenerates BRAND.md §7 (the CSS token reference table) from the live :root "
+     "block in webapp/app.py's _CSS, so the doc can't drift from the real values.",
+     "Recurring-manual — run and commit the diff in the same PR as any change to that "
+     "CSS :root block (CI fails on a stale table via tests/test_brand_docs_sync.py).",
+     ["None"],
+     ["python -m scripts.generate_brand_docs          # regenerate BRAND.md in place",
+      "python -m scripts.generate_brand_docs --check   # exit 1 if BRAND.md is stale, no write"]),
+    ("report_orphaned_categories.py", "scripts.report_orphaned_categories", "Recurring & actively useful",
+     "Read-only: lists every tool/community carrying a category string no longer in the "
+     "active vocabulary. Makes no writes — a diagnostic to review before any manual cleanup.",
+     "Recurring-manual — run as needed if orphaned-category drift is suspected.",
+     ["LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.report_orphaned_categories --db library.db"]),
+    ("dump_communities.py", "scripts.dump_communities", "Recurring & actively useful",
+     "Read-only plain listing of every community's name, URL, and slug — no filtering or "
+     "formatting. A quick ad hoc lookup tool.",
+     "Recurring-manual — run as needed.",
+     ["LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.dump_communities --db library.db",
+      "railway run python -m scripts.dump_communities --db /data/library.db   # against prod"]),
+    ("diagnose_cookie_banner.py", "scripts.diagnose_cookie_banner", "Reusable diagnostic",
+     "Reproduces linklib.screenshots.capture_homepage()'s exact navigation/wait sequence "
+     "against a real URL and dumps the rendered DOM (including any Shadow DOM content and "
+     "cross-origin iframes) — built for the ApprovalMax cookie-banner investigation, but "
+     "generalizes to any vendor whose screenshot capture is being blocked by something "
+     "on the page and needs a real look at what's actually there.",
+     "Recurring-manual — run whenever a new screenshot-capture failure needs the same "
+     "kind of DOM-level investigation.",
+     ["None, but needs real network egress — run from railway ssh or a dev machine, not a "
+      "sandboxed build session."],
+     ["python -m scripts.diagnose_cookie_banner --url https://example.com --out /tmp/example.html"]),
+    ("verify_screenshot_capture.py", "scripts.verify_screenshot_capture", "Reusable diagnostic",
+     "Runs the real, production capture_homepage() against a URL and writes the "
+     "resulting PNG somewhere it can be inspected — confirms a fix (e.g. a new cookie-"
+     "banner selector) actually works, rather than trusting the change looks right.",
+     "Recurring-manual — run after any fix to the screenshot-capture path, against the "
+     "URL that originally failed.",
+     ["None, but needs real network egress — run from railway ssh or a dev machine, not a "
+      "sandboxed build session."],
+     ["python -m scripts.verify_screenshot_capture --url https://example.com --out /tmp/verify.png"]),
+]
+
+
+@app.get("/admin/system/scripts", response_class=HTMLResponse)
+def admin_system_scripts(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    buckets = [
+        ("Recurring & actively useful",
+         "Run by hand, on their own cadence — not part of any automatic boot hook or CI job."),
+        ("Reusable diagnostic",
+         "Built for one investigation, but reusable — the question they answer can come up again."),
+    ]
+
+    def _script_card(name, module, purpose, cadence, env_vars, invocation):
+        env_html = "".join(f'<li>{_esc(v)}</li>' for v in env_vars) if env_vars and env_vars != ["None"] else '<li style="color:var(--muted);">None required</li>'
+        invocation_html = "".join(
+            f'<div style="font-family:ui-monospace,monospace;font-size:12.5px;color:var(--ink-soft);'
+            f'background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;'
+            f'margin-top:4px;overflow-x:auto;white-space:pre;">{_esc(line)}</div>'
+            for line in invocation
+        )
+        return (
+            f'<div style="background:var(--bg);border:1px solid var(--line);border-radius:12px;'
+            f'padding:14px 18px;margin-bottom:12px;">'
+            f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
+            f'<span style="font-family:ui-monospace,monospace;font-weight:600;font-size:14.5px;color:var(--navy);">{_esc(name)}</span>'
+            f'<span style="font-size:11px;color:var(--muted);">{_esc(cadence)}</span></div>'
+            f'<p style="margin:6px 0 8px;font-size:13.5px;color:var(--ink-soft);line-height:1.55;">{_esc(purpose)}</p>'
+            f'<div style="font-size:12px;color:var(--muted);"><strong>Env vars:</strong>'
+            f'<ul style="margin:2px 0 8px;padding-left:18px;">{env_html}</ul></div>'
+            f'<div style="font-size:12px;color:var(--muted);"><strong>Invocation:</strong>{invocation_html}</div>'
+            f'</div>'
+        )
+
+    sections_html = ""
+    for bucket_name, bucket_blurb in buckets:
+        cards = "".join(
+            _script_card(name, module, purpose, cadence, env_vars, invocation)
+            for name, module, bucket, purpose, cadence, env_vars, invocation in _SCRIPT_REGISTRY
+            if bucket == bucket_name
+        )
+        sections_html += (
+            f'<section style="margin-bottom:28px;">'
+            f'<h2 style="font-size:16px;font-weight:600;margin:0 0 2px;">{_esc(bucket_name)}</h2>'
+            f'<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">{_esc(bucket_blurb)}</p>'
+            f'{cards}'
+            f'</section>'
+        )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Scripts</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">The CLI scripts still worth running&mdash;purpose, cadence, required env vars, and exact invocation. Hand-maintained: a small, slow-changing list, kept honest by the standing rule in CLAUDE.md that any PR touching <code>scripts/</code> updates this page in the same PR. One-time migrations and closed-investigation reports that have done their job live in <code>scripts/archive/</code> instead, off this list.</p>
+{sections_html}
+</div>"""
+    return HTMLResponse(_page("Scripts—Admin", "Admin", body, authed=True))
 
 
 # Informal foreign-key map for /admin/system/database. This schema declares no

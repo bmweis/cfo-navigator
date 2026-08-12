@@ -25,8 +25,8 @@ can be identified — this is a hard cutover per the build plan (no redirect
 from old ID-based or old name-based-slug URLs).
 
 Usage:
-    python -m scripts.migrate_domain_slugs --db library.db
-    python -m scripts.migrate_domain_slugs --db library.db --dry-run
+    python -m scripts.archive.migrate_domain_slugs --db library.db
+    python -m scripts.archive.migrate_domain_slugs --db library.db --dry-run
 """
 from __future__ import annotations
 

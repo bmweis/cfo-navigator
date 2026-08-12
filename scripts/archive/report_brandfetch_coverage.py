@@ -23,7 +23,7 @@ one-time run polite to Brandfetch's servers.
 
 Usage:
     export BRANDFETCH_CLIENT_ID=...
-    python -m scripts.report_brandfetch_coverage [--db library.db] [--delay 0.15]
+    python -m scripts.archive.report_brandfetch_coverage [--db library.db] [--delay 0.15]
 """
 from __future__ import annotations
 

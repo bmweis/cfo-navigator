@@ -1103,7 +1103,7 @@ def generate_community_listing(name: str, url: str, *, reach_options: list[str],
 
 
 # The 11 narrative community-profile fields eligible for a voice-rewrite pass
-# (scripts/import_community_profiles.py) — a style pass only, never a content
+# (scripts/archive/import_community_profiles.py) — a style pass only, never a content
 # edit. Deliberately excludes `notable_members` (a name list, not prose) and
 # the 8 short factual/categorical fields (founded_year, low_confidence,
 # primary_purpose, cpe_eligible, platform_type, meeting_format, event_style,

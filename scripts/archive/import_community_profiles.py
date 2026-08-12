@@ -23,9 +23,9 @@ then for each of the 37 remaining communities:
 
 Usage:
     export ANTHROPIC_API_KEY=...
-    python -m scripts.import_community_profiles --db library.db
-    python -m scripts.import_community_profiles --db library.db --dry-run
-    python -m scripts.import_community_profiles --db library.db --only "SENG-NE (Senior Executive Networking Group of New England)"
+    python -m scripts.archive.import_community_profiles --db library.db
+    python -m scripts.archive.import_community_profiles --db library.db --dry-run
+    python -m scripts.archive.import_community_profiles --db library.db --only "SENG-NE (Senior Executive Networking Group of New England)"
 
 `--only NAME` restricts the run to a single community (exact `name` match) —
 for a community whose research landed later than the original batch (e.g. a

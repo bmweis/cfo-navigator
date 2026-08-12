@@ -13,7 +13,7 @@ frozen as of the migration date, the way screenshot_is_product did.
 
 Usage (run against production via `railway ssh`, per CLAUDE.md's "One-off
 admin fixes against the database" convention):
-    python -m scripts.report_field_reviews_summary [--db library.db]
+    python -m scripts.archive.report_field_reviews_summary [--db library.db]
 """
 from __future__ import annotations
 

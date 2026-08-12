@@ -1217,7 +1217,7 @@ class Library:
             # column with a controlled `reach` value plus a `metros` tag list,
             # so the region filter can match a metro against national/global
             # communities with a local chapter there, not just purely-regional
-            # ones. scripts/backfill_community_geo.py is the one-off pass that
+            # ones. scripts/archive/backfill_community_geo.py is the one-off pass that
             # populated these for the existing corpus.
             "ALTER TABLE communities ADD COLUMN reach TEXT NOT NULL DEFAULT 'National'",
             "ALTER TABLE communities ADD COLUMN metros_json TEXT NOT NULL DEFAULT '[]'",
@@ -1265,7 +1265,7 @@ class Library:
             # which a bare 0/1 or fixed enum would lose. Unlike the narrative
             # fields, these are short factual/categorical data, not prose, so
             # they're excluded from the bulk import's voice-rewrite pass (see
-            # scripts/import_community_profiles.py).
+            # scripts/archive/import_community_profiles.py).
             "ALTER TABLE community_profiles ADD COLUMN primary_purpose TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE community_profiles ADD COLUMN cpe_eligible TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE community_profiles ADD COLUMN platform_type TEXT NOT NULL DEFAULT ''",
@@ -1508,7 +1508,7 @@ class Library:
             # existing homepage slot above. screenshot_is_product is retired
             # by this phase (see migrate_app_screenshot_from_product_flag
             # below — a manual-trigger data migration, not an automatic
-            # boot one; see scripts/migrate_app_screenshot_from_product_flag.py)
+            # boot one; see scripts/archive/migrate_app_screenshot_from_product_flag.py)
             # but deliberately NOT dropped — same non-destructive
             # precedent as the retired community_profiles *_tags columns:
             # the column stays in place, frozen, as a historical marker of
@@ -1589,7 +1589,7 @@ class Library:
         # review of a production data write before it happens, not after —
         # an automatic boot hook would fire the moment this deploys, before
         # anyone has seen the affected-row count. Run it by hand instead via
-        # scripts/migrate_app_screenshot_from_product_flag.py (preview by
+        # scripts/archive/migrate_app_screenshot_from_product_flag.py (preview by
         # default, --apply to actually write, same convention as
         # scripts/backfill_logos.py). See that script's docstring.
         # Indexes on any column added by the ALTER TABLE loop above must be
@@ -1750,7 +1750,7 @@ class Library:
         admin fixes against the database") requires Brian's review of the
         affected rows BEFORE a production write, not an after-the-fact
         deploy-log line. The only caller is
-        scripts/migrate_app_screenshot_from_product_flag.py, run by hand
+        scripts/archive/migrate_app_screenshot_from_product_flag.py, run by hand
         (preview by default, --apply to actually write — same convention as
         scripts/backfill_logos.py). Idempotent regardless: guarded by
         app_screenshot_url = '', so a re-run only ever touches a row once.
@@ -2878,7 +2878,7 @@ class Library:
         # description_needs_verification defaults to None ("leave the column
         # alone") rather than 0/1, because update_tool is also the bulk-edit
         # panel's write path (every row resaved at once) and
-        # scripts/fix_corpay_category.py's one-off fix path — neither of
+        # scripts/archive/fix_corpay_category.py's one-off fix path — neither of
         # those callers knows or should guess whether this particular save
         # followed a fresh Generate click, so they simply don't pass it and
         # the flag stays whatever it already was. Only the admin edit-submit
@@ -3077,7 +3077,7 @@ class Library:
         route called it with a hardcoded screenshot_is_product=0 on EVERY
         full-form save (any field, not just the screenshot ones), silently
         clearing the retired flag on rows the one-time migration script
-        (scripts/migrate_app_screenshot_from_product_flag.py) hadn't been
+        (scripts/archive/migrate_app_screenshot_from_product_flag.py) hadn't been
         run against yet — so a row could vanish from that script's preview
         between two runs seconds apart, with no --apply in between, just
         because someone resaved the tool's edit page for an unrelated
@@ -3853,7 +3853,7 @@ class Library:
         there's no way to distinguish "leave alone" from "set to null" other
         than by omission. Caller is responsible for not passing None for a
         field it actually wants nulled out; today's only caller
-        (scripts/patch_round3_community_profiles.py) never needs to."""
+        (scripts/archive/patch_round3_community_profiles.py) never needs to."""
         fields = {
             "founded_year": founded_year, "notable_members": notable_members,
             "low_confidence": low_confidence, "anti_fit": anti_fit,

@@ -15,7 +15,7 @@ a normal homepage capture" and "got clobbered." A pre-bug snapshot is the
 only real source of truth.
 
 Usage:
-    python -m scripts.audit_screenshot_is_product_regression \\
+    python -m scripts.archive.audit_screenshot_is_product_regression \\
         --before-db /path/to/library-YYYYMMDD-HHMMSS.db \\
         --after-db  /path/to/current/library.db
 
@@ -106,7 +106,7 @@ def main() -> int:
         for r in clobbered:
             print(f"  [{r['table']:11s}] id={r['id']:>4} {r['name']!r} ({r['slug']}) "
                   f"screenshot_url={r['screenshot_url']!r}")
-        print("\nThese are exactly the rows scripts/migrate_app_screenshot_from_product_flag.py "
+        print("\nThese are exactly the rows scripts/archive/migrate_app_screenshot_from_product_flag.py "
               "will now miss. screenshot_url itself is untouched on all of them (no image/URL "
               "data was lost) — only the flag identifying them as a product shot is gone. If you "
               "want them migrated anyway, re-check the 'This is an actual product screenshot' "

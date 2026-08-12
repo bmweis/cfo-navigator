@@ -1,4 +1,4 @@
-"""scripts/migrate_software_tags.py — the one-off (re-runnable) migration
+"""scripts/archive/migrate_software_tags.py — the one-off (re-runnable) migration
 that collapses the old ad hoc Software category vocabulary down to the fixed
 15-tag taxonomy. Covers the CATEGORY_MAP entries added after a real
 production run surfaced unmapped stragglers (Tax Compliance, CLM, Legal AI,
@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib.db import Library
-from scripts import migrate_software_tags as script
+from scripts.archive import migrate_software_tags as script
 
 
 @pytest.fixture

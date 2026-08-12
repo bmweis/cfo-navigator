@@ -1,4 +1,4 @@
-"""Auto-generated data for scripts/patch_community_profiles_copy.py.
+"""Auto-generated data for scripts/archive/patch_community_profiles_copy.py.
 
 Derived from the diff between the pre-cleanup and post-cleanup versions of
 _community_profile_data.py (PR #153: em-dash + generic-word sweep). Not
