@@ -9,3 +9,6 @@ __pycache__/
 
 # Claude Code browser-preview dev server config (local tooling, not app code)
 .claude/launch.json
+
+# Claude Code agent isolation worktrees (ephemeral, not app code)
+.claude/worktrees/
