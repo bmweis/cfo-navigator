@@ -16529,7 +16529,7 @@ def admin_how_fpa_buddy_works(request: Request):
         for tier, s in EFFORT_SETTINGS.items()
     )
 
-    body = f"""<div class="page page-admin">
+    body = f"""<div class="page page-admin article-atlantic">
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>How FP&amp;A Buddy works</h1>
@@ -16562,8 +16562,12 @@ mermaid.initialize({{
 <ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
 <li><strong>Library</strong> (highest authority, always searched first): the curated archive of saved articles, retrieved by a hybrid of keyword search (FTS5) and semantic search (vector embeddings), merged by a rank-fusion algorithm so an article can surface even when the question's wording doesn't match the source's own.</li>
 <li><strong>Feed:</strong> recent items from the subscribed RSS/Atom feeds, matched to the question by keyword overlap. Optional&mdash;off by default.</li>
-<li><strong>Web:</strong> live web search, scoped only to the domains on the trusted-sites list (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list, whichever mechanism handles it. Exa's search API, called directly from the server, is the preferred mechanism&mdash;on by default, toggled at <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings</a>. When Exa is off, or its API key isn't configured, Claude's own web-search tool steps in instead, so web search itself is never unavailable&mdash;only which engine handles it changes. Exactly one of the two runs per question, never both. A web result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</li>
+<li><strong>Web:</strong> live web search, scoped only to the domains on the trusted-sites list (the same list that feeds the CFO Feed reader)&mdash;it can't cite a source outside that list, whichever mechanism handles it. Exa's search API, called directly from the server, is the preferred mechanism, on by default.</li>
 </ul>
+<div class="article-callout" style="margin:16px 0;">
+<div class="article-callout-title">Which engine handled this answer?</div>
+<p style="margin:0;">Exa is the default, toggled at <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings</a>. Turn it off, or leave <code>EXA_API_KEY</code> unset, and Claude's own web-search tool steps in instead&mdash;web search itself is never unavailable, only which engine runs it changes. Exactly one of the two runs per question, never both. A result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</p>
+</div>
 <p style="margin:8px 0 0;font-size:16px;color:var(--ink-soft);line-height:1.65;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
 </section>
 
