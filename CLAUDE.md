@@ -477,10 +477,12 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   signed-in friends, not just Brian. On the admin side, the Admin hub's
   "Archive" section (the card + its own `/admin/library` management page,
   covering the same 8 existing tools in the same order) was renamed
-  "Library," and now links directly to "Browse Archive" and "View Feed" above
-  those 8 tools — the merge of Archive+Feed into a single Reader page,
-  and giving that merged page its own permanent entry point here, is Phase 5's
-  job, not this one. The coral "Before opening the archive to paid
+  "Library" — deliberately **without** adding links to Archive/Feed above
+  those 8 tools yet: Archive and Feed are merging into a single Reader page
+  in Phase 5, and adding two separate links now just means deleting them
+  again almost immediately, so `/library/archive`/`/library/feed` stay
+  reachable by direct URL only until Phase 5 gives the merged page its own
+  permanent entry point here. The coral "Before opening the archive to paid
   subscribers—read this" banner (zero dependents, confirmed by investigation)
   and the permanent green "Subscriber access" status box were both deleted
   from the Admin hub outright — the manual re-check trigger and the underlying
@@ -491,6 +493,44 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   owns building a real conditional subscriber-access alert on the merged
   Reader page — deliberately not built here, since Feed is being retired into
   `/read` in that same phase and building it twice would be wasted work.
+- **Thought Leadership Admin CRUD, Phase 1 — the four `/thought-leadership`
+  columns (Writing, Speaking & Events, Podcasts, Press) are now admin-managed,
+  not hardcoded.** Phase 0 investigation found all four columns reading from
+  one shared Python module, `webapp/thought_leadership_data.py` (33 hand-
+  written `TLItem` dataclass instances across four module-level lists, no DB
+  table, no admin surface — edited directly by hand each time). Phase 1
+  replaces that with a `thought_leadership` table (see `linklib/db.py`'s
+  table comment and `ARCHITECTURE.md`'s Thought Leadership section for the
+  schema) and a new admin section, `/admin/thought-leadership` — add/edit/
+  delete across all four types from one filterable list, same CRUD pattern
+  as `/admin/tools/benchmarks`. `scripts/archive/migrate_thought_leadership.py`
+  (dry-run by default, `--apply` to write, write-then-read-back verified —
+  same convention as `scripts/backfill_logos.py`) is the one-time migration;
+  it moved 32 of the 33 entries. Two decisions carried over unchanged from
+  the Phase 0 sign-off: **role/capacity stays free-text inside `title`** (no
+  separate column — every existing "Host"/"Co-Chair"/"Guest" etc. is already
+  a trailing parenthetical or em-dash suffix on the title string, and no
+  rendering path reads a separate field), and **photos are out of scope**.
+  The one entry that used them (Abacum AI Summit, 2 photos + a caption) is
+  the 33rd entry, excluded from the migration and from the admin form — it
+  stays hardcoded as `_TL_PHOTO_ENTRY` in `webapp/app.py`, merged into the
+  Speaking & Events column at render time so it doesn't disappear from the
+  public page, but it isn't editable via `/admin/thought-leadership`.
+  `webapp/thought_leadership_data.py` itself is **not deleted** — it stays in
+  the repo, unimported, as a rollback reference (same non-destructive-
+  retirement precedent as `screenshot_is_product`/`field_reviews` above).
+  The "Show all N" expand/collapse on Speaking & Events and Podcasts
+  (client-side JS, cap of 6) needed no changes — it operates on whatever
+  list of items the route hands it, DB-backed or not. Ordering also carried
+  over unchanged: undated items (`sort_key == ''`) float to the top of their
+  section, everything else sorts newest-first by `sort_key`; a new
+  `display_order` column is the tiebreaker within each group (assigned as
+  each entry's original list index during the migration) so items that
+  shared a `sort_key` don't reshuffle against the pre-migration page. Out of
+  scope for this phase, same as Phase 0 flagged: a "Show all" full-listing
+  page (the toggle already covers the practical need), and the three
+  Framework/Playbook/Setup Guide featured cards above the four columns
+  (separate, hardcoded `fcard(...)` mechanism in `webapp/app.py`, untouched).
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

@@ -57,7 +57,10 @@ from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.pipeline import ingest_url
 from linklib import backup
-from webapp.thought_leadership_data import SECTIONS as TL_SECTIONS, TLItem
+# webapp/thought_leadership_data.py is no longer imported here — the four
+# /thought-leadership columns now read from the thought_leadership DB table
+# (Phase 1, see CLAUDE.md). The module itself stays in the repo, unused, as
+# a rollback reference.
 
 DB_PATH = os.environ.get("LINKLIB_DB", "library.db")
 SAVE_TOKEN = os.environ.get("LINKLIB_SAVE_TOKEN", "")
@@ -2033,27 +2036,63 @@ def about_page(request: Request):
     return HTMLResponse(_page("About—Brian Weisberg", "About", body, role=_role(request)))
 
 
+# The one Speaking & Events entry with photos (Abacum AI Summit). Excluded
+# from the thought_leadership DB table/admin CRUD (Phase 1 — photos are a
+# single-use field, not worth the upload/JSON handling for one entry; see
+# CLAUDE.md), but kept rendering in its column so it doesn't silently
+# disappear. Hardcoded here rather than imported from
+# webapp/thought_leadership_data.py, which stays in the repo unused as a
+# rollback reference. `photos`/`photo_caption` aren't read by any current
+# rendering path (col_preview_item never touches them) — kept for parity
+# with the pre-migration data in case a future "Show all" listing page uses
+# them.
+_TL_PHOTO_ENTRY = {
+    "type": "speaking",
+    "title": "Abacum AI Summit—Recording",
+    "url": "https://www.youtube.com/watch?v=MDBz0OpR1II",
+    "venue": "Abacum",
+    "date_label": "Apr 2026",
+    "sort_key": "2026-04",
+    "description": ("A panel on what AI adoption changes inside a finance team once the pilot phase ends, "
+                     "recorded live at Abacum's invite-only summit in New York."),
+    "needs_synopsis": False,
+    "display_order": 0,
+    "photos": [
+        {"src": "/static/speaking-close.jpg",
+         "alt": "Brian Weisberg speaking at the Abacum AI Summit, April 2026"},
+        {"src": "/static/speaking-wide.jpg",
+         "alt": "Panel discussion at the Abacum AI Summit, April 2026"},
+    ],
+    "photo_caption": "Abacum AI Summit · New York · April 2026",
+}
+
+
 @app.get("/thought-leadership", response_class=HTMLResponse)
 def thought_leadership(request: Request):
-    def ordered_items(items: list[TLItem]) -> list[TLItem]:
+    def ordered_items(items: list[dict]) -> list[dict]:
         # Undated items (sort_key == "") float to the top of their section — a
-        # standing "full feed" link or similar; everything else sorts newest first.
-        dated = sorted((it for it in items if it.sort_key), key=lambda it: it.sort_key, reverse=True)
-        undated = [it for it in items if not it.sort_key]
+        # standing "full feed" link or similar; everything else sorts newest
+        # first. display_order is the tiebreaker within each group (two sorts,
+        # relying on Python's stable sort — the tiebreak pass runs first).
+        dated = [it for it in items if it["sort_key"]]
+        dated.sort(key=lambda it: it["display_order"])
+        dated.sort(key=lambda it: it["sort_key"], reverse=True)
+        undated = [it for it in items if not it["sort_key"]]
+        undated.sort(key=lambda it: it["display_order"])
         return undated + dated
 
-    def col_preview_item(it: TLItem, hidden: bool = False) -> str:
-        meta_bits = [b for b in (it.venue, it.date_label) if b]
+    def col_preview_item(it: dict, hidden: bool = False) -> str:
+        meta_bits = [b for b in (it["venue"], it["date_label"]) if b]
         meta_html = (f'<div class="tl-col-item-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</div>'
                      if meta_bits else "")
-        title_html = (f'<a href="{_esc(it.url)}" target="_blank" rel="noopener" class="tl-col-item-title">{_esc(it.title)}</a>'
-                      if it.url else f'<div class="tl-col-item-title">{_esc(it.title)}</div>')
+        title_html = (f'<a href="{_esc(it["url"])}" target="_blank" rel="noopener" class="tl-col-item-title">{_esc(it["title"])}</a>'
+                      if it["url"] else f'<div class="tl-col-item-title">{_esc(it["title"])}</div>')
         cls = "tl-col-item tl-col-item-extra" if hidden else "tl-col-item"
         return f'<div class="{cls}">{title_html}{meta_html}</div>'
 
     _TL_COL_CAP = 6
 
-    def column(index: int, icon_svg: str, title: str, items: list[TLItem]) -> str:
+    def column(index: int, icon_svg: str, title: str, items: list[dict]) -> str:
         # Press collapses to nothing (not an empty card) when there's nothing to
         # show — cap each column at ~6 items with a "Show all N" toggle that
         # expands the rest in place, so the overview stays scannable without
@@ -2134,9 +2173,20 @@ def thought_leadership(request: Request):
         + featured
     )
 
+    lib = _lib()
+    try:
+        sections = [
+            ("Writing", "writing", lib.list_thought_leadership(type="writing")),
+            ("Speaking &amp; Events", "speaking", lib.list_thought_leadership(type="speaking") + [_TL_PHOTO_ENTRY]),
+            ("Podcasts", "podcast", lib.list_thought_leadership(type="podcast")),
+            ("Press", "press", lib.list_thought_leadership(type="press")),
+        ]
+    finally:
+        lib.close()
+
     columns_html = "".join(
         column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], section_title, items)
-        for i, (section_title, emoji, items) in enumerate(TL_SECTIONS)
+        for i, (section_title, _type, items) in enumerate(sections)
     )
     body += f'<div class="tl-cols">{columns_html}</div>'
     body += """<script>
@@ -10492,6 +10542,263 @@ def admin_benchmarks_delete(request: Request, benchmark_id: int):
     return RedirectResponse("/admin/tools/benchmarks", status_code=303)
 
 
+# -- Thought Leadership admin (Phase 1 — see CLAUDE.md) ----------------------
+# Add/edit/delete for the four /thought-leadership columns (Writing, Speaking
+# & Events, Podcasts, Press), all backed by the one thought_leadership table.
+# No AI-generate button — entries are short and manually written, added as
+# things happen. Deliberately not a Show-all-N listing page (out of scope,
+# see CLAUDE.md) — just the admin CRUD.
+
+_TL_TYPES = [
+    ("writing", "Writing"),
+    ("speaking", "Speaking & Events"),
+    ("podcast", "Podcasts"),
+    ("press", "Press"),
+]
+_TL_TYPE_LABELS = dict(_TL_TYPES)
+
+
+def _tl_form_fields(item: dict | None = None) -> str:
+    item = item or {}
+    type_opts = "".join(
+        f'<option value="{t}"{" selected" if item.get("type") == t else ""}>{label}</option>'
+        for t, label in _TL_TYPES
+    )
+    checked = "checked" if item.get("needs_synopsis") else ""
+    return f"""  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Type *</label>
+    <select name="type" required style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      {type_opts}
+    </select>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Title *</label>
+    <input name="title" required maxlength="300" value="{_esc(item.get('title', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="Role/capacity (Host, Co-Chair, Guest, …) goes inline here, e.g. &quot;Cash Cycle Demo Day—Co-Chair&quot;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL</label>
+    <input name="url" type="url" maxlength="500" value="{_esc(item.get('url', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="https://… (leave blank to render as unlinked text)">
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Source / venue</label>
+      <input name="venue" maxlength="200" value="{_esc(item.get('venue', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="Publication or host org">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
+      <input name="date_label" maxlength="50" value="{_esc(item.get('date_label', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="e.g. Jun 2026">
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sort key</label>
+      <input name="sort_key" maxlength="7" value="{_esc(item.get('sort_key', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="YYYY-MM, blank floats to top">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order</label>
+      <input name="display_order" type="number" value="{item.get('display_order', 0)}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    </div>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description</label>
+    <textarea name="description" maxlength="500" rows="3"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+      placeholder="1-2 sentence synopsis in Brian's voice">{_esc(item.get('description', ''))}</textarea>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--navy);">
+      <input type="checkbox" name="needs_synopsis" value="1" {checked}>
+      Needs synopsis (shows a "Synopsis pending" placeholder instead of the description above)
+    </label>
+  </div>"""
+
+
+@app.get("/admin/thought-leadership", response_class=HTMLResponse)
+def admin_thought_leadership(request: Request, type: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        items = lib.list_thought_leadership(type=type or None)
+    finally:
+        lib.close()
+
+    def _row(it: dict) -> str:
+        url_cell = (f'<a href="{_esc(it["url"])}" target="_blank" rel="noopener" style="word-break:break-all;">'
+                    f'{_esc(it["url"][:50])}{"…" if len(it["url"]) > 50 else ""}</a>') if it["url"] else "—"
+        return f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(_TL_TYPE_LABELS.get(it['type'], it['type']))}</td>
+  <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(it['venue']) or '—'}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(it['date_label']) or '—'}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{url_cell}</td>
+  <td style="padding:10px 12px;white-space:nowrap;">
+    <a href="/admin/thought-leadership/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <form method="post" action="/admin/thought-leadership/{it['id']}/delete" style="display:inline;"
+          onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot; from Thought Leadership?');">
+      <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+
+    rows = "".join(_row(it) for it in items) or \
+        '<tr><td colspan="6" style="padding:20px;color:var(--muted);">No entries yet.</td></tr>'
+
+    def _filter_link(t: str, label: str) -> str:
+        active = t == type
+        href = "/admin/thought-leadership" + (f"?type={t}" if t else "")
+        style = "font-weight:700;color:var(--navy);" if active else "color:var(--muted);"
+        return f'<a href="{href}" style="font-size:13px;margin-right:14px;{style}">{label}</a>'
+
+    filters = _filter_link("", "All") + "".join(_filter_link(t, label) for t, label in _TL_TYPES)
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+  <h1>Thought Leadership</h1>
+  <a href="/admin/thought-leadership/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add entry</a>
+</div>
+<p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
+<div style="margin-bottom:16px;">{filters}</div>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Type</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Title</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Source / venue</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Date</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">URL</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>
+<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
+  The Abacum AI Summit entry (Speaking &amp; Events) isn&rsquo;t listed here&mdash;it&rsquo;s a one-off with photos,
+  hardcoded on the public page rather than migrated. See CLAUDE.md.
+</p>
+</div>"""
+    return HTMLResponse(_page("Thought Leadership—Admin", "", body, authed=True))
+
+
+@app.get("/admin/thought-leadership/new", response_class=HTMLResponse)
+def admin_thought_leadership_new(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    body = f"""<div class="page page-form">
+<h1>Add a Thought Leadership entry</h1>
+<form method="post" action="/admin/thought-leadership/new" style="display:grid;gap:20px;">
+{_tl_form_fields()}
+  <div>
+    <button type="submit" class="btn">Add entry</button>
+    <a href="/admin/thought-leadership" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page("Add Thought Leadership entry—Admin", "", body, authed=True))
+
+
+def _tl_form_values(form) -> dict:
+    tl_type = (form.get("type") or "").strip()
+    if tl_type not in _TL_TYPE_LABELS:
+        raise HTTPException(status_code=400, detail="Invalid type.")
+    title = (form.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required.")
+    try:
+        display_order = int(form.get("display_order") or 0)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Display order must be a number.")
+    return {
+        "type": tl_type,
+        "title": title,
+        "url": (form.get("url") or "").strip(),
+        "venue": (form.get("venue") or "").strip(),
+        "date_label": (form.get("date_label") or "").strip(),
+        "sort_key": (form.get("sort_key") or "").strip(),
+        "description": (form.get("description") or "").strip(),
+        "needs_synopsis": bool(form.get("needs_synopsis")),
+        "display_order": display_order,
+    }
+
+
+@app.post("/admin/thought-leadership/new")
+async def admin_thought_leadership_new_submit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    v = _tl_form_values(form)
+    lib = _lib()
+    try:
+        lib.add_thought_leadership(v["type"], v["title"], v["url"], v["venue"], v["date_label"],
+                                   v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"])
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/thought-leadership", status_code=303)
+
+
+@app.get("/admin/thought-leadership/{item_id}/edit", response_class=HTMLResponse)
+def admin_thought_leadership_edit(request: Request, item_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        it = lib.get_thought_leadership(item_id)
+    finally:
+        lib.close()
+    if not it:
+        raise HTTPException(status_code=404, detail="Thought Leadership entry not found")
+    body = f"""<div class="page page-form">
+<h1>Edit Thought Leadership entry</h1>
+<form method="post" action="/admin/thought-leadership/{item_id}/edit" style="display:grid;gap:20px;">
+{_tl_form_fields(it)}
+  <div>
+    <button type="submit" class="btn">Save changes</button>
+    <a href="/admin/thought-leadership" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+    return HTMLResponse(_page(f"Edit {_esc(it['title'])}—Admin", "", body, authed=True))
+
+
+@app.post("/admin/thought-leadership/{item_id}/edit")
+async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    v = _tl_form_values(form)
+    lib = _lib()
+    try:
+        lib.update_thought_leadership(item_id, v["type"], v["title"], v["url"], v["venue"], v["date_label"],
+                                      v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"])
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/thought-leadership", status_code=303)
+
+
+@app.post("/admin/thought-leadership/{item_id}/delete")
+def admin_thought_leadership_delete(request: Request, item_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_thought_leadership(item_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/thought-leadership", status_code=303)
+
+
 _COMMUNITY_COST_BANDS = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
 _COMMUNITY_SPONSORSHIP_TYPES = ["Independent", "Vendor-sponsored", "Investor-sponsored"]
 # Derived from the actual access/format values across the existing 35
@@ -15686,6 +15993,9 @@ _ADMIN_GROUPS = [
         ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
+    ("Thought Leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
+        ("/admin/thought-leadership", "Thought Leadership", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
+    ]),
     ("FP&A Buddy", "The Q&amp;A tool's own explainer, usage report, and feedback triage.", _FPA_BUDDY_TOOLS),
     ("Brand & voice", "How the site looks and sounds.", [
         ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
@@ -16435,7 +16745,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Toolbox — Communities", ["communities", "community_audit_log", "community_categories",
                                 "community_competitors", "community_profiles",
                                 "community_gap_submissions", "community_profile_views"]),
-    ("Thought Leadership / Game", ["game_rank_settings", "game_runs"]),
+    ("Thought Leadership / Game", ["thought_leadership", "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback"]),
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
