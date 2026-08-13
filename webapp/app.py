@@ -17,10 +17,9 @@ Public routes (no auth):
     GET  /health               Health check
 
 Private routes (require login cookie; API routes also accept a token):
-    GET  /library              Library hub: Reading Room + FP&A Buddy sections
-    GET  /library/archive      Search + browse saved articles
-    GET  /library/feed         RSS reader over the OPML subscription list
-    GET  /library/ask          FP&A Buddy Q&A page
+    GET  /library/archive      Search + browse saved articles (admin-only)
+    GET  /library/feed         RSS reader over the OPML subscription list (admin-only)
+    GET  /library/ask          FP&A Buddy Q&A page (member-gated)
     GET  /library/past-questions  Browse other members' past FP&A Buddy questions
     GET  /read                 Article reader (Instapaper-style clean view)
     POST /ask                  FP&A Q&A
@@ -1082,10 +1081,11 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     # easter egg linked only from the bottom of /thought-leadership/ai-hackathon-playbook.
     public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
               ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
-    # Account-only section — one nav entry ("Library") that opens a hub linking to
-    # Archive, Feed, and FP&A Buddy. Shown to everyone so the gated area is
-    # discoverable; clicking it when signed out lands on the login screen.
-    member = [("/library", "Library")]
+    # Archive and Feed moved admin-only and the Library hub was removed
+    # (Phase 1) — there's no longer a member-facing nav entry to show here.
+    # FP&A Buddy (still member-gated) is reachable directly at /library/ask;
+    # it regains nav placement in a later phase's Toolbox restructure.
+    member = []
 
     def links(items):
         return "".join(
@@ -1093,7 +1093,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
             for href, label in items
         )
 
-    nav = links(public) + '<span class="sep"></span>' + links(member)
+    nav = links(public) + ('<span class="sep"></span>' + links(member) if member else "")
     if role == "admin":
         # Admin sees exactly what a member sees, plus the Admin hub (which holds
         # the admin-only tools). Keeps the top nav uncluttered.
@@ -1592,9 +1592,6 @@ _ICON_BRAIN = ('<path d="M9.5 4.5c-1.7 0-3 1.3-3.2 3C5 8 4 9.3 4 10.8c0 .9.4 1.7
 _ICON_TOOLBOX = ('<rect x="3" y="9" width="18" height="10" rx="1.5"/>'
                  '<path d="M8 9V6.5A2.5 2.5 0 0 1 10.5 4h3A2.5 2.5 0 0 1 16 6.5V9"/>'
                  '<line x1="3" y1="13.5" x2="21" y2="13.5"/>')
-_ICON_BOOKS_STACK = ('<rect x="4" y="15" width="16" height="4" rx="1"/>'
-                      '<rect x="5" y="10.5" width="14" height="4" rx="1"/>'
-                      '<rect x="6" y="6" width="12" height="4" rx="1"/>')
 _ICON_WRENCH = ('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94'
                 'l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>')
 _ICON_CHART = '<path d="M4 20V14M12 20V4M20 20v-10"/>'
@@ -1611,12 +1608,6 @@ _ICON_NEWSPAPER = ('<path d="M3 6h13v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
                     '<line x1="6" y1="9.5" x2="12" y2="9.5"/><line x1="6" y1="12.5" x2="12" y2="12.5"/>'
                     '<line x1="6" y1="15.5" x2="10" y2="15.5"/>')
 _TL_COLUMN_ICONS = (_ICON_PENCIL, _ICON_MIC, _ICON_HEADPHONES, _ICON_NEWSPAPER)
-_ICON_BOOK_OPEN = ('<path d="M12,4.8 C8.4,3.6 4.8,4.2 4.8,4.2 V18 C4.8,18 8.4,17.4 12,18.6 '
-                   'C15.6,17.4 19.2,18 19.2,18 V4.2 C19.2,4.2 15.6,3.6 12,4.8 Z"/>'
-                   '<line x1="12" y1="4.8" x2="12" y2="18.6"/>')
-_ICON_CHAT_QUESTION = ('<path d="M4 5.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4.5 4v-4H6a2 2 0 0 1-2-2z"/>'
-                        '<path d="M9.5 9.3a2.3 2.3 0 1 1 3.4 2c-.7.5-1.15 1-1.15 1.9"/>'
-                        '<circle cx="11.9" cy="16" r=".01" stroke-width="2.2"/>')
 
 
 # ---------------------------------------------------------------------------
@@ -1661,7 +1652,7 @@ def login_page(request: Request, next: str = "", error: str = "", reset: str = "
 @app.get("/forgot-password", response_class=HTMLResponse)
 def forgot_password_page(request: Request, sent: str = ""):
     if _is_member(request):
-        return RedirectResponse("/library", status_code=303)
+        return RedirectResponse("/", status_code=303)
     if sent:
         body = """<div class="page page-form">
 <h1>Check your email</h1>
@@ -1734,7 +1725,7 @@ async def forgot_password_submit(request: Request):
 @app.get("/reset-password", response_class=HTMLResponse)
 def reset_password_page(request: Request, token: str = "", error: str = ""):
     if _is_member(request):
-        return RedirectResponse("/library", status_code=303)
+        return RedirectResponse("/", status_code=303)
     lib = _lib()
     try:
         req = lib.get_password_reset_by_token_hash(hashlib.sha256(token.encode("utf-8")).hexdigest()) if token else None
@@ -1960,12 +1951,6 @@ def homepage(request: Request):
                "groups worth joining.",
                icon_html=_card_icon(1, _ICON_TOOLBOX),
                sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=14)),
-        _rcard("/library", "Digital Library",
-               "The Reading Room: a searchable archive plus my personal feed of finance and technology "
-               "blogs. Also home to FP&amp;A Buddy, a research agent for questions on frameworks, metrics, "
-               "and more. Sign-in required, still being built out.",
-               icon_html=_card_icon(2, _ICON_BOOKS_STACK),
-               sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=14)),
     ])
 
     body = f"""<div class="page page-full">
@@ -1984,7 +1969,7 @@ def homepage(request: Request):
   .home-status{{padding-top:44px;}}
 }}
 @media(min-width:760px){{
-  .home-cards{{grid-template-columns:repeat(3,1fr);}}
+  .home-cards{{grid-template-columns:repeat(2,1fr);}}
 }}
 </style>
 <div class="home-hero">
@@ -13607,7 +13592,7 @@ def feed_redirect(request: Request):
 
 @app.get("/library/feed", response_class=HTMLResponse)
 def feed_reader(request: Request, cat: str = "", rl: str = ""):
-    if not _is_member(request):
+    if not _is_authed(request):
         return _login_redirect(request)
     # In-app reader and "Save to Archive" stay admin-only (resale-safe / shared
     # Archive writes). Read-later is a personal bookmark and is member-scoped
@@ -13967,7 +13952,7 @@ function saveCustomFilters() {{
     )
 
     body = f"""<div style="max-width:860px;margin:0 auto;padding:12px 24px 0;">
-  <a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a>
+  <a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a>
 </div>
 <div style="border-bottom:1px solid var(--line);padding:12px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
   <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -14125,8 +14110,8 @@ def reader(request: Request, url: str = "", id: int = 0):
     from linklib.extract import fetch_page
     import html as html_mod
 
-    back_url = "/library/archive"
-    back_label = "Archive"
+    back_url = "/admin/library"
+    back_label = "Library"
 
     # Try to load from DB first (may have cached content)
     article = None
@@ -14279,7 +14264,7 @@ async function deleteArticle(id) {{
     var form = new FormData();
     var r = await fetch('/library/' + id + '/delete', {{method: 'POST', body: form}});
     if (r.redirected) {{ window.location.href = r.url; return; }}
-    window.location.href = '/library';
+    window.location.href = '/admin/library';
   }} catch(e) {{
     alert('Could not delete—please try again.');
   }}
@@ -14307,7 +14292,7 @@ def archive_redirect(request: Request):
 
 @app.get("/library/archive", response_class=HTMLResponse)
 def archive(request: Request, q: str = ""):
-    if not _is_member(request):
+    if not _is_authed(request):
         return _login_redirect(request)
     authed = _is_authed(request)   # admin: shows tag-edit / delete controls
     lib = _lib()
@@ -14363,7 +14348,7 @@ def archive(request: Request, q: str = ""):
 
     page_body = f"""<div style="border-bottom:1px solid var(--line);padding:20px 24px;">
   <div style="max-width:960px;margin:0 auto;">
-    <p style="margin:0 0 10px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+    <p style="margin:0 0 10px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
     <div style="font-size:13px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:16px;">
       <span>{total} saved</span>
       <a href="/read" style="color:var(--accent);font-weight:500;">&#9654; Article Reader</a>
@@ -14410,7 +14395,6 @@ def archive(request: Request, q: str = ""):
 #answer sup.cite{{line-height:0;}}
 #answer sup.cite a{{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}}
 #answer sup.cite a:hover{{color:var(--accent);}}
-nav.site-nav a[href="/library"]{{color:var(--ink);font-weight:600;}}  /* bold the Library nav item while in the Archive */
 </style>
 <script>
 function openTagEditor(id) {{
@@ -14536,76 +14520,6 @@ async function ask(){{
     return HTMLResponse(_page("Archive—Brian Weisberg", "Library", page_body, role=_role(request)))
 
 
-@app.get("/library", response_class=HTMLResponse)
-def library(request: Request):
-    """Account hub: a landing page linking to the Archive, Feed, and FP&A Buddy."""
-    if not _is_member(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        total = lib.count()
-    finally:
-        lib.close()
-
-    def _hcard(href, title, desc, icon_html=""):
-        return (
-            f'<a href="{href}" style="display:block;border:1px solid var(--line);background:var(--surface);'
-            f'border-radius:14px;padding:22px 24px;text-decoration:none;">'
-            f'{icon_html}'
-            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-            f'<span style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
-            f'<p style="margin:7px 0 0;font-size:14.5px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
-        )
-
-    def _section(title, cards):
-        return (
-            f'<h2 style="font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);'
-            f'margin:0 0 12px;">{title}</h2>'
-            f'<div class="lib-card-row">{cards}</div>'
-        )
-
-    reading_room = "".join([
-        _hcard("/library/archive", "Archive", f"Search {total:,} saved articles by title, summary, or tag&mdash;your curated reading history.",
-               icon_html=_card_icon(0, _ICON_BOOKS_STACK)),
-        _hcard("/library/feed", "Feed", "The latest from the sources you follow, in one reader. Save anything worth keeping to the Archive.",
-               icon_html=_card_icon(1, _ICON_BOOK_OPEN)),
-    ])
-
-    # The "suggest a piece" prompt is shown only to signed-in members — submissions
-    # are account-only now, to keep public spam out. Relocated here (from the
-    # homepage) to sit alongside the Archive it feeds.
-    suggest = ('<p style="margin:-14px 0 28px;font-size:14px;color:var(--muted);">Read something a finance '
-               'leader should have in their back pocket? <a href="/library/submit">Suggest a piece for '
-               'the archive &rarr;</a></p>') if _is_member(request) else ''
-
-    fpa_buddy = "".join([
-        _hcard("/library/ask", "FP&amp;A Buddy", "Put an FP&amp;A question to your archive&mdash;a cited answer drawn from the Archive plus trusted web sources.",
-               icon_html=_card_icon(0, _ICON_BRAIN)),
-        _hcard("/library/past-questions", "Past Questions", "Browse questions other members have already asked FP&amp;A Buddy, so you don&rsquo;t burn a query re-asking one.",
-               icon_html=_card_icon(1, _ICON_CHAT_QUESTION)),
-    ])
-
-    body = f"""<div class="page page-full">
-<style>
-.lib-wrap{{max-width:900px;}}
-.lib-card-row{{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:28px;}}
-@media(min-width:760px){{.lib-card-row{{grid-template-columns:1fr 1fr;}}}}
-</style>
-<div class="lib-wrap">
-<div style="position:relative;display:inline-block;">
-  <h1 style="margin:0 0 6px;">Library</h1>
-  {_sticker("🚧 building", rotate=-4, top="-14px", right="-52px", size=14)}
-</div>
-<p style="color:var(--muted);margin:0 0 26px;">Your private workspace&mdash;the curated archive, the live feed, and the FP&amp;A assistant.</p>
-{_section("Reading Room", reading_room)}
-{suggest}
-{_section("FP&amp;A Buddy", fpa_buddy)}
-</div>
-</div>"""
-    return HTMLResponse(_page("Library—Brian Weisberg", "Library", body, role=_role(request)))
-
-
 @app.get("/questions")
 def community_questions_redirect(request: Request):
     target = "/library/past-questions"
@@ -14662,7 +14576,7 @@ def community_questions(request: Request, q: str = ""):
 
     body = f"""<div class="page page-full">
 <div class="tool-prose">
-<p style="margin:0 0 4px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<p style="margin:0 0 4px;"><a href="/" style="font-size:13px;color:var(--muted);">&larr; Home</a></p>
 <h1>Past Questions</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy&mdash;check here before spending a query re-asking one. <a href="/library/ask">Ask your own &rarr;</a></p>
 <form method="get" action="/library/past-questions" style="display:flex;gap:8px;margin-bottom:22px;">
@@ -14847,7 +14761,7 @@ def ask_page(request: Request, q: str = ""):
 
     body = f"""<div class="page page-full">
 <div class="tool-inner">
-<p style="margin:0 0 12px;"><a href="/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<p style="margin:0 0 12px;"><a href="/" style="font-size:13px;color:var(--muted);">&larr; Home</a></p>
 <span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
 <p style="color:var(--muted);margin:0 0 28px;">A digital library of finance content, curated over years, searched instantly. Skip the digging, get your answer.</p>
@@ -17105,11 +17019,17 @@ def admin_checks(request: Request):
 
 
 def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:
-    """Subscriber-cookie status panel for the Admin hub: shows each configured
-    paid-newsletter cookie's health (working / expired / untested) with a
-    Re-check button, and refresh steps when one is stale. Only rendered when
-    LINKLIB_AUTH_COOKIES is set. Kicks a background re-check when the stored
-    status is missing or stale."""
+    """Subscriber-cookie status control, shown on /admin/library. Only rendered
+    when LINKLIB_AUTH_COOKIES is set. Kicks a background re-check when the
+    stored status is missing or stale.
+
+    Phase 1 removed the permanent green "Subscriber access" status box that
+    used to sit on the Admin hub — the manual re-check trigger and the
+    underlying check logic (authcheck.check_auth_cookies) are unchanged, but
+    the UI only surfaces a colored panel with per-domain detail when a cookie
+    has actually gone stale (any_bad). Otherwise this renders just a compact
+    "Re-check" control, so there's still a way to trigger a check by hand
+    without a status box sitting there permanently."""
     from linklib.extract import _auth_cookies
     cookies = _auth_cookies()
     if not cookies:
@@ -17128,10 +17048,16 @@ def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> 
 
     stale = authcheck.stale_domains(status)
     any_bad = bool(stale)
-    border = "var(--coral)" if any_bad else "var(--seafoam)"
-    wash = "var(--coral-wash)" if any_bad else "var(--seafoam-wash)"
 
-    # Per-domain status lines.
+    recheck_form = ('<form method="post" action="/admin/auth/recheck" style="margin:0;">'
+                     '<button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">'
+                     'Re-check subscriber access</button></form>')
+
+    if not any_bad:
+        # Nothing wrong — no permanent status box, just the manual trigger.
+        return f'<p style="margin:0 0 22px;">{recheck_form}</p>'
+
+    # Per-domain status lines — only shown once something's actually stale.
     rows = ""
     for dom in cookies:
         s = status.get(dom)
@@ -17151,9 +17077,7 @@ def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> 
                  f'<span style="color:{color};font-weight:600;">{label}</span>'
                  f'<span style="color:var(--muted);">&mdash; {_esc(detail)}{(" &middot; " + checked) if checked else ""}</span></div>')
 
-    refresh_steps = ""
-    if any_bad:
-        refresh_steps = ("""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">To refresh an expired cookie:</p>
+    refresh_steps = ("""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">To refresh an expired cookie:</p>
 <ol style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">
 <li>Log into the site.</li>
 <li>Open DevTools &rarr; <strong>Network</strong>, then reload.</li>
@@ -17162,11 +17086,10 @@ def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> 
 <li>Update <code>LINKLIB_AUTH_COOKIES</code> in Railway &rarr; Variables.</li>
 </ol>""")
 
-    heading = ("Subscriber cookie expired" if any_bad else "Subscriber access")
-    return f"""<div style="background:{wash};border:1px solid {border};border-radius:12px;padding:16px 18px;margin:0 0 22px;">
+    return f"""<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 22px;">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-    <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);">{heading}</div>
-    <form method="post" action="/admin/auth/recheck" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">Re-check now</button></form>
+    <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);">Subscriber cookie expired</div>
+    {recheck_form}
   </div>
   <div style="margin-top:8px;">{rows}</div>
   {refresh_steps}
@@ -17174,11 +17097,9 @@ def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> 
 
 
 @app.get("/admin", response_class=HTMLResponse)
-def admin_page(request: Request, background_tasks: BackgroundTasks):
+def admin_page(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-
-    auth_banner = _auth_cookie_banner(request, background_tasks)
 
     from webapp import tasks as _tasks
     lib = _lib()
@@ -17199,12 +17120,12 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    # Archive gets a single prominent card linking to its own management page,
+    # Library gets a single prominent card linking to its own management page,
     # so the hub stays uncluttered; everything else renders as the expandable
-    # groups defined in _ADMIN_GROUPS. The Archive card is never
+    # groups defined in _ADMIN_GROUPS. The Library card is never
     # inline-collapsible, so it always shows its aggregate badge here —
     # the per-step breakdown lives on /admin/library itself.
-    library_card = _card("/admin/library", "Archive",
+    library_card = _card("/admin/library", "Library",
                          f"Build, curate, enrich, and back up your archive&mdash;{len(_LIBRARY_TOOLS)} tools.",
                          _group_badge(task_counts, [href for href, _, _ in _LIBRARY_TOOLS]))
 
@@ -17254,16 +17175,6 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 </style>
 <h1>Admin</h1>
 <p style="color:var(--muted);margin:4px 0 26px;">Manage the site&rsquo;s private tools.</p>
-{auth_banner}
-<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 28px;">
-  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);margin-bottom:6px;">Before opening the archive to paid subscribers&mdash;read this</div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.55;">The archive stores the full text of other people&rsquo;s articles. That&rsquo;s fine for your own research, but charging readers for access to it would mean redistributing content you don&rsquo;t own. Settle licensing with the authors you can, and before any paid access goes live:</p>
-  <ul style="font-size:13.5px;color:var(--ink-soft);margin:0;padding-left:18px;line-height:1.6;">
-    <li>Make subscriber-facing feed items <strong>link out</strong> to the original source; keep the in-app reader (<code>/read</code>) private to you.</li>
-    <li>Serve only <strong>summaries, tags, and citations</strong>&mdash;never the stored full text (the <code>content</code> field).</li>
-    <li>Tighten <code>agent.py</code> so an answer can never fall back to raw <code>content</code> when a summary is missing (today it can, at <code>_build_source_documents</code> via <code>_ground_body</code>).</li>
-  </ul>
-</div>
 <div class="admin-cols">
 <div>{left_html}</div>
 <div>{right_html}</div>
@@ -17273,9 +17184,11 @@ def admin_page(request: Request, background_tasks: BackgroundTasks):
 
 
 @app.get("/admin/library", response_class=HTMLResponse)
-def admin_library(request: Request):
+def admin_library(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         return _login_redirect(request)
+
+    auth_banner = _auth_cookie_banner(request, background_tasks)
 
     from webapp import tasks as _tasks
     lib = _lib()
@@ -17300,11 +17213,32 @@ def admin_library(request: Request):
             f'</span></a>'
         )
 
+    def _reader_link(href, title, desc):
+        return (
+            f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
+            f'border-radius:14px;padding:16px 20px;text-decoration:none;">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<span style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
+            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+            f'<p style="margin:5px 0 0;font-size:13.5px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
+        )
+
+    reader_links = "".join([
+        _reader_link("/library/archive", "Browse Archive", "Search and browse the saved-article archive."),
+        _reader_link("/library/feed", "View Feed", "The live RSS reader over your subscription list."),
+    ])
+
     cards = "".join(_step(i + 1, href, title, desc, _badge_for_href(href, task_counts.get(href, 0)))
                     for i, (href, title, desc) in enumerate(_LIBRARY_TOOLS))
     body = f"""<div class="page page-admin">
+<style>
+.lib-reader-links{{display:grid;grid-template-columns:1fr;gap:12px;margin:0 0 22px;}}
+@media(min-width:640px){{.lib-reader-links{{grid-template-columns:1fr 1fr;}}}}
+</style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Archive</h1>
+<h1>Library</h1>
+{auth_banner}
+<div class="lib-reader-links">{reader_links}</div>
 <p style="color:var(--muted);margin:4px 0 6px;">Full management of the digital archive. The eight tools below cover backing it up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from.</p>
 <p style="color:var(--muted);margin:0 0 18px;">For a first-time cleanup, work top to bottom&mdash;each step sets up the next. Once set up, jump to any tool directly anytime.</p>
 {_content_flow_diagram()}
@@ -17354,7 +17288,7 @@ def admin_library(request: Request):
 </div>
 </details>
 </div>"""
-    return HTMLResponse(_page("Archive—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Library—Admin", "Admin", body, authed=True))
 
 
 def _auth_recheck_background() -> None:
@@ -17379,7 +17313,7 @@ def admin_auth_recheck(request: Request):
         authcheck.check_auth_cookies(lib, OPML_PATH)
     finally:
         lib.close()
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse("/admin/library", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -17621,7 +17555,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
 <style>
 .q-group summary:hover{{background:var(--surface);}}
 </style>
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Archive Queue</h1>
 <p style="color:var(--muted);margin:4px 0 6px;">Proposed saves waiting for your review—from &ldquo;Scan feed&rdquo; below (ongoing) or a <a href="/admin/library/backfill">Historical sweep</a> (one-time back-catalog catch-up).</p>
 <p style="color:var(--muted);margin:0 0 22px;">Approve into the archive (edit the tags first if you like), or dismiss what you don&rsquo;t want.</p>
@@ -17833,7 +17767,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
         rows = '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--muted);">No tags yet.</td></tr>'
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Tag cleanup</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Tags are generated automatically during enrichment. Use this to tidy the vocabulary:</p>
 <ul style="color:var(--muted);margin:0 0 10px;padding-left:20px;">
@@ -18001,7 +17935,7 @@ def admin_tag_style(request: Request, generating: int = 0):
     gen_label = "Re-learn from my archive" if has_guide else "Learn from my archive"
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Tagging style{state_badge}</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Auto-tagging already reuses your vocabulary. This goes further—it studies <strong>how</strong> you tagged your {n_tags} tags:</p>
 <ul style="color:var(--muted);margin:0 0 8px;padding-left:20px;">
@@ -18350,7 +18284,7 @@ def admin_dedupe(request: Request, source: str = "", level: str = "balanced",
             body_inner += verify_banner + bulk + blocks
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Content de-dupe</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Scans one source for articles that are likely duplicates or near-duplicates—most often the same piece republished under a different title, which exact-URL dedup misses.</p>
 <p style="color:var(--muted);margin:0 0 6px;">A fast title match finds candidates, then Claude verifies each against the summaries so look-alikes (different role, milestone, or question) aren&rsquo;t flagged.</p>
@@ -20222,7 +20156,7 @@ def admin_review_removals(request: Request):
         cards = "".join(_card(a) for a in flagged)
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Remove content</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Articles the enricher flagged as potentially off-target for this archive&mdash;most often &ldquo;how to get into VC&rdquo; content. Nothing is deleted until you say so: keep the false positives, remove the rest.</p>
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px;">
@@ -20445,7 +20379,7 @@ def admin_enrich(request: Request):
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Re-enrich archive</h1>
 <p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what FP&A Buddy reasons from, so depth here pays off there.</p>
 
@@ -20687,7 +20621,7 @@ def admin_backfill(request: Request):
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Historical sweep</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review.</p>
 <p style="color:var(--muted);margin:0 0 20px;">A one-time catch-up on your back catalog—it doesn&rsquo;t save anything by itself, it just fills the queue below for you to approve.</p>
@@ -20891,7 +20825,7 @@ def admin_backup(request: Request, uploaded: str = ""):
         for b in backup_rows
     ) or '<tr><td colspan="5" style="padding:16px;color:var(--muted);font-size:13px;">No off-site backups recorded yet.</td></tr>'
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Archive</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Archive backup</h1>
 {uploaded_banner}
 <p style="color:var(--muted);margin:-6px 0 24px;">Currently <strong>{count:,}</strong> articles in the live database.</p>

@@ -355,5 +355,5 @@ def test_admin_nav_shows_task_dot_for_email_failure(env):
     finally:
         lib.close()
     admin = _admin_client(env)
-    r = admin.get("/library")
+    r = admin.get("/")
     assert 'class="task-dot"' in r.text

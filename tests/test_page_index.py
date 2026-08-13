@@ -85,7 +85,7 @@ def test_page_index_excludes_non_page_endpoints(env):
 def test_page_index_includes_known_pages(env):
     rows = env._page_index_snapshot()
     paths = {r["path"] for r in rows}
-    for path in ["/", "/thought-leadership", "/library", "/admin", "/admin/system/page-index"]:
+    for path in ["/", "/thought-leadership", "/admin/library", "/admin", "/admin/system/page-index"]:
         assert path in paths
 
 

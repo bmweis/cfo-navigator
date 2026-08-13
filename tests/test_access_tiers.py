@@ -66,8 +66,11 @@ PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           "/play", "/play/leaderboard"]
 # Submitting a tool / a piece, or requesting a warm intro, is account-only (spam
 # control) even though the directory and home page are public.
-MEMBER = ["/library", "/library/archive", "/library/feed", "/library/ask",
-          "/tools/submit", "/library/submit"]
+MEMBER = ["/library/ask", "/tools/submit", "/library/submit"]
+# Archive and Feed moved admin-only (Phase 1) — a signed-in non-admin member
+# gets bounced to login just like any other admin page. The /library hub
+# route itself was removed outright, no redirect.
+ADMIN_ONLY = ["/library/archive", "/library/feed"]
 # Old flat URLs 301-redirect to their nested equivalents, unconditionally
 # (even signed-out — the redirect itself carries no gated content).
 OLD_TO_NEW = {
@@ -102,6 +105,28 @@ def test_member_can_reach_member_pages(env):
         assert r.status_code == 200, f"{path} -> {r.status_code}"
 
 
+def test_admin_only_library_pages_redirect_non_admin_member(env):
+    # Archive and Feed are admin-only (Phase 1) — a signed-in non-admin
+    # member is bounced to login exactly like an anonymous visitor.
+    for c in (_client(env), _member_client(env)):
+        for path in ADMIN_ONLY:
+            r = c.get(path, follow_redirects=False)
+            assert r.status_code == 303 and "/login" in r.headers["location"], f"{path} -> {r.status_code}"
+
+
+def test_admin_reaches_admin_only_library_pages(env):
+    c = _admin_client(env)
+    for path in ADMIN_ONLY:
+        r = c.get(path, follow_redirects=False)
+        assert r.status_code == 200, f"{path} -> {r.status_code}"
+
+
+def test_library_hub_route_removed(env):
+    # /library was removed outright in Phase 1 — no redirect, just gone.
+    for c in (_client(env), _member_client(env), _admin_client(env)):
+        assert c.get("/library", follow_redirects=False).status_code == 404
+
+
 def test_old_flat_urls_redirect_to_nested_paths(env):
     c = _client(env)
     for old, new in OLD_TO_NEW.items():
@@ -122,7 +147,7 @@ def test_member_blocked_from_admin_and_reader(env):
 def test_admin_reaches_everything(env):
     c = _admin_client(env)
     assert c.get("/admin", follow_redirects=False).status_code == 200
-    assert c.get("/library", follow_redirects=False).status_code == 200
+    assert c.get("/admin/library", follow_redirects=False).status_code == 200
     assert c.get("/read?url=https://ex.com/x", follow_redirects=False).status_code == 200
 
 
@@ -137,7 +162,7 @@ def test_member_api_gating(env):
 
 def test_member_nav_shows_logout_not_admin(env):
     c = _member_client(env)
-    html = c.get("/library").text
+    html = c.get("/library/ask").text
     assert "Log out" in html
     assert ">Admin<" not in html and ">Draft<" not in html
 
@@ -154,13 +179,16 @@ def test_public_pages_are_role_aware(env):
 
 
 def test_admin_nav_mirrors_member_plus_admin(env):
-    # Admin sees the member nav + Admin + Log out. Draft is an admin tool that
-    # lives in the Admin hub, not the top nav.
+    # Admin sees the public nav + Admin + Log out. Draft is an admin tool that
+    # lives in the Admin hub, not the top nav. Library was removed from the
+    # nav entirely (Phase 1) — Archive/Feed are admin-only now and FP&A Buddy
+    # is reachable directly by URL, not via a top-nav entry.
     html = _admin_client(env).get("/").text
     assert ">Admin<" in html and "Log out" in html
-    assert ">Library<" in html and ">CFO Toolbox<" in html   # member links
+    assert ">CFO Toolbox<" in html
     nav = html.split("<nav")[1].split("</nav>")[0]
     assert ">Draft<" not in nav
+    assert ">Library<" not in nav
 
 
 def test_blank_username_no_longer_logs_in(env):
