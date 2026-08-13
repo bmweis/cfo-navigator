@@ -10601,9 +10601,13 @@ def _tl_parse_warning(item: dict) -> str:
     date_label = (item.get("date_label") or "").strip()
     sort_key = item.get("sort_key") or ""
     if date_label and not sort_key:
+        # Same advisory-amber tone as the "Needs verification" badges/verify
+        # banners elsewhere in admin (#fef3c7/#92400e/#fde68a) — see
+        # linklib/brand_check.py's AUX_COLORS for why this is a documented,
+        # distinct-from-`--caution` tone rather than a new hue.
         return (
-            '<p style="margin:-8px 0 0;padding:8px 12px;background:#fff3e0;border:1px solid #ffcc80;'
-            'border-radius:8px;font-size:12px;color:#8a5a00;">'
+            '<p style="margin:-8px 0 0;padding:8px 12px;background:#fef3c7;border:1px solid #fde68a;'
+            'border-radius:8px;font-size:12px;color:#92400e;">'
             "Date didn&rsquo;t parse as Mon YYYY — this entry will float to the top of its section.</p>"
         )
     return ""
@@ -10693,7 +10697,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
         # Mon YYYY — flag it here too, not just on the edit form, since this
         # is the page an admin scans to spot something off at a glance.
         date_warning = (' <span title="Didn&rsquo;t parse — floats to top of its section" '
-                         'style="color:#b8860b;">&#9888;</span>') if it['date_label'] and not it['sort_key'] else ''
+                         'style="color:#92400e;">&#9888;</span>') if it['date_label'] and not it['sort_key'] else ''
         return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(_TL_TYPE_LABELS.get(it['type'], it['type']))}</td>
   <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}</td>
