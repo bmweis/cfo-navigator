@@ -408,6 +408,44 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   width while everything else extended past it — confirmed by the fix
   eliminating both symptoms together.
 
+- **Sail, Don't Row — water reflections, re-added (reverses an earlier decision).**
+  The original build removed reflections outright: "unrealistic inverted-building
+  duplicate, not worth fading," and a test (`test_play_no_skyline_reflection`)
+  codified that as a design-review constraint. Brian later signed off on
+  re-adding them, but only on the condition that the technique actually be fixed,
+  not just made subtler — the prior version was rejected for being a hard-edged,
+  full-opacity mirror with no fade or blur, not for being too intense. The
+  re-added version (`webapp/app.py`'s `.sdr-reflection-wrap`/`.sdr-reflection-inner`)
+  reuses the same skyline SVG markup as `.sdr-skyline-wrap` (so both crossfade
+  together automatically off the same `.sdr-skyline-layer`/`data-cp` selectors —
+  no separate JS toggle needed), flipped with `scaleY(-1)` pivoting exactly on
+  its own bottom edge so reflected distance below the waterline always equals
+  true distance above it, then clipped to a band within the first ~27% of the
+  stage below the waterline with a real blur, a single fade-to-transparent mask,
+  reduced opacity, and a `::after` color-blend tint toward the water's own hue
+  so it reads as color reflected in water rather than a building floating under
+  it. A slow `skewX` wobble on the flip stands in for rippling distortion
+  (true per-pixel distortion isn't reachable in DOM+CSS), reinforced by
+  `.sdr-water-shine`'s soft diagonal light-streak glints drifting across both
+  the live water and the reflection band. One non-obvious placement bug worth
+  noting for future water-layer work: `.sdr-band1` (the water's base color) is
+  fully opaque, so a reflection layer painted *before* it in DOM order is
+  completely hidden underneath it — the reflection has to live inside
+  `.sdr-water`, painted immediately after `.sdr-band1` and before the
+  `.sdr-band2`/`.sdr-band3` texture layers, not as a sibling of
+  `.sdr-skyline-wrap`. The old test was replaced with
+  `test_play_has_water_reflection`, asserting the mechanism is present.
+  Same PR also gave the water itself a color progression along the route —
+  Charles River (brackish green) -> Boston Harbor (open, grayer blue) -> Cape
+  Cod Bay (clearer turquoise) -> Martha's Vineyard Sound (deep ocean blue) ->
+  Nantucket (deepest indigo) — five `.sdr-water-tint[data-cp]` layers
+  crossfaded by the same `updateCheckpointLayer`/`data-cp` mechanism the
+  skyline backdrops already use (`waterTintLayers` in the JS, toggled
+  alongside `skylineLayers` at both call sites), `mix-blend-mode:color` so
+  the existing wave texture and reflection stay visible through the tint
+  rather than being painted over. `test_play_has_water_color_progression`
+  covers it.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 

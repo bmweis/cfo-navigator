@@ -3774,12 +3774,56 @@ _SDR_CSS = """
 /* Five checkpoint backdrops, stacked and crossfaded by data-cp index as
    DistanceFraction crosses each segment boundary — the water/obstacles/gusts
    keep scrolling continuously underneath; only this distant backdrop layer
-   changes. No mirrored reflection layer — a skyline should only ever read
-   right-side up, per design review. */
+   changes. */
 .sdr-skyline-wrap{position:absolute;left:0;right:0;top:0;height:60%;overflow:hidden;}
 .sdr-skyline-layer{position:absolute;inset:0;opacity:0;transition:opacity 1.4s ease;}
 .sdr-skyline-layer.sdr-active{opacity:1;}
 .sdr-skyline-layer svg{width:100%;height:100%;display:block;}
+/* Water reflection — re-added (see CLAUDE.md's Key architecture decisions
+   entry on this reversal): the original build removed reflections outright
+   ("unrealistic inverted-building duplicate, not worth fading"), because
+   that version was a hard-edged, full-opacity mirror of the skyline with no
+   fade or blur. This is a different technique, not a subtler version of the
+   same one. .sdr-reflection-inner reuses the *same* skyline SVG markup as
+   .sdr-skyline-wrap (same data-cp toggling, so both copies crossfade
+   together automatically — see skylineLayers in the JS, which already
+   selects every ".sdr-skyline-layer" regardless of which wrapper it's in),
+   sized to the source's own 60%-of-stage height and flipped with
+   scaleY(-1) around its own bottom edge (the horizon line). Because the
+   flip pivots exactly on the horizon, a point's reflected distance below
+   the waterline always equals its true distance above it — real mirror
+   geometry, not an eyeballed offset. .sdr-reflection-wrap then clips that
+   to a 27%-of-stage band (within the ask's 25-30% guidance), applies a
+   single fade-to-transparent mask (opaque near the shoreline, gone well
+   before the band ends), a real Gaussian blur (not a crisp duplicate), an
+   overall translucency, and a ::after color-blend tint toward the water's
+   own hue so it reads as color reflected IN water rather than a building
+   floating under it. A slow skewX wobble on the inner flip stands in for
+   rippling — full per-pixel distortion isn't reachable in DOM+CSS, but a
+   gentle, continuous horizontal shear breaks up the mirror-flatness the
+   original version was rejected for. .sdr-water-shine below layers soft
+   diagonal light-streak glints across both the live water and this
+   reflection band, reinforcing the rippling read.
+   Lives INSIDE .sdr-water (not as a sibling of .sdr-skyline-wrap) and
+   paints right after .sdr-band1 — .sdr-band1 is a fully opaque base water
+   color, so a reflection positioned *before* it in paint order would be
+   completely hidden underneath it. top/height below are percentages of
+   .sdr-water's own box (58%-100% of the stage, i.e. 42% tall), chosen so
+   the visible band still runs from the waterline down to 27% of the
+   *stage's* height (0/42 to 27/42 of water's own height) — the .sdr-water
+   nesting changes the percentage basis, not the on-screen size. */
+.sdr-reflection-wrap{position:absolute;left:0;right:0;top:0;height:64.3%;overflow:hidden;
+  pointer-events:none;opacity:.6;filter:blur(2.5px);-webkit-filter:blur(2.5px);
+  -webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,.85) 0%,rgba(0,0,0,.35) 55%,rgba(0,0,0,0) 100%);
+  mask-image:linear-gradient(to bottom,rgba(0,0,0,.85) 0%,rgba(0,0,0,.35) 55%,rgba(0,0,0,0) 100%);}
+.sdr-reflection-wrap::after{content:'';position:absolute;inset:0;background:var(--sdr-water-mid);
+  mix-blend-mode:color;opacity:.4;}
+.sdr-reflection-inner{position:absolute;left:0;right:0;bottom:100%;height:222%;transform-origin:bottom;
+  animation:sdrReflectionWobble 6s ease-in-out infinite;}
+@keyframes sdrReflectionWobble{
+  0%,100%{transform:scaleY(-1) skewX(.5deg);}
+  50%{transform:scaleY(-1) skewX(-.5deg);}
+}
 .sdr-water{position:absolute;left:0;right:0;bottom:0;top:58%;overflow:hidden;}
 .sdr-band{position:absolute;left:0;right:-100%;height:100%;}
 .sdr-band1{background:var(--sdr-water-light);top:0;}
@@ -3790,6 +3834,33 @@ _SDR_CSS = """
   -webkit-mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);
   mask-image:repeating-linear-gradient(100deg,#000 0 46px,transparent 46px 90px);animation:sdrDrift 9s linear infinite reverse;}
 @keyframes sdrDrift{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+/* Water color progression, leg by leg — the real Charles/Harbor/Cape/Vineyard/
+   Nantucket route runs river to open bay to ocean, and the water should read
+   as that same journey, not one static teal the whole way. Five tint layers,
+   crossfaded on the same data-cp/updateCheckpointLayer mechanism the skyline
+   backdrops already use (see waterTintLayers in the JS — same toggle call,
+   just a second array), so the water shifts in step with the skyline rather
+   than needing its own separate timer. mix-blend-mode:color recolors the
+   existing bands/reflection/shine underneath rather than painting a flat
+   wash over them, so the wave texture and reflection stay visible through
+   the tint the whole way down the course. */
+.sdr-water-tint{position:absolute;inset:0;opacity:0;transition:opacity 1.4s ease;
+  mix-blend-mode:color;pointer-events:none;}
+.sdr-water-tint.sdr-active{opacity:1;}
+.sdr-water-tint[data-cp="0"]{background:#4F9E7A;}   /* Charles River — brackish, greener */
+.sdr-water-tint[data-cp="1"]{background:#3E7FA0;}   /* Boston Harbor — open, grayer blue */
+.sdr-water-tint[data-cp="2"]{background:#2FA7B5;}   /* Cape Cod Bay — clearer turquoise */
+.sdr-water-tint[data-cp="3"]{background:#1D6FA5;}   /* Martha's Vineyard Sound — deep ocean blue */
+.sdr-water-tint[data-cp="4"]{background:#123E6E;}   /* Nantucket — deepest, indigo ocean */
+/* Soft diagonal light-ray glints drifting across the water surface — doubles
+   as the "light distortion/rippling" cue over the reflection band above,
+   since .sdr-water (top:58%) already overlaps it. mix-blend-mode:screen
+   keeps it additive (brightening) rather than darkening either layer. */
+.sdr-water-shine{position:absolute;inset:0;pointer-events:none;mix-blend-mode:screen;opacity:.5;
+  background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.16) 0 2px,transparent 2px 30px,
+    rgba(255,255,255,.08) 30px 33px,transparent 33px 60px);
+  animation:sdrShine 7s linear infinite;}
+@keyframes sdrShine{from{background-position:0 0;}to{background-position:-60px 0;}}
 
 .sdr-boat-wrap{position:absolute;width:78px;z-index:4;filter:drop-shadow(0 4px 6px rgba(0,41,117,0.15));}
 .sdr-boat-wrap svg{width:100%;height:auto;display:block;}
@@ -3970,6 +4041,10 @@ _SDR_DEFS_SVG = """<svg width="0" height="0" style="position:absolute;">
     <linearGradient id="sdrBuoyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#9C7A54"/><stop offset="100%" stop-color="#5A4128"/></linearGradient>
     <linearGradient id="sdrWhaleGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3E5FA8"/><stop offset="100%" stop-color="#16418F"/></linearGradient>
     <linearGradient id="sdrSharkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3D4650"/><stop offset="100%" stop-color="#1C2126"/></linearGradient>
+    <!-- Sail: a soft cross-light gradient (bright luffing edge near the mast,
+         shadowed leech at the trailing corner) so the sail reads as canvas
+         catching wind rather than a flat white triangle. -->
+    <linearGradient id="sdrSailGrad" x1="0" y1="0" x2="1" y2="0.4"><stop offset="0%" stop-color="#FFFFFF"/><stop offset="60%" stop-color="#F1EEE4"/><stop offset="100%" stop-color="#D9D4C6"/></linearGradient>
   </defs>
 </svg>"""
 
@@ -3981,7 +4056,7 @@ _SDR_DEFS_SVG = """<svg width="0" height="0" style="position:absolute;">
 _SDR_BOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
   <g class="sdr-sail-group">
     <line x1="65" y1="26" x2="65" y2="93" stroke="#002975" stroke-width="2.5"/>
-    <path d="M65,28 L65,89 L99,86 Z" fill="#FBFAF6" stroke="#002975" stroke-width="1.4"/>
+    <path d="M65,28 L65,89 L99,86 Z" fill="url(#sdrSailGrad)" stroke="#002975" stroke-width="1.4"/>
     <path d="M68,36 L94,84" stroke="#D8D3C8" stroke-width="1" opacity="0.8"/>
   </g>
   <path d="M12,93 C34,88 96,88 118,93 C115,108 96,121 65,122 C34,121 15,108 12,93 Z" fill="url(#sdrHullGrad)"/>
@@ -4014,15 +4089,37 @@ _SDR_ROWBOAT_SVG = """<svg viewBox="0 0 130 140" width="130" height="140">
   </g>
 </svg>"""
 
+# Shading beyond the base gradient: a lit facet (catching light from the
+# upper-left, same direction the skyline/sun implies) and a cast-shadow
+# facet on the lower-right, so the rock reads as a faceted mass rather
+# than a flat gradient blob.
 _SDR_ROCK_SVG = """<svg viewBox="0 0 40 32" width="40" height="32">
   <path d="M2,30 C0,20 6,8 16,4 C26,0 38,6 38,18 C38,26 30,30 20,31 C12,32 4,30 2,30 Z" fill="url(#sdrRockGrad)"/>
+  <path d="M16,4 C10,7 5,14 3,22 C7,17 13,11 20,8 Z" fill="#D6D4C8" opacity="0.4"/>
+  <path d="M38,18 C38,26 30,30 20,31 C26,29 32,24 34,17 Z" fill="#3A3830" opacity="0.35"/>
   <path d="M8,10 C14,6 22,6 28,10" stroke="#7A7869" stroke-width="1" opacity="0.4" fill="none"/>
 </svg>"""
 
+# Channel marker, not a plain wooden float: a red-and-white striped hull
+# (clipped to the buoy's own silhouette so the stripes follow its curve
+# rather than overhanging as a rectangle) with a small light on top, the
+# real visual cue that reads as "navigation buoy" rather than "barrel."
 _SDR_BUOY_SVG = """<svg viewBox="0 0 26 34" width="26" height="34">
+  <defs>
+    <clipPath id="sdrBuoyClip"><path d="M4,26 C2,16 4,6 13,3 C22,6 24,16 22,26 C22,30 4,30 4,26 Z"/></clipPath>
+  </defs>
   <ellipse cx="13" cy="28" rx="11" ry="5" fill="#3A2C18" opacity="0.3"/>
   <path d="M4,26 C2,16 4,6 13,3 C22,6 24,16 22,26 C22,30 4,30 4,26 Z" fill="url(#sdrBuoyGrad)"/>
-  <rect x="4" y="14" width="18" height="4" fill="#5A4128" opacity="0.5"/>
+  <g clip-path="url(#sdrBuoyClip)">
+    <rect x="0" y="3" width="26" height="6" fill="#B5553A"/>
+    <rect x="0" y="9" width="26" height="5" fill="#EDE8DD"/>
+    <rect x="0" y="14" width="26" height="6" fill="#B5553A"/>
+    <rect x="0" y="20" width="26" height="5" fill="#EDE8DD"/>
+    <path d="M20,6 C21,14 21,22 19,29" stroke="#000" stroke-width="1.4" opacity="0.15" fill="none"/>
+  </g>
+  <rect x="4" y="14" width="18" height="4" fill="#5A4128" opacity="0.35"/>
+  <rect x="11.5" y="0" width="3" height="4" fill="#5A4128"/>
+  <circle cx="13" cy="0" r="2.4" fill="var(--sdr-gold)"/>
 </svg>"""
 
 _SDR_SKYLINE_CHARLES_SVG = """<svg viewBox="0 0 700 168" preserveAspectRatio="none">
@@ -4255,6 +4352,7 @@ _SDR_JS = """
   var prizeEl = document.getElementById('sdrPrize');
   var sharkEl = document.getElementById('sdrShark');
   var skylineLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-skyline-layer'));
+  var waterTintLayers = Array.prototype.slice.call(document.querySelectorAll('.sdr-water-tint'));
   var minimapDots = Array.prototype.slice.call(document.querySelectorAll('.sdr-minimap-dot'));
 
   var touchCapable = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
@@ -4396,6 +4494,7 @@ _SDR_JS = """
     state.checkpointIdx = idx;
     var idxStr = String(idx);
     skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === idxStr); });
+    waterTintLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === idxStr); });
     minimapDots.forEach(function(el){ el.classList.toggle('sdr-active', parseInt(el.getAttribute('data-cp'), 10) <= idx); });
     document.getElementById('sdrMinimapLabel').textContent = CHECKPOINTS[idx][1];
     prizeEl.style.display = idx === 4 ? 'block' : 'none';
@@ -4607,6 +4706,7 @@ _SDR_JS = """
     sharkEl.classList.remove('sdr-lunging');
     sharkEl.style.display = 'none';
     skylineLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
+    waterTintLayers.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
     minimapDots.forEach(function(el){ el.classList.toggle('sdr-active', el.getAttribute('data-cp') === '0'); });
     document.getElementById('sdrMinimapLabel').textContent = CHECKPOINTS[0][1];
     prizeEl.style.display = 'none';
@@ -4992,6 +5092,10 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
         f'<div class="sdr-skyline-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">{svg}</div>'
         for i, svg in enumerate(_SDR_CHECKPOINT_SVGS)
     )
+    water_tint_layers = "".join(
+        f'<div class="sdr-water-tint{" sdr-active" if i == 0 else ""}" data-cp="{i}"></div>'
+        for i in range(len(_SDR_CHECKPOINT_SVGS))
+    )
     rank_json = {
         r["rank"]: {
             "collision_limit": r["collision_limit"],
@@ -5044,7 +5148,11 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
   """ + _SDR_DEFS_SVG + f"""
   <div class="sdr-skyline-wrap">{skyline_layers}</div>
   """ + """
-  <div class="sdr-water"><div class="sdr-band sdr-band1"></div><div class="sdr-band sdr-band2"></div><div class="sdr-band sdr-band3"></div></div>
+  <div class="sdr-water"><div class="sdr-band sdr-band1"></div>
+  """ + f"""<div class="sdr-reflection-wrap"><div class="sdr-reflection-inner">{skyline_layers}</div></div>""" + """
+  <div class="sdr-band sdr-band2"></div><div class="sdr-band sdr-band3"></div>
+  """ + water_tint_layers + """
+  <div class="sdr-water-shine"></div></div>
   <div id="sdrGusts"></div>
   <div id="sdrObstacles"></div>
   <div id="sdrWhale" class="sdr-whale"><div class="sdr-whale-inner">""" + _SDR_WHALE_SVG + """</div></div>

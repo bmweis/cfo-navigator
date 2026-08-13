@@ -278,13 +278,32 @@ def test_play_renders_five_checkpoint_layers(env):
         assert f'<div class="sdr-skyline-layer{" sdr-active" if i == 0 else ""}" data-cp="{i}">' in body
 
 
-def test_play_no_skyline_reflection(env):
-    """Design review: the skyline should only ever read right-side up — no
-    mirrored/upside-down reflection layer."""
+def test_play_has_water_reflection(env):
+    """Reversal of the earlier "no mirrored reflection layer" design-review
+    call — see CLAUDE.md's Key architecture decisions entry. The original
+    version was rejected for being a hard-edged, full-opacity duplicate; this
+    one is re-added with a real fade/blur/tint treatment, so assert the
+    mechanism is present rather than absent. One reflection copy per
+    checkpoint backdrop, same as the source skyline layers."""
     _, client = env
     body = client.get("/play").text
-    assert "sdr-reflection" not in body
-    assert "reflectionLayers" not in body
+    assert "sdr-reflection-wrap" in body
+    assert "sdr-reflection-inner" in body
+    assert body.count('class="sdr-skyline-layer') == 10
+
+
+def test_play_has_water_color_progression(env):
+    """The real route runs river -> open bay -> ocean (Charles River, Boston
+    Harbor, Cape Cod, Martha's Vineyard, Nantucket) — the water tint should
+    shift leg by leg along with the skyline backdrop, not stay one static
+    color the whole course. One tint layer per checkpoint, crossfaded on the
+    same data-cp mechanism as the skyline (see waterTintLayers in the JS)."""
+    _, client = env
+    body = client.get("/play").text
+    assert body.count('class="sdr-water-tint') == 5
+    for i in range(5):
+        assert f'class="sdr-water-tint{" sdr-active" if i == 0 else ""}" data-cp="{i}"' in body
+    assert "waterTintLayers" in body
 
 
 def test_play_checkpoint_labels_and_thresholds(env):
