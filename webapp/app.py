@@ -10617,14 +10617,20 @@ def _tl_form_fields(item: dict | None = None) -> str:
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sort key</label>
       <input name="sort_key" maxlength="7" value="{_esc(item.get('sort_key', ''))}"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="YYYY-MM, blank floats to top">
+        placeholder="YYYY-MM — controls order, newest first">
     </div>
     <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order</label>
-      <input name="display_order" type="number" value="{item.get('display_order', 0)}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (rarely needed)</label>
+      <input name="display_order" type="number" value="{item.get('display_order', '') if item else ''}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="Leave blank — auto-assigned">
     </div>
   </div>
+  <p style="margin:-8px 0 0;font-size:12px;color:var(--muted);">
+    Sort key decides order (newest first) — you don&rsquo;t need to touch Display order unless two entries
+    share the same sort key and you want to control which shows first. A blank sort key floats an entry to
+    the top of its column, for a standing link with no single date (e.g. a full episode feed).
+  </p>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description</label>
     <textarea name="description" maxlength="500" rows="3"
@@ -10731,10 +10737,19 @@ def _tl_form_values(form) -> dict:
     title = (form.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="Title is required.")
-    try:
-        display_order = int(form.get("display_order") or 0)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Display order must be a number.")
+    display_order_raw = (form.get("display_order") or "").strip()
+    # Blank means "auto" — the new-entry route passes None straight through
+    # to Library.add_thought_leadership, which assigns the next value for
+    # this type; the edit route treats a blank as an explicit 0 (the field
+    # is always prefilled with the current value there, so a blank means
+    # the admin deliberately cleared it).
+    if display_order_raw == "":
+        display_order = None
+    else:
+        try:
+            display_order = int(display_order_raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Display order must be a number.")
     return {
         "type": tl_type,
         "title": title,
@@ -10756,6 +10771,8 @@ async def admin_thought_leadership_new_submit(request: Request):
     v = _tl_form_values(form)
     lib = _lib()
     try:
+        # display_order left as None (blank on the add form) auto-assigns
+        # the next value for this type — see Library.add_thought_leadership.
         lib.add_thought_leadership(v["type"], v["title"], v["url"], v["venue"], v["date_label"],
                                    v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"])
     finally:
@@ -10795,8 +10812,11 @@ async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
     v = _tl_form_values(form)
     lib = _lib()
     try:
+        # The edit form always prefills display_order with the current
+        # value, so a blank submission here is a deliberate clear — treat
+        # it as 0 rather than re-triggering the add-only auto-assign.
         lib.update_thought_leadership(item_id, v["type"], v["title"], v["url"], v["venue"], v["date_label"],
-                                      v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"])
+                                      v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"] or 0)
     finally:
         lib.close()
     return RedirectResponse("/admin/thought-leadership", status_code=303)
