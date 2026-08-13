@@ -176,6 +176,39 @@ CREATE TABLE IF NOT EXISTS benchmarks (
     sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
+-- The /thought-leadership page's four editorial lists (Writing, Speaking &
+-- Events, Podcasts, Press), admin-managed (Phase 1 — see CLAUDE.md). type:
+-- 'writing'|'speaking'|'podcast'|'press'. Role/capacity (Host, Co-Chair,
+-- Guest, ...) is deliberately not a separate column — it stays free-text
+-- inside title, matching how every existing entry already writes it (e.g.
+-- "Cash Cycle Demo Day—Co-Chair"). date_label is the display string (e.g.
+-- "Jun 2026"); sort_key is "YYYY-MM" and drives newest-first ordering on the
+-- public page — "" floats an item to the top of its section (a standing
+-- link with no single date). display_order is a stable tiebreaker for items
+-- that share a sort_key (or are both undated), preserving whatever order
+-- they were added/migrated in rather than leaving ties to SQLite's
+-- unspecified row order. needs_synopsis flags a description that's
+-- deliberately blank pending research, not skipped by accident. Superseded
+-- webapp/thought_leadership_data.py (kept in the repo, unused, as a
+-- rollback reference) — see that module's docstring and CLAUDE.md's Phase 1
+-- entry for the migration this table replaced it with. One legacy entry
+-- (Abacum AI Summit, which has photos — a field this table doesn't carry;
+-- see CLAUDE.md) stays hardcoded in webapp/app.py instead of migrating here.
+CREATE TABLE IF NOT EXISTS thought_leadership (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    type           TEXT NOT NULL,
+    title          TEXT NOT NULL DEFAULT '',
+    url            TEXT NOT NULL DEFAULT '',
+    venue          TEXT NOT NULL DEFAULT '',
+    date_label     TEXT NOT NULL DEFAULT '',
+    sort_key       TEXT NOT NULL DEFAULT '',
+    description    TEXT NOT NULL DEFAULT '',
+    needs_synopsis INTEGER NOT NULL DEFAULT 0,
+    display_order  INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT,
+    updated_at     TEXT
+);
+
 -- Personal bookmark list — private per user, never shared with other users
 -- or with the admin-curated Archive. user_id has no NOT NULL/UNIQUE
 -- constraint here on purpose: on a fresh DB every row gets a real user_id at
@@ -3452,6 +3485,63 @@ class Library:
 
     def delete_benchmark(self, benchmark_id: int) -> None:
         self.conn.execute("DELETE FROM benchmarks WHERE id = ?", (benchmark_id,))
+        self.conn.commit()
+
+    # -- thought leadership (the /thought-leadership page's four columns) ---
+    # Ordering mirrors the pre-DB behavior in webapp/thought_leadership_data.py:
+    # undated items (sort_key == '') float to the top, everything else sorts
+    # newest-first by sort_key; display_order breaks ties within each group so
+    # migrated/added items don't reshuffle on every read.
+    _TL_ORDER_SQL = "(CASE WHEN sort_key = '' THEN 0 ELSE 1 END), sort_key DESC, display_order ASC"
+
+    def list_thought_leadership(self, type: str | None = None) -> list[dict]:
+        if type:
+            rows = self.conn.execute(
+                f"SELECT * FROM thought_leadership WHERE type = ? ORDER BY {self._TL_ORDER_SQL}",
+                (type,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                f"SELECT * FROM thought_leadership ORDER BY type, {self._TL_ORDER_SQL}"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_thought_leadership(self, item_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM thought_leadership WHERE id = ?", (item_id,)).fetchone()
+        return dict(row) if row else None
+
+    def add_thought_leadership(self, type: str, title: str, url: str = "", venue: str = "",
+                               date_label: str = "", sort_key: str = "", description: str = "",
+                               needs_synopsis: bool = False, display_order: int | None = None) -> int:
+        if display_order is None:
+            display_order = self.conn.execute(
+                "SELECT COALESCE(MAX(display_order), -1) + 1 FROM thought_leadership WHERE type = ?",
+                (type,),
+            ).fetchone()[0]
+        now = _now()
+        cur = self.conn.execute(
+            "INSERT INTO thought_leadership "
+            "(type, title, url, venue, date_label, sort_key, description, needs_synopsis, display_order, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (type, title.strip(), url.strip(), venue.strip(), date_label.strip(), sort_key.strip(),
+             description.strip(), int(bool(needs_synopsis)), display_order, now, now),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_thought_leadership(self, item_id: int, type: str, title: str, url: str, venue: str,
+                                  date_label: str, sort_key: str, description: str,
+                                  needs_synopsis: bool, display_order: int) -> None:
+        self.conn.execute(
+            "UPDATE thought_leadership SET type=?, title=?, url=?, venue=?, date_label=?, sort_key=?, "
+            "description=?, needs_synopsis=?, display_order=?, updated_at=? WHERE id=?",
+            (type, title.strip(), url.strip(), venue.strip(), date_label.strip(), sort_key.strip(),
+             description.strip(), int(bool(needs_synopsis)), display_order, _now(), item_id),
+        )
+        self.conn.commit()
+
+    def delete_thought_leadership(self, item_id: int) -> None:
+        self.conn.execute("DELETE FROM thought_leadership WHERE id = ?", (item_id,))
         self.conn.commit()
 
     # -- communities (the /tools/communities directory) ---------------------
