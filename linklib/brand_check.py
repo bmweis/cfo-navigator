@@ -128,8 +128,18 @@ AUX_COLORS = {
     "#e0917a", "#b5553a", "#f5e4da", "#8b3f28",             # mainsail coral + fold shading
     "#d8987c", "#96432c",                                    # jib gradient
     "#a8a69c", "#5c5a52", "#7a7869",           # rock (grey stone)
+    "#d6d4c8", "#3a3830",                       # rock lit facet / cast-shadow facet
     "#9c7a54", "#5a4128", "#3a2c18",           # buoy (weathered brown wood)
+    "#f1eee4", "#d9d4c6",                       # sail gradient: mid stop / leech shadow stop
     "#ffe9a8",                                  # active rank-pill sleeve-stripe highlight
+    # Water color progression (river to open ocean) — one tint per checkpoint
+    # leg, crossfaded the same way the skyline backdrop is. Kin of the
+    # #0e5a7a/#4fa8a0 water bands above, not brand tokens.
+    "#4f9e7a",   # Charles River — brackish green
+    "#3e7fa0",   # Boston Harbor — open, grayer blue
+    "#2fa7b5",   # Cape Cod Bay — clearer turquoise
+    "#1d6fa5",   # Martha's Vineyard Sound — deep ocean blue
+    "#123e6e",   # Nantucket — deepest indigo ocean
     # Phase 3 checkpoint backdrops (Boston Harbor / Cape Cod / Martha's
     # Vineyard / Nantucket) — dunes, lighthouses, cottages, bluffs.
     "#d9cba3", "#c9b896",                       # dune / bluff sand tones
