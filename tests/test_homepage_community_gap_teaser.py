@@ -117,15 +117,17 @@ def test_zero_result_message_links_inline_to_gap_form(env):
     assert "comm-gap-cta-highlight" not in r.text
 
 
-def test_suggest_a_piece_hidden_from_anonymous_visitors_on_library_page(env):
+def test_suggest_a_piece_page_gated_to_signed_in_members(env):
+    # The /library hub page that used to link here was removed (Phase 1) —
+    # /library/submit itself is untouched: still member-gated, still reachable
+    # directly by URL.
     c = _client(env)
-    r = c.get("/library", follow_redirects=False)
-    assert r.status_code in (302, 303)  # /library redirects signed-out visitors to /login
+    r = c.get("/library/submit", follow_redirects=False)
+    assert r.status_code in (302, 303)  # redirects signed-out visitors to /login
 
 
-def test_suggest_a_piece_shown_to_members_on_library_page(env):
+def test_suggest_a_piece_page_open_to_members(env):
     c = _member_client(env)
-    r = c.get("/library")
+    r = c.get("/library/submit")
     assert r.status_code == 200
     assert "Suggest a piece for the archive" in r.text
-    assert '<a href="/library/submit">' in r.text

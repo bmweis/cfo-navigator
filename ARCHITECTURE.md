@@ -1578,13 +1578,19 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     correction is always about one specific listing), `/contact`, `/privacy`, `/play`, `/login`,
     `/static/*`, `/health`. (The old flat `/growth-engine-ratio`, `/finops-ai-hackathon`,
     `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
-  - *Member* (`_is_member` — any valid session): `/library`, `/library/archive`,
-    `/library/feed`, `/read`, `/library/ask`, `/library/past-questions`,
-    `/library/submit`. HTML pages redirect to `/login`; APIs return 401. (The
-    old flat `/archive`, `/feed`, `/ask`, `/questions` URLs 301-redirect to
-    their nested equivalents.)
+  - *Member* (`_is_member` — any valid session): `/library/ask`,
+    `/library/past-questions`, `/library/submit`. HTML pages redirect to
+    `/login`; APIs return 401. (The old flat `/ask`, `/questions` URLs
+    301-redirect to their nested equivalents.)
   - *Admin* (`_is_authed` — session with `role=admin`): everything under
-    `/admin/*`, plus admin-only actions on shared pages. This includes two
+    `/admin/*`, plus admin-only actions on shared pages, plus **the digital
+    Library** — `/library/archive`, `/library/feed`, and `/read` (Phase 1:
+    tightened from member to admin-only — it's Brian's personal reading
+    stash, not a member-facing feature). The old flat `/archive`, `/feed`
+    URLs still 301-redirect to their nested equivalents, which now land on
+    an admin-gated page. The `/library` hub route (a landing page linking to
+    Archive/Feed/FP&A Buddy) was removed outright in the same phase — no
+    redirect, nothing points to it anymore. This tier also includes two
     routes that live on the public `/tools/*` prefix rather than under
     `/admin/*` — `GET/POST /tools/software/{slug}/edit` and
     `GET/POST /tools/communities/{slug}/edit` (Phase 2), the full edit forms

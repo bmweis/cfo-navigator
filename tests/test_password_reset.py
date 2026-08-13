@@ -110,7 +110,7 @@ def test_admin_nav_shows_task_dot_when_reset_pending(env):
     c = _client(env)
     c.post("/forgot-password", data={"username": "jane"})
     admin = _admin_client(env)
-    r = admin.get("/library")
+    r = admin.get("/")
     assert 'class="task-dot"' in r.text   # dot renders sitewide, not just on /admin
 
 

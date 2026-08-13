@@ -454,6 +454,45 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   rather than being painted over. `test_play_has_water_color_progression`
   covers it.
 
+- **Phase 1 — the digital Library (Archive + Feed) moved from member-visible to
+  admin-only, and the `/library` hub route was removed outright.** It's Brian's
+  personal reading stash, not a member-facing feature, and he doesn't want it
+  discoverable by anyone but him. `/library/archive` and `/library/feed` now gate
+  on `_is_authed` instead of `_is_member` — same URLs, no redirect changes,
+  just a stricter gate (a signed-in non-admin member is bounced to login exactly
+  like an anonymous visitor). The `/library` hub page itself (a landing page
+  linking to Archive/Feed/FP&A Buddy) had no reason to exist once Archive/Feed
+  went admin-only and FP&A Buddy stayed member-facing — removed with no
+  compatibility redirect, since nothing external pointed to it. Every internal
+  reference was repointed by the same rule: a still-member-facing page's
+  back-link (Ask, Past Questions) goes to `/`, never an admin-gated destination
+  a signed-in non-admin member would hit a login wall on; an admin-only
+  destination's back-link (Archive, Feed, Read) goes to `/admin/library`. The
+  homepage's "Digital Library" card was deleted outright, not repointed, and
+  "Library" came out of the public nav bar entirely — FP&A Buddy (still
+  member-gated) is reachable directly at `/library/ask` but has no nav entry
+  until a later phase's Toolbox restructure gives it one. **FP&A Buddy's own
+  access level is untouched** — `/library/ask` and `/library/past-questions`
+  remain member-gated, not admin, since it's meant for a small group of
+  signed-in friends, not just Brian. On the admin side, the Admin hub's
+  "Archive" section (the card + its own `/admin/library` management page,
+  covering the same 8 existing tools in the same order) was renamed
+  "Library" — deliberately **without** adding links to Archive/Feed above
+  those 8 tools yet: Archive and Feed are merging into a single Reader page
+  in Phase 5, and adding two separate links now just means deleting them
+  again almost immediately, so `/library/archive`/`/library/feed` stay
+  reachable by direct URL only until Phase 5 gives the merged page its own
+  permanent entry point here. The coral "Before opening the archive to paid
+  subscribers—read this" banner (zero dependents, confirmed by investigation)
+  and the permanent green "Subscriber access" status box were both deleted
+  from the Admin hub outright — the manual re-check trigger and the underlying
+  `authcheck.check_auth_cookies` logic are unchanged, just relocated to
+  `/admin/library` as a compact "Re-check subscriber access" control that
+  only expands into a colored detail panel when a cookie has actually gone
+  stale, rather than sitting there as a permanent status display. Phase 5
+  owns building a real conditional subscriber-access alert on the merged
+  Reader page — deliberately not built here, since Feed is being retired into
+  `/read` in that same phase and building it twice would be wasted work.
 - **Thought Leadership Admin CRUD, Phase 1 — the four `/thought-leadership`
   columns (Writing, Speaking & Events, Podcasts, Press) are now admin-managed,
   not hardcoded.** Phase 0 investigation found all four columns reading from
@@ -517,10 +556,14 @@ tables, no third-party dependency.
     `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp`, `/contact`,
     `/privacy`, `/login`, `/logout`, `/static/*`, `/health`. (The old flat `/growth-engine-ratio`,
     `/finops-ai-hackathon`, `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
-  - Private HTML pages → **redirect to `/login`** when signed out: `/library`,
-    `/library/archive`, `/library/feed`, `/library/ask`, `/library/past-questions`,
-    `/read`, `/admin/contacts`. (The old flat `/archive`, `/feed`, `/ask`, `/questions`
-    URLs 301-redirect to their nested equivalents above, unconditionally.)
+  - Private HTML pages → **redirect to `/login`** when signed out: `/library/ask`,
+    `/library/past-questions`, `/admin/contacts` (member-gated), and
+    `/library/archive`, `/library/feed`, `/read` (**admin-only**, Phase 1 — see the
+    Library access-level note in Key architecture decisions above). (The old flat
+    `/archive`, `/feed`, `/ask`, `/questions` URLs 301-redirect to their nested
+    equivalents above, unconditionally — the redirect itself carries no gated
+    content, so it fires even signed-out; where it lands is what's gated.) The
+    `/library` hub route was removed outright in Phase 1 — no redirect.
   - Private API → **401** when unauthenticated, but also accept a valid token (cookie OR
     `X-Save-Token`/`?token=`): `/ask`, `/post`, `/feed/save`, `/api/search`.
   - `/save` is **token-only** (`X-Save-Token` header or `?token=`) because the bookmarklet
