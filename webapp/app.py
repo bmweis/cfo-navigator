@@ -11585,6 +11585,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <button type="submit" form="comm-edit-form" class="btn">Save changes</button>
+  <button type="submit" form="comm-edit-form" name="save_action" value="continue" class="btn btn-ghost" style="margin-left:10px;">Save and continue</button>
   <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
 </div>
 </div>
@@ -11644,6 +11645,11 @@ async def admin_communities_edit_submit(request: Request, slug: str):
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/communities/{e.slug}/edit"))
     finally:
         lib.close()
+    # "Save and continue" mirrors the Software edit page's own handling
+    # above—stay on this same community's Edit page instead of the admin
+    # list. "Save changes" (no save_action, or any other value) is unchanged.
+    if form.get("save_action") == "continue":
+        return RedirectResponse(f"/tools/communities/{slug}/edit", status_code=303)
     return RedirectResponse("/admin/tools/communities", status_code=303)
 
 
@@ -12725,6 +12731,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
 <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
   <button type="submit" form="tool-edit-form" class="btn">Save changes</button>
+  <button type="submit" form="tool-edit-form" name="save_action" value="continue" class="btn btn-ghost" style="margin-left:10px;">Save and continue</button>
   <a href="/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
 </div>
 </div>
@@ -12873,6 +12880,13 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     finally:
         lib.close()
+    # "Save and continue" (Quick Fix: stay-on-page after save) redirects back
+    # to this same tool's Edit page—fresh data reflecting the save—instead of
+    # the admin list, so a multi-field editing pass in one sitting doesn't
+    # lose its place after every save. "Save changes" (no save_action, or any
+    # other value) keeps its original behavior unchanged.
+    if form.get("save_action") == "continue":
+        return RedirectResponse(f"/tools/software/{slug}/edit", status_code=303)
     redirect_url = "/tools/software"
     if name_dup:
         redirect_url += f"?warn={quote(_name_duplicate_warning(name_dup))}"
