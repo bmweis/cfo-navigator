@@ -10672,7 +10672,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
 
     def _filter_link(t: str, label: str) -> str:
         active = t == type
-        href = f"/admin/thought-leadership" + (f"?type={t}" if t else "")
+        href = "/admin/thought-leadership" + (f"?type={t}" if t else "")
         style = "font-weight:700;color:var(--navy);" if active else "color:var(--muted);"
         return f'<a href="{href}" style="font-size:13px;margin-right:14px;{style}">{label}</a>'
 
