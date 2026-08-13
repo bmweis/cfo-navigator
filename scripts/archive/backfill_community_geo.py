@@ -15,7 +15,7 @@ metros_json only, not local_markets, so it's kept for the historical record
 rather than as a script to run again.
 
 Usage:
-    python -m scripts.backfill_community_geo [--db library.db] [--dry-run]
+    python -m scripts.archive.backfill_community_geo [--db library.db] [--dry-run]
 """
 from __future__ import annotations
 

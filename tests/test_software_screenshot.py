@@ -84,7 +84,7 @@ def test_admin_edit_save_does_not_clobber_legacy_product_flag(env):
     must NOT silently reset it to 0. The Phase E submit route originally
     called update_tool_screenshot with a hardcoded screenshot_is_product=0
     on every save regardless of what was actually edited — which meant a
-    row could vanish from scripts/migrate_app_screenshot_from_product_flag.py's
+    row could vanish from scripts/archive/migrate_app_screenshot_from_product_flag.py's
     preview between two runs, with no --apply in between, purely because an
     admin resaved the page for an unrelated reason. Fixed by having the
     submit route call the new update_tool_screenshot_url (which never

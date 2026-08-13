@@ -41,8 +41,8 @@ created for that purpose. Running --apply against the real database is
 reserved for Brian, via `railway ssh`.
 
 Usage:
-    python -m scripts.rename_differentiation_columns --db library.db            # preview
-    python -m scripts.rename_differentiation_columns --db library.db --apply    # write for real
+    python -m scripts.archive.rename_differentiation_columns --db library.db            # preview
+    python -m scripts.archive.rename_differentiation_columns --db library.db --apply    # write for real
 """
 from __future__ import annotations
 

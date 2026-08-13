@@ -24,8 +24,8 @@ Management) are seeded with zero tools — expected, not a bug; nothing in
 the old vocabulary was ever about corporate travel or neobanking.
 
 Usage:
-    python -m scripts.migrate_software_tags --db library.db
-    python -m scripts.migrate_software_tags --db library.db --dry-run
+    python -m scripts.archive.migrate_software_tags --db library.db
+    python -m scripts.archive.migrate_software_tags --db library.db --dry-run
 """
 from __future__ import annotations
 

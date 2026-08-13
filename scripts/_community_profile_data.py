@@ -1,7 +1,7 @@
-"""Source data for scripts/import_community_profiles.py — Round 1 + Round 2
+"""Source data for scripts/archive/import_community_profiles.py — Round 1 + Round 2
 research profiles, reconciled with corrections-and-overrides.md. Not imported
 anywhere else; kept as a separate module purely so the import script itself
-stays readable (logic vs. data). See scripts/import_community_profiles.py for
+stays readable (logic vs. data). See scripts/archive/import_community_profiles.py for
 how this is used (community lookup, voice-rewrite, needs_review, cost ledger).
 
 Text below is the RAW researched copy — the import script runs the 11

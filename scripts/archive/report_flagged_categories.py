@@ -6,7 +6,7 @@ can review and delete by hand via /admin/tools/software — same workflow as
 the original cleanup. Makes NO writes of any kind.
 
 Usage:
-    python -m scripts.report_flagged_categories [--db library.db]
+    python -m scripts.archive.report_flagged_categories [--db library.db]
 
 Flagged categories (from the original cleanup criteria):
     BI/Analytics, Cloud/IT Spend, Legal and Contracting, Treasury/Cash Management

@@ -55,8 +55,8 @@ UPDATE (only touches the columns actually passed), not upsert_community_profile'
 full-row replace, so nothing else on any row is disturbed.
 
 Usage:
-    python -m scripts.patch_round4_community_profiles --db library.db
-    python -m scripts.patch_round4_community_profiles --db library.db --dry-run
+    python -m scripts.archive.patch_round4_community_profiles --db library.db
+    python -m scripts.archive.patch_round4_community_profiles --db library.db --dry-run
 
 No ANTHROPIC_API_KEY needed — this script makes no LLM calls.
 """

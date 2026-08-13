@@ -7,7 +7,7 @@ Bearer <BRANDFETCH_API_KEY>`) — NOT the free CDN Logo API
 investigation assumed. That CDN product is browser-embed-only and
 explicitly disallows programmatic/backend access per Brandfetch's own docs
 and ToS; a follow-up investigation confirmed our dry-run against it (see
-scripts/report_brandfetch_coverage.py) returned a uniform blocked-request
+scripts/archive/report_brandfetch_coverage.py) returned a uniform blocked-request
 response for all 216 records, not real "no logo" misses. The Brand API is
 the correct, sanctioned product for this — a real JSON response with logo
 asset URLs, meant for exactly this kind of one-time server-side fetch — but
@@ -65,20 +65,48 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sqlite3
 import sys
 import time
+from urllib.parse import urlparse
 
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from linklib.db import Library, resolve_db_path
-from scripts.report_brandfetch_coverage import extract_domain
 
 BRAND_API_URL = "https://api.brandfetch.io/v2/brands/domain/{domain}"
 REQUEST_TIMEOUT = 15  # seconds
 DEFAULT_LIMIT = 90  # safety margin below the hard 100/month free-tier cap
 DEFAULT_DELAY = 0.25  # seconds between Brand API calls — sanctioned use, but no reason to hammer it
+
+_HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}\.)+[a-z]{2,}$", re.IGNORECASE)
+
+
+def extract_domain(url: str) -> str | None:
+    """Bare registrable-ish domain from a stored tool/community URL, e.g.
+    "https://www.brex.com/pricing" -> "brex.com". Returns None for a URL
+    too malformed to parse at all. Formerly imported from
+    scripts.report_brandfetch_coverage — inlined here (Phase N archive
+    cleanup) so this recurring script doesn't depend on a one-time,
+    archived investigation script; report_brandfetch_coverage.py (now in
+    scripts/archive/) keeps its own copy, frozen as-is."""
+    url = (url or "").strip()
+    if not url:
+        return None
+    if "://" not in url:
+        url = "https://" + url
+    try:
+        host = urlparse(url).netloc
+    except ValueError:
+        return None
+    host = host.split("@")[-1].split(":")[0]  # strip userinfo/port if present
+    if host.startswith("www."):
+        host = host[4:]
+    if not host or not _HOSTNAME_RE.match(host):
+        return None
+    return host
 
 # Subdirectory per record type, to avoid a slug collision between a tool and
 # a community silently overwriting each other's logo file (see module docstring).

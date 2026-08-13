@@ -16,7 +16,7 @@ verification" badge rather than failing silently. Safe to re-run: a row
 already on one of the fixed options (or NEEDS_VERIFICATION) is skipped.
 
 Usage:
-    python -m scripts.backfill_community_access_format [--db library.db] [--dry-run]
+    python -m scripts.archive.backfill_community_access_format [--db library.db] [--dry-run]
 """
 from __future__ import annotations
 

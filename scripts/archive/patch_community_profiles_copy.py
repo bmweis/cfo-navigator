@@ -4,7 +4,7 @@ from PR #153 (em dashes, "braintrust"/generic-word cleanup) — WITHOUT
 re-running the bulk import, so it never re-triggers voice-rewrite or spends
 API budget a second time.
 
-Why this exists: scripts/import_community_profiles.py voice-rewrites the 11
+Why this exists: scripts/archive/import_community_profiles.py voice-rewrites the 11
 narrative fields via a live Claude call, so a row already imported against
 production does NOT contain the raw text in scripts/_community_profile_data.py
 — it contains Claude's rewritten version of whatever that file said at import
@@ -38,8 +38,8 @@ matched fragment AND has no leftover spaced em dash, it's reported as
 No ANTHROPIC_API_KEY needed — this never calls Claude. Costs nothing.
 
 Usage:
-    python -m scripts.patch_community_profiles_copy --db library.db            # dry run (default)
-    python -m scripts.patch_community_profiles_copy --db library.db --apply    # write changes
+    python -m scripts.archive.patch_community_profiles_copy --db library.db            # dry run (default)
+    python -m scripts.archive.patch_community_profiles_copy --db library.db --apply    # write changes
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib.db import Library, resolve_db_path
-from scripts._community_profile_copy_fixes import FULL_FIXES, FRAGMENT_FIXES
+from scripts.archive._community_profile_copy_fixes import FULL_FIXES, FRAGMENT_FIXES
 
 
 def _apply_fallback(text: str) -> tuple[str, bool]:

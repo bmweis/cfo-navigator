@@ -20,8 +20,8 @@ full-row replace, so nothing else on either row is disturbed.
 
 Usage:
     export ANTHROPIC_API_KEY=...
-    python -m scripts.patch_round3_community_profiles --db library.db
-    python -m scripts.patch_round3_community_profiles --db library.db --dry-run
+    python -m scripts.archive.patch_round3_community_profiles --db library.db
+    python -m scripts.archive.patch_round3_community_profiles --db library.db --dry-run
 """
 from __future__ import annotations
 

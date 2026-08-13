@@ -3,7 +3,7 @@
 investigation: lists every tool AND community currently carrying a category
 string that doesn't exist in the active `tool_categories` /
 `community_categories` vocabulary anymore. Makes NO writes of any kind —
-same safe-by-default shape as scripts/report_flagged_categories.py, no
+same safe-by-default shape as scripts/archive/report_flagged_categories.py, no
 --apply flag because there's nothing to apply.
 
 Why this exists: the prior investigation confirmed delete_tool_category /

@@ -21,8 +21,8 @@ rows this touched stays visible/reconstructable afterward purely by
 re-querying for `screenshot_is_product=1`.
 
 Usage:
-    python -m scripts.migrate_app_screenshot_from_product_flag --db library.db            # preview
-    python -m scripts.migrate_app_screenshot_from_product_flag --db library.db --apply     # write for real
+    python -m scripts.archive.migrate_app_screenshot_from_product_flag --db library.db            # preview
+    python -m scripts.archive.migrate_app_screenshot_from_product_flag --db library.db --apply     # write for real
 """
 from __future__ import annotations
 

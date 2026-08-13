@@ -66,6 +66,14 @@ scripts/           # CLI entry points
   ask.py              # FP&A Buddy from the terminal
   voice_review.py     # check a file/stdin against the voice standards
   mcp_server.py       # stdio MCP server wrapping GET /api/search for Claude Desktop/Code
+  archive/            # (Phase N) one-time migrations and closed-investigation reports
+                      #   whose job is done — kept for history via `git mv`, never run
+                      #   again in the ordinary course
+
+# The full recurring/actively-useful script inventory (purpose, cadence, required env vars,
+# exact invocation) lives at /admin/system/scripts, not here — that admin page is the live
+# reference; this tree only sketches scripts/'s shape. See "Documentation" below for the
+# standing rule that keeps that page in sync with scripts/.
 
 webapp/
   app.py           # FastAPI, ~110 routes, all HTML/CSS/JS inline: public site
@@ -190,7 +198,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   DATA write, so — per the standing "human review before a production write" rule below —
   it is deliberately **not** wired into an automatic boot hook the way schema/column
   backfills are; it only runs when Brian invokes
-  `scripts/migrate_app_screenshot_from_product_flag.py` by hand (preview by default,
+  `scripts/archive/migrate_app_screenshot_from_product_flag.py` by hand (preview by default,
   `--apply` to write for real, write-then-read-back verified — same convention as
   `scripts/backfill_logos.py`), after reviewing the affected-row list it prints. Desktop
   stacks both screenshots in one card when the app slot is populated; mobile shows one at
@@ -388,9 +396,9 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   naming inconsistent with each other for no benefit. Kept as-is: only the
   Software edit page's on-screen copy changed ("Competitors" heading ->
   "Core competition" subheading); the schema, every function name, and every
-  route path are untouched. `scripts/rename_differentiation_columns.py`
+  route path are untouched. `scripts/archive/rename_differentiation_columns.py`
   (dry-run/apply/write-then-read-back, same convention as
-  `scripts/backfill_logos.py`/`scripts/migrate_app_screenshot_from_product_flag.py`)
+  `scripts/backfill_logos.py`/`scripts/archive/migrate_app_screenshot_from_product_flag.py`)
   exists alongside the automatic migration for manual pre-migration of a
   standalone DB copy via `railway ssh`, not as a substitute for it — see
   that script's docstring for the distinction. A stray `repeat(4,1fr)` CSS
@@ -572,6 +580,14 @@ pip install mcp
 python -m scripts.mcp_server
 ```
 
+The commands above cover the core scripts every fresh checkout needs. For everything
+else in `scripts/` — the recurring backfills, seeders, and diagnostics run on their own
+cadence (`backfill_logos.py`, `capture_tool_screenshots.py`, `seed_tools.py`, and so on)
+— see **`/admin/system/scripts`** (Phase N), the live, hand-maintained reference for
+purpose, cadence, required env vars, and exact invocation. One-time migrations and
+closed-investigation reports that already did their job live in `scripts/archive/`
+instead, off that page — kept for git history, not meant to run again.
+
 ## What's built vs. what's next
 
 **Built and working:**
@@ -649,7 +665,7 @@ other memory of repo state.
 flows, design decisions, and their Mermaid diagrams. `RUNBOOK.md` (repo root)
 holds the operational procedures — DB restore from a Drive snapshot, save-token
 rotation, Railway-outage triage — and should be updated in the same PR whenever
-a change alters one of those procedures. Two standing rules keep the
+a change alters one of those procedures. Several standing rules keep the
 docs honest, **in the same PR as the change** (never a follow-up):
 
 1. **Any PR that changes the database schema** (a table or column in
@@ -690,6 +706,18 @@ docs honest, **in the same PR as the change** (never a follow-up):
    the same discipline as rules 1-3 above, so a forgotten prompt or a
    drifted tracking description doesn't become the next thing this rule set
    has to fix retroactively.
+5. **The scripts registry** — `/admin/system/scripts` (`_SCRIPT_REGISTRY` in
+   `webapp/app.py`, Phase N) is a static, hand-maintained inventory of every
+   still-relevant script in `scripts/`: purpose, cadence, required env vars, and
+   exact invocation. **Any PR that adds a new script to `scripts/`, or changes
+   what an existing recurring script does** (its purpose, required env vars, or
+   invocation) **must update this registry in the same PR** — same discipline as
+   rules 1-4 above. **Any PR that makes a recurring script's job "done"** (a
+   one-time migration completes, a diagnostic's question gets answered for
+   good) **should `git mv` it into `scripts/archive/` and remove its entry from
+   the registry, in that same PR** — not as a follow-up cleanup. Scripts already
+   in `scripts/archive/` are deliberately excluded from the registry; they're
+   kept only for git history, never meant to run again in the ordinary course.
 
 ## Voice — em dash policy
 
