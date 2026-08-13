@@ -17213,32 +17213,12 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
             f'</span></a>'
         )
 
-    def _reader_link(href, title, desc):
-        return (
-            f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
-            f'border-radius:14px;padding:16px 20px;text-decoration:none;">'
-            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-            f'<span style="font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
-            f'<p style="margin:5px 0 0;font-size:13.5px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
-        )
-
-    reader_links = "".join([
-        _reader_link("/library/archive", "Browse Archive", "Search and browse the saved-article archive."),
-        _reader_link("/library/feed", "View Feed", "The live RSS reader over your subscription list."),
-    ])
-
     cards = "".join(_step(i + 1, href, title, desc, _badge_for_href(href, task_counts.get(href, 0)))
                     for i, (href, title, desc) in enumerate(_LIBRARY_TOOLS))
     body = f"""<div class="page page-admin">
-<style>
-.lib-reader-links{{display:grid;grid-template-columns:1fr;gap:12px;margin:0 0 22px;}}
-@media(min-width:640px){{.lib-reader-links{{grid-template-columns:1fr 1fr;}}}}
-</style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Library</h1>
 {auth_banner}
-<div class="lib-reader-links">{reader_links}</div>
 <p style="color:var(--muted);margin:4px 0 6px;">Full management of the digital archive. The eight tools below cover backing it up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from.</p>
 <p style="color:var(--muted);margin:0 0 18px;">For a first-time cleanup, work top to bottom&mdash;each step sets up the next. Once set up, jump to any tool directly anytime.</p>
 {_content_flow_diagram()}
