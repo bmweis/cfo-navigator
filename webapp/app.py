@@ -10573,6 +10573,42 @@ _TL_TYPES = [
 _TL_TYPE_LABELS = dict(_TL_TYPES)
 
 
+def _sort_key_from_date_label(date_label: str) -> str:
+    """Derive a YYYY-MM sort_key from the free-text date_label admins type
+    (e.g. 'Jun 2026' or 'June 2026'). Pure function of date_label — safe to
+    recompute on every save. Blank or unparseable input returns '' rather
+    than blocking the save: an entry with no resolvable date floats to the
+    top of its section, the same convention already used intentionally for
+    the standing "Cash Flow Show — Full Episode Feed" link. See
+    _tl_parse_warning below for the admin-facing note when that happens
+    for a non-blank date_label (i.e. likely a typo, not deliberate)."""
+    s = date_label.strip()
+    if not s:
+        return ""
+    for fmt in ("%b %Y", "%B %Y"):  # "Jun 2026", "June 2026"
+        try:
+            dt = datetime.strptime(s, fmt)
+            return f"{dt.year:04d}-{dt.month:02d}"
+        except ValueError:
+            continue
+    return ""
+
+
+def _tl_parse_warning(item: dict) -> str:
+    """Inline note on the admin form when a non-blank date_label didn't
+    parse into a sort_key — distinguishes an accidental typo from the
+    deliberate blank-date_label convention (which needs no warning)."""
+    date_label = (item.get("date_label") or "").strip()
+    sort_key = item.get("sort_key") or ""
+    if date_label and not sort_key:
+        return (
+            '<p style="margin:-8px 0 0;padding:8px 12px;background:#fff3e0;border:1px solid #ffcc80;'
+            'border-radius:8px;font-size:12px;color:#8a5a00;">'
+            "Date didn&rsquo;t parse as Mon YYYY — this entry will float to the top of its section.</p>"
+        )
+    return ""
+
+
 def _tl_form_fields(item: dict | None = None) -> str:
     item = item or {}
     type_opts = "".join(
@@ -10609,27 +10645,22 @@ def _tl_form_fields(item: dict | None = None) -> str:
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
       <input name="date_label" maxlength="50" value="{_esc(item.get('date_label', ''))}"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="e.g. Jun 2026">
+        placeholder="Mon YYYY, e.g. Jun 2026 — leave blank for a standing, undated link">
     </div>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sort key</label>
-      <input name="sort_key" maxlength="7" value="{_esc(item.get('sort_key', ''))}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="YYYY-MM — controls order, newest first">
-    </div>
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (rarely needed)</label>
-      <input name="display_order" type="number" value="{item.get('display_order', '') if item else ''}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="Leave blank — auto-assigned">
-    </div>
+  {_tl_parse_warning(item)}
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (tiebreaker)</label>
+    <input name="display_order" type="number" value="{item.get('display_order', '') if item else ''}"
+      style="width:180px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="Leave blank — auto-assigned">
   </div>
   <p style="margin:-8px 0 0;font-size:12px;color:var(--muted);">
-    Sort key decides order (newest first) — you don&rsquo;t need to touch Display order unless two entries
-    share the same sort key and you want to control which shows first. A blank sort key floats an entry to
-    the top of its column, for a standing link with no single date (e.g. a full episode feed).
+    Date label decides order (newest first) — it's parsed into the render order automatically, so you
+    don&rsquo;t need to think about sort order when filling it in. Leave Date label blank for a standing
+    link with no single date (e.g. a full episode feed); it floats to the top of its column. Display order
+    is a rare manual override — only needed if two entries share the same month and you want to control
+    which one shows first; leave it blank otherwise and the next value is assigned automatically.
   </p>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description</label>
@@ -10658,11 +10689,16 @@ def admin_thought_leadership(request: Request, type: str = ""):
     def _row(it: dict) -> str:
         url_cell = (f'<a href="{_esc(it["url"])}" target="_blank" rel="noopener" style="word-break:break-all;">'
                     f'{_esc(it["url"][:50])}{"…" if len(it["url"]) > 50 else ""}</a>') if it["url"] else "—"
+        # A non-blank date_label with no sort_key means it didn't parse as
+        # Mon YYYY — flag it here too, not just on the edit form, since this
+        # is the page an admin scans to spot something off at a glance.
+        date_warning = (' <span title="Didn&rsquo;t parse — floats to top of its section" '
+                         'style="color:#b8860b;">&#9888;</span>') if it['date_label'] and not it['sort_key'] else ''
         return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(_TL_TYPE_LABELS.get(it['type'], it['type']))}</td>
   <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(it['venue']) or '—'}</td>
-  <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(it['date_label']) or '—'}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(it['date_label']) or '—'}{date_warning}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{url_cell}</td>
   <td style="padding:10px 12px;white-space:nowrap;">
     <a href="/admin/thought-leadership/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
@@ -10750,13 +10786,16 @@ def _tl_form_values(form) -> dict:
             display_order = int(display_order_raw)
         except ValueError:
             raise HTTPException(status_code=400, detail="Display order must be a number.")
+    date_label = (form.get("date_label") or "").strip()
     return {
         "type": tl_type,
         "title": title,
         "url": (form.get("url") or "").strip(),
         "venue": (form.get("venue") or "").strip(),
-        "date_label": (form.get("date_label") or "").strip(),
-        "sort_key": (form.get("sort_key") or "").strip(),
+        "date_label": date_label,
+        # sort_key is no longer a form field — it's derived from date_label
+        # on every save, not hand-typed. See _sort_key_from_date_label.
+        "sort_key": _sort_key_from_date_label(date_label),
         "description": (form.get("description") or "").strip(),
         "needs_synopsis": bool(form.get("needs_synopsis")),
         "display_order": display_order,
