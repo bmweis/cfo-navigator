@@ -130,6 +130,7 @@ Every table in the file, grouped by feature area:
 | Chat Matchmaker | `matchmaker_questions` |
 | Accounts | `users`, `password_reset_requests` |
 | CFO Toolbox | `tools`, `tool_categories`, `tool_audit_log`, `benchmarks`, `tool_leads`, `communities`, `community_categories`, `community_audit_log`, `community_profiles`, `community_gap_submissions`, `community_profile_views`, `field_reviews`, `narrative_review_log` |
+| Thought Leadership | `thought_leadership` |
 | Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log`, `backup_log` |
 | "Sail, Don't Row" (`/play`) | `game_rank_settings`, `game_runs` |
 
@@ -1101,6 +1102,18 @@ back if they set any, "Ranked using Brian's default priorities" otherwise —
 by design, no separate methodology explanation beyond stating the weights in
 effect.
 
+### Thought Leadership
+
+| Table | Purpose | Columns that carry meaning |
+|---|---|---|
+| `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident) |
+
+One Speaking & Events entry (Abacum AI Summit) has photos — a field this
+table doesn't carry, since it's the only entry that ever used it. It stays
+hardcoded in `webapp/app.py`'s `_TL_PHOTO_ENTRY` instead of migrating, merged
+into the `speaking` column's items at render time so it doesn't disappear
+from the public page. Not editable via the admin CRUD.
+
 ### Site operations
 
 | Table | Purpose | Columns that carry meaning |
@@ -1253,8 +1266,8 @@ erDiagram
 ```
 
 (Diagram shows key columns and conventional relationships only; `settings`,
-`contacts`, `email_failures`, `benchmarks`, `dedupe_decisions`, `read_later`,
-`tool_categories`, `community_categories`, `articles_vec`, and the audit
+`contacts`, `email_failures`, `benchmarks`, `thought_leadership`, `dedupe_decisions`,
+`read_later`, `tool_categories`, `community_categories`, `articles_vec`, and the audit
 tables carry no columns beyond what the tables above describe.)
 
 ## 3. Key request flows
