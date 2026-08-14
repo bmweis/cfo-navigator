@@ -608,6 +608,39 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   per-type auto-assign (`MAX+1`) — a blank field now correctly parses to
   `None` and flows through to that auto-assign path.
 
+- **Library/Toolbox restructure, Phase 3 — CFO Toolbox landing page and the homepage
+  both move to a 4-tile 2x2 grid, plus a 5th admin-only tile.** `/tools`'s old 3-card
+  `repeat(3,1fr)` list (Software, Benchmarking, Communities) is replaced by a 2x2 grid
+  of Software/Benchmarking/Communities/FP&A Buddy tiles, sourced from one shared
+  `_TOOLBOX_TILES` tuple in `webapp/app.py` — the FP&A Buddy tile is the first link
+  into `/tools/fpa-buddy` from the Toolbox itself since it moved there in Phase 2. The
+  same tuple drives a new, more compact "Everything in the toolbox" teaser section on
+  the homepage (mini icon + heading + one-liner, no per-tile links — one "See the full
+  toolbox" link out), which replaces the homepage's old standalone "CFO Toolbox" card
+  in the top card row outright (redundant with the new teaser directly below it); with
+  only the Thought Leadership card left in that row, `.home-cards` dropped its 2-column
+  breakpoint and caps at a single-card width instead of stretching edge-to-edge. FP&A
+  Buddy's tile reuses the existing `_ICON_BRAIN` glyph (already drawn for the
+  homepage's Thought Leadership card) rather than drawing a new one — the build brief
+  assumed no brain icon existed yet, but this one already matches the flat, two-tone,
+  stroke-width-2 look the design spec called for, so reusing it was a straight
+  simplification, not a spec deviation. A 5th tile — seafoam-bordered (vs. the other
+  four's navy-wash border), linking to `/admin/library`, using a newly-drawn
+  `_ICON_BOOK` glyph (nothing existing fit "Library") — appears only on `/tools`, and
+  only when `_is_authed(request)`: it's built conditionally in Python, not hidden by
+  CSS, so it's absent from the response HTML entirely for a signed-out or non-admin
+  visitor. The homepage teaser never includes it under any auth state — it's built from
+  the public-only `_TOOLBOX_TILES` tuple, which the 5th tile was deliberately kept out
+  of. **Design-file caveat:** the build brief pointed at a Claude Design project
+  (`Toolbox Illustration Concepts.dc.html`, option 2a) as the source of truth for exact
+  markup/spacing over the written spec, but the design MCP requires an interactive
+  `/design-login` unavailable in this headless session, and a direct fetch of the
+  claude.ai/design URL 403'd — the design file itself was never actually checked
+  against. Implemented straight off the written spec instead (which was pixel-specific:
+  exact hex colors, badge/icon sizes, padding), flagged here rather than silently
+  assumed equivalent — worth a visual diff against the design file next time someone
+  can reach it.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 

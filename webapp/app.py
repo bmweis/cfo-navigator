@@ -1586,15 +1586,29 @@ def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
     )
 
 
+def _toolbox_icon_badge(index: int, svg_path: str, *, size: int = 44, icon_size: int = 22,
+                         margin_bottom: int = 14) -> str:
+    """Icon badge for the CFO Toolbox 2x2 tile grid (Phase 3, "Toolbox Illustration
+    Concepts" design, option 2a) — same seafoam/navy/coral wash cycle as _card_icon(),
+    but sized (44x44 badge / 22x22 icon, stroke-width 2) and rounded (12px) per that
+    spec rather than _card_icon()'s generic card-row proportions. `size`/`icon_size`
+    are overridden smaller for the homepage teaser's compact mini-tiles."""
+    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    return (
+        f'<div style="width:{size}px;height:{size}px;border-radius:12px;background:{bg};'
+        f'margin-bottom:{margin_bottom}px;display:flex;align-items:center;justify-content:center;'
+        f'flex-shrink:0;">'
+        f'<svg viewBox="0 0 24 24" width="{icon_size}" height="{icon_size}" fill="none" stroke="{stroke}" '
+        f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{svg_path}</svg></div>'
+    )
+
+
 # 2px-stroke, 24x24-viewBox icon paths for _card_icon() — reused across every
 # card-row grid sitewide (homepage, CFO Toolbox, Library, Thought Leadership).
 _ICON_BRAIN = ('<path d="M9.5 4.5c-1.7 0-3 1.3-3.2 3C5 8 4 9.3 4 10.8c0 .9.4 1.7 1 2.3-.6.6-1 1.4-1 2.3 '
                '0 1.5 1.1 2.8 2.5 3.1.2 1.6 1.6 2.8 3.3 2.8.5 0 1-.1 1.4-.3V5.7c-.4-.7-1-1.2-1.7-1.2z"/>'
                '<path d="M14.5 4.5c1.7 0 3 1.3 3.2 3C18.9 8 20 9.3 20 10.8c0 .9-.4 1.7-1 2.3.6.6 1 1.4 1 2.3 '
                '0 1.5-1.1 2.8-2.5 3.1-.2 1.6-1.6 2.8-3.3 2.8-.5 0-1-.1-1.4-.3V5.7c.4-.7 1-1.2 1.7-1.2z"/>')
-_ICON_TOOLBOX = ('<rect x="3" y="9" width="18" height="10" rx="1.5"/>'
-                 '<path d="M8 9V6.5A2.5 2.5 0 0 1 10.5 4h3A2.5 2.5 0 0 1 16 6.5V9"/>'
-                 '<line x1="3" y1="13.5" x2="21" y2="13.5"/>')
 _ICON_WRENCH = ('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94'
                 'l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>')
 _ICON_CHART = '<path d="M4 20V14M12 20V4M20 20v-10"/>'
@@ -1611,6 +1625,12 @@ _ICON_NEWSPAPER = ('<path d="M3 6h13v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
                     '<line x1="6" y1="9.5" x2="12" y2="9.5"/><line x1="6" y1="12.5" x2="12" y2="12.5"/>'
                     '<line x1="6" y1="15.5" x2="10" y2="15.5"/>')
 _TL_COLUMN_ICONS = (_ICON_PENCIL, _ICON_MIC, _ICON_HEADPHONES, _ICON_NEWSPAPER)
+# Open-book glyph for the admin-only 5th tile on the /tools 2x2 grid (Phase 3)
+# — no existing icon fit "Library" (admin's Archive/Feed reading stash), so
+# this is drawn fresh in the same flat, two-tone line-icon style as the rest
+# of the set, same as _ICON_BRAIN was for FP&A Buddy.
+_ICON_BOOK = ('<path d="M12 6.2c-1.8-1.3-4-2-6-2v13c2 0 4.2.7 6 2 1.8-1.3 4-2 6-2v-13c-2 0-4.2.7-6 2z"/>'
+              '<path d="M12 6.2v13"/>')
 
 
 # ---------------------------------------------------------------------------
@@ -1942,19 +1962,20 @@ def homepage(request: Request):
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    cards = "".join([
-        _rcard("/thought-leadership", "Thought Leadership",
-               "Frameworks and playbooks worth keeping: the Growth Engine Ratio for pressure-testing GTM "
-               "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
-               "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press.",
-               icon_html=_card_icon(0, _ICON_BRAIN)),
-        _rcard("/tools", "CFO Toolbox",
-               "Software, benchmarking, and communities for the Office of the CFO&mdash;the vendors "
-               "high-growth finance teams actually use, the benchmarking sources I rely on, and the peer "
-               "groups worth joining.",
-               icon_html=_card_icon(1, _ICON_TOOLBOX),
-               sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=14)),
-    ])
+    # A single top-row card now (CFO Toolbox moved to its own teaser section
+    # below — see _TOOLBOX_TILES / _toolbox_mini_tile) — no longer needs to
+    # reserve space for a 2-column grid, so it's capped to a single-card
+    # width rather than stretching edge-to-edge on wide viewports.
+    cards = _rcard("/thought-leadership", "Thought Leadership",
+                    "Frameworks and playbooks worth keeping: the Growth Engine Ratio for pressure-testing GTM "
+                    "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
+                    "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press.",
+                    icon_html=_card_icon(0, _ICON_BRAIN))
+
+    toolbox_mini_tiles = "".join(
+        _toolbox_mini_tile(i, title, one_liner, icon)
+        for i, (_href, title, icon, _desc, one_liner) in enumerate(_TOOLBOX_TILES)
+    )
 
     body = f"""<div class="page page-full">
 <style>
@@ -1963,7 +1984,10 @@ def homepage(request: Request):
 .home-hero-side{{display:flex;flex-direction:column;gap:32px;align-items:center;}}
 .home-hero-photo{{position:relative;z-index:2;flex-shrink:0;}}
 .home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
-.home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;}}
+.home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;max-width:460px;}}
+.home-toolbox-teaser{{margin:32px 0 8px;}}
+.home-toolbox-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:16px;}}
+.home-toolbox-grid{{display:grid;grid-template-columns:1fr;gap:16px;}}
 @media(min-width:900px){{
   .home-hero{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start;}}
   .home-hero-copy{{grid-column:1 / 3;}}
@@ -1971,8 +1995,8 @@ def homepage(request: Request):
   .home-hero-photo{{margin-bottom:-74px;}}
   .home-status{{padding-top:44px;}}
 }}
-@media(min-width:760px){{
-  .home-cards{{grid-template-columns:repeat(2,1fr);}}
+@media(min-width:560px){{
+  .home-toolbox-grid{{grid-template-columns:1fr 1fr;}}
 }}
 </style>
 <div class="home-hero">
@@ -1995,6 +2019,14 @@ def homepage(request: Request):
 </div>
 
 <div class="home-cards">{cards}</div>
+
+<div class="home-toolbox-teaser">
+  <div style="font:600 10.5px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">TOOLBOX</div>
+  <h2 style="margin:0 0 6px;font-family:var(--font-head);font-weight:600;font-size:21px;">Everything in the toolbox</h2>
+  <p style="margin:0 0 16px;font-size:14px;color:var(--muted);">Software, benchmarks, communities, and an AI research buddy.</p>
+  <div class="home-toolbox-panel"><div class="home-toolbox-grid">{toolbox_mini_tiles}</div></div>
+  <a href="/tools" style="display:inline-block;margin-top:14px;font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--navy);text-decoration:none;">See the full toolbox &rarr;</a>
+</div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
 
@@ -5615,46 +5647,92 @@ async def library_submit(request: Request):
     # Always confirm — never reveal whether the URL was already in the archive.
     return RedirectResponse("/library/submit?submitted=1", status_code=303)
 
+# The 4-tile 2x2 CFO Toolbox grid (Phase 3, "Toolbox Illustration Concepts"
+# design, option 2a) — shared between the /tools landing page's full-size
+# tiles and the homepage's compact teaser mini-tiles. (href, title, icon,
+# landing-size body copy, teaser one-liner). FP&A Buddy reuses _ICON_BRAIN
+# (already drawn for the homepage's Thought Leadership card) rather than a
+# new glyph — it already matches the "flat, two-tone line icon" look the
+# design spec calls for.
+_TOOLBOX_TILES = (
+    ("/tools/software", "Software", _ICON_WRENCH,
+     "A searchable, filterable directory of the software high-growth finance teams actually "
+     "use&mdash;try the Software Matchmaker if you&rsquo;re not sure where to start, plus a Warm "
+     "Intro button for the vendors I know well.",
+     "The software high-growth finance teams actually use."),
+    ("/tools/benchmarks", "Benchmarking", _ICON_CHART,
+     "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks "
+     "help and where they mislead.",
+     "The benchmarking sources I actually rely on."),
+    ("/tools/communities", "Communities", _ICON_PEOPLE,
+     "CFO and finance communities worth joining: peer groups, associations, and Slack "
+     "channels&mdash;searchable and filterable, with a Community Matchmaker if you&rsquo;re unsure "
+     "which one fits.",
+     "CFO and finance communities worth joining."),
+    ("/tools/fpa-buddy", "FP&amp;A Buddy", _ICON_BRAIN,
+     "An AI research assistant trained on the frameworks and metrics I actually use&mdash;ask it a "
+     "real FP&amp;A question, get a sourced answer instead of a half-day of Googling.",
+     "Ask a real FP&amp;A question, get a sourced answer."),
+)
+
+
+def _toolbox_tile(index: int, href: str, title: str, desc: str, icon_svg: str, *,
+                   border: str = "1.5px solid rgba(0,41,117,.15)") -> str:
+    """Landing-size CFO Toolbox tile (44x44 icon badge, no arrow — a grid
+    tile, not the sitewide card-row list-item pattern _card_icon()/_hcard()
+    render elsewhere)."""
+    return (
+        f'<a href="{href}" style="display:block;background:#fff;border:{border};'
+        f'border-radius:14px;padding:20px;text-decoration:none;">'
+        f'{_toolbox_icon_badge(index, icon_svg)}'
+        f'<div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);'
+        f'letter-spacing:-0.01em;">{title}</div>'
+        f'<p style="margin:6px 0 0;font-size:13.5px;line-height:1.5;color:rgba(20,23,28,.7);">{desc}</p></a>'
+    )
+
+
+def _toolbox_mini_tile(index: int, title: str, one_liner: str, icon_svg: str) -> str:
+    """Compact homepage-teaser mini-tile: smaller icon badge, no link (the
+    whole panel links out once via the teaser's own "See the full toolbox"
+    line, not per-tile)."""
+    return (
+        f'<div>{_toolbox_icon_badge(index, icon_svg, size=32, icon_size=16, margin_bottom=8)}'
+        f'<div style="font-family:var(--font-head);font-weight:600;font-size:13px;color:var(--navy);">{title}</div>'
+        f'<p style="margin:4px 0 0;font-size:12px;line-height:1.5;color:rgba(20,23,28,.65);">{one_liner}</p></div>'
+    )
+
+
 @app.get("/tools", response_class=HTMLResponse)
 def tools_landing(request: Request):
-    """CFO Toolbox landing page: three pillars, each its own subpage."""
-    def _hcard(href, title, desc, icon_html):
-        return (
-            f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
-            f'border-radius:14px;padding:22px 24px;text-decoration:none;">'
-            f'{icon_html}'
-            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-            f'<span style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
-            f'<p style="margin:7px 0 0;font-size:14.5px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
-        )
-
-    cards = "".join([
-        _hcard("/tools/software", "Software",
-               "A curated directory of the software high-growth finance teams actually use&mdash;searchable, "
-               "filterable, with a Warm Intro button for the vendors I know well.",
-               _card_icon(0, _ICON_WRENCH)),
-        _hcard("/tools/benchmarks", "Benchmarking",
-               "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks "
-               "help and where they mislead.",
-               _card_icon(1, _ICON_CHART)),
-        _hcard("/tools/communities", "Communities",
-               "CFO and finance communities worth joining: peer groups, associations, and Slack channels, "
-               "searchable and filterable.",
-               _card_icon(2, _ICON_PEOPLE)),
-    ])
+    """CFO Toolbox landing page: 2x2 tile grid (Phase 3) — Software, Benchmarking,
+    Communities, FP&A Buddy. Admins additionally see a 5th, seafoam-bordered tile
+    linking to /admin/library — rendered only when _is_authed(request), so it's
+    entirely absent from the HTML (not just CSS-hidden) for anyone else. That 5th
+    tile is landing-only; the homepage teaser (see homepage()) never shows it,
+    for any visitor, so it looks identical regardless of auth state."""
+    tiles = "".join(
+        _toolbox_tile(i, href, title, desc, icon)
+        for i, (href, title, icon, desc, _one_liner) in enumerate(_TOOLBOX_TILES)
+    )
+    if _is_authed(request):
+        tiles += _toolbox_tile(
+            len(_TOOLBOX_TILES), "/admin/library", "Library",
+            "Your private reading stash&mdash;Archive and Feed, admin only.",
+            _ICON_BOOK, border="1.5px solid var(--seafoam)")
 
     body = f"""<div class="page page-grid">
 <style>
-.toolbox-cards{{display:grid;grid-template-columns:1fr;gap:14px;}}
-@media(min-width:760px){{.toolbox-cards{{grid-template-columns:repeat(3,1fr);}}}}
+.toolbox-grid{{display:grid;grid-template-columns:1fr;gap:16px;}}
+@media(min-width:560px){{.toolbox-grid{{grid-template-columns:1fr 1fr;}}}}
 </style>
 <div style="position:relative;display:inline-block;">
   <h1 style="margin:0 0 6px;">CFO Toolbox</h1>
   {_sticker("🚧 building", rotate=-4, top="-14px", right="-52px", size=14)}
 </div>
-<p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO&mdash;still being built out.</p>
-<div class="toolbox-cards">{cards}</div>
+<p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO.</p>
+<div style="background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:28px;">
+  <div class="toolbox-grid">{tiles}</div>
+</div>
 </div>"""
     return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
