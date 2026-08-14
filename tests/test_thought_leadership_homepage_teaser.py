@@ -92,10 +92,16 @@ def test_toolbox_panel_present_and_matches_design(env):
     assert ">CFO Toolbox<" in html
     assert "Everything in the toolbox" in html
     assert "See the full toolbox" in html
-    # Regression check: the sticker was missing from the design file export
-    # itself (an omission, confirmed by Brian — not an intentional removal),
+    # Regression check: the sticker was missing from an earlier design file
+    # export (an omission, confirmed by Brian — not an intentional removal),
     # so it stays on the rebuilt panel same as every earlier round.
     assert "🚧 building" in html
+    # A later re-export of the design file added the sticker back at the
+    # source with a specific position/rotation — lock that in so it can't
+    # silently drift from the file a second time.
+    idx = html.find("🚧 building")
+    assert "rotate(4deg)" in html[idx - 250:idx]
+    assert "right:20px" in html[idx - 250:idx]
 
 
 def test_reader_access_box_admin_only(env):

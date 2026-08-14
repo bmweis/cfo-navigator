@@ -2090,7 +2090,7 @@ def homepage(request: Request):
 
   <div class="home-sidebar-rest">
     <div class="home-toolbox-panel">
-      {_sticker("🚧 building", rotate=-4, top="-14px", right="14px", size=14)}
+      {_sticker("🚧 building", rotate=4, top="-14px", right="20px", size=14)}
       <div style="font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:10px;">CFO Toolbox</div>
       <h3 style="margin:0 0 8px;font-family:var(--font-head);font-weight:600;font-size:19px;">Everything in the toolbox</h3>
       <p style="font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 20px;">Software, benchmarks, communities, and an AI research buddy.</p>

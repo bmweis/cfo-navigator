@@ -1002,6 +1002,22 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   come up (first as the Homepage Restructure regression bullet above), and
   the file's omission is confirmed to be a known gap in the export, not a
   design decision to match.
+- **Homepage Restructure — Brian re-exported the design file with the
+  building sticker added, and its position/rotation differs from the
+  earlier guess.** A follow-up upload of `Homepage_Restructure_Standalone.html`
+  (re-rendered fresh via Playwright, same as every prior cross-check round)
+  turned out to be an updated export, not a duplicate: the Toolbox panel now
+  genuinely includes a sticker in the file itself — confirming the earlier
+  "known gap in the export" bullet above was correct, and Brian has since
+  closed that gap at the source rather than leaving it a standing exception.
+  Position/rotation differs from what this branch had been using since
+  Phase 3 (`rotate(-4deg)`, `right:14px`): the updated file shows
+  `rotate(4deg)`, `right:20px` — corrected to match exactly. The file's
+  sticker text is plain "building" with no emoji (likely the same design-
+  tool text-field limitation noted for the "hi, I'm Brian" sticker
+  elsewhere), but the emoji is kept — established sitewide copy
+  (`"🚧 building"`, identical wording already live on `/tools`), not
+  something this pass should silently change based on an export artifact.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
