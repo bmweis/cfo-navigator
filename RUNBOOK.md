@@ -93,8 +93,8 @@ shell on the volume:
 ### Post-restore validation checklist
 
 - [ ] `https://bmweis.com/health` returns `{"ok": true}`
-- [ ] Log in as admin, open `/library/archive` — article count and recent items look right
-- [ ] FTS search works (search something specific on `/library/archive`, or
+- [ ] Log in as admin, open `/read?view=saved` — article count and recent items look right
+- [ ] FTS search works (search something specific on `/read?view=saved`, or
       `GET /api/search?q=netsuite` with the token) — the FTS index travels
       inside the DB file, so if the file is good, search is good
 - [ ] `/admin/contacts`, `/admin/library/queue` load (spot-check non-article tables)
@@ -230,7 +230,7 @@ Work down this list; each step splits the problem in half.
    Dockerfile — nothing about the app is Railway-specific.
 
 **After any recovery:** hit `/admin/checks` (mirrors CI) and click through
-`/library/archive`, `/library/feed`, `/tools/fpa-buddy` once. Then check `/admin` for
+`/read`, `/tools/fpa-buddy` once. Then check `/admin` for
 email-failure badges — outbound email during the outage will have landed in
 `email_failures` rather than vanishing.
 

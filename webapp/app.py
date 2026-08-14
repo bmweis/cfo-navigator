@@ -17,10 +17,10 @@ Public routes (no auth):
     GET  /health               Health check
 
 Private routes (require login cookie; API routes also accept a token):
-    GET  /library/archive      Search + browse saved articles (admin-only)
-    GET  /library/feed         RSS reader over the OPML subscription list (admin-only)
+    GET  /read                 Merged Reader: Feed + Saved (Archive) + Read Later, three-pane (admin-only)
+    GET  /read/{id}            Single-article standalone reader view (admin-only)
+    GET  /api/read-article     JSON article content for the Reader pane's AJAX fetch (admin-only)
     GET  /tools/fpa-buddy      FP&A Buddy Q&A page + past-questions search (member-gated)
-    GET  /read                 Article reader (Instapaper-style clean view)
     POST /ask                  FP&A Q&A
     POST /post                 Draft a LinkedIn post
     POST /feed/save            Save a feed item to the archive
@@ -13984,394 +13984,90 @@ async def tools_interest(tool_id: int, request: Request):
 OPML_PATH = os.environ.get("LINKLIB_SITES_OPML", os.path.join(_APP_DIR, "preferred_sites.opml"))
 
 
-@app.get("/feed")
-def feed_redirect(request: Request):
-    target = "/library/feed"
-    if request.url.query:
-        target += "?" + request.url.query
-    return RedirectResponse(target, status_code=301)
+def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
+    """Resolve an id-or-url to reader content: DB lookup by id first (using
+    cached content when it's substantial), falling back to a live fetch by
+    url. Shared by GET /read/{article_id} (a standalone HTML page) and
+    GET /api/read-article (the JSON endpoint the merged /read page's reader
+    pane calls) — exactly one implementation of "resolve id-or-url to article
+    content," not two. Returns None when neither an id nor a url resolves to
+    anything."""
+    from linklib.extract import fetch_page
+    import html as html_mod
 
-
-@app.get("/library/feed", response_class=HTMLResponse)
-def feed_reader(request: Request, cat: str = "", rl: str = ""):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    # In-app reader and "Save to Archive" stay admin-only (resale-safe / shared
-    # Archive writes). Read-later is a personal bookmark and is member-scoped
-    # end to end at the API level (/feed/read-later, read_later table) — but
-    # the buttons below are still gated on is_admin pending a UI decision on
-    # when to actually expose read-later to non-admin members.
-    is_admin = _is_authed(request)
-
-    import json as _json
-    lib = _lib()
-    try:
-        lib_tags = [t for t, _ in lib.all_tags()[:20]]
-        custom_filters = _json.loads(lib.get_setting("feed_filter_tags") or "[]")
-        user_id = _current_user_id(lib, request)
-        rl_urls = lib.read_later_urls(user_id) if user_id is not None else set()
-        rl_items_raw = (lib.list_read_later(user_id) if (rl and user_id is not None) else [])
-    finally:
-        lib.close()
-
-    PINNED_TOPICS = ["S-1"]
-
-    if rl:
-        items = [
-            {"url": r["url"], "title": r["title"] or "(no title)", "source": r["source"] or "",
-             "summary": r["summary"] or "", "published_at": r["published_at"],
-             "paywalled": False, "_rl_mode": True}
-            for r in rl_items_raw
-        ]
-        categories = []
-    else:
-        from linklib.feed import get_feed_items
+    article = None
+    if id:
+        lib = _lib()
         try:
-            items, categories = get_feed_items(OPML_PATH, category=cat, max_total=120)
-        except Exception as e:
-            return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Library",
-                f'<div style="max-width:860px;margin:0 auto;padding:48px 24px 72px;">'
-                f'<h2>Feed unavailable</h2><p style="color:var(--muted);">Could not load feeds: {_esc(str(e))}</p></div>',
-                role=_role(request)))
+            row = lib.conn.execute("SELECT * FROM articles WHERE id=?", (id,)).fetchone()
+            if row:
+                article = dict(row)
+                article["tags"] = json.loads(article.get("tags_json") or "[]")
+        finally:
+            lib.close()
+        if article:
+            url = article["url"]
 
-    # Tab bar
-    if rl:
-        tabs = '<a href="/library/feed" class="ftab" style="margin-right:4px;">&larr; Back</a>'
+    if not url:
+        return None
+
+    cached_content = (article or {}).get("content", "")
+    cached_title = (article or {}).get("title", "")
+
+    if cached_content and len(cached_content) > 200:
+        title = cached_title or url
+        content = cached_content
     else:
-        tabs = '<a href="/library/feed" class="ftab{active}">All</a>'.format(
-            active=' ftab-on' if not cat else '',
-        )
-        for c in categories:
-            active = ' ftab-on' if c == cat else ''
-            tabs += f'<a href="/library/feed?cat={quote(c)}" class="ftab{active}">{_esc(c)}</a>'
-
-    def _fmt_date(iso: str) -> str:
-        if not iso:
-            return ""
         try:
-            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-            return dt.strftime("%-d %b %Y")
+            page = fetch_page(url)
+            title = page.title or cached_title or url
+            content = page.content or ""
         except Exception:
-            return iso[:10]
+            title = cached_title or url
+            content = ""
 
-    sources = list(dict.fromkeys(item.get("source", "") for item in items if item.get("source")))
-
-    # Build cards
-    cards = ""
-    for item in items:
-        url = item["url"]
-        paywalled = item.get("paywalled", False)
-        paywall_badge = (' <span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:600;vertical-align:middle;">&#128274; Paywalled</span>'
-                         if paywalled else '')
-        # In-app reader + save/read-later are admin-only (resale-safe); members
-        # read on the original source via the card title.
-        read_btn = (f'<a href="/read?url={quote(url, safe="")}" class="faction">&#9654; Read</a>'
-                    if (is_admin and not paywalled) else '')
-        is_rl_mode = item.get("_rl_mode", False)
-        is_rl = is_rl_mode or (url in rl_urls)
-        if not is_admin:
-            rl_btn = save_btn = ''
-        elif is_rl_mode:
-            rl_btn = '<button class="faction rl-active" onclick="removeReadLater(this)">&#10003; Read later</button>'
-            save_btn = ''
+    if content:
+        if "<p>" in content or "<div" in content:
+            body_html = content
+            word_count = len(re.sub(r"<[^>]+>", " ", content).split())
         else:
-            rl_cls = ' rl-active' if is_rl else ''
-            rl_lbl = '&#10003; Read later' if is_rl else '&#128204; Read later'
-            rl_btn = f'<button class="faction{rl_cls}" onclick="toggleReadLater(this)">{rl_lbl}</button>'
-            save_btn = '<button class="faction" onclick="saveItem(this)">+ Save</button>'
-
-        summary_html = f'  <p class="fcard-summary">{_esc(item["summary"])}</p>\n' if item.get("summary") else ''
-        actions = read_btn + (' ' + save_btn if save_btn else '') + ' ' + rl_btn
-        cards += (
-            f'<article class="fcard"'
-            f' data-source="{_esc(item.get("source", ""))}"'
-            f' data-text="{_esc((item["title"] + " " + (item.get("summary") or "")).lower())}"'
-            f' data-rl="{1 if is_rl else 0}"'
-            f' data-url="{_esc(url)}"'
-            f' data-title="{_esc(item.get("title", ""))}"'
-            f' data-fsrc="{_esc(item.get("source", ""))}"'
-            f' data-summary="{_esc((item.get("summary") or "")[:300])}"'
-            f' data-pub="{_esc(item.get("published_at") or "")}">\n'
-            f'  <div class="fcard-meta">{_esc(item.get("source", ""))}'
-            f'{ " &middot; " + _fmt_date(item["published_at"]) if item.get("published_at") else ""}'
-            f'{paywall_badge}</div>\n'
-            f'  <a class="fcard-title" href="{_esc(url)}" target="_blank" rel="noopener">{_esc(item["title"])}</a>\n'
-            f'{summary_html}'
-            f'  <div class="fcard-actions">{actions}</div>\n'
-            f'</article>'
-        )
-
-    if not cards:
-        msg = ('No items saved to Read Later yet.' if rl
-               else 'No items loaded—feeds may be warming up. Try refreshing in a moment.')
-        cards = f'<p style="color:var(--muted);padding:32px 0;">{msg}</p>'
-
-    # Source filter checkboxes
-    source_checks = "".join(
-        f'<label class="fsrc-label"><input type="checkbox" class="fsrc-cb" value="{_esc(s)}" checked onchange="applyFilter()"><span>{_esc(s)}</span></label>'
-        for s in sources
-    )
-
-    # Topic chips: pinned + library tags + custom (deduplicated, order preserved)
-    seen_t: set[str] = set()
-    all_topics: list[str] = []
-    for t in PINNED_TOPICS + lib_tags + custom_filters:
-        if t not in seen_t:
-            seen_t.add(t)
-            all_topics.append(t)
-
-    topic_chips = ""
-    for t in all_topics:
-        is_custom = t not in PINNED_TOPICS and t not in lib_tags
-        x_part = (f' <button class="chip-x" data-keyword="{_esc(t)}"'
-                  f' onclick="event.stopPropagation();removeCustomFilter(this)">&#xd7;</button>'
-                  if is_custom else '')
-        topic_chips += (f'<span class="topic-chip" data-keyword="{_esc(t)}"'
-                        f' onclick="toggleTopic(this)">{_esc(t)}{x_part}</span>')
-
-    custom_filters_js = _json.dumps(custom_filters)
-
-    # Sources section (hidden in rl mode since items come from DB)
-    if not rl:
-        src_section = f"""<div style="margin-bottom:16px;">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-        <span style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Sources</span>
-        <button onclick="setAll(true)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Select all</button>
-        <button onclick="setAll(false)" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;">Clear all</button>
-        <span id="filter-count" style="font-size:12px;color:var(--muted);margin-left:auto;"></span>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;">{source_checks}</div>
-    </div>"""
+            paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+            body_html = "".join(f"<p>{html_mod.escape(p)}</p>" for p in paragraphs) if paragraphs else ""
+            word_count = sum(len(p.split()) for p in paragraphs)
     else:
-        src_section = ""
+        body_html = ""
+        word_count = 0
 
-    filter_panel = f"""<div id="filter-panel" style="display:none;border-bottom:1px solid var(--line);background:#fff;padding:14px 24px;">
-  <div style="max-width:860px;margin:0 auto;">
-    {src_section}
-    <div>
-      <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">Topics</div>
-      <div id="topic-chips" style="display:flex;flex-wrap:wrap;gap:8px;">{topic_chips}</div>
-      <div style="margin-top:8px;display:flex;gap:6px;align-items:center;">
-        <input id="custom-topic-input" placeholder="Add keyword&#x2026;"
-          style="padding:4px 10px;border:1px solid var(--line);border-radius:20px;font-size:12px;background:#fff;width:130px;"
-          onkeydown="if(event.key==='Enter')addCustomFilter();">
-        <button onclick="addCustomFilter()"
-          style="font-size:12px;color:var(--accent);background:none;border:1px solid var(--line);border-radius:20px;padding:4px 10px;cursor:pointer;">+ Add</button>
-      </div>
-    </div>
-  </div>
-</div>"""
+    tags = (article or {}).get("tags", [])
+    category = tags[0] if tags else (article or {}).get("source", "") or "Article"
 
-    rl_count = f' ({len(rl_items_raw)})' if rl_items_raw else ''
-    rl_link = '/library/feed' if rl else '/library/feed?rl=1'
-    rl_extra = ' style="background:var(--accent);color:#fff;border-color:var(--accent);"' if rl else ''
+    return {
+        "id": article["id"] if article else None,
+        "url": url,
+        "title": title,
+        "source": (article or {}).get("source", "") or "",
+        "author": (article or {}).get("author", "") or "",
+        "published_at": (article or {}).get("published_at", "") or "",
+        "tags": tags,
+        "category": category,
+        "reading_minutes": max(1, round(word_count / 225)) if word_count else 0,
+        "body_html": body_html,
+        "has_content": bool(content),
+    }
 
-    feed_css = """<style>
-.ftab{display:inline-block;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;
-  color:var(--muted);text-decoration:none;border:1px solid transparent;}
-.ftab:hover{color:var(--ink);text-decoration:none;background:var(--accent-light);}
-.ftab-on{background:var(--accent);color:#fff !important;}
-.fcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 20px;}
-.fcard-meta{font-size:12px;color:var(--muted);margin-bottom:5px;}
-.fcard-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);text-decoration:none;display:block;margin-bottom:6px;line-height:1.35;}
-.fcard-title:hover{color:var(--accent);text-decoration:none;}
-.fcard-summary{font-size:14px;color:#5a5248;margin:0 0 10px;line-height:1.5;}
-.fcard-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
-.faction{font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);
-  border-radius:8px;padding:5px 12px;cursor:pointer;text-decoration:none;}
-.faction:hover{background:var(--accent-light);text-decoration:none;}
-.faction.saved{color:var(--muted);pointer-events:none;}
-.faction.rl-active{background:var(--accent-light);border-color:var(--accent);}
-.fsrc-label{display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;
-  background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:4px 10px;
-  user-select:none;transition:background .1s;}
-.fsrc-label:hover{background:var(--accent-light);}
-.fsrc-label input{accent-color:var(--accent);cursor:pointer;}
-.filter-btn{font-size:13px;font-weight:500;color:var(--accent);background:none;border:1px solid var(--line);
-  border-radius:20px;padding:6px 14px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-block;}
-.filter-btn:hover{background:var(--accent-light);text-decoration:none;}
-.topic-chip{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:20px;
-  font-size:12px;cursor:pointer;background:var(--accent-light);color:var(--accent);
-  border:1px solid transparent;user-select:none;transition:background .1s;}
-.topic-chip:hover{border-color:var(--accent);}
-.topic-chip.chip-on{background:var(--accent);color:#fff;}
-.chip-x{background:none;border:none;cursor:pointer;color:inherit;font-size:11px;
-  padding:0;margin-left:1px;opacity:.7;line-height:1;}
-.chip-x:hover{opacity:1;}
-</style>"""
 
-    feed_js = f"""<script>
-var customFilters = {custom_filters_js};
-var activeTopics = new Set();
-function toggleFilter() {{
-  var p = document.getElementById('filter-panel');
-  var btn = document.getElementById('filter-btn');
-  var open = p.style.display === 'none';
-  p.style.display = open ? 'block' : 'none';
-  btn.style.background = open ? 'var(--accent-light)' : 'none';
-  if (open) updateCount();
-}}
-function setAll(checked) {{
-  document.querySelectorAll('.fsrc-cb').forEach(function(cb) {{ cb.checked = checked; }});
-  applyFilter();
-}}
-function toggleTopic(chip) {{
-  var kw = chip.dataset.keyword;
-  if (activeTopics.has(kw)) {{ activeTopics.delete(kw); chip.classList.remove('chip-on'); }}
-  else {{ activeTopics.add(kw); chip.classList.add('chip-on'); }}
-  applyFilter();
-}}
-function applyFilter() {{
-  var hasCbs = document.querySelectorAll('.fsrc-cb').length > 0;
-  var selected = new Set();
-  document.querySelectorAll('.fsrc-cb:checked').forEach(function(cb) {{ selected.add(cb.value); }});
-  var visible = 0;
-  document.querySelectorAll('.fcard').forEach(function(card) {{
-    var showSrc = !hasCbs || selected.has(card.dataset.source);
-    var showTopic = activeTopics.size === 0;
-    if (!showTopic) {{
-      var txt = card.dataset.text || '';
-      activeTopics.forEach(function(kw) {{ if (txt.indexOf(kw.toLowerCase()) !== -1) showTopic = true; }});
-    }}
-    var show = showSrc && showTopic;
-    card.style.display = show ? '' : 'none';
-    if (show) visible++;
-  }});
-  updateCount(visible);
-}}
-function updateCount(n) {{
-  var el = document.getElementById('filter-count');
-  if (!el) return;
-  var total = document.querySelectorAll('.fcard').length;
-  if (n === undefined) n = total;
-  el.textContent = n + ' of ' + total + ' shown';
-}}
-function saveItem(btn) {{
-  var card = btn.closest('.fcard');
-  var url = card.dataset.url;
-  var t = prompt('Tags (comma-separated, optional):');
-  if (t === null) return;
-  btn.textContent = 'Saving…';
-  btn.classList.add('saved');
-  fetch('/feed/save', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-    body: 'url=' + encodeURIComponent(url) + '&tags=' + encodeURIComponent(t)
-  }})
-  .then(function(r) {{ btn.textContent = r.ok ? '✓ Saved' : '✗ Error'; }})
-  .catch(function() {{ btn.textContent = '✗ Error'; btn.classList.remove('saved'); }});
-}}
-async function toggleReadLater(btn) {{
-  var card = btn.closest('.fcard');
-  var isRl = card.dataset.rl === '1';
-  var params = new URLSearchParams({{
-    url: card.dataset.url, action: isRl ? 'remove' : 'add',
-    title: card.dataset.title || '', source: card.dataset.fsrc || '',
-    summary: card.dataset.summary || '', published_at: card.dataset.pub || ''
-  }});
-  btn.disabled = true;
-  try {{
-    var r = await fetch('/feed/read-later', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-      body: params
-    }});
-    if (r.ok) {{
-      var newRl = isRl ? '0' : '1';
-      card.dataset.rl = newRl;
-      btn.innerHTML = newRl === '1' ? '&#10003; Read later' : '&#128204; Read later';
-      btn.classList.toggle('rl-active', newRl === '1');
-    }}
-  }} finally {{ btn.disabled = false; }}
-}}
-async function removeReadLater(btn) {{
-  var card = btn.closest('.fcard');
-  var params = new URLSearchParams({{url: card.dataset.url, action: 'remove'}});
-  btn.disabled = true;
-  try {{
-    var r = await fetch('/feed/read-later', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-      body: params
-    }});
-    if (r.ok) {{
-      card.style.transition = 'opacity .25s';
-      card.style.opacity = '0';
-      setTimeout(function() {{ card.remove(); }}, 260);
-    }}
-  }} finally {{ btn.disabled = false; }}
-}}
-function addCustomFilter() {{
-  var input = document.getElementById('custom-topic-input');
-  var kw = input.value.trim();
-  if (!kw || customFilters.indexOf(kw) !== -1) {{ input.value = ''; return; }}
-  customFilters.push(kw);
-  input.value = '';
-  document.getElementById('topic-chips').appendChild(makeTopicChip(kw));
-  saveCustomFilters();
-}}
-function removeCustomFilter(btn) {{
-  var kw = btn.dataset.keyword;
-  customFilters = customFilters.filter(function(k) {{ return k !== kw; }});
-  if (activeTopics.has(kw)) {{ activeTopics.delete(kw); applyFilter(); }}
-  btn.closest('.topic-chip').remove();
-  saveCustomFilters();
-}}
-function makeTopicChip(kw) {{
-  var span = document.createElement('span');
-  span.className = 'topic-chip';
-  span.dataset.keyword = kw;
-  span.onclick = function() {{ toggleTopic(span); }};
-  span.appendChild(document.createTextNode(kw + ' '));
-  var x = document.createElement('button');
-  x.className = 'chip-x';
-  x.dataset.keyword = kw;
-  x.innerHTML = '&times;';
-  x.onclick = function(e) {{ e.stopPropagation(); removeCustomFilter(x); }};
-  span.appendChild(x);
-  return span;
-}}
-function saveCustomFilters() {{
-  fetch('/feed/filters', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{filters: customFilters}})
-  }});
-}}
-</script>"""
-
-    # Reminder for Brian only: the Save / Read Later buttons below are still
-    # gated to is_admin (see the comment above), even though the backend now
-    # supports any signed-in member — flip that gate when you're ready to
-    # launch these to non-admin users.
-    admin_note = (
-        '<div style="max-width:860px;margin:12px auto 0;background:var(--seafoam-wash);'
-        'border:1px solid var(--seafoam);border-radius:10px;padding:10px 16px;'
-        'font-size:13px;line-height:1.5;color:var(--ink);">'
-        '&#128274; <strong>Save</strong> and <strong>Read later</strong> are admin-only for now '
-        '&mdash; other signed-in members won&rsquo;t see these buttons until you turn them on.'
-        '</div>' if is_admin else ''
-    )
-
-    body = f"""<div style="max-width:860px;margin:0 auto;padding:12px 24px 0;">
-  <a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a>
-</div>
-<div style="border-bottom:1px solid var(--line);padding:12px 24px;position:sticky;top:0;z-index:5;background:var(--bg);">
-  <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1;">{tabs}</div>
-    <a href="{rl_link}" class="filter-btn"{rl_extra}>&#128204; Read Later{rl_count}</a>
-    <button onclick="toggleFilter()" id="filter-btn" class="filter-btn">&#9776; Sources &amp; Topics</button>
-  </div>
-</div>
-{admin_note}
-{filter_panel}
-<main id="feed-main" style="max-width:860px;margin:0 auto;padding:24px 24px 80px;display:grid;gap:12px;">
-{cards}
-</main>
-{feed_css}
-{feed_js}"""
-
-    return HTMLResponse(_page("CFO Feed—Brian Weisberg", "Library", body, role=_role(request)))
+@app.get("/api/read-article")
+def api_read_article(request: Request, id: int = 0, url: str = ""):
+    """Internal JSON endpoint the merged /read page's reader pane fetches
+    into without a full page navigation. Admin-gated, same as /read itself."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not id and not url:
+        raise HTTPException(status_code=400, detail="id or url required")
+    data = _resolve_reader_content(id=id, url=url)
+    if data is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return JSONResponse(data)
 
 
 _READER_CSS = """
@@ -14503,91 +14199,32 @@ function adj(d) {{
 </body></html>"""
 
 
-@app.get("/read", response_class=HTMLResponse)
-def reader(request: Request, url: str = "", id: int = 0):
-    # Admin-only by design: the in-app reader renders full article text, which we
-    # don't serve to members (resale-safe). Members link out to the source instead.
+@app.get("/read/{article_id}", response_class=HTMLResponse)
+def reader_single(request: Request, article_id: int):
+    """Standalone single-article view for a saved DB row — what the old
+    GET /read?id=... did, now a path param. Admin-only (resale-safe): full
+    article text isn't served to members. No inline tag-edit/delete controls
+    (Phase 5 — those stay exclusively in /admin/library's dedicated tools);
+    the only actions here are Read Later (personal bookmark) and font size."""
     if not _is_authed(request):
         return _login_redirect(request)
-    from linklib.extract import fetch_page
-    import html as html_mod
+    data = _resolve_reader_content(id=article_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="not found")
 
-    back_url = "/admin/library"
-    back_label = "Library"
-
-    # Try to load from DB first (may have cached content)
-    article = None
-    if id:
-        lib = _lib()
-        try:
-            row = lib.conn.execute("SELECT * FROM articles WHERE id=?", (id,)).fetchone()
-            if row:
-                article = dict(row)
-                import json as _json
-                article["tags"] = _json.loads(article.get("tags_json") or "[]")
-        finally:
-            lib.close()
-        if article:
-            url = article["url"]
-
-    if not url:
-        body_html = """<div class="reader-empty">
-  <h2>Read any article</h2>
-  <p style="margin-bottom:1.5rem;">Paste a URL below, or open an article from your
-    <a href="/library/archive">Archive</a> or <a href="/library/feed">Feed</a>.</p>
-  <form method="get" action="/read"
-        style="display:flex;gap:8px;max-width:500px;margin:0 auto;">
-    <input type="url" name="url" placeholder="https://…" autofocus required
-      style="flex:1;padding:10px 14px;border:1px solid #d0cac0;border-radius:10px;
-             font-size:16px;background:#fff;font-family:inherit;">
-    <button type="submit"
-      style="padding:10px 20px;background:#002975;color:#fff;border:none;
-             border-radius:10px;font-size:16px;font-family:inherit;cursor:pointer;
-             white-space:nowrap;">Read</button>
-  </form>
-</div>"""
-        return HTMLResponse(_READER_TMPL.format(
-            title="Reader", heading="Reader", css=_READER_CSS, back_url=back_url, back_label=back_label,
-            orig_url="#", byline="", body=body_html,
-            article_controls="", tags_block="", article_script="",
-        ))
-
-    # Fetch content — use cached DB content if available and non-empty
-    cached_content = (article or {}).get("content", "")
-    cached_title = (article or {}).get("title", "")
-
-    if cached_content and len(cached_content) > 200:
-        title = cached_title or url
-        content = cached_content
-    else:
-        try:
-            page = fetch_page(url)
-            title = page.title or cached_title or url
-            content = page.content or ""
-        except Exception:
-            title = cached_title or url
-            content = ""
-
-    # Build byline from article metadata if available
     byline_parts = []
-    if article:
-        if article.get("author"):
-            byline_parts.append(_esc(article["author"]))
-        if article.get("source"):
-            byline_parts.append(_esc(article["source"]))
-        if article.get("published_at"):
-            byline_parts.append(article["published_at"][:10])
+    if data["author"]:
+        byline_parts.append(_esc(data["author"]))
+    if data["source"]:
+        byline_parts.append(_esc(data["source"]))
+    if data["published_at"]:
+        byline_parts.append(data["published_at"][:10])
+    url = data["url"]
     byline_parts.append(f'<a class="source-link" href="{_esc(url)}" target="_blank" rel="noopener">{_esc(url[:60])}{"…" if len(url) > 60 else ""}</a>')
     byline = " &middot; ".join(byline_parts)
 
-    if content:
-        # content from extract.py is plain text with newlines — convert to paragraphs
-        # but also handle if it looks like it already has HTML tags
-        if "<p>" in content or "<div" in content:
-            body_html = content
-        else:
-            paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
-            body_html = "".join(f"<p>{html_mod.escape(p)}</p>" for p in paragraphs) if paragraphs else ""
+    if data["has_content"]:
+        body_html = data["body_html"]
     else:
         body_html = f"""<div class="reader-empty">
           <h2>Content could not be extracted</h2>
@@ -14595,87 +14232,43 @@ def reader(request: Request, url: str = "", id: int = 0):
           <p style="margin-top:16px;"><a href="{_esc(url)}" target="_blank" rel="noopener">Open original article &rarr;</a></p>
         </div>"""
 
-    # Article management controls — only shown when loaded by id from the DB
-    article_controls = ""
     tags_block = ""
-    article_script = ""
-    if article:
-        aid = article["id"]
-        current_tags = article.get("tags", [])
-        tags_csv = _esc(",".join(current_tags))
-        tag_spans = "".join(
+    if data["tags"]:
+        tags_block = '<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:4px;">' + "".join(
             f'<span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);'
-            f'border-radius:6px;padding:2px 8px;margin-right:4px;">{_esc(t)}</span>'
-            for t in current_tags
-        )
-        tags_block = f"""<div id="reader-tags" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
-  {tag_spans}
-  <button onclick="openReaderTagEditor()" style="font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer;margin-left:4px;">Edit tags</button>
-</div>
-<div id="reader-tag-editor" style="display:none;margin-top:10px;">
-  <input type="text" id="reader-tag-input" value="{tags_csv}"
-    placeholder="comma-separated tags"
-    style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:14px;background:#fff;">
-  <div style="display:flex;gap:8px;margin-top:6px;">
-    <button onclick="saveReaderTags()" style="padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;">Save</button>
-    <button onclick="closeReaderTagEditor()" style="padding:5px 14px;background:none;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:13px;color:var(--muted);">Cancel</button>
-  </div>
-</div>"""
-        article_controls = (
-            f'<button onclick="deleteArticle({aid})" '
-            f'style="font-size:13px;color:#b91c1c;background:none;border:1px solid #fca5a5;'
-            f'border-radius:6px;padding:4px 10px;cursor:pointer;">Delete</button>'
-        )
-        article_script = f"""<script>
-var _articleId = {aid};
-function openReaderTagEditor() {{
-  document.getElementById('reader-tags').style.display = 'none';
-  document.getElementById('reader-tag-editor').style.display = 'block';
-  document.getElementById('reader-tag-input').focus();
-}}
-function closeReaderTagEditor() {{
-  document.getElementById('reader-tag-editor').style.display = 'none';
-  document.getElementById('reader-tags').style.display = 'flex';
-}}
-async function saveReaderTags() {{
-  var val = document.getElementById('reader-tag-input').value;
-  var tags = val.split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
+            f'border-radius:6px;padding:2px 8px;margin-right:4px;">{_esc(t)}</span>' for t in data["tags"]
+        ) + "</div>"
+
+    article_controls = """<button onclick="toggleReadLaterSingle()" id="rl-single-btn"
+      style="font-size:13px;color:var(--accent);background:none;border:1px solid var(--line);
+      border-radius:6px;padding:4px 10px;cursor:pointer;">&#128204; Read later</button>"""
+    article_script = f"""<script>
+var _rlUrl = {json.dumps(url)};
+var _rlTitle = {json.dumps(data["title"])};
+var _rlSource = {json.dumps(data["source"])};
+var _rlPub = {json.dumps(data["published_at"])};
+var _rlSaved = false;
+async function toggleReadLaterSingle() {{
+  var btn = document.getElementById('rl-single-btn');
+  var params = new URLSearchParams({{
+    url: _rlUrl, action: _rlSaved ? 'remove' : 'add',
+    title: _rlTitle || '', source: _rlSource || '', published_at: _rlPub || ''
+  }});
+  btn.disabled = true;
   try {{
-    var r = await fetch('/library/' + _articleId + '/tags', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{tags: tags}})
-    }});
-    if (!r.ok) throw new Error();
-    var d = await r.json();
-    var box = document.getElementById('reader-tags');
-    var esc = function(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
-    var spans = (d.tags || []).map(function(t) {{
-      return '<span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:2px 8px;margin-right:4px;">' + esc(t) + '</span>';
-    }}).join('');
-    var editBtn = '<button onclick="openReaderTagEditor()" style="font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer;margin-left:4px;">Edit tags</button>';
-    box.innerHTML = spans + editBtn;
-    closeReaderTagEditor();
-  }} catch(e) {{
-    alert('Could not save tags—please try again.');
-  }}
-}}
-async function deleteArticle(id) {{
-  if (!confirm('Permanently delete this article from your archive?')) return;
-  try {{
-    var form = new FormData();
-    var r = await fetch('/library/' + id + '/delete', {{method: 'POST', body: form}});
-    if (r.redirected) {{ window.location.href = r.url; return; }}
-    window.location.href = '/admin/library';
-  }} catch(e) {{
-    alert('Could not delete—please try again.');
-  }}
+    var r = await fetch('/feed/read-later', {{method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}}, body: params}});
+    if (r.ok) {{
+      _rlSaved = !_rlSaved;
+      btn.innerHTML = _rlSaved ? '&#10003; Read later' : '&#128204; Read later';
+    }}
+  }} finally {{ btn.disabled = false; }}
 }}
 </script>"""
 
     return HTMLResponse(_READER_TMPL.format(
-        title=_esc(title), heading=_esc(title), css=_READER_CSS,
-        back_url=back_url, back_label=back_label,
+        title=_esc(data["title"]), heading=_esc(data["title"]), css=_READER_CSS,
+        back_url="/read", back_label="Reader",
         orig_url=_esc(url), byline=byline,
         body=body_html,
         article_controls=article_controls,
@@ -14684,242 +14277,547 @@ async function deleteArticle(id) {{
     ))
 
 
-@app.get("/archive")
-def archive_redirect(request: Request):
-    target = "/library/archive"
-    if request.url.query:
-        target += "?" + request.url.query
-    return RedirectResponse(target, status_code=301)
+# ---------------------------------------------------------------------------
+# /read — the merged Reader shell (Phase 5): a three-pane admin tool that
+# replaces both /library/archive and /library/feed. Left rail (quick views +
+# feed sources), middle list pane (whichever view is active), right reader
+# pane (article content, loaded via AJAX against /api/read-article — no full
+# page navigation when you click an item). No compatibility redirects for the
+# two retired routes, and no per-item Edit tags/Delete/Archive controls here
+# — those stay exclusively in /admin/library's dedicated tools.
+# ---------------------------------------------------------------------------
+
+_READER_SHELL_CSS = """
+<style>
+.rr-shell{display:flex;height:calc(100vh - 180px);min-height:520px;width:100%;background:var(--bg);
+  border:1px solid var(--line);border-radius:14px;overflow:hidden;font-family:var(--font-body);}
+.rr-rail{flex:0 1 232px;min-width:150px;max-width:360px;background:var(--surface-2);
+  border-right:1px solid var(--line);display:flex;flex-direction:column;padding:20px 14px;overflow-y:auto;}
+.rr-rail-back{font-size:13px;color:var(--muted);text-decoration:none;margin-bottom:18px;display:inline-block;}
+.rr-rail-back:hover{color:var(--ink);text-decoration:none;}
+.rr-rail-title{font-family:var(--font-head);font-weight:700;font-size:20px;color:var(--navy);margin-bottom:16px;}
+.rr-qv{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:8px;
+  text-decoration:none;font-size:14px;color:var(--ink-soft);margin-bottom:2px;}
+.rr-qv:hover{background:var(--navy-wash);text-decoration:none;}
+.rr-qv-on{background:var(--navy-wash);color:var(--navy);font-weight:600;}
+.rr-qv-count{font-size:12px;color:var(--muted);}
+.rr-rope{height:6px;border-radius:3px;margin:18px 2px;
+  background:repeating-linear-gradient(45deg,var(--navy-light) 0 4px,var(--seafoam) 4px 8px);opacity:.4;}
+.rr-rail-label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+  margin:14px 6px 8px;}
+.rr-cat{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:8px;
+  cursor:pointer;font-size:14px;color:var(--ink-soft);}
+.rr-cat:hover{background:var(--navy-wash);}
+.rr-cat-on{background:var(--navy-wash);color:var(--navy);font-weight:600;}
+.rr-cat-count{font-size:12px;color:var(--muted);}
+.rr-cat-chev{display:inline-block;width:0;height:0;border-style:solid;border-width:4px 0 4px 6px;
+  border-color:transparent transparent transparent var(--muted);margin-right:6px;transition:transform .15s;}
+.rr-cat-chev.rr-open{transform:rotate(90deg);}
+.rr-src-list{display:none;flex-direction:column;gap:2px;margin:2px 0 4px 22px;}
+.rr-src-list.rr-open{display:flex;}
+.rr-src{display:flex;justify-content:space-between;align-items:center;padding:5px 10px;border-radius:6px;
+  cursor:pointer;font-size:13px;color:var(--ink-soft);}
+.rr-src:hover{background:var(--seafoam-wash);}
+.rr-src-on{background:var(--seafoam-wash);color:var(--seafoam-deep);font-weight:600;}
+.rr-tagbar a{display:inline-block;font-size:12px;background:var(--surface);border:1px solid var(--line);
+  border-radius:14px;padding:3px 9px;margin:0 4px 6px 0;color:var(--ink-soft);text-decoration:none;}
+.rr-tagbar a:hover{background:var(--navy-wash);color:var(--navy);}
+.rr-list-pane{flex:0 1 480px;min-width:300px;max-width:760px;background:var(--surface);
+  border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;}
+.rr-list-header{padding:20px 22px 14px;border-bottom:1px solid var(--line);flex-shrink:0;}
+.rr-list-title{font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);}
+.rr-list-count{font-size:13px;color:var(--muted);margin-top:4px;}
+.rr-alert{margin:14px 22px 0;padding:11px 13px;border-radius:10px;background:var(--coral-wash);
+  border:1px solid var(--coral-light);display:flex;gap:10px;align-items:flex-start;font-size:13px;
+  line-height:1.5;color:var(--coral-deep);}
+.rr-search-form{padding:14px 22px 0;}
+.rr-search-form input{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;
+  font-size:14px;background:var(--surface);font-family:inherit;}
+.rr-list-rows{flex:1;overflow-y:auto;}
+.rr-row{display:flex;gap:14px;padding:15px 22px;border-bottom:1px solid var(--line);}
+.rr-row:hover{background:var(--surface-2);}
+.rr-row-selected{background:var(--navy-wash);border-left:3px solid var(--navy);padding-left:19px;}
+.rr-row-main{flex:1;min-width:0;cursor:pointer;}
+.rr-row-main.rr-row-disabled{cursor:default;}
+.rr-row-meta{display:flex;align-items:baseline;gap:6px;margin-bottom:4px;font-size:12px;}
+.rr-row-source{font-weight:600;letter-spacing:.02em;color:var(--navy-light);}
+.rr-row-date{color:var(--muted);}
+.rr-row-title{font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--ink);line-height:1.3;margin-bottom:4px;}
+.rr-row-excerpt{font-size:13.5px;color:var(--muted);line-height:1.55;display:-webkit-box;
+  -webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;}
+.rr-row-tags{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+.rr-row-tags span{background:var(--seafoam);color:var(--navy);font-size:11px;font-weight:600;
+  padding:2px 8px;border-radius:6px;}
+.rr-row-actions{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
+.rr-row-btn{background:none;border:1px solid var(--line);border-radius:7px;font-size:12px;padding:4px 9px;
+  cursor:pointer;color:var(--navy-light);white-space:nowrap;font-family:inherit;}
+.rr-row-btn:hover{background:var(--navy-wash);}
+.rr-row-btn.rr-row-btn-on{background:var(--seafoam-wash);border-color:var(--seafoam-deep);color:var(--seafoam-deep);}
+.rr-paywall-badge{font-size:10.5px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:9px;
+  font-weight:600;margin-left:4px;}
+.rr-reader-pane{flex:1 1 320px;min-width:240px;background:var(--surface);overflow-y:auto;position:relative;}
+.rr-reader-header{position:sticky;top:0;background:var(--surface);display:flex;align-items:center;
+  justify-content:space-between;flex-wrap:wrap;row-gap:8px;padding:13px 20px;border-bottom:1px solid var(--line);z-index:5;}
+.rr-reader-close{cursor:pointer;font-size:20px;color:var(--muted);line-height:1;background:none;border:none;}
+.rr-reader-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;}
+.rr-reader-actions button{cursor:pointer;font-size:12px;font-weight:600;background:none;border:1px solid var(--line);
+  border-radius:6px;padding:4px 9px;color:var(--navy-light);font-family:inherit;}
+.rr-reader-actions button.rr-row-btn-on{background:var(--seafoam-wash);border-color:var(--seafoam-deep);color:var(--seafoam-deep);}
+.rr-reader-body{max-width:640px;margin:0 auto;padding:44px 32px 100px;}
+.rr-reader-category{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--seafoam-deep);margin-bottom:12px;}
+.rr-reader-title{font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:30px;line-height:1.18;
+  color:var(--ink);margin-bottom:16px;}
+.rr-reader-byline{font-size:13px;color:var(--muted);padding-bottom:22px;border-bottom:1px solid var(--line);
+  margin-bottom:26px;font-family:var(--font-body);}
+.rr-reader-body-text{font-family:'Source Serif 4',Georgia,serif;font-size:var(--rr-fs,17px);line-height:1.75;color:var(--ink-soft);}
+.rr-reader-body-text p{margin-bottom:1.3em;}
+.rr-reader-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;
+  color:var(--muted);font-size:14px;padding:40px;text-align:center;}
+.rr-resize{width:6px;flex-shrink:0;margin:0 -3px;cursor:col-resize;background:transparent;z-index:6;}
+.rr-resize:hover{background:var(--seafoam);}
+@media(max-width:900px){
+  .rr-shell{display:block;height:auto;}
+  .rr-rail,.rr-list-pane{max-width:none;flex:none;border-right:none;border-bottom:1px solid var(--line);}
+  .rr-resize{display:none;}
+}
+</style>
+"""
 
 
-@app.get("/library/archive", response_class=HTMLResponse)
-def archive(request: Request, q: str = ""):
+def _reader_fmt_date(iso: str) -> str:
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        return dt.strftime("%-d %b %Y")
+    except Exception:
+        return iso[:10]
+
+
+@app.get("/read", response_class=HTMLResponse)
+def reader_shell(request: Request, view: str = "feed", q: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
-    authed = _is_authed(request)   # admin: shows tag-edit / delete controls
+    if view not in ("feed", "saved", "readlater"):
+        view = "feed"
+
+    from linklib import authcheck
+    from linklib.feed import get_feed_items, PAYWALLED_DOMAINS
+
     lib = _lib()
     try:
-        results = lib.search(q, limit=100)
-        total = lib.count()
-        tags = lib.all_tags()[:25]
+        user_id = _current_user_id(lib, request)
+        saved_total = lib.count()
+        rl_urls = lib.read_later_urls(user_id) if user_id is not None else set()
+
+        auth_status = authcheck.get_auth_status(lib)
+        stale = authcheck.stale_domains(auth_status)
+
+        try:
+            feed_items, _feed_cats_unused = get_feed_items(OPML_PATH, category="", max_total=120)
+        except Exception:
+            feed_items = []
+
+        saved_rows, saved_tags = [], []
+        rl_rows = []
+        if view == "saved":
+            saved_rows = lib.search(q, limit=200)
+            saved_tags = lib.all_tags()[:25]
+        elif view == "readlater":
+            rl_rows = lib.list_read_later(user_id) if user_id is not None else []
     finally:
         lib.close()
 
-    def _card(r):
-        tags_csv = _esc(",".join(r.get("tags", [])))
-        # Tags are auto-generated; show them as labels. Editing is behind "Edit tags".
-        tag_spans = "".join(
-            f'<span class="tag-chip" data-tag="{_esc(t)}">{_esc(t)}</span>'
-            for t in r.get("tags", [])
-        )
-        url = _esc(r['url'])
-        if authed:
-            # Admin: in-app reader + curation controls.
-            editor = f"""<div id="tag-editor-{r['id']}" style="display:none;margin-top:8px;">
-            <input type="text" id="tag-input-{r['id']}" value="{tags_csv}"
-              placeholder="comma-separated tags"
-              style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;">
-            <div style="display:flex;gap:6px;margin-top:6px;">
-              <button class="postbtn" onclick="saveTags({r['id']})">Save</button>
-              <button class="postbtn" onclick="cancelTags({r['id']})">Cancel</button>
-            </div>
-          </div>"""
-            actions = (f'<a href="/read?id={r["id"]}" class="postbtn" style="text-decoration:none;">Read</a>'
-                       f'<button class="postbtn" onclick="openTagEditor({r["id"]})">Edit tags</button>'
-                       f'<form method="post" action="/library/{r["id"]}/delete" style="display:contents;" '
-                       f'onsubmit="return confirm(\'Permanently delete this article?\');">'
-                       f'<button type="submit" class="postbtn" style="color:#b91c1c;">Delete</button></form>')
-        else:
-            # Member: read on the original source (no in-app full text).
-            editor = ""
-            actions = f'<a href="{url}" target="_blank" rel="noopener" class="postbtn" style="text-decoration:none;">Read on source &rarr;</a>'
-        return f"""<article class="card" id="card-{r['id']}">
-          <a class="card-title" href="{url}" target="_blank" rel="noopener">{_esc(r['title'])}</a>
-          <div class="meta">{_esc(r.get('source',''))}{' &middot; ' + _esc(r['saved_at'][:10]) if r.get('saved_at') else ''}</div>
-          <p class="summary">{_esc(r.get('summary',''))[:280]}</p>
-          <div class="tags" id="tags-{r['id']}" data-tags="{tags_csv}">{tag_spans}</div>
-          {editor}
-          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">{actions}</div>
-        </article>"""
+    # Categories/sources tree, built off the same feed_items payload used for
+    # the Feed view's count and rows — client-side filtering (JS) over this
+    # one fetch, same approach as the old Feed page's source checkboxes.
+    cat_sources: dict[str, dict[str, int]] = {}
+    cat_order: list[str] = []
+    for item in feed_items:
+        c = item.get("category") or "Other"
+        if c not in cat_sources:
+            cat_sources[c] = {}
+            cat_order.append(c)
+        s = item.get("source") or ""
+        cat_sources[c][s] = cat_sources[c].get(s, 0) + 1
 
-    cards = "".join(_card(r) for r in results) or '<p style="color:var(--muted);">No matches.</p>'
+    # -- left rail ----------------------------------------------------------
+    def _qv(v, label, count):
+        cls = "rr-qv rr-qv-on" if view == v else "rr-qv"
+        return f'<a href="/read?view={v}" class="{cls}"><span>{_esc(label)}</span><span class="rr-qv-count">{count}</span></a>'
 
-    tagbar = "".join(
-        f'<a href="/library/archive?q={_esc(t)}">{_esc(t)} <em>{c}</em></a>' for t, c in tags
+    quick_views_html = (
+        _qv("feed", "Feed", len(feed_items))
+        + _qv("saved", "Saved", saved_total)
+        + _qv("readlater", "Read Later", len(rl_urls))
     )
 
-    page_body = f"""<div style="border-bottom:1px solid var(--line);padding:20px 24px;">
-  <div style="max-width:960px;margin:0 auto;">
-    <p style="margin:0 0 10px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:16px;">
-      <span>{total} saved</span>
-      <a href="/read" style="color:var(--accent);font-weight:500;">&#9654; Article Reader</a>
-    </div>
-    <form method="get" action="/library/archive" style="display:flex;gap:8px;max-width:680px;">
-      <input type="search" name="q" value="{_esc(q)}" placeholder="Search titles, summaries, notes, tags…"
-             style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font-size:15px;background:#fff;" autofocus>
-      <button type="submit" class="btn">Search</button>
-    </form>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;">{tagbar}</div>
-    <div style="display:flex;gap:8px;margin-top:14px;max-width:680px;">
-      <textarea id="askq" rows="2" placeholder="Ask your archive an FP&amp;A question…"
-        style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"></textarea>
-      <button class="btn" onclick="ask()">Ask</button>
-    </div>
-    <div style="margin-top:6px;max-width:680px;text-align:right;">
-      <a id="more-opts-link" href="/tools/fpa-buddy" style="font-size:12px;color:var(--muted);">More options (model, effort, sources) &rarr;</a>
-    </div>
-    <div id="answer" style="display:none;margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;font-size:15px;max-width:680px;"></div>
-  </div>
-</div>
-<main style="max-width:960px;margin:0 auto;padding:20px 24px;display:grid;gap:14px;">
-{cards}
-</main>
-<style>
-.card{{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;}}
-.card-title{{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);}}
-.card-title:hover{{color:var(--accent);}}
-.meta{{color:var(--muted);font-size:13px;margin:3px 0 8px;}}
-.summary{{margin:0 0 10px;color:var(--ink-soft);font-size:14px;}}
-.tags{{display:flex;flex-wrap:wrap;gap:6px;}}
-.tags span{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;display:inline-flex;align-items:center;gap:2px;}}
-.tag-x-btn{{background:none;border:none;cursor:pointer;color:var(--muted);font-size:10px;padding:0;line-height:1;opacity:.7;}}
-.tag-x-btn:hover{{color:#b91c1c;opacity:1;}}
-.postbtn{{margin-top:12px;padding:6px 12px;font-size:12px;background:transparent;color:var(--accent);border:1px solid var(--line);border-radius:8px;cursor:pointer;}}
-.postbtn:hover{{background:var(--accent-light);}}
-#answer p{{margin:0 0 12px;}}
-#answer h3,#answer h4,#answer h5,#answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:14px 0 6px;}}
-#answer h3:first-child,#answer h4:first-child{{margin-top:0;}}
-#answer ul,#answer ol{{margin:0 0 12px;padding-left:20px;}}
-#answer li{{margin-bottom:4px;}}
-#answer code{{background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:13px;font-family:ui-monospace,monospace;}}
-#answer a{{color:var(--accent);}}
-#answer sup.cite{{line-height:0;}}
-#answer sup.cite a{{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}}
-#answer sup.cite a:hover{{color:var(--accent);}}
-</style>
-<script>
-function openTagEditor(id) {{
-  document.getElementById('tag-editor-' + id).style.display = 'block';
-  document.getElementById('tag-input-' + id).focus();
-}}
-function cancelTags(id) {{
-  document.getElementById('tag-editor-' + id).style.display = 'none';
-}}
-async function _doSaveTags(id, tags) {{
-  var r = await fetch('/library/' + id + '/tags', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{tags: tags}})
-  }});
-  if (!r.ok) throw new Error('failed');
-  var d = await r.json();
-  var box = document.getElementById('tags-' + id);
-  var esc = function(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
-  box.innerHTML = (d.tags || []).map(function(t) {{
-    var et = esc(t);
-    var btn = '<button class="tag-x-btn" data-article-id="' + id + '" data-tag="' + et + '" onclick="quickRemoveTagBtn(this)">&times;</button>';
-    return '<span class="tag-chip" data-tag="' + et + '">' + et + ' ' + btn + '</span>';
-  }}).join('');
-  box.dataset.tags = (d.tags || []).join(',');
-  var input = document.getElementById('tag-input-' + id);
-  if (input) input.value = (d.tags || []).join(', ');
-  document.getElementById('tag-editor-' + id).style.display = 'none';
-}}
-async function saveTags(id) {{
-  var input = document.getElementById('tag-input-' + id);
-  var tags = input.value.split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
-  try {{ await _doSaveTags(id, tags); }} catch(e) {{ alert('Could not save tags—please try again.'); }}
-}}
-async function quickRemoveTag(id, tag) {{
-  var box = document.getElementById('tags-' + id);
-  var current = (box.dataset.tags || '').split(',').map(function(t) {{ return t.trim(); }}).filter(Boolean);
-  try {{ await _doSaveTags(id, current.filter(function(t) {{ return t !== tag; }})); }}
-  catch(e) {{ alert('Could not remove tag—please try again.'); }}
-}}
-function quickRemoveTagBtn(btn) {{
-  quickRemoveTag(parseInt(btn.dataset.articleId), btn.dataset.tag);
-}}
-function escapeHtml(s) {{
-  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}}
-// Same small markdown renderer as /ask — kept duplicated per this codebase's
-// no-shared-JS-module, self-contained-page-script convention.
-// Citations for the answer being rendered (set from each /ask response).
-var CITES = [];
-function mdInline(s) {{
-  s = escapeHtml(s);
-  s = s.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)/g, function(_, t, u) {{
-    return '<a href="' + u + '" target="_blank" rel="noopener">' + t + '</a>';
-  }});
-  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
-  s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
-  s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-  s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1<em>$2</em>');
-  s = s.replace(/(^|[^_])_([^_\\n]+)_(?!_)/g, '$1<em>$2</em>');
-  // Last, so the injected HTML is never re-processed: bare [n] citation
-  // markers become superscript links (same rule as the /ask page).
-  s = s.replace(/\\[(\\d{{1,2}})\\](?!\\()/g, function(m, num) {{
-    var i = parseInt(num, 10);
-    if (CITES && i >= 1 && i <= CITES.length) {{
-      return '<sup class="cite"><a href="' + encodeURI(CITES[i-1].url) + '" target="_blank" rel="noopener" title="' + escapeHtml(CITES[i-1].title) + '">[' + i + ']</a></sup>';
-    }}
-    return m;
-  }});
-  return s;
-}}
-function mdToHtml(raw) {{
-  var lines = (raw || '').split('\\n');
-  var html = [], para = [], listType = null;
-  function closeList() {{ if (listType) {{ html.push('</' + listType + '>'); listType = null; }} }}
-  function flushPara() {{ if (para.length) {{ html.push('<p>' + para.join('<br>') + '</p>'); para = []; }} }}
-  lines.forEach(function(line) {{
-    var t = line.trim();
-    var h = t.match(/^(#{{1,4}})\\s+(.*)$/);
-    var ol = t.match(/^\\d+\\.\\s+(.*)$/);
-    var ul = t.match(/^[-*]\\s+(.*)$/);
-    if (h) {{
-      flushPara(); closeList();
-      var lvl = Math.min(h[1].length + 2, 6);
-      html.push('<h' + lvl + '>' + mdInline(h[2]) + '</h' + lvl + '>');
-    }} else if (ol) {{
-      flushPara();
-      if (listType !== 'ol') {{ closeList(); html.push('<ol>'); listType = 'ol'; }}
-      html.push('<li>' + mdInline(ol[1]) + '</li>');
-    }} else if (ul) {{
-      flushPara();
-      if (listType !== 'ul') {{ closeList(); html.push('<ul>'); listType = 'ul'; }}
-      html.push('<li>' + mdInline(ul[1]) + '</li>');
-    }} else if (t === '') {{
-      flushPara(); closeList();
-    }} else {{
-      closeList();
-      para.push(mdInline(t));
-    }}
-  }});
-  flushPara(); closeList();
-  return html.join('');
-}}
-async function ask(){{
-  var q=document.getElementById('askq').value.trim();
-  if(!q)return;
-  var link=document.getElementById('more-opts-link');
-  if(link) link.href='/tools/fpa-buddy?q='+encodeURIComponent(q);
-  var box=document.getElementById('answer');
-  box.style.display='block';box.innerHTML='<em>Thinking…</em>';
-  try{{
-    var r=await fetch('/ask',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{question:q}})}});
-    var d=await r.json();
-    // Cited sources only, numbered to match the inline [n] markers.
-    CITES = d.citations || [];
-    var icons={{library:'&#128218;',feed:'&#128240;',web:'&#127760;'}};
-    var cites=CITES.map(function(c){{return '<li>'+(icons[c.type]||'')+' <a href="'+encodeURI(c.url)+'" target="_blank" rel="noopener">['+c.n+'] '+escapeHtml(c.title)+'</a></li>';}}).join('');
-    box.innerHTML=mdToHtml(d.answer)+(cites?'<ul style="padding-left:18px;font-size:13px;list-style:none;">'+cites+'</ul>':'');
-  }}catch(e){{box.innerHTML='Something went wrong.';}}
-}}
-</script>"""
+    sources_html = ""
+    if view == "feed" and cat_order:
+        cat_rows = ""
+        for c in cat_order:
+            srcs = cat_sources[c]
+            total_c = sum(srcs.values())
+            src_rows = "".join(
+                f'<div class="rr-src" data-cat="{_esc(c)}" data-src="{_esc(s)}" onclick="rrSelectSource(this)">'
+                f'<span>{_esc(s)}</span><span class="rr-cat-count">{n}</span></div>'
+                for s, n in sorted(srcs.items())
+            )
+            cat_rows += (
+                f'<div>'
+                f'<div class="rr-cat" data-cat="{_esc(c)}">'
+                f'<div style="display:flex;align-items:center;flex:1;min-width:0;" onclick="rrSelectCategory(this)">'
+                f'<span class="rr-cat-chev" onclick="event.stopPropagation();rrToggleCat(this)"></span>'
+                f'<span>{_esc(c)}</span></div>'
+                f'<span class="rr-cat-count">{total_c}</span></div>'
+                f'<div class="rr-src-list">{src_rows}</div>'
+                f'</div>'
+            )
+        sources_html = f'<div class="rr-rail-label">Sources</div>{cat_rows}'
+    elif view == "saved":
+        tagbar = "".join(f'<a href="/read?view=saved&q={_esc(t)}">{_esc(t)} ({c})</a>' for t, c in saved_tags)
+        sources_html = f"""<div class="rr-rail-label">Search</div>
+<form method="get" action="/read" style="margin-bottom:12px;">
+  <input type="hidden" name="view" value="saved">
+  <input type="search" name="q" value="{_esc(q)}" placeholder="Search titles, summaries, tags…"
+    style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--surface);">
+</form>
+<div class="rr-tagbar">{tagbar}</div>"""
 
-    return HTMLResponse(_page("Archive—Brian Weisberg", "Library", page_body, role=_role(request)))
+    rail_html = f"""<div class="rr-rail" id="rr-rail">
+  <a class="rr-rail-back" href="/admin/library">&larr; Library</a>
+  <div class="rr-rail-title">Reader</div>
+  <div>{quick_views_html}</div>
+  <div class="rr-rope"></div>
+  {sources_html}
+</div>"""
+
+    # -- list pane ------------------------------------------------------------
+    def _feed_row(item):
+        paywalled = any(dom in item.get("url", "") for dom in PAYWALLED_DOMAINS)
+        url = item.get("url", "")
+        source = item.get("source", "")
+        category = item.get("category") or "Other"
+        date = _reader_fmt_date(item.get("published_at") or "")
+        is_rl = url in rl_urls
+        badge = '<span class="rr-paywall-badge">&#128274; Paywalled</span>' if paywalled else ""
+        main_cls = "rr-row-main rr-row-disabled" if paywalled else "rr-row-main"
+        main_onclick = "" if paywalled else ' onclick="rrOpen(this)"'
+        main_open = (
+            f'<a href="{_esc(url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">'
+            if paywalled else ""
+        )
+        main_close = "</a>" if paywalled else ""
+        actions = ""
+        if not paywalled:
+            save_btn = '<button class="rr-row-btn" onclick="rrSaveItem(this)">+ Save</button>'
+            rl_lbl = "&#10003; Read later" if is_rl else "&#128204; Read later"
+            rl_cls = "rr-row-btn rr-row-btn-on" if is_rl else "rr-row-btn"
+            rl_btn = f'<button class="{rl_cls}" onclick="rrToggleReadLater(this)">{rl_lbl}</button>'
+            actions = f'<div class="rr-row-actions">{save_btn}{rl_btn}</div>'
+        return (
+            f'<div class="rr-row" data-category="{_esc(category)}" data-source="{_esc(source)}" data-rl="{1 if is_rl else 0}">'
+            f'<div class="{main_cls}"{main_onclick} data-url="{_esc(url)}" data-title="{_esc(item.get("title", ""))}" '
+            f'data-source-name="{_esc(source)}" data-pub="{_esc(item.get("published_at") or "")}" '
+            f'data-summary="{_esc((item.get("summary") or "")[:400])}">'
+            f'{main_open}'
+            f'<div class="rr-row-meta"><span class="rr-row-source">{_esc(source)}</span>'
+            f'<span style="color:var(--line-strong);">&middot;</span><span class="rr-row-date">{date}</span>{badge}</div>'
+            f'<div class="rr-row-title">{_esc(item.get("title", ""))}</div>'
+            f'<div class="rr-row-excerpt">{_esc(item.get("summary") or "")}</div>'
+            f'{main_close}</div>{actions}</div>'
+        )
+
+    def _saved_row(r):
+        tag_spans = "".join(f'<span>{_esc(t)}</span>' for t in r.get("tags", []))
+        date = _esc((r.get("saved_at") or "")[:10])
+        return (
+            f'<div class="rr-row" data-id="{r["id"]}">'
+            f'<div class="rr-row-main" onclick="rrOpen(this)" data-id="{r["id"]}" data-url="{_esc(r["url"])}">'
+            f'<div class="rr-row-meta"><span class="rr-row-source">{_esc(r.get("source", ""))}</span>'
+            f'<span style="color:var(--line-strong);">&middot;</span><span class="rr-row-date">{date}</span></div>'
+            f'<div class="rr-row-title">{_esc(r["title"])}</div>'
+            f'<div class="rr-row-excerpt">{_esc(r.get("summary", ""))}</div>'
+            f'<div class="rr-row-tags">{tag_spans}</div>'
+            f'</div></div>'
+        )
+
+    def _rl_row(r):
+        url = r["url"]
+        date = _reader_fmt_date(r.get("published_at") or "")
+        return (
+            f'<div class="rr-row" data-url="{_esc(url)}">'
+            f'<div class="rr-row-main" onclick="rrOpen(this)" data-url="{_esc(url)}" '
+            f'data-title="{_esc(r.get("title", ""))}" data-source-name="{_esc(r.get("source", ""))}" '
+            f'data-pub="{_esc(r.get("published_at") or "")}" data-summary="{_esc((r.get("summary") or "")[:400])}">'
+            f'<div class="rr-row-meta"><span class="rr-row-source">{_esc(r.get("source", ""))}</span>'
+            f'<span style="color:var(--line-strong);">&middot;</span><span class="rr-row-date">{date}</span></div>'
+            f'<div class="rr-row-title">{_esc(r.get("title") or "(no title)")}</div>'
+            f'<div class="rr-row-excerpt">{_esc(r.get("summary") or "")}</div>'
+            f'</div>'
+            f'<div class="rr-row-actions">'
+            f'<button class="rr-row-btn" onclick="rrRemoveReadLater(this)" data-url="{_esc(url)}">Remove</button>'
+            f'</div></div>'
+        )
+
+    if view == "saved":
+        rows_html = "".join(_saved_row(r) for r in saved_rows) or '<p style="padding:24px;color:var(--muted);">No matches.</p>'
+        list_title = "Saved"
+        list_count_label = f"{len(saved_rows)} of {saved_total} shown" if q else f"{saved_total} saved"
+    elif view == "readlater":
+        rows_html = "".join(_rl_row(r) for r in rl_rows) or '<p style="padding:24px;color:var(--muted);">No items saved to Read Later yet.</p>'
+        list_title = "Read Later"
+        list_count_label = f"{len(rl_rows)} items"
+    else:
+        rows_html = "".join(_feed_row(i) for i in feed_items) or '<p style="padding:24px;color:var(--muted);">No items loaded—feeds may be warming up. Try refreshing in a moment.</p>'
+        list_title = "Feed"
+        list_count_label = f"{len(feed_items)} items"
+
+    alert_html = ""
+    if stale:
+        dom = stale[0]
+        extra = f" and {len(stale) - 1} more" if len(stale) > 1 else ""
+        alert_html = (
+            '<div class="rr-alert">'
+            '<span style="flex-shrink:0;width:18px;height:18px;border-radius:50%;background:var(--coral);'
+            'color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;">!</span>'
+            f'<span style="flex:1;">Subscriber access looks stale for <strong>{_esc(dom)}</strong>{extra} &mdash; '
+            f'the cookie may have expired. Re-run the subscriber cookie refresh flow for {_esc(dom)}, then '
+            f'<a href="#" onclick="rrRecheckAuth(event)">re-check subscriber access</a>.</span>'
+            '</div>'
+        )
+
+    list_pane_html = f"""<div class="rr-list-pane" id="rr-list-pane">
+  <div class="rr-list-header">
+    <div class="rr-list-title" id="rr-list-title">{_esc(list_title)}</div>
+    <div class="rr-list-count" id="rr-list-count">{_esc(list_count_label)}</div>
+  </div>
+  {alert_html}
+  <div class="rr-list-rows" id="rr-list-rows">{rows_html}</div>
+</div>"""
+
+    reader_pane_html = """<div class="rr-reader-pane" id="rr-reader">
+  <div class="rr-reader-empty">
+    <div style="font-size:14px;">Select an article to start reading</div>
+  </div>
+</div>"""
+
+    body = (
+        _READER_SHELL_CSS
+        + '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
+        + f"""<div class="rr-shell">
+  {rail_html}
+  <div class="rr-resize" id="rr-resize-rail"></div>
+  {list_pane_html}
+  <div class="rr-resize" id="rr-resize-list"></div>
+  {reader_pane_html}
+</div>
+<script>
+function rrToggleCat(el) {{
+  el.classList.toggle('rr-open');
+  el.closest('.rr-cat').nextElementSibling.classList.toggle('rr-open');
+}}
+function rrSelectCategory(el) {{
+  var cat = el.closest('.rr-cat').dataset.cat;
+  document.querySelectorAll('.rr-cat').forEach(function(c) {{ c.classList.remove('rr-cat-on'); }});
+  document.querySelectorAll('.rr-src').forEach(function(s) {{ s.classList.remove('rr-src-on'); }});
+  el.closest('.rr-cat').classList.add('rr-cat-on');
+  rrApplyFilter(cat, null);
+}}
+function rrSelectSource(el) {{
+  var cat = el.dataset.cat, src = el.dataset.src;
+  document.querySelectorAll('.rr-cat').forEach(function(c) {{ c.classList.remove('rr-cat-on'); }});
+  document.querySelectorAll('.rr-src').forEach(function(s) {{ s.classList.remove('rr-src-on'); }});
+  el.classList.add('rr-src-on');
+  rrApplyFilter(cat, src);
+}}
+function rrApplyFilter(cat, src) {{
+  var rows = document.querySelectorAll('#rr-list-rows > .rr-row');
+  var shown = 0;
+  rows.forEach(function(r) {{
+    var ok = (!cat || r.dataset.category === cat) && (!src || r.dataset.source === src);
+    r.style.display = ok ? '' : 'none';
+    if (ok) shown++;
+  }});
+  document.getElementById('rr-list-title').textContent = src ? (cat + ' \\u00b7 ' + src) : (cat || 'Feed');
+  document.getElementById('rr-list-count').textContent = shown + ' items';
+}}
+function rrOpen(el) {{
+  document.querySelectorAll('.rr-row').forEach(function(r) {{ r.classList.remove('rr-row-selected'); }});
+  el.closest('.rr-row').classList.add('rr-row-selected');
+  var id = el.dataset.id, url = el.dataset.url;
+  rrLoadArticle(id, url, {{
+    title: el.dataset.title, source: el.dataset.sourceName,
+    pub: el.dataset.pub, summary: el.dataset.summary
+  }});
+}}
+var rrCurrent = null;
+var rrFsStep = 0;
+var rrFsSizes = [17, 15, 20];
+async function rrLoadArticle(id, url, fallback) {{
+  var pane = document.getElementById('rr-reader');
+  pane.innerHTML = '<div class="rr-reader-empty"><div>Loading&hellip;</div></div>';
+  try {{
+    var qs = id ? ('id=' + encodeURIComponent(id)) : ('url=' + encodeURIComponent(url));
+    var r = await fetch('/api/read-article?' + qs);
+    if (!r.ok) throw new Error('fetch failed');
+    var d = await r.json();
+    rrCurrent = d;
+    rrRenderArticle(d);
+  }} catch (e) {{
+    pane.innerHTML = '<div class="rr-reader-empty"><div>Could not load this article.</div></div>';
+  }}
+}}
+function rrEsc(s) {{
+  return (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}}
+function rrRenderArticle(d) {{
+  var pane = document.getElementById('rr-reader');
+  var isSaved = !!d.id;
+  var isRl = document.querySelector('.rr-row-selected .rr-row-btn-on') !== null;
+  var byline = [d.source, (d.published_at || '').slice(0, 10)].filter(Boolean).join(' &middot; ');
+  if (d.reading_minutes) byline += (byline ? ' &middot; ' : '') + d.reading_minutes + ' min read';
+  var saveBtn = isSaved ? '' : '<button onclick="rrSaveCurrent()">+ Save</button>';
+  var rlBtn = '<button id="rr-reader-rl" class="' + (isRl ? 'rr-row-btn-on' : '') + '" onclick="rrToggleReadLaterCurrent()">' +
+    (isRl ? '&#10003; Read later' : '&#128204; Read later') + '</button>';
+  var body = d.has_content ? d.body_html :
+    '<p style="color:var(--muted);">Content could not be extracted. <a href="' + rrEsc(d.url) + '" target="_blank" rel="noopener">Open original &rarr;</a></p>';
+  pane.innerHTML =
+    '<div class="rr-reader-header">' +
+      '<button class="rr-reader-close" onclick="rrCloseReader()">&times;</button>' +
+      '<div class="rr-reader-actions">' + saveBtn + rlBtn +
+        '<button onclick="rrCycleFontSize()">Aa</button>' +
+        '<a href="' + rrEsc(d.url) + '" target="_blank" rel="noopener" style="font-size:12px;">Original &rarr;</a>' +
+      '</div>' +
+    '</div>' +
+    '<div class="rr-reader-body">' +
+      '<div class="rr-reader-category">' + rrEsc(d.category) + '</div>' +
+      '<div class="rr-reader-title">' + rrEsc(d.title) + '</div>' +
+      '<div class="rr-reader-byline">' + byline + '</div>' +
+      '<div class="rr-reader-body-text" id="rr-reader-body-text" style="--rr-fs:' + rrFsSizes[rrFsStep] + 'px;">' + body + '</div>' +
+    '</div>';
+}}
+function rrCloseReader() {{
+  document.querySelectorAll('.rr-row').forEach(function(r) {{ r.classList.remove('rr-row-selected'); }});
+  document.getElementById('rr-reader').innerHTML =
+    '<div class="rr-reader-empty"><div style="font-size:14px;">Select an article to start reading</div></div>';
+  rrCurrent = null;
+}}
+function rrCycleFontSize() {{
+  rrFsStep = (rrFsStep + 1) % rrFsSizes.length;
+  var el = document.getElementById('rr-reader-body-text');
+  if (el) el.style.setProperty('--rr-fs', rrFsSizes[rrFsStep] + 'px');
+}}
+async function rrSaveItem(btn) {{
+  var main = btn.closest('.rr-row').querySelector('.rr-row-main');
+  var url = main.dataset.url;
+  var t = prompt('Tags (comma-separated, optional):');
+  if (t === null) return;
+  btn.textContent = 'Saving…';
+  btn.disabled = true;
+  try {{
+    var r = await fetch('/feed/save', {{method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+      body: 'url=' + encodeURIComponent(url) + '&tags=' + encodeURIComponent(t)}});
+    btn.textContent = r.ok ? '\\u2713 Saved' : '\\u2717 Error';
+  }} catch (e) {{ btn.textContent = '\\u2717 Error'; btn.disabled = false; }}
+}}
+async function rrSaveCurrent() {{
+  if (!rrCurrent) return;
+  var t = prompt('Tags (comma-separated, optional):');
+  if (t === null) return;
+  try {{
+    await fetch('/feed/save', {{method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+      body: 'url=' + encodeURIComponent(rrCurrent.url) + '&tags=' + encodeURIComponent(t)}});
+  }} catch (e) {{}}
+}}
+async function rrToggleReadLater(btn) {{
+  var row = btn.closest('.rr-row');
+  var main = row.querySelector('.rr-row-main');
+  var isRl = row.dataset.rl === '1';
+  var params = new URLSearchParams({{
+    url: main.dataset.url, action: isRl ? 'remove' : 'add',
+    title: main.dataset.title || '', source: main.dataset.sourceName || '',
+    summary: main.dataset.summary || '', published_at: main.dataset.pub || ''
+  }});
+  btn.disabled = true;
+  try {{
+    var r = await fetch('/feed/read-later', {{method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}}, body: params}});
+    if (r.ok) {{
+      var next = isRl ? '0' : '1';
+      row.dataset.rl = next;
+      btn.innerHTML = next === '1' ? '&#10003; Read later' : '&#128204; Read later';
+      btn.classList.toggle('rr-row-btn-on', next === '1');
+    }}
+  }} finally {{ btn.disabled = false; }}
+}}
+async function rrToggleReadLaterCurrent() {{
+  if (!rrCurrent) return;
+  var btn = document.getElementById('rr-reader-rl');
+  var isOn = btn.classList.contains('rr-row-btn-on');
+  var params = new URLSearchParams({{
+    url: rrCurrent.url, action: isOn ? 'remove' : 'add',
+    title: rrCurrent.title || '', source: rrCurrent.source || ''
+  }});
+  btn.disabled = true;
+  try {{
+    var r = await fetch('/feed/read-later', {{method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}}, body: params}});
+    if (r.ok) {{
+      btn.classList.toggle('rr-row-btn-on', !isOn);
+      btn.innerHTML = !isOn ? '&#10003; Read later' : '&#128204; Read later';
+    }}
+  }} finally {{ btn.disabled = false; }}
+}}
+async function rrRemoveReadLater(btn) {{
+  var url = btn.dataset.url;
+  btn.disabled = true;
+  try {{
+    var r = await fetch('/feed/read-later', {{method: 'POST',
+      headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+      body: new URLSearchParams({{url: url, action: 'remove'}})}});
+    if (r.ok) {{
+      var row = btn.closest('.rr-row');
+      row.style.transition = 'opacity .25s';
+      row.style.opacity = '0';
+      setTimeout(function() {{ row.remove(); }}, 260);
+    }}
+  }} finally {{ btn.disabled = false; }}
+}}
+async function rrRecheckAuth(e) {{
+  e.preventDefault();
+  try {{ await fetch('/admin/auth/recheck', {{method: 'POST'}}); }} catch (err) {{}}
+  location.reload();
+}}
+(function() {{
+  function makeResizer(handleId, paneEl, min, max) {{
+    var handle = document.getElementById(handleId);
+    if (!handle) return;
+    handle.addEventListener('mousedown', function(e) {{
+      e.preventDefault();
+      var startX = e.clientX, startWidth = paneEl.getBoundingClientRect().width;
+      function onMove(ev) {{
+        var next = Math.max(min, Math.min(max, startWidth + (ev.clientX - startX)));
+        paneEl.style.flexBasis = next + 'px';
+      }}
+      function onUp() {{
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      }}
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }});
+  }}
+  makeResizer('rr-resize-rail', document.getElementById('rr-rail'), 150, 360);
+  makeResizer('rr-resize-list', document.getElementById('rr-list-pane'), 300, 760);
+}})();
+</script>"""
+    )
+
+    return HTMLResponse(_page("Reader—Brian Weisberg", "Library", body, role=_role(request)))
 
 
 # Note: /library/past-questions was retired in Phase 2 — folded into the
@@ -16008,6 +15906,7 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 # Library management lives on its own page (/admin/library) so the hub stays
 # uncluttered. Ordered as the recommended workflow — top to bottom.
 _LIBRARY_TOOLS = [
+    ("/read",                       "Open Reader",         "The day-to-day reading surface (Phase 5): Feed, Saved, and Read Later in one three-pane view, with an in-app reader pane. This is where you actually read—the tools below are curation."),
     ("/admin/library/backup",       "Archive backup",      "Snapshot the database before you start, so you can roll back if needed."),
     ("/admin/library/backfill",     "Historical sweep",    "One-time catch-up: crawl each source's sitemap for older articles you saved before this tool existed, and queue them for review. Run once per source; new candidates land in Archive Queue below."),
     ("/admin/library/queue",        "Archive Queue",       "Review every proposed save from the historical sweep or an ongoing feed scan—fix dates, edit tags, and approve into the archive or dismiss."),
@@ -16925,17 +16824,20 @@ _PAGE_TIER_LABELS = {"full": "page-full", "grid": "page-grid",
 # Routes whose width can't be read off a `.page-*` class name in their own
 # source, so the live-introspection regex below would otherwise flag them as
 # untiered — each maps to the accurate label to show instead of re-deriving it.
-# Two are bespoke full-bleed layouts documented in BRAND.md §5 as living
-# outside the .page tier system entirely (their own internal widths, not one
-# of the four tiers). `/read` is different: it genuinely renders at the
-# page-full width (1900px, matching BRAND.md §5's own listing of it under
-# that tier) — it's just built from a fully standalone `_READER_TMPL`/
-# `_READER_CSS` template that never uses the `.page`/`.page-full` classes, so
-# it gets its real tier name (not "custom exception") rather than a false flag.
+# `/read` (Phase 5 — the merged Reader shell) is a bespoke full-bleed
+# three-pane layout, same reasoning the old /library/archive and
+# /library/feed carried before the Phase 5 merge: it never uses the
+# `.page`/`.page-full` classes, it has its own internal widths, so it's a
+# genuine custom exception, not a false "no tier assigned" flag.
+# `/read/{article_id}` (the single-article standalone view) is different: it
+# genuinely renders at the page-full width (1900px, matching BRAND.md §5's
+# own listing of it under that tier) — it's just built from a fully
+# standalone `_READER_TMPL`/`_READER_CSS` template that never uses the
+# `.page`/`.page-full` classes, so it gets its real tier name (not "custom
+# exception") rather than a false flag.
 _PAGE_INDEX_CUSTOM_EXCEPTIONS = {
-    "/library/archive": "custom exception",
-    "/library/feed": "custom exception",
-    "/read": "page-full",
+    "/read": "custom exception",
+    "/read/{article_id}": "page-full",
 }
 
 
@@ -17599,13 +17501,13 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Library</h1>
 {auth_banner}
-<p style="color:var(--muted);margin:4px 0 6px;">Full management of the digital archive. The eight tools below cover backing it up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from.</p>
+<p style="color:var(--muted);margin:4px 0 6px;">Open Reader for your day-to-day reading. The other eight tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from.</p>
 <p style="color:var(--muted);margin:0 0 18px;">For a first-time cleanup, work top to bottom&mdash;each step sets up the next. Once set up, jump to any tool directly anytime.</p>
 {_content_flow_diagram()}
-<p style="color:var(--muted);font-size:14px;margin:-8px 0 6px;">New content always enters through the queue (step&nbsp;2 or&nbsp;3) for your review before it's saved. From there:</p>
+<p style="color:var(--muted);font-size:14px;margin:-8px 0 6px;">New content always enters through the queue (step&nbsp;3 or&nbsp;4) for your review before it's saved. From there:</p>
 <ul style="color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px;padding-left:20px;">
-<li>De-duping and enrichment (steps&nbsp;4&ndash;5) get it ready for the FP&amp;A Buddy corpus.</li>
-<li>Filtering out anything off-target (step&nbsp;6) and tidying tags (steps&nbsp;7&ndash;8) keeps that corpus clean, on an ongoing basis.</li>
+<li>De-duping and enrichment (steps&nbsp;5&ndash;6) get it ready for the FP&amp;A Buddy corpus.</li>
+<li>Filtering out anything off-target (step&nbsp;7) and tidying tags (steps&nbsp;8&ndash;9) keeps that corpus clean, on an ongoing basis.</li>
 </ul>
 <div style="display:grid;gap:12px;">{cards}</div>
 
@@ -20789,7 +20691,7 @@ def admin_enrich(request: Request):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
   <p style="font-size:13.5px;color:var(--muted);margin:0;line-height:1.6;">
     <strong>After finishing:</strong> visit <a href="/admin/library/review-removals">Review removals</a> to confirm any articles the enricher flagged as off-audience,
-    and check the enriched summaries in the <a href="/library/archive">Archive</a>.
+    and check the enriched summaries in the <a href="/read?view=saved">Reader's Saved view</a>.
   </p>
 </div>
 
@@ -22283,7 +22185,7 @@ def backup_now_route(request: Request, token: str | None = None):
         msg = f"Backup failed: {e}"
         status_code = 502
     body = f"""<div class="page page-admin"><h1>Backup</h1><p>{msg}</p>
-  <p style="margin-top:1rem;"><a href="/library/archive">Back to the archive →</a></p></div>"""
+  <p style="margin-top:1rem;"><a href="/read?view=saved">Back to Saved →</a></p></div>"""
     return HTMLResponse(_page("Backup", "", body, authed=True), status_code=status_code)
 
 
@@ -22411,7 +22313,7 @@ def library_delete(request: Request, article_id: int):
         _log_archive_audit(lib, request, "delete", article_id)
     finally:
         lib.close()
-    return RedirectResponse("/library/archive", status_code=303)
+    return RedirectResponse("/read?view=saved", status_code=303)
 
 
 @app.get("/static/{filename}")
