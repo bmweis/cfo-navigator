@@ -1994,8 +1994,15 @@ def homepage(request: Request):
     body = f"""<div class="page page-full">
 <style>
 {_TL_SHARED_CSS}
+/* Mobile (default): plain stacked flow, DOM order = hero -> photo card ->
+   Thought Leadership section -> Toolbox/Reader sidebar rest. That specific
+   order (photo card between the hero and Thought Leadership, not at the very
+   bottom with the rest of the sidebar) is a deliberate mobile-only ask —
+   see CLAUDE.md's Homepage Restructure mobile-order note. Desktop restores
+   the two-column layout via explicit grid placement below, independent of
+   this DOM order. */
 .home-grid{{display:flex;flex-direction:column;gap:48px;}}
-.home-side{{display:flex;flex-direction:column;gap:20px;}}
+.home-sidebar-rest{{display:flex;flex-direction:column;gap:20px;}}
 .home-photo-wrap{{position:relative;width:100%;height:340px;}}
 .home-avatar-wrap{{position:relative;width:200px;height:200px;margin:0 auto;z-index:3;}}
 .home-status{{position:absolute;top:150px;left:0;right:0;background:#fff;border:2px solid var(--ink-graffiti);border-radius:14px;padding:20px 22px;transform:rotate(-1.5deg);box-shadow:3px 3px 0 var(--ink-graffiti);box-sizing:border-box;z-index:2;}}
@@ -2008,60 +2015,67 @@ def homepage(request: Request):
 .home-tl-bullet{{display:flex;gap:12px;font-size:15.5px;line-height:1.55;color:var(--ink-soft);}}
 .home-tl-bullet-mark{{color:var(--navy);flex-shrink:0;font-size:18px;line-height:1.3;}}
 .home-tl-highlights{{display:grid;grid-template-columns:1fr;gap:24px;border-top:1px solid var(--line);padding-top:24px;margin-top:8px;}}
-@media(min-width:900px){{
-  .home-grid{{display:grid;grid-template-columns:1fr 360px;gap:56px;align-items:start;}}
-  .home-photo-wrap{{height:400px;}}
+/* 1024px, not the sitewide-standard 900px other sections on this page use —
+   deliberately wider so the mobile stacked order (and its photo-card
+   placement above) holds through phone landscape too, not just portrait.
+   The largest common phones land around 930px wide in landscape, which
+   would otherwise cross a 900px breakpoint into the desktop 2-column grid
+   and undo the requested mobile ordering purely from a screen rotation. */
+@media(min-width:1024px){{
+  .home-grid{{display:grid;grid-template-columns:1fr 360px;grid-template-rows:auto auto;gap:56px;align-items:start;}}
+  .home-hero-block{{grid-column:1;grid-row:1;}}
+  .home-tl-section{{grid-column:1;grid-row:2;}}
+  .home-photo-wrap{{grid-column:2;grid-row:1;height:400px;}}
   .home-avatar-wrap{{width:240px;height:240px;left:40px;top:-16px;}}
   .home-status{{top:190px;left:-30px;right:auto;width:calc(100% + 30px);}}
+  .home-sidebar-rest{{grid-column:2;grid-row:2;}}
 }}
 @media(min-width:560px){{
   .home-tl-highlights{{grid-template-columns:1fr 1fr;}}
 }}
 </style>
 <div class="home-grid">
-  <div style="min-width:0;">
-    <div style="padding-top:8px;margin-bottom:52px;">
-      <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:18px;">A CFO, for CFOs</div>
-      <h1 style="margin:0 0 22px;max-width:640px;font-family:var(--font-head);font-weight:700;font-size:clamp(32px,3.6vw,46px);line-height:1.1;">{_underline_last_word(homepage_headline)}</h1>
-      {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;max-width:640px;")}
+  <div class="home-hero-block" style="min-width:0;padding-top:8px;">
+    <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:18px;">A CFO, for CFOs</div>
+    <h1 style="margin:0 0 22px;max-width:640px;font-family:var(--font-head);font-weight:700;font-size:clamp(32px,3.6vw,46px);line-height:1.1;">{_underline_last_word(homepage_headline)}</h1>
+    {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;max-width:640px;")}
+  </div>
+
+  <div class="home-photo-wrap">
+    <div class="home-avatar-wrap">
+      {_avatar(200)}
+      {_sticker("hi, I&rsquo;m Brian 🤙", rotate=-6, top="-18px", right="-10px")}
     </div>
-
-    <div>
-      <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:14px;">Thought Leadership</div>
-      <h2 style="margin:0 0 16px;font-family:var(--font-head);font-weight:700;font-size:28px;">What I write about</h2>
-      <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0 0 22px;max-width:640px;">Frameworks, playbooks, and real opinions on building finance functions that scale&mdash;collected across writing, speaking, podcasts, and press.</p>
-
-      <ul class="home-tl-bullets" style="padding:0;list-style:none;">
-        <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing.</li>
-        <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Frameworks myself and others have built, real opinions, and stories from the trenches.</li>
-        <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>How to move from scorekeeper to strategic partner: stop reporting what happened, start shaping what&rsquo;s next.</li>
-        <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
-      </ul>
-
-      {_tl_featured_cards_html(_TL_FEATURED_CARDS)}
-
-      <div class="home-tl-highlights">
-        <div style="grid-column:1/-1;font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;">Recent highlights</div>
-        {recent_highlights}
-      </div>
-
-      <a href="/thought-leadership" style="display:inline-block;margin-top:32px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
+    <div class="home-status">
+      <div style="font:700 16px var(--font-wordmark);color:var(--seafoam-deep);margin-bottom:10px;">Status:</div>
+      {_copy_paragraphs_html(homepage_teaser, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
+      {_copy_paragraphs_html(homepage_expanded, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
     </div>
   </div>
 
-  <div class="home-side">
-    <div class="home-photo-wrap">
-      <div class="home-avatar-wrap">
-        {_avatar(200)}
-        {_sticker("hi, I&rsquo;m Brian 🤙", rotate=-6, top="-18px", right="-10px")}
-      </div>
-      <div class="home-status">
-        <div style="font:700 16px var(--font-wordmark);color:var(--seafoam-deep);margin-bottom:10px;">Status:</div>
-        {_copy_paragraphs_html(homepage_teaser, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
-        {_copy_paragraphs_html(homepage_expanded, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
-      </div>
+  <div class="home-tl-section" style="min-width:0;">
+    <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:14px;">Thought Leadership</div>
+    <h2 style="margin:0 0 16px;font-family:var(--font-head);font-weight:700;font-size:28px;">What I write about</h2>
+    <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0 0 22px;max-width:640px;">Frameworks, playbooks, and real opinions on building finance functions that scale&mdash;collected across writing, speaking, podcasts, and press.</p>
+
+    <ul class="home-tl-bullets" style="padding:0;list-style:none;">
+      <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing.</li>
+      <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Frameworks myself and others have built, real opinions, and stories from the trenches.</li>
+      <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>How to move from scorekeeper to strategic partner: stop reporting what happened, start shaping what&rsquo;s next.</li>
+      <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
+    </ul>
+
+    {_tl_featured_cards_html(_TL_FEATURED_CARDS)}
+
+    <div class="home-tl-highlights">
+      <div style="grid-column:1/-1;font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;">Recent highlights</div>
+      {recent_highlights}
     </div>
 
+    <a href="/thought-leadership" style="display:inline-block;margin-top:32px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
+  </div>
+
+  <div class="home-sidebar-rest">
     <div class="home-toolbox-panel">
       {_sticker("🚧 building", rotate=-4, top="-14px", right="14px", size=14)}
       <div style="font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:10px;">CFO Toolbox</div>

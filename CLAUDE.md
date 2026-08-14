@@ -908,6 +908,28 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     pick) — the two sections pull from different, independent data sources
     (a hardcoded tuple vs. a per-type DB query) with no dedup between them,
     same as the file shows no such guard either.
+- **Homepage Restructure — mobile-only DOM reorder: the photo/status card
+  moves between the hero and Thought Leadership sections, not to the very
+  bottom with the rest of the sidebar.** A follow-up request from Brian after
+  seeing the mobile render: on narrow viewports the photo/status card should
+  sit right after the hero copy (ending "...CFO Toolbox and Digital Library I
+  built along the way.") and before the "Thought Leadership / What I write
+  about" section — not stacked at the bottom alongside the Toolbox panel and
+  Reader-access placeholder, which is where plain DOM order had put the whole
+  former `.home-side` sidebar bundle. Fixed by splitting the homepage's single
+  two-item grid (`.home-hero-copy`+`.home-tl-section` / `.home-side`) into
+  four independent top-level grid children — `.home-hero-block`,
+  `.home-photo-wrap`, `.home-tl-section`, `.home-sidebar-rest` (Toolbox panel
+  + Reader-access box) — in that exact DOM order. Below the 900px breakpoint
+  `.home-grid` is a plain `flex-direction:column` stack with no per-item
+  overrides, so DOM order *is* the rendered mobile order for free. At 900px+
+  the existing two-column desktop layout is restored via explicit
+  `grid-column`/`grid-row` placement on each of the four children (hero at
+  column 1 row 1, Thought Leadership at column 1 row 2, photo card at column
+  2 row 1, sidebar-rest at column 2 row 2) — completely independent of DOM
+  order, so the desktop design-file layout is unaffected by this change.
+  `test_mobile_dom_order_photo_card_between_hero_and_thought_leadership`
+  asserts the DOM order directly.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

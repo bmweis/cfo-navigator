@@ -249,3 +249,34 @@ def test_speaking_and_events_renders_without_double_escaping(env):
     html = _client(env).get("/thought-leadership").text
     assert "&amp;amp;" not in html
     assert "Speaking &amp; Events" in html  # correctly single-escaped in the raw HTML
+
+
+def test_mobile_dom_order_photo_card_between_hero_and_thought_leadership(env):
+    """On mobile, .home-grid is a plain stacked flow (no CSS grid override
+    below the desktop breakpoint), so DOM order is what actually renders. The
+    photo/status card must sit between the hero block and the Thought
+    Leadership section — not at the very end with the rest of the sidebar —
+    per Brian's explicit mobile-order request. Desktop layout is restored via
+    separate explicit grid-column/grid-row placement, independent of this
+    DOM order."""
+    html = _client(env).get("/").text
+    hero_idx = html.index('class="home-hero-block"')
+    photo_idx = html.index('class="home-photo-wrap"')
+    tl_idx = html.index('class="home-tl-section"')
+    sidebar_rest_idx = html.index('class="home-sidebar-rest"')
+    assert hero_idx < photo_idx < tl_idx < sidebar_rest_idx
+
+
+def test_mobile_order_breakpoint_survives_phone_landscape_widths(env):
+    """The desktop 2-column grid must not kick in at typical phone-landscape
+    widths (the largest common phones land around ~930px), or the mobile
+    ordering above would flip back to the desktop layout purely from a
+    screen rotation, not an actual desktop viewport. 1024px (not the
+    sitewide-standard 900px other sections on this page use) is the
+    deliberate, wider breakpoint that keeps phones — portrait or
+    landscape — on the stacked mobile order."""
+    html = _client(env).get("/").text
+    idx = html.find("@media(min-width:1024px)")
+    assert idx != -1
+    assert ".home-grid{display:grid" in html[idx:idx + 60]
+    assert "@media(min-width:900px){\n  .home-grid{display:grid" not in html
