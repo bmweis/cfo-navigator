@@ -640,6 +640,47 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   exact hex colors, badge/icon sizes, padding), flagged here rather than silently
   assumed equivalent — worth a visual diff against the design file next time someone
   can reach it.
+- **Phase 3 addendum — a matching homepage Thought Leadership teaser, a
+  `featured_home` pin field, and a real schema change (unlike Phase 3 itself).**
+  Removing the redundant "CFO Toolbox" homepage card left the top card row with
+  just one lone card (Thought Leadership) sitting above a full teaser section for
+  Toolbox alone — a visible asymmetry once the Phase 3 preview was actually
+  looked at. Fixed by giving Thought Leadership the identical compact-teaser
+  treatment: same eyebrow style, same panel, same mini-tile grid — the CSS
+  classes backing both sections were renamed from `.home-toolbox-*` to the
+  shared `.home-teaser*` to make that a literal shared component rather than
+  two near-duplicates. Only the content between the heading and the panel
+  differs: Toolbox keeps its one-line subline, while Thought Leadership gets a
+  four-item bulleted list (generous line-height/spacing, deliberately not
+  compressed) since its themes don't compress to a single sentence the way
+  Toolbox's four nouns do. Tile selection needed a real decision, not just
+  most-recent-3: `thought_leadership.featured_home` is a new column — a
+  "Feature on homepage" checkbox on both the add and edit admin
+  forms — with `Library.list_thought_leadership_for_home` picking pinned
+  entries first (reusing the exact same `_TL_ORDER_SQL` recency rule
+  `/thought-leadership`'s own columns already sort by, not a reinvented one),
+  backfilling with the most-recent unpinned entries until 3 tiles are filled,
+  and truncating rather than overflowing if more than 3 are pinned at once.
+  Defaults to 0 for every existing row — no retroactive pinning, same
+  precedent as every other needs-verification-style column's migration. Each
+  tile reuses the exact per-type icon already drawn for the `/thought-leadership`
+  columns (`_TL_COLUMN_ICONS`, via a new `_TL_TYPE_ICON` lookup keyed off
+  `_TL_TYPES`' existing order) rather than drawing anything new, and links
+  straight to the piece using the same venue/date_label metadata the full page
+  already shows. **Also fixed while in the same template:** the "Speaking &
+  Events" section header was rendering literally as "Speaking &amp;amp; Events"
+  — the section-title string was hardcoded as the already-HTML-escaped
+  `"Speaking &amp; Events"` in Python, then passed through `_esc()` a second
+  time by `column()`, which escapes every title it's given. Fixed by storing
+  the plain, unescaped `"Speaking & Events"` at the source (matching
+  `_TL_TYPES`' own label, which was never double-escaped) and letting `_esc()`
+  do its one intended escaping pass — checked the rest of `/thought-leadership`
+  for the same pattern (any hardcoded `&amp;`-containing string later run
+  through `_esc()`) and found no other instance. The four teaser list items'
+  copy was supplied verbatim by Brian in the build brief for this addendum,
+  em dashes included — flagging that per the em-dash policy above, but noting
+  the copy was pre-approved by the person the policy asks it be flagged to,
+  not independently written and shipped.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

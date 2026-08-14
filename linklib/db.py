@@ -1602,6 +1602,13 @@ class Library:
             # the same pass — order matters, so this must stay after them.
             "ALTER TABLE tools RENAME COLUMN differentiation_note TO competitive_differentiation",
             "ALTER TABLE tools RENAME COLUMN differentiation_needs_verification TO competitive_differentiation_needs_verification",
+            # Phase 3 addendum: the homepage's new Thought Leadership teaser
+            # picks 3 tiles per entry, pinned entries first — this is the pin
+            # flag. Defaults to 0 for every existing row (no retroactive
+            # pinning), same precedent as agent_taxonomy_needs_verification's
+            # own migration. See list_thought_leadership_for_homepage below
+            # for the selection logic this drives.
+            "ALTER TABLE thought_leadership ADD COLUMN featured_home INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -3517,9 +3524,33 @@ class Library:
         row = self.conn.execute("SELECT * FROM thought_leadership WHERE id = ?", (item_id,)).fetchone()
         return dict(row) if row else None
 
+    def list_thought_leadership_for_home(self, limit: int = 3) -> list[dict]:
+        """Homepage Thought Leadership teaser tile selection (Phase 3 addendum):
+        pinned entries (featured_home=1) first, ordered among themselves by the
+        same recency rule the /thought-leadership page already uses
+        (_TL_ORDER_SQL — undated float to top, else newest sort_key first,
+        display_order as tiebreak). If fewer than `limit` are pinned, backfill
+        with the most-recent unpinned entries (same ordering) until `limit`
+        tiles are filled. More than `limit` pinned entries are truncated to
+        the most recent `limit` — never overflows the tile count."""
+        pinned = self.conn.execute(
+            f"SELECT * FROM thought_leadership WHERE featured_home = 1 ORDER BY {self._TL_ORDER_SQL} LIMIT ?",
+            (limit,),
+        ).fetchall()
+        items = [dict(r) for r in pinned]
+        remaining = limit - len(items)
+        if remaining > 0:
+            unpinned = self.conn.execute(
+                f"SELECT * FROM thought_leadership WHERE featured_home = 0 ORDER BY {self._TL_ORDER_SQL} LIMIT ?",
+                (remaining,),
+            ).fetchall()
+            items.extend(dict(r) for r in unpinned)
+        return items
+
     def add_thought_leadership(self, type: str, title: str, url: str = "", venue: str = "",
                                date_label: str = "", sort_key: str = "", description: str = "",
-                               needs_synopsis: bool = False, display_order: int | None = None) -> int:
+                               needs_synopsis: bool = False, display_order: int | None = None,
+                               featured_home: bool = False) -> int:
         if display_order is None:
             display_order = self.conn.execute(
                 "SELECT COALESCE(MAX(display_order), -1) + 1 FROM thought_leadership WHERE type = ?",
@@ -3528,22 +3559,25 @@ class Library:
         now = _now()
         cur = self.conn.execute(
             "INSERT INTO thought_leadership "
-            "(type, title, url, venue, date_label, sort_key, description, needs_synopsis, display_order, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "(type, title, url, venue, date_label, sort_key, description, needs_synopsis, display_order, "
+            "featured_home, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (type, title.strip(), url.strip(), venue.strip(), date_label.strip(), sort_key.strip(),
-             description.strip(), int(bool(needs_synopsis)), display_order, now, now),
+             description.strip(), int(bool(needs_synopsis)), display_order, int(bool(featured_home)), now, now),
         )
         self.conn.commit()
         return cur.lastrowid
 
     def update_thought_leadership(self, item_id: int, type: str, title: str, url: str, venue: str,
                                   date_label: str, sort_key: str, description: str,
-                                  needs_synopsis: bool, display_order: int) -> None:
+                                  needs_synopsis: bool, display_order: int,
+                                  featured_home: bool = False) -> None:
         self.conn.execute(
             "UPDATE thought_leadership SET type=?, title=?, url=?, venue=?, date_label=?, sort_key=?, "
-            "description=?, needs_synopsis=?, display_order=?, updated_at=? WHERE id=?",
+            "description=?, needs_synopsis=?, display_order=?, featured_home=?, updated_at=? WHERE id=?",
             (type, title.strip(), url.strip(), venue.strip(), date_label.strip(), sort_key.strip(),
-             description.strip(), int(bool(needs_synopsis)), display_order, _now(), item_id),
+             description.strip(), int(bool(needs_synopsis)), display_order, int(bool(featured_home)),
+             _now(), item_id),
         )
         self.conn.commit()
 

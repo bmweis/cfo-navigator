@@ -1106,7 +1106,15 @@ effect.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident) |
+| `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (Phase 3 addendum — "Feature on homepage" checkbox on both the add and edit forms; pins an entry into the homepage's Thought Leadership teaser regardless of recency; defaults to 0, no retroactive backfill) |
+
+`Library.list_thought_leadership_for_home(limit=3)` (Phase 3 addendum) selects the
+homepage teaser's tiles: entries with `featured_home=1` first (ordered among
+themselves by the same `_TL_ORDER_SQL` recency rule the `/thought-leadership`
+columns already use — undated float to top, else newest `sort_key` first,
+`display_order` as tiebreak), truncated to `limit` if more than `limit` are
+pinned; then backfilled with the most-recent `featured_home=0` entries (same
+ordering) until `limit` tiles are filled. Never overflows the tile count.
 
 One Speaking & Events entry (Abacum AI Summit) has photos — a field this
 table doesn't carry, since it's the only entry that ever used it. It stays

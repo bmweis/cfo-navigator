@@ -1946,6 +1946,7 @@ def homepage(request: Request):
         homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
         homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
+        tl_teaser_items = lib.list_thought_leadership_for_home(limit=3)
     finally:
         lib.close()
 
@@ -1977,6 +1978,10 @@ def homepage(request: Request):
         for i, (_href, title, icon, _desc, one_liner) in enumerate(_TOOLBOX_TILES)
     )
 
+    tl_mini_tiles = "".join(
+        _tl_home_tile(i, item) for i, item in enumerate(tl_teaser_items)
+    )
+
     body = f"""<div class="page page-full">
 <style>
 .home-hero{{display:flex;flex-direction:column;gap:28px;align-items:stretch;}}
@@ -1985,9 +1990,13 @@ def homepage(request: Request):
 .home-hero-photo{{position:relative;z-index:2;flex-shrink:0;}}
 .home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
 .home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;max-width:460px;}}
-.home-toolbox-teaser{{margin:32px 0 8px;}}
-.home-toolbox-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:16px;}}
-.home-toolbox-grid{{display:grid;grid-template-columns:1fr;gap:16px;}}
+/* Shared "compact teaser section" treatment — Toolbox and Thought Leadership
+   are a deliberately matched pair (Phase 3 + its addendum): same eyebrow
+   style, same panel, same mini-tile grid. Only each section's own heading/
+   subline/list content differs. */
+.home-teaser{{margin:32px 0 8px;}}
+.home-teaser-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:16px;}}
+.home-teaser-grid{{display:grid;grid-template-columns:1fr;gap:16px;}}
 @media(min-width:900px){{
   .home-hero{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start;}}
   .home-hero-copy{{grid-column:1 / 3;}}
@@ -1996,7 +2005,7 @@ def homepage(request: Request):
   .home-status{{padding-top:44px;}}
 }}
 @media(min-width:560px){{
-  .home-toolbox-grid{{grid-template-columns:1fr 1fr;}}
+  .home-teaser-grid{{grid-template-columns:1fr 1fr;}}
 }}
 </style>
 <div class="home-hero">
@@ -2020,12 +2029,25 @@ def homepage(request: Request):
 
 <div class="home-cards">{cards}</div>
 
-<div class="home-toolbox-teaser">
+<div class="home-teaser">
   <div style="font:600 10.5px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">TOOLBOX</div>
   <h2 style="margin:0 0 6px;font-family:var(--font-head);font-weight:600;font-size:21px;">Everything in the toolbox</h2>
   <p style="margin:0 0 16px;font-size:14px;color:var(--muted);">Software, benchmarks, communities, and an AI research buddy.</p>
-  <div class="home-toolbox-panel"><div class="home-toolbox-grid">{toolbox_mini_tiles}</div></div>
+  <div class="home-teaser-panel"><div class="home-teaser-grid">{toolbox_mini_tiles}</div></div>
   <a href="/tools" style="display:inline-block;margin-top:14px;font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--navy);text-decoration:none;">See the full toolbox &rarr;</a>
+</div>
+
+<div class="home-teaser">
+  <div style="font:600 10.5px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">THOUGHT LEADERSHIP</div>
+  <h2 style="margin:0 0 14px;font-family:var(--font-head);font-weight:600;font-size:21px;">What I write about</h2>
+  <ul style="padding-left:22px;margin:0 0 26px;">
+    <li style="margin-bottom:18px;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing.</li>
+    <li style="margin-bottom:18px;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">Frameworks myself and others have built, real opinions, and stories from the trenches.</li>
+    <li style="margin-bottom:18px;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">How to move from scorekeeper to strategic partner: stop reporting what happened, start shaping what&rsquo;s next.</li>
+    <li style="margin-bottom:0;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
+  </ul>
+  <div class="home-teaser-panel"><div class="home-teaser-grid">{tl_mini_tiles}</div></div>
+  <a href="/thought-leadership" style="display:inline-block;margin-top:14px;font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
 </div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
@@ -2209,7 +2231,7 @@ def thought_leadership(request: Request):
     try:
         sections = [
             ("Writing", "writing", lib.list_thought_leadership(type="writing")),
-            ("Speaking &amp; Events", "speaking", lib.list_thought_leadership(type="speaking") + [_TL_PHOTO_ENTRY]),
+            ("Speaking & Events", "speaking", lib.list_thought_leadership(type="speaking") + [_TL_PHOTO_ENTRY]),
             ("Podcasts", "podcast", lib.list_thought_leadership(type="podcast")),
             ("Press", "press", lib.list_thought_leadership(type="press")),
         ]
@@ -10634,6 +10656,32 @@ _TL_TYPES = [
     ("press", "Press"),
 ]
 _TL_TYPE_LABELS = dict(_TL_TYPES)
+# Same order as _TL_TYPES, so zip() pairs each type with the exact icon its
+# /thought-leadership column already renders (_TL_COLUMN_ICONS) — reused,
+# not redrawn, for the homepage Thought Leadership teaser's tiles.
+_TL_TYPE_ICON = dict(zip((t for t, _ in _TL_TYPES), _TL_COLUMN_ICONS))
+
+
+def _tl_home_tile(index: int, item: dict) -> str:
+    """Homepage Thought Leadership teaser tile (Phase 3 addendum) — same
+    compact treatment as the Toolbox teaser's _toolbox_mini_tile (icon badge,
+    same seafoam/navy/coral wash cycle, 13px heading), but linking straight
+    to the piece and showing its real venue/date_label metadata (the same
+    metadata /thought-leadership's own columns already show) instead of a
+    canned one-liner."""
+    icon = _TL_TYPE_ICON.get(item.get("type"), _ICON_PENCIL)
+    meta_bits = [b for b in (item.get("venue"), item.get("date_label")) if b]
+    meta_html = (f'<p style="margin:4px 0 0;font-size:12px;line-height:1.5;color:rgba(20,23,28,.65);">'
+                 f'{" &middot; ".join(_esc(b) for b in meta_bits)}</p>') if meta_bits else ""
+    inner = (
+        f'{_toolbox_icon_badge(index, icon, size=32, icon_size=16, margin_bottom=8)}'
+        f'<div style="font-family:var(--font-head);font-weight:600;font-size:13px;color:var(--navy);">'
+        f'{_esc(item.get("title", ""))}</div>{meta_html}'
+    )
+    url = item.get("url") or ""
+    if url:
+        return f'<a href="{_esc(url)}" target="_blank" rel="noopener" style="display:block;text-decoration:none;">{inner}</a>'
+    return f'<div>{inner}</div>'
 
 
 def _sort_key_from_date_label(date_label: str) -> str:
@@ -10740,6 +10788,15 @@ def _tl_form_fields(item: dict | None = None) -> str:
       <input type="checkbox" name="needs_synopsis" value="1" {checked}>
       Needs synopsis (shows a "Synopsis pending" placeholder instead of the description above)
     </label>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--navy);">
+      <input type="checkbox" name="featured_home" value="1" {"checked" if item.get("featured_home") else ""}>
+      Feature on homepage
+    </label>
+    <p style="margin:4px 0 0 26px;font-size:12px;color:var(--muted);">
+      Shows this entry in the homepage Thought Leadership teaser regardless of recency.
+    </p>
   </div>"""
 
 
@@ -10866,6 +10923,7 @@ def _tl_form_values(form) -> dict:
         "description": (form.get("description") or "").strip(),
         "needs_synopsis": bool(form.get("needs_synopsis")),
         "display_order": display_order,
+        "featured_home": bool(form.get("featured_home")),
     }
 
 
@@ -10880,7 +10938,8 @@ async def admin_thought_leadership_new_submit(request: Request):
         # display_order left as None (blank on the add form) auto-assigns
         # the next value for this type — see Library.add_thought_leadership.
         lib.add_thought_leadership(v["type"], v["title"], v["url"], v["venue"], v["date_label"],
-                                   v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"])
+                                   v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"],
+                                   v["featured_home"])
     finally:
         lib.close()
     return RedirectResponse("/admin/thought-leadership", status_code=303)
@@ -10922,7 +10981,8 @@ async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
         # value, so a blank submission here is a deliberate clear — treat
         # it as 0 rather than re-triggering the add-only auto-assign.
         lib.update_thought_leadership(item_id, v["type"], v["title"], v["url"], v["venue"], v["date_label"],
-                                      v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"] or 0)
+                                      v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"] or 0,
+                                      v["featured_home"])
     finally:
         lib.close()
     return RedirectResponse("/admin/thought-leadership", status_code=303)
