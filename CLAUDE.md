@@ -804,25 +804,33 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     (`.home-tl-bullet*`), not a native `<ul><li>` — matching the file's own
     treatment (14px item gap, 15.5px text) rather than the more generous
     spacing an earlier round guessed at without the file to check against.
-  - **The 3 flagship cards on the homepage are no longer the same data as
-    `/thought-leadership`'s own featured row.** An earlier round shared one
-    `_TL_FEATURED_CARDS` tuple between both pages on the assumption their
-    copy would always match; the design file shows the homepage's cards
-    with shorter copy, a single consistent seafoam-deep tag color (vs.
-    `/thought-leadership`'s 3-color cycle), and a "Read the piece →" CTA —
-    genuinely different content, not a rendering difference. Un-shared:
-    `_TL_FEATURED_CARDS` (unchanged, `/thought-leadership`'s own) and the
-    new `_HOME_TL_FEATURED_CARDS` (homepage's own) both render through the
-    same shared `_tl_fcard()`/`.tl-card` markup, so the two pages still
-    can't visually drift in *treatment* — only in which copy they show.
+  - **The 3 flagship cards' content stays shared between the homepage and
+    `/thought-leadership`'s own featured row — a short-lived un-sharing
+    detour, reverted per Brian's explicit call.** The design file shows the
+    homepage's cards with shorter copy, a single consistent seafoam-deep tag
+    color (vs. `/thought-leadership`'s 3-color cycle), and a "Read the
+    piece →" CTA. A first pass at this design-fidelity round took that at
+    face value and split `_TL_FEATURED_CARDS` into two diverged tuples (one
+    per page) — but the single-shared-tuple design was deliberate from the
+    original build specifically so the two surfaces *can't* drift apart in
+    content, and that intent still holds: the design file's placeholder copy
+    doesn't override it. Reverted back to one `_TL_FEATURED_CARDS`, rendered
+    on both pages through the same `_tl_fcard()`/`.tl-card` markup — title,
+    description, and link label are now guaranteed identical (test-enforced:
+    `test_flagship_cards_content_shared_between_homepage_and_thought_leadership`
+    renders every card via `_tl_fcard()` and asserts the exact markup appears
+    on both pages). Card *sizing* is still free to differ per page — each
+    page's own `.tl-featured` grid track width naturally narrows the cards
+    on the homepage's tighter column vs. `/thought-leadership`'s full-width
+    row — only the content itself is pinned.
     **Sail Don't Row correction (Brian's explicit call before building):**
     the design file's copy for that card describes the arcade game itself
     ("Interactive" tag, "a game about strategic leverage", "Play it →") —
     wrong; that card is meant to represent the AI hackathon playbook
-    article. `_HOME_TL_FEATURED_CARDS`' entry for it reuses
-    `_TL_FEATURED_CARDS`' real "Playbook" tag, description, title, and
-    "Read the playbook →" link instead of the design file's placeholder
-    copy — the one deliberate departure from "implement the file as-is."
+    article. `_TL_FEATURED_CARDS`' entry for it already carries the real
+    "Playbook" tag, description, title, and "Read the playbook →" link —
+    that was true before this round and stays true now that both pages
+    share it again — instead of the design file's placeholder copy.
   - **Avatar is 200px** (not the ~176px estimated in the earlier hero-polish
     bullet) with a repositioned, rotated status box overlapping it — closer
     to the file's own 265px-at-1720px-wide layout, scaled down slightly to
@@ -833,14 +841,20 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     I'm Brian" sticker keeps its existing 🤙 emoji rather than the file's
     plain-text placeholder, since that emoji is established site copy this
     file wasn't asking to change.
-  - **The "🚧 building" sticker is genuinely gone, deliberately, per the
-    file.** The two prior bullets above treated restoring/keeping that
-    sticker as a fixed regression to guard against; the actual design file
-    doesn't include it on the rebuilt Toolbox panel at all. Since "implement
-    the file as-is" was the explicit instruction this round, the sticker is
-    dropped and `test_toolbox_panel_present_and_matches_design` now asserts
-    its *absence* — noted here prominently since it directly reverses an
-    earlier acceptance criterion, not silently.
+  - **The "🚧 building" sticker's absence from the design file turned out to
+    be an export omission, not an intentional removal — confirmed by Brian
+    after this was flagged, and restored.** The design file the panel was
+    rebuilt from didn't show the sticker, so the first pass at this round
+    dropped it, reversing the "must not drop it" regression guard the two
+    prior bullets above established — and said so explicitly rather than
+    silently. That flag is what surfaced the omission: Brian confirmed the
+    sticker was the one thing missing from the file itself, not a deliberate
+    design change, so it's back on the rebuilt Toolbox panel and
+    `test_toolbox_panel_present_and_matches_design` asserts its *presence*
+    again. Kept here as the concrete case for why flagging a reversal
+    explicitly (instead of just making the call and moving on) is worth the
+    friction — it's what let a real omission get caught and corrected in one
+    round-trip instead of shipping silently wrong.
   - **New: an admin-only "Reader access" placeholder box** in the sidebar,
     below the Toolbox panel — seafoam background, navy border, the reused
     `_ICON_NEWSPAPER` glyph, static copy ("Shown here only when logged in as

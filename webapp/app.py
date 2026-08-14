@@ -2038,7 +2038,7 @@ def homepage(request: Request):
         <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
       </ul>
 
-      {_tl_featured_cards_html(_HOME_TL_FEATURED_CARDS)}
+      {_tl_featured_cards_html(_TL_FEATURED_CARDS)}
 
       <div class="home-tl-highlights">
         <div style="grid-column:1/-1;font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;">Recent highlights</div>
@@ -2063,6 +2063,7 @@ def homepage(request: Request):
     </div>
 
     <div class="home-toolbox-panel">
+      {_sticker("🚧 building", rotate=-4, top="-14px", right="14px", size=14)}
       <div style="font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:10px;">CFO Toolbox</div>
       <h3 style="margin:0 0 8px;font-family:var(--font-head);font-weight:600;font-size:19px;">Everything in the toolbox</h3>
       <p style="font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 20px;">Software, benchmarks, communities, and an AI research buddy.</p>
@@ -2211,13 +2212,12 @@ def thought_leadership(request: Request):
             f'{rows}{more}</div>'
         )
 
-    # Featured: three flagship pieces, one consistent card treatment. The
-    # card markup/CSS (_tl_fcard/_TL_SHARED_CSS) is shared with the
-    # homepage's own flagship cards, but this page's copy/tag-color set
-    # (_TL_FEATURED_CARDS) is this page's own — see _HOME_TL_FEATURED_CARDS'
-    # comment for why the two pages' card content is allowed to diverge. The
-    # only per-card variation here is the small category tag colour — no
-    # full-colour floods, which is what made the old top read as busy.
+    # Featured: three flagship pieces, one consistent card treatment — same
+    # shared _TL_FEATURED_CARDS content and _tl_fcard/_TL_SHARED_CSS markup
+    # as the homepage's own flagship cards, so the two surfaces can't drift
+    # apart (see _TL_FEATURED_CARDS' comment). The only per-card variation
+    # here is the small category tag colour — no full-colour floods, which
+    # is what made the old top read as busy.
     body = (
         '<div class="page page-full">'
         '<style>'
@@ -10686,13 +10686,21 @@ def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: s
     )
 
 
-# /thought-leadership's own 3 flagship pieces (its featured row) — 3
-# distinct tag colors for visual variety on that page. NOT shared with the
-# homepage: the Homepage Restructure design file (see _HOME_TL_FEATURED_CARDS
-# below) gives the homepage's 3 flagship cards their own shorter copy and a
-# single consistent tag color, so the two surfaces are allowed to diverge —
-# an earlier round of this work shared one tuple between both pages on the
-# (wrong, in hindsight) assumption the copy would always match; it doesn't.
+# The 3 flagship pieces — one shared source for both /thought-leadership's
+# featured row and the homepage's consolidated Thought Leadership section, so
+# the two surfaces can't drift apart in content (title/description/link
+# label). This was the deliberate original intent; a brief detour during the
+# Homepage Restructure design-fidelity pass split this into two diverged
+# tuples (the design file showed shorter, homepage-specific copy) before
+# Brian confirmed the shared-content guarantee should hold regardless of what
+# the design file's placeholder copy showed — reverted back to one source.
+# Card *sizing* is still free to differ per page (each page's own .tl-featured
+# grid track width naturally narrows the cards on the homepage's tighter
+# column vs. /thought-leadership's full-width featured row) — only the
+# content itself is pinned. The "Sail Don't Row" entry's "Playbook" tag,
+# description, and "Read the playbook" link/title are the real, correct copy
+# for that piece (not the design file's arcade-game framing — see CLAUDE.md's
+# Homepage Restructure entries for that correction's history).
 _TL_FEATURED_CARDS = (
     ("/thought-leadership/growth-engine-ratio", "Framework", "var(--coral-deep)",
      "The Growth Engine Ratio",
@@ -10711,41 +10719,14 @@ _TL_FEATURED_CARDS = (
      "Read the guide"),
 )
 
-# The homepage's own 3 flagship cards (Homepage Restructure design file) —
-# shorter copy, one consistent seafoam-deep tag color across all three
-# (unlike /thought-leadership's 3-color cycle above). The design file's
-# "Sail Don't Row" card was written as if it were the arcade game itself
-# ("Interactive" tag, "a game about strategic leverage", "Play it →") — a
-# correction from Brian: that card is meant to represent the AI hackathon
-# playbook article, so it reuses the real "Playbook" tag, description, and
-# "Read the playbook →" link/title already established on /thought-leadership
-# (_TL_FEATURED_CARDS above) instead of the design file's placeholder copy.
-_HOME_TL_FEATURED_CARDS = (
-    ("/thought-leadership/growth-engine-ratio", "Framework", "var(--seafoam-deep)",
-     "The Growth Engine Ratio",
-     "A framework for pressure-testing GTM efficiency before you scale spend.",
-     "Read the piece"),
-    ("/thought-leadership/ai-hackathon-playbook", "Playbook", "var(--seafoam-deep)",
-     "Sail, Don&rsquo;t Row",
-     "How to run an AI hackathon with your finance team&mdash;the full format, facilitation mechanics, and "
-     "how to make it stick.",
-     "Read the playbook"),
-    ("/thought-leadership/netsuite-mcp", "Guide", "var(--seafoam-deep)",
-     "Connecting Claude to NetSuite",
-     "A hands-on guide to wiring Claude into your ERP for real analysis.",
-     "Read the piece"),
-)
-
 
 def _tl_featured_cards_html(cards) -> str:
     return '<div class="tl-featured">' + "".join(_tl_fcard(*c) for c in cards) + '</div>'
 
 
-# Flagship-card CSS (.tl-featured/.tl-card*) — the only piece truly shared
-# between /thought-leadership's featured row and the homepage's flagship
-# cards (see _TL_FEATURED_CARDS vs. _HOME_TL_FEATURED_CARDS above: the two
-# pages' card *content* diverges per the Homepage Restructure design file,
-# but the card *markup/CSS* stays identical, via _tl_fcard()).
+# Flagship-card CSS (.tl-featured/.tl-card*) — shared by /thought-leadership's
+# featured row and the homepage's flagship cards, same as their content
+# (_TL_FEATURED_CARDS above via _tl_fcard()).
 _TL_SHARED_CSS = (
     '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
     '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'

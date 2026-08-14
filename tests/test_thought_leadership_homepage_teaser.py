@@ -71,16 +71,31 @@ def test_homepage_has_one_consolidated_thought_leadership_section(env):
     assert "The F Suite" not in html
 
 
+def test_flagship_cards_content_shared_between_homepage_and_thought_leadership(env):
+    """The two pages must render identical flagship-card content (title,
+    description, tag, link label) — a deliberate shared-source guarantee
+    (_TL_FEATURED_CARDS) so the two surfaces can't silently drift apart, even
+    though their card *sizing* differs (each page's own .tl-featured grid
+    track width narrows the cards on the homepage's tighter column)."""
+    from webapp.app import _TL_FEATURED_CARDS, _tl_fcard
+
+    home_html = _client(env).get("/").text
+    tl_html = _client(env).get("/thought-leadership").text
+    for card in _TL_FEATURED_CARDS:
+        card_html = _tl_fcard(*card)
+        assert card_html in home_html, f"missing/diverged on homepage: {card[3]}"
+        assert card_html in tl_html, f"missing/diverged on /thought-leadership: {card[3]}"
+
+
 def test_toolbox_panel_present_and_matches_design(env):
     html = _client(env).get("/").text
     assert ">CFO Toolbox<" in html
     assert "Everything in the toolbox" in html
     assert "See the full toolbox" in html
-    # Design-fidelity note: the Homepage Restructure design file this panel
-    # was rebuilt from does not include a "building" sticker on it (unlike
-    # the Phase-3-era panel it replaced) — its absence here is intentional,
-    # not the regression the earlier Phase 3 sticker-drop was.
-    assert "🚧 building" not in html
+    # Regression check: the sticker was missing from the design file export
+    # itself (an omission, confirmed by Brian — not an intentional removal),
+    # so it stays on the rebuilt panel same as every earlier round.
+    assert "🚧 building" in html
 
 
 def test_reader_access_placeholder_admin_only(env):
