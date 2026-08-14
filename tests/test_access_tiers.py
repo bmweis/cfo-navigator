@@ -66,18 +66,20 @@ PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           "/play", "/play/leaderboard"]
 # Submitting a tool / a piece, or requesting a warm intro, is account-only (spam
 # control) even though the directory and home page are public.
-MEMBER = ["/library/ask", "/tools/submit", "/library/submit"]
+MEMBER = ["/tools/fpa-buddy", "/tools/submit", "/library/submit"]
 # Archive and Feed moved admin-only (Phase 1) — a signed-in non-admin member
 # gets bounced to login just like any other admin page. The /library hub
 # route itself was removed outright, no redirect.
 ADMIN_ONLY = ["/library/archive", "/library/feed"]
 # Old flat URLs 301-redirect to their nested equivalents, unconditionally
-# (even signed-out — the redirect itself carries no gated content).
+# (even signed-out — the redirect itself carries no gated content). /ask and
+# /questions used to redirect to /library/ask and /library/past-questions —
+# both retired outright in Phase 2 (FP&A Buddy moved to /tools/fpa-buddy, no
+# compatibility redirect), so those two flat URLs are just gone now too, not
+# redirecting anywhere — see test_retired_ask_routes_are_gone below.
 OLD_TO_NEW = {
     "/archive": "/library/archive",
     "/feed": "/library/feed",
-    "/ask": "/library/ask",
-    "/questions": "/library/past-questions",
     "/growth-engine-ratio": "/thought-leadership/growth-engine-ratio",
     "/finops-ai-hackathon": "/thought-leadership/ai-hackathon-playbook",
     "/netsuite-mcp": "/thought-leadership/netsuite-mcp",
@@ -127,6 +129,22 @@ def test_library_hub_route_removed(env):
         assert c.get("/library", follow_redirects=False).status_code == 404
 
 
+def test_retired_ask_routes_are_gone(env):
+    # /library/ask and /library/past-questions were retired outright in
+    # Phase 2 — FP&A Buddy moved to /tools/fpa-buddy, Past Questions folded
+    # into that same page. No compatibility redirect (nothing bookmarked),
+    # so both, plus the flat /questions redirect stub that used to point at
+    # /library/past-questions, are just gone (404) for anonymous visitors,
+    # members, and admins alike. GET /ask is the one exception: it 405s
+    # rather than 404s, because POST /ask (the Q&A API) still lives at that
+    # exact path — the GET redirect stub is gone, but the path itself isn't.
+    retired_404 = ["/library/ask", "/library/past-questions", "/questions"]
+    for c in (_client(env), _member_client(env), _admin_client(env)):
+        for path in retired_404:
+            assert c.get(path, follow_redirects=False).status_code == 404, f"{path} should be gone"
+        assert c.get("/ask", follow_redirects=False).status_code == 405
+
+
 def test_old_flat_urls_redirect_to_nested_paths(env):
     c = _client(env)
     for old, new in OLD_TO_NEW.items():
@@ -162,7 +180,7 @@ def test_member_api_gating(env):
 
 def test_member_nav_shows_logout_not_admin(env):
     c = _member_client(env)
-    html = c.get("/library/ask").text
+    html = c.get("/tools/fpa-buddy").text
     assert "Log out" in html
     assert ">Admin<" not in html and ">Draft<" not in html
 

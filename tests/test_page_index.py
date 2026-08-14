@@ -73,7 +73,7 @@ def test_page_index_excludes_non_page_endpoints(env):
         "/health",            # health check, plain dict/JSON
         "/api/search",        # JSON search API
         "/growth-engine-ratio",  # legacy redirect stub
-        "/questions",            # legacy redirect stub
+        "/archive",              # legacy redirect stub
         "/logout",               # redirects to /
         "/bookmarklet",          # PlainTextResponse, not a page
         "/static/{filename}",    # static asset serving
@@ -85,7 +85,7 @@ def test_page_index_excludes_non_page_endpoints(env):
 def test_page_index_includes_known_pages(env):
     rows = env._page_index_snapshot()
     paths = {r["path"] for r in rows}
-    for path in ["/", "/thought-leadership", "/admin/library", "/admin", "/admin/system/page-index"]:
+    for path in ["/", "/thought-leadership", "/admin/library", "/admin", "/admin/system/page-index", "/tools/fpa-buddy"]:
         assert path in paths
 
 

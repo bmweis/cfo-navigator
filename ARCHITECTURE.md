@@ -1285,7 +1285,7 @@ follow-up cap and the money guards are fully server-side.
 
 ```mermaid
 sequenceDiagram
-    participant B as Browser (/library/ask page)
+    participant B as Browser (/tools/fpa-buddy page)
     participant W as webapp/app.py
     participant DB as SQLite (Library)
     participant AG as linklib/agent.py
@@ -1415,7 +1415,7 @@ Details worth knowing:
   includes the query-embedding cost — but never embed-ON-SAVE cost, which
   lives on a separate table entirely (`article_embeddings`, Brian's overhead,
   never a user's).
-- **Conversations resume across reloads and devices.** The `/library/ask` page offers
+- **Conversations resume across reloads and devices.** The `/tools/fpa-buddy` page offers
   a "Recent conversations" list on load (`GET /ask/conversations` — the
   user's last 5, first question as the label) and loads a full transcript
   from `GET /ask/conversations/{id}`: per-turn question, answer, the
@@ -1440,7 +1440,7 @@ Details worth knowing:
   (`ask_questions.citations_json`) as a snapshot — feed and web sources are
   transient, so the stored title/url is the record and is never re-resolved;
   library entries additionally carry their `articles.id`. Under each answer on
-  `/library/ask`, quiet 👍/⚠️/👎 controls post to `POST /ask/feedback` (same auth as
+  `/tools/fpa-buddy`, quiet 👍/⚠️/👎 controls post to `POST /ask/feedback` (same auth as
   `/ask`; you can only rate turns from your own conversations), upserting one
   `ask_feedback` row per turn per user — a changed rating updates in place. The
   `/admin/ask-feedback` page triages ratings with the question, answer, and
@@ -1449,7 +1449,8 @@ Details worth knowing:
   replays to re-render past turns' `[n]` markers.
 - **Server-rendered surfaces share one citation renderer.** Every
   server-rendered view of a stored answer — `/ask/history`, the
-  `/library/past-questions` view, and `/admin/ask-feedback` — calls
+  "search past questions" section on `/tools/fpa-buddy`, and
+  `/admin/ask-feedback` — calls
   `_render_cited_answer(answer, citations_json, truncate=?)` in
   `webapp/app.py`: it linkifies each `[n]` marker against that turn's own
   snapshot (same marker contract as the client — 1–2 digits, not followed by
@@ -1458,11 +1459,11 @@ Details worth knowing:
   numbered source list. Legacy rows (backfilled `citations_json='[]'`)
   degrade to plain literal markers with no source list — never fabricated
   links, never an error. **Any future server-rendered answer surface must
-  call this helper**, and it is deliberately *not* unified with `/library/ask`'s
-  client-side JS rendering (`mdInline`/`srcListHtml` over live API
-  responses) — that's a different layer; keep them separate. The admin CSV
-  export deliberately keeps raw literal `[n]` markers (no HTML in a CSV) and
-  instead appends a plain-text `citations` column resolving them.
+  call this helper**, and it is deliberately *not* unified with
+  `/tools/fpa-buddy`'s own client-side JS rendering (`mdInline`/`srcListHtml`
+  over live API responses) — that's a different layer; keep them separate. The
+  admin CSV export deliberately keeps raw literal `[n]` markers (no HTML in a
+  CSV) and instead appends a plain-text `citations` column resolving them.
 
 ### Archive save / enrichment pipeline
 
@@ -1578,10 +1579,16 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     correction is always about one specific listing), `/contact`, `/privacy`, `/play`, `/login`,
     `/static/*`, `/health`. (The old flat `/growth-engine-ratio`, `/finops-ai-hackathon`,
     `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
-  - *Member* (`_is_member` — any valid session): `/library/ask`,
-    `/library/past-questions`, `/library/submit`. HTML pages redirect to
-    `/login`; APIs return 401. (The old flat `/ask`, `/questions` URLs
-    301-redirect to their nested equivalents.)
+  - *Member* (`_is_member` — any valid session): `/tools/fpa-buddy`,
+    `/library/submit`. HTML pages redirect to `/login`; APIs return 401.
+    (`/library/ask` and `/library/past-questions` were retired outright in
+    the Library/Toolbox restructure's Phase 2 — FP&A Buddy moved to
+    `/tools/fpa-buddy`, Past Questions folded into that same page as a
+    "search past questions" section. No compatibility redirect, since
+    nothing was bookmarked; the old flat `/ask` and `/questions` redirect
+    stubs that used to point at them are gone too — `/questions` 404s,
+    `/ask` 405s instead since `POST /ask`, the Q&A API, still lives at that
+    exact path.)
   - *Admin* (`_is_authed` — session with `role=admin`): everything under
     `/admin/*`, plus admin-only actions on shared pages, plus **the digital
     Library** — `/library/archive`, `/library/feed`, and `/read` (Phase 1:
@@ -1727,7 +1734,7 @@ recorded anywhere, it's flagged rather than invented.
   archive is built from other people's articles, so the product is the
   curation and synthesis, never republication.
 - **Server-held conversation history, reconstructed per request.** The
-  `/library/ask` client sends only `conversation_id` + the new question; the server rebuilds
+  `/tools/fpa-buddy` client sends only `conversation_id` + the new question; the server rebuilds
   the transcript from the conversation's `ask_questions` rows (which were
   already recording every turn) and enforces the follow-up cap by counting
   those rows. There is still no session store or in-memory conversation
@@ -1787,7 +1794,7 @@ recorded anywhere, it's flagged rather than invented.
   in the source list and pushed live by deploying, per #113; everything else
   is meant to be edited live via the admin UI. Each narrow sync method
   documents which fields it touches.
-- **Effort tiers instead of a model picker.** `/library/ask` exposes
+- **Effort tiers instead of a model picker.** `/tools/fpa-buddy` exposes
   Quick/Standard/Deep; the model behind each tier is an implementation detail
   (`EFFORT_SETTINGS`). *Why:* members shouldn't need model literacy to make a
   cost/quality choice (PR #84 collapsed the previous model+effort UI).
@@ -1920,6 +1927,31 @@ recorded anywhere, it's flagged rather than invented.
   and Differentiation directly and, in reduced form (button + review line
   only, no badge — the existing checkbox already shows state), for the
   Community profile draft.
+- **Library/Toolbox restructure, Phase 2 — FP&A Buddy relocated to
+  `/tools/fpa-buddy`; Past Questions folded in as a helpful-only search.**
+  Second phase of the Phase 1 restructure (§4's Member/Admin tier list
+  above has the full route/redirect accounting). FP&A Buddy moved out from
+  under Library into the Toolbox area at a new URL, replacing
+  `/library/ask` — stays member-gated, unlike Archive/Feed's Phase 1 move
+  to admin-only, since it's meant for a small group of signed-in friends,
+  not just Brian. `/library/past-questions` (a standalone browse page, no
+  rating filter) was retired and its functionality folded into a "search
+  past questions" section on the same page — but with a real behavior
+  change, not a straight copy: `Library.list_public_ask_questions` gained a
+  `helpful_only` parameter (an `EXISTS` subquery against `ask_feedback`,
+  not a join, so a question with several raters — some possibly rating it
+  `inaccurate` — still surfaces exactly once as long as any single rater
+  called it `helpful`) that the new section always passes `True`, so a
+  member searching there only ever finds answers someone already vouched
+  for. No dedup on repeated question text — deliberately deferred; the
+  existing page never deduped either, and doing it well would need more
+  than exact-string matching (near-duplicate phrasing, or two genuinely
+  different answers to a similarly-worded question) to be worth the
+  complexity. `POST /ask` (the API) didn't move — only the page that calls
+  it did. The route move also caught a stale leftover from Phase 1: the
+  dead `nav.site-nav a[href="/ask"]` CSS selector (Phase 0 flagged it,
+  Phase 1 explicitly deferred cleanup here since this phase already
+  touches that code) is gone now too.
 
 ## 5. Directory map
 
@@ -1968,8 +2000,8 @@ CLAUDE.md, BRAND.md         # working agreements: context for agents, design sys
 ## 6. Known limitations / deferred work
 
 - **Citation markers in the admin CSV export are literal text, on purpose.**
-  The server-rendered surfaces (`/ask/history`, `/library/past-questions`,
-  `/admin/ask-feedback`) now linkify `[n]` markers via the shared
+  The server-rendered surfaces (`/ask/history`, `/tools/fpa-buddy`'s
+  past-questions section, `/admin/ask-feedback`) now linkify `[n]` markers via the shared
   `_render_cited_answer` helper (see §3), but the CSV keeps raw `[1]`/`[2]`
   markers deliberately — no link conversion in a CSV — with a trailing
   plain-text `citations` column resolving them. Don't "fix" the CSV markers

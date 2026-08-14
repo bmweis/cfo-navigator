@@ -3,8 +3,9 @@
 Covers the one shared helper (webapp.app._render_cited_answer — marker
 linkification against the turn's persisted citations_json snapshot, safe
 truncation, escaping, legacy-'[]' degradation) and its three call sites
-(/ask/history, /questions, /admin/ask-feedback), plus the CSV export's
-deliberately-raw markers with the new plain-text citations column.
+(/ask/history, /tools/fpa-buddy's past-questions section, /admin/ask-feedback),
+plus the CSV export's deliberately-raw markers with the new plain-text
+citations column.
 """
 import csv
 import io
@@ -145,7 +146,6 @@ def _login(appmod, username, password):
 
 @pytest.mark.parametrize("path,who", [
     ("/ask/history", "member1"),
-    ("/library/past-questions", "member1"),
     ("/admin/ask-feedback", "admin"),
 ])
 def test_surface_renders_linked_markers_and_source_list(env, path, who):
@@ -158,6 +158,18 @@ def test_surface_renders_linked_markers_and_source_list(env, path, who):
     assert "[2] Feed item" in html
     # Legacy '[]' turn on the same page: literal marker, no broken link.
     assert "Legacy answer citing [1] before snapshots." in html
+
+
+def test_past_questions_section_only_shows_helpful_rated(env):
+    # /tools/fpa-buddy's past-questions search filters to helpful-rated
+    # answers only (Phase 2) — unlike /ask/history and /admin/ask-feedback
+    # above, which show every turn regardless of rating. This fixture is a
+    # genuine mixed-rating case: cited_id is rated 'inaccurate', legacy_id
+    # is rated 'helpful' — only legacy_id's content should render here.
+    html = _login(env, "member1", "supersecret").get("/tools/fpa-buddy").text
+    assert "Legacy answer citing [1] before snapshots." in html
+    assert "CAC payback is months to recover CAC" not in html
+    assert "https://ex.com/a" not in html
 
 
 def test_csv_export_stays_raw_with_citations_column(env):

@@ -19,8 +19,7 @@ Public routes (no auth):
 Private routes (require login cookie; API routes also accept a token):
     GET  /library/archive      Search + browse saved articles (admin-only)
     GET  /library/feed         RSS reader over the OPML subscription list (admin-only)
-    GET  /library/ask          FP&A Buddy Q&A page (member-gated)
-    GET  /library/past-questions  Browse other members' past FP&A Buddy questions
+    GET  /tools/fpa-buddy      FP&A Buddy Q&A page + past-questions search (member-gated)
     GET  /read                 Article reader (Instapaper-style clean view)
     POST /ask                  FP&A Q&A
     POST /post                 Draft a LinkedIn post
@@ -1086,8 +1085,9 @@ def _page(title: str, active: str, body: str, authed: bool = False,
               ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
     # Archive and Feed moved admin-only and the Library hub was removed
     # (Phase 1) — there's no longer a member-facing nav entry to show here.
-    # FP&A Buddy (still member-gated) is reachable directly at /library/ask;
-    # it regains nav placement in a later phase's Toolbox restructure.
+    # FP&A Buddy (still member-gated) moved under Toolbox (Phase 2) and is
+    # reachable directly at /tools/fpa-buddy; it regains an actual nav
+    # placement once the Toolbox 2x2 grid ships (Phase 3).
     member = []
 
     def links(items):
@@ -8209,7 +8209,7 @@ function escapeHtml(s) {
 }
 
 // Small hand-rolled markdown renderer, same zero-dependency approach as
-// /library/ask's mdToHtml — but unlike that one, matchmaker links are
+// /tools/fpa-buddy's mdToHtml — but unlike that one, matchmaker links are
 // same-site profile paths (/tools/communities/<slug>), not https:// URLs.
 function mmInline(s) {
   s = escapeHtml(s);
@@ -11232,7 +11232,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li>Replaced the old 4-question quiz outright, same URL. Free-type chat: the visitor describes what they're looking for, Claude asks a small number of clarifying questions (one or two per turn), then narrows to 2&ndash;3 best-fit suggestions with links to their profile pages, drawn from a text block covering every approved community's directory listing plus its Community Profile (<code>linklib/matchmaker.py::_build_communities_context</code>) &mdash; sent as full context on every turn rather than retrieved, since the ~38-community dataset is small enough that this is cheap and simpler than a retrieval layer.</li>
 <li>Thumbs up/down per suggestion, UI-only &mdash; never persisted (no server call, no DB row), unlike FP&amp;A Buddy's <code>ask_feedback</code> table.</li>
-<li>Multi-turn, server-rebuilt history (mirroring <code>/library/ask</code>'s <code>conversation_id</code> pattern) capped at <code>linklib.matchmaker.MAX_FOLLOWUPS</code> turns &mdash; higher than FP&amp;A Buddy's cap, since narrowing down through clarifying questions naturally takes more turns even though each turn is individually cheaper (no retrieval, no web search).</li>
+<li>Multi-turn, server-rebuilt history (mirroring <code>/tools/fpa-buddy</code>'s <code>conversation_id</code> pattern) capped at <code>linklib.matchmaker.MAX_FOLLOWUPS</code> turns &mdash; higher than FP&amp;A Buddy's cap, since narrowing down through clarifying questions naturally takes more turns even though each turn is individually cheaper (no retrieval, no web search).</li>
 <li><strong>Public, no login required</strong> (same as the quiz it replaces) &mdash; so unlike FP&amp;A Buddy's user-keyed dollar cap, rate limiting here keys off the anonymous <code>cfo_visitor</code> session cookie for the common signed-out case, falling back to a per-user cap only when the visitor happens to be signed in. See <code>matchmaker_questions</code> in ARCHITECTURE.md for the schema and <code>/admin/users</code>' "Matchmaker" cap fields for the admin controls.</li>
 </ul>
 </section>
@@ -14672,7 +14672,7 @@ def archive(request: Request, q: str = ""):
       <button class="btn" onclick="ask()">Ask</button>
     </div>
     <div style="margin-top:6px;max-width:680px;text-align:right;">
-      <a id="more-opts-link" href="/library/ask" style="font-size:12px;color:var(--muted);">More options (model, effort, sources) &rarr;</a>
+      <a id="more-opts-link" href="/tools/fpa-buddy" style="font-size:12px;color:var(--muted);">More options (model, effort, sources) &rarr;</a>
     </div>
     <div id="answer" style="display:none;margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;font-size:15px;max-width:680px;"></div>
   </div>
@@ -14809,7 +14809,7 @@ async function ask(){{
   var q=document.getElementById('askq').value.trim();
   if(!q)return;
   var link=document.getElementById('more-opts-link');
-  if(link) link.href='/library/ask?q='+encodeURIComponent(q);
+  if(link) link.href='/tools/fpa-buddy?q='+encodeURIComponent(q);
   var box=document.getElementById('answer');
   box.style.display='block';box.innerHTML='<em>Thinking…</em>';
   try{{
@@ -14827,74 +14827,10 @@ async function ask(){{
     return HTMLResponse(_page("Archive—Brian Weisberg", "Library", page_body, role=_role(request)))
 
 
-@app.get("/questions")
-def community_questions_redirect(request: Request):
-    target = "/library/past-questions"
-    if request.url.query:
-        target += "?" + request.url.query
-    return RedirectResponse(target, status_code=301)
-
-
-@app.get("/library/past-questions", response_class=HTMLResponse)
-def community_questions(request: Request, q: str = ""):
-    """Past Questions: questions other members already asked FP&A Buddy, so a
-    member can check before spending a query on something already answered.
-    Reads from the same ask_questions table as the admin report and
-    /ask/history; admin-only inline controls here only affect this view (see
-    hide/anonymize below)."""
-    if not _is_member(request):
-        return _login_redirect(request)
-    is_admin = _is_authed(request)
-    lib = _lib()
-    try:
-        rows = lib.list_public_ask_questions(query=q, limit=200)
-    finally:
-        lib.close()
-
-    def _row(r: dict) -> str:
-        anonymized = bool(r.get("anonymized"))
-        asker = "A member" if anonymized else (r.get("asker_name") or r.get("asker_username") or "A member")
-        admin_controls = ""
-        if is_admin:
-            admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
-      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">Remove from this view</button></form>
-      <form method="post" action="/questions/{r["id"]}/anonymize" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">{"Un-anonymize" if anonymized else "Anonymize asker"}</button></form>
-    </div>"""
-        q_txt = _esc(r.get("question") or "")
-        a_html, src_html = _render_cited_answer(r.get("answer") or "",
-                                                r.get("citations_json") or "[]",
-                                                truncate=600)
-        return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
-    <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q_txt}</div>
-    <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(asker)} &middot; {_esc((r["created_at"] or "")[:10])}</div>
-  </div>
-  <p style="font-size:13.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.55;">{a_html}</p>
-  {src_html}
-  {admin_controls}
-</div>"""
-
-    rows_html = "".join(_row(r) for r in rows) or \
-        ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
-         'padding:32px;text-align:center;color:var(--muted);">'
-         + ('No questions match your search.' if q else
-            'No past questions yet. Answers show up here after members ask FP&amp;A Buddy something.')
-         + '</div>')
-
-    body = f"""<div class="page page-full">
-<div class="tool-prose">
-<p style="margin:0 0 4px;"><a href="/" style="font-size:13px;color:var(--muted);">&larr; Home</a></p>
-<h1>Past Questions</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Questions other members have already asked FP&amp;A Buddy&mdash;check here before spending a query re-asking one. <a href="/library/ask">Ask your own &rarr;</a></p>
-<form method="get" action="/library/past-questions" style="display:flex;gap:8px;margin-bottom:22px;">
-  <input type="search" name="q" value="{_esc(q)}" placeholder="Search past questions&hellip;"
-    style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  <button type="submit" class="btn">Search</button>
-</form>
-{rows_html}
-</div>
-</div>"""
-    return HTMLResponse(_page("Past Questions—Brian Weisberg", "Library", body, role=_role(request)))
+# Note: /library/past-questions was retired in Phase 2 — folded into the
+# "Search past questions" section on /tools/fpa-buddy (see fpa_buddy_page),
+# filtered to only helpful-rated answers. No redirect — nothing bookmarked.
+# The old flat /questions redirect stub is gone too, for the same reason.
 
 
 @app.post("/questions/{question_id}/hide")
@@ -14909,7 +14845,7 @@ async def community_question_hide(request: Request, question_id: int):
         lib.set_ask_question_hidden(question_id, not bool(row["hidden_public"]))
     finally:
         lib.close()
-    return RedirectResponse("/library/past-questions", status_code=303)
+    return RedirectResponse("/tools/fpa-buddy#past-questions", status_code=303)
 
 
 @app.post("/questions/{question_id}/anonymize")
@@ -14924,7 +14860,7 @@ async def community_question_anonymize(request: Request, question_id: int):
         lib.set_ask_question_anonymized(question_id, not bool(row["anonymized"]))
     finally:
         lib.close()
-    return RedirectResponse("/library/past-questions", status_code=303)
+    return RedirectResponse("/tools/fpa-buddy#past-questions", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -14946,16 +14882,8 @@ def api_search(request: Request, q: str = "", limit: int = 50, token: str | None
         lib.close()
 
 
-@app.get("/ask")
-def ask_page_redirect(request: Request):
-    target = "/library/ask"
-    if request.url.query:
-        target += "?" + request.url.query
-    return RedirectResponse(target, status_code=301)
-
-
-@app.get("/library/ask", response_class=HTMLResponse)
-def ask_page(request: Request, q: str = ""):
+@app.get("/tools/fpa-buddy", response_class=HTMLResponse)
+def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     # Member-gated: signed-in members and admin. Anonymous visitors go to login.
     if not _is_member(request):
         return _login_redirect(request)
@@ -14976,8 +14904,54 @@ def ask_page(request: Request, q: str = ""):
                 "spent": round(usage_lib.ask_cost_this_month(usage_user_id), 2),
                 "cap": round(usage_lib.get_effective_ask_cap(usage_user_id), 2),
             }
+        # Past Questions (Phase 2 — folded in from the old standalone
+        # /library/past-questions page): only questions with at least one
+        # ask_feedback.rating='helpful' row, so a member searching here only
+        # ever finds answers someone already vouched for.
+        pq_rows = usage_lib.list_public_ask_questions(query=pq, limit=200, helpful_only=True)
     finally:
         usage_lib.close()
+
+    def _pq_row(r: dict) -> str:
+        anonymized = bool(r.get("anonymized"))
+        asker = "A member" if anonymized else (r.get("asker_name") or r.get("asker_username") or "A member")
+        admin_controls = ""
+        if authed:
+            admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">Remove from this view</button></form>
+      <form method="post" action="/questions/{r["id"]}/anonymize" style="margin:0;"><button type="submit" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">{"Un-anonymize" if anonymized else "Anonymize asker"}</button></form>
+    </div>"""
+        q_txt = _esc(r.get("question") or "")
+        a_html, src_html = _render_cited_answer(r.get("answer") or "",
+                                                r.get("citations_json") or "[]",
+                                                truncate=600)
+        return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+    <div style="font-weight:600;color:var(--navy);font-size:14.5px;">{q_txt}</div>
+    <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(asker)} &middot; {_esc((r["created_at"] or "")[:10])}</div>
+  </div>
+  <p style="font-size:13.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.55;">{a_html}</p>
+  {src_html}
+  {admin_controls}
+</div>"""
+
+    pq_rows_html = "".join(_pq_row(r) for r in pq_rows) or \
+        ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
+         'padding:24px;text-align:center;color:var(--muted);">'
+         + ('No past questions match your search.' if pq else
+            'No past questions yet. Answers show up here once a member rates one helpful.')
+         + '</div>')
+
+    past_questions_section = f"""<div id="past-questions" class="ask-section" style="margin-top:0;margin-bottom:28px;">
+  <div class="ask-section-label">Search past questions</div>
+  <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Questions other members have already asked&mdash;check here before spending a query re-asking one.</p>
+  <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:18px;">
+    <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
+      style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+    <button type="submit" class="btn btn-ghost">Search</button>
+  </form>
+  {pq_rows_html}
+</div>"""
 
     # Quick / Standard / Deep is the only choice shown — no separate model
     # picker. Each tier maps internally (linklib.agent.EFFORT_SETTINGS) to a
@@ -15081,6 +15055,8 @@ def ask_page(request: Request, q: str = ""):
     <ul class="ask-value-list">{ask_value_bullets}</ul>
   </details>
 </div>
+
+{past_questions_section}
 
 <div class="ask-card">
   <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Question</label>
@@ -15211,7 +15187,6 @@ def ask_page(request: Request, q: str = ""):
 .ask-fb-comment{{display:none;flex-basis:100%;gap:8px;align-items:center;}}
 .ask-fb-comment input{{flex:1;min-width:0;padding:7px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--bg);}}
 .ask-fb-send{{padding:7px 14px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);font:600 12px var(--font-body);color:var(--ink-soft);cursor:pointer;}}
-nav.site-nav a[href="/ask"]{{color:var(--ink);font-weight:600;}}
 </style>
 
 <script>
@@ -15557,7 +15532,7 @@ updateEstimate();
 loadRecent();
 </script>"""
 
-    return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "Library", body, role=_role(request)))
+    return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
 @app.post("/ask")
@@ -15891,13 +15866,13 @@ def ask_history(request: Request):
     rows_html = "".join(_card(c) for c in _group_conversations(rows)) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:32px;text-align:center;color:var(--muted);">You haven&rsquo;t asked FP&amp;A Buddy anything yet. '
-         '<a href="/library/ask">Ask a question &rarr;</a></div>')
+         '<a href="/tools/fpa-buddy">Ask a question &rarr;</a></div>')
 
     body = f"""<div class="page page-full">
 <div class="tool-prose">
-<p style="margin:0 0 4px;"><a href="/library/ask" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
+<p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/library/past-questions">Past Questions page</a> for other members to browse.</p>
+<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/tools/fpa-buddy#past-questions">Past Questions section</a> for other members to browse.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:22px;font-size:14px;">
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>
@@ -15908,7 +15883,7 @@ def ask_history(request: Request):
 .convo-chip .disclosure-caret{{font-size:11px;}}
 </style>
 </div>"""
-    return HTMLResponse(_page("Your FP&A Buddy history—Brian Weisberg", "Library", body, role=_role(request)))
+    return HTMLResponse(_page("Your FP&A Buddy history—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
 @app.post("/save")
@@ -16268,7 +16243,7 @@ _SCRIPT_REGISTRY = [
     ("mcp_server.py", "scripts.mcp_server", "Recurring & actively useful",
      "Stdio MCP server wrapping the hosted CFO Library search (GET /api/search) — lets "
      "Claude Desktop/Code search the archive directly, without going through the "
-     "/library/ask web UI.",
+     "/tools/fpa-buddy web UI.",
      "Long-running — launched by the MCP client (Claude Desktop/Code) per its own config, "
      "not invoked manually per-use.",
      ["LINKLIB_PUBLIC_BASE (default http://localhost:8000)", "LINKLIB_SAVE_TOKEN"],
@@ -17061,7 +17036,7 @@ def admin_how_fpa_buddy_works(request: Request):
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>How FP&amp;A Buddy works</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">The real mechanism behind <a href="/library/ask" style="color:var(--accent);">/library/ask</a>, for anyone who wants more than the marketing description&mdash;a PM, an engineer, or a technically comfortable CFO. Retrieval-tier counts and the default cost cap below are read live from the code, so this page can't quietly drift out of date the way a hand-typed number would.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">The real mechanism behind <a href="/tools/fpa-buddy" style="color:var(--accent);">/tools/fpa-buddy</a>, for anyone who wants more than the marketing description&mdash;a PM, an engineer, or a technically comfortable CFO. Retrieval-tier counts and the default cost cap below are read live from the code, so this page can't quietly drift out of date the way a hand-typed number would.</p>
 </div>
 
 {_diagram_lightbox_html("fpa-flow-diagram-frame", _FPA_FLOW_DIAGRAM, "the retrieval flow diagram")}

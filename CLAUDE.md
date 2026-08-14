@@ -80,7 +80,8 @@ webapp/
                    #   (/, /thought-leadership [+ /thought-leadership/growth-engine-ratio,
                    #   /thought-leadership/ai-hackathon-playbook, /thought-leadership/netsuite-mcp],
                    #   /tools, /contact, /play) + private tools
-                   #   (/library, /library/feed, /read, /library/ask, /save, /api/search, /bookmarklet)
+                   #   (/tools/fpa-buddy, /save, /api/search, /bookmarklet — plus
+                   #   /library/archive, /library/feed, and /read, all admin-only)
                    #   + auth (/login, /logout) + the /admin back office (~40 pages)
   checks.py        # aggregates the automated checks for /admin/checks (mirrors CI)
   tasks.py         # open-task badge counts for the admin hub
@@ -470,11 +471,13 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   destination's back-link (Archive, Feed, Read) goes to `/admin/library`. The
   homepage's "Digital Library" card was deleted outright, not repointed, and
   "Library" came out of the public nav bar entirely — FP&A Buddy (still
-  member-gated) is reachable directly at `/library/ask` but has no nav entry
-  until a later phase's Toolbox restructure gives it one. **FP&A Buddy's own
-  access level is untouched** — `/library/ask` and `/library/past-questions`
-  remain member-gated, not admin, since it's meant for a small group of
-  signed-in friends, not just Brian. On the admin side, the Admin hub's
+  member-gated) was reachable directly at `/library/ask` at this point, with
+  no nav entry yet (see the Phase 2 bullet below: it moved to
+  `/tools/fpa-buddy` and `/library/ask` no longer exists). **FP&A Buddy's own
+  access level was untouched in this phase** — it stayed member-gated, not
+  admin, since it's meant for a small group of signed-in friends, not just
+  Brian; that's still true post-Phase-2, only the URL changed. On the admin
+  side, the Admin hub's
   "Archive" section (the card + its own `/admin/library` management page,
   covering the same 8 existing tools in the same order) was renamed
   "Library" — deliberately **without** adding links to Archive/Feed above
@@ -493,6 +496,48 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   owns building a real conditional subscriber-access alert on the merged
   Reader page — deliberately not built here, since Feed is being retired into
   `/read` in that same phase and building it twice would be wasted work.
+- **Library/Toolbox restructure, Phase 2 — FP&A Buddy moves to
+  `/tools/fpa-buddy`; Past Questions folds in as a helpful-only search.**
+  FP&A Buddy moved out of Library into the Toolbox area, at a new URL
+  replacing `/library/ask` — still member-gated exactly as before (unlike
+  Archive/Feed's Phase 1 move to admin-only), since it's for a small group
+  of signed-in friends, not just Brian. `/library/ask` and
+  `/library/past-questions` are both gone outright — no compatibility
+  redirect, since nothing was bookmarked. Every internal reference was
+  found and fixed instead: the nav comment, the old Library hub card
+  (already gone as of Phase 1), the Archive admin page's inline "quick ask"
+  widget and its "More options" link/JS, `/ask/history`'s links back to the
+  ask page and out to Past Questions, the "How FP&A Buddy works" admin
+  explainer, the scripts registry's `mcp_server.py` blurb, and the
+  Community Matchmaker's "How this works" reference doc — all repointed to
+  `/tools/fpa-buddy`. The old flat `/questions` redirect stub (which used
+  to 301 to `/library/past-questions`) is gone the same way, straight 404
+  now. `/ask` is the one exception: `GET /ask` used to 301 to
+  `/library/ask`, and that redirect is gone too, but the bare path isn't —
+  `POST /ask` (the Q&A API, untouched by this phase) still lives there, so
+  `GET /ask` now 405s instead of 404ing. Past Questions itself — previously
+  a standalone browse page showing every non-hidden question, no rating
+  filter — folded into a "Search past questions" section on
+  `/tools/fpa-buddy`, placed above the ask box (a genuine "search before you
+  ask" flow), with a real behavior change: it now shows only questions with
+  at least one `ask_feedback.rating='helpful'` row.
+  `Library.list_public_ask_questions` grew a `helpful_only` parameter (an
+  `EXISTS` subquery against `ask_feedback`, not a join — a question with
+  several raters, possibly including an `inaccurate` one, still shows up
+  exactly once as long as any single rater called it `helpful`) rather than
+  becoming a second near-duplicate query method. No dedup on repeated
+  question text for v1 — the old page never deduped either, and doing it
+  well would need more than exact-string matching to be worth the
+  complexity (near-duplicate phrasing, or two genuinely different answers
+  to a similarly-phrased question), so it's left as a possible future
+  improvement, not a v1 gap being silently accepted. The admin-only
+  hide/anonymize controls on each past-question row carried over unchanged
+  (same `/questions/{id}/hide` and `/questions/{id}/anonymize` POST routes,
+  just redirecting back to `/tools/fpa-buddy#past-questions` now instead of
+  the removed page). This phase also cleaned up the dead
+  `nav.site-nav a[href="/ask"]` CSS selector Phase 0's investigation flagged
+  and Phase 1 explicitly deferred — removed here since this phase already
+  touches that exact code.
 - **Thought Leadership Admin CRUD, Phase 1 — the four `/thought-leadership`
   columns (Writing, Speaking & Events, Podcasts, Press) are now admin-managed,
   not hardcoded.** Phase 0 investigation found all four columns reading from
@@ -556,13 +601,18 @@ tables, no third-party dependency.
     `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp`, `/contact`,
     `/privacy`, `/login`, `/logout`, `/static/*`, `/health`. (The old flat `/growth-engine-ratio`,
     `/finops-ai-hackathon`, `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
-  - Private HTML pages → **redirect to `/login`** when signed out: `/library/ask`,
-    `/library/past-questions`, `/admin/contacts` (member-gated), and
+  - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
+    `/admin/contacts` (member-gated), and
     `/library/archive`, `/library/feed`, `/read` (**admin-only**, Phase 1 — see the
     Library access-level note in Key architecture decisions above). (The old flat
-    `/archive`, `/feed`, `/ask`, `/questions` URLs 301-redirect to their nested
-    equivalents above, unconditionally — the redirect itself carries no gated
-    content, so it fires even signed-out; where it lands is what's gated.) The
+    `/archive`, `/feed` URLs 301-redirect to their nested equivalents above,
+    unconditionally — the redirect itself carries no gated content, so it fires
+    even signed-out; where it lands is what's gated. `/library/ask` and
+    `/library/past-questions` were retired outright in Phase 2 — see the
+    Library/Toolbox Phase 2 note in Key architecture decisions above — along
+    with the old flat `/questions` redirect stub that pointed at the latter;
+    `GET /ask`'s redirect stub is gone the same way, but the bare `/ask` path
+    now 405s rather than 404s since `POST /ask` still lives there.) The
     `/library` hub route was removed outright in Phase 1 — no redirect.
   - Private API → **401** when unauthenticated, but also accept a valid token (cookie OR
     `X-Save-Token`/`?token=`): `/ask`, `/post`, `/feed/save`, `/api/search`.
@@ -908,7 +958,7 @@ surface it. The enrichment pickers stay curated (no auto-surfacing) so a whole-a
 re-enrich can't be pointed at an unexpectedly pricey new model by accident. When the
 API/key is unavailable, every picker falls back to the static registry.
 
-**FP&A Buddy (`/library/ask`) has no visible model picker.** The UI exposes only a
+**FP&A Buddy (`/tools/fpa-buddy`) has no visible model picker.** The UI exposes only a
 Quick/Standard/Deep effort choice; each tier maps internally to a model, an
 archive/web-search count, and a token budget (`EFFORT_SETTINGS` in
 `linklib/agent.py`). The model is an implementation detail, not a user-facing choice.

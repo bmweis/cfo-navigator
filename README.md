@@ -27,19 +27,18 @@ search is the spine; everything reads and writes through it.
   to the nested paths above)
 
 **Private (login or token)**
-- `/library` — the CFO Library hub, grouping the pages below into "Reading
-  Room" (Archive, Feed) and "FP&A Buddy" (the Buddy itself, Past Questions)
 - `/library/archive` — 1,500+ saved articles, imported from Feedly and
-  captured going forward, searchable via FTS5
+  captured going forward, searchable via FTS5 (admin-only)
 - `/library/feed` — RSS/Atom reader over `preferred_sites.opml`, with category
-  tabs and save-to-library
-- `/read` — Instapaper-style article reader
-- `/library/ask` — **FP&A Buddy**: retrieval-augmented Q&A over the library
-  plus domain-restricted web search, with cited answers and per-user cost caps
-- `/library/past-questions` — Past Questions: browse questions other members
-  have already asked FP&A Buddy
-- (`/archive`, `/feed`, `/ask`, `/questions` 301-redirect to the nested paths
-  above)
+  tabs and save-to-library (admin-only)
+- `/read` — Instapaper-style article reader (admin-only)
+- `/tools/fpa-buddy` — **FP&A Buddy**: retrieval-augmented Q&A over the library
+  plus domain-restricted web search, with cited answers and per-user cost caps,
+  plus a "search past questions" section (helpful-rated answers other members
+  already got) — member-gated
+- (`/archive`, `/feed` 301-redirect to the nested paths above; the old
+  `/library` hub, `/library/ask`, and `/library/past-questions` were retired
+  outright — no redirect)
 - `/admin` — the back office: archive queue and enrichment, dedupe, tag
   cleanup, CFO Toolbox management, users, brand/voice standards, checks,
   backups, and more
@@ -90,7 +89,7 @@ python -m scripts.enrich_compare --url https://example.com/some-article
 
 ## FP&A Buddy (Q&A)
 
-Web UI at `/library/ask`, CLI at `python -m scripts.ask "your question"`. Answers
+Web UI at `/tools/fpa-buddy`, CLI at `python -m scripts.ask "your question"`. Answers
 are grounded in your saved articles **plus** fresh web results restricted to
 the domains in `preferred_sites.opml`, with every citation linked. Model
 pickers are dynamic (`linklib/models.py`) — new Claude models surface
