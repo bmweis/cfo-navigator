@@ -284,3 +284,23 @@ def test_mobile_order_breakpoint_survives_phone_landscape_widths(env):
     assert idx != -1
     assert ".home-grid{display:grid" in html[idx:idx + 60]
     assert "@media(min-width:900px){\n  .home-grid{display:grid" not in html
+
+
+def test_only_one_thought_leadership_section_old_standalone_card_removed(env):
+    """Exactly one Thought Leadership presence on the homepage — the
+    consolidated section (home-tl-section) — with no trace of either
+    superseded predecessor: the original standalone "Thought Leadership"
+    card (pre-Phase-3, _rcard-based, its own distinct copy) or the stray
+    parallel-session PR's version of homepage() (which never touched the
+    Thought Leadership section at all, so the standalone card was still the
+    live one at the time it merged — see CLAUDE.md's reconciliation note)."""
+    html = _client(env).get("/").text
+    assert html.count('class="home-tl-section"') == 1
+    assert html.count("What I write about") == 1
+    # The old standalone card's own distinct copy — must not survive under
+    # any form (it predates the flagship-card/bullet copy entirely).
+    assert "Frameworks and playbooks worth keeping" not in html
+    assert "plus the podcasts, writing, and press." not in html
+    # The old card's containing markup (a Phase-3-era single-card row) is
+    # gone too, not just its text.
+    assert 'class="home-cards"' not in html
