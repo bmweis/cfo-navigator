@@ -189,8 +189,9 @@ pattern applied to routes instead of tables: on every page load it walks
 (skipping POST-only action routes, redirect stubs, JSON/AJAX APIs, file
 downloads, and other non-page endpoints), and reads each page's width tier
 (`page-full`/`page-grid`/`page-form`/`page-admin`, or "custom
-exception" for `/library/archive` and `/library/feed` — see BRAND.md §5 for
-the tier system itself) straight from that route's own source via
+exception" for `/read` (the merged Reader shell — see the Reader merge
+section below) — see BRAND.md §5 for the tier system itself) straight from
+that route's own source via
 `inspect.getsource` (following one hop into a directly-called helper function
 when a route builds its body that way, e.g. `/play` via `_sdr_build_body`).
 Any page route whose source carries no recognized tier class is flagged —
@@ -1502,6 +1503,62 @@ All capture paths converge on `linklib/pipeline.py::ingest_url` or the
   article is always immediately findable via FTS5, and via vector search
   once its embed call (inline or backfilled) has actually completed.
 
+### Reader merge (Phase 5)
+
+`GET /read` is a single three-pane admin tool that replaces the two
+previously separate `/library/archive` (search + browse the saved Archive)
+and `/library/feed` (the RSS reader) pages — both retired outright, no
+compatibility redirect (nothing was bookmarked, same precedent as every
+other retired-route call in this doc). The three panes:
+
+- **Left rail** — quick views (Feed / Saved / Read Later, each with a live
+  count) plus, only in the Feed view, a Sources tree (OPML category →
+  per-source counts) driving client-side filtering over one already-loaded
+  batch of feed items — same approach the old Feed page's source checkboxes
+  used, just restyled. Switching quick views is a real page load
+  (`/read?view=feed|saved|readlater`); filtering *within* the Feed view is
+  client-side JS, no round trip.
+- **Middle list pane** — server-rendered rows for whichever view is active.
+  Saved search is a plain GET reload (`/read?view=saved&q=...`), matching
+  this codebase's existing server-rendered-search convention rather than a
+  client-side SPA search. A subtle coral alert renders here (via
+  `authcheck.stale_domains`) only when a subscriber cookie has actually gone
+  stale — same underlying `authcheck.check_auth_cookies`/`get_auth_status`
+  mechanism `/admin/library`'s banner already used, just a second,
+  conditional surface for it. `/admin/library`'s own manual re-check control
+  (`POST /admin/auth/recheck`) is untouched; the Reader's alert link posts to
+  the same route.
+- **Right reader pane** — empty state until a row is clicked, then loaded
+  via `GET /api/read-article?id=...` or `?url=...` (JSON, admin-gated) with
+  no full page navigation. That endpoint, and the standalone
+  `GET /read/{article_id}` page (what `GET /read?id=...` used to be, now a
+  path param — for a direct link to one saved article), both call
+  `_resolve_reader_content`, one shared helper for "look up by id in the DB
+  first, using cached `content` when it's substantial, else fetch the URL
+  live" — previously duplicated inline in the pre-merge `/read` route, now a
+  single implementation.
+
+**What got removed, deliberately, in this merge:**
+- The old Archive page's inline "ask your archive a question" box (a
+  duplicate, lesser FP&A Buddy surface) is gone outright, not migrated and
+  not pointed at `/tools/fpa-buddy` — `POST /ask` and `linklib/agent.py` are
+  untouched, so FP&A Buddy itself is unaffected.
+- Every per-item Edit tags / Delete / Archive-management control that used
+  to live inline on the Archive page and the old `/read?id=...` view is
+  gone. Those stay exclusively in `/admin/library`'s dedicated tools (Tag
+  cleanup, Remove content, etc.) — the Reader is a reading surface, not a
+  curation one. Save-to-library (`POST /feed/save`) and the Read Later
+  toggle (`POST /feed/read-later`) are the only actions still exposed, both
+  reused verbatim.
+- The old bare paste-a-URL empty state (`GET /read` with no `id`/`url`) is
+  gone — the merged page's list-driven UX (click a row, the reader pane
+  loads it) replaces that need. There's no standalone way to read an
+  arbitrary not-yet-saved URL outside the Feed/Read Later list rows anymore.
+
+`/admin/library`'s `_LIBRARY_TOOLS` gained a ninth entry, "Open Reader" →
+`/read`, first in the list — the entry point Phase 1 deliberately deferred
+to this phase.
+
 ### Auth: three tiers, one cookie
 
 Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
@@ -1591,13 +1648,16 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
     exact path.)
   - *Admin* (`_is_authed` — session with `role=admin`): everything under
     `/admin/*`, plus admin-only actions on shared pages, plus **the digital
-    Library** — `/library/archive`, `/library/feed`, and `/read` (Phase 1:
-    tightened from member to admin-only — it's Brian's personal reading
-    stash, not a member-facing feature). The old flat `/archive`, `/feed`
-    URLs still 301-redirect to their nested equivalents, which now land on
-    an admin-gated page. The `/library` hub route (a landing page linking to
-    Archive/Feed/FP&A Buddy) was removed outright in the same phase — no
-    redirect, nothing points to it anymore. This tier also includes two
+    Library**, now the merged Reader — `GET /read` (the three-pane shell:
+    Feed/Saved/Read Later) and `GET /read/{article_id}` (the standalone
+    single-article view) — tightened from member to admin-only back in
+    Phase 1, carried into the Phase 5 Reader merge below. The old flat
+    `/archive`, `/feed` URLs, and the pre-merge `/library/archive` and
+    `/library/feed` routes they redirected to, are all gone outright as of
+    the Phase 5 merge — no compatibility redirect, nothing was bookmarked.
+    The `/library` hub route (a landing page linking to Archive/Feed/FP&A
+    Buddy) was removed outright in Phase 1 — no redirect, nothing points to
+    it anymore. This tier also includes two
     routes that live on the public `/tools/*` prefix rather than under
     `/admin/*` — `GET/POST /tools/software/{slug}/edit` and
     `GET/POST /tools/communities/{slug}/edit` (Phase 2), the full edit forms
@@ -1992,7 +2052,7 @@ scripts/                    # CLI entry points (import, add_link, enrich_backfil
   archive/                  # one-time migrations + closed-investigation reports,
                             #   job done, kept only for git history (Phase N)
 tests/                      # pytest suite run by CI (.github/workflows/qa.yml)
-preferred_sites.opml        # dual-purpose: web-search allowlist AND /library/feed subscriptions
+preferred_sites.opml        # dual-purpose: web-search allowlist AND /read's Feed view subscriptions
 Dockerfile, Procfile, railway.toml  # Railway deploy (uvicorn, /health healthcheck)
 CLAUDE.md, BRAND.md         # working agreements: context for agents, design system
 ```

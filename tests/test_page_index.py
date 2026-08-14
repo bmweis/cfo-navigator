@@ -89,23 +89,26 @@ def test_page_index_includes_known_pages(env):
         assert path in paths
 
 
-def test_page_index_recognizes_custom_exceptions(env):
+def test_page_index_recognizes_reader_shell_as_custom_exception(env):
+    """`/read` (Phase 5's merged three-pane Reader shell) is a bespoke
+    full-bleed layout that never uses the `.page`/`.page-full` classes —
+    same reasoning the old /library/archive and /library/feed carried
+    before the merge."""
     rows = {r["path"]: r for r in env._page_index_snapshot()}
-    for path in ("/library/archive", "/library/feed"):
-        assert rows[path]["tier"] == "custom exception"
-        assert rows[path]["flagged"] is False
-
-
-def test_page_index_recognizes_read_as_page_full(env):
-    """`/read` is a fully standalone template (_READER_TMPL/_READER_CSS) that
-    never uses the `.page`/`.page-full` classes, so the live-source regex
-    can't detect its tier on its own — it genuinely renders at the page-full
-    width (1900px) though, so it's mapped to that real tier name (not flagged,
-    and not lumped in with the two true custom-exception layouts) rather than
-    surfacing as a false "no tier assigned" flag."""
-    rows = {r["path"]: r for r in env._page_index_snapshot()}
+    assert rows["/read"]["tier"] == "custom exception"
     assert rows["/read"]["flagged"] is False
-    assert rows["/read"]["tier"] == "page-full"
+
+
+def test_page_index_recognizes_read_article_as_page_full(env):
+    """`/read/{article_id}` is a fully standalone template (_READER_TMPL/
+    _READER_CSS) that never uses the `.page`/`.page-full` classes, so the
+    live-source regex can't detect its tier on its own — it genuinely
+    renders at the page-full width (1900px) though, so it's mapped to that
+    real tier name (not flagged) rather than surfacing as a false "no tier
+    assigned" flag."""
+    rows = {r["path"]: r for r in env._page_index_snapshot()}
+    assert rows["/read/{article_id}"]["flagged"] is False
+    assert rows["/read/{article_id}"]["tier"] == "page-full"
 
 
 def test_page_index_flags_a_newly_added_untiered_route(env):
