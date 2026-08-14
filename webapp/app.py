@@ -1988,21 +1988,21 @@ def homepage(request: Request):
   <a href="/tools" style="display:inline-block;margin-top:22px;font-size:14px;font-weight:600;color:var(--navy);">See the full toolbox &rarr;</a>
 </div>"""
 
-    # Reader-access placeholder (admin-only): /read (Phase 5, PR 320) hasn't
-    # merged yet, so this stays informational rather than a real link until
-    # it's live&mdash;see webapp/app.py's homepage() for the live-status check.
+    # Reader access (admin-only): /read shipped in Phase 5 (PR 320, merged),
+    # so this is a real link now rather than the placeholder text it launched
+    # with&mdash;see webapp/app.py's homepage() for the admin-only gate.
     reader_access_card = ""
     if _is_authed(request):
-        reader_access_card = """<div style="background:var(--seafoam);border:1.5px solid var(--seafoam-deep);border-radius:16px;padding:26px;width:100%;height:178px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:8px;">
-  <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only &mdash; placeholder</div>
+        reader_access_card = """<a href="/read" style="text-decoration:none;background:var(--seafoam);border:1.5px solid var(--seafoam-deep);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
+  <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only</div>
   <div style="display:flex;align-items:center;gap:12px;">
     <div style="flex-shrink:0;width:34px;height:34px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--navy)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h13a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 8h7"/><path d="M8 12h7"/><path d="M8 16h4"/><path d="M19 8h1a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2"/></svg>
     </div>
     <div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Reader access</div>
   </div>
-  <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Links into the Reader&mdash;build pending.</p>
-</div>"""
+  <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Saved, and Read Later in one place.</p>
+</a>"""
 
     body = f"""<div class="page page-full">
 <style>
