@@ -1,7 +1,9 @@
-"""Phase 3 addendum: homepage Thought Leadership teaser section, mirroring
-the Toolbox teaser's structure, plus the "Feature on homepage" pin field
-that drives its tile selection, and the "Speaking &amp; Events" double-
-escaping fix on /thought-leadership.
+"""Homepage Restructure phase: the homepage's consolidated Thought
+Leadership section (flagship cards + 4-column type breakdown + bullets,
+replacing both the old standalone card and the Phase 3 addendum's separate
+recency-pin teaser), the repurposed "Feature on homepage" checkbox that now
+selects each type's representative entry, and the "Speaking &amp; Events"
+double-escaping fix on /thought-leadership.
 """
 import pathlib
 import sys
@@ -37,13 +39,19 @@ def _admin_client(appmod):
     return c
 
 
-def test_homepage_has_thought_leadership_teaser_section(env):
+def test_homepage_has_one_consolidated_thought_leadership_section(env):
     html = _client(env).get("/").text
-    assert "THOUGHT LEADERSHIP" in html
-    assert "What I write about" in html
+    # Exactly one section — old standalone card + old separate teaser are gone.
+    assert html.count("THOUGHT LEADERSHIP") == 1
+    assert html.count("What I write about") == 1
     assert "See all Thought Leadership" in html
     assert 'href="/thought-leadership"' in html
-    # Exact copy, not rephrased.
+    # The 3 flagship pieces, in their existing /thought-leadership card treatment.
+    assert "The Growth Engine Ratio" in html
+    assert "Sail, Don&rsquo;t Row" in html
+    assert "Connecting Claude to NetSuite" in html
+    assert 'class="tl-card"' in html
+    # Exact bullet copy, not rephrased.
     assert "AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing." in html
     assert ("Frameworks myself and others have built, real opinions, and stories from the "
             "trenches.") in html
@@ -51,15 +59,17 @@ def test_homepage_has_thought_leadership_teaser_section(env):
             "start shaping what&rsquo;s next.") in html
     assert ("Showing up for the finance community&mdash;hosting my own podcast, speaking on "
             "panels, co-chairing demo days and events.") in html
-    # No specific community named.
     assert "The F Suite" not in html
 
 
-def test_toolbox_teaser_section_unchanged(env):
+def test_toolbox_teaser_section_unchanged_and_has_building_sticker(env):
     html = _client(env).get("/").text
     assert "TOOLBOX" in html
     assert "Everything in the toolbox" in html
     assert "See the full toolbox" in html
+    # Regression check: the "building" sticker was dropped when Phase 3 rebuilt
+    # the old homepage card into the teaser section — must be present here.
+    assert "🚧 building" in html
 
 
 def test_add_and_edit_forms_have_feature_on_homepage_checkbox(env):
@@ -95,7 +105,6 @@ def test_featured_home_checkbox_persists_via_add_and_edit_routes(env):
     assert items[0]["featured_home"] == 1
 
     item_id = items[0]["id"]
-    # Edit and uncheck the pin.
     c.post(f"/admin/thought-leadership/{item_id}/edit", data={
         "type": "writing", "title": "Pinned Piece", "url": "https://example.com/pinned",
         "venue": "Forbes", "date_label": "Jan 2020", "display_order": "0",
@@ -108,41 +117,94 @@ def test_featured_home_checkbox_persists_via_add_and_edit_routes(env):
     assert it["featured_home"] == 0
 
 
-def test_homepage_teaser_shows_pinned_entry_first_then_backfills_recent(env):
+def test_representative_prefers_checked_entry_over_more_recent_unchecked(env):
     lib = env._lib()
     try:
-        lib.add_thought_leadership("writing", "Old Unpinned", "https://example.com/old",
-                                   "Forbes", "Jan 2020", "2020-01", featured_home=False)
-        lib.add_thought_leadership("speaking", "Pinned Older Talk", "https://example.com/pinned",
-                                   "The F Suite", "Jun 2020", "2020-06", featured_home=True)
-        lib.add_thought_leadership("podcast", "Recent Pod", "https://example.com/pod",
-                                   "Cash Flow Show", "Jul 2026", "2026-07", featured_home=False)
-        lib.add_thought_leadership("press", "Newest Press", "https://example.com/press",
-                                   "TechCrunch", "Aug 2026", "2026-08", featured_home=False)
+        lib.add_thought_leadership("writing", "Newer Unchecked", "https://example.com/newer",
+                                   "Forbes", "Aug 2026", "2026-08", featured_home=False)
+        lib.add_thought_leadership("writing", "Older Checked", "https://example.com/older",
+                                   "Forbes", "Jan 2020", "2020-01", featured_home=True)
     finally:
         lib.close()
-    html = _client(env).get("/").text
-    pinned_idx = html.find("Pinned Older Talk")
-    newest_idx = html.find("Newest Press")
-    recent_idx = html.find("Recent Pod")
-    old_idx = html.find("Old Unpinned")
-    assert pinned_idx != -1 and newest_idx != -1 and recent_idx != -1
-    # Pinned tile appears despite being the oldest dated entry.
-    assert pinned_idx < newest_idx
-    # The oldest unpinned entry is bumped by the two more-recent unpinned ones
-    # (only 3 tiles total: 1 pinned + 2 backfilled).
-    assert old_idx == -1
+    rep = env._lib()
+    try:
+        result = rep.get_thought_leadership_representative("writing")
+    finally:
+        rep.close()
+    assert result["title"] == "Older Checked"
 
 
-def test_homepage_teaser_tile_links_directly_to_piece(env):
+def test_representative_falls_back_to_most_recent_when_none_checked(env):
     lib = env._lib()
     try:
-        lib.add_thought_leadership("writing", "Direct Link Piece", "https://example.com/direct",
+        lib.add_thought_leadership("podcast", "Old Pod", "https://example.com/old",
+                                   "Cash Flow Show", "Jan 2020", "2020-01")
+        lib.add_thought_leadership("podcast", "New Pod", "https://example.com/new",
+                                   "Cash Flow Show", "Aug 2026", "2026-08")
+    finally:
+        lib.close()
+    rep = env._lib()
+    try:
+        result = rep.get_thought_leadership_representative("podcast")
+    finally:
+        rep.close()
+    assert result["title"] == "New Pod"
+
+
+def test_representative_is_none_when_type_has_no_entries(env):
+    lib = env._lib()
+    try:
+        result = lib.get_thought_leadership_representative("press")
+    finally:
+        lib.close()
+    assert result is None
+
+
+def test_two_checked_entries_same_type_most_recently_updated_wins(env):
+    lib = env._lib()
+    try:
+        a_id = lib.add_thought_leadership("press", "A", "https://example.com/a",
+                                          "TechCrunch", "Jan 2026", "2026-01", featured_home=True)
+        lib.add_thought_leadership("press", "B", "https://example.com/b",
+                                   "Forbes", "Feb 2026", "2026-02", featured_home=True)
+        # Re-save A so it's now the most recently updated of the two checked entries.
+        lib.update_thought_leadership(a_id, "press", "A", "https://example.com/a", "TechCrunch",
+                                      "Jan 2026", "2026-01", "", False, 0, featured_home=True)
+    finally:
+        lib.close()
+    rep = env._lib()
+    try:
+        result = rep.get_thought_leadership_representative("press")
+    finally:
+        rep.close()
+    assert result["title"] == "A"
+
+
+def test_homepage_type_breakdown_renders_representative_and_handles_empty_type(env):
+    lib = env._lib()
+    try:
+        lib.add_thought_leadership("writing", "Featured Writing Piece", "https://example.com/w",
                                    "Forbes", "Jan 2026", "2026-01", featured_home=True)
+        # No "speaking", "podcast", or "press" entries at all — those columns
+        # must not break the page.
     finally:
         lib.close()
+    resp = _client(env).get("/")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "Featured Writing Piece" in html
+    assert 'href="https://example.com/w"' in html
+
+
+def test_homepage_type_breakdown_empty_db_does_not_break_page(env):
+    resp = _client(env).get("/")
+    assert resp.status_code == 200
+    assert "THOUGHT LEADERSHIP" in resp.text
+
+
+def test_hero_polish_avatar_and_headline_width(env):
     html = _client(env).get("/").text
-    assert 'href="https://example.com/direct"' in html
+    assert "max-width:520px" in html
 
 
 def test_speaking_and_events_renders_without_double_escaping(env):

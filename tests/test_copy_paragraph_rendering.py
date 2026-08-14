@@ -81,8 +81,12 @@ def test_homepage_expanded_still_renders_multiple_paragraphs(env):
     c = _client(env)
     r = c.get("/")
     assert r.status_code == 200
-    assert "<p>Expanded para one.</p>" in r.text
-    assert "<p>Expanded para two.</p>" in r.text
+    # Homepage Restructure phase: the expanded-copy block now shares the same
+    # explicit style as the teaser-copy block above it in the status box
+    # (previously it fell through to the sitewide default <p> margin, which
+    # read as a different spacing rhythm within the same box — see CLAUDE.md).
+    assert '<p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">Expanded para one.</p>' in r.text
+    assert '<p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">Expanded para two.</p>' in r.text
 
 
 def test_about_page_renders_multiple_paragraphs(env):

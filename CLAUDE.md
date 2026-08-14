@@ -681,6 +681,63 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   em dashes included — flagging that per the em-dash policy above, but noting
   the copy was pre-approved by the person the policy asks it be flagged to,
   not independently written and shipped.
+- **Homepage Restructure — the Thought Leadership addendum's recency-pin panel is
+  gone; the homepage gets one consolidated Thought Leadership section instead, and
+  `featured_home` is repurposed rather than left orphaned.** The redesign replaced
+  the addendum's "3 tiles, pinned-then-recency-backfilled" panel outright with a
+  fixed, curated section: the same eyebrow/heading, an intro line (reusing
+  `/thought-leadership`'s own intro copy verbatim), the **3 flagship pieces**
+  (Growth Engine Ratio, Sail Don't Row, Connecting Claude to NetSuite) in their
+  existing card treatment, a **4-column type breakdown** (Writing/Speaking &amp;
+  Events/Podcasts/Press, one representative entry each), and the 4 existing
+  bullets — replacing both the old standalone homepage "Thought Leadership" card
+  and the addendum's separate lower teaser, which are both gone now (not two
+  sections stacked). Investigated first, per the build brief's explicit ask,
+  rather than guessed at: `featured_home` (the addendum's "pin to homepage
+  teaser" checkbox) had no role in a hardcoded-flagship-pieces design, so its
+  recency-backfill purpose was genuinely dead — but the checkbox mechanism itself
+  was still useful, just for a different question ("which entry represents this
+  type?"), so it's **repurposed, not removed**: no new column, no migration,
+  same admin form location, only the meaning and helper copy changed. Resolution
+  rule (`Library.get_thought_leadership_representative`, replacing
+  `list_thought_leadership_for_home`): the most recently updated `featured_home=1`
+  entry of that type wins if more than one is checked (`updated_at DESC`); if
+  none is checked, falls back to the most recent entry by the existing
+  `_TL_ORDER_SQL` ordering, so an admin who hasn't curated a type yet still sees
+  something instead of a broken/empty column; a type with zero entries at all
+  renders no column, same empty-collapse convention `/thought-leadership`'s own
+  `column()` already uses. The flagship-card markup/CSS and the per-type-column
+  markup/CSS are now shared module-level constants (`_TL_FEATURED_CARDS`/
+  `_tl_fcard`/`_TL_SHARED_CSS`, `_tl_type_column`) used by both
+  `/thought-leadership` and the homepage, rather than two copies that could
+  drift — `/thought-leadership` itself is otherwise unchanged (still full capped
+  lists with "Show all", not single representatives). **Hero polish:** avatar
+  sized to 176px (80% of the prior 220px), the headline capped to a 520px
+  max-width so it wraps more deliberately instead of stretching the full copy
+  column, and the status box's two copy blocks now share one style call (the
+  expanded-copy block previously fell through to the sitewide default
+  `p{{margin:0 0 16px}}` while the teaser block above it used an explicit
+  `margin:0 0 8px`, so the two paragraph groups inside one box read with two
+  different rhythms). **Toolbox teaser sticker regression, caught and fixed
+  here:** the "🚧 building" sticker was on the old homepage "CFO Toolbox" card
+  before Phase 3, but never carried over when Phase 3 rebuilt that card into
+  the current full-width Toolbox teaser section — it had been silently missing
+  since that phase shipped until this build brief's acceptance criteria called
+  for verifying it explicitly. Re-added to the teaser section's corner (same
+  `_sticker()` component, same rotate/positioning convention as its other
+  sitewide uses). **Design-file caveat (same limitation as Phase 3, still
+  unresolved):** the build brief pointed at a second Claude Design project
+  (`Homepage Restructure.dc.html`, importing `image-slot.js`/`support.js`) as
+  the source of truth for the hero/Toolbox-teaser-placement/section layout —
+  `/design-login` is still unavailable in this headless session and the direct
+  claude.ai/design URL still 403s, so this file was never actually checked
+  against either. In particular, the Toolbox teaser's placement (moved into the
+  hero's right column vs. kept full-width and built out further — both
+  explicitly named as live possibilities in the build brief) was decided by
+  judgment, not verified: kept full-width, since restructuring the hero grid
+  to absorb it is a materially bigger, riskier change to guess at blind than
+  polishing the section in place. Flagged for a visual diff against the design
+  file, same as Phase 3's still-open caveat above.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

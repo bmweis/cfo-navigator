@@ -97,8 +97,12 @@ def test_homepage_has_toolbox_teaser_section(env):
 
 
 def test_homepage_old_cfo_toolbox_card_is_gone(env):
+    # The old standalone top-row "CFO Toolbox" card (with its own copy) is
+    # gone — the "🚧 building" sticker itself carries over onto the new
+    # Toolbox teaser section (Homepage Restructure phase; see
+    # test_thought_leadership_homepage_teaser.py's sticker regression test),
+    # so its presence alone doesn't indicate the old card survived.
     html = _client(env).get("/").text
-    assert "🚧 building" not in html
     assert "A curated directory of the software high-growth" not in html
 
 

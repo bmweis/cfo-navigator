@@ -1946,55 +1946,35 @@ def homepage(request: Request):
         homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
         homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
-        tl_teaser_items = lib.list_thought_leadership_for_home(limit=3)
+        # One representative entry per Thought Leadership type, for the
+        # consolidated section's 4-column breakdown — see
+        # get_thought_leadership_representative's docstring for the
+        # selection rule (repurposes the `featured_home` checkbox).
+        tl_reps = [lib.get_thought_leadership_representative(t) for t, _label in _TL_TYPES]
     finally:
         lib.close()
-
-    def _rcard(href, title, desc, icon_html="", sticker_html="", external=False):
-        attrs = ' target="_blank" rel="noopener"' if external else ''
-        pos = "position:relative;" if sticker_html else ""
-        return (
-            f'<a href="{href}"{attrs} style="{pos}display:block;background:var(--surface);border:1px solid var(--line);'
-            f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
-            f'{sticker_html}{icon_html}'
-            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-            f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
-            f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
-        )
-
-    # A single top-row card now (CFO Toolbox moved to its own teaser section
-    # below — see _TOOLBOX_TILES / _toolbox_mini_tile) — no longer needs to
-    # reserve space for a 2-column grid, so it's capped to a single-card
-    # width rather than stretching edge-to-edge on wide viewports.
-    cards = _rcard("/thought-leadership", "Thought Leadership",
-                    "Frameworks and playbooks worth keeping: the Growth Engine Ratio for pressure-testing GTM "
-                    "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
-                    "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press.",
-                    icon_html=_card_icon(0, _ICON_BRAIN))
 
     toolbox_mini_tiles = "".join(
         _toolbox_mini_tile(i, title, one_liner, icon)
         for i, (_href, title, icon, _desc, one_liner) in enumerate(_TOOLBOX_TILES)
     )
 
-    tl_mini_tiles = "".join(
-        _tl_home_tile(i, item) for i, item in enumerate(tl_teaser_items)
+    tl_type_columns = "".join(
+        _tl_type_column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], label, item)
+        for i, ((_t, label), item) in enumerate(zip(_TL_TYPES, tl_reps))
     )
 
     body = f"""<div class="page page-full">
 <style>
+{_TL_SHARED_CSS}
 .home-hero{{display:flex;flex-direction:column;gap:28px;align-items:stretch;}}
 .home-hero-copy{{min-width:0;}}
 .home-hero-side{{display:flex;flex-direction:column;gap:32px;align-items:center;}}
 .home-hero-photo{{position:relative;z-index:2;flex-shrink:0;}}
 .home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
-.home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;max-width:460px;}}
-/* Shared "compact teaser section" treatment — Toolbox and Thought Leadership
-   are a deliberately matched pair (Phase 3 + its addendum): same eyebrow
-   style, same panel, same mini-tile grid. Only each section's own heading/
-   subline/list content differs. */
-.home-teaser{{margin:32px 0 8px;}}
+/* Shared "compact teaser section" treatment for the Toolbox teaser — same
+   eyebrow style, same panel, same mini-tile grid it's had since Phase 3. */
+.home-teaser{{margin:32px 0 8px;position:relative;}}
 .home-teaser-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:16px;}}
 .home-teaser-grid{{display:grid;grid-template-columns:1fr;gap:16px;}}
 @media(min-width:900px){{
@@ -2011,25 +1991,24 @@ def homepage(request: Request):
 <div class="home-hero">
   <div class="home-hero-copy">
     <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
-    <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">{_underline_last_word(homepage_headline)}</h1>
+    <h1 style="margin:0 0 18px;max-width:520px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">{_underline_last_word(homepage_headline)}</h1>
     {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0 0 12px;")}
   </div>
   <div class="home-hero-side">
     <div class="home-hero-photo">
-      {_avatar(220)}
+      {_avatar(176)}
       {_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="-14px", right="-18px")}
     </div>
     <div class="home-status">
       <div style="font:700 15px var(--font-sticker);color:var(--seafoam-deep);margin-bottom:8px;">STATUS:</div>
       {_copy_paragraphs_html(homepage_teaser, style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;")}
-      <div style="font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
+      {_copy_paragraphs_html(homepage_expanded, style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;")}
     </div>
   </div>
 </div>
 
-<div class="home-cards">{cards}</div>
-
 <div class="home-teaser">
+  {_sticker("🚧 building", rotate=-4, top="-14px", right="14px", size=14)}
   <div style="font:600 10.5px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">TOOLBOX</div>
   <h2 style="margin:0 0 6px;font-family:var(--font-head);font-weight:600;font-size:21px;">Everything in the toolbox</h2>
   <p style="margin:0 0 16px;font-size:14px;color:var(--muted);">Software, benchmarks, communities, and an AI research buddy.</p>
@@ -2039,15 +2018,17 @@ def homepage(request: Request):
 
 <div class="home-teaser">
   <div style="font:600 10.5px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">THOUGHT LEADERSHIP</div>
-  <h2 style="margin:0 0 14px;font-family:var(--font-head);font-weight:600;font-size:21px;">What I write about</h2>
-  <ul style="padding-left:22px;margin:0 0 26px;">
+  <h2 style="margin:0 0 8px;font-family:var(--font-head);font-weight:600;font-size:21px;">What I write about</h2>
+  <p style="max-width:680px;margin:0 0 20px;font-size:14px;color:var(--muted);">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>
+  <div class="tl-featured">{"".join(_tl_fcard(*c) for c in _TL_FEATURED_CARDS)}</div>
+  <div class="tl-cols" style="margin-top:24px;">{tl_type_columns}</div>
+  <ul style="padding-left:22px;margin:28px 0 0;">
     <li style="margin-bottom:18px;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing.</li>
     <li style="margin-bottom:18px;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">Frameworks myself and others have built, real opinions, and stories from the trenches.</li>
     <li style="margin-bottom:18px;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">How to move from scorekeeper to strategic partner: stop reporting what happened, start shaping what&rsquo;s next.</li>
     <li style="margin-bottom:0;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
   </ul>
-  <div class="home-teaser-panel"><div class="home-teaser-grid">{tl_mini_tiles}</div></div>
-  <a href="/thought-leadership" style="display:inline-block;margin-top:14px;font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
+  <a href="/thought-leadership" style="display:inline-block;margin-top:20px;font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
 </div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
@@ -2168,63 +2149,20 @@ def thought_leadership(request: Request):
             f'{rows}{more}</div>'
         )
 
-    # Featured: three flagship pieces, one consistent card treatment. The only
-    # per-card variation is the small category tag colour — no full-colour floods,
-    # which is what made the old top read as busy.
-    def fcard(href, tag, tag_color, title, desc, cta):
-        return (
-            f'<a href="{href}" class="tl-card">'
-            f'<span class="tl-tag" style="color:{tag_color};">{tag}</span>'
-            f'<h3>{title}</h3><p>{desc}</p>'
-            f'<span class="tl-go">{cta} &rarr;</span></a>'
-        )
-
-    featured = (
-        '<div class="tl-featured">'
-        + fcard("/thought-leadership/growth-engine-ratio", "Framework", "var(--coral-deep)",
-                "The Growth Engine Ratio",
-                "A metric for how R&amp;D and GTM investments work together to drive growth—with an interactive calculator.",
-                "Read the framework")
-        + fcard("/thought-leadership/ai-hackathon-playbook", "Playbook", "var(--seafoam-deep)",
-                "Sail, Don&rsquo;t Row",
-                "How to run an AI hackathon with your finance team—the full format, facilitation mechanics, and how to make it stick.",
-                "Read the playbook")
-        + fcard("/thought-leadership/netsuite-mcp", "Setup Guide", "var(--navy-light)",
-                "Connecting Claude to NetSuite",
-                "End-to-end setup for the two-role OAuth architecture—what it is, why it&rsquo;s secure, and how to use it.",
-                "Read the guide")
-        + '</div>'
-    )
-
+    # Featured: three flagship pieces, one consistent card treatment — shared
+    # with the homepage's consolidated Thought Leadership section (Homepage
+    # Restructure phase) via _TL_FEATURED_CARDS/_tl_featured_cards_html, so
+    # the two surfaces can't drift apart. The only per-card variation is the
+    # small category tag colour — no full-colour floods, which is what made
+    # the old top read as busy.
     body = (
         '<div class="page page-full">'
         '<style>'
-        '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
-        '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'
-        'border-radius:14px;padding:22px 22px 18px;text-decoration:none;transition:border-color .15s,box-shadow .15s,transform .15s;}'
-        '.tl-card:hover{border-color:var(--navy-light);box-shadow:0 6px 20px rgba(0,41,117,.08);transform:translateY(-2px);text-decoration:none;}'
-        '.tl-tag{font:700 10px var(--font-body);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;}'
-        '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
-        '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
-        '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
-        '.tl-cols{display:flex;gap:24px;margin:8px 0 12px;}'
-        '.tl-col{flex:1;min-width:0;}'
-        '.tl-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}'
-        '.tl-col-head>div:first-child{margin-bottom:0;}'
-        '.tl-col-title{font:700 15px var(--font-head);color:var(--ink);}'
-        '.tl-col-item{margin-bottom:12px;}'
-        '.tl-col-item-title{display:block;font:600 13px var(--font-head);color:var(--ink);'
-        'margin:0 0 3px;line-height:1.35;text-decoration:none;}'
-        'a.tl-col-item-title:hover{color:var(--navy);text-decoration:underline;}'
-        '.tl-col-item-meta{font:400 11px var(--font-body);color:var(--muted);}'
-        '.tl-col-more{display:inline-block;margin-top:2px;font:600 12px var(--font-body);color:var(--navy);}'
-        '.tl-col-item-extra{display:none;}'
-        '@media(max-width:900px){.tl-cols{flex-wrap:wrap;}.tl-col{flex:1 1 calc(50% - 12px);}}'
-        '@media(max-width:560px){.tl-col{flex:1 1 100%;}}'
+        + _TL_SHARED_CSS +
         '</style>'
         '<h1>Thought Leadership</h1>'
         '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
-        + featured
+        + _tl_featured_cards_html()
     )
 
     lib = _lib()
@@ -10658,30 +10596,103 @@ _TL_TYPES = [
 _TL_TYPE_LABELS = dict(_TL_TYPES)
 # Same order as _TL_TYPES, so zip() pairs each type with the exact icon its
 # /thought-leadership column already renders (_TL_COLUMN_ICONS) — reused,
-# not redrawn, for the homepage Thought Leadership teaser's tiles.
+# not redrawn, for the homepage's 4-column type breakdown (_tl_type_column).
 _TL_TYPE_ICON = dict(zip((t for t, _ in _TL_TYPES), _TL_COLUMN_ICONS))
 
 
-def _tl_home_tile(index: int, item: dict) -> str:
-    """Homepage Thought Leadership teaser tile (Phase 3 addendum) — same
-    compact treatment as the Toolbox teaser's _toolbox_mini_tile (icon badge,
-    same seafoam/navy/coral wash cycle, 13px heading), but linking straight
-    to the piece and showing its real venue/date_label metadata (the same
-    metadata /thought-leadership's own columns already show) instead of a
-    canned one-liner."""
-    icon = _TL_TYPE_ICON.get(item.get("type"), _ICON_PENCIL)
-    meta_bits = [b for b in (item.get("venue"), item.get("date_label")) if b]
-    meta_html = (f'<p style="margin:4px 0 0;font-size:12px;line-height:1.5;color:rgba(20,23,28,.65);">'
-                 f'{" &middot; ".join(_esc(b) for b in meta_bits)}</p>') if meta_bits else ""
-    inner = (
-        f'{_toolbox_icon_badge(index, icon, size=32, icon_size=16, margin_bottom=8)}'
-        f'<div style="font-family:var(--font-head);font-weight:600;font-size:13px;color:var(--navy);">'
-        f'{_esc(item.get("title", ""))}</div>{meta_html}'
+def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: str) -> str:
+    """Flagship-piece card — shared by /thought-leadership's featured row and
+    the homepage's consolidated Thought Leadership section (Homepage
+    Restructure phase), so the two surfaces render identically instead of
+    maintaining two copies of the same markup."""
+    return (
+        f'<a href="{href}" class="tl-card">'
+        f'<span class="tl-tag" style="color:{tag_color};">{tag}</span>'
+        f'<h3>{title}</h3><p>{desc}</p>'
+        f'<span class="tl-go">{cta} &rarr;</span></a>'
     )
-    url = item.get("url") or ""
-    if url:
-        return f'<a href="{_esc(url)}" target="_blank" rel="noopener" style="display:block;text-decoration:none;">{inner}</a>'
-    return f'<div>{inner}</div>'
+
+
+# The 3 flagship pieces, reused verbatim by both /thought-leadership's
+# featured row and the homepage's consolidated Thought Leadership section
+# (Homepage Restructure phase) — one shared list so the two surfaces can't
+# drift out of sync with each other.
+_TL_FEATURED_CARDS = (
+    ("/thought-leadership/growth-engine-ratio", "Framework", "var(--coral-deep)",
+     "The Growth Engine Ratio",
+     "A metric for how R&amp;D and GTM investments work together to drive growth&mdash;with an interactive "
+     "calculator.",
+     "Read the framework"),
+    ("/thought-leadership/ai-hackathon-playbook", "Playbook", "var(--seafoam-deep)",
+     "Sail, Don&rsquo;t Row",
+     "How to run an AI hackathon with your finance team&mdash;the full format, facilitation mechanics, and "
+     "how to make it stick.",
+     "Read the playbook"),
+    ("/thought-leadership/netsuite-mcp", "Setup Guide", "var(--navy-light)",
+     "Connecting Claude to NetSuite",
+     "End-to-end setup for the two-role OAuth architecture&mdash;what it is, why it&rsquo;s secure, and how "
+     "to use it.",
+     "Read the guide"),
+)
+
+
+def _tl_featured_cards_html() -> str:
+    return '<div class="tl-featured">' + "".join(_tl_fcard(*c) for c in _TL_FEATURED_CARDS) + '</div>'
+
+
+# Shared CSS for the flagship-card row (.tl-featured/.tl-card*) and the
+# per-type column treatment (.tl-cols/.tl-col*) — used by both
+# /thought-leadership (full columns: capped list + "Show all" toggle) and
+# the homepage's consolidated section (a single representative item per
+# column, via _tl_type_column below). Kept as one shared constant, per this
+# codebase's inline-CSS-per-page convention (no external stylesheet to put
+# it in instead), so the two surfaces can't visually drift apart.
+_TL_SHARED_CSS = (
+    '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
+    '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'
+    'border-radius:14px;padding:22px 22px 18px;text-decoration:none;transition:border-color .15s,box-shadow .15s,transform .15s;}'
+    '.tl-card:hover{border-color:var(--navy-light);box-shadow:0 6px 20px rgba(0,41,117,.08);transform:translateY(-2px);text-decoration:none;}'
+    '.tl-tag{font:700 10px var(--font-body);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;}'
+    '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
+    '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
+    '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
+    '.tl-cols{display:flex;gap:24px;margin:8px 0 12px;}'
+    '.tl-col{flex:1;min-width:0;}'
+    '.tl-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}'
+    '.tl-col-head>div:first-child{margin-bottom:0;}'
+    '.tl-col-title{font:700 15px var(--font-head);color:var(--ink);}'
+    '.tl-col-item{margin-bottom:12px;}'
+    '.tl-col-item-title{display:block;font:600 13px var(--font-head);color:var(--ink);'
+    'margin:0 0 3px;line-height:1.35;text-decoration:none;}'
+    'a.tl-col-item-title:hover{color:var(--navy);text-decoration:underline;}'
+    '.tl-col-item-meta{font:400 11px var(--font-body);color:var(--muted);}'
+    '.tl-col-more{display:inline-block;margin-top:2px;font:600 12px var(--font-body);color:var(--navy);}'
+    '.tl-col-item-extra{display:none;}'
+    '@media(max-width:900px){.tl-cols{flex-wrap:wrap;}.tl-col{flex:1 1 calc(50% - 12px);}}'
+    '@media(max-width:560px){.tl-col{flex:1 1 100%;}}'
+)
+
+
+def _tl_type_column(index: int, icon_svg: str, title: str, item: dict | None) -> str:
+    """One column of the homepage's 4-column Thought Leadership type
+    breakdown (Homepage Restructure phase) — same .tl-col/.tl-col-head/
+    .tl-col-item markup as /thought-leadership's own per-type columns (via
+    the shared _TL_SHARED_CSS above), but a single representative item
+    instead of a capped list + "Show all" toggle. Collapses to nothing when
+    the type has zero entries at all (`item` is None) — same empty-column
+    convention as that page's own column()."""
+    if not item:
+        return ""
+    meta_bits = [b for b in (item.get("venue"), item.get("date_label")) if b]
+    meta_html = (f'<div class="tl-col-item-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</div>'
+                 if meta_bits else "")
+    title_html = (f'<a href="{_esc(item["url"])}" target="_blank" rel="noopener" class="tl-col-item-title">{_esc(item["title"])}</a>'
+                  if item.get("url") else f'<div class="tl-col-item-title">{_esc(item["title"])}</div>')
+    return (
+        f'<div class="tl-col">'
+        f'<div class="tl-col-head">{_card_icon(index, icon_svg)}<div class="tl-col-title">{_esc(title)}</div></div>'
+        f'<div class="tl-col-item">{title_html}{meta_html}</div></div>'
+    )
 
 
 def _sort_key_from_date_label(date_label: str) -> str:
@@ -10795,7 +10806,9 @@ def _tl_form_fields(item: dict | None = None) -> str:
       Feature on homepage
     </label>
     <p style="margin:4px 0 0 26px;font-size:12px;color:var(--muted);">
-      Shows this entry in the homepage Thought Leadership teaser regardless of recency.
+      Represents this entry's type (Writing, Speaking &amp; Events, Podcasts, or Press) in the homepage's
+      4-column breakdown. If more than one entry of the same type is checked, the most recently updated one
+      wins. Leave unchecked and the most recent entry of that type is used automatically.
     </p>
   </div>"""
 
