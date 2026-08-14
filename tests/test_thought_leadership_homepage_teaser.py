@@ -98,7 +98,10 @@ def test_toolbox_panel_present_and_matches_design(env):
     assert "🚧 building" in html
 
 
-def test_reader_access_placeholder_admin_only(env):
+def test_reader_access_box_admin_only(env):
+    # /read shipped (Phase 5 Reader merge) before this box was reconciled
+    # onto this branch, so it's a real link now, not a "build pending"
+    # placeholder.
     anon_html = _client(env).get("/").text
     assert "Reader access" not in anon_html
 
@@ -107,7 +110,8 @@ def test_reader_access_placeholder_admin_only(env):
     admin_html = c.get("/").text
     assert "Reader access" in admin_html
     assert "Admin only" in admin_html
-    assert "build pending" in admin_html
+    assert 'href="/read"' in admin_html
+    assert c.get("/read").status_code == 200
 
 
 def test_add_and_edit_forms_have_feature_on_homepage_checkbox(env):

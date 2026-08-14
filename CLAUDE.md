@@ -930,6 +930,78 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   order, so the desktop design-file layout is unaffected by this change.
   `test_mobile_dom_order_photo_card_between_hero_and_thought_leadership`
   asserts the DOM order directly.
+- **Homepage Restructure — a parallel session's stray PR landed a second,
+  independent homepage rebuild on `main` mid-flight; reconciled by keeping
+  this branch's fuller redesign and adopting one piece from the other.**
+  While this branch's design-fidelity work was in progress, a different
+  session (working off a different, narrower design export —
+  `CFO_Navigator_Feed_Redesign`, not `Homepage_Restructure_Standalone.html`)
+  independently rebuilt the same `homepage()` function and merged straight
+  to `main` as its own PR — a duplicate/stray session, confirmed by Brian,
+  not the intended direction. Its version never touched the Thought
+  Leadership section at all (the old standalone card was still live, not
+  duplicated with this branch's consolidated section — checked directly
+  against the then-live homepage before reconciling, since two rewrites of
+  the same page landing separately raised the real possibility of visibly
+  broken output), moved the Toolbox teaser into the right column as a
+  narrower vertical list, resized the avatar to 265px, and — the one piece
+  worth keeping — wired the "Reader access" box to a real `/read` link
+  instead of the placeholder text it launched with, since the Phase 5
+  Reader merge had landed by the time that session built it. Reconciled via
+  a real merge (lower-risk than a from-scratch rebuild given it was really
+  only two conflicting functions, `_avatar()` and `homepage()`): kept this
+  branch's full consolidated Thought Leadership section, flagship-card
+  sharing, Sail Don't Row correction, and mobile-order/breakpoint work;
+  adopted the real `/read` link and `_avatar()`'s new `border_width` param
+  (set to 4 here, matching the design file's own 4px ring — a discrepancy
+  this branch hadn't caught before the param existed to fix it); kept this
+  branch's 200px avatar size and narrower Toolbox-panel-as-single-white-card
+  treatment rather than the other session's 265px/vertical-list version,
+  since neither was specifically requested to be adopted. The other
+  session's now-superseded `_toolbox_row`/`_ICON_FPA_BUDDY`/`toolbox_card`/
+  `reader_access_card` helpers were dead code after the merge and removed
+  outright rather than left unused. Same brand-check false positive as
+  before recurred here too (a `PR #320`/`#321` reference this time, not
+  `#318`) — reworded away from the `#NNN` pattern again rather than adding
+  a general suppression, consistent with the earlier fix's approach.
+- **Homepage Restructure — a direct post-merge cross-check against the
+  design file (not memory of it) caught real drift the reconciliation merge
+  introduced, beyond the two deliberately-approved deviations.** After
+  reconciling with the stray parallel-session PR above, Brian asked for the
+  final markup to be checked against the actual design file again, the same
+  way the Sail Don't Row and shared-card issues were originally caught —
+  re-rendered the bundled export fresh (same Playwright approach as the
+  original build) rather than relying on the first pass's notes. Found and
+  fixed genuine, non-shared-CSS drift: the Toolbox panel's tile-row icon
+  badges were reusing `_card_icon()`, whose `margin-bottom:14px` (meant for
+  a badge stacked *above* a title) and `1.8` stroke-width don't match the
+  design's own badges for this icon-*beside*-text row — replaced with a
+  dedicated `.home-toolbox-icon` class built to the file's exact spec (34px,
+  radius 8, stroke-width 2, 16px icon, no margin). Also fixed three
+  typography/spacing values that had drifted from the file with no
+  justification for the drift: the "What I write about" heading (28px ->
+  30px), the bullet list's bottom margin (28px -> 37px), and the "Recent
+  highlights" grid's gap (`24px` uniform -> `32px 40px` row/column, per the
+  file), plus restructuring the "Recent highlights" label from a grid item
+  sharing the items' own gap into its own element with the file's explicit
+  20px margin-bottom and 28px divider padding-top. **Explicitly NOT
+  "fixed" back to the file, and confirmed as deliberate on this pass, not
+  overlooked:** the flagship-card CSS (`.tl-card` padding, `.tl-featured`
+  gap) and the "Recent highlights" label/type-label color both differ from
+  the file's literal values — the former because that CSS is intentionally
+  shared with `/thought-leadership`'s own pre-existing card treatment (see
+  the flagship-cards-shared bullet above; changing it to match the design
+  file would also change the live `/thought-leadership` page, which Brian's
+  instruction was specifically protecting), the latter because the file's
+  `rgb(138,143,153)` isn't an established site token and `--muted`
+  (`#6F6A60`) already covers this role elsewhere on the page — introducing
+  a new off-brand gray to chase an exact pixel match would trip
+  `brand_check.py`'s own off-palette check. **The "🚧 building" sticker
+  stays, per explicit standing instruction, even though the design file
+  still doesn't show it** — this is the second time this exact point has
+  come up (first as the Homepage Restructure regression bullet above), and
+  the file's omission is confirmed to be a known gap in the export, not a
+  design decision to match.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

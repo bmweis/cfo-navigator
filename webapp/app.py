@@ -1892,18 +1892,19 @@ def _avatar_data_url() -> str | None:
         return None
 
 
-def _avatar(size: int = 140) -> str:
+def _avatar(size: int = 140, border_width: int = 3) -> str:
     """DB-stored avatar if uploaded, else static headshot.jpg if present,
-    else a clean monogram."""
+    else a clean monogram. `border_width` defaults to the site-wide 3px ring;
+    the homepage hero photo uses a heavier 4px ring per its own design spec."""
     src = _avatar_data_url()
     if not src and os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg")):
         src = "/static/headshot.jpg"
     if src:
         return (f'<img src="{src}" alt="Brian Weisberg" '
                 f'style="width:{size}px;height:{size}px;border-radius:50%;object-fit:cover;'
-                f'object-position:center top;flex-shrink:0;border:3px solid var(--navy);">')
+                f'object-position:center top;flex-shrink:0;border:{border_width}px solid var(--navy);">')
     return (f'<div aria-label="Brian Weisberg" '
-            f'style="width:{size}px;height:{size}px;border-radius:50%;flex-shrink:0;border:3px solid var(--navy);'
+            f'style="width:{size}px;height:{size}px;border-radius:50%;flex-shrink:0;border:{border_width}px solid var(--navy);'
             f'background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;'
             f'font-size:{round(size/3)}px;font-weight:700;letter-spacing:-0.02em;">BW</div>')
 
@@ -1980,16 +1981,21 @@ def homepage(request: Request):
         for i, ((t, label), item) in enumerate(zip(_TL_TYPES, tl_reps))
     )
 
+    # Reader access (admin-only): /read shipped in the Phase 5 Reader-merge PR,
+    # so this is a real link now, not the placeholder text it launched with on
+    # this branch — adopted from a since-reconciled parallel session's PR,
+    # which built this same box against a slightly later main where /read
+    # already existed.
     is_admin = _is_authed(request)
     reader_access_box = (f"""
-      <div style="background:var(--seafoam);border:1.5px solid var(--seafoam-deep);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
-        <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only &mdash; placeholder</div>
+      <a href="/read" rel="nofollow noreferrer" style="text-decoration:none;background:var(--seafoam);border:1.5px solid var(--seafoam-deep);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only</div>
         <div style="display:flex;align-items:center;gap:12px;">
           {_card_icon(3, _ICON_NEWSPAPER)}
           <div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Reader access</div>
         </div>
-        <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Links into the Reader&mdash;build pending.</p>
-      </div>""" if is_admin else "")
+        <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Saved, and Read Later in one place.</p>
+      </a>""" if is_admin else "")
 
     body = f"""<div class="page page-full">
 <style>
@@ -2009,12 +2015,19 @@ def homepage(request: Request):
 .home-toolbox-panel,.home-reader-slot{{width:100%;}}
 .home-toolbox-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:26px;box-sizing:border-box;position:relative;}}
 .home-toolbox-rows{{display:flex;flex-direction:column;gap:16px;}}
+/* Homepage-only icon badge for the Toolbox panel's tile rows — deliberately
+   not _card_icon() here: that helper's margin-bottom:14px is meant for a
+   badge stacked above a title, and bleeds unwanted space into this
+   icon-beside-text row layout, which the design file's own badges don't have. */
+.home-toolbox-icon{{flex-shrink:0;width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;}}
 /* Bullet list — a manual flex layout with a "•" glyph (design file), not a
    native <ul><li>, so the marker color/size/gap match the design exactly. */
-.home-tl-bullets{{display:flex;flex-direction:column;gap:14px;margin:0 0 28px;}}
+.home-tl-bullets{{display:flex;flex-direction:column;gap:14px;margin:0 0 37px;}}
 .home-tl-bullet{{display:flex;gap:12px;font-size:15.5px;line-height:1.55;color:var(--ink-soft);}}
 .home-tl-bullet-mark{{color:var(--navy);flex-shrink:0;font-size:18px;line-height:1.3;}}
-.home-tl-highlights{{display:grid;grid-template-columns:1fr;gap:24px;border-top:1px solid var(--line);padding-top:24px;margin-top:8px;}}
+.home-tl-highlights-wrap{{border-top:1px solid var(--line);padding-top:28px;}}
+.home-tl-highlights-label{{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin-bottom:20px;}}
+.home-tl-highlights{{display:grid;grid-template-columns:1fr;gap:32px 40px;}}
 /* 1024px, not the sitewide-standard 900px other sections on this page use —
    deliberately wider so the mobile stacked order (and its photo-card
    placement above) holds through phone landscape too, not just portrait.
@@ -2043,7 +2056,7 @@ def homepage(request: Request):
 
   <div class="home-photo-wrap">
     <div class="home-avatar-wrap">
-      {_avatar(200)}
+      {_avatar(200, border_width=4)}
       {_sticker("hi, I&rsquo;m Brian 🤙", rotate=-6, top="-18px", right="-10px")}
     </div>
     <div class="home-status">
@@ -2055,7 +2068,7 @@ def homepage(request: Request):
 
   <div class="home-tl-section" style="min-width:0;">
     <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:14px;">Thought Leadership</div>
-    <h2 style="margin:0 0 16px;font-family:var(--font-head);font-weight:700;font-size:28px;">What I write about</h2>
+    <h2 style="margin:0 0 16px;font-family:var(--font-head);font-weight:700;font-size:30px;">What I write about</h2>
     <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0 0 22px;max-width:640px;">Frameworks, playbooks, and real opinions on building finance functions that scale&mdash;collected across writing, speaking, podcasts, and press.</p>
 
     <ul class="home-tl-bullets" style="padding:0;list-style:none;">
@@ -2067,9 +2080,9 @@ def homepage(request: Request):
 
     {_tl_featured_cards_html(_TL_FEATURED_CARDS)}
 
-    <div class="home-tl-highlights">
-      <div style="grid-column:1/-1;font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;">Recent highlights</div>
-      {recent_highlights}
+    <div class="home-tl-highlights-wrap">
+      <div class="home-tl-highlights-label">Recent highlights</div>
+      <div class="home-tl-highlights">{recent_highlights}</div>
     </div>
 
     <a href="/thought-leadership" style="display:inline-block;margin-top:32px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
@@ -5739,11 +5752,20 @@ def _toolbox_mini_tile(index: int, title: str, one_liner: str, icon_svg: str) ->
     """Homepage Toolbox-panel tile row (Homepage Restructure design file) —
     icon badge to the left, title + one-liner stacked to the right, no link
     (the panel links out once via the "See the full toolbox" line below it,
-    not per-tile). Reuses the sitewide _card_icon() badge (34px) rather than
-    a dedicated size, matching the design's own toolbox-tile badge size."""
+    not per-tile). Badge is built directly (.home-toolbox-icon), not via the
+    sitewide _card_icon() — that helper's margin-bottom:14px and 1.8 stroke-
+    width are meant for a badge stacked above a title, not this icon-beside-
+    text row, and don't match the design file's own 34px/stroke-2/16px-icon
+    badge here."""
+    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    badge = (
+        f'<div class="home-toolbox-icon" style="background:{bg};">'
+        f'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="{stroke}" '
+        f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_svg}</svg></div>'
+    )
     return (
         f'<div style="display:flex;gap:12px;align-items:flex-start;">'
-        f'{_card_icon(index, icon_svg)}'
+        f'{badge}'
         f'<div><div style="font-family:var(--font-head);font-weight:600;font-size:14.5px;color:var(--navy);">{title}</div>'
         f'<div style="margin-top:2px;font-size:13px;line-height:1.5;color:var(--muted);">{one_liner}</div></div></div>'
     )
