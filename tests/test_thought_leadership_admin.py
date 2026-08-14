@@ -161,6 +161,101 @@ def test_undated_and_tied_sort_key_ordering(env):
     assert pos_undated < pos_newer < pos_first < pos_second
 
 
+def test_sort_key_is_derived_from_date_label_not_a_form_field(env):
+    """Follow-up fix: sort_key is no longer a form field — the add/edit
+    forms only expose date_label, and sort_key is computed server-side on
+    every save ("Mon YYYY"/"Month YYYY" -> "YYYY-MM")."""
+    c = _admin_client(env)
+
+    # The form itself no longer has a sort_key input.
+    resp = c.get("/admin/thought-leadership/new")
+    assert 'name="sort_key"' not in resp.text
+    assert 'name="date_label"' in resp.text
+
+    resp = c.post("/admin/thought-leadership/new", data={
+        "type": "press", "title": "Full Month Name Entry", "date_label": "March 2027",
+    }, follow_redirects=False)
+    assert resp.status_code == 303
+
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        rows = lib.list_thought_leadership(type="press")
+    finally:
+        lib.close()
+    row = next(r for r in rows if r["title"] == "Full Month Name Entry")
+    assert row["sort_key"] == "2027-03"
+
+    # Edit form doesn't expose sort_key either.
+    resp = c.get(f"/admin/thought-leadership/{row['id']}/edit")
+    assert 'name="sort_key"' not in resp.text
+
+
+def test_unparseable_date_label_floats_to_top_with_warning(env):
+    """A non-blank date_label that doesn't parse as Mon YYYY gets a blank
+    sort_key (floats to top, same as an intentionally undated entry) —
+    but is flagged with a visible warning, not silently indistinguishable
+    from a deliberate blank."""
+    c = _admin_client(env)
+    resp = c.post("/admin/thought-leadership/new", data={
+        "type": "press", "title": "Weird Date Entry", "date_label": "Q2 2027",
+    }, follow_redirects=False)
+    assert resp.status_code == 303
+
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        rows = lib.list_thought_leadership(type="press")
+    finally:
+        lib.close()
+    row = next(r for r in rows if r["title"] == "Weird Date Entry")
+    assert row["sort_key"] == ""
+
+    # Warning icon on the admin list row.
+    resp = c.get("/admin/thought-leadership")
+    assert "&#9888;" in resp.text
+    assert "didn" in resp.text.lower() and "parse" in resp.text.lower()
+
+    # Inline warning on the edit form.
+    resp = c.get(f"/admin/thought-leadership/{row['id']}/edit")
+    assert "Date label" in resp.text
+    assert "didn" in resp.text.lower() and "parse" in resp.text.lower()
+
+    # It floats to the top of its column on the public page, same as a
+    # deliberately undated entry.
+    resp = c.get("/thought-leadership")
+    assert "Weird Date Entry" in resp.text
+
+
+def test_blank_date_label_has_no_parse_warning(env):
+    """A deliberately blank date_label (the standing-link convention) must
+    NOT trigger the didn't-parse warning — only a non-blank, unparseable
+    value should."""
+    c = _admin_client(env)
+    resp = c.post("/admin/thought-leadership/new", data={
+        "type": "podcast", "title": "Standing Feed Link", "date_label": "",
+    }, follow_redirects=False)
+    assert resp.status_code == 303
+
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        rows = lib.list_thought_leadership(type="podcast")
+    finally:
+        lib.close()
+    row = next(r for r in rows if r["title"] == "Standing Feed Link")
+    assert row["sort_key"] == ""
+
+    resp = c.get(f"/admin/thought-leadership/{row['id']}/edit")
+    assert "Date label" in resp.text
+    assert "didn&rsquo;t parse" not in resp.text
+
+    # And no warning icon on the admin list row for this entry either.
+    resp = c.get("/admin/thought-leadership?type=podcast")
+    row_html = resp.text[resp.text.index("Standing Feed Link"):]
+    assert "&#9888;" not in row_html.split("</tr>")[0]
+
+
 def test_migration_script_moves_32_of_33_entries(env, tmp_path):
     """The Abacum photo entry (33rd) is deliberately excluded — see
     scripts/archive/migrate_thought_leadership.py's docstring."""

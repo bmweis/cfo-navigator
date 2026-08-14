@@ -181,10 +181,17 @@ CREATE TABLE IF NOT EXISTS benchmarks (
 -- 'writing'|'speaking'|'podcast'|'press'. Role/capacity (Host, Co-Chair,
 -- Guest, ...) is deliberately not a separate column — it stays free-text
 -- inside title, matching how every existing entry already writes it (e.g.
--- "Cash Cycle Demo Day—Co-Chair"). date_label is the display string (e.g.
--- "Jun 2026"); sort_key is "YYYY-MM" and drives newest-first ordering on the
--- public page — "" floats an item to the top of its section (a standing
--- link with no single date). display_order is a stable tiebreaker for items
+-- "Cash Cycle Demo Day—Co-Chair"). date_label is the display string an
+-- admin types (e.g. "Jun 2026"); sort_key is "YYYY-MM" and drives
+-- newest-first ordering on the public page — "" floats an item to the top
+-- of its section (a standing link with no single date). Since a follow-up
+-- fix (see CLAUDE.md), sort_key is no longer a separate hand-typed admin
+-- form field — it's derived automatically from date_label on every save
+-- (webapp/app.py's _sort_key_from_date_label, "Mon YYYY"/"Month YYYY" ->
+-- "YYYY-MM"; unparseable or blank input yields "", the same
+-- floats-to-top behavior). It still lives as its own column here because
+-- render-order queries need a plain sortable string, not a date_label to
+-- reparse on every read. display_order is a stable tiebreaker for items
 -- that share a sort_key (or are both undated), preserving whatever order
 -- they were added/migrated in rather than leaving ties to SQLite's
 -- unspecified row order. needs_synopsis flags a description that's

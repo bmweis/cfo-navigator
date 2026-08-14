@@ -531,6 +531,37 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   page (the toggle already covers the practical need), and the three
   Framework/Playbook/Setup Guide featured cards above the four columns
   (separate, hardcoded `fcard(...)` mechanism in `webapp/app.py`, untouched).
+- **Thought Leadership Admin CRUD, follow-up — `sort_key` is now derived
+  from `date_label`, not hand-typed.** After Phase 1 shipped, two separately
+  editable free-text fields encoding the same date (`date_label` for display,
+  `sort_key` as `YYYY-MM` for ordering) caused real confusion twice: a
+  suspected mismatch between the two, and a blank `sort_key` on an entry
+  that was correct-by-design (the undated "Cash Flow Show — Full Episode
+  Feed" podcast link, which intentionally floats to the top of its section).
+  Investigation confirmed all 32 migrated `date_label` values fit
+  `"Mon YYYY"` (e.g. "Jun 2026") except that one intentional blank, and that
+  every `date_label`/`sort_key` pair was already internally consistent — so
+  no backfill was needed, just removing the redundant manual field going
+  forward. The `sort_key` input is gone from both admin forms; `date_label`
+  is now the only field an admin fills in, and `webapp/app.py`'s
+  `_sort_key_from_date_label` derives `sort_key` server-side on every add/
+  edit save ("Mon YYYY" or "Month YYYY" -> "YYYY-MM"; blank or unparseable
+  input -> `""`, the same floats-to-top convention, not a save-blocking
+  error — `date_label` itself still isn't validated/constrained, deliberately
+  out of scope here). Because a typo silently floating an entry to the top
+  would be a *worse* version of the exact confusion this fix set out to
+  solve, an inline warning appears both on the edit form and as a small
+  icon in the `/admin/thought-leadership` list row whenever a non-blank
+  `date_label` fails to parse — distinguishing "this admin meant to leave
+  the date blank" from "this admin's date didn't parse." `sort_key` itself
+  stays a real column (queries need a plain sortable string, not a
+  `date_label` to reparse on every read) — this is a save-path change, not
+  a schema change. Also folded into this same round: relabeled
+  `display_order` to "Display order (tiebreaker)" with explicit helper
+  copy, and fixed the admin add form always submitting `display_order=0`
+  instead of triggering `Library.add_thought_leadership`'s intended
+  per-type auto-assign (`MAX+1`) — a blank field now correctly parses to
+  `None` and flows through to that auto-assign path.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

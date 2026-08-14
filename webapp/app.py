@@ -10558,6 +10558,46 @@ _TL_TYPES = [
 _TL_TYPE_LABELS = dict(_TL_TYPES)
 
 
+def _sort_key_from_date_label(date_label: str) -> str:
+    """Derive a YYYY-MM sort_key from the free-text date_label admins type
+    (e.g. 'Jun 2026' or 'June 2026'). Pure function of date_label — safe to
+    recompute on every save. Blank or unparseable input returns '' rather
+    than blocking the save: an entry with no resolvable date floats to the
+    top of its section, the same convention already used intentionally for
+    the standing "Cash Flow Show — Full Episode Feed" link. See
+    _tl_parse_warning below for the admin-facing note when that happens
+    for a non-blank date_label (i.e. likely a typo, not deliberate)."""
+    s = date_label.strip()
+    if not s:
+        return ""
+    for fmt in ("%b %Y", "%B %Y"):  # "Jun 2026", "June 2026"
+        try:
+            dt = datetime.strptime(s, fmt)
+            return f"{dt.year:04d}-{dt.month:02d}"
+        except ValueError:
+            continue
+    return ""
+
+
+def _tl_parse_warning(item: dict) -> str:
+    """Inline note on the admin form when a non-blank date_label didn't
+    parse into a sort_key — distinguishes an accidental typo from the
+    deliberate blank-date_label convention (which needs no warning)."""
+    date_label = (item.get("date_label") or "").strip()
+    sort_key = item.get("sort_key") or ""
+    if date_label and not sort_key:
+        # Same advisory-amber tone as the "Needs verification" badges/verify
+        # banners elsewhere in admin (#fef3c7/#92400e/#fde68a) — see
+        # linklib/brand_check.py's AUX_COLORS for why this is a documented,
+        # distinct-from-`--caution` tone rather than a new hue.
+        return (
+            '<p style="margin:-8px 0 0;padding:8px 12px;background:#fef3c7;border:1px solid #fde68a;'
+            'border-radius:8px;font-size:12px;color:#92400e;">'
+            "Date didn&rsquo;t parse as Mon YYYY — this entry will float to the top of its section.</p>"
+        )
+    return ""
+
+
 def _tl_form_fields(item: dict | None = None) -> str:
     item = item or {}
     type_opts = "".join(
@@ -10594,22 +10634,23 @@ def _tl_form_fields(item: dict | None = None) -> str:
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
       <input name="date_label" maxlength="50" value="{_esc(item.get('date_label', ''))}"
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="e.g. Jun 2026">
+        placeholder="Mon YYYY, e.g. Jun 2026 — leave blank for a standing, undated link">
     </div>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sort key</label>
-      <input name="sort_key" maxlength="7" value="{_esc(item.get('sort_key', ''))}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="YYYY-MM, blank floats to top">
-    </div>
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order</label>
-      <input name="display_order" type="number" value="{item.get('display_order', 0)}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-    </div>
+  {_tl_parse_warning(item)}
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (tiebreaker)</label>
+    <input name="display_order" type="number" value="{item.get('display_order', '') if item else ''}"
+      style="width:180px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="Leave blank — auto-assigned">
   </div>
+  <p style="margin:-8px 0 0;font-size:12px;color:var(--muted);">
+    Date label decides order (newest first) — it's parsed into the render order automatically, so you
+    don&rsquo;t need to think about sort order when filling it in. Leave Date label blank for a standing
+    link with no single date (e.g. a full episode feed); it floats to the top of its column. Display order
+    is a rare manual override — only needed if two entries share the same month and you want to control
+    which one shows first; leave it blank otherwise and the next value is assigned automatically.
+  </p>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description</label>
     <textarea name="description" maxlength="500" rows="3"
@@ -10637,11 +10678,16 @@ def admin_thought_leadership(request: Request, type: str = ""):
     def _row(it: dict) -> str:
         url_cell = (f'<a href="{_esc(it["url"])}" target="_blank" rel="noopener" style="word-break:break-all;">'
                     f'{_esc(it["url"][:50])}{"…" if len(it["url"]) > 50 else ""}</a>') if it["url"] else "—"
+        # A non-blank date_label with no sort_key means it didn't parse as
+        # Mon YYYY — flag it here too, not just on the edit form, since this
+        # is the page an admin scans to spot something off at a glance.
+        date_warning = (' <span title="Didn&rsquo;t parse — floats to top of its section" '
+                         'style="color:#92400e;">&#9888;</span>') if it['date_label'] and not it['sort_key'] else ''
         return f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(_TL_TYPE_LABELS.get(it['type'], it['type']))}</td>
   <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(it['venue']) or '—'}</td>
-  <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(it['date_label']) or '—'}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(it['date_label']) or '—'}{date_warning}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{url_cell}</td>
   <td style="padding:10px 12px;white-space:nowrap;">
     <a href="/admin/thought-leadership/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
@@ -10716,17 +10762,29 @@ def _tl_form_values(form) -> dict:
     title = (form.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="Title is required.")
-    try:
-        display_order = int(form.get("display_order") or 0)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Display order must be a number.")
+    display_order_raw = (form.get("display_order") or "").strip()
+    # Blank means "auto" — the new-entry route passes None straight through
+    # to Library.add_thought_leadership, which assigns the next value for
+    # this type; the edit route treats a blank as an explicit 0 (the field
+    # is always prefilled with the current value there, so a blank means
+    # the admin deliberately cleared it).
+    if display_order_raw == "":
+        display_order = None
+    else:
+        try:
+            display_order = int(display_order_raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Display order must be a number.")
+    date_label = (form.get("date_label") or "").strip()
     return {
         "type": tl_type,
         "title": title,
         "url": (form.get("url") or "").strip(),
         "venue": (form.get("venue") or "").strip(),
-        "date_label": (form.get("date_label") or "").strip(),
-        "sort_key": (form.get("sort_key") or "").strip(),
+        "date_label": date_label,
+        # sort_key is no longer a form field — it's derived from date_label
+        # on every save, not hand-typed. See _sort_key_from_date_label.
+        "sort_key": _sort_key_from_date_label(date_label),
         "description": (form.get("description") or "").strip(),
         "needs_synopsis": bool(form.get("needs_synopsis")),
         "display_order": display_order,
@@ -10741,6 +10799,8 @@ async def admin_thought_leadership_new_submit(request: Request):
     v = _tl_form_values(form)
     lib = _lib()
     try:
+        # display_order left as None (blank on the add form) auto-assigns
+        # the next value for this type — see Library.add_thought_leadership.
         lib.add_thought_leadership(v["type"], v["title"], v["url"], v["venue"], v["date_label"],
                                    v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"])
     finally:
@@ -10780,8 +10840,11 @@ async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
     v = _tl_form_values(form)
     lib = _lib()
     try:
+        # The edit form always prefills display_order with the current
+        # value, so a blank submission here is a deliberate clear — treat
+        # it as 0 rather than re-triggering the add-only auto-assign.
         lib.update_thought_leadership(item_id, v["type"], v["title"], v["url"], v["venue"], v["date_label"],
-                                      v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"])
+                                      v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"] or 0)
     finally:
         lib.close()
     return RedirectResponse("/admin/thought-leadership", status_code=303)
