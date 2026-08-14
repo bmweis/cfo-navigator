@@ -1,11 +1,11 @@
 """Phase 3 of the Exa integration: a small "Web search powered by Exa" caption
-on /library/ask's client-side citation list (srcListHtml in webapp/app.py).
+on /tools/fpa-buddy's client-side citation list (srcListHtml in webapp/app.py).
 Phase 7 tightened the gating condition: a web-type citation alone is no
 longer enough (the native web_search_20250305 fallback also produces
 type "web" citations when Exa is off) — it must also carry provider "exa".
-Server-rendered surfaces (/ask/history, /library/past-questions,
-/admin/ask-feedback) are untouched — this is presentation-only on the
-live-rendering page.
+Server-rendered surfaces (/ask/history, /tools/fpa-buddy's past-questions
+section, /admin/ask-feedback) are untouched — this is presentation-only on
+the live-rendering page.
 """
 import pathlib
 import sys
@@ -50,14 +50,14 @@ def _admin_client(appmod):
     return c
 
 
-def test_library_ask_ships_the_conditional_exa_caption(env):
+def test_fpa_buddy_page_ships_the_conditional_exa_caption(env):
     """The live-rendering page's JS carries the caption logic, gated on the
     turn's citations including a web-type entry produced by Exa specifically
     (provider === 'exa') — not shown for a Library/Feed-only turn, and not
     shown when the native web_search_20250305 fallback handled the web tier
     instead (Phase 7)."""
     c = _member_client(env)
-    resp = c.get("/library/ask")
+    resp = c.get("/tools/fpa-buddy")
     assert resp.status_code == 200
     body = resp.text
     assert CAPTION in body
@@ -72,11 +72,17 @@ def test_ask_history_has_no_exa_caption(env):
     assert CAPTION not in resp.text
 
 
-def test_past_questions_has_no_exa_caption(env):
-    c = _member_client(env)
-    resp = c.get("/library/past-questions")
-    assert resp.status_code == 200
-    assert CAPTION not in resp.text
+# Note: there used to be a test_past_questions_has_no_exa_caption here,
+# checking /library/past-questions (a standalone, purely server-rendered
+# page) never emitted the caption. Past Questions folded into /tools/fpa-buddy
+# in Phase 2 — the same page as the live ask box — so that page-level
+# assertion no longer holds: the caption string IS present on /tools/fpa-buddy
+# now, via the ask box's own JS, regardless of any past-questions rows. The
+# underlying invariant this test protected is unchanged and still covered:
+# past-questions rows render through the same _render_cited_answer() helper
+# as /ask/history and /admin/ask-feedback, neither of which ever emits the
+# caption (that's client-side-only logic in the live ask box's srcListHtml),
+# so a past-questions row can't get it either.
 
 
 def test_admin_ask_feedback_has_no_exa_caption(env):

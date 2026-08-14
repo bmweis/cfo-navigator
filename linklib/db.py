@@ -4747,16 +4747,30 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def list_public_ask_questions(self, query: str = "", limit: int = 200) -> list[dict]:
+    def list_public_ask_questions(self, query: str = "", limit: int = 200,
+                                   helpful_only: bool = False) -> list[dict]:
         """Non-hidden Q&A for the community browse view, newest first, optionally
         text-filtered on question/answer. Callers render `asker_name`/
         `asker_username` unless `anonymized` is set, in which case show a
         generic label instead — anonymizing here never affects the admin or
-        the asker's own history view, both of which always show the real name."""
+        the asker's own history view, both of which always show the real name.
+        `helpful_only` (Phase 2, the FP&A Buddy "search past questions"
+        feature on /tools/fpa-buddy) additionally restricts to questions with
+        at least one ask_feedback.rating='helpful' row — an EXISTS check, not
+        a join, so a question with several raters (some maybe 'inaccurate')
+        still appears exactly once as long as any one of them rated it
+        helpful. ask_feedback carries no declared FK to ask_questions, so
+        this is matched by question_id convention, same as everywhere else
+        that joins the two tables."""
         base = """SELECT aq.*, u.username AS asker_username, u.name AS asker_name
                   FROM ask_questions aq LEFT JOIN users u ON u.id = aq.user_id
                   WHERE aq.hidden_public=0"""
         params: list = []
+        if helpful_only:
+            base += """ AND EXISTS (
+                SELECT 1 FROM ask_feedback f
+                WHERE f.question_id = aq.id AND f.rating = 'helpful'
+            )"""
         q = query.strip()
         if q:
             base += " AND (aq.question LIKE ? OR aq.answer LIKE ?)"
