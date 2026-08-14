@@ -1,8 +1,9 @@
 """Homepage Restructure phase: the homepage's consolidated Thought
-Leadership section (flagship cards + 4-column type breakdown + bullets,
-replacing both the old standalone card and the Phase 3 addendum's separate
-recency-pin teaser), the repurposed "Feature on homepage" checkbox that now
-selects each type's representative entry, and the "Speaking &amp; Events"
+Leadership section (flagship cards + "Recent highlights" one-per-type grid +
+bullets, replacing both the old standalone card and the Phase 3 addendum's
+separate recency-pin teaser), the repurposed "Feature on homepage" checkbox
+that now selects each type's representative entry, the sidebar Toolbox panel
+and admin-only Reader-access placeholder, and the "Speaking &amp; Events"
 double-escaping fix on /thought-leadership.
 """
 import pathlib
@@ -42,15 +43,23 @@ def _admin_client(appmod):
 def test_homepage_has_one_consolidated_thought_leadership_section(env):
     html = _client(env).get("/").text
     # Exactly one section — old standalone card + old separate teaser are gone.
-    assert html.count("THOUGHT LEADERSHIP") == 1
+    # (">Thought Leadership<" alone would also match the top nav link, so
+    # "What I write about" — the section's own unique heading — is the
+    # reliable one-section signal here.)
     assert html.count("What I write about") == 1
     assert "See all Thought Leadership" in html
     assert 'href="/thought-leadership"' in html
-    # The 3 flagship pieces, in their existing /thought-leadership card treatment.
+    # The 3 flagship pieces, using the shared _tl_fcard/.tl-card treatment.
     assert "The Growth Engine Ratio" in html
     assert "Sail, Don&rsquo;t Row" in html
     assert "Connecting Claude to NetSuite" in html
     assert 'class="tl-card"' in html
+    # Sail Don't Row correction: real playbook copy/link, not the design
+    # file's arcade-game placeholder copy.
+    assert "Play it" not in html
+    assert "Read the playbook" in html
+    assert ">Playbook<" in html
+    assert ">Interactive<" not in html
     # Exact bullet copy, not rephrased.
     assert "AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing." in html
     assert ("Frameworks myself and others have built, real opinions, and stories from the "
@@ -62,14 +71,28 @@ def test_homepage_has_one_consolidated_thought_leadership_section(env):
     assert "The F Suite" not in html
 
 
-def test_toolbox_teaser_section_unchanged_and_has_building_sticker(env):
+def test_toolbox_panel_present_and_matches_design(env):
     html = _client(env).get("/").text
-    assert "TOOLBOX" in html
+    assert ">CFO Toolbox<" in html
     assert "Everything in the toolbox" in html
     assert "See the full toolbox" in html
-    # Regression check: the "building" sticker was dropped when Phase 3 rebuilt
-    # the old homepage card into the teaser section — must be present here.
-    assert "🚧 building" in html
+    # Design-fidelity note: the Homepage Restructure design file this panel
+    # was rebuilt from does not include a "building" sticker on it (unlike
+    # the Phase-3-era panel it replaced) — its absence here is intentional,
+    # not the regression the earlier Phase 3 sticker-drop was.
+    assert "🚧 building" not in html
+
+
+def test_reader_access_placeholder_admin_only(env):
+    anon_html = _client(env).get("/").text
+    assert "Reader access" not in anon_html
+
+    c = _client(env)
+    c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
+    admin_html = c.get("/").text
+    assert "Reader access" in admin_html
+    assert "Admin only" in admin_html
+    assert "build pending" in admin_html
 
 
 def test_add_and_edit_forms_have_feature_on_homepage_checkbox(env):
@@ -199,12 +222,12 @@ def test_homepage_type_breakdown_renders_representative_and_handles_empty_type(e
 def test_homepage_type_breakdown_empty_db_does_not_break_page(env):
     resp = _client(env).get("/")
     assert resp.status_code == 200
-    assert "THOUGHT LEADERSHIP" in resp.text
+    assert ">Thought Leadership<" in resp.text
 
 
-def test_hero_polish_avatar_and_headline_width(env):
+def test_hero_polish_avatar_size(env):
     html = _client(env).get("/").text
-    assert "max-width:520px" in html
+    assert "width:200px;height:200px" in html
 
 
 def test_speaking_and_events_renders_without_double_escaping(env):

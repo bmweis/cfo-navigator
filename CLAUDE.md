@@ -764,6 +764,97 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   to absorb it is a materially bigger, riskier change to guess at blind than
   polishing the section in place. Flagged for a visual diff against the design
   file, same as Phase 3's still-open caveat above.
+- **Homepage Restructure, design-fidelity pass — the actual design file
+  (previously unreachable) supersedes both judgment calls above; the Toolbox
+  teaser really does move into the hero's right column, and the "Recent
+  highlights" grid replaces the 4-column breakdown outright.** The headless
+  `/design-login` limitation flagged in the two bullets above turned out to
+  be a session limitation, not a permanent one — Brian supplied the design
+  as a self-contained bundled HTML export instead (a runtime-unpacking
+  artifact, not plain static markup; read by rendering it in the
+  pre-installed headless Chromium via Playwright and diffing the resulting
+  DOM, since the bundler's JS reconstructs the real page client-side). That
+  changed several calls made blind in the two bullets above:
+  - **Layout is a real two-column grid**, not a stack of full-width
+    sections: a `1fr / ~360px` grid, left column holding the hero copy and
+    the entire consolidated Thought Leadership section, right column (the
+    sidebar) holding the photo/status-box block, the Toolbox panel, and the
+    Reader-access placeholder — collapsing to a single stacked column below
+    900px, the same convention every other responsive section on this page
+    already uses.
+  - **The Toolbox panel moved into that right column**, resolving the
+    previous bullet's judgment call the other way — and its whole
+    eyebrow/heading/subline/tile-list/link now lives inside *one* white
+    bordered card (previously two nested layers: a bare eyebrow/heading
+    above a separately-bordered tile panel).
+  - **The Thought Leadership section's "4-column breakdown" is actually a
+    "Recent highlights" 2-column grid** (`_tl_recent_highlight_item`,
+    replacing `_tl_type_column`) — visually and structurally different from
+    `/thought-leadership`'s own `.tl-cols` per-type columns (this reuses
+    `Library.get_thought_leadership_representative`'s existing selection
+    logic unchanged, just a different renderer for the result): a divider,
+    a plain "Recent highlights" label, then one tile per type with an
+    icon+type-label row, linked title, venue/date metadata, **and the
+    entry's own description** (the earlier `_tl_type_column` didn't surface
+    description at all). Order also changed to match the file exactly:
+    eyebrow → heading → intro → bullets → flagship cards → divider +
+    Recent Highlights → "See all" link (bullets used to come after the
+    breakdown, not before the flagship cards).
+  - **The bullet list is a manual flex layout with a "•" glyph**
+    (`.home-tl-bullet*`), not a native `<ul><li>` — matching the file's own
+    treatment (14px item gap, 15.5px text) rather than the more generous
+    spacing an earlier round guessed at without the file to check against.
+  - **The 3 flagship cards on the homepage are no longer the same data as
+    `/thought-leadership`'s own featured row.** An earlier round shared one
+    `_TL_FEATURED_CARDS` tuple between both pages on the assumption their
+    copy would always match; the design file shows the homepage's cards
+    with shorter copy, a single consistent seafoam-deep tag color (vs.
+    `/thought-leadership`'s 3-color cycle), and a "Read the piece →" CTA —
+    genuinely different content, not a rendering difference. Un-shared:
+    `_TL_FEATURED_CARDS` (unchanged, `/thought-leadership`'s own) and the
+    new `_HOME_TL_FEATURED_CARDS` (homepage's own) both render through the
+    same shared `_tl_fcard()`/`.tl-card` markup, so the two pages still
+    can't visually drift in *treatment* — only in which copy they show.
+    **Sail Don't Row correction (Brian's explicit call before building):**
+    the design file's copy for that card describes the arcade game itself
+    ("Interactive" tag, "a game about strategic leverage", "Play it →") —
+    wrong; that card is meant to represent the AI hackathon playbook
+    article. `_HOME_TL_FEATURED_CARDS`' entry for it reuses
+    `_TL_FEATURED_CARDS`' real "Playbook" tag, description, title, and
+    "Read the playbook →" link instead of the design file's placeholder
+    copy — the one deliberate departure from "implement the file as-is."
+  - **Avatar is 200px** (not the ~176px estimated in the earlier hero-polish
+    bullet) with a repositioned, rotated status box overlapping it — closer
+    to the file's own 265px-at-1720px-wide layout, scaled down slightly to
+    fit this site's narrower right-column width.
+  - **The "Status:" label switches to `var(--font-wordmark)`** (Permanent
+    Marker, already loaded sitewide for the nav logo — no new font) instead
+    of `var(--font-sticker)` (Caveat), matching the file exactly; the "hi,
+    I'm Brian" sticker keeps its existing 🤙 emoji rather than the file's
+    plain-text placeholder, since that emoji is established site copy this
+    file wasn't asking to change.
+  - **The "🚧 building" sticker is genuinely gone, deliberately, per the
+    file.** The two prior bullets above treated restoring/keeping that
+    sticker as a fixed regression to guard against; the actual design file
+    doesn't include it on the rebuilt Toolbox panel at all. Since "implement
+    the file as-is" was the explicit instruction this round, the sticker is
+    dropped and `test_toolbox_panel_present_and_matches_design` now asserts
+    its *absence* — noted here prominently since it directly reverses an
+    earlier acceptance criterion, not silently.
+  - **New: an admin-only "Reader access" placeholder box** in the sidebar,
+    below the Toolbox panel — seafoam background, navy border, the reused
+    `_ICON_NEWSPAPER` glyph, static copy ("Shown here only when logged in as
+    admin. Links into the Reader—build pending."), gated on `_is_authed`
+    the same way the `/tools` 5th tile is (built conditionally in Python,
+    absent from the HTML entirely for non-admins, not CSS-hidden). No
+    actual link yet — it's explicitly a placeholder per the file, and stays
+    one; wiring it to `/read` is future work, not this round's.
+  - **Expected, not a bug:** the same Thought Leadership entry can appear
+    in both the flagship cards and "Recent highlights" (e.g. if Growth
+    Engine Ratio is also Writing's `get_thought_leadership_representative`
+    pick) — the two sections pull from different, independent data sources
+    (a hardcoded tuple vs. a per-type DB query) with no dedup between them,
+    same as the file shows no such guard either.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

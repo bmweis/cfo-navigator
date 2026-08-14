@@ -87,7 +87,7 @@ def test_tools_landing_admin_sees_5th_seafoam_bordered_tile(env):
 def test_homepage_has_toolbox_teaser_section(env):
     html = _client(env).get("/").text
     assert "Everything in the toolbox" in html
-    assert "TOOLBOX" in html
+    assert ">CFO Toolbox<" in html
     assert "See the full toolbox" in html
     # All four public tiles' one-liners show up as mini-tiles.
     assert "The software high-growth finance teams actually use." in html
@@ -98,10 +98,8 @@ def test_homepage_has_toolbox_teaser_section(env):
 
 def test_homepage_old_cfo_toolbox_card_is_gone(env):
     # The old standalone top-row "CFO Toolbox" card (with its own copy) is
-    # gone — the "🚧 building" sticker itself carries over onto the new
-    # Toolbox teaser section (Homepage Restructure phase; see
-    # test_thought_leadership_homepage_teaser.py's sticker regression test),
-    # so its presence alone doesn't indicate the old card survived.
+    # gone — replaced first by a Phase 3 teaser section and then, in the
+    # Homepage Restructure phase, by the sidebar Toolbox panel.
     html = _client(env).get("/").text
     assert "A curated directory of the software high-growth" not in html
 

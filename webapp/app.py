@@ -1625,6 +1625,17 @@ _ICON_NEWSPAPER = ('<path d="M3 6h13v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
                     '<line x1="6" y1="9.5" x2="12" y2="9.5"/><line x1="6" y1="12.5" x2="12" y2="12.5"/>'
                     '<line x1="6" y1="15.5" x2="10" y2="15.5"/>')
 _TL_COLUMN_ICONS = (_ICON_PENCIL, _ICON_MIC, _ICON_HEADPHONES, _ICON_NEWSPAPER)
+# Homepage-only FP&A Buddy icon (Homepage Restructure design file) — a
+# half-filled circle, distinct from _ICON_BRAIN which /tools's own Toolbox
+# grid keeps using (that page is out of scope for this design file; the two
+# surfaces showing different glyphs for the same tile is a deliberate,
+# design-file-driven inconsistency, not an oversight). Fill is hardcoded to
+# seafoam-deep rather than threaded dynamically through _card_icon()'s
+# stroke cycle — this icon is only ever used at the homepage Toolbox panel's
+# 4th (index-3) position, which _CARD_ICON_STYLES' 3-cycle already resolves
+# to seafoam regardless, so hardcoding matches the design exactly with no
+# generic-badge plumbing needed.
+_ICON_HALF_CIRCLE = '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="#1F7A66" stroke="none"/>'
 # Open-book glyph for the admin-only 5th tile on the /tools 2x2 grid (Phase 3)
 # — no existing icon fit "Library" (admin's Archive/Feed reading stash), so
 # this is drawn fresh in the same flat, two-tone line-icon style as the rest
@@ -1947,88 +1958,120 @@ def homepage(request: Request):
         homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
         # One representative entry per Thought Leadership type, for the
-        # consolidated section's 4-column breakdown — see
-        # get_thought_leadership_representative's docstring for the
-        # selection rule (repurposes the `featured_home` checkbox).
+        # "Recent highlights" grid — see get_thought_leadership_representative's
+        # docstring for the selection rule (repurposes the `featured_home`
+        # checkbox). Deliberately the same piece can end up in both this grid
+        # and the flagship cards below (e.g. Growth Engine Ratio, if it's also
+        # Writing's representative) — that's expected given how the selection
+        # logic works, not a bug to guard against.
         tl_reps = [lib.get_thought_leadership_representative(t) for t, _label in _TL_TYPES]
     finally:
         lib.close()
 
-    toolbox_mini_tiles = "".join(
-        _toolbox_mini_tile(i, title, one_liner, icon)
-        for i, (_href, title, icon, _desc, one_liner) in enumerate(_TOOLBOX_TILES)
+    # Toolbox panel tile rows — FP&A Buddy uses a homepage-only half-circle
+    # icon here (design file), distinct from _ICON_BRAIN on /tools's own grid.
+    toolbox_rows = "".join(
+        _toolbox_mini_tile(i, title, one_liner, _ICON_HALF_CIRCLE if href == "/tools/fpa-buddy" else icon)
+        for i, (href, title, icon, _desc, one_liner) in enumerate(_TOOLBOX_TILES)
     )
 
-    tl_type_columns = "".join(
-        _tl_type_column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], label, item)
-        for i, ((_t, label), item) in enumerate(zip(_TL_TYPES, tl_reps))
+    recent_highlights = "".join(
+        _tl_recent_highlight_item(i, _TL_TYPE_ICON[t], label, item)
+        for i, ((t, label), item) in enumerate(zip(_TL_TYPES, tl_reps))
     )
+
+    is_admin = _is_authed(request)
+    reader_access_box = (f"""
+      <div style="background:var(--seafoam);border:1.5px solid var(--seafoam-deep);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only &mdash; placeholder</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          {_card_icon(3, _ICON_NEWSPAPER)}
+          <div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Reader access</div>
+        </div>
+        <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Links into the Reader&mdash;build pending.</p>
+      </div>""" if is_admin else "")
 
     body = f"""<div class="page page-full">
 <style>
 {_TL_SHARED_CSS}
-.home-hero{{display:flex;flex-direction:column;gap:28px;align-items:stretch;}}
-.home-hero-copy{{min-width:0;}}
-.home-hero-side{{display:flex;flex-direction:column;gap:32px;align-items:center;}}
-.home-hero-photo{{position:relative;z-index:2;flex-shrink:0;}}
-.home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
-/* Shared "compact teaser section" treatment for the Toolbox teaser — same
-   eyebrow style, same panel, same mini-tile grid it's had since Phase 3. */
-.home-teaser{{margin:32px 0 8px;position:relative;}}
-.home-teaser-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:16px;}}
-.home-teaser-grid{{display:grid;grid-template-columns:1fr;gap:16px;}}
+.home-grid{{display:flex;flex-direction:column;gap:48px;}}
+.home-side{{display:flex;flex-direction:column;gap:20px;}}
+.home-photo-wrap{{position:relative;width:100%;height:340px;}}
+.home-avatar-wrap{{position:relative;width:200px;height:200px;margin:0 auto;z-index:3;}}
+.home-status{{position:absolute;top:150px;left:0;right:0;background:#fff;border:2px solid var(--ink-graffiti);border-radius:14px;padding:20px 22px;transform:rotate(-1.5deg);box-shadow:3px 3px 0 var(--ink-graffiti);box-sizing:border-box;z-index:2;}}
+.home-toolbox-panel,.home-reader-slot{{width:100%;}}
+.home-toolbox-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:26px;box-sizing:border-box;position:relative;}}
+.home-toolbox-rows{{display:flex;flex-direction:column;gap:16px;}}
+/* Bullet list — a manual flex layout with a "•" glyph (design file), not a
+   native <ul><li>, so the marker color/size/gap match the design exactly. */
+.home-tl-bullets{{display:flex;flex-direction:column;gap:14px;margin:0 0 28px;}}
+.home-tl-bullet{{display:flex;gap:12px;font-size:15.5px;line-height:1.55;color:var(--ink-soft);}}
+.home-tl-bullet-mark{{color:var(--navy);flex-shrink:0;font-size:18px;line-height:1.3;}}
+.home-tl-highlights{{display:grid;grid-template-columns:1fr;gap:24px;border-top:1px solid var(--line);padding-top:24px;margin-top:8px;}}
 @media(min-width:900px){{
-  .home-hero{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start;}}
-  .home-hero-copy{{grid-column:1 / 3;}}
-  .home-hero-side{{grid-column:3 / 4;align-items:flex-end;gap:0;}}
-  .home-hero-photo{{margin-bottom:-74px;}}
-  .home-status{{padding-top:44px;}}
+  .home-grid{{display:grid;grid-template-columns:1fr 360px;gap:56px;align-items:start;}}
+  .home-photo-wrap{{height:400px;}}
+  .home-avatar-wrap{{width:240px;height:240px;left:40px;top:-16px;}}
+  .home-status{{top:190px;left:-30px;right:auto;width:calc(100% + 30px);}}
 }}
 @media(min-width:560px){{
-  .home-teaser-grid{{grid-template-columns:1fr 1fr;}}
+  .home-tl-highlights{{grid-template-columns:1fr 1fr;}}
 }}
 </style>
-<div class="home-hero">
-  <div class="home-hero-copy">
-    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
-    <h1 style="margin:0 0 18px;max-width:520px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">{_underline_last_word(homepage_headline)}</h1>
-    {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0 0 12px;")}
-  </div>
-  <div class="home-hero-side">
-    <div class="home-hero-photo">
-      {_avatar(176)}
-      {_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="-14px", right="-18px")}
+<div class="home-grid">
+  <div style="min-width:0;">
+    <div style="padding-top:8px;margin-bottom:52px;">
+      <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:18px;">A CFO, for CFOs</div>
+      <h1 style="margin:0 0 22px;max-width:640px;font-family:var(--font-head);font-weight:700;font-size:clamp(32px,3.6vw,46px);line-height:1.1;">{_underline_last_word(homepage_headline)}</h1>
+      {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;max-width:640px;")}
     </div>
-    <div class="home-status">
-      <div style="font:700 15px var(--font-sticker);color:var(--seafoam-deep);margin-bottom:8px;">STATUS:</div>
-      {_copy_paragraphs_html(homepage_teaser, style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;")}
-      {_copy_paragraphs_html(homepage_expanded, style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;")}
+
+    <div>
+      <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:14px;">Thought Leadership</div>
+      <h2 style="margin:0 0 16px;font-family:var(--font-head);font-weight:700;font-size:28px;">What I write about</h2>
+      <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0 0 22px;max-width:640px;">Frameworks, playbooks, and real opinions on building finance functions that scale&mdash;collected across writing, speaking, podcasts, and press.</p>
+
+      <ul class="home-tl-bullets" style="padding:0;list-style:none;">
+        <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing.</li>
+        <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Frameworks myself and others have built, real opinions, and stories from the trenches.</li>
+        <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>How to move from scorekeeper to strategic partner: stop reporting what happened, start shaping what&rsquo;s next.</li>
+        <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
+      </ul>
+
+      {_tl_featured_cards_html(_HOME_TL_FEATURED_CARDS)}
+
+      <div class="home-tl-highlights">
+        <div style="grid-column:1/-1;font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;">Recent highlights</div>
+        {recent_highlights}
+      </div>
+
+      <a href="/thought-leadership" style="display:inline-block;margin-top:32px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
     </div>
   </div>
-</div>
 
-<div class="home-teaser">
-  {_sticker("🚧 building", rotate=-4, top="-14px", right="14px", size=14)}
-  <div style="font:600 10.5px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">TOOLBOX</div>
-  <h2 style="margin:0 0 6px;font-family:var(--font-head);font-weight:600;font-size:21px;">Everything in the toolbox</h2>
-  <p style="margin:0 0 16px;font-size:14px;color:var(--muted);">Software, benchmarks, communities, and an AI research buddy.</p>
-  <div class="home-teaser-panel"><div class="home-teaser-grid">{toolbox_mini_tiles}</div></div>
-  <a href="/tools" style="display:inline-block;margin-top:14px;font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--navy);text-decoration:none;">See the full toolbox &rarr;</a>
-</div>
+  <div class="home-side">
+    <div class="home-photo-wrap">
+      <div class="home-avatar-wrap">
+        {_avatar(200)}
+        {_sticker("hi, I&rsquo;m Brian 🤙", rotate=-6, top="-18px", right="-10px")}
+      </div>
+      <div class="home-status">
+        <div style="font:700 16px var(--font-wordmark);color:var(--seafoam-deep);margin-bottom:10px;">Status:</div>
+        {_copy_paragraphs_html(homepage_teaser, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
+        {_copy_paragraphs_html(homepage_expanded, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
+      </div>
+    </div>
 
-<div class="home-teaser">
-  <div style="font:600 10.5px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:6px;">THOUGHT LEADERSHIP</div>
-  <h2 style="margin:0 0 8px;font-family:var(--font-head);font-weight:600;font-size:21px;">What I write about</h2>
-  <p style="max-width:680px;margin:0 0 20px;font-size:14px;color:var(--muted);">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>
-  <div class="tl-featured">{"".join(_tl_fcard(*c) for c in _TL_FEATURED_CARDS)}</div>
-  <div class="tl-cols" style="margin-top:24px;">{tl_type_columns}</div>
-  <ul style="padding-left:22px;margin:28px 0 0;">
-    <li style="margin-bottom:18px;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing.</li>
-    <li style="margin-bottom:18px;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">Frameworks myself and others have built, real opinions, and stories from the trenches.</li>
-    <li style="margin-bottom:18px;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">How to move from scorekeeper to strategic partner: stop reporting what happened, start shaping what&rsquo;s next.</li>
-    <li style="margin-bottom:0;font-size:14.5px;line-height:1.65;color:var(--ink-soft);">Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
-  </ul>
-  <a href="/thought-leadership" style="display:inline-block;margin-top:20px;font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
+    <div class="home-toolbox-panel">
+      <div style="font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:10px;">CFO Toolbox</div>
+      <h3 style="margin:0 0 8px;font-family:var(--font-head);font-weight:600;font-size:19px;">Everything in the toolbox</h3>
+      <p style="font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 20px;">Software, benchmarks, communities, and an AI research buddy.</p>
+      <div class="home-toolbox-rows">{toolbox_rows}</div>
+      <a href="/tools" style="display:inline-block;margin-top:22px;font-family:var(--font-body);font-weight:600;font-size:14px;color:var(--navy);text-decoration:none;">See the full toolbox &rarr;</a>
+    </div>
+
+    {reader_access_box}
+  </div>
 </div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
@@ -2168,20 +2211,21 @@ def thought_leadership(request: Request):
             f'{rows}{more}</div>'
         )
 
-    # Featured: three flagship pieces, one consistent card treatment — shared
-    # with the homepage's consolidated Thought Leadership section (Homepage
-    # Restructure phase) via _TL_FEATURED_CARDS/_tl_featured_cards_html, so
-    # the two surfaces can't drift apart. The only per-card variation is the
-    # small category tag colour — no full-colour floods, which is what made
-    # the old top read as busy.
+    # Featured: three flagship pieces, one consistent card treatment. The
+    # card markup/CSS (_tl_fcard/_TL_SHARED_CSS) is shared with the
+    # homepage's own flagship cards, but this page's copy/tag-color set
+    # (_TL_FEATURED_CARDS) is this page's own — see _HOME_TL_FEATURED_CARDS'
+    # comment for why the two pages' card content is allowed to diverge. The
+    # only per-card variation here is the small category tag colour — no
+    # full-colour floods, which is what made the old top read as busy.
     body = (
         '<div class="page page-full">'
         '<style>'
-        + _TL_SHARED_CSS +
+        + _TL_SHARED_CSS + _TL_COLUMN_CSS +
         '</style>'
         '<h1>Thought Leadership</h1>'
         '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
-        + _tl_featured_cards_html()
+        + _tl_featured_cards_html(_TL_FEATURED_CARDS)
     )
 
     lib = _lib()
@@ -5678,13 +5722,16 @@ def _toolbox_tile(index: int, href: str, title: str, desc: str, icon_svg: str, *
 
 
 def _toolbox_mini_tile(index: int, title: str, one_liner: str, icon_svg: str) -> str:
-    """Compact homepage-teaser mini-tile: smaller icon badge, no link (the
-    whole panel links out once via the teaser's own "See the full toolbox"
-    line, not per-tile)."""
+    """Homepage Toolbox-panel tile row (Homepage Restructure design file) —
+    icon badge to the left, title + one-liner stacked to the right, no link
+    (the panel links out once via the "See the full toolbox" line below it,
+    not per-tile). Reuses the sitewide _card_icon() badge (34px) rather than
+    a dedicated size, matching the design's own toolbox-tile badge size."""
     return (
-        f'<div>{_toolbox_icon_badge(index, icon_svg, size=32, icon_size=16, margin_bottom=8)}'
-        f'<div style="font-family:var(--font-head);font-weight:600;font-size:13px;color:var(--navy);">{title}</div>'
-        f'<p style="margin:4px 0 0;font-size:12px;line-height:1.5;color:rgba(20,23,28,.65);">{one_liner}</p></div>'
+        f'<div style="display:flex;gap:12px;align-items:flex-start;">'
+        f'{_card_icon(index, icon_svg)}'
+        f'<div><div style="font-family:var(--font-head);font-weight:600;font-size:14.5px;color:var(--navy);">{title}</div>'
+        f'<div style="margin-top:2px;font-size:13px;line-height:1.5;color:var(--muted);">{one_liner}</div></div></div>'
     )
 
 
@@ -10622,7 +10669,7 @@ _TL_TYPES = [
 _TL_TYPE_LABELS = dict(_TL_TYPES)
 # Same order as _TL_TYPES, so zip() pairs each type with the exact icon its
 # /thought-leadership column already renders (_TL_COLUMN_ICONS) — reused,
-# not redrawn, for the homepage's 4-column type breakdown (_tl_type_column).
+# not redrawn, for the homepage's "Recent highlights" grid (_tl_recent_highlight_item).
 _TL_TYPE_ICON = dict(zip((t for t, _ in _TL_TYPES), _TL_COLUMN_ICONS))
 
 
@@ -10639,10 +10686,13 @@ def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: s
     )
 
 
-# The 3 flagship pieces, reused verbatim by both /thought-leadership's
-# featured row and the homepage's consolidated Thought Leadership section
-# (Homepage Restructure phase) — one shared list so the two surfaces can't
-# drift out of sync with each other.
+# /thought-leadership's own 3 flagship pieces (its featured row) — 3
+# distinct tag colors for visual variety on that page. NOT shared with the
+# homepage: the Homepage Restructure design file (see _HOME_TL_FEATURED_CARDS
+# below) gives the homepage's 3 flagship cards their own shorter copy and a
+# single consistent tag color, so the two surfaces are allowed to diverge —
+# an earlier round of this work shared one tuple between both pages on the
+# (wrong, in hindsight) assumption the copy would always match; it doesn't.
 _TL_FEATURED_CARDS = (
     ("/thought-leadership/growth-engine-ratio", "Framework", "var(--coral-deep)",
      "The Growth Engine Ratio",
@@ -10661,18 +10711,41 @@ _TL_FEATURED_CARDS = (
      "Read the guide"),
 )
 
+# The homepage's own 3 flagship cards (Homepage Restructure design file) —
+# shorter copy, one consistent seafoam-deep tag color across all three
+# (unlike /thought-leadership's 3-color cycle above). The design file's
+# "Sail Don't Row" card was written as if it were the arcade game itself
+# ("Interactive" tag, "a game about strategic leverage", "Play it →") — a
+# correction from Brian: that card is meant to represent the AI hackathon
+# playbook article, so it reuses the real "Playbook" tag, description, and
+# "Read the playbook →" link/title already established on /thought-leadership
+# (_TL_FEATURED_CARDS above) instead of the design file's placeholder copy.
+_HOME_TL_FEATURED_CARDS = (
+    ("/thought-leadership/growth-engine-ratio", "Framework", "var(--seafoam-deep)",
+     "The Growth Engine Ratio",
+     "A framework for pressure-testing GTM efficiency before you scale spend.",
+     "Read the piece"),
+    ("/thought-leadership/ai-hackathon-playbook", "Playbook", "var(--seafoam-deep)",
+     "Sail, Don&rsquo;t Row",
+     "How to run an AI hackathon with your finance team&mdash;the full format, facilitation mechanics, and "
+     "how to make it stick.",
+     "Read the playbook"),
+    ("/thought-leadership/netsuite-mcp", "Guide", "var(--seafoam-deep)",
+     "Connecting Claude to NetSuite",
+     "A hands-on guide to wiring Claude into your ERP for real analysis.",
+     "Read the piece"),
+)
 
-def _tl_featured_cards_html() -> str:
-    return '<div class="tl-featured">' + "".join(_tl_fcard(*c) for c in _TL_FEATURED_CARDS) + '</div>'
+
+def _tl_featured_cards_html(cards) -> str:
+    return '<div class="tl-featured">' + "".join(_tl_fcard(*c) for c in cards) + '</div>'
 
 
-# Shared CSS for the flagship-card row (.tl-featured/.tl-card*) and the
-# per-type column treatment (.tl-cols/.tl-col*) — used by both
-# /thought-leadership (full columns: capped list + "Show all" toggle) and
-# the homepage's consolidated section (a single representative item per
-# column, via _tl_type_column below). Kept as one shared constant, per this
-# codebase's inline-CSS-per-page convention (no external stylesheet to put
-# it in instead), so the two surfaces can't visually drift apart.
+# Flagship-card CSS (.tl-featured/.tl-card*) — the only piece truly shared
+# between /thought-leadership's featured row and the homepage's flagship
+# cards (see _TL_FEATURED_CARDS vs. _HOME_TL_FEATURED_CARDS above: the two
+# pages' card *content* diverges per the Homepage Restructure design file,
+# but the card *markup/CSS* stays identical, via _tl_fcard()).
 _TL_SHARED_CSS = (
     '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
     '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'
@@ -10682,6 +10755,15 @@ _TL_SHARED_CSS = (
     '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
     '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
     '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
+)
+
+# /thought-leadership-only CSS for its per-type columns (.tl-cols/.tl-col*):
+# full capped lists with a "Show all" toggle plus a per-item click-to-expand
+# description. The homepage's "Recent highlights" grid
+# (_tl_recent_highlight_item) is a single-representative-item design with its
+# own distinct 2-column grid markup, not a user of this class set — kept
+# page-scoped rather than folded into _TL_SHARED_CSS.
+_TL_COLUMN_CSS = (
     '.tl-cols{display:flex;gap:24px;margin:8px 0 12px;}'
     '.tl-col{flex:1;min-width:0;}'
     '.tl-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}'
@@ -10705,25 +10787,43 @@ _TL_SHARED_CSS = (
 )
 
 
-def _tl_type_column(index: int, icon_svg: str, title: str, item: dict | None) -> str:
-    """One column of the homepage's 4-column Thought Leadership type
-    breakdown (Homepage Restructure phase) — same .tl-col/.tl-col-head/
-    .tl-col-item markup as /thought-leadership's own per-type columns (via
-    the shared _TL_SHARED_CSS above), but a single representative item
-    instead of a capped list + "Show all" toggle. Collapses to nothing when
-    the type has zero entries at all (`item` is None) — same empty-column
-    convention as that page's own column()."""
+def _tl_recent_highlight_item(index: int, icon_svg: str, type_label: str, item: dict | None) -> str:
+    """One tile of the homepage's "Recent highlights" 2-column grid
+    (Homepage Restructure design file) — one representative entry per type:
+    a small icon + type-label row, the title (linked when a URL exists),
+    venue/date metadata, and the entry's own description. Collapses to
+    nothing when the type has zero entries at all (`item` is None), same
+    empty-column convention /thought-leadership's own column() uses."""
     if not item:
         return ""
     meta_bits = [b for b in (item.get("venue"), item.get("date_label")) if b]
-    meta_html = (f'<div class="tl-col-item-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</div>'
-                 if meta_bits else "")
-    title_html = (f'<a href="{_esc(item["url"])}" target="_blank" rel="noopener" class="tl-col-item-title">{_esc(item["title"])}</a>'
-                  if item.get("url") else f'<div class="tl-col-item-title">{_esc(item["title"])}</div>')
+    meta_html = (f'<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">'
+                 f'{" &middot; ".join(_esc(b) for b in meta_bits)}</div>') if meta_bits else ""
+    title_html = (f'<a href="{_esc(item["url"])}" target="_blank" rel="noopener" style="font-family:var(--font-head);'
+                  f'font-weight:600;font-size:15px;color:var(--ink);line-height:1.4;display:block;margin-bottom:4px;'
+                  f'text-decoration:none;">{_esc(item["title"])}</a>'
+                  if item.get("url") else
+                  f'<div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);'
+                  f'line-height:1.4;margin-bottom:4px;">{_esc(item["title"])}</div>')
+    desc_html = (f'<p style="font-size:13px;line-height:1.55;color:var(--muted);margin:0;">{_esc(item["description"])}</p>'
+                 if item.get("description") else "")
+    # Badge built inline rather than via _card_icon() — that helper's
+    # margin-bottom:14px (meant for a badge stacked above a title) would
+    # throw off align-items:center in this icon-beside-label row.
+    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    badge = (
+        f'<div style="width:32px;height:32px;border-radius:8px;background:{bg};'
+        f'display:flex;align-items:center;justify-content:center;flex-shrink:0;">'
+        f'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="{stroke}" '
+        f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_svg}</svg></div>'
+    )
     return (
-        f'<div class="tl-col">'
-        f'<div class="tl-col-head">{_card_icon(index, icon_svg)}<div class="tl-col-title">{_esc(title)}</div></div>'
-        f'<div class="tl-col-item">{title_html}{meta_html}</div></div>'
+        f'<div>'
+        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">'
+        f'{badge}'
+        f'<div style="font-size:11.5px;font-weight:600;letter-spacing:.06em;color:var(--muted);'
+        f'text-transform:uppercase;">{_esc(type_label)}</div></div>'
+        f'{title_html}{meta_html}{desc_html}</div>'
     )
 
 
