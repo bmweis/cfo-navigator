@@ -1861,18 +1861,19 @@ def _avatar_data_url() -> str | None:
         return None
 
 
-def _avatar(size: int = 140) -> str:
+def _avatar(size: int = 140, border_width: int = 3) -> str:
     """DB-stored avatar if uploaded, else static headshot.jpg if present,
-    else a clean monogram."""
+    else a clean monogram. `border_width` defaults to the site-wide 3px ring;
+    the homepage hero photo uses a heavier 4px ring per its own design spec."""
     src = _avatar_data_url()
     if not src and os.path.isfile(os.path.join(_STATIC_DIR, "headshot.jpg")):
         src = "/static/headshot.jpg"
     if src:
         return (f'<img src="{src}" alt="Brian Weisberg" '
                 f'style="width:{size}px;height:{size}px;border-radius:50%;object-fit:cover;'
-                f'object-position:center top;flex-shrink:0;border:3px solid var(--navy);">')
+                f'object-position:center top;flex-shrink:0;border:{border_width}px solid var(--navy);">')
     return (f'<div aria-label="Brian Weisberg" '
-            f'style="width:{size}px;height:{size}px;border-radius:50%;flex-shrink:0;border:3px solid var(--navy);'
+            f'style="width:{size}px;height:{size}px;border-radius:50%;flex-shrink:0;border:{border_width}px solid var(--navy);'
             f'background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;'
             f'font-size:{round(size/3)}px;font-weight:700;letter-spacing:-0.02em;">BW</div>')
 
@@ -1948,31 +1949,75 @@ def homepage(request: Request):
                "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
                "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press.",
                icon_html=_card_icon(0, _ICON_BRAIN)),
-        _rcard("/tools", "CFO Toolbox",
-               "Software, benchmarking, and communities for the Office of the CFO&mdash;the vendors "
-               "high-growth finance teams actually use, the benchmarking sources I rely on, and the peer "
-               "groups worth joining.",
-               icon_html=_card_icon(1, _ICON_TOOLBOX),
-               sticker_html=_sticker("🚧 building", rotate=-4, top="-10px", right="14px", size=14)),
     ])
+
+    # Compact vertical Toolbox teaser for the hero's right column (moved out of
+    # the full-width .home-cards row so it sits with the avatar/status stack
+    # instead of the Thought Leadership card below). Reuses the same
+    # Software/Benchmarking/Communities icons as the /tools landing page's own
+    # pillar cards for visual continuity; FP&A Buddy has no pillar card of its
+    # own yet (it's a Toolbox sub-page, not a fourth pillar), so its icon here
+    # is a one-off inline SVG rather than a new _ICON_* constant.
+    def _toolbox_row(icon_svg, stroke, bg, title, desc):
+        return (
+            f'<div style="display:flex;gap:12px;align-items:flex-start;">'
+            f'<div style="flex-shrink:0;width:34px;height:34px;border-radius:8px;background:{bg};'
+            f'display:flex;align-items:center;justify-content:center;">'
+            f'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="{stroke}" '
+            f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_svg}</svg></div>'
+            f'<div><div style="font-family:var(--font-head);font-weight:600;font-size:14.5px;color:var(--navy);">{title}</div>'
+            f'<div style="font-size:13px;color:var(--muted);line-height:1.5;">{desc}</div></div></div>'
+        )
+
+    _ICON_FPA_BUDDY = '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>'
+    toolbox_rows = "".join([
+        _toolbox_row(_ICON_WRENCH, "var(--seafoam-deep)", "var(--seafoam-wash)",
+                     "Software", "The software high-growth finance teams actually use."),
+        _toolbox_row(_ICON_CHART, "var(--navy)", "var(--navy-wash)",
+                     "Benchmarking", "The benchmarking sources I actually rely on."),
+        _toolbox_row(_ICON_PEOPLE, "var(--coral-deep)", "var(--coral-wash)",
+                     "Communities", "CFO and finance communities worth joining."),
+        _toolbox_row(_ICON_FPA_BUDDY, "var(--seafoam-deep)", "var(--seafoam-wash)",
+                     "FP&amp;A Buddy", "Ask a real FP&amp;A question, get a sourced answer."),
+    ])
+    toolbox_card = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;">
+  <div style="font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;">CFO Toolbox</div>
+  <h3 style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--ink);margin:0 0 8px;">Everything in the toolbox</h3>
+  <p style="font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 20px;">Software, benchmarks, communities, and an AI research buddy.</p>
+  <div style="display:flex;flex-direction:column;gap:16px;">{toolbox_rows}</div>
+  <a href="/tools" style="display:inline-block;margin-top:22px;font-size:14px;font-weight:600;color:var(--navy);">See the full toolbox &rarr;</a>
+</div>"""
+
+    # Reader access (admin-only): /read shipped in Phase 5 (PR 320, merged),
+    # so this is a real link now rather than the placeholder text it launched
+    # with&mdash;see webapp/app.py's homepage() for the admin-only gate.
+    reader_access_card = ""
+    if _is_authed(request):
+        reader_access_card = """<a href="/read" style="text-decoration:none;background:var(--seafoam);border:1.5px solid var(--seafoam-deep);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
+  <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only</div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div style="flex-shrink:0;width:34px;height:34px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--navy)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h13a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 8h7"/><path d="M8 12h7"/><path d="M8 16h4"/><path d="M19 8h1a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2"/></svg>
+    </div>
+    <div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Reader access</div>
+  </div>
+  <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Saved, and Read Later in one place.</p>
+</a>"""
 
     body = f"""<div class="page page-full">
 <style>
 .home-hero{{display:flex;flex-direction:column;gap:28px;align-items:stretch;}}
 .home-hero-copy{{min-width:0;}}
-.home-hero-side{{display:flex;flex-direction:column;gap:32px;align-items:center;}}
+.home-hero-side{{display:flex;flex-direction:column;gap:20px;align-items:center;}}
 .home-hero-photo{{position:relative;z-index:2;flex-shrink:0;}}
 .home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
 .home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;}}
 @media(min-width:900px){{
   .home-hero{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start;}}
   .home-hero-copy{{grid-column:1 / 3;}}
-  .home-hero-side{{grid-column:3 / 4;align-items:flex-end;gap:0;}}
+  .home-hero-side{{grid-column:3 / 4;align-items:flex-end;gap:20px;}}
   .home-hero-photo{{margin-bottom:-74px;}}
   .home-status{{padding-top:44px;}}
-}}
-@media(min-width:760px){{
-  .home-cards{{grid-template-columns:repeat(2,1fr);}}
 }}
 </style>
 <div class="home-hero">
@@ -1983,7 +2028,7 @@ def homepage(request: Request):
   </div>
   <div class="home-hero-side">
     <div class="home-hero-photo">
-      {_avatar(220)}
+      {_avatar(265, border_width=4)}
       {_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="-14px", right="-18px")}
     </div>
     <div class="home-status">
@@ -1991,6 +2036,8 @@ def homepage(request: Request):
       {_copy_paragraphs_html(homepage_teaser, style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;")}
       <div style="font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
     </div>
+    {toolbox_card}
+    {reader_access_card}
   </div>
 </div>
 
