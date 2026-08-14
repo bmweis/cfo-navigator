@@ -2081,14 +2081,33 @@ def thought_leadership(request: Request):
         undated.sort(key=lambda it: it["display_order"])
         return undated + dated
 
-    def col_preview_item(it: dict, hidden: bool = False) -> str:
+    def col_preview_item(it: dict, item_id: str, hidden: bool = False) -> str:
         meta_bits = [b for b in (it["venue"], it["date_label"]) if b]
         meta_html = (f'<div class="tl-col-item-meta">{" &middot; ".join(_esc(b) for b in meta_bits)}</div>'
                      if meta_bits else "")
         title_html = (f'<a href="{_esc(it["url"])}" target="_blank" rel="noopener" class="tl-col-item-title">{_esc(it["title"])}</a>'
                       if it["url"] else f'<div class="tl-col-item-title">{_esc(it["title"])}</div>')
         cls = "tl-col-item tl-col-item-extra" if hidden else "tl-col-item"
-        return f'<div class="{cls}">{title_html}{meta_html}</div>'
+        # The description is never shown by default (title/venue/date only,
+        # matching the page's existing look) — a small chevron toggle reveals
+        # it inline, independent per entry. Suppressed entirely when there's
+        # nothing to reveal: no description, or needs_synopsis (a deliberate
+        # placeholder, not real content) — no point inviting a click that
+        # does nothing. A full-row click was considered and rejected: most
+        # entries' title is itself a link out to the piece, so a row-level
+        # handler would fight that link for the click.
+        desc_id = f"tl-desc-{item_id}"
+        toggle_html = ""
+        if it["description"] and not it.get("needs_synopsis"):
+            toggle_html = (
+                f'<button type="button" class="tl-col-item-toggle" aria-expanded="false" aria-controls="{desc_id}" '
+                f'onclick="toggleTLDesc(this,\'{desc_id}\')">'
+                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" '
+                'stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'
+                'More</button>'
+                f'<div class="tl-col-item-desc" id="{desc_id}" hidden>{_esc(it["description"])}</div>'
+            )
+        return f'<div class="{cls}">{title_html}{meta_html}{toggle_html}</div>'
 
     _TL_COL_CAP = 6
 
@@ -2102,8 +2121,8 @@ def thought_leadership(request: Request):
         ordered = ordered_items(items)
         preview = ordered[:_TL_COL_CAP]
         extra = ordered[_TL_COL_CAP:]
-        rows = "".join(col_preview_item(it) for it in preview)
-        rows += "".join(col_preview_item(it, hidden=True) for it in extra)
+        rows = "".join(col_preview_item(it, f"{index}-{n}") for n, it in enumerate(preview))
+        rows += "".join(col_preview_item(it, f"{index}-{n + len(preview)}", hidden=True) for n, it in enumerate(extra))
         col_id = f"tl-col-{index}"
         more = (f'<a href="#" class="tl-col-more" onclick="toggleTLCol(event,\'{col_id}\')" '
                 f'data-more-label="Show all {len(ordered)} &rarr;">Show all {len(ordered)} &rarr;</a>'
@@ -2165,6 +2184,12 @@ def thought_leadership(request: Request):
         '.tl-col-item-meta{font:400 11px var(--font-body);color:var(--muted);}'
         '.tl-col-more{display:inline-block;margin-top:2px;font:600 12px var(--font-body);color:var(--navy);}'
         '.tl-col-item-extra{display:none;}'
+        '.tl-col-item-toggle{display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:0;'
+        'font:600 11px var(--font-body);color:var(--navy);background:none;border:none;cursor:pointer;}'
+        '.tl-col-item-toggle:hover{text-decoration:underline;}'
+        '.tl-col-item-toggle svg{transition:transform .15s;flex-shrink:0;}'
+        '.tl-col-item-toggle[aria-expanded="true"] svg{transform:rotate(180deg);}'
+        '.tl-col-item-desc{margin:6px 0 0;font:400 12.5px var(--font-body);color:var(--ink-soft);line-height:1.5;}'
         '@media(max-width:900px){.tl-cols{flex-wrap:wrap;}.tl-col{flex:1 1 calc(50% - 12px);}}'
         '@media(max-width:560px){.tl-col{flex:1 1 100%;}}'
         '</style>'
@@ -2200,6 +2225,13 @@ function toggleTLCol(e, colId) {
   });
   btn.innerHTML = expanded ? btn.dataset.moreLabel : 'Show less';
   btn.dataset.expanded = expanded ? '0' : '1';
+}
+function toggleTLDesc(btn, descId) {
+  var desc = document.getElementById(descId);
+  var expanded = btn.getAttribute('aria-expanded') === 'true';
+  desc.hidden = expanded;
+  btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+  btn.lastChild.textContent = expanded ? 'More' : 'Less';
 }
 </script>"""
     body += "</div>"

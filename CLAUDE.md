@@ -607,6 +607,32 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   instead of triggering `Library.add_thought_leadership`'s intended
   per-type auto-assign (`MAX+1`) — a blank field now correctly parses to
   `None` and flows through to that auto-assign path.
+- **Thought Leadership — click-to-expand descriptions.** `description` has
+  been editable via `/admin/thought-leadership` since Phase 1, with 32+
+  entries carrying real synopsis text, but the public `/thought-leadership`
+  page never rendered it — confirmed via git history that no commit, in
+  this build or the pre-migration `thought_leadership_data.py` version,
+  ever wired `description` into the column-rendering path
+  (`col_preview_item` only ever read `title`/`venue`/`date_label`/`url`).
+  Fixed with a small per-entry toggle, not a default-visible change: each
+  entry still renders exactly as before (title, source/venue, date only)
+  until its chevron button is clicked, which reveals `description` inline
+  beneath it — independent per entry, so multiple can be expanded at once,
+  and it collapses back on a second click. **Deliberately a small button,
+  not a full-row click handler:** most entries' title is itself an outbound
+  link to the piece, so a row-level click target would fight that link for
+  the click. Suppressed entirely (no affordance rendered) when there's
+  nothing to reveal — an empty `description`, or `needs_synopsis` (a
+  deliberate placeholder, not real content) — rather than inviting a click
+  that does nothing. Vanilla JS (`toggleTLDesc`, alongside the pre-existing
+  `toggleTLCol`); degrades safely without JS since the description `<div>`
+  is hidden via the `hidden` attribute server-side, not a CSS class a
+  disabled-JS page would still need to override. Same `hidden`-attribute
+  pattern extends across all four columns and both mobile/desktop layouts —
+  no new responsive CSS needed since the toggle/description block is a
+  plain stacked element inside the existing `.tl-col-item`. Independent of,
+  and unaffected by, the pre-existing "Show all N" cap/expand mechanism —
+  the two toggles coexist on the same entries without conflict.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
