@@ -67,19 +67,23 @@ PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
 # Submitting a tool / a piece, or requesting a warm intro, is account-only (spam
 # control) even though the directory and home page are public.
 MEMBER = ["/tools/fpa-buddy", "/tools/submit", "/library/submit"]
-# Archive and Feed moved admin-only (Phase 1) — a signed-in non-admin member
-# gets bounced to login just like any other admin page. The /library hub
-# route itself was removed outright, no redirect.
-ADMIN_ONLY = ["/library/archive", "/library/feed"]
+# Archive and Feed (Phase 1: admin-only) merged into the single Reader at
+# /read in Phase 5 — a signed-in non-admin member is bounced to login just
+# like any other admin page. The /library hub route itself was removed
+# outright, no redirect. Auth gating on /read/{id} happens the same way
+# (covered separately in test_reader_single_article_view below since it
+# needs a seeded article to return 200 rather than 404 for an admin).
+ADMIN_ONLY = ["/read"]
 # Old flat URLs 301-redirect to their nested equivalents, unconditionally
 # (even signed-out — the redirect itself carries no gated content). /ask and
 # /questions used to redirect to /library/ask and /library/past-questions —
 # both retired outright in Phase 2 (FP&A Buddy moved to /tools/fpa-buddy, no
 # compatibility redirect), so those two flat URLs are just gone now too, not
-# redirecting anywhere — see test_retired_ask_routes_are_gone below.
+# redirecting anywhere — see test_retired_ask_routes_are_gone below. /archive
+# and /feed used to redirect to /library/archive and /library/feed; both were
+# retired outright in Phase 5 (merged into /read), no compatibility redirect
+# — see test_retired_reader_routes_are_gone below.
 OLD_TO_NEW = {
-    "/archive": "/library/archive",
-    "/feed": "/library/feed",
     "/growth-engine-ratio": "/thought-leadership/growth-engine-ratio",
     "/finops-ai-hackathon": "/thought-leadership/ai-hackathon-playbook",
     "/netsuite-mcp": "/thought-leadership/netsuite-mcp",
@@ -159,14 +163,42 @@ def test_member_blocked_from_admin_and_reader(env):
     assert c.get("/admin", follow_redirects=False).status_code == 303
     assert c.get("/admin/users", follow_redirects=False).status_code == 303
     # In-app reader is admin-only (resale-safe) even for members.
-    assert c.get("/read?id=1", follow_redirects=False).status_code == 303
+    assert c.get("/read/1", follow_redirects=False).status_code == 303
+    assert c.get("/api/read-article?id=1", follow_redirects=False).status_code == 401
 
 
 def test_admin_reaches_everything(env):
     c = _admin_client(env)
     assert c.get("/admin", follow_redirects=False).status_code == 200
     assert c.get("/admin/library", follow_redirects=False).status_code == 200
-    assert c.get("/read?url=https://ex.com/x", follow_redirects=False).status_code == 200
+    assert c.get("/read", follow_redirects=False).status_code == 200
+
+
+def test_reader_single_article_view(env):
+    """/read/{id} — the standalone single-article view (path param, replaces
+    the old ?id= query param) — works for a saved article and 404s for one
+    that doesn't exist."""
+    from linklib.db import Library, Article
+    lib = Library(os.environ["LINKLIB_DB"])
+    aid = lib.upsert(Article(url="https://ex.com/x", title="Test Article", source="Ex", content="Body text " * 60))
+    lib.close()
+
+    c = _admin_client(env)
+    r = c.get(f"/read/{aid}", follow_redirects=False)
+    assert r.status_code == 200
+    assert "Test Article" in r.text
+    assert c.get("/read/999999", follow_redirects=False).status_code == 404
+
+
+def test_retired_reader_routes_are_gone(env):
+    # /library/archive and /library/feed were retired outright in Phase 5
+    # (merged into /read) — no compatibility redirect, since Phase 1's
+    # precedent for retired routes was "nothing bookmarked, nothing to
+    # redirect." /archive and /feed used to 301 to them and are gone too.
+    retired_404 = ["/library/archive", "/library/feed", "/archive", "/feed"]
+    for c in (_client(env), _member_client(env), _admin_client(env)):
+        for path in retired_404:
+            assert c.get(path, follow_redirects=False).status_code == 404, f"{path} should be gone"
 
 
 def test_member_api_gating(env):

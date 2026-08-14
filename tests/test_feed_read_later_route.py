@@ -92,33 +92,35 @@ def test_two_members_read_later_lists_are_isolated(env):
         lib.close()
 
 
-def test_feed_page_read_later_view_only_shows_own_saves(env):
-    # /library/feed itself is admin-only (Phase 1) — the two viewers here are
-    # both admins, since a regular member can no longer reach the page at
-    # all (covered by test_regular_member_cannot_view_feed_page below). The
-    # read-later API stays member-scoped regardless of who's viewing.
+def test_reader_read_later_view_only_shows_own_saves(env):
+    # The Reader (/read?view=readlater — Phase 5, merged from /library/feed's
+    # old rl=1 mode) is admin-only — the two viewers here are both admins,
+    # since a regular member can no longer reach the page at all (covered by
+    # test_regular_member_cannot_view_reader below). The read-later API stays
+    # member-scoped regardless of who's viewing.
     appmod, db = env
     c1 = _login(appmod, "admin1", "supersecret")
     c2 = _login(appmod, "admin2", "supersecret")
     c1.post("/feed/read-later", data={"url": "https://ex.com/a", "title": "Alpha Piece"})
     c2.post("/feed/read-later", data={"url": "https://ex.com/b", "title": "Beta Piece"})
 
-    html1 = c1.get("/library/feed?rl=1").text
+    html1 = c1.get("/read?view=readlater").text
     assert "Alpha Piece" in html1
     assert "Beta Piece" not in html1
 
-    html2 = c2.get("/library/feed?rl=1").text
+    html2 = c2.get("/read?view=readlater").text
     assert "Beta Piece" in html2
     assert "Alpha Piece" not in html2
 
 
-def test_regular_member_cannot_view_feed_page(env):
-    # /library/feed is admin-only (Phase 1) — a non-admin member is bounced
-    # to login exactly like an anonymous visitor, even though they can still
-    # use the read-later API itself (test_a_regular_member_can_use_read_later).
+def test_regular_member_cannot_view_reader(env):
+    # /read is admin-only (Phase 1 admin-only precedent, carried into the
+    # Phase 5 merge) — a non-admin member is bounced to login exactly like
+    # an anonymous visitor, even though they can still use the read-later
+    # API itself (test_a_regular_member_can_use_read_later).
     appmod, _ = env
     c = _login(appmod, "member1", "supersecret")
-    r = c.get("/library/feed", follow_redirects=False)
+    r = c.get("/read", follow_redirects=False)
     assert r.status_code == 303 and "/login" in r.headers["location"]
 
 
@@ -129,14 +131,3 @@ def test_feed_save_to_archive_stays_admin_only(env):
     c = _login(appmod, "member1", "supersecret")
     r = c.post("/feed/save", data={"url": "https://ex.com/a"})
     assert r.status_code == 401
-
-
-def test_admin_only_reminder_shown_to_admin(env):
-    """The Save/Read-later buttons are still admin-gated in the UI even
-    though the read-later backend now supports any member — an on-page
-    reminder so that doesn't get forgotten before the UI gate is flipped.
-    A regular member can no longer even reach the page to see it — /library/feed
-    is admin-only as of Phase 1 (test_regular_member_cannot_view_feed_page)."""
-    appmod, _ = env
-    admin = _login(appmod, "admin", "adminpass")   # break-glass host-password admin
-    assert "admin-only for now" in admin.get("/library/feed").text

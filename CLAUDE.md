@@ -81,7 +81,7 @@ webapp/
                    #   /thought-leadership/ai-hackathon-playbook, /thought-leadership/netsuite-mcp],
                    #   /tools, /contact, /play) + private tools
                    #   (/tools/fpa-buddy, /save, /api/search, /bookmarklet — plus
-                   #   /library/archive, /library/feed, and /read, all admin-only)
+                   #   the merged Reader, /read and /read/{article_id}, admin-only)
                    #   + auth (/login, /logout) + the /admin back office (~40 pages)
   checks.py        # aggregates the automated checks for /admin/checks (mirrors CI)
   tasks.py         # open-task badge counts for the admin hub
@@ -129,11 +129,11 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   does (`embed_cost_usd` breaks out its share). A general ledger covering overhead
   spend more broadly (enrichment included) is deferred — see issue #105.
 - **`preferred_sites.opml` is dual-purpose.** It's both the web-search allowlist and the
-  `/library/feed` reader's subscription list. Use direct RSS/Atom URLs — Feedly proxy URLs
-  (`feedly.com/web/...`) are skipped because they require auth. Paywalled sources are
-  tagged in `feed.py` (`PAYWALLED_DOMAINS`) and shown with a badge; the in-app reader is
-  disabled for them.
-- **The `/library/feed` reader caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
+  subscription list behind `/read`'s Feed quick view. Use direct RSS/Atom URLs — Feedly
+  proxy URLs (`feedly.com/web/...`) are skipped because they require auth. Paywalled
+  sources are tagged in `feed.py` (`PAYWALLED_DOMAINS`) and shown with a badge; the
+  in-app reader is disabled for them.
+- **The Reader's Feed view caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
   item dicts are shallow-copied before mutation — never mutate a cached entry in place.
   Editing the OPML won't show up live until the cache expires or the app restarts.
 - **The CFO Toolbox startup sync (`_seed_toolbox` in `webapp/app.py`) never inserts —
@@ -538,6 +538,45 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `nav.site-nav a[href="/ask"]` CSS selector Phase 0's investigation flagged
   and Phase 1 explicitly deferred — removed here since this phase already
   touches that exact code.
+- **Library/Toolbox restructure, Phase 5 — `/library/archive` and
+  `/library/feed` merge into one three-pane Reader at `/read`.** The route
+  split: `GET /read` is the merged shell (left rail with Feed/Saved/Read
+  Later quick views plus, in the Feed view, a Sources category/source tree;
+  a middle list pane for whichever view is active; a right reader pane that
+  loads an article via AJAX with no page navigation). `GET /read/{article_id}`
+  is what `GET /read?id=...` used to be — the standalone single-article view,
+  now a path param — and `GET /api/read-article?id=...`/`?url=...` is a new
+  admin-gated JSON endpoint the merged page's reader pane calls into. Both
+  routes resolve their content through one shared helper
+  (`_resolve_reader_content` in `webapp/app.py`) instead of the old `/read`
+  route's inline id-then-url-fallback logic duplicated in two places.
+  `/library/archive` and `/library/feed` are retired outright — no
+  compatibility redirect, same "nothing was bookmarked" precedent Phase 1
+  and Phase 2 both used — and so are the flat `/archive`/`/feed` redirect
+  stubs that used to point at them. Three things were deliberately dropped
+  in the merge, not carried forward: the old Archive page's inline "ask your
+  archive a question" box (a lesser duplicate of FP&A Buddy — confirmed
+  `POST /ask` and `linklib/agent.py` are untouched, so `/tools/fpa-buddy`
+  isn't affected); every per-item Edit tags/Delete/Archive-management
+  control that used to sit inline on the Archive page and the old
+  `/read?id=...` view (those stay exclusively in `/admin/library`'s
+  dedicated tools — Save-to-library and the Read Later toggle are the only
+  actions still exposed on the Reader, both reused verbatim from
+  `POST /feed/save`/`POST /feed/read-later`); and the old bare
+  paste-a-URL empty state on `/read` with no `id`/`url` (the merged page's
+  list-driven click-to-open UX replaces that need — there's no standalone
+  way to read an arbitrary not-yet-saved URL outside a Feed/Read Later row
+  anymore). The subscriber-access alert Phase 1 explicitly deferred is
+  built here for real: a coral banner in the list pane's header, rendered
+  only when `authcheck.stale_domains(authcheck.get_auth_status(lib))` is
+  non-empty, naming the failing domain and linking to the same
+  `POST /admin/auth/recheck` route `/admin/library`'s own manual re-check
+  control already used (that control is untouched — both surfaces trigger
+  the same underlying `authcheck.check_auth_cookies`). `_LIBRARY_TOOLS`
+  gained a ninth, first-listed entry, "Open Reader" → `/read` — the entry
+  point Phase 1 deferred to this phase rather than adding two separate
+  Archive/Feed links that would've just been deleted again once the merge
+  landed.
 - **Thought Leadership Admin CRUD, Phase 1 — the four `/thought-leadership`
   columns (Writing, Speaking & Events, Podcasts, Press) are now admin-managed,
   not hardcoded.** Phase 0 investigation found all four columns reading from
@@ -896,11 +935,12 @@ tables, no third-party dependency.
     `/finops-ai-hackathon`, `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
   - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
     `/admin/contacts` (member-gated), and
-    `/library/archive`, `/library/feed`, `/read` (**admin-only**, Phase 1 — see the
-    Library access-level note in Key architecture decisions above). (The old flat
-    `/archive`, `/feed` URLs 301-redirect to their nested equivalents above,
-    unconditionally — the redirect itself carries no gated content, so it fires
-    even signed-out; where it lands is what's gated. `/library/ask` and
+    `/read`, `/read/{article_id}` (**admin-only**, Phase 1 access level, merged into
+    the single Reader in Phase 5 — see the Library access-level note and the Phase 5
+    Reader-merge note in Key architecture decisions above). (The old flat
+    `/archive`, `/feed` URLs, and the pre-merge `/library/archive`/`/library/feed`
+    routes they used to redirect to, are all gone outright as of Phase 5 — no
+    compatibility redirect, nothing was bookmarked. `/library/ask` and
     `/library/past-questions` were retired outright in Phase 2 — see the
     Library/Toolbox Phase 2 note in Key architecture decisions above — along
     with the old flat `/questions` redirect stub that pointed at the latter;
@@ -945,7 +985,7 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 | `LINKLIB_ENRICH_MODEL` | `claude-haiku-4-5-20251001` | Claude model for enrichment |
 | `LINKLIB_CHAT_MODEL` | `claude-sonnet-4-6` | Claude model for Q&A and post drafting |
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
-| `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/library/feed` source list |
+| `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/read`'s Feed-view source list |
 | `GOOGLE_OAUTH_CLIENT_ID` | — | Google Cloud OAuth client ID. Required (with the two below) for `linklib/backup.py`'s weekly off-site Drive backup and `linklib/email_utils.py`'s outbound contact-form email — one client, both scopes. Absent → both features are a safe no-op, no error. |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | — | Google Cloud OAuth client secret, paired with the above. |
 | `GOOGLE_OAUTH_REFRESH_TOKEN` | — | OAuth refresh token (`drive.file` + `gmail.send` scopes), paired with the above. Mint once with both scopes — see `.env.example` for the exact steps. |
@@ -1065,8 +1105,9 @@ instead, off that page — kept for git history, not meant to run again.
 - Public site: bio homepage (`/`), thought leadership (`/thought-leadership`),
   Growth Engine Ratio page + calculator (`/thought-leadership/growth-engine-ratio`), contact (`/contact`)
 - Password login for the private section (`/login` + signed session cookie)
-- CFO Feed RSS reader (`/library/feed`) with category tabs, per-source filter, save-to-library
-- Article reader, Instapaper-style (`/read`)
+- Merged Reader (`/read`, Phase 5): a three-pane Feed/Saved/Read Later view with category
+  and per-source filtering, an AJAX-loaded article pane, save-to-library, and a
+  standalone single-article view at `/read/{article_id}`
 - Hosting/deployment on Railway (see Deployment below)
 - bmweis.com custom domain pointed at Railway (July 2026)
 - MCP server (`scripts/mcp_server.py`) wrapping `/api/search` for Claude Desktop/Code
