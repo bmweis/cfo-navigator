@@ -197,7 +197,12 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
     if not page.raw_html:
         # fetch_page swallows its own request/HTTP errors and returns an
         # empty PageData rather than raising — this is that case.
-        lib.log_content_refetch_attempt(article_id, "failure", reason="fetch-error")
+        # page.fetch_error carries the specific reason (a status code, a
+        # timeout, a connection error) so a batch of failures can be told
+        # apart: independent dead links vs. one host systematically
+        # blocking/throttling this tool — see PageData.fetch_error.
+        lib.log_content_refetch_attempt(article_id, "failure", reason="fetch-error",
+                                        detail=page.fetch_error)
         return False, "fetch-error"
 
     ok, reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)

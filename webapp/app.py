@@ -21954,6 +21954,7 @@ def admin_backfill_content(request: Request):
         remaining = lib.count_content_backfill_remaining()
         total_articles = lib.count()
         failure_counts = lib.content_refetch_failure_counts()
+        failure_domains = lib.content_refetch_failure_domains(limit=15)
         log_rows = lib.list_content_refetch_log(limit=50)
     finally:
         lib.close()
@@ -22002,11 +22003,33 @@ def admin_backfill_content(request: Request):
         pills = "".join(_failure_pill(r, c) for r, c in sorted(failure_counts.items(), key=lambda x: -x[1]))
         failures_html = f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0;">{pills}</div>'
 
+    domains_html = ""
+    # Only worth calling out a domain once it's clustering — a single failure
+    # from a source is an ordinary dead link, not a signal worth a banner.
+    clustered_domains = [d for d in failure_domains if d["count"] >= 2]
+    if clustered_domains:
+        domain_pills = "".join(
+            f'<span style="display:inline-flex;align-items:center;gap:5px;background:#fff;'
+            f'border:1px solid #fde68a;border-radius:999px;padding:4px 12px;font-size:12.5px;">'
+            f'<strong>{d["count"]}</strong> {_esc(d["domain"])}</span>'
+            for d in clustered_domains
+        )
+        domains_html = f"""
+<div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin:14px 0 0;">
+  <div style="font-size:13px;color:#92400e;font-weight:600;margin-bottom:8px;">Failures clustering on one source&mdash;may be a systematic issue with how that site responds to this tool, not independent dead links:</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;">{domain_pills}</div>
+</div>"""
+
     def _log_row(r):
         color = "#16a34a" if r["status"] == "success" else "#b91c1c"
         label = "Success" if r["status"] == "success" else _esc(r.get("reason") or "failure")
         title = _esc(r.get("article_title") or r.get("article_url") or f'#{r["article_id"]}')
-        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title}</td>'
+        url = r.get("article_url") or ""
+        title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
+                      if url else title)
+        detail = _esc(r.get("detail") or "")
+        detail_html = f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;">{detail}</div>' if detail else ""
+        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}{detail_html}</td>'
                 f'<td style="padding:7px 12px;font-size:13px;color:{color};font-weight:500;">{label}</td>'
                 f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{_esc((r.get("attempted_at") or "")[:19].replace("T", " "))}</td></tr>')
 
@@ -22076,6 +22099,7 @@ def admin_backfill_content(request: Request):
 </div>
 
 {failures_html}
+{domains_html}
 {log_html}
 </div>
 <script>

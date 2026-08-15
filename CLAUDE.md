@@ -688,6 +688,25 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   skip whatever `content_html` is already populated). See ARCHITECTURE.md's
   "Reader content-structure backfill" section for the full technical
   write-up.
+- **Phase 5b follow-up — the first real verification batch (25 articles, 12
+  failures) turned up an opaque `fetch-error` with no detail behind it, plus
+  no way to tell independent dead links from one source systematically
+  failing.** Root cause: `extract.fetch_page()`'s `except Exception:` never
+  bound the exception, so there was genuinely nothing for
+  `backfill_article_content()` to log beyond the category. Fixed
+  non-destructively (`PageData.fetch_error`, defaulted empty — every
+  existing caller already ignores a failed fetch, so this changes nothing
+  for `ingest_url`/the Reader's live-fetch path) via a new
+  `extract._describe_fetch_error()` that turns the caught exception into an
+  HTTP status / `timeout` / connection-error string, now stored in
+  `content_refetch_log.detail`. Also added
+  `Library.content_refetch_failure_domains()` (same latest-attempt de-dupe
+  as `content_refetch_failure_counts()`, grouped by URL host instead of
+  reason) and a coral clustering banner on the admin page, shown only once a
+  host has 2+ failures. **Not retroactive** — the already-logged rows from
+  that first batch keep an empty `detail`; only future attempts capture it.
+  See ARCHITECTURE.md's "Reader content-structure backfill" section for the
+  full write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found
