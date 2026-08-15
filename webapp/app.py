@@ -14676,8 +14676,13 @@ _READER_SHELL_CSS = """
 .rr-alert{margin:14px 22px 0;padding:11px 13px;border-radius:10px;background:var(--coral-wash);
   border:1px solid var(--coral-light);display:flex;gap:10px;align-items:flex-start;font-size:13px;
   line-height:1.5;color:var(--coral-deep);}
-.rr-search-form{padding:14px 22px 0;}
-.rr-search-form input{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;
+/* Search, in the list pane's header directly above the rows it filters. This
+   replaces .rr-search-form, which had been sitting in the left rail while
+   carrying the list pane's own 22px gutter — the fingerprint that gave the
+   misplacement away. No horizontal padding of its own now: .rr-list-header
+   already supplies it, so the field lines up with the title above it. */
+.rr-list-search{margin:12px 0 0;display:block;}
+.rr-list-search input{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;
   font-size:14px;background:var(--surface);font-family:inherit;}
 .rr-list-rows{flex:1;overflow-y:auto;}
 /* Distraction-free reading: the middle list pane collapses to a thin sliver
@@ -14903,19 +14908,12 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
         + _qv("readlater", "Read Later", len(rl_urls))
     )
 
+    # Search lives in the list pane's header, directly above the rows it
+    # filters — not in the left rail. See _list_search_html below; the rail
+    # keeps only navigation (quick views) and per-view filter vocabularies
+    # (Feed's Sources tree, Saved's tag bar).
     sources_html = ""
     if view == "feed":
-        # Real search, not the decorative magnifying-glass shape the original
-        # design file had (never wired to anything, not even in the design
-        # tool itself). Client-side, same as the existing category/source
-        # filtering it composes with — searches whichever rows are currently
-        # listed, respecting the active category/source filter.
-        search_html = (
-            '<div class="rr-search-form">'
-            '<input type="search" id="rr-feed-search" placeholder="Search this feed&hellip;" '
-            'oninput="rrApplyFilter()" autocomplete="off">'
-            '</div>'
-        )
         cat_rows = ""
         for c in cat_order:
             srcs = cat_sources[c]
@@ -14937,16 +14935,14 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
             )
         if cat_rows:
             cat_rows = f'<div class="rr-rail-label">Sources</div>{cat_rows}'
-        sources_html = search_html + cat_rows
+        sources_html = cat_rows
     elif view == "saved":
+        # The tag bar stays in the rail: it's a filter vocabulary, the Saved
+        # view's counterpart to Feed's Sources tree, so it's labelled to match
+        # rather than keeping the old "Search" heading the moved form left behind.
         tagbar = "".join(f'<a href="/read?view=saved&q={_esc(t)}">{_esc(t)} ({c})</a>' for t, c in saved_tags)
-        sources_html = f"""<div class="rr-rail-label">Search</div>
-<form method="get" action="/read" style="margin-bottom:12px;">
-  <input type="hidden" name="view" value="saved">
-  <input type="search" name="q" value="{_esc(q)}" placeholder="Search titles, summaries, tags…"
-    style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--surface);">
-</form>
-<div class="rr-tagbar">{tagbar}</div>"""
+        if tagbar:
+            sources_html = f'<div class="rr-rail-label">Tags</div><div class="rr-tagbar">{tagbar}</div>'
 
     rail_html = f"""<div class="rr-rail" id="rr-rail">
   <a class="rr-rail-back" href="/admin/library">&larr; Library</a>
@@ -15069,10 +15065,34 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
             '</div>'
         )
 
+    # Search sits in the list pane's own header, directly above the rows it
+    # filters. Each view keeps its existing mechanism — Feed filters client-side
+    # through rrApplyFilter (composing with the active category/source), Saved
+    # does a plain GET reload — only the placement is shared. Read Later has no
+    # search today and renders none, same as before.
+    if view == "feed":
+        list_search_html = (
+            '<div class="rr-list-search">'
+            '<input type="search" id="rr-feed-search" placeholder="Search this feed&hellip;" '
+            'oninput="rrApplyFilter()" autocomplete="off">'
+            "</div>"
+        )
+    elif view == "saved":
+        list_search_html = (
+            '<form class="rr-list-search" method="get" action="/read">'
+            '<input type="hidden" name="view" value="saved">'
+            f'<input type="search" name="q" value="{_esc(q)}" '
+            'placeholder="Search titles, summaries, tags&hellip;">'
+            "</form>"
+        )
+    else:
+        list_search_html = ""
+
     list_pane_html = f"""<div class="rr-list-pane" id="rr-list-pane">
   <div class="rr-list-header">
     <div class="rr-list-title" id="rr-list-title">{_esc(list_title)}</div>
     <div class="rr-list-count" id="rr-list-count">{_esc(list_count_label)}</div>
+    {list_search_html}
   </div>
   <div id="rr-alert-wrap">{alert_html}</div>
   <div class="rr-list-rows" id="rr-list-rows">{rows_html}</div>
