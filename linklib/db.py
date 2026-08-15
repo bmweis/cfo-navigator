@@ -2838,6 +2838,35 @@ class Library:
         ).fetchall()
         return {r[0] or "unknown": r[1] for r in rows}
 
+    def content_refetch_failure_domains(self, limit: int = 15) -> list[dict]:
+        """Failure count by source domain, most-recent-attempt-per-article
+        only (same de-dupe as content_refetch_failure_counts) — lets an
+        admin tell "several independent dead links" from "one host
+        systematically blocking/throttling this tool" before a full run
+        repeats whatever's wrong across every article from that source.
+        Domain is derived from the article's URL in Python (no clean
+        host-extraction in SQL), so this is O(failed articles), not indexed
+        — fine at this table's realistic size (thousands of rows at most)."""
+        from urllib.parse import urlsplit
+        rows = self.conn.execute(
+            """SELECT a.url FROM (
+                 SELECT article_id, status,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               ) l JOIN articles a ON a.id = l.article_id
+               WHERE l.rn=1 AND l.status='failure'"""
+        ).fetchall()
+        counts: dict[str, int] = {}
+        for (url,) in rows:
+            host = (urlsplit(url or "").netloc or "unknown").lower()
+            if host.startswith("www."):
+                host = host[4:]
+            counts[host] = counts.get(host, 0) + 1
+        return sorted(
+            [{"domain": d, "count": c} for d, c in counts.items()],
+            key=lambda x: -x["count"],
+        )[:limit]
+
     # -- tools directory ---------------------------------------------------
 
     def _find_tool_by_normalized_url(self, url: str, exclude_id: int | None = None) -> sqlite3.Row | None:

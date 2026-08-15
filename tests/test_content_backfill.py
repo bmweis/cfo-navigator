@@ -30,9 +30,11 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+import requests
+
 from linklib.db import Article, Library
 from linklib import pipeline as pl
-from linklib.extract import PageData, assess_extraction_quality, looks_like_bot_challenge
+from linklib.extract import PageData, assess_extraction_quality, looks_like_bot_challenge, _describe_fetch_error
 from linklib import extract as extract_mod
 
 
@@ -124,10 +126,11 @@ def test_backfill_article_content_success(lib, monkeypatch):
 def test_backfill_article_content_dead_url_never_destructive(lib, monkeypatch):
     """A deliberately-broken/dead URL: fetch_page's own contract is to
     swallow request errors and return an empty PageData, not raise — this
-    must be logged as a fetch-error failure, and the article's existing
+    must be logged as a fetch-error failure with the specific underlying
+    reason (see PageData.fetch_error), and the article's existing
     content/content_html must survive completely unchanged."""
     article_id = _seed(lib, content="Existing content that must survive.")
-    monkeypatch.setattr(extract_mod, "fetch_page", lambda url: PageData(title="", content=""))
+    monkeypatch.setattr(extract_mod, "fetch_page", lambda url: PageData(title="", content="", fetch_error="HTTP 404"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False
@@ -139,6 +142,48 @@ def test_backfill_article_content_dead_url_never_destructive(lib, monkeypatch):
 
     log = lib.list_content_refetch_log()
     assert log and log[0]["status"] == "failure" and log[0]["reason"] == "fetch-error"
+    assert log[0]["detail"] == "HTTP 404", \
+        "the specific fetch failure reason must be captured, not just the generic category"
+
+
+# ---------------------------------------------------------------------------
+# extract._describe_fetch_error / fetch_page — the actual root cause behind
+# a previously-generic "fetch-error" with no detail: fetch_page swallowed
+# the exception entirely (`except Exception:` with no `as exc`). Fixed by
+# capturing it into PageData.fetch_error so a batch of failures can be told
+# apart (independent dead links vs. one host systematically blocking this
+# tool) instead of all looking identical.
+# ---------------------------------------------------------------------------
+
+def test_describe_fetch_error_http_status():
+    resp = requests.Response()
+    resp.status_code = 404
+    exc = requests.exceptions.HTTPError(response=resp)
+    assert _describe_fetch_error(exc) == "HTTP 404"
+
+
+def test_describe_fetch_error_timeout():
+    exc = requests.exceptions.Timeout("Connection timed out")
+    assert _describe_fetch_error(exc) == "timeout"
+
+
+def test_describe_fetch_error_connection_error():
+    exc = requests.exceptions.ConnectionError("Name or service not known")
+    assert "connection error" in _describe_fetch_error(exc)
+
+
+def test_fetch_page_populates_fetch_error_on_real_failure(monkeypatch):
+    """End-to-end through the real fetch_page(), not a hand-built PageData —
+    confirms the fix actually wires into the function production calls."""
+    def _raise(*a, **kw):
+        resp = requests.Response()
+        resp.status_code = 500
+        raise requests.exceptions.HTTPError(response=resp)
+
+    monkeypatch.setattr(extract_mod.requests, "get", _raise)
+    page = extract_mod.fetch_page("https://example.com/dead")
+    assert page.content == ""
+    assert page.fetch_error == "HTTP 500"
 
 
 def test_backfill_article_content_paywall_failure_preserves_existing(lib, monkeypatch):
@@ -208,6 +253,41 @@ def test_content_refetch_failure_counts_uses_latest_attempt_only(lib):
     assert counts == {}, "the article's most recent attempt succeeded, so it shouldn't count as a failure"
 
 
+def test_content_refetch_failure_domains_groups_by_host(lib):
+    """Four failures from the same host should surface as one clustered
+    entry (count=4), not four independent-looking rows — exactly the signal
+    that distinguishes 'one source systematically failing' from 'a handful
+    of unrelated dead links'."""
+    ids = {
+        "https://boardtips.example.com/a": None,
+        "https://boardtips.example.com/b": None,
+        "https://boardtips.example.com/c": None,
+        "https://boardtips.example.com/d": None,
+        "https://unrelated.example.org/x": None,
+    }
+    for url in ids:
+        ids[url] = _seed(lib, url=url)
+    for url, aid in ids.items():
+        lib.log_content_refetch_attempt(aid, "failure", reason="fetch-error", detail="HTTP 403")
+
+    domains = lib.content_refetch_failure_domains()
+    by_domain = {d["domain"]: d["count"] for d in domains}
+    assert by_domain["boardtips.example.com"] == 4
+    assert by_domain["unrelated.example.org"] == 1
+
+
+def test_content_refetch_failure_domains_strips_www(lib):
+    a1 = _seed(lib, url="https://www.example.com/one")
+    a2 = _seed(lib, url="https://example.com/two")
+    lib.log_content_refetch_attempt(a1, "failure", reason="fetch-error")
+    lib.log_content_refetch_attempt(a2, "failure", reason="fetch-error")
+
+    domains = lib.content_refetch_failure_domains()
+    assert len(domains) == 1
+    assert domains[0]["domain"] == "example.com"
+    assert domains[0]["count"] == 2
+
+
 # ---------------------------------------------------------------------------
 # Admin job: stop control
 # ---------------------------------------------------------------------------
@@ -268,6 +348,34 @@ def test_content_backfill_admin_page_renders(env):
     assert r.status_code == 200
     assert "Reader content backfill" in r.text
     assert 'action="/admin/library/backfill-content/start"' in r.text
+
+
+def test_content_backfill_admin_page_shows_domain_clustering_banner(env):
+    lib = env._lib()
+    for i in range(4):
+        aid = _seed(lib, url=f"https://boardtips.example.com/tip-{i}")
+        lib.log_content_refetch_attempt(aid, "failure", reason="fetch-error", detail="HTTP 403")
+    lib.close()
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    assert "Failures clustering on one source" in r.text
+    assert "boardtips.example.com" in r.text
+    assert "HTTP 403" in r.text, "the specific failure detail should show in the recent-attempts log"
+
+
+def test_content_backfill_admin_page_no_clustering_banner_for_single_failures(env):
+    lib = env._lib()
+    aid = _seed(lib, url="https://onlyone.example.com/piece")
+    lib.log_content_refetch_attempt(aid, "failure", reason="fetch-error", detail="HTTP 404")
+    lib.close()
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    assert "Failures clustering on one source" not in r.text, \
+        "a single failure from a source is an ordinary dead link, not a clustering signal"
 
 
 # ---------------------------------------------------------------------------
