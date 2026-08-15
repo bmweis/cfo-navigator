@@ -310,3 +310,68 @@ def test_only_one_thought_leadership_section_old_standalone_card_removed(env):
     # The old card's containing markup (a Phase-3-era single-card row) is
     # gone too, not just its text.
     assert 'class="home-cards"' not in html
+
+
+def test_hero_copy_has_no_artificial_width_cap(env):
+    """The hero headline and subhead paragraph used to be capped at
+    max-width:640px — a leftover from an earlier hero-polish pass that
+    pre-dated the wider two-column grid. Once the grid gave the hero column
+    ~975px to work with, that cap made the text wrap far narrower than the
+    design file shows (which lets it fill the column), leaving a large
+    unused gap next to the sidebar. Cap removed outright — no reason for a
+    hero paragraph to be narrower than its own column."""
+    html = _client(env).get("/").text
+    assert 'max-width:640px;font-family:var(--font-head)' not in html
+    assert 'margin:0 0 12px;max-width:640px' not in html
+
+
+def test_avatar_image_fills_its_wrapper_at_desktop_size(env):
+    """_avatar() bakes a fixed pixel width/height into its <img> (or
+    placeholder <div>) inline style — correct for every other call site,
+    which all use a single fixed size. The homepage hero photo is the one
+    place the wrapper itself resizes (200px -> 240px at the desktop
+    breakpoint), so without an override the photo stays pinned at its
+    original 200px inside a now-larger frame, opening a gap between it and
+    the status box below that isn't in the design. The override must apply
+    to the avatar image/placeholder specifically, not to every div inside
+    the wrapper — the "hi, I'm Brian" sticker is a sibling div in the same
+    wrapper and must NOT get stretched to 100%."""
+    html = _client(env).get("/").text
+    assert (".home-avatar-wrap>img,.home-avatar-wrap>div[aria-label]"
+            "{width:100% !important;height:100% !important;}") in html
+
+
+def test_status_box_in_normal_flow_not_absolutely_positioned(env):
+    """.home-status used to be position:absolute with a hardcoded top
+    offset, floating free of .home-photo-wrap's own (also hardcoded)
+    height. Admin-edited status copy longer than that guess would overflow
+    silently into the Toolbox panel in the next grid row, with nothing to
+    catch it. Kept in normal flow (pulled up under the avatar with a
+    negative margin-top instead) so .home-photo-wrap's height genuinely
+    reflects its content and the grid row sizes itself correctly regardless
+    of how long the status copy is."""
+    html = _client(env).get("/").text
+    # The rule itself: no more position:absolute/top offset, uses margin-top instead.
+    assert ".home-status{position:relative;margin-top:-50px;" in html
+    assert "position:absolute;top:150px" not in html
+    assert "top:190px;left:-30px" not in html
+
+
+def test_hero_headline_underlines_strategic_partner_not_last_word(env):
+    """The hero heading used _underline_last_word(), which always accents
+    whatever word happens to end the (admin-editable) headline text — for
+    the default copy that's "scorekeeper.", not the design's intended
+    "strategic partner" mid-sentence accent. Switched to _underline_phrase()
+    targeting "strategic partner" specifically, with a same-behavior
+    fallback to the last word if an admin ever rewrites the headline
+    without that phrase in it."""
+    html = _client(env).get("/").text
+    idx = html.find("<h1")
+    h1_html = html[idx:html.find("</h1>", idx)]
+    assert "<span>strategic partner</span>" in h1_html
+    assert "<span>scorekeeper.</span>" not in h1_html
+    # The rest of the sentence must still render, just not re-escaped twice
+    # and not duplicated around the underlined phrase.
+    assert h1_html.count("strategic partner") == 1
+    assert "leadership team leans on" in h1_html
+    assert "the scorekeeper." in h1_html

@@ -1570,6 +1570,25 @@ def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--sea
     return f"{_esc(head)} {underlined}" if sep else underlined
 
 
+def _underline_phrase(text: str, phrase: str, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
+    """Wrap the first case-insensitive occurrence of `phrase` (raw,
+    unescaped) inside `text` in the same marker-underline `_underline_last_word`
+    draws, but mid-sentence rather than at the end — the homepage hero
+    heading's design specifically accents "strategic partner", not whatever
+    word happens to end the (admin-editable) headline. Falls back to
+    `_underline_last_word` when `phrase` isn't found in `text` at all (e.g.
+    an admin rewrites the headline without that phrase) so there's always
+    still an accent rather than none."""
+    lower_text, lower_phrase = text.lower(), phrase.lower()
+    idx = lower_text.find(lower_phrase)
+    if idx == -1:
+        return _underline_last_word(text, stroke, color)
+    before, match, after = text[:idx], text[idx:idx + len(phrase)], text[idx + len(phrase):]
+    underlined = (f'<span style="display:inline-grid;justify-items:stretch;">'
+                  f'<span>{_esc(match)}</span>{_marker_underline(stroke, color)}</span>')
+    return f"{_esc(before)}{underlined}{_esc(after)}"
+
+
 def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
     """2px-stroke line-icon badge for a card-row grid (2-up, 3-up, or 4-up).
     Cycles seafoam-wash -> navy-wash -> coral-wash by `index`, the fixed
@@ -2009,9 +2028,27 @@ def homepage(request: Request):
    this DOM order. */
 .home-grid{{display:flex;flex-direction:column;gap:48px;}}
 .home-sidebar-rest{{display:flex;flex-direction:column;gap:20px;}}
-.home-photo-wrap{{position:relative;width:100%;height:340px;}}
+.home-photo-wrap{{position:relative;width:100%;}}
 .home-avatar-wrap{{position:relative;width:200px;height:200px;margin:0 auto;z-index:3;}}
-.home-status{{position:absolute;top:150px;left:0;right:0;background:#fff;border:2px solid var(--ink-graffiti);border-radius:14px;padding:20px 22px;transform:rotate(-1.5deg);box-shadow:3px 3px 0 var(--ink-graffiti);box-sizing:border-box;z-index:2;}}
+/* _avatar() bakes a fixed pixel width/height into its <img>/placeholder
+   <div> inline style (shared helper, correct for every other call site).
+   This wrapper resizes to 240px at the desktop breakpoint below, so the
+   avatar itself has to be told to scale with it — otherwise the photo
+   stays pinned at its original 200px inside a now-larger frame, opening
+   an unintended gap between it and the status box beneath. */
+.home-avatar-wrap>img,.home-avatar-wrap>div[aria-label]{{width:100% !important;height:100% !important;}}
+/* .home-status used to be position:absolute with a hardcoded top offset,
+   which put it outside normal flow entirely — .home-photo-wrap's own
+   height (also hardcoded, 340/400px) was the only thing holding space for
+   it, so on any admin edit that made the status copy longer than that
+   guess, the box silently overflowed into whatever sat below it in the
+   next grid row (the Toolbox panel). Kept in flow instead, pulled up
+   under the avatar with a negative margin-top tuned to land at the same
+   visual offset the old absolute top values produced (200px/240px avatar
+   flow height minus the old 150px/190px top = -50px at both breakpoints)
+   — so .home-photo-wrap's height now genuinely reflects its content and
+   the grid row sizes itself correctly regardless of status copy length. */
+.home-status{{position:relative;margin-top:-50px;background:#fff;border:2px solid var(--ink-graffiti);border-radius:14px;padding:20px 22px;transform:rotate(-1.5deg);box-shadow:3px 3px 0 var(--ink-graffiti);box-sizing:border-box;z-index:2;}}
 .home-toolbox-panel,.home-reader-slot{{width:100%;}}
 .home-toolbox-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:26px;box-sizing:border-box;position:relative;}}
 .home-toolbox-rows{{display:flex;flex-direction:column;gap:16px;}}
@@ -2038,9 +2075,9 @@ def homepage(request: Request):
   .home-grid{{display:grid;grid-template-columns:1fr 360px;grid-template-rows:auto auto;gap:56px;align-items:start;}}
   .home-hero-block{{grid-column:1;grid-row:1;}}
   .home-tl-section{{grid-column:1;grid-row:2;}}
-  .home-photo-wrap{{grid-column:2;grid-row:1;height:400px;}}
+  .home-photo-wrap{{grid-column:2;grid-row:1;}}
   .home-avatar-wrap{{width:240px;height:240px;left:40px;top:-16px;}}
-  .home-status{{top:190px;left:-30px;right:auto;width:calc(100% + 30px);}}
+  .home-status{{margin-left:-30px;width:calc(100% + 30px);}}
   .home-sidebar-rest{{grid-column:2;grid-row:2;}}
 }}
 @media(min-width:560px){{
@@ -2050,8 +2087,8 @@ def homepage(request: Request):
 <div class="home-grid">
   <div class="home-hero-block" style="min-width:0;padding-top:8px;">
     <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:18px;">A CFO, for CFOs</div>
-    <h1 style="margin:0 0 22px;max-width:640px;font-family:var(--font-head);font-weight:700;font-size:clamp(32px,3.6vw,46px);line-height:1.1;">{_underline_last_word(homepage_headline)}</h1>
-    {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;max-width:640px;")}
+    <h1 style="margin:0 0 22px;font-family:var(--font-head);font-weight:700;font-size:clamp(32px,3.6vw,46px);line-height:1.1;">{_underline_phrase(homepage_headline, "strategic partner")}</h1>
+    {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;")}
   </div>
 
   <div class="home-photo-wrap">

@@ -55,10 +55,10 @@ def test_homepage_subhead_renders_multiple_paragraphs(env):
     r = c.get("/")
     assert r.status_code == 200
     assert "<p" in r.text
-    assert ('<p style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;'
-            'max-width:640px;">First subhead paragraph.</p>') in r.text
-    assert ('<p style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;'
-            'max-width:640px;">Second subhead paragraph.</p>') in r.text
+    assert ('<p style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;">'
+            'First subhead paragraph.</p>') in r.text
+    assert ('<p style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;">'
+            'Second subhead paragraph.</p>') in r.text
 
 
 def test_homepage_teaser_renders_multiple_paragraphs(env):

@@ -1018,6 +1018,69 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   elsewhere), but the emoji is kept — established sitewide copy
   (`"🚧 building"`, identical wording already live on `/tools`), not
   something this pass should silently change based on an export artifact.
+- **Homepage Restructure — a live-preview check (not a design-file re-read)
+  caught four real layout/logic bugs the prior design-fidelity passes
+  missed, all confirmed against actual rendered output rather than guessed
+  at.** Brian flagged that the Railway preview didn't match what had been
+  signed off; since this session's sandbox can't reach `*.up.railway.app`
+  directly (network policy blocks it), verification used a locally-served
+  copy of the exact same commit instead — comparing element bounding boxes
+  (`getBoundingClientRect()`) between the live app and the bundled design
+  export at matching viewport widths, not just eyeballing screenshots.
+  Four distinct bugs surfaced this way, each already covered by a
+  regression test:
+  1. **Hero headline/subhead were capped at `max-width:640px`** — a
+     leftover from an earlier hero-polish pass that predates the current
+     two-column grid giving the hero column ~975px to work with. The cap
+     made the text wrap narrower than the design (design lets it fill the
+     column) and left a large unused gap next to the sidebar. Removed
+     outright.
+  2. **The avatar `<img>` didn't scale with its own wrapper.** `_avatar()`
+     bakes a fixed pixel `width`/`height` into its inline style — correct
+     for every other call site, which use one fixed size throughout. The
+     homepage hero photo is the one place the *wrapper* itself resizes
+     (200px -> 240px at the desktop breakpoint), so without an override the
+     photo stayed pinned at 200px inside a now-larger frame, opening a gap
+     before the status box that isn't in the design. Fixed with a CSS
+     override scoped to `.home-avatar-wrap>img,.home-avatar-wrap>div[aria-label]`
+     specifically — not every child div, since the "hi, I'm Brian" sticker
+     is a sibling div in that same wrapper and must not get stretched.
+  3. **`.home-status` was `position:absolute` with a hardcoded top offset**,
+     so its actual rendered height was invisible to `.home-photo-wrap`
+     (also hardcoded, 340/400px) — any status copy longer than that guess
+     (this text is admin-editable via `/admin/copy`) would silently
+     overflow into the Toolbox panel in the next grid row. Moved into
+     normal flow, pulled up under the avatar with `margin-top:-50px`
+     instead of an absolute offset — tuned to land at the exact same visual
+     position the old absolute values produced (avatar flow height minus
+     the old top offset, -50px at both breakpoints) — so
+     `.home-photo-wrap`'s height now genuinely reflects its content and the
+     grid row sizes itself correctly regardless of copy length.
+  4. **The wrong word was underlined in the hero headline.** The existing
+     `_underline_last_word()` helper (by design, for arbitrary admin-edited
+     heading text) always accents whichever word ends the sentence — for
+     the current default copy that's "scorekeeper.", not the design's
+     intended "strategic partner" mid-sentence accent. This was wrong on
+     both breakpoints, not just mobile — easy to miss at full-page zoom,
+     which is likely why earlier design-fidelity passes didn't catch it.
+     Added `_underline_phrase()`, which targets a specific phrase
+     case-insensitively and falls back to `_underline_last_word()`'s
+     behavior if the phrase isn't found (e.g. an admin rewrites the
+     headline without "strategic partner" in it) — same underline
+     mechanism, just phrase-targeted instead of always-last-word. Homepage
+     hero heading now calls `_underline_phrase(homepage_headline,
+     "strategic partner")`; the unrelated `_underline_last_word("Brian
+     Weisberg", ...)` use elsewhere is untouched.
+  **Also confirmed, not a bug:** this session's headless Chromium can't
+  actually load the sitewide Google Fonts (`fonts.googleapis.com` requests
+  measured taking 12+ seconds before failing in this sandbox, vs. a
+  same-second success from plain `curl` — a sandbox networking quirk, not
+  a CSS issue), so local screenshots taken here render the nav
+  wordmark/stickers in a fallback system font rather than Permanent
+  Marker/Caveat. Checked via `getComputedStyle().fontFamily`, which
+  correctly returns the intended `@font-face` stack — confirming the CSS
+  itself is right and this is purely a rendering limitation of the
+  comparison tooling, not something to chase in the app.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
