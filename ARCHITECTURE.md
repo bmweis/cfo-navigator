@@ -1679,6 +1679,68 @@ additionally hides the rail (untouched by desktop focus mode, which only
 collapses the list pane to a sliver) — without it, "distraction-free" on
 mobile would still mean scrolling past a full nav rail before the article.
 
+### Reader content-structure backfill (Phase 5b)
+
+Closes the "Known gap" the Reader-fixes section above flagged: `extract_reader_html()`
+only ever ran against a live fetch (an unsaved Feed item, or a saved article whose
+cached `content` was too thin to use as-is), never against the ~4,500 articles already
+saved as flattened plain text from the original ingest. No raw HTML is stored anywhere
+for those rows, so restoring structure requires a genuine re-fetch of every one — this
+phase is that re-fetch, run as a resumable, rate-limited, observable admin batch job.
+
+- **New column, not a reuse of `content`.** `articles.content_html` (`TEXT NOT NULL
+  DEFAULT ''`) holds the backfill's structured HTML per article. `content` stays plain
+  text — it's a load-bearing contract (FTS5 indexing, the enrichment prompt,
+  `looks_paywalled()`'s length check) that must not start holding markup. An empty
+  `content_html` doubles as "not yet backfilled," the same not-yet-done signal
+  `unenriched()` gets from `enriched=0` — just via an empty string instead of a flag.
+  `_resolve_reader_content` now prefers a populated `content_html` over the plain-text
+  `content` cache (a strict upgrade, never triggers a live fetch on its own).
+- **Content sanity check beyond HTTP status.** `linklib/extract.py`'s
+  `assess_extraction_quality(html, plain_content, blocked)` runs after every fetch,
+  before anything is stored — a 200 response with a bot-challenge or paywall-preview
+  body must never overwrite `content_html` with garbage. Three ordered reasons, most
+  specific first: `'paywall'` (reuses the existing `looks_paywalled()`/`PageData.blocked`
+  signal), `'bot-challenge'` (new — `looks_like_bot_challenge()` against a marker list of
+  Cloudflare/PerimeterX/DataDome/generic-CAPTCHA interstitial phrases, since those also
+  return HTTP 200 and have no relationship to `looks_paywalled()`'s publisher-subscribe
+  phrases), and `'too-thin'` (a blunt word-count floor, catching anything neither marker
+  list names). A `fetch-error` reason (request-layer failure, or `fetch_page`'s own
+  empty-`PageData`-on-failure contract) is logged by the pipeline caller, not this
+  function, since it never gets HTML to assess in the first place.
+- **Glue lives in `linklib/pipeline.py`** (`backfill_article_content(lib, article)`),
+  matching `ingest_url`'s existing "fetch via extract.py, store via db.py" convention —
+  fetches, runs the sanity check, and on success runs `extract_reader_html()` and
+  `Library.set_article_content_html()`; on any failure, stores nothing and only logs.
+  **Never destructive**: a failed re-fetch cannot touch `articles.content` or
+  `articles.content_html` — the row is left exactly as it was.
+- **`content_refetch_log`** (new table, shape mirrors `backup_log`): one row per attempt,
+  success or failure, with a `reason` column so failures are groupable/countable by
+  cause on the admin page. A re-run after a stop or a crash adds new rows rather than
+  overwriting old ones, so a flaky source's full history stays visible.
+- **Admin job**: `/admin/library/backfill-content` — same background-thread/
+  `_JOB_STATE["content_backfill"]` pattern as re-enrich and Historical sweep (see those
+  sections above), plus two things neither of those has:
+  - **Stoppable**, not just crash-recoverable. A `stop_requested` flag on the job state,
+    checked once per article (between fetches, never mid-fetch) — `POST
+    .../backfill-content/stop` sets it, the loop notices on its next iteration and exits
+    cleanly. Resuming (pressing Start again) picks up exactly where it left off, because
+    stopping and crash-recovery share the same resumability mechanism: both rely on
+    `Library.articles_needing_content_backfill()`'s default scope (`content_html=''`),
+    which skips whatever a prior run — complete, stopped, or crashed — already succeeded
+    on. `force=True` re-runs every row regardless, the same escape hatch the re-enrich
+    job's own `force` option provides.
+  - **Rate-limited.** Nothing else in this codebase throttles outbound crawling
+    (Historical sweep's sitemap fetches and the queue scanner both hit sources
+    back-to-back) — a fixed ~1.5s delay between fetches here is a deliberate new
+    convention for this tool specifically, not a reuse of an existing one, since a
+    full run means several thousand requests against sites Brian doesn't want to hammer.
+  - The admin page's Limit field defaults to a small batch (25) so a first run can be
+    verified before a full pass is even offered, and shows live success/failure counts
+    plus a failure-reason breakdown (`Library.content_refetch_failure_counts()`, latest
+    attempt per article only, so a since-fixed failure doesn't keep inflating the tally)
+    and a recent-attempts log table.
+
 ### Auth: three tiers, one cookie
 
 Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no

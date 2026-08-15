@@ -620,6 +620,33 @@ CREATE TABLE IF NOT EXISTS backup_log (
 
 CREATE INDEX IF NOT EXISTS idx_backup_log_created ON backup_log(created_at);
 
+-- Per-article attempt log for the Reader content-structure backfill (Phase
+-- 5b): PR #322's extract_reader_html() only ever ran against a live fetch
+-- (an unsaved Feed item, or a saved article whose cached content was too
+-- thin to use as-is) — the ~4,500 already-saved articles are stored as
+-- flattened plain text from the original ingest, since no raw HTML was ever
+-- kept for them. This table is the durable, resumable, observable record of
+-- re-fetching each one: one row per attempt (a re-run after a stop/crash
+-- adds new rows rather than overwriting old ones, so the full history of a
+-- flaky source is visible, not just its latest state) — same shape and
+-- reasoning as backup_log above. reason is populated on failure only, and is
+-- one of extract.assess_extraction_quality's own reason strings ('paywall',
+-- 'bot-challenge', 'too-thin') plus 'fetch-error' for a request that failed
+-- outright (timeout, DNS, non-2xx) — never a generic message, so failures
+-- are groupable/countable by cause on the admin page. A failed attempt never
+-- touches articles.content or articles.content_html — see
+-- linklib.pipeline.backfill_article_content.
+CREATE TABLE IF NOT EXISTS content_refetch_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id    INTEGER NOT NULL,
+    status        TEXT NOT NULL,              -- 'success' | 'failure'
+    reason        TEXT NOT NULL DEFAULT '',    -- failure only: paywall|bot-challenge|too-thin|fetch-error
+    detail        TEXT NOT NULL DEFAULT '',    -- optional extra context (e.g. exception text)
+    attempted_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_refetch_log_article ON content_refetch_log(article_id);
+
 -- Overhead cost ledger for embed-on-save + the one-off backfill (#93) — one
 -- row per embedded article, upserted by article_id. content_hash is the
 -- SHA-256 of the exact text that was embedded (linklib.embeddings.
@@ -1611,6 +1638,21 @@ class Library:
             # for every existing row (no retroactive selection), same
             # precedent as agent_taxonomy_needs_verification's own migration.
             "ALTER TABLE thought_leadership ADD COLUMN featured_home INTEGER NOT NULL DEFAULT 0",
+            # Phase 5b (Reader content backfill): structured HTML for the
+            # Reader pane, persisted per-article so a re-fetch's work
+            # actually survives past the request that did it — without this,
+            # _resolve_reader_content's "cached content > 200 chars, use it"
+            # branch would keep serving the old plain-text `content` on every
+            # later read and the backfill's output would be silently
+            # discarded. Deliberately a NEW column, not a reuse of `content`:
+            # `content` is a load-bearing plain-text contract (FTS5 indexing,
+            # the enrichment prompt, looks_paywalled's length check) that
+            # must not start holding HTML. Empty string ("" default) doubles
+            # as "not yet backfilled" for articles_needing_content_backfill's
+            # default (non-force) scope — same not-yet-done-signal pattern
+            # `unenriched()` uses for `enriched=0`, just via an empty column
+            # instead of a boolean.
+            "ALTER TABLE articles ADD COLUMN content_html TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -2430,6 +2472,42 @@ class Library:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def articles_needing_content_backfill(self, limit: int = 100000, force: bool = False) -> list[dict]:
+        """Scope for the Reader content-structure backfill (Phase 5b) —
+        mirrors unenriched()/all_articles()'s own resumability idiom exactly.
+        Default (force=False): only rows with content_html still empty, so a
+        stopped/crashed run and a deliberate re-run both just pick up where
+        they left off, and articles a prior run already succeeded on are
+        never re-fetched (rate-limit-friendly, and safe to press "start"
+        again after a stop). `force=True` re-runs every row with a saved
+        URL — for standardizing the whole library after an extraction-logic
+        change, same escape hatch as the re-enrich job's own force option."""
+        if force:
+            rows = self.conn.execute(
+                "SELECT * FROM articles WHERE url!='' ORDER BY id LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM articles WHERE url!='' AND content_html='' ORDER BY id LIMIT ?", (limit,)
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def count_content_backfill_remaining(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM articles WHERE url!='' AND content_html=''"
+        ).fetchone()[0]
+
+    def set_article_content_html(self, article_id: int, content_html: str) -> None:
+        """Store the backfill's structured HTML for one article. Never
+        touches `content` (the plain-text contract) or `updated_at` — this
+        is enrichment-adjacent bookkeeping, not an edit to the article
+        itself, same reasoning as embeddings living in their own table
+        rather than bumping articles.updated_at on every embed."""
+        self.conn.execute(
+            "UPDATE articles SET content_html=? WHERE id=?", (content_html, article_id)
+        )
+        self.conn.commit()
+
     def recent_articles_by_source(self, source: str, limit: int = 20) -> list[dict]:
         """Most-recently-saved articles from one source — the 'what I keep' examples
         for predicting which queued candidates the curator would approve."""
@@ -2723,6 +2801,42 @@ class Library:
             "SELECT * FROM backup_log ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- Reader content-structure backfill (Phase 5b) ------------------------
+
+    def log_content_refetch_attempt(self, article_id: int, status: str,
+                                     reason: str = "", detail: str = "") -> int:
+        """One row per re-fetch attempt — see content_refetch_log's CREATE
+        TABLE comment for why every attempt is logged, not just failures."""
+        cur = self.conn.execute(
+            "INSERT INTO content_refetch_log (article_id, status, reason, detail, attempted_at) "
+            "VALUES (?,?,?,?,?)",
+            (article_id, status, reason, detail, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_content_refetch_log(self, limit: int = 200) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT l.*, a.title AS article_title, a.url AS article_url
+               FROM content_refetch_log l LEFT JOIN articles a ON a.id = l.article_id
+               ORDER BY l.attempted_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def content_refetch_failure_counts(self) -> dict[str, int]:
+        """Failure count by reason, most-recent-attempt-per-article only —
+        so an article that failed once and later succeeded on a re-run
+        doesn't keep inflating the failure tally shown on the admin page."""
+        rows = self.conn.execute(
+            """SELECT reason, COUNT(*) FROM (
+                 SELECT article_id, status, reason,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               ) WHERE rn=1 AND status='failure' GROUP BY reason"""
+        ).fetchall()
+        return {r[0] or "unknown": r[1] for r in rows}
 
     # -- tools directory ---------------------------------------------------
 
