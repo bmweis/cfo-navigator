@@ -87,6 +87,69 @@ def looks_paywalled(html: str, content: str) -> bool:
     return len(content or "") < 400 and ('class="paywall"' in low or "subscribe-widget" in low)
 
 
+# Phrases a bot-challenge/anti-scraper interstitial shows instead of the real
+# page — Cloudflare's "Just a moment..."/Turnstile challenge, generic
+# "verify you are human" CAPTCHA walls, PerimeterX/Akamai/DataDome bot-manager
+# pages. These all return HTTP 200 (fetch_page's raise_for_status never fires),
+# so a naive "status succeeded" check would happily overwrite content_html with
+# an interstitial instead of logging a failure. Distinct from _PAYWALL_MARKERS
+# (a real publisher's own "subscribe to keep reading" copy) — a bot challenge
+# means the actual page was never reached at all, from any account.
+_BOT_CHALLENGE_MARKERS = (
+    "just a moment...",             # Cloudflare's own interstitial title
+    "checking your browser before accessing",
+    "cf-browser-verification",
+    "cf_chl_opt",                   # Cloudflare Turnstile challenge script hook
+    "verify you are human",
+    "verify that you are a human",
+    "please verify you are a human",
+    "attention required! | cloudflare",
+    "press and hold",               # PerimeterX/Akamai "press and hold" challenge
+    "/distil_r_captcha.html",       # Imperva/Distil bot-block redirect
+    "captcha-delivery.com",         # DataDome
+    "are you a robot",
+)
+
+
+def looks_like_bot_challenge(html: str) -> bool:
+    """Heuristic: is this page a bot-challenge/anti-scraper interstitial
+    (Cloudflare, PerimeterX, DataDome, a generic CAPTCHA wall) rather than
+    the real article? See _BOT_CHALLENGE_MARKERS for the phrase list."""
+    low = (html or "").lower()
+    return any(m in low for m in _BOT_CHALLENGE_MARKERS)
+
+
+# Below this many words, extracted "content" is more likely a stub/teaser/
+# interstitial than a real article body — used only as the last-resort
+# sanity floor in assess_extraction_quality(), after the more specific
+# paywall/bot-challenge marker checks have already had a chance to name the
+# real reason.
+_MIN_CONTENT_WORDS = 60
+
+
+def assess_extraction_quality(html: str, plain_content: str, blocked: bool) -> tuple[bool, str]:
+    """Decide whether a fetch actually got the real article, or a look-alike
+    that would otherwise pass a bare HTTP-status check. Returns (ok, reason):
+    `ok=True, reason=""` when the content looks real; `ok=False` with a
+    reason in {'paywall', 'bot-challenge', 'too-thin'} otherwise. Checked in
+    that order so a page that happens to trip more than one heuristic (e.g. a
+    thin bot-challenge page with almost no words) still logs the most
+    specific, most useful reason rather than the vaguest one.
+
+    Deliberately conservative: this only decides whether it's SAFE to store a
+    result, never mutates anything itself — see linklib.pipeline.
+    backfill_article_content for the caller that treats `ok=False` as
+    "leave the existing content alone, log why."
+    """
+    if blocked:
+        return False, "paywall"
+    if looks_like_bot_challenge(html):
+        return False, "bot-challenge"
+    if len((plain_content or "").split()) < _MIN_CONTENT_WORDS:
+        return False, "too-thin"
+    return True, ""
+
+
 @dataclass
 class PageData:
     title: str

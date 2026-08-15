@@ -622,6 +622,46 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   verification, mobile viewports included, for every UI-facing change going
   forward) — the mobile bug above is exactly the kind of thing a desktop-only
   verification pass structurally cannot catch.
+- **Phase 5b — Reader content backfill: reprocessing the ~4,500 already-saved
+  articles for real structure, not just live fetches.** The Reader
+  follow-up pass above shipped `extract_reader_html()`, but it only ever ran
+  against a live fetch — every already-saved article was still flattened
+  plain text from ingest time, and no raw HTML was ever kept for them, so
+  restoring structure needs a genuine re-fetch of each one. Investigated
+  first, per the standing gate: confirmed no raw HTML exists anywhere to
+  reprocess offline, so a live re-fetch of all ~4,516 URLs is unavoidable;
+  Historical sweep and the re-enrich job (near-identical background-thread/
+  `_JOB_STATE` patterns) are the right admin-batch-job template to copy,
+  not Archive Queue (a review UI, not a fetch loop) or Content de-dupe
+  (synchronous/foreground, wrong for a multi-hour job); and nothing in the
+  codebase rate-limits outbound crawling today, so a new ~1.5s delay between
+  fetches is a deliberate first, not a reuse. Built as
+  `/admin/library/backfill-content`: a new `articles.content_html` column
+  (never reusing `content`, which stays plain text — see `_resolve_reader_
+  content`, now preferring `content_html` when populated) and a new
+  `content_refetch_log` table (shape mirrors `backup_log` — one row per
+  attempt, success or failure, so a re-run's history stays visible).
+  **Never destructive**: a failed re-fetch never touches `articles.content`
+  or `articles.content_html`, only the log. Two refinements added after the
+  initial proposal, both requested before implementation began: (1) a real
+  content sanity check beyond HTTP status — `extract.
+  assess_extraction_quality()` catches a bot-challenge or paywall
+  interstitial that returned 200 with garbage instead of the real page,
+  logging `paywall`/`bot-challenge`/`too-thin` as distinct, groupable
+  reasons rather than silently storing a bad result; `bot-challenge` (a new
+  Cloudflare/PerimeterX/DataDome marker list, `looks_like_bot_challenge()`)
+  is a genuinely new detection path with no prior track record in this
+  codebase, unlike `paywall`, which reuses the existing `looks_paywalled()`/
+  `PageData.blocked` signal — so it got its own dedicated test, not just
+  incidental coverage riding behind the paywall case. (2) A real stop
+  control, not just crash-recovery resumability — neither Historical sweep
+  nor re-enrich had one (confirmed by direct grep, not just relayed from an
+  investigation report); added a `stop_requested` flag on the job state,
+  checked once per article between fetches, sharing the exact same
+  resumability mechanism a crash-recovery restart already used (both just
+  skip whatever `content_html` is already populated). See ARCHITECTURE.md's
+  "Reader content-structure backfill" section for the full technical
+  write-up.
 - **Thought Leadership Admin CRUD, Phase 1 — the four `/thought-leadership`
   columns (Writing, Speaking & Events, Podcasts, Press) are now admin-managed,
   not hardcoded.** Phase 0 investigation found all four columns reading from
