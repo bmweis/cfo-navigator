@@ -1571,6 +1571,114 @@ other retired-route call in this doc). The three panes:
 `/read`, first in the list — the entry point Phase 1 deliberately deferred
 to this phase.
 
+**Reader fixes/follow-ups (post-launch pass):**
+- **Paywalled Feed items now open in-app like any other row.** They used to
+  be wrapped in a real `<a target="_blank">` instead of getting `rrOpen()`'s
+  normal click handler — a genuine bug (the click hijacked straight to an
+  external tab before the reader pane, and its own "Original →" toolbar
+  link, ever got a chance to render), not a deliberate "no in-app reader for
+  paywalled sources" design. Extraction still runs and gracefully falls back
+  to "Content could not be extracted, Open original →" when a paywall blocks
+  it, same as any other fetch failure — the "🔒 Paywalled" badge stays, only
+  the click behavior changed.
+- **Article content is now real structured HTML for a live fetch, not
+  flattened plain text.** `linklib/extract.py` gained `extract_reader_html()`
+  — a BeautifulSoup-based sanitizer that keeps paragraphs/headings/lists,
+  absolute-izes and preserves `<img>`/`<a>`, and strips everything else
+  (chrome tags, all non-safelisted attributes) — used only by
+  `_resolve_reader_content`'s live-fetch branch, over `PageData.raw_html` (a
+  new field on the existing dataclass; the fetched HTML, kept only so a
+  caller wanting structure doesn't need a second HTTP round trip).
+  `_extract_content()` itself — the plain-text extractor the ingest/search/
+  enrichment pipeline depends on staying plain text (`articles.content`,
+  FTS5, the Claude enrichment prompt, `looks_paywalled()`'s length check) —
+  is deliberately untouched in contract, only its always-active BeautifulSoup
+  fallback (trafilatura isn't a declared dependency, so in practice this is
+  the path that runs) was fixed to actually preserve paragraph breaks
+  (`\n\n`-joined blocks) instead of `get_text(" ", strip=True)` flattening
+  everything into one line. **Known gap:** a saved article's cached
+  `content` in the DB is still whatever plain text ingest-time extraction
+  produced — this fix doesn't retroactively restore images/links for
+  already-saved articles (no backfill shipped in this pass; would need a
+  live re-fetch per article, out of scope here), though newly-ingested or
+  re-enriched articles going forward at least get real paragraph breaks in
+  their plain-text `content`.
+- **Reader body column widened** 640px → 700px, matched against Instapaper's
+  own desktop reading column width (~680–700px, measured off the reference
+  screenshots in the original design handoff) — the original build brief's
+  target, which the initial implementation undershot.
+- **Two new reader-pane features**, both Instapaper-parity asks:
+  - **Find in article** — a separate, article-scoped text search (distinct
+    from Saved-view's list search) via a toggleable find bar in
+    `.rr-reader-actions`; walks `#rr-reader-body-text`'s text nodes with a
+    `TreeWalker`, wraps matches in `<mark>`, next/prev navigation, closes
+    and clears on Escape.
+  - **Distraction-free reading** — a header toggle (outward/inward diagonal-
+    arrow icon, immediately next to the close button, matching Instapaper's
+    own icon and placement) that collapses the middle list pane to a thin
+    sliver (title/source/live time-remaining, computed from reader-pane
+    scroll position; a duplicate collapse button sits above that content) and
+    lets the reader pane take the freed width. Keyed only to whether an
+    article is open, not to which quick view it came from, so it behaves
+    identically for Feed and Saved.
+- **Thousands separators** (`:,` format spec) added to every large-count
+  render sitewide that was missing one — the Reader's quick-view badges and
+  list-pane item counts (inherited the gap from the pre-merge Archive page),
+  plus `/admin/system/page-index`'s stat cards and the Tag cleanup admin
+  table's per-tag counts. An audit of every other `lib.count()`/large-list
+  count site found no other gaps.
+- **Feed view now has a real search box.** Confirmed against the original
+  `Feed.dc.html` design export first (its list-pane header only ever had a
+  decorative magnifying-glass *shape* — no `onClick`, no search-state
+  variable, never wired to anything even in the design tool itself, so this
+  was never a shipped-vs-designed gap) and flagged for a decision rather
+  than built; built in the very next round once the decision came back yes.
+  `#rr-feed-search`, client-side, same mechanism the existing category/
+  source filtering already used (`rrApplyFilter`) rather than a second
+  parallel filter — `rrFeedCat`/`rrFeedSrc` became sticky module-level state
+  (previously passed as one-shot function args from `rrSelectCategory`/
+  `rrSelectSource`) so a search keystroke can re-run the same active
+  category/source combination without needing to know it externally.
+  Matches a row against its whole visible text (title, source, excerpt,
+  tags), same broad-match spirit as Saved view's server-rendered search.
+
+**Second follow-up round — a real mobile bug, root-caused before fixing (not
+assumed from the bug report's own guess):** "clicking an article on mobile
+does nothing" turned out not to be a broken click handler or a hidden touch
+target at all — `rrOpen()` fired correctly every time, confirmed live via a
+real touch-enabled mobile-viewport session (`element.tap()`, not just
+`.click()`) that hit-tested the row's own coordinates and found nothing
+overlapping it. The actual mechanism: on the mobile stacked layout
+(`.rr-shell{display:block}`), `#rr-reader` sits at the bottom of the DOM,
+after the full item list — often 600px+ below the fold — and nothing ever
+scrolled the page to it, so the update was real but invisible. Fixed with an
+unconditional `pane.scrollIntoView(...)` at the end of `rrRenderArticle`
+(a no-op on desktop, where `.rr-shell` is already viewport-height-
+constrained with its own internal scroll) plus, going further than a pure
+scroll fix per the follow-up ask below, an auto-focus-mode default.
+
+**Responsive default: mobile portrait now opens straight into distraction-
+free reading; landscape (with room) gets the real 3-pane layout.**
+`rrMobileNoRoom()` — `window.matchMedia('(max-width:900px) and
+(orientation:portrait), (max-width:699px)')` — gates both the CSS stacking
+breakpoint and a call in `rrRenderArticle` to auto-`rrSetFocusMode(true)`
+when it matches. Deliberately orientation-aware rather than reusing the
+homepage's own `1024px` mobile-stacking breakpoint (`.home-grid`, same
+file) — that number solves the *mirror-image* problem: it's pushed *up*
+so a landscape phone (~930px) still gets the homepage's mobile stacked
+order instead of flipping into its 2-column desktop grid on pure rotation.
+The Reader wants the opposite outcome (a landscape phone *should* get the
+real 3-pane layout, since it has the width for it), so a single shared
+number can't serve both goals — this stays a combined width+orientation
+query instead. The `699px` fallback (any orientation) is the hard floor
+below which 3 panes can't fit even at their own CSS min-widths
+(150+300+240px); only the smallest common landscape phones (iPhone
+SE-class, ~667px) fall under it and stay stacked in landscape too, correctly.
+In the forced-focus state, `.rr-shell.rr-focus-mode .rr-rail{display:none}`
+additionally hides the rail (untouched by desktop focus mode, which only
+collapses the list pane to a sliver) — without it, "distraction-free" on
+mobile would still mean scrolling past a full nav rail before the article.
+
 ### Auth: three tiers, one cookie
 
 Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no

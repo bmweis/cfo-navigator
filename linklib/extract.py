@@ -15,10 +15,10 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; linklib/1.0)"}
 
@@ -93,6 +93,11 @@ class PageData:
     content: str
     blocked: bool = False    # looked like a logged-out paywall (cookie missing/expired)
     published: str = ""      # true publish date (ISO) parsed from the page, if found
+    raw_html: str = ""       # the fetched page's raw HTML — kept only so a caller that
+                              # wants real structure (paragraphs/images/links, not the
+                              # plain-text `content` the ingest/search/enrichment
+                              # pipeline depends on) can run its own extraction over it
+                              # without a second HTTP fetch. See extract_reader_html().
 
 
 def fetch_page(url: str, timeout: int = 20) -> PageData:
@@ -119,7 +124,8 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     content = _extract_content(html)
     return PageData(title=title, content=content,
                     blocked=looks_paywalled(html, content),
-                    published=_extract_published(html))
+                    published=_extract_published(html),
+                    raw_html=html)
 
 
 def fetch_fulltext(url: str, timeout: int = 20) -> str:
@@ -183,8 +189,21 @@ def _extract_title(html: str) -> str:
     return ""
 
 
+_BLOCK_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote",
+               "pre", "figcaption", "br", "div"}
+
+
 def _extract_content(html: str) -> str:
-    # Preferred path: trafilatura (handles boilerplate removal well).
+    """Plain-text extraction — the contract the ingest/search/enrichment pipeline
+    depends on (`articles.content`, FTS5 indexing, the Claude enrichment prompt,
+    `looks_paywalled()`'s length check). Must stay plain text; a caller that wants
+    real structure (paragraphs as actual tags, images, links) should use
+    `extract_reader_html()` instead, over the same fetched HTML."""
+    # Preferred path: trafilatura (handles boilerplate removal well). Not a
+    # declared dependency — `pip install trafilatura` is opt-in (see module
+    # docstring) — so in practice this almost always falls through to the BS4
+    # path below; both must produce properly paragraph-broken text, not one
+    # flattened blob.
     try:
         import trafilatura
         extracted = trafilatura.extract(html, include_comments=False, include_tables=False)
@@ -193,11 +212,107 @@ def _extract_content(html: str) -> str:
     except Exception:
         pass
 
-    # Fallback: strip tags.
+    # Fallback: strip chrome, then join text a block at a time so paragraph
+    # breaks survive as "\n\n" — plain soup.get_text(" ", strip=True) collapses
+    # the entire page into one line, which is what a caller splitting on "\n\n"
+    # (e.g. the Reader's paragraph renderer) would otherwise see as a single
+    # giant paragraph.
     try:
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
             tag.decompose()
+        blocks = []
+        for el in soup.find_all(_BLOCK_TAGS):
+            # Skip a block whose own ancestor is also one of our block tags
+            # (e.g. an <li> inside a <ul> we're not separately selecting, or a
+            # <p> nested in another <div> we already picked up) so text isn't
+            # duplicated across an outer and inner block.
+            if el.find_parent(_BLOCK_TAGS):
+                continue
+            text = el.get_text(" ", strip=True)
+            if text:
+                blocks.append(text)
+        if blocks:
+            return "\n\n".join(blocks)
+        # No recognizable block structure at all (rare) — fall back to a flat
+        # pull rather than returning nothing.
         return soup.get_text(" ", strip=True)
     except Exception:
         return ""
+
+
+# Tags kept verbatim (minus a stripped-down attribute set) when building
+# structured Reader HTML — everything else is either dropped with its content
+# (chrome/script-y tags) or unwrapped (its children kept, the wrapper dropped).
+_READER_JUNK_TAGS = ("script", "style", "nav", "header", "footer", "aside", "noscript",
+                     "iframe", "form", "button", "svg", "input", "select", "textarea",
+                     "object", "embed", "video", "audio", "canvas",
+                     "head", "title", "meta", "link")  # only matters when root falls all
+                                                        # the way back to the whole `soup`
+                                                        # (no <article>/<body> found) —
+                                                        # otherwise these never appear
+                                                        # under root in the first place
+_READER_KEEP_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li",
+                     "blockquote", "img", "a", "strong", "em", "b", "i", "br",
+                     "figure", "figcaption", "code", "pre"}
+# Only these attributes survive on a kept tag, and only for these specific tags —
+# everything else (class, style, id, data-*, on*) is stripped so a source site's
+# CSS/JS can never bleed into the Reader pane, which supplies its own styling.
+_READER_KEEP_ATTRS = {"img": ("src", "alt"), "a": ("href",)}
+
+
+def extract_reader_html(html: str, base_url: str) -> str:
+    """Best-effort structured extraction for the in-app Reader pane: preserves
+    paragraph/heading/list structure, images (absolute src), and hyperlinks
+    (absolute href, opened in a new tab) as real HTML — unlike `_extract_content()`,
+    whose plain-text contract the ingest/search/enrichment pipeline depends on and
+    which this deliberately does not touch. Only meaningful against HTML from a
+    fresh fetch (`PageData.raw_html`) — a saved article's cached `content` in the
+    DB is already plain text from ingest time, so this can't retroactively recover
+    images/links for it. No readability-style content-density scoring (that's what
+    trafilatura would add, if ever installed as a real dependency) — this only
+    strips known chrome and keeps what's left, same heuristic ceiling as
+    `_extract_content()`'s own fallback. Returns "" on any failure or if nothing
+    usable survives."""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return ""
+
+    for c in soup.find_all(string=lambda s: isinstance(s, Comment)):
+        c.extract()
+    for tag in soup(_READER_JUNK_TAGS):
+        tag.decompose()
+
+    root = soup.find("article") or soup.body or soup
+
+    for tag in root.find_all(True):
+        if tag.name not in _READER_KEEP_TAGS:
+            tag.unwrap()
+            continue
+        keep = _READER_KEEP_ATTRS.get(tag.name, ())
+        for attr in list(tag.attrs):
+            if attr not in keep:
+                del tag[attr]
+        if tag.name == "img":
+            src = tag.get("src", "")
+            if not src:
+                tag.decompose()
+                continue
+            tag["src"] = urljoin(base_url, src)
+            tag["loading"] = "lazy"
+        elif tag.name == "a":
+            href = tag.get("href", "")
+            if href:
+                tag["href"] = urljoin(base_url, href)
+                tag["target"] = "_blank"
+                tag["rel"] = "noopener"
+
+    # Drop now-empty leftovers (e.g. a <p> that only ever wrapped an ad div we
+    # unwrapped down to nothing) so they don't render as dead vertical space.
+    for tag in root.find_all(["p", "li", "blockquote"]):
+        if not tag.get_text(strip=True) and not tag.find("img"):
+            tag.decompose()
+
+    out = "".join(str(c) for c in root.contents).strip()
+    return out if ("<p" in out or "<h" in out or "<ul" in out or "<img" in out) else ""

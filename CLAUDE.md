@@ -577,6 +577,51 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   point Phase 1 deferred to this phase rather than adding two separate
   Archive/Feed links that would've just been deleted again once the merge
   landed.
+- **Reader follow-up pass — a live post-launch walkthrough surfaced a real
+  click-hijack bug, a content-flattening bug, and a few gaps.** Paywalled
+  Feed items were wrapped in a real `<a target="_blank">` instead of getting
+  the normal `rrOpen()` click handler, so a click hijacked straight to an
+  external tab before the reader pane's own "Original →" link ever got a
+  chance to render — fixed by removing the special-casing entirely (the
+  paywall badge stays; the click behavior no longer differs from any other
+  row). Article content rendered as one flattened paragraph with no images
+  or links because `linklib/extract.py`'s always-active BeautifulSoup
+  fallback (trafilatura isn't a declared dependency, so this is the path
+  that actually runs) used `get_text(" ", strip=True)`, which drops
+  paragraph breaks entirely — fixed there, plus a new `extract_reader_html()`
+  gives the Reader's live-fetch path real structured HTML (paragraphs,
+  headings, lists, absolute-ized images/links) via a new `PageData.raw_html`
+  field, without changing `_extract_content()`'s plain-text contract that
+  ingest/search/enrichment depend on. See ARCHITECTURE.md's Reader-merge
+  section for the full list, including the known gap (already-saved
+  articles' cached content isn't retroactively restructured), the reader
+  body's width fix (640px → 700px, matched to Instapaper's own reading
+  column), the two new Instapaper-parity features (in-article find, a
+  distraction-free reading toggle), and the sitewide thousands-separator
+  sweep.
+- **Reader follow-up, second round — real Feed search, a root-caused mobile
+  bug, and a responsive default.** Feed view's search box (confirmed absent
+  from the original design file, even decoratively, in the round above) got
+  built for real once the call came back yes — `#rr-feed-search`, reusing
+  `rrApplyFilter`'s existing category/source filtering rather than a second
+  parallel mechanism. Separately, "clicking an article on mobile does
+  nothing" turned out not to be a broken click handler at all — confirmed
+  live with a real touch-enabled mobile-viewport session before writing any
+  fix, not assumed from the bug report's own guess — `rrOpen()` fired every
+  time; `#rr-reader` was just landing 600px+ below the fold on the stacked
+  mobile layout with nothing scrolling the page to it. Fixed with an
+  unconditional `scrollIntoView`, plus a responsive default beyond the pure
+  scroll fix: mobile portrait now opens straight into distraction-free
+  reading (`rrMobileNoRoom()`, an orientation-aware breakpoint — deliberately
+  *not* reusing the homepage's `1024px` mobile-stacking number, which solves
+  the mirror-image problem of keeping landscape phones on the *mobile*
+  layout, the opposite of what the Reader wants here), while landscape at
+  real width still gets the genuine 3-pane layout. See ARCHITECTURE.md's
+  Reader-merge section for the full breakpoint reasoning. This round also
+  set the standing testing-standard bullet above (live headless-browser
+  verification, mobile viewports included, for every UI-facing change going
+  forward) — the mobile bug above is exactly the kind of thing a desktop-only
+  verification pass structurally cannot catch.
 - **Thought Leadership Admin CRUD, Phase 1 — the four `/thought-leadership`
   columns (Writing, Speaking & Events, Podcasts, Press) are now admin-managed,
   not hardcoded.** Phase 0 investigation found all four columns reading from
@@ -1293,6 +1338,36 @@ instead, off that page — kept for git history, not meant to run again.
 
 Note: the migration plan document (`MIGRATION_AND_BUILD_PLAN.md`) was never
 committed to the repo — this item is tracked here as the only record of it.
+
+## Testing standard for UI-facing changes
+
+**Live-verify with a real headless-browser session (Playwright — pre-installed in
+this environment; see the top-level agent instructions for the executable path),
+not just code review or a `TestClient`-rendered HTML string, for any change that
+touches interactive behavior** — a click/tap handler, a CSS layout switch, JS
+state, anything a person actually clicks or taps. A rendered-HTML assertion
+confirms the markup exists; it does not confirm the click handler actually fires,
+that nothing else is capturing the tap, or that the updated content ends up
+somewhere the user can see it. This standard was set from a real miss: the
+Reader's mobile "clicking an article does nothing" bug (see the Reader
+follow-up-pass bullet above) was never caught because verification up to that
+point only ever ran at desktop widths — the click handler was fine the whole
+time; the root cause (the reader pane updating far off-screen with nothing to
+scroll to it) was a mobile-layout-only symptom a desktop-only browser session
+could never have surfaced.
+
+**Test at real mobile viewport widths, not just desktop, whenever a change
+touches anything that has a mobile layout.** Use Playwright's device emulation
+(a real viewport size, `has_touch`/`is_mobile`, and `.tap()` rather than only
+`.click()`) so touch-event and CSS-breakpoint differences actually have a chance
+to surface, the same way the desktop-only gap above let a real bug through
+undetected. Cover both portrait and landscape where a layout has orientation-
+specific behavior (see the Reader's `orientation:portrait` breakpoint) — a
+width-only check can't tell a cramped phone-portrait viewport from a
+phone-landscape one at a similar or even narrower width.
+
+This applies to every UI-facing feature going forward, not just the Reader
+batch that prompted it.
 
 ## Contributing — pull requests
 
