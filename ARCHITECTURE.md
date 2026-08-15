@@ -1739,6 +1739,11 @@ changed text. Vector search is eventually consistent by design.
   the tag text, so an apostrophe in a tag name can't break out of the inline
   handler. `rrSyncRowTags` keeps the Saved-view row's own chips in step, so
   the two panes never disagree without a reload.
+  The input carries a 220px width floor (`min(220px,100%)`), not the 110px it
+  launched with: below that, chips on the same line could squeeze it too narrow
+  to type in, and the floor makes flex-wrap drop it onto its own full-width line
+  instead. The `min()` keeps the floor from overflowing a container narrower
+  than itself — the reader pane is ~219px in the 3-pane mobile-landscape layout.
 - **Autocomplete** is a native `<datalist id="rr-tag-vocab">` built from
   `Library.all_tags()` — the same vocabulary Tag cleanup curates, and the
   same `<datalist>` pattern the overhead-category admin inputs already use

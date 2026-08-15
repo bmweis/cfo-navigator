@@ -14745,7 +14745,16 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
 .rr-tag-chip button{cursor:pointer;background:none;border:none;color:var(--navy);opacity:.55;
   font-size:14px;line-height:1;padding:0 2px;font-family:inherit;}
 .rr-tag-chip button:hover{opacity:1;}
-.rr-tag-input{flex:1 1 130px;min-width:110px;padding:5px 9px;border:1px solid var(--line);border-radius:7px;
+/* The input needs a real typing width, not whatever's left over. A floor of
+   220px (rather than the original 110px, which chips could squeeze it down to)
+   means that once the chips on a line leave less than that, flex-wrap drops the
+   input onto its own line instead — where flex-grow then gives it the panel's
+   full width. min() keeps the floor from overflowing a container narrower than
+   220px, which min-width alone would. Deliberately kept in the reader pane
+   rather than moved to the list pane: that pane collapses to a sliver in
+   distraction-free mode (which mobile portrait auto-enters), so a tag editor
+   living there would be unreachable exactly while reading. */
+.rr-tag-input{flex:1 1 220px;min-width:min(220px,100%);padding:5px 9px;border:1px solid var(--line);border-radius:7px;
   font-size:12.5px;font-family:inherit;background:var(--surface);}
 .rr-tag-status{font-size:11.5px;color:var(--muted);white-space:nowrap;}
 .rr-tag-empty{font-size:12px;color:var(--muted);}

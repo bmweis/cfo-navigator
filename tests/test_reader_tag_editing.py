@@ -296,6 +296,17 @@ def test_save_time_form_gets_its_own_row_line(env):
     assert ".rr-row-tagform{display:none;flex:0 0 100%;" in html
 
 
+def test_tag_input_keeps_a_real_typing_width(env):
+    """The input started at flex-basis 130px / min-width 110px, which let a few
+    chips squeeze it down to something too narrow to type in. A 220px floor
+    makes flex-wrap drop it onto its own line instead, where flex-grow gives it
+    the panel's full width. min() keeps that floor from overflowing a container
+    narrower than 220px (the reader pane in mobile landscape is ~219px)."""
+    c = _admin_client(env)
+    html = c.get("/read").text
+    assert ".rr-tag-input{flex:1 1 220px;min-width:min(220px,100%);" in html
+
+
 def test_opening_the_tag_panel_does_not_scroll_it_off_screen(env):
     """Live-verification catch (mobile portrait): focusing the input let the
     browser scroll the document far enough to clip the panel's first chip row
