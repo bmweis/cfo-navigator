@@ -135,7 +135,7 @@ def test_backfill_article_content_dead_url_never_destructive(lib, monkeypatch):
     # Explicit, deterministic "no Wayback fallback available" — not relying
     # on the test environment's network being unreachable. See
     # test_fetch_reliability.py for the dedicated Wayback-fallback tests.
-    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: None)
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False
@@ -147,7 +147,7 @@ def test_backfill_article_content_dead_url_never_destructive(lib, monkeypatch):
 
     log = lib.list_content_refetch_log()
     assert log and log[0]["status"] == "failure" and log[0]["reason"] == "fetch-error"
-    assert log[0]["detail"] == "HTTP 404", \
+    assert log[0]["detail"] == "HTTP 404 (wayback: no snapshot archived)", \
         "the specific fetch failure reason must be captured, not just the generic category"
 
 
@@ -197,7 +197,7 @@ def test_backfill_article_content_paywall_failure_preserves_existing(lib, monkey
     page = PageData(title="Paywalled", content="Subscribe to read the rest of this post.",
                     blocked=True, raw_html=html)
     monkeypatch.setattr(extract_mod, "fetch_page", lambda url: page)
-    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: None)
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False
@@ -218,7 +218,7 @@ def test_backfill_article_content_bot_challenge_failure_dedicated(lib, monkeypat
     page = PageData(title="Just a moment...", content="Checking your browser before accessing this site.",
                     blocked=False, raw_html=html)
     monkeypatch.setattr(extract_mod, "fetch_page", lambda url: page)
-    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: None)
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False
