@@ -1977,7 +1977,16 @@ recorded anywhere, it's flagged rather than invented.
 - **Effort tiers instead of a model picker.** `/tools/fpa-buddy` exposes
   Quick/Standard/Deep; the model behind each tier is an implementation detail
   (`EFFORT_SETTINGS`). *Why:* members shouldn't need model literacy to make a
-  cost/quality choice (PR #84 collapsed the previous model+effort UI).
+  cost/quality choice (PR #84 collapsed the previous model+effort UI). The
+  tiers render as single-select buttons in an `.ask-controls` two-column grid
+  beside the Sources multi-select, both built from the same `.ask-tag`
+  component so the two carry equal visual weight; each tier's retrieval counts
+  and token estimate live in a hover `title` rather than persistent subtext.
+  *Why:* three tall descriptive cards spent a lot of vertical space on a
+  one-of-three choice. The shared component carries one hazard worth knowing
+  about: Depth's buttons share `.ask-tag.active` with Sources, so anything
+  reading the selected sources must scope to `.ask-tag[data-source].active` or
+  it sweeps the selected tier in as a null source.
   Elsewhere, enrichment model pickers stay curated (no auto-surfacing of new
   models) so a whole-archive re-enrich can't accidentally target a pricey new
   model.

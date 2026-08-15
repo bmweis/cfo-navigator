@@ -718,6 +718,38 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   and unaffected by, the pre-existing "Show all N" cap/expand mechanism —
   the two toggles coexist on the same entries without conflict.
 
+- **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
+  compact into two columns, and Depth stops being a card stack.** On
+  `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat
+  above a vertical stack of three tall `.ask-tier` cards, each carrying
+  persistent subtext (archive count, web-search count, token estimate) plus a
+  "Recommended" badge on Standard. That's a lot of vertical space for a
+  one-of-three choice, so both groups now sit side by side in an
+  `.ask-controls` two-column grid (Sources left, Depth right), and Depth's
+  tiers are rebuilt from the *same* `.ask-tag` component Sources uses —
+  identical padding/radius/border/font/active-fill, verified by comparing
+  computed styles in a live browser, not by reading the CSS. The whole
+  `.ask-tier*` CSS block and the badge are gone; the per-tier detail moved
+  into a `title` hover tooltip (Standard's also says "Recommended"), which is
+  deliberately native `title` rather than a custom CSS tooltip — a positioned
+  tooltip anchored to a wrapping button is exactly the kind of thing that
+  overflows a narrow viewport, and the standing mobile-verification rule
+  exists because of that class of bug. Default selection is unchanged
+  (Standard for admin, Quick otherwise). **The one non-obvious hazard the
+  shared component introduces**, and the reason `.ask-tag[data-source]` now
+  appears in two places: Depth's buttons carry `.ask-tag.active` exactly like
+  Sources', so `doAsk()`'s original unscoped `'.ask-tag.active'` query would
+  have posted the selected tier to `/ask` as a fourth, null source. Confirmed
+  live rather than reasoned about — an unscoped query in the running page
+  returns `['library','feed','web',null]`, the scoped one returns the three
+  real sources. Anything added later that reads the selected sources has to
+  scope the same way. Section label went from "How deep should I go?" to
+  "Depth" so the two column headers read as a matched pair. Below 640px the
+  grid collapses to one column and the groups stack; verified with real
+  headless-browser sessions at 1280 (side by side), 844x390 landscape (side
+  by side), and 390x844 portrait (stacked, no horizontal overflow), tapping
+  rather than clicking on the touch contexts.
+
 - **Library/Toolbox restructure, Phase 3 — CFO Toolbox landing page and the homepage
   both move to a 4-tile 2x2 grid, plus a 5th admin-only tile.** `/tools`'s old 3-card
   `repeat(3,1fr)` list (Software, Benchmarking, Communities) is replaced by a 2x2 grid
