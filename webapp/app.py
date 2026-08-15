@@ -15507,35 +15507,21 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     # picker. Each tier maps internally (linklib.agent.EFFORT_SETTINGS) to a
     # model plus archive/web-search count and token budget; the model itself
     # is an implementation detail, never surfaced to the end user.
+    #
+    # The per-tier detail (archive count, web-search count, token estimate) used
+    # to render as persistent subtext under each tier's name, inside a tall
+    # card. It's now a hover tooltip on a compact button instead: the same
+    # information, available on demand, without three cards' worth of vertical
+    # space for what is a one-of-three choice.
     effort_details = [
-        ("quick",    "Quick",    "4 archive &middot; 2 web searches &middot; ~700 tokens out"),
-        ("standard", "Standard", "8 archive &middot; 4 web searches &middot; ~1,500 tokens out"),
-        ("deep",     "Deep",     "16 archive &middot; 6 web searches &middot; ~2,500 tokens out"),
+        ("quick",    "Quick",    "4 archive sources &middot; 2 web searches &middot; ~700 tokens out"),
+        ("standard", "Standard", "8 archive sources &middot; 4 web searches &middot; ~1,500 tokens out"),
+        ("deep",     "Deep",     "16 archive sources &middot; 6 web searches &middot; ~2,500 tokens out"),
     ]
     RECOMMENDED_TIER = "standard"
     # Logged-in (Brian) gets the balanced default; anonymous users default to
     # the most efficient tier (a cost guard, not a recommendation).
     default_effort = "standard" if authed else "quick"
-
-    def tier_card(val, label, detail, selected):
-        recommended = (val == RECOMMENDED_TIER)
-        classes = "ask-tier"
-        if recommended:
-            classes += " recommended"
-        if selected:
-            classes += " selected"
-        badge = '<span class="ask-tier-badge">Recommended</span>' if recommended else ""
-        return (
-            f'<button type="button" class="{classes}" data-tier="{val}" onclick="selectTier(this)">'
-            f'<span class="ask-tier-text">'
-            f'<span class="ask-tier-name">{label}{badge}</span>'
-            f'<span class="ask-tier-detail">{detail}</span>'
-            f'</span>'
-            f'<span class="ask-tier-radio"><span class="fill"></span></span>'
-            f'</button>'
-        )
-
-    tier_cards = "".join(tier_card(v, l, d, v == default_effort) for v, l, d in effort_details)
 
     # Sources — the same seafoam-fill/navy-text tag component used elsewhere on
     # the site (BRAND.md §5), toggled on/off by tap instead of a checkbox list.
@@ -15550,10 +15536,25 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 
     def source_tag(key, label, active):
         cls = "ask-tag active" if active else "ask-tag"
-        return (f'<button type="button" class="{cls}" data-source="{key}" onclick="toggleSource(this)">'
+        return (f'<button type="button" class="{cls}" data-source="{key}" '
+                f'aria-pressed="{"true" if active else "false"}" onclick="toggleSource(this)">'
                 f'{_CHECK_SVG}<span>{label}</span></button>')
 
     source_tags = "".join(source_tag(k, l, a) for k, l, a in source_defs)
+
+    # Depth reuses the Sources tag component verbatim so the two columns carry
+    # the same visual weight — the only difference is behavior: Sources is a
+    # multi-select toggle, Depth is single-select (radio), enforced in
+    # selectTier() and marked up as a real radiogroup for assistive tech.
+    def tier_tag(val, label, detail, selected):
+        cls = "ask-tag active" if selected else "ask-tag"
+        hint = detail + (" &middot; Recommended" if val == RECOMMENDED_TIER else "")
+        return (f'<button type="button" class="{cls}" data-tier="{val}" role="radio" '
+                f'aria-checked="{"true" if selected else "false"}" title="{hint}" '
+                f'onclick="selectTier(this)">'
+                f'{_CHECK_SVG}<span>{label}</span></button>')
+
+    tier_tags = "".join(tier_tag(v, l, d, v == default_effort) for v, l, d in effort_details)
 
     # Cost estimates are for Brian's eyes only — never exposed to anonymous
     # users. When not authed, the cost table is empty and the estimate line is
@@ -15614,17 +15615,18 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
     style="width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:var(--bg);resize:vertical;">{pre_q}</textarea>
 </div>
 
-<div class="ask-section">
-  <div class="ask-section-label">Sources</div>
-  <div class="ask-tags">
-    {source_tags}
+<div class="ask-controls">
+  <div class="ask-control">
+    <div class="ask-section-label">Sources</div>
+    <div class="ask-tags">
+      {source_tags}
+    </div>
   </div>
-</div>
-
-<div class="ask-section">
-  <div class="ask-section-label">How deep should I go?</div>
-  <div class="ask-tiers">
-    {tier_cards}
+  <div class="ask-control">
+    <div class="ask-section-label">Depth</div>
+    <div class="ask-tags" role="radiogroup" aria-label="Depth">
+      {tier_tags}
+    </div>
   </div>
 </div>
 
@@ -15669,24 +15671,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);}}
 .ask-tag.active svg{{opacity:1;}}
 
-.ask-tiers{{display:flex;flex-direction:column;gap:10px;}}
-.ask-tier{{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;text-align:left;
-  font:inherit;padding:15px 16px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);cursor:pointer;
-  transition:background .12s ease,border-color .12s ease;}}
-.ask-tier-text{{display:flex;flex-direction:column;gap:2px;}}
-.ask-tier-name{{font-family:var(--font-head);font-weight:600;font-size:16.5px;color:var(--ink);}}
-.ask-tier-detail{{font-size:12.5px;color:var(--muted);margin-top:2px;}}
-.ask-tier-badge{{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--coral-deep);
-  background:var(--coral-wash);padding:2px 7px;border-radius:5px;margin-left:7px;vertical-align:middle;}}
-.ask-tier-radio{{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line-strong);flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;}}
-.ask-tier-radio .fill{{width:10px;height:10px;border-radius:50%;background:var(--navy);transform:scale(0);transition:transform .12s ease;}}
-.ask-tier.selected .ask-tier-radio{{border-color:var(--navy);}}
-.ask-tier.selected .ask-tier-radio .fill{{transform:scale(1);}}
-.ask-tier.recommended.selected{{background:var(--coral-wash);border-color:var(--coral-light);}}
-.ask-tier.recommended.selected .ask-tier-name{{color:var(--coral-deep);}}
-.ask-tier.recommended.selected .ask-tier-radio{{border-color:var(--coral-deep);}}
-.ask-tier.recommended.selected .ask-tier-radio .fill{{background:var(--coral-deep);}}
+/* Sources | Depth, side by side. Both columns use the same .ask-tags/.ask-tag
+   component, so they carry identical weight. Below 640px the grid collapses to
+   one column and the two groups stack — each still a wrapping row of the same
+   buttons, so nothing overflows a narrow viewport. */
+.ask-controls{{display:grid;grid-template-columns:1fr 1fr;gap:20px 28px;margin:20px 0;align-items:start;}}
+@media (max-width:640px){{.ask-controls{{grid-template-columns:1fr;gap:18px;}}}}
 
 .ask-recent-item{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;width:100%;text-align:left;
   font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
@@ -15743,15 +15733,23 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 var COST = {cost_js};
 var selectedTier = "{default_effort}";
 
+// Single-select: clearing every tier before setting this one is what makes
+// Depth radio behavior rather than the multi-select toggle Sources uses,
+// even though both share the .ask-tag component.
 function selectTier(el) {{
-  document.querySelectorAll('.ask-tier').forEach(function(t) {{ t.classList.remove('selected'); }});
-  el.classList.add('selected');
+  document.querySelectorAll('.ask-tag[data-tier]').forEach(function(t) {{
+    t.classList.remove('active');
+    t.setAttribute('aria-checked', 'false');
+  }});
+  el.classList.add('active');
+  el.setAttribute('aria-checked', 'true');
   selectedTier = el.getAttribute('data-tier');
   updateEstimate();
 }}
 
 function toggleSource(el) {{
-  el.classList.toggle('active');
+  var on = el.classList.toggle('active');
+  el.setAttribute('aria-pressed', on ? 'true' : 'false');
 }}
 
 function updateEstimate() {{
@@ -16016,7 +16014,10 @@ async function doAsk() {{
 
   var effort = selectedTier || 'standard';
   var sources = Array.prototype.map.call(
-    document.querySelectorAll('.ask-tag.active'), function(t) {{ return t.getAttribute('data-source'); }}
+    // Scoped to [data-source]: Depth's buttons share the .ask-tag component and
+    // its .active state, so an unscoped '.ask-tag.active' would sweep the
+    // selected depth tier into the sources list.
+    document.querySelectorAll('.ask-tag[data-source].active'), function(t) {{ return t.getAttribute('data-source'); }}
   );
   if (!sources.length) {{ alert('Select at least one source.'); return; }}
 
