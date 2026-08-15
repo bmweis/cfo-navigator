@@ -201,10 +201,10 @@ def test_backfill_falls_back_to_wayback_on_fetch_error(lib, monkeypatch):
     article_id = _seed(lib, content="Old plain text.")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 404"))
-    monkeypatch.setattr(wayback_mod, "find_snapshot",
-                        lambda url: "https://web.archive.org/web/20200101/https://example.com/piece")
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose",
+                        lambda url: ("https://web.archive.org/web/20200101/https://example.com/piece", ""))
     snap_html = "<html><body><article>" + "<p>Archived paragraph content, plenty long enough to pass.</p>" * 15 + "</article></body></html>"
-    monkeypatch.setattr(wayback_mod, "fetch_snapshot", lambda snap_url: snap_html)
+    monkeypatch.setattr(wayback_mod, "fetch_snapshot_verbose", lambda snap_url: (snap_html, ""))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is True
@@ -230,9 +230,9 @@ def test_backfill_wayback_fallback_triggers_on_bot_challenge_not_just_404(lib, m
     page = PageData(title="Just a moment...", content="Checking your browser.",
                     blocked=False, raw_html=challenge_html)
     monkeypatch.setattr(extract_mod, "fetch_page", lambda url: page)
-    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: "https://web.archive.org/web/x")
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: ("https://web.archive.org/web/x", ""))
     snap_html = "<html><body><article>" + "<p>Real archived text, well past the minimum word threshold for sure.</p>" * 15 + "</article></body></html>"
-    monkeypatch.setattr(wayback_mod, "fetch_snapshot", lambda snap_url: snap_html)
+    monkeypatch.setattr(wayback_mod, "fetch_snapshot_verbose", lambda snap_url: (snap_html, ""))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is True
@@ -244,11 +244,15 @@ def test_backfill_wayback_fallback_triggers_on_bot_challenge_not_just_404(lib, m
 def test_backfill_wayback_miss_falls_back_to_original_reason(lib, monkeypatch):
     """No snapshot available at all — must log and return the ORIGINAL
     direct-fetch reason, not a new synthetic 'wayback failed' reason, so
-    the admin failure-reason breakdown stays meaningful."""
+    the admin failure-reason breakdown stays meaningful. The detail DOES
+    get the Wayback outcome appended, though — that's the whole point of
+    the verbose variants (a real production batch needed a manual
+    railway-ssh round-trip to answer 'was Wayback even attempted' before
+    this existed)."""
     article_id = _seed(lib, content="Must survive.")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 404"))
-    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: None)
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False
@@ -262,22 +266,26 @@ def test_backfill_wayback_miss_falls_back_to_original_reason(lib, monkeypatch):
     assert log[0]["status"] == "failure"
     assert log[0]["reason"] == "fetch-error"
     assert log[0]["source"] == "direct"
+    assert log[0]["detail"] == "HTTP 404 (wayback: no snapshot archived)"
 
 
 def test_backfill_wayback_snapshot_fetch_fails_falls_back_to_original_reason(lib, monkeypatch):
     """A snapshot URL was found, but fetching it failed (e.g. archive.org
     429'd on the follow-up request too) — same fallback-to-original-reason
-    behavior as no snapshot at all."""
+    behavior as no snapshot at all, with the fetch failure appended to
+    detail."""
     article_id = _seed(lib, content="Must survive.")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
-    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: "https://web.archive.org/web/x")
-    monkeypatch.setattr(wayback_mod, "fetch_snapshot", lambda snap_url: "")  # fetch failed
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: ("https://web.archive.org/web/x", ""))
+    monkeypatch.setattr(wayback_mod, "fetch_snapshot_verbose", lambda snap_url: ("", "timeout"))  # fetch failed
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False
     assert reason == "fetch-error"
     assert lib.get_article(article_id)["content"] == "Must survive."
+    log = lib.list_content_refetch_log()
+    assert "timeout" in log[0]["detail"]
 
 
 def test_backfill_wayback_snapshot_fails_own_sanity_check(lib, monkeypatch):
@@ -288,14 +296,189 @@ def test_backfill_wayback_snapshot_fails_own_sanity_check(lib, monkeypatch):
     article_id = _seed(lib, content="Must survive.")
     monkeypatch.setattr(extract_mod, "fetch_page",
                         lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
-    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: "https://web.archive.org/web/x")
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: ("https://web.archive.org/web/x", ""))
     thin_html = "<html><body><p>Short.</p></body></html>"
-    monkeypatch.setattr(wayback_mod, "fetch_snapshot", lambda snap_url: thin_html)
+    monkeypatch.setattr(wayback_mod, "fetch_snapshot_verbose", lambda snap_url: (thin_html, ""))
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False
     assert reason == "fetch-error", "the original direct-fetch reason, not a new wayback-specific one"
-    assert lib.get_article(article_id)["content_html"] == ""
+    log = lib.list_content_refetch_log()
+    assert "too-thin" in log[0]["detail"]
+
+
+# ---------------------------------------------------------------------------
+# find_snapshot_verbose / fetch_snapshot_verbose — the enriched-detail
+# variants, added after a real production batch needed a manual railway-ssh
+# round-trip to answer "was Wayback attempted, and what happened."
+# ---------------------------------------------------------------------------
+
+def test_find_snapshot_verbose_success():
+    data = {"archived_snapshots": {"closest": {"url": "https://web.archive.org/web/x"}}}
+    import unittest.mock as mock
+    with mock.patch.object(wayback_mod.requests, "get", return_value=_FakeResponse(200, data)):
+        snap_url, reason = wayback_mod.find_snapshot_verbose("https://example.com/x")
+    assert snap_url == "https://web.archive.org/web/x"
+    assert reason == ""
+
+
+def test_find_snapshot_verbose_no_snapshot():
+    data = {"archived_snapshots": {}}
+    import unittest.mock as mock
+    with mock.patch.object(wayback_mod.requests, "get", return_value=_FakeResponse(200, data)):
+        snap_url, reason = wayback_mod.find_snapshot_verbose("https://example.com/x")
+    assert snap_url is None
+    assert reason == "no snapshot archived"
+
+
+def test_find_snapshot_verbose_429():
+    import unittest.mock as mock
+    with mock.patch.object(wayback_mod.requests, "get", return_value=_FakeResponse(429)):
+        snap_url, reason = wayback_mod.find_snapshot_verbose("https://example.com/x")
+    assert snap_url is None
+    assert reason == "HTTP 429"
+
+
+def test_find_snapshot_verbose_connection_error():
+    """The real production finding: archive.org didn't always 429 — a real
+    batch hit ConnectionResetError/ConnectTimeout instead. Both must be
+    described distinctly, not collapsed into a generic message."""
+    import unittest.mock as mock
+
+    def _raise(*a, **kw):
+        raise requests.exceptions.ConnectionError("Connection reset by peer")
+
+    with mock.patch.object(wayback_mod.requests, "get", side_effect=_raise):
+        snap_url, reason = wayback_mod.find_snapshot_verbose("https://example.com/x")
+    assert snap_url is None
+    assert "connection error" in reason
+
+
+def test_find_snapshot_verbose_timeout():
+    import unittest.mock as mock
+
+    def _raise(*a, **kw):
+        raise requests.exceptions.ConnectTimeout("timed out")
+
+    with mock.patch.object(wayback_mod.requests, "get", side_effect=_raise):
+        snap_url, reason = wayback_mod.find_snapshot_verbose("https://example.com/x")
+    assert snap_url is None
+    assert reason == "timeout"
+
+
+def test_fetch_snapshot_verbose_success():
+    import unittest.mock as mock
+    with mock.patch.object(wayback_mod.requests, "get", return_value=_FakeResponse(200, text="content")):
+        html, reason = wayback_mod.fetch_snapshot_verbose("https://web.archive.org/web/x")
+    assert html == "content"
+    assert reason == ""
+
+
+def test_fetch_snapshot_verbose_failure():
+    import unittest.mock as mock
+    with mock.patch.object(wayback_mod.requests, "get", return_value=_FakeResponse(404)):
+        html, reason = wayback_mod.fetch_snapshot_verbose("https://web.archive.org/web/dead")
+    assert html == ""
+    assert "HTTP 404" in reason
+
+
+def test_find_snapshot_thin_wrapper_matches_verbose():
+    """find_snapshot() must still work as a plain wrapper — the Reader's
+    live-fetch path (_resolve_reader_content) calls it directly and only
+    cares about the URL, not the reason."""
+    import unittest.mock as mock
+    data = {"archived_snapshots": {"closest": {"url": "https://web.archive.org/web/x"}}}
+    with mock.patch.object(wayback_mod.requests, "get", return_value=_FakeResponse(200, data)):
+        assert wayback_mod.find_snapshot("https://example.com/x") == "https://web.archive.org/web/x"
+
+
+# ---------------------------------------------------------------------------
+# Defunct-service domains (e.g. Google's retired FeedBurner proxy) — no
+# fetch or Wayback attempt at all, and permanently excluded from future
+# default-scope backfill runs.
+# ---------------------------------------------------------------------------
+
+def test_backfill_skips_fetch_and_wayback_for_defunct_service_domain(lib, monkeypatch):
+    """A feedproxy.google.com URL must never even attempt a live fetch or a
+    Wayback lookup — both are guaranteed useless (the redirect service
+    itself is gone) and Wayback's own rate-limit budget is scarce enough
+    not to spend on something already known unrecoverable."""
+    article_id = _seed(lib, url="http://feedproxy.google.com/~r/AVc/~3/JjzF7P6BTeU/",
+                       content="Must survive.")
+
+    fetch_called = []
+    wayback_called = []
+    monkeypatch.setattr(extract_mod, "fetch_page", lambda url: fetch_called.append(url) or PageData("", ""))
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose",
+                        lambda url: wayback_called.append(url) or (None, "unreached"))
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is False
+    assert reason == "defunct-service"
+    assert fetch_called == [], "must never attempt a live fetch for a known-defunct-service domain"
+    assert wayback_called == [], "must never attempt Wayback either — both are guaranteed useless"
+
+    row = lib.get_article(article_id)
+    assert row["content"] == "Must survive."
+    assert row["content_html"] == ""
+
+    log = lib.list_content_refetch_log()
+    assert log[0]["status"] == "failure"
+    assert log[0]["reason"] == "defunct-service"
+    assert "feedproxy.google.com" in log[0]["detail"]
+
+
+def test_articles_needing_content_backfill_excludes_defunct_service_by_default(lib):
+    """A defunct-service article must be permanently excluded from the
+    default (non-force) scope — no point burning a fetch attempt on
+    something already known unrecoverable — but still reachable under
+    force=True."""
+    normal_id = _seed(lib, url="https://example.com/normal")
+    defunct_id = _seed(lib, url="http://feedproxy.google.com/~r/x/y/")
+    lib.log_content_refetch_attempt(defunct_id, "failure", reason="defunct-service",
+                                    detail="feedproxy.google.com is a discontinued service")
+
+    default_scope = lib.articles_needing_content_backfill()
+    ids = [r["id"] for r in default_scope]
+    assert normal_id in ids
+    assert defunct_id not in ids
+
+    forced_scope = lib.articles_needing_content_backfill(force=True)
+    forced_ids = [r["id"] for r in forced_scope]
+    assert normal_id in forced_ids
+    assert defunct_id in forced_ids
+
+
+def test_count_content_backfill_remaining_excludes_defunct_service(lib):
+    _seed(lib, url="https://example.com/normal2")
+    defunct_id = _seed(lib, url="http://feedproxy.google.com/~r/z/")
+    assert lib.count_content_backfill_remaining() == 2
+
+    lib.log_content_refetch_attempt(defunct_id, "failure", reason="defunct-service")
+    assert lib.count_content_backfill_remaining() == 1
+
+
+def test_count_structured_content_unaffected_by_defunct_exclusion(lib):
+    """The 'Structured' stat must reflect real content_html population, not
+    get inflated by excluded-but-never-structured defunct-service rows —
+    this was a real bug caught before shipping: done_count used to be
+    derived as total-remaining, and once 'remaining' started excluding
+    defunct-service articles too, that subtraction silently mis-attributed
+    them as 'done'."""
+    a1 = _seed(lib, url="https://example.com/structured")
+    defunct_id = _seed(lib, url="http://feedproxy.google.com/~r/w/")
+    lib.set_article_content_html(a1, "<p>Real content.</p>")
+    lib.log_content_refetch_attempt(defunct_id, "failure", reason="defunct-service")
+
+    assert lib.count_structured_content() == 1
+    assert lib.count_permanently_excluded_content() == 1
+
+
+def test_defunct_service_domain_detection():
+    from linklib.pipeline import _defunct_service_domain
+    assert _defunct_service_domain("http://feedproxy.google.com/~r/x/") == "feedproxy.google.com"
+    assert _defunct_service_domain("http://www.feedproxy.google.com/~r/x/") == "feedproxy.google.com"
+    assert _defunct_service_domain("https://example.com/normal") == ""
 
 
 def test_backfill_direct_success_logs_source_direct(lib, monkeypatch):
@@ -438,3 +621,52 @@ def test_admin_page_no_wayback_note_when_zero(env):
     r = c.get("/admin/library/backfill-content")
     assert r.status_code == 200
     assert "of the structured articles above came from a" not in r.text
+
+
+# ---------------------------------------------------------------------------
+# Admin page — defunct-service pill + exclusion note + correct stat math
+# ---------------------------------------------------------------------------
+
+def test_admin_page_shows_defunct_service_pill_and_exclusion_note(env):
+    lib = env._lib()
+    article_id = _seed(lib, url="http://feedproxy.google.com/~r/AVc/~3/x/")
+    lib.log_content_refetch_attempt(article_id, "failure", reason="defunct-service",
+                                    detail="feedproxy.google.com is a discontinued service")
+    lib.close()
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    assert "Defunct service" in r.text
+    assert "permanently excluded from future runs" in r.text
+    assert "1 article permanently" in r.text or "permanently excluded" in r.text
+
+
+def test_admin_page_no_exclusion_note_when_zero(env):
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    assert "permanently excluded from future runs" not in r.text
+
+
+def test_admin_page_structured_stat_not_inflated_by_defunct_exclusion(env):
+    """Regression test for the real bug caught before shipping: done_count
+    used to be derived as total-remaining, which silently counted an
+    excluded-but-never-structured defunct-service article as 'done' once
+    'remaining' started excluding it too."""
+    lib = env._lib()
+    structured_id = _seed(lib, url="https://example.com/structured-one")
+    defunct_id = _seed(lib, url="http://feedproxy.google.com/~r/y/")
+    lib.set_article_content_html(structured_id, "<p>Real content.</p>")
+    lib.log_content_refetch_attempt(defunct_id, "failure", reason="defunct-service")
+    lib.close()
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    # 2 total, 1 structured, 1 excluded, 0 remaining — "Structured" must
+    # read 1, not 2.
+    import re
+    m = re.search(r'([\d,]+)</div>\s*<div[^>]*>Structured</div>', r.text)
+    assert m is not None
+    assert m.group(1) == "1"
