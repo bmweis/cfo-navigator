@@ -274,7 +274,7 @@ used manual check rather than a per-turn or overhead cost.
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
-| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; empty for the other reasons, which are self-describing) |
+| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback success, the snapshot URL used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` — distinguishes a Wayback-archived-snapshot success from a normal live-fetch success; see the "fetch reliability" note in §3 below) |
 
 ### FP&A Buddy (Ask)
 
@@ -1762,6 +1762,98 @@ notice share a domain by eye. The recent-attempts log table also now links each 
 title to its article URL and shows the `detail` text inline. **Not retroactive**: the
 already-logged rows from that first batch still have an empty `detail` (the exception
 was never captured for them) — the fix only changes what future attempts record.
+
+**Second follow-up — fetch reliability: a real-request investigation found the
+identifiable bot UA doesn't matter, and reshaped the plan around what actually does.**
+The domain-clustering work above surfaced that 17 of 18 failures in a follow-up batch
+traced to 4 domains — `bothsidesofthetable.com`, `continuations.com`, `medium.com`,
+`pointsandfigures.com` — splitting into a suspected UA-blocking problem (403s) and
+genuine link rot (404s, the "Board Effectiveness Tip" series). **Investigated with real
+requests before building anything** (per the standing gate), via `railway ssh` +
+one-off scripts, not assumed:
+- **Browser User-Agent swap: confirmed it does NOT fix these four domains.** Tested one
+  real failing URL per domain with both the old bot UA (`Mozilla/5.0 (compatible;
+  linklib/1.0)`) and a standard Chrome UA. Three of four (`bothsidesofthetable.com`,
+  `medium.com`, `pointsandfigures.com`) returned the byte-identical Cloudflare "Just a
+  moment..." bot-management challenge regardless of which UA was sent — Cloudflare
+  fingerprints the TLS handshake/connection behavior, not the UA string, so no UA swap
+  alone gets past it (defeating that is explicitly out of scope — see
+  `looks_like_bot_challenge()`, unchanged). `continuations.com` returned an identical
+  404 with either UA, confirming its failures are genuine link rot, unrelated to
+  blocking. **Kept as the new default anyway** (`extract._BROWSER_HEADERS`, now used by
+  `fetch_page()` unconditionally rather than only on the auth-cookie path) — no
+  downside, and it may still help against a site doing a naive UA-string check
+  somewhere in the wider ~4,500-article corpus outside this one flagged batch — but
+  the PR states plainly that it's confirmed *not* to solve this specific batch.
+- **Wayback Machine fallback: the request/parsing logic is built and tested, but real
+  end-to-end content retrieval was never verified at build time — archive.org's own
+  Availability API was found to rate-limit (HTTP 429) broadly and unpredictably.**
+  Three rounds of investigation, each ruling out a narrower theory: repeated 429s from
+  Railway's production container even with exponential backoff (~60s waits); the exact
+  same URL request from a completely different residential network (ruling out
+  "Railway's shared egress IP is blocked"); a *never-before-queried* URL, including a
+  totally unrelated well-known page (Wikipedia), from that same residential network,
+  429'd immediately too (ruling out "one URL got hammered by testing"). Conclusion:
+  archive.org's Availability API was rate-limiting for anyone, on any URL, at
+  investigation time — an external condition unrelated to this codebase's approach,
+  IP, or request pattern, that further testing that day wouldn't have resolved.
+  **`linklib/wayback.py` is built defensively around exactly that finding**: every
+  function (`find_snapshot`, `fetch_snapshot`) returns `None`/`""` on ANY failure — a
+  429, a timeout, a malformed response, a network error — and never raises or retries;
+  a retry loop would just add load against a service already observed to be
+  struggling. See the module's own docstring for the full finding, restated at the
+  point anyone would next touch this code.
+
+Both fixes ship in the same PR, with the Wayback side explicitly building to be
+*wired correctly whether or not archive.org happens to be healthy that day* rather
+than a mechanism whose success depends on today's outage clearing:
+- **`linklib/wayback.py`** (new module) — `find_snapshot(url)` queries the
+  Availability API and returns a snapshot URL or `None`; `fetch_snapshot(snapshot_url)`
+  fetches that snapshot's HTML or returns `""`. Both use `extract._BROWSER_HEADERS`
+  and a short, deliberately conservative timeout (`_TIMEOUT = 8`) — this sits on both
+  the backfill's per-article loop AND the Reader's *interactive* live-fetch path
+  (`_resolve_reader_content`), and real Wayback latency is itself unverified pending
+  archive.org's rate limiting clearing, so this stays conservative rather than
+  generous until that's confirmed.
+- **`extract._page_data_from_html(html)`** (new, factored out of `fetch_page()`) —
+  builds a `PageData` (title/content/blocked/published) from already-fetched HTML,
+  so a Wayback snapshot runs through the *exact same* title/content/paywall-detection
+  logic a live fetch would, rather than a second, parallel implementation that could
+  drift from it.
+- **`pipeline.backfill_article_content()`** now tries Wayback as a last resort after
+  ANY direct-fetch failure — deliberately not scoped to 404 only, since a stubborn
+  403 a UA swap couldn't get past may still have a usable archived snapshot (the
+  Internet Archive's own crawler generally isn't subject to the same per-request bot
+  gate a generic scraper hits). The Wayback snapshot has to clear the identical
+  `assess_extraction_quality()` bar a live page would (so an archived paywall preview
+  still fails, exactly as a live one would). If Wayback comes up empty at any stage —
+  no snapshot, the snapshot fails to fetch, or it fails the sanity check — the
+  function logs and returns the **original** direct-fetch reason/detail, never a
+  synthetic "wayback also failed" reason, so the admin failure-reason breakdown stays
+  meaningful and comparable to a pre-Wayback run.
+- **`content_refetch_log.source`** (new column, migration, default `'direct'`) —
+  distinguishes a Wayback-sourced success from a direct-fetch success, since a
+  Wayback-archived version can be stale or differ from what the live page shows
+  today. `/admin/library/backfill-content` shows a "via Wayback" badge on the
+  relevant log rows and a count of how many currently-structured articles are
+  running on an archived copy (`Library.count_wayback_content()`, same latest-
+  attempt-per-article de-dupe as the failure-count methods).
+- **`_resolve_reader_content`** (the Reader's live-fetch path) gets the identical
+  fallback for consistency — an unsaved Feed item hitting a dead/blocked link gets
+  the same benefit a backfill run would. The resolved dict gains `content_via`
+  (`'cache' | 'direct' | 'wayback'`), and the reader pane shows a coral notice
+  ("The live page couldn't be reached, so this is a Wayback Machine archived
+  copy...") whenever `content_via === 'wayback'`, so a reader isn't confused by
+  content that might not match what's live today. **Added latency on this
+  interactive path from the Wayback fallback is unverified**, for the same
+  archive.org-rate-limiting reason the content-retrieval verification itself is —
+  flagged explicitly rather than silently shipped as "confirmed fine."
+- **Verification of "real content actually comes back" is deferred to Brian**, via
+  the backfill tool's own existing small-batch-first convention
+  (`/admin/library/backfill-content`, Limit field), once archive.org's rate limiting
+  clears — not something this PR claims to have confirmed itself. This was an
+  explicit, discussed trade-off (see CLAUDE.md's matching bullet for the full
+  decision point), not an oversight.
 
 ### Auth: three tiers, one cookie
 
