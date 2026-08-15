@@ -14324,6 +14324,13 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
                              # fetch's own extract_reader_html() output. A cached
                              # article's plain-text `content` (pre-backfill) can't
                              # carry images/links either way.
+    content_via = "cache"   # 'cache' | 'direct' | 'wayback' — surfaced to the
+                             # reader pane so a Wayback-archived read is visibly
+                             # distinguishable from the live page, the same
+                             # reasoning content_refetch_log's `source` column
+                             # exists for the backfill tool's durable log (see
+                             # linklib.wayback's module docstring). Not persisted
+                             # anywhere — this is a live read, not a stored one.
 
     if cached_content_html:
         # Phase 5b backfill: this article was reprocessed and has real
@@ -14344,11 +14351,46 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
             if structured:
                 content = structured
                 is_structured = True
+                content_via = "direct"
             else:
                 content = page.content or ""
+                if content:
+                    content_via = "direct"
         except Exception:
             title = cached_title or url
             content = ""
+
+        if not content:
+            # Direct fetch failed outright (bot-block, dead link, timeout —
+            # any reason) — last-resort Wayback fallback, same mechanism the
+            # backfill tool uses (linklib.wayback). Best-effort: any Wayback
+            # failure (including the 429 rate-limiting the Phase 5b follow-up
+            # investigation found archive.org returns unpredictably — see
+            # linklib.wayback's module docstring) just falls through to the
+            # normal "Content could not be extracted" empty state below,
+            # exactly as if this fallback didn't exist. Kept on
+            # linklib.wayback's short timeout deliberately: this sits on an
+            # interactive request, not a background job, and added latency
+            # here is unverified pending archive.org's own rate limiting
+            # clearing (see CLAUDE.md's Phase 5b follow-up note) — stays
+            # conservative rather than generous until that's confirmed.
+            from linklib import wayback as _wayback
+            from linklib.extract import _page_data_from_html
+            snap_url = _wayback.find_snapshot(url)
+            if snap_url:
+                snap_html = _wayback.fetch_snapshot(snap_url)
+                if snap_html:
+                    snap_page = _page_data_from_html(snap_html)
+                    structured = extract_reader_html(snap_html, snap_url)
+                    if structured:
+                        content = structured
+                        is_structured = True
+                        content_via = "wayback"
+                    elif snap_page.content:
+                        content = snap_page.content
+                        content_via = "wayback"
+                    if content and (not title or title == url):
+                        title = snap_page.title or title
 
     if content:
         if is_structured:
@@ -14377,6 +14419,7 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
         "reading_minutes": max(1, round(word_count / 225)) if word_count else 0,
         "body_html": body_html,
         "has_content": bool(content),
+        "content_via": content_via,
     }
 
 
@@ -15102,6 +15145,15 @@ function rrRenderArticle(d) {{
     (isRl ? '&#10003; Read later' : '&#128204; Read later') + '</button>';
   var body = d.has_content ? d.body_html :
     '<p style="color:var(--muted);">Content could not be extracted. <a href="' + rrEsc(d.url) + '" target="_blank" rel="noopener">Open original &rarr;</a></p>';
+  // The live page couldn't be fetched directly, so this came from a Wayback
+  // Machine snapshot instead — surfaced visibly (not just logged) since an
+  // archived copy can be stale or differ from what the live page shows
+  // today. See linklib.wayback's module docstring for the fallback itself.
+  var waybackNote = (d.has_content && d.content_via === 'wayback')
+    ? '<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:8px;' +
+      'padding:8px 12px;margin-bottom:16px;font-size:12.5px;color:var(--navy);">' +
+      'The live page couldn&rsquo;t be reached, so this is a Wayback Machine archived copy&mdash;it may be stale or differ from the current page.</div>'
+    : '';
   rrFindMatches = []; rrFindIndex = -1; rrFindBodyHtml = '';
   pane.innerHTML =
     '<div class="rr-reader-header">' +
@@ -15130,6 +15182,7 @@ function rrRenderArticle(d) {{
       '<div class="rr-reader-category">' + rrEsc(d.category) + '</div>' +
       '<div class="rr-reader-title">' + rrEsc(d.title) + '</div>' +
       '<div class="rr-reader-byline">' + byline + '</div>' +
+      waybackNote +
       '<div class="rr-reader-body-text" id="rr-reader-body-text" style="--rr-fs:' + rrFsSizes[rrFsStep] + 'px;">' + body + '</div>' +
     '</div>';
   // Mobile fix: opening an article used to leave #rr-reader wherever it
@@ -21646,6 +21699,7 @@ def admin_backfill_content(request: Request):
         total_articles = lib.count()
         failure_counts = lib.content_refetch_failure_counts()
         failure_domains = lib.content_refetch_failure_domains(limit=15)
+        wayback_count = lib.count_wayback_content()
         log_rows = lib.list_content_refetch_log(limit=50)
     finally:
         lib.close()
@@ -21714,6 +21768,14 @@ def admin_backfill_content(request: Request):
     def _log_row(r):
         color = "#16a34a" if r["status"] == "success" else "#b91c1c"
         label = "Success" if r["status"] == "success" else _esc(r.get("reason") or "failure")
+        # A Wayback-sourced success is visibly distinguished from a normal
+        # direct fetch (never just identical-looking rows) — see
+        # linklib.wayback's module docstring for why this matters: a
+        # Wayback-archived version can be stale or differ from the live
+        # page, worth being able to spot later.
+        if r["status"] == "success" and (r.get("source") or "direct") == "wayback":
+            label += (' <span style="background:var(--coral-wash);color:var(--navy);'
+                      'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Wayback</span>')
         title = _esc(r.get("article_title") or r.get("article_url") or f'#{r["article_id"]}')
         url = r.get("article_url") or ""
         title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
@@ -21764,6 +21826,8 @@ def admin_backfill_content(request: Request):
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Remaining</div>
   </div>
 </div>
+
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 20px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch&mdash;the live page couldn&rsquo;t be reached for those. A snapshot can be stale or differ from what the current page shows; look for the &ldquo;via Wayback&rdquo; badge in the attempts log below to spot which ones.</p>' if wayback_count else ''}
 
 <div id="poll-container">{status_html}</div>
 
