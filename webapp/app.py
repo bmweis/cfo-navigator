@@ -17340,7 +17340,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Thought Leadership / Game", ["thought_leadership", "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
-                            "content_refetch_log"]),
+                            "content_refetch_log", "url_correction_log"]),
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "enrichment_cost", "manual_overhead",
                                   "field_reviews", "narrative_review_log", "matchmaker_questions"]),
@@ -21891,11 +21891,11 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Remaining</div>
   </div>
   <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:26px;font-weight:700;color:#b45309;font-family:var(--font-head);">{needs_review_count:,}</div>
+    <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{needs_review_count:,}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Needs review</div>
   </div>
   <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:26px;font-weight:700;color:#6b7280;font-family:var(--font-head);">{excluded_count:,}</div>
+    <div style="font-size:26px;font-weight:700;color:var(--muted);font-family:var(--font-head);">{excluded_count:,}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Defunct service</div>
   </div>
 </div>
