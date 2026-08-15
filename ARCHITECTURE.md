@@ -1561,7 +1561,9 @@ other retired-route call in this doc). The three panes:
   cleanup, Remove content, etc.) — the Reader is a reading surface, not a
   curation one. Save-to-library (`POST /feed/save`) and the Read Later
   toggle (`POST /feed/read-later`) are the only actions still exposed, both
-  reused verbatim.
+  reused verbatim. (**Tags alone came back in Phase 5c** — a deliberate,
+  narrow exception documented below. Delete/archive did not, and this
+  bullet still governs them.)
 - The old bare paste-a-URL empty state (`GET /read` with no `id`/`url`) is
   gone — the merged page's list-driven UX (click a row, the reader pane
   loads it) replaces that need. There's no standalone way to read an
@@ -1678,6 +1680,92 @@ In the forced-focus state, `.rr-shell.rr-focus-mode .rr-rail{display:none}`
 additionally hides the rail (untouched by desktop focus mode, which only
 collapses the list pane to a sliver) — without it, "distraction-free" on
 mobile would still mean scrolling past a full nav rail before the article.
+
+### Reader tag editing (Phase 5c)
+
+A deliberate, **tags-only** exception to the merge's "no inline management"
+rule above. Delete/archive stay admin-only and unchanged; this is not a
+precedent for bringing the rest back.
+
+**Almost none of this is new backend.** The investigation that opened the
+phase found both write paths already present and simply unreachable:
+
+- `POST /library/{article_id}/tags` (JSON or form body, `_require_api`,
+  writes an `archive_audit_log` row) survived Phase 5 **with zero callers** —
+  the old Archive page's "Edit tags" button was removed, its endpoint wasn't.
+  The reader pane's editor calls exactly this route rather than adding a
+  second one.
+- `POST /feed/save` **already accepted a `tags` field** and passed it to
+  `ingest_url`. What was missing was a UI that sent anything useful: both
+  save paths collected tags through a blocking `window.prompt()`, which is
+  neither inline nor able to autocomplete. Its only change here is returning
+  `{"ok", "id", "tags"}` instead of `{"ok"}`, so the reader can switch into
+  its saved state (and know where to POST later edits) without a reload.
+
+`/admin/library`'s two tag tools were confirmed to be **vocabulary-level, not
+per-article**: "Tag cleanup" (`/admin/library/tags`) merges/renames/deletes a
+tag across the whole library (`Library.rename_tag`/`delete_tag`), and
+"Tagging style" (`/admin/library/tag-style`) learns Brian's tagging style to
+feed the enrichment prompt. Neither edits one article's tags, so nothing here
+duplicates them — they read and write the same `articles.tags_json` through
+the same `Library` methods.
+
+**Propagation matches what those Admin tools already do.**
+`Library.update_tags` hard-replaces the list (stripped, de-duplicated,
+sorted) and writes `tags_text`, so the `articles_au` FTS trigger reindexes
+automatically — no manual reindex, same as rename/delete. Tags are also part
+of the embedded document text (`linklib/embeddings.py::document_text`), and,
+exactly like rename/delete, nothing re-embeds inline: `article_embeddings`'
+content hash means the next `scripts/embed_backfill.py` run picks up the
+changed text. Vector search is eventually consistent by design.
+
+**Surfaces:**
+
+- **Save-time, on a Feed row.** "+ Save" expands `.rr-row-tagform` in place
+  (an input backed by the shared datalist, plus Save/Cancel) instead of
+  opening a prompt. Tags stay optional — committing an empty input saves
+  exactly as the old one-click action did. The form is `flex:0 0 100%` inside
+  a now-`flex-wrap:wrap` `.rr-row` so it takes its own line; as a plain third
+  flex child it became a third column and squeezed the row's title into a
+  sliver (caught in live verification, guarded by a test).
+- **Inline editor in the reader pane**, for already-saved articles only.
+  Collapsed by default: the toolbar shows just a tag glyph with a count
+  badge, modelled on Instapaper's own reader-toolbar tag icon. Clicking it
+  opens `.rr-tag-panel` (sticky under the header, same treatment as the find
+  bar) with removable chips and an autocomplete input. **Every add/remove
+  writes through immediately** — no separate submit step. Only `#rr-tag-chips`
+  and `#rr-tag-status` re-render, never the input, so focus survives a save
+  and tags can be typed one after another. Chip removal passes an index, not
+  the tag text, so an apostrophe in a tag name can't break out of the inline
+  handler. `rrSyncRowTags` keeps the Saved-view row's own chips in step, so
+  the two panes never disagree without a reload.
+- **Autocomplete** is a native `<datalist id="rr-tag-vocab">` built from
+  `Library.all_tags()` — the same vocabulary Tag cleanup curates, and the
+  same `<datalist>` pattern the overhead-category admin inputs already use
+  (no JS autocomplete widget, no new dependency). `all_tags()` is now read
+  **unconditionally** in the `/read` route rather than only inside the
+  `view == "saved"` branch, since a Feed item can be tagged at save time.
+
+**`_resolve_reader_content` now resolves a url to an existing row.** A Feed
+or Read Later row carries only a url, so an article already in the library
+used to open as unsaved and offer "+ Save" again — which would have left the
+inline editor unreachable for exactly the "any Feed item that's been saved"
+case this phase is meant to cover. It now falls back to
+`SELECT * FROM articles WHERE url=?` (url is the natural key) and surfaces
+that row's `id` and `tags`. **A url-matched row still gets a live fetch for
+its content**, deliberately: only an explicit by-id open prefers the DB's
+cached copy, because cached `content` is plain text from ingest time and
+using it here would silently strip images and links from a Feed item that
+currently reads with them intact (the known cached-content gap noted in the
+follow-up pass above).
+
+**One mobile bug, found only by live verification.** Focusing the tag input
+let the browser scroll the document far enough to clip the panel's first chip
+row — and the whole toolbar — off the top of a portrait viewport: the panel
+opened somewhere the user couldn't fully see it, the same shape as the Phase 5
+"tapping an article does nothing" bug. Fixed with `focus({preventScroll:true})`
+plus an explicit `pane.scrollIntoView`, which moves only the document and
+never the pane's own `scrollTop`, so a part-read article keeps its position.
 
 ### Auth: three tiers, one cookie
 
