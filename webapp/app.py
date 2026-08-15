@@ -54,6 +54,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.overhead_csv import parse_overhead_csv
+from linklib.manual_review_csv import parse_manual_review_corrections_csv
 from linklib.pipeline import ingest_url
 from linklib import backup
 # webapp/thought_leadership_data.py is no longer imported here — the four
@@ -17339,7 +17340,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Thought Leadership / Game", ["thought_leadership", "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
-                            "content_refetch_log"]),
+                            "content_refetch_log", "url_correction_log"]),
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "enrichment_cost", "manual_overhead",
                                   "field_reviews", "narrative_review_log", "matchmaker_questions"]),
@@ -21690,7 +21691,7 @@ def _content_backfill_job(limit: int, force: bool) -> None:
 
 
 @app.get("/admin/library/backfill-content", response_class=HTMLResponse)
-def admin_backfill_content(request: Request):
+def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -21699,12 +21700,20 @@ def admin_backfill_content(request: Request):
         total_articles = lib.count()
         done_count = lib.count_structured_content()
         excluded_count = lib.count_permanently_excluded_content()
+        needs_review_count = lib.count_articles_needing_manual_review()
+        needs_review_rows = lib.list_articles_needing_manual_review(limit=500)
         failure_counts = lib.content_refetch_failure_counts()
         failure_domains = lib.content_refetch_failure_domains(limit=15)
         wayback_count = lib.count_wayback_content()
+        migration_count = lib.count_migration_content()
         log_rows = lib.list_content_refetch_log(limit=50)
     finally:
         lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;padding:10px 16px;'
+                     f'font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>' if error else '')
 
     job = _job_get("content_backfill")
     running = job.get("running", False)
@@ -21777,6 +21786,9 @@ def admin_backfill_content(request: Request):
         if r["status"] == "success" and (r.get("source") or "direct") == "wayback":
             label += (' <span style="background:var(--coral-wash);color:var(--navy);'
                       'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Wayback</span>')
+        elif r["status"] == "success" and (r.get("source") or "direct") == "migration":
+            label += (' <span style="background:#dbeafe;color:#1d4ed8;'
+                      'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Migration</span>')
         title = _esc(r.get("article_title") or r.get("article_url") or f'#{r["article_id"]}')
         url = r.get("article_url") or ""
         title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
@@ -21807,13 +21819,65 @@ def admin_backfill_content(request: Request):
 
     disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
 
+    def _review_row(r):
+        labels = {"paywall": "Paywall", "bot-challenge": "Bot challenge",
+                  "too-thin": "Too thin", "fetch-error": "Fetch error"}
+        reason_label = _esc(labels.get(r.get("reason") or "", r.get("reason") or "unknown"))
+        detail = _esc(r.get("detail") or "")
+        reason_html = f'{reason_label}<div style="font-size:11.5px;color:var(--muted);margin-top:2px;">{detail}</div>' if detail else reason_label
+        title = _esc(r.get("title") or f'article #{r["article_id"]}')
+        url = r.get("current_url") or ""
+        title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
+                      if url else title)
+        last = _esc((r.get("last_attempted_at") or "")[:19].replace("T", " "))
+        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}'
+                f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-all;">{_esc(url)}</div></td>'
+                f'<td style="padding:7px 12px;font-size:13px;">{reason_html}</td>'
+                f'<td style="padding:7px 12px;font-size:13px;text-align:center;">{r.get("attempt_count", 0)}</td>'
+                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{last}</td></tr>')
+
+    manual_review_html = ""
+    if needs_review_rows:
+        review_rows_html = "".join(_review_row(r) for r in needs_review_rows)
+        manual_review_html = f"""
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:20px 0;">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div style="font-weight:600;font-size:14px;">Needs manual review ({needs_review_count:,})</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Failed {Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD}+ times in a row&mdash;excluded from automatic retry, but NOT considered permanently dead (unlike Defunct service below). Export, fill in a corrected URL for any you can find, and re-import to fix and requeue them.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <a href="/admin/library/backfill-content/manual-review/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>
+    </div>
+  </div>
+  <form method="post" action="/admin/library/backfill-content/manual-review/import/preview" enctype="multipart/form-data"
+        style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg);">
+    <input type="file" name="file" accept=".csv,text/csv" required
+      style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:#fff;">
+    <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Preview import</button>
+    <span style="font-size:12px;color:var(--muted);">Re-upload the exported CSV with a <code>corrected_url</code> column filled in. Nothing is saved until you confirm on the preview screen.</span>
+  </form>
+  <div style="overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last failure</th>
+      <th style="padding:7px 12px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Attempts</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last attempt</th>
+    </tr></thead>
+    <tbody>{review_rows_html}</tbody>
+  </table>
+  </div>
+</div>"""
+
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Reader content backfill</h1>
+{banner}{error_banner}
 <p style="color:var(--muted);margin:-6px 0 6px;">Re-fetches already-saved articles so the Reader can show real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as.</p>
 <p style="color:var(--muted);margin:0 0 20px;">A failed re-fetch never touches an article&rsquo;s existing content&mdash;it&rsquo;s only logged. Rate-limited (~{_CONTENT_BACKFILL_DELAY_SEC}s between requests) and safe to stop and resume; a re-run only touches articles that still need it.</p>
 
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px;margin-bottom:20px;">
   <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
     <div style="font-size:26px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{total_articles:,}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Total articles</div>
@@ -21826,9 +21890,18 @@ def admin_backfill_content(request: Request):
     <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{remaining:,}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Remaining</div>
   </div>
+  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{needs_review_count:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Needs review</div>
+  </div>
+  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:26px;font-weight:700;color:var(--muted);font-family:var(--font-head);">{excluded_count:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Defunct service</div>
+  </div>
 </div>
 
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch&mdash;the live page couldn&rsquo;t be reached for those. A snapshot can be stale or differ from what the current page shows; look for the &ldquo;via Wayback&rdquo; badge in the attempts log below to spot which ones.</p>' if wayback_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{migration_count:,} of the structured articles above came from a <strong>known domain migration</strong> (e.g. a blog that relocated to a new host), not the article&rsquo;s originally saved URL&mdash;look for the &ldquo;via Migration&rdquo; badge in the attempts log below.</p>' if migration_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service (e.g. Google&rsquo;s retired FeedBurner proxy), so re-fetching can never succeed. Not counted in Remaining above. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry them anyway.</p>' if excluded_count else ''}
 
 <div id="poll-container">{status_html}</div>
@@ -21855,6 +21928,7 @@ def admin_backfill_content(request: Request):
   </form>
 </div>
 
+{manual_review_html}
 {failures_html}
 {domains_html}
 {log_html}
@@ -21924,6 +21998,213 @@ def admin_backfill_content_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
     return JSONResponse(_job_get("content_backfill"))
+
+
+@app.get("/admin/library/backfill-content/manual-review/export.csv")
+def admin_backfill_content_manual_review_export(request: Request):
+    """CSV of every needs-manual-review article, article_id-keyed (the
+    stable match key — the URL itself is what's being corrected, so it
+    can't be the key) with an empty corrected_url column to fill in and
+    re-upload via the Preview import form. See linklib.manual_review_csv's
+    module docstring for the round-trip's design."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    import csv
+    import io
+
+    lib = _lib()
+    try:
+        rows = lib.list_articles_needing_manual_review(limit=100000)
+    finally:
+        lib.close()
+
+    def _csv_safe(val) -> str:
+        # Same formula-injection guard as /admin/ask-report/export.csv — a
+        # title is asker/enrichment-derived text, could start with any of
+        # these by accident.
+        s = str(val)
+        return "'" + s if s and s[0] in ("=", "+", "-", "@", "\t", "\r") else s
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["article_id", "title", "current_url", "reason", "attempt_count",
+                     "last_attempted_at", "corrected_url"])
+    for r in rows:
+        writer.writerow([
+            r["article_id"], _csv_safe(r.get("title") or ""), r.get("current_url") or "",
+            r.get("reason") or "", r.get("attempt_count") or 0, r.get("last_attempted_at") or "",
+            "",  # corrected_url — blank for the admin to fill in
+        ])
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="manual-review-{stamp}.csv"'},
+    )
+
+
+@app.post("/admin/library/backfill-content/manual-review/import/preview")
+async def admin_backfill_content_manual_review_import_preview(request: Request, file: UploadFile = File(...)):
+    """Parses the uploaded corrections CSV and shows what would change —
+    nothing is written to the DB here. Valid corrections are round-tripped
+    as hidden fields in a confirm form (same state-carry convention as
+    /admin/overhead-spend/csv/preview — this app has no server-side session
+    store) that posts to the /commit route below."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    data = await file.read()
+
+    lib = _lib()
+    try:
+        review_rows = lib.list_articles_needing_manual_review(limit=100000)
+    finally:
+        lib.close()
+    current_urls = {r["article_id"]: (r.get("current_url") or "") for r in review_rows}
+
+    try:
+        updates, skipped, errors = parse_manual_review_corrections_csv(data, current_urls)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/library/backfill-content?error={quote(str(e))}", status_code=303)
+
+    if not updates and not skipped and not errors:
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error={quote('The file had no data rows to import.')}", status_code=303)
+
+    hidden_fields = "".join(
+        f'<input type="hidden" name="article_id" value="{u["article_id"]}">'
+        f'<input type="hidden" name="corrected_url" value="{_esc(u["corrected_url"])}">'
+        for u in updates
+    )
+
+    updates_table_rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;">#{u['article_id']}</td>
+  <td style="padding:8px 10px;font-size:12px;color:var(--muted);word-break:break-all;">{_esc(u['current_url'])}</td>
+  <td style="padding:8px 10px;font-size:12px;word-break:break-all;">{_esc(u['corrected_url'])}</td>
+</tr>""" for u in updates) or (
+        '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--muted);">No valid corrections found.</td></tr>')
+
+    skipped_section = ""
+    if skipped:
+        skipped_rows_html = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{r['line']}</td>
+  <td style="padding:8px 10px;font-size:13px;">#{r['article_id']}</td>
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{_esc(r['reason'])}</td>
+</tr>""" for r in skipped)
+        skipped_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or unchanged&mdash;not an error, nothing to do.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:400px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why</th>
+    </tr></thead>
+    <tbody>{skipped_rows_html}</tbody>
+  </table>
+</div>"""
+
+    errors_section = ""
+    if errors:
+        errors_rows_html = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{r['line']}</td>
+  <td style="padding:8px 10px;font-size:13px;font-family:monospace;">{_esc(r['raw'])}</td>
+  <td style="padding:8px 10px;font-size:13px;color:#b91c1c;">{_esc(r['reason'])}</td>
+</tr>""" for r in errors)
+        errors_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be imported&mdash;fix them in your CSV and re-upload if needed.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:480px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Raw row</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why it was skipped</th>
+    </tr></thead>
+    <tbody>{errors_rows_html}</tbody>
+  </table>
+</div>"""
+
+    confirm_button = (
+        f'<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">'
+        f'Confirm &amp; apply {len(updates)} correction{"s" if len(updates) != 1 else ""}</button>'
+        if updates else
+        '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to apply</button>'
+    )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/library/backfill-content" style="font-size:13px;color:var(--muted);">&larr; Reader content backfill</a></p>
+<h1>Preview URL corrections</h1>
+<p style="color:var(--muted);margin:0 0 18px;">Nothing has been saved yet. Review the rows below, then confirm to apply them.</p>
+
+<h3 style="font-size:14px;margin:0 0 10px;">Ready to apply ({len(updates)})</h3>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+  <table style="width:100%;border-collapse:collapse;min-width:560px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Current URL</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Corrected URL</th>
+    </tr></thead>
+    <tbody>{updates_table_rows}</tbody>
+  </table>
+</div>
+
+<form method="post" action="/admin/library/backfill-content/manual-review/import/commit" style="margin:14px 0 8px;display:flex;gap:10px;">
+  {hidden_fields}
+  {confirm_button}
+  <a href="/admin/library/backfill-content" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+</form>
+{skipped_section}
+{errors_section}
+</div>"""
+    return HTMLResponse(_page("Preview URL corrections—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/library/backfill-content/manual-review/import/commit")
+async def admin_backfill_content_manual_review_import_commit(request: Request):
+    """Applies the corrections the preview step showed, one
+    Library.apply_article_url_correction call per row (which itself writes
+    the url_correction_log trace and verifies the write actually landed).
+    Re-validates the article id/url pairing against the current DB state
+    rather than trusting the hidden fields blindly, same discipline as
+    /admin/overhead-spend/csv/commit — one bad row is skipped and counted,
+    not allowed to abort the batch."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    article_ids = form.getlist("article_id")
+    corrected_urls = form.getlist("corrected_url")
+
+    if not article_ids:
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error={quote('No corrections to apply—upload a CSV first.')}",
+            status_code=303)
+
+    lib = _lib()
+    applied = 0
+    failures: list[str] = []
+    try:
+        for i, raw_id in enumerate(article_ids):
+            try:
+                article_id = int(raw_id)
+            except ValueError:
+                failures.append(f"row {i + 1}: invalid article id")
+                continue
+            new_url = corrected_urls[i] if i < len(corrected_urls) else ""
+            if not new_url:
+                failures.append(f"row {i + 1}: missing corrected_url")
+                continue
+            if lib.apply_article_url_correction(article_id, new_url, source="csv-import"):
+                applied += 1
+            else:
+                failures.append(f"row {i + 1}: article #{article_id} not found")
+    finally:
+        lib.close()
+
+    msg = f'Applied {applied} correction{"s" if applied != 1 else ""}.'
+    if failures:
+        shown = "; ".join(failures[:5]) + (" …" if len(failures) > 5 else "")
+        msg += f' {len(failures)} row(s) failed: {shown}'
+    return RedirectResponse(f"/admin/library/backfill-content?msg={quote(msg)}", status_code=303)
 
 
 def _backup_status_banner(backup_rows: list[dict]) -> str:

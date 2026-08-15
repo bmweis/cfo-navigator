@@ -770,6 +770,76 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `count_structured_content()` query instead of a derived subtraction, and
   a regression test written for exactly this failure mode. See
   ARCHITECTURE.md's fetch-reliability sub-section for the full write-up.
+- **Phase 5b follow-up #2 — retry backoff (a distinct, non-permanent
+  exclusion tier) + manual URL correction, plus a known-domain-migration
+  fetch tier tried before Wayback.** Everything that wasn't
+  `defunct-service` stayed in default-scope retry forever — every future
+  batch kept re-attempting a Cloudflare-blocked domain or a genuinely dead
+  link, burning time and Wayback's scarce rate-limit budget. Two
+  investigation gates ran first, per Brian's ask: confirmed no existing
+  admin capability lets `articles.url` be edited anywhere (unlike
+  `tools`/`benchmarks`/`thought_leadership`/`communities`, which all have
+  this), and confirmed `content_refetch_log` is genuinely one-row-per-attempt
+  with no existing raw attempt-count query. **"Needs manual review" is a
+  second, deliberately separate exclusion tier from `defunct-service` — not
+  merged into it**: unlike a confirmed-dead service, a Cloudflare block can
+  lift and a 404 can be relinked, so this tier isn't permanent.
+  `Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD = 3` (Brian's own assumption,
+  flagged rather than silently picked) — an article failing 3+ times in a
+  row (reason != `defunct-service`), counted *since its last URL
+  correction* (or ever, if uncorrected), is pulled from default-scope
+  auto-retry; `force=True` still reaches it. Deliberately query-time-derived
+  (`Library._manual_review_article_ids()`, a CTE), not its own stored
+  `content_refetch_log` reason, since "3rd failure in a row" is a judgment
+  about accumulated history, not a fact from a single attempt — so the
+  admin page's needs-review list shows the article's REAL last failure
+  reason (e.g. `bot-challenge`), not a synthetic tag.
+  `Library.apply_article_url_correction()` updates `articles.url` and
+  writes a durable `url_correction_log` trace (per the one-off-fix rule
+  above) — it never touches `content_refetch_log` itself; the reset falls
+  naturally out of `_manual_review_article_ids()`'s cutoff logic (only
+  counting attempts after the correction), so the full pre-correction
+  failure history stays intact and non-destructive. The correction
+  mechanism is an export/import CSV round trip on `/admin/library/
+  backfill-content` (`linklib/manual_review_csv.py`, mirroring
+  `linklib/overhead_csv.py`'s shape and the pre-existing overhead-spend
+  preview-then-confirm route pair/state-carry convention): export is keyed
+  by the stable `article_id` (the URL itself is what's changing) with a
+  blank `corrected_url` column; import previews a three-way split
+  (valid updates / skipped blank-or-unchanged / errors for a malformed URL
+  or unrecognized `article_id`) with nothing written until a separate
+  confirm step. Also added a known-domain-migration fetch tier
+  (`linklib/domain_migration.py`, tried by
+  `linklib.pipeline._finish_backfill_after_direct_failure` BEFORE the
+  pre-existing Wayback fallback): a small hand-curated
+  `_DOMAIN_MIGRATIONS` map (`pointsandfigures.com` →
+  `jeffreycarter.substack.com`, `avc.com` → `avc.xyz`), same
+  live-confirmation discipline as `_DEFUNCT_SERVICE_DOMAINS` — a real
+  domain-count diagnostic against the full production archive (not a test
+  batch) found 20 `pointsandfigures.com` articles (2 already showing a
+  logged Cloudflare-consistent failure) and 55 `avc.com` articles (0 logged
+  failures yet, since most hadn't been attempted in a batch since the
+  fetch-reliability work landed). Reuses the exact Exa integration FP&A
+  Buddy's `retrieve_exa()` already uses, restricted to the one destination
+  domain, searching for the article's stored title — a hit is only accepted
+  if its own title plausibly matches (word-overlap, not exact string), and
+  the candidate still has to clear `assess_extraction_quality()` like any
+  other fetch. **Explicitly not a general search fallback** — trusted only
+  because the destination domain is already confirmed as that specific
+  source's legitimate continuation. Confirmed before building that this
+  can't conflict with the retry-cap attempt-counting design: the migration
+  tier still writes exactly one `content_refetch_log` row per
+  `backfill_article_content()` call (`source='migration'` on success; on
+  any miss it logs nothing and falls through to the existing Wayback path,
+  which does its own single log — never a double-log). Admin page's stats
+  grid grew from 3 to 5 tiles (Total/Structured/Remaining/Needs
+  review/Defunct service), CSS switched from a fixed `repeat(3,1fr)` to
+  `repeat(auto-fit,minmax(130px,1fr))` per the standing CSS-Grid-blowout
+  lesson (Phase P) rather than hardcoding a new column count. `defunct-
+  service` logic and its permanent exclusion are untouched — the
+  pre-existing `tests/test_fetch_reliability.py` suite passes unmodified as
+  the regression check. See ARCHITECTURE.md's Reader content-structure
+  backfill section for the full write-up.
 - **Thought Leadership Admin CRUD, Phase 1 — the four `/thought-leadership`
   columns (Writing, Speaking & Events, Podcasts, Press) are now admin-managed,
   not hardcoded.** Phase 0 investigation found all four columns reading from
