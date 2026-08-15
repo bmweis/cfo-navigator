@@ -36,6 +36,7 @@ from linklib.db import Article, Library
 from linklib import pipeline as pl
 from linklib.extract import PageData, assess_extraction_quality, looks_like_bot_challenge, _describe_fetch_error
 from linklib import extract as extract_mod
+from linklib import wayback as wayback_mod
 
 
 @pytest.fixture
@@ -131,6 +132,10 @@ def test_backfill_article_content_dead_url_never_destructive(lib, monkeypatch):
     content/content_html must survive completely unchanged."""
     article_id = _seed(lib, content="Existing content that must survive.")
     monkeypatch.setattr(extract_mod, "fetch_page", lambda url: PageData(title="", content="", fetch_error="HTTP 404"))
+    # Explicit, deterministic "no Wayback fallback available" — not relying
+    # on the test environment's network being unreachable. See
+    # test_fetch_reliability.py for the dedicated Wayback-fallback tests.
+    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: None)
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False
@@ -192,6 +197,7 @@ def test_backfill_article_content_paywall_failure_preserves_existing(lib, monkey
     page = PageData(title="Paywalled", content="Subscribe to read the rest of this post.",
                     blocked=True, raw_html=html)
     monkeypatch.setattr(extract_mod, "fetch_page", lambda url: page)
+    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: None)
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False
@@ -212,6 +218,7 @@ def test_backfill_article_content_bot_challenge_failure_dedicated(lib, monkeypat
     page = PageData(title="Just a moment...", content="Checking your browser before accessing this site.",
                     blocked=False, raw_html=html)
     monkeypatch.setattr(extract_mod, "fetch_page", lambda url: page)
+    monkeypatch.setattr(wayback_mod, "find_snapshot", lambda url: None)
 
     ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
     assert ok is False

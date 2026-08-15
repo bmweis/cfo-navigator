@@ -180,9 +180,19 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
     extract.assess_extraction_quality() judged the result unusable. Every
     call — success or failure — writes one content_refetch_log row.
 
-    Never destructive: a failure never touches articles.content or
-    articles.content_html, so a bad re-fetch can't erase what a good ingest
-    (or an earlier successful backfill run) already stored.
+    On a direct-fetch failure of ANY kind above, tries the Wayback Machine as
+    a last resort before giving up (see linklib.wayback's module docstring —
+    deliberately not scoped to 404 only, since a stubborn bot-block a direct
+    fetch can't get past may still have a usable archived snapshot). A
+    Wayback-sourced success is logged with source='wayback' so it's
+    distinguishable from a normal direct fetch (linklib.wayback's docstring
+    covers why this fallback's real-world reliability is unverified at the
+    time this was built).
+
+    Never destructive: a failure — even after the Wayback fallback is also
+    exhausted — never touches articles.content or articles.content_html, so
+    a bad re-fetch can't erase what a good ingest (or an earlier successful
+    backfill run) already stored.
     """
     from .extract import fetch_page, extract_reader_html, assess_extraction_quality
 
@@ -191,8 +201,7 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
     try:
         page = fetch_page(url)
     except Exception as exc:
-        lib.log_content_refetch_attempt(article_id, "failure", reason="fetch-error", detail=str(exc)[:500])
-        return False, "fetch-error"
+        return _finish_backfill_via_wayback(lib, article_id, url, "fetch-error", str(exc)[:500])
 
     if not page.raw_html:
         # fetch_page swallows its own request/HTTP errors and returns an
@@ -201,26 +210,61 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
         # timeout, a connection error) so a batch of failures can be told
         # apart: independent dead links vs. one host systematically
         # blocking/throttling this tool — see PageData.fetch_error.
-        lib.log_content_refetch_attempt(article_id, "failure", reason="fetch-error",
-                                        detail=page.fetch_error)
-        return False, "fetch-error"
+        return _finish_backfill_via_wayback(lib, article_id, url, "fetch-error", page.fetch_error)
 
     ok, reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
     if not ok:
-        lib.log_content_refetch_attempt(article_id, "failure", reason=reason)
-        return False, reason
+        return _finish_backfill_via_wayback(lib, article_id, url, reason, "")
 
     structured = extract_reader_html(page.raw_html, url)
     if not structured:
         # Passed the content sanity check on plain text, but the structured
         # extractor itself came back empty (e.g. no <article>/<body> the
         # extractor recognizes) — nothing usable to store.
-        lib.log_content_refetch_attempt(article_id, "failure", reason="too-thin")
-        return False, "too-thin"
+        return _finish_backfill_via_wayback(lib, article_id, url, "too-thin", "")
 
     lib.set_article_content_html(article_id, structured)
-    lib.log_content_refetch_attempt(article_id, "success")
+    lib.log_content_refetch_attempt(article_id, "success", source="direct")
     return True, ""
+
+
+def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
+                                  direct_reason: str, direct_detail: str) -> tuple[bool, str]:
+    """Called only once a direct fetch has already failed for
+    `direct_reason` — tries a Wayback Machine snapshot as a last resort
+    (linklib.wayback), reusing the exact same sanity-check/structured-
+    extraction logic a direct fetch goes through (via
+    extract._page_data_from_html), so a Wayback snapshot has to clear the
+    identical bar a live page would.
+
+    If Wayback comes up empty at ANY stage (no snapshot, the snapshot itself
+    fails to fetch, or it fails the same sanity check a live page would —
+    e.g. an archived paywall preview), this logs and returns the ORIGINAL
+    `direct_reason`/`direct_detail` — that's still the true diagnostic
+    signal for this article, not a synthetic "wayback also failed" reason,
+    so the admin failure-reason breakdown stays meaningful and comparable to
+    a pre-Wayback run. Never destructive at any stage.
+    """
+    from .extract import extract_reader_html, assess_extraction_quality, _page_data_from_html
+    from . import wayback
+
+    snap_url = wayback.find_snapshot(url)
+    if snap_url:
+        snap_html = wayback.fetch_snapshot(snap_url)
+        if snap_html:
+            page = _page_data_from_html(snap_html)
+            ok, _reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
+            if ok:
+                structured = extract_reader_html(snap_html, snap_url)
+                if structured:
+                    lib.set_article_content_html(article_id, structured)
+                    lib.log_content_refetch_attempt(article_id, "success",
+                                                    source="wayback", detail=snap_url)
+                    return True, ""
+
+    lib.log_content_refetch_attempt(article_id, "failure", reason=direct_reason,
+                                    detail=direct_detail, source="direct")
+    return False, direct_reason
 
 
 def _now() -> str:

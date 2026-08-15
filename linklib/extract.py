@@ -20,11 +20,21 @@ from urllib.parse import urljoin, urlsplit
 import requests
 from bs4 import BeautifulSoup, Comment
 
-_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; linklib/1.0)"}
-
-# When sending an auth cookie we're impersonating the logged-in browser, so pair
-# it with a realistic browser User-Agent + Accept to reduce WAF friction
-# (Cloudflare cf_clearance is also IP-bound, so this helps but isn't a guarantee).
+# Standard browser headers, used as the DEFAULT for every fetch (fetch_page,
+# below) — not just the auth-cookie path it was originally added for
+# ("impersonating the logged-in browser"). A Phase 5b follow-up investigation
+# found the previous identifiable bot string ("Mozilla/5.0 (compatible;
+# linklib/1.0)") provides zero benefit over declaring it honestly: three real
+# 403s from the backfill's flagged domains (bothsidesofthetable.com,
+# medium.com, pointsandfigures.com) returned the identical Cloudflare "Just a
+# moment..." challenge with EITHER header set — confirmed with real requests
+# against real failing URLs, not assumed. Cloudflare's bot management
+# fingerprints the TLS handshake/connection behavior, not the UA string, so no
+# UA swap alone gets past it (see looks_like_bot_challenge(), unchanged). Kept
+# as the default anyway: no downside, and it may still help against a site
+# doing a naive UA-string check somewhere in the wider ~4,500-article corpus
+# outside this one flagged batch. Cloudflare cf_clearance is also IP-bound, so
+# this helps reduce WAF friction but isn't a guarantee either way.
 _BROWSER_HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -190,20 +200,42 @@ def _describe_fetch_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def _page_data_from_html(html: str) -> PageData:
+    """Build a PageData from already-fetched HTML — the shared back half of
+    fetch_page(), factored out so a caller with HTML from somewhere OTHER
+    than a fresh live request (namely: a Wayback Machine snapshot, see
+    linklib.wayback) can run through the exact same title/content/paywall/
+    published-date extraction fetch_page() would have used, rather than a
+    second, parallel implementation that could drift from it. `raw_html` is
+    always populated (unlike fetch_page's failure path); `fetch_error` is
+    always empty here — that field only means anything for an actual failed
+    HTTP request, which this function never makes."""
+    title = _extract_title(html)
+    content = _extract_content(html)
+    return PageData(title=title, content=content,
+                    blocked=looks_paywalled(html, content),
+                    published=_extract_published(html),
+                    raw_html=html)
+
+
 def fetch_page(url: str, timeout: int = 20) -> PageData:
     """Fetch a URL once and return both the page title and cleaned body text.
 
-    Always returns a PageData; fields are empty strings on failure. For domains
-    with a configured auth cookie (LINKLIB_AUTH_COOKIES), the request is sent
-    authenticated so subscriber-only full text is fetched instead of a preview.
-    `blocked` flags a response that still looks paywalled — the signal that a
+    Always returns a PageData; fields are empty strings on failure. Sends a
+    standard browser User-Agent by default (see _BROWSER_HEADERS — a Phase 5b
+    follow-up investigation confirmed the previous identifiable bot string
+    provided no benefit against real 403s, so there's no reason to keep
+    declaring it). For domains with a configured auth cookie
+    (LINKLIB_AUTH_COOKIES), the same browser headers are sent plus the cookie,
+    so subscriber-only full text is fetched instead of a preview. `blocked`
+    flags a response that still looks paywalled — the signal that a
     configured cookie is missing or expired. `fetch_error` carries the reason
     for a request-layer failure (see _describe_fetch_error) — every existing
     caller already treats a failed fetch as "nothing usable" and ignores this
     field, so populating it changes nothing for them.
     """
     cookie = _cookie_for(url)
-    headers = dict(_BROWSER_HEADERS if cookie else _HEADERS)
+    headers = dict(_BROWSER_HEADERS)
     if cookie:
         headers["Cookie"] = cookie
     try:
@@ -213,12 +245,7 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     except Exception as exc:
         return PageData(title="", content="", fetch_error=_describe_fetch_error(exc))
 
-    title = _extract_title(html)
-    content = _extract_content(html)
-    return PageData(title=title, content=content,
-                    blocked=looks_paywalled(html, content),
-                    published=_extract_published(html),
-                    raw_html=html)
+    return _page_data_from_html(html)
 
 
 def fetch_fulltext(url: str, timeout: int = 20) -> str:
