@@ -735,6 +735,41 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     assumed fine.
   See ARCHITECTURE.md's "Reader content-structure backfill" section
   (fetch-reliability sub-section) for the full investigation write-up.
+- **Phase 5b third follow-up — the first real production batch surfaced a
+  genuine logging gap (fixed) and a real new failure class
+  (`defunct-service`, fixed), diagnosed live rather than guessed at.**
+  Brian's first real batch (25 articles, 23 failures) showed zero "via
+  Wayback" successes, even on the Cloudflare-blocked domains the fallback
+  was built for. Root cause, found via `railway ssh` one-off scripts
+  against real failing URLs: Wayback genuinely was attempted every time —
+  no code bug — but `content_refetch_log` only ever logged the *original*
+  direct-fetch failure, discarding whatever Wayback itself returned. A
+  manual replay found archive.org still unreachable, but this time as
+  `ConnectionResetError`/`ConnectTimeout`, not the `HTTP 429` the original
+  investigation found — different symptom, same underlying story. Fixed
+  with `wayback.find_snapshot_verbose()`/`fetch_snapshot_verbose()` (same
+  never-raises guarantee, plus a short outcome string appended to the
+  logged `detail`) — the plain versions stay as thin wrappers for the
+  Reader's live-fetch path, which doesn't need the reason. Also confirmed
+  a new domain, `feedproxy.google.com` (3 failures) — Google's
+  discontinued FeedBurner proxy — is genuinely, permanently dead (a live
+  request returned Google's own real `Error 404` page, not a block).
+  Added `linklib.pipeline._DEFUNCT_SERVICE_DOMAINS` (small, hand-curated,
+  each entry requires live confirmation) — `backfill_article_content()`
+  skips BOTH the fetch and the Wayback attempt entirely for a match
+  (`reason='defunct-service'`), since neither can ever succeed and Wayback's
+  own rate-limit budget is too scarce to spend on something already known
+  unrecoverable. `articles_needing_content_backfill()`'s default scope now
+  permanently excludes these going forward (Brian's explicit ask — no
+  point re-burning fetch/Wayback attempts on a confirmed-dead domain every
+  batch), reachable again only under `force=True`. **Caught a real bug
+  before shipping, not after**: the "Structured" stat used to be derived
+  as `total - remaining`, which would have silently mis-attributed an
+  excluded-but-never-structured `defunct-service` article as "done" once
+  `remaining` started excluding it too — fixed with a dedicated
+  `count_structured_content()` query instead of a derived subtraction, and
+  a regression test written for exactly this failure mode. See
+  ARCHITECTURE.md's fetch-reliability sub-section for the full write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found

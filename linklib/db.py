@@ -631,8 +631,12 @@ CREATE INDEX IF NOT EXISTS idx_backup_log_created ON backup_log(created_at);
 -- flaky source is visible, not just its latest state) — same shape and
 -- reasoning as backup_log above. reason is populated on failure only, and is
 -- one of extract.assess_extraction_quality's own reason strings ('paywall',
--- 'bot-challenge', 'too-thin') plus 'fetch-error' for a request that failed
--- outright (timeout, DNS, non-2xx) — never a generic message, so failures
+-- 'bot-challenge', 'too-thin'), 'fetch-error' for a request that failed
+-- outright (timeout, DNS, non-2xx), or 'defunct-service' for a URL whose
+-- host is a known-permanently-discontinued service (linklib.pipeline.
+-- _DEFUNCT_SERVICE_DOMAINS — no fetch or Wayback attempt is even made for
+-- these, and articles_needing_content_backfill()'s default scope excludes
+-- them from future runs entirely) — never a generic message, so failures
 -- are groupable/countable by cause on the admin page. A failed attempt never
 -- touches articles.content or articles.content_html — see
 -- linklib.pipeline.backfill_article_content. `source` ('direct' | 'wayback',
@@ -642,7 +646,7 @@ CREATE TABLE IF NOT EXISTS content_refetch_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     article_id    INTEGER NOT NULL,
     status        TEXT NOT NULL,              -- 'success' | 'failure'
-    reason        TEXT NOT NULL DEFAULT '',    -- failure only: paywall|bot-challenge|too-thin|fetch-error
+    reason        TEXT NOT NULL DEFAULT '',    -- failure only: paywall|bot-challenge|too-thin|fetch-error|defunct-service
     detail        TEXT NOT NULL DEFAULT '',    -- optional extra context (e.g. exception text)
     attempted_at  TEXT NOT NULL
 );
@@ -2494,22 +2498,80 @@ class Library:
         stopped/crashed run and a deliberate re-run both just pick up where
         they left off, and articles a prior run already succeeded on are
         never re-fetched (rate-limit-friendly, and safe to press "start"
-        again after a stop). `force=True` re-runs every row with a saved
-        URL — for standardizing the whole library after an extraction-logic
-        change, same escape hatch as the re-enrich job's own force option."""
+        again after a stop). ALSO excludes, in the default scope only, any
+        article whose most recent content_refetch_log attempt was
+        reason='defunct-service' (linklib.pipeline._DEFUNCT_SERVICE_DOMAINS)
+        — a confirmed-permanently-dead host (e.g. Google's discontinued
+        FeedBurner proxy) can never succeed no matter how many times it's
+        retried, so retrying it on every future batch would only burn fetch
+        attempts and Wayback's own scarce rate-limit budget for a known
+        outcome. `force=True` re-runs every row with a saved URL, defunct-
+        service included — for standardizing the whole library after an
+        extraction-logic change, or re-checking a domain that's since been
+        removed from the defunct list, same escape hatch as the re-enrich
+        job's own force option."""
         if force:
             rows = self.conn.execute(
                 "SELECT * FROM articles WHERE url!='' ORDER BY id LIMIT ?", (limit,)
             ).fetchall()
         else:
             rows = self.conn.execute(
-                "SELECT * FROM articles WHERE url!='' AND content_html='' ORDER BY id LIMIT ?", (limit,)
+                """SELECT a.* FROM articles a
+                   WHERE a.url!='' AND a.content_html=''
+                     AND a.id NOT IN (
+                       SELECT article_id FROM (
+                         SELECT article_id, reason,
+                                ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                         FROM content_refetch_log
+                       ) WHERE rn=1 AND reason='defunct-service'
+                     )
+                   ORDER BY a.id LIMIT ?""",
+                (limit,),
             ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
-    def count_content_backfill_remaining(self) -> int:
+    def count_structured_content(self) -> int:
+        """Articles that actually have content_html populated — the real
+        "Structured" count. Deliberately its own query rather than derived
+        as `total - remaining`: once count_content_backfill_remaining()
+        started excluding defunct-service articles too, that subtraction
+        would silently misattribute an excluded-but-never-structured
+        article as "done"."""
         return self.conn.execute(
-            "SELECT COUNT(*) FROM articles WHERE url!='' AND content_html=''"
+            "SELECT COUNT(*) FROM articles WHERE url!='' AND content_html!=''"
+        ).fetchone()[0]
+
+    def count_content_backfill_remaining(self) -> int:
+        """Matches articles_needing_content_backfill()'s default (non-force)
+        scope exactly, including the defunct-service exclusion — so this
+        stat reads as "how many articles the next default-scope run will
+        actually attempt," not an inflated count that includes articles
+        already known permanently unrecoverable."""
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM articles a
+               WHERE a.url!='' AND a.content_html=''
+                 AND a.id NOT IN (
+                   SELECT article_id FROM (
+                     SELECT article_id, reason,
+                            ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                     FROM content_refetch_log
+                   ) WHERE rn=1 AND reason='defunct-service'
+                 )"""
+        ).fetchone()[0]
+
+    def count_permanently_excluded_content(self) -> int:
+        """How many articles have been marked defunct-service on their most
+        recent attempt — permanently excluded from the default backfill
+        scope (see articles_needing_content_backfill). Surfaced on the admin
+        page so Brian can see at a glance how many articles are being
+        deliberately skipped, not just watch the remaining count quietly
+        exclude them with no explanation."""
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM (
+                 SELECT article_id, reason,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               ) WHERE rn=1 AND reason='defunct-service'"""
         ).fetchone()[0]
 
     def set_article_content_html(self, article_id: int, content_html: str) -> None:

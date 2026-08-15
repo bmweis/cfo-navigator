@@ -1950,6 +1950,62 @@ than a mechanism whose success depends on today's outage clearing:
   explicit, discussed trade-off (see CLAUDE.md's matching bullet for the full
   decision point), not an oversight.
 
+**Third follow-up — the first real production batch surfaced a genuine logging gap
+and a new failure class, both fixed.** Brian's first real batch after the fetch-
+reliability PR (25 articles, 23 failures) showed zero "via Wayback" successes, even on
+the Cloudflare-blocked domains the fallback was built for — and a new domain,
+`feedproxy.google.com` (Google's discontinued FeedBurner proxy), clustering 3
+failures. Diagnosed live via `railway ssh` one-off scripts rather than guessed at:
+- **Wayback genuinely was being attempted for every failure — the code had no bug —
+  but `content_refetch_log` couldn't say so**, because `_finish_backfill_via_wayback`
+  only ever re-logged the *original* direct-fetch failure, discarding whatever
+  Wayback itself returned (no snapshot? a fetch failure? a sanity-check miss?). A
+  manual replay of the exact fallback logic against real failing URLs found archive.org
+  was still unreachable — but this time as `ConnectionResetError`/`ConnectTimeout`,
+  not the `HTTP 429` the original investigation found. **Different symptom, same
+  underlying story** (archive.org unreliable from wherever this runs), and proof the
+  plain `find_snapshot()`/`fetch_snapshot()` contract wasn't enough to diagnose from
+  the log alone. Fixed with `find_snapshot_verbose()`/`fetch_snapshot_verbose()`
+  (same never-raises guarantee, plus a short outcome string) — `find_snapshot()`/
+  `fetch_snapshot()` stay as thin wrappers for callers (the Reader's live-fetch path)
+  that only care whether a fallback is available, not why one isn't.
+  `_finish_backfill_via_wayback` now appends that outcome to the logged `detail`
+  (e.g. `"HTTP 403 (wayback: connection error: ...)"`), so the next time this question
+  comes up the log already has the answer instead of needing another `railway ssh`
+  round-trip.
+- **`feedproxy.google.com` confirmed as a genuinely new failure class: a permanently
+  discontinued service, not a recoverable block or a moved page.** A live request to
+  one of the failing URLs returned Google's own `"Error 404 (Not Found)!!1"` page
+  directly — the redirect-shim service itself is gone, not blocking or throttling.
+  `linklib.pipeline._DEFUNCT_SERVICE_DOMAINS` is a small, hand-curated, comment-
+  documented set (starting with just this one entry — each addition requires the
+  same kind of live confirmation, not a hunch, since the consequence is permanent).
+  `backfill_article_content()` checks a URL's host against this set *before* any
+  fetch or Wayback attempt — both are skipped entirely for a match, since neither
+  can ever succeed and a Wayback attempt would spend its own scarce rate-limit
+  budget on something already known unrecoverable. Logged with the new
+  `reason='defunct-service'`.
+- **`articles_needing_content_backfill()`'s default (non-force) scope now excludes
+  any article whose most recent `content_refetch_log` attempt was
+  `defunct-service`** — otherwise every future default-scope batch would keep
+  re-attempting a URL already confirmed permanently dead, burning both a fetch
+  attempt and Wayback's rate-limit budget for a known outcome. `force=True` still
+  reaches them (e.g. to re-check after a domain is removed from the defunct list).
+  `count_content_backfill_remaining()` mirrors the same exclusion, so the admin
+  page's "Remaining" stat reads as "what the next default run will actually
+  attempt," not an inflated count.
+- **A real bug caught before shipping, not after**: `done_count` (the "Structured"
+  stat) used to be derived as `total - remaining`. Once `remaining` started
+  excluding `defunct-service` articles too, that subtraction would have silently
+  mis-attributed an excluded-but-never-structured article as "done." Fixed with a
+  dedicated `Library.count_structured_content()` query (`content_html != ''`
+  directly) instead of a derived subtraction — caught by a regression test
+  written specifically for this failure mode, not discovered live.
+  `Library.count_permanently_excluded_content()` (same latest-attempt-per-article
+  pattern as the failure-count methods) surfaces the exclusion count itself, with
+  an explanatory note on the admin page and a "Defunct service" pill in the
+  failure-reason breakdown, so the exclusion is visible, not a silent scope change.
+
 ### Auth: three tiers, one cookie
 
 Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
