@@ -161,6 +161,33 @@ class PageData:
                               # plain-text `content` the ingest/search/enrichment
                               # pipeline depends on) can run its own extraction over it
                               # without a second HTTP fetch. See extract_reader_html().
+    fetch_error: str = ""    # populated only when the request itself failed (timeout,
+                              # DNS, connection refused, non-2xx status) — see
+                              # _describe_fetch_error(). Every other caller of fetch_page
+                              # (ingest_url, the Reader's live-fetch path) has always
+                              # swallowed this silently and still does — it's opt-in,
+                              # read by linklib.pipeline.backfill_article_content so a
+                              # content_refetch_log row records *why* a fetch failed
+                              # (a 404, a timeout, a connection reset) instead of just
+                              # "fetch-error" with no detail.
+
+
+def _describe_fetch_error(exc: Exception) -> str:
+    """A short, specific description of a request failure — the difference
+    between "this URL is dead (404)" and "this host is timing out on every
+    request" matters when deciding whether a batch of failures is a source-
+    wide problem worth investigating before a full run repeats it across
+    every article from that source."""
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status = exc.response.status_code if exc.response is not None else "?"
+        return f"HTTP {status}"
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "timeout"
+    if isinstance(exc, requests.exceptions.SSLError):
+        return f"SSL error: {exc}"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return f"connection error: {exc}"
+    return f"{type(exc).__name__}: {exc}"
 
 
 def fetch_page(url: str, timeout: int = 20) -> PageData:
@@ -170,7 +197,10 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     with a configured auth cookie (LINKLIB_AUTH_COOKIES), the request is sent
     authenticated so subscriber-only full text is fetched instead of a preview.
     `blocked` flags a response that still looks paywalled — the signal that a
-    configured cookie is missing or expired.
+    configured cookie is missing or expired. `fetch_error` carries the reason
+    for a request-layer failure (see _describe_fetch_error) — every existing
+    caller already treats a failed fetch as "nothing usable" and ignores this
+    field, so populating it changes nothing for them.
     """
     cookie = _cookie_for(url)
     headers = dict(_BROWSER_HEADERS if cookie else _HEADERS)
@@ -180,8 +210,8 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
         resp = requests.get(url, headers=headers, timeout=timeout)
         resp.raise_for_status()
         html = resp.text
-    except Exception:
-        return PageData(title="", content="")
+    except Exception as exc:
+        return PageData(title="", content="", fetch_error=_describe_fetch_error(exc))
 
     title = _extract_title(html)
     content = _extract_content(html)

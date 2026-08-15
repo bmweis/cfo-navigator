@@ -274,7 +274,7 @@ used manual check rather than a per-turn or overhead cost.
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
-| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error`), `detail` (optional extra context) |
+| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; empty for the other reasons, which are self-describing) |
 
 ### FP&A Buddy (Ask)
 
@@ -1836,6 +1836,27 @@ opened somewhere the user couldn't fully see it, the same shape as the Phase 5
 "tapping an article does nothing" bug. Fixed with `focus({preventScroll:true})`
 plus an explicit `pane.scrollIntoView`, which moves only the document and
 never the pane's own `scrollTop`, so a part-read article keeps its position.
+
+**First-real-batch follow-up: the `fetch-error` reason had no detail behind it.** The
+initial 25-article verification batch Brian ran turned up 12 failures, all labeled
+just `fetch-error` — `extract.fetch_page()` catches its own request exception with a
+bare `except Exception:` (no `as exc`), so `backfill_article_content()` genuinely had
+nothing to log beyond the category. Fixed non-destructively: `PageData` gained a
+`fetch_error` field (empty string by default — every existing caller of `fetch_page()`
+already treats a failed fetch as "nothing usable" and ignores the new field, so this
+changes nothing for them), populated by a new `extract._describe_fetch_error()` that
+turns the caught exception into `"HTTP {status}"`, `"timeout"`, or a connection/SSL
+error string. `content_refetch_log.detail` now carries that value for every `fetch-error`
+row going forward. Also added `Library.content_refetch_failure_domains()` — the same
+latest-attempt-per-article de-dupe `content_refetch_failure_counts()` uses, grouped by
+URL host instead of reason — so a source-wide problem (one site systematically
+blocking or throttling this tool) shows up as a visible cluster on the admin page
+(a coral banner, only rendered once a host has ≥2 failures — a single failure is an
+ordinary dead link, not a signal) rather than N identical-looking rows a human has to
+notice share a domain by eye. The recent-attempts log table also now links each row's
+title to its article URL and shows the `detail` text inline. **Not retroactive**: the
+already-logged rows from that first batch still have an empty `detail` (the exception
+was never captured for them) — the fix only changes what future attempts record.
 
 ### Auth: three tiers, one cookie
 
