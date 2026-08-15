@@ -1602,6 +1602,15 @@ class Library:
             # the same pass — order matters, so this must stay after them.
             "ALTER TABLE tools RENAME COLUMN differentiation_note TO competitive_differentiation",
             "ALTER TABLE tools RENAME COLUMN differentiation_needs_verification TO competitive_differentiation_needs_verification",
+            # Originally added for the Phase 3 addendum's pin-then-recency-
+            # backfill homepage teaser panel; the Homepage Restructure phase
+            # replaced that panel with 3 hardcoded flagship pieces + a
+            # 4-column type breakdown and repurposed this same column rather
+            # than adding a new one — see get_thought_leadership_representative
+            # below for the selection logic it now drives. Still defaults to 0
+            # for every existing row (no retroactive selection), same
+            # precedent as agent_taxonomy_needs_verification's own migration.
+            "ALTER TABLE thought_leadership ADD COLUMN featured_home INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -3517,9 +3526,40 @@ class Library:
         row = self.conn.execute("SELECT * FROM thought_leadership WHERE id = ?", (item_id,)).fetchone()
         return dict(row) if row else None
 
+    def get_thought_leadership_representative(self, type: str) -> dict | None:
+        """One representative entry for `type`, for the homepage's 4-column
+        Thought Leadership type breakdown (Homepage Restructure phase).
+        Supersedes list_thought_leadership_for_home's pin-then-recency-
+        backfill panel (Phase 3 addendum), which the homepage redesign
+        replaced outright with 3 hardcoded flagship pieces + this per-type
+        breakdown — repurposes the same `featured_home` checkbox rather than
+        adding a new column: it now means "represents this type on the
+        homepage" instead of "pin into the (now-gone) recency panel". If more
+        than one entry of this type is checked, the most recently updated one
+        wins (`updated_at DESC`) — documented on the admin checkbox's helper
+        text. If none is checked, falls back to the most recent entry by the
+        existing /thought-leadership ordering (_TL_ORDER_SQL), so a type an
+        admin hasn't curated yet still shows something instead of an empty
+        column. Returns None only when this type has zero entries at all —
+        the caller (webapp) renders nothing for that column, same convention
+        as /thought-leadership's own column() collapsing when empty."""
+        row = self.conn.execute(
+            "SELECT * FROM thought_leadership WHERE type = ? AND featured_home = 1 "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (type,),
+        ).fetchone()
+        if row:
+            return dict(row)
+        row = self.conn.execute(
+            f"SELECT * FROM thought_leadership WHERE type = ? ORDER BY {self._TL_ORDER_SQL} LIMIT 1",
+            (type,),
+        ).fetchone()
+        return dict(row) if row else None
+
     def add_thought_leadership(self, type: str, title: str, url: str = "", venue: str = "",
                                date_label: str = "", sort_key: str = "", description: str = "",
-                               needs_synopsis: bool = False, display_order: int | None = None) -> int:
+                               needs_synopsis: bool = False, display_order: int | None = None,
+                               featured_home: bool = False) -> int:
         if display_order is None:
             display_order = self.conn.execute(
                 "SELECT COALESCE(MAX(display_order), -1) + 1 FROM thought_leadership WHERE type = ?",
@@ -3528,22 +3568,25 @@ class Library:
         now = _now()
         cur = self.conn.execute(
             "INSERT INTO thought_leadership "
-            "(type, title, url, venue, date_label, sort_key, description, needs_synopsis, display_order, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "(type, title, url, venue, date_label, sort_key, description, needs_synopsis, display_order, "
+            "featured_home, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (type, title.strip(), url.strip(), venue.strip(), date_label.strip(), sort_key.strip(),
-             description.strip(), int(bool(needs_synopsis)), display_order, now, now),
+             description.strip(), int(bool(needs_synopsis)), display_order, int(bool(featured_home)), now, now),
         )
         self.conn.commit()
         return cur.lastrowid
 
     def update_thought_leadership(self, item_id: int, type: str, title: str, url: str, venue: str,
                                   date_label: str, sort_key: str, description: str,
-                                  needs_synopsis: bool, display_order: int) -> None:
+                                  needs_synopsis: bool, display_order: int,
+                                  featured_home: bool = False) -> None:
         self.conn.execute(
             "UPDATE thought_leadership SET type=?, title=?, url=?, venue=?, date_label=?, sort_key=?, "
-            "description=?, needs_synopsis=?, display_order=?, updated_at=? WHERE id=?",
+            "description=?, needs_synopsis=?, display_order=?, featured_home=?, updated_at=? WHERE id=?",
             (type, title.strip(), url.strip(), venue.strip(), date_label.strip(), sort_key.strip(),
-             description.strip(), int(bool(needs_synopsis)), display_order, _now(), item_id),
+             description.strip(), int(bool(needs_synopsis)), display_order, int(bool(featured_home)),
+             _now(), item_id),
         )
         self.conn.commit()
 

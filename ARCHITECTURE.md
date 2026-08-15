@@ -1107,7 +1107,19 @@ effect.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident) |
+| `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (originally "pin into the homepage teaser" — Phase 3 addendum; repurposed by the Homepage Restructure phase to mean "represents this type in the homepage's "Recent highlights" grid", see below; defaults to 0, no retroactive selection) |
+
+`Library.get_thought_leadership_representative(type)` (Homepage Restructure phase;
+supersedes the Phase 3 addendum's `list_thought_leadership_for_home` pin-then-
+recency-backfill panel, which the redesign replaced outright) selects one
+representative entry per type for the homepage's "Recent highlights" grid: the most
+recently updated `featured_home=1` entry of that type, if any (`updated_at
+DESC` — the tie-break when more than one entry of a type is checked); otherwise
+the most recent entry by the existing `_TL_ORDER_SQL` ordering, so a type with
+no admin selection yet still shows something instead of an empty column.
+Returns `None` only when the type has zero entries at all, in which case the
+homepage renders no column for it (same convention as `/thought-leadership`'s
+own `column()` collapsing when empty).
 
 One Speaking & Events entry (Abacum AI Summit) has photos — a field this
 table doesn't carry, since it's the only entry that ever used it. It stays

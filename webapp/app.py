@@ -1570,6 +1570,25 @@ def _underline_last_word(text: str, stroke: float = 4.0, color: str = "var(--sea
     return f"{_esc(head)} {underlined}" if sep else underlined
 
 
+def _underline_phrase(text: str, phrase: str, stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
+    """Wrap the first case-insensitive occurrence of `phrase` (raw,
+    unescaped) inside `text` in the same marker-underline `_underline_last_word`
+    draws, but mid-sentence rather than at the end — the homepage hero
+    heading's design specifically accents "strategic partner", not whatever
+    word happens to end the (admin-editable) headline. Falls back to
+    `_underline_last_word` when `phrase` isn't found in `text` at all (e.g.
+    an admin rewrites the headline without that phrase) so there's always
+    still an accent rather than none."""
+    lower_text, lower_phrase = text.lower(), phrase.lower()
+    idx = lower_text.find(lower_phrase)
+    if idx == -1:
+        return _underline_last_word(text, stroke, color)
+    before, match, after = text[:idx], text[idx:idx + len(phrase)], text[idx + len(phrase):]
+    underlined = (f'<span style="display:inline-grid;justify-items:stretch;">'
+                  f'<span>{_esc(match)}</span>{_marker_underline(stroke, color)}</span>')
+    return f"{_esc(before)}{underlined}{_esc(after)}"
+
+
 def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
     """2px-stroke line-icon badge for a card-row grid (2-up, 3-up, or 4-up).
     Cycles seafoam-wash -> navy-wash -> coral-wash by `index`, the fixed
@@ -1586,15 +1605,29 @@ def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
     )
 
 
+def _toolbox_icon_badge(index: int, svg_path: str, *, size: int = 44, icon_size: int = 22,
+                         margin_bottom: int = 14) -> str:
+    """Icon badge for the CFO Toolbox 2x2 tile grid (Phase 3, "Toolbox Illustration
+    Concepts" design, option 2a) — same seafoam/navy/coral wash cycle as _card_icon(),
+    but sized (44x44 badge / 22x22 icon, stroke-width 2) and rounded (12px) per that
+    spec rather than _card_icon()'s generic card-row proportions. `size`/`icon_size`
+    are overridden smaller for the homepage teaser's compact mini-tiles."""
+    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    return (
+        f'<div style="width:{size}px;height:{size}px;border-radius:12px;background:{bg};'
+        f'margin-bottom:{margin_bottom}px;display:flex;align-items:center;justify-content:center;'
+        f'flex-shrink:0;">'
+        f'<svg viewBox="0 0 24 24" width="{icon_size}" height="{icon_size}" fill="none" stroke="{stroke}" '
+        f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{svg_path}</svg></div>'
+    )
+
+
 # 2px-stroke, 24x24-viewBox icon paths for _card_icon() — reused across every
 # card-row grid sitewide (homepage, CFO Toolbox, Library, Thought Leadership).
 _ICON_BRAIN = ('<path d="M9.5 4.5c-1.7 0-3 1.3-3.2 3C5 8 4 9.3 4 10.8c0 .9.4 1.7 1 2.3-.6.6-1 1.4-1 2.3 '
                '0 1.5 1.1 2.8 2.5 3.1.2 1.6 1.6 2.8 3.3 2.8.5 0 1-.1 1.4-.3V5.7c-.4-.7-1-1.2-1.7-1.2z"/>'
                '<path d="M14.5 4.5c1.7 0 3 1.3 3.2 3C18.9 8 20 9.3 20 10.8c0 .9-.4 1.7-1 2.3.6.6 1 1.4 1 2.3 '
                '0 1.5-1.1 2.8-2.5 3.1-.2 1.6-1.6 2.8-3.3 2.8-.5 0-1-.1-1.4-.3V5.7c.4-.7 1-1.2 1.7-1.2z"/>')
-_ICON_TOOLBOX = ('<rect x="3" y="9" width="18" height="10" rx="1.5"/>'
-                 '<path d="M8 9V6.5A2.5 2.5 0 0 1 10.5 4h3A2.5 2.5 0 0 1 16 6.5V9"/>'
-                 '<line x1="3" y1="13.5" x2="21" y2="13.5"/>')
 _ICON_WRENCH = ('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94'
                 'l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>')
 _ICON_CHART = '<path d="M4 20V14M12 20V4M20 20v-10"/>'
@@ -1611,6 +1644,23 @@ _ICON_NEWSPAPER = ('<path d="M3 6h13v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
                     '<line x1="6" y1="9.5" x2="12" y2="9.5"/><line x1="6" y1="12.5" x2="12" y2="12.5"/>'
                     '<line x1="6" y1="15.5" x2="10" y2="15.5"/>')
 _TL_COLUMN_ICONS = (_ICON_PENCIL, _ICON_MIC, _ICON_HEADPHONES, _ICON_NEWSPAPER)
+# Homepage-only FP&A Buddy icon (Homepage Restructure design file) — a
+# half-filled circle, distinct from _ICON_BRAIN which /tools's own Toolbox
+# grid keeps using (that page is out of scope for this design file; the two
+# surfaces showing different glyphs for the same tile is a deliberate,
+# design-file-driven inconsistency, not an oversight). Fill is hardcoded to
+# seafoam-deep rather than threaded dynamically through _card_icon()'s
+# stroke cycle — this icon is only ever used at the homepage Toolbox panel's
+# 4th (index-3) position, which _CARD_ICON_STYLES' 3-cycle already resolves
+# to seafoam regardless, so hardcoding matches the design exactly with no
+# generic-badge plumbing needed.
+_ICON_HALF_CIRCLE = '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="#1F7A66" stroke="none"/>'
+# Open-book glyph for the admin-only 5th tile on the /tools 2x2 grid (Phase 3)
+# — no existing icon fit "Library" (admin's Archive/Feed reading stash), so
+# this is drawn fresh in the same flat, two-tone line-icon style as the rest
+# of the set, same as _ICON_BRAIN was for FP&A Buddy.
+_ICON_BOOK = ('<path d="M12 6.2c-1.8-1.3-4-2-6-2v13c2 0 4.2.7 6 2 1.8-1.3 4-2 6-2v-13c-2 0-4.2.7-6 2z"/>'
+              '<path d="M12 6.2v13"/>')
 
 
 # ---------------------------------------------------------------------------
@@ -1927,121 +1977,167 @@ def homepage(request: Request):
         homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
         homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
         homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
+        # One representative entry per Thought Leadership type, for the
+        # "Recent highlights" grid — see get_thought_leadership_representative's
+        # docstring for the selection rule (repurposes the `featured_home`
+        # checkbox). Deliberately the same piece can end up in both this grid
+        # and the flagship cards below (e.g. Growth Engine Ratio, if it's also
+        # Writing's representative) — that's expected given how the selection
+        # logic works, not a bug to guard against.
+        tl_reps = [lib.get_thought_leadership_representative(t) for t, _label in _TL_TYPES]
     finally:
         lib.close()
 
-    def _rcard(href, title, desc, icon_html="", sticker_html="", external=False):
-        attrs = ' target="_blank" rel="noopener"' if external else ''
-        pos = "position:relative;" if sticker_html else ""
-        return (
-            f'<a href="{href}"{attrs} style="{pos}display:block;background:var(--surface);border:1px solid var(--line);'
-            f'border-radius:14px;padding:20px 22px;text-decoration:none;">'
-            f'{sticker_html}{icon_html}'
-            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-            f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
-            f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
-        )
+    # Toolbox panel tile rows — FP&A Buddy uses a homepage-only half-circle
+    # icon here (design file), distinct from _ICON_BRAIN on /tools's own grid.
+    toolbox_rows = "".join(
+        _toolbox_mini_tile(i, title, one_liner, _ICON_HALF_CIRCLE if href == "/tools/fpa-buddy" else icon)
+        for i, (href, title, icon, _desc, one_liner) in enumerate(_TOOLBOX_TILES)
+    )
 
-    cards = "".join([
-        _rcard("/thought-leadership", "Thought Leadership",
-               "Frameworks and playbooks worth keeping: the Growth Engine Ratio for pressure-testing GTM "
-               "efficiency, a playbook for running an AI hackathon with your finance team, and a guide to "
-               "connecting Claude to NetSuite&mdash;plus the podcasts, writing, and press.",
-               icon_html=_card_icon(0, _ICON_BRAIN)),
-    ])
+    recent_highlights = "".join(
+        _tl_recent_highlight_item(i, _TL_TYPE_ICON[t], label, item)
+        for i, ((t, label), item) in enumerate(zip(_TL_TYPES, tl_reps))
+    )
 
-    # Compact vertical Toolbox teaser for the hero's right column (moved out of
-    # the full-width .home-cards row so it sits with the avatar/status stack
-    # instead of the Thought Leadership card below). Reuses the same
-    # Software/Benchmarking/Communities icons as the /tools landing page's own
-    # pillar cards for visual continuity; FP&A Buddy has no pillar card of its
-    # own yet (it's a Toolbox sub-page, not a fourth pillar), so its icon here
-    # is a one-off inline SVG rather than a new _ICON_* constant.
-    def _toolbox_row(icon_svg, stroke, bg, title, desc):
-        return (
-            f'<div style="display:flex;gap:12px;align-items:flex-start;">'
-            f'<div style="flex-shrink:0;width:34px;height:34px;border-radius:8px;background:{bg};'
-            f'display:flex;align-items:center;justify-content:center;">'
-            f'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="{stroke}" '
-            f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_svg}</svg></div>'
-            f'<div><div style="font-family:var(--font-head);font-weight:600;font-size:14.5px;color:var(--navy);">{title}</div>'
-            f'<div style="font-size:13px;color:var(--muted);line-height:1.5;">{desc}</div></div></div>'
-        )
-
-    _ICON_FPA_BUDDY = '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>'
-    toolbox_rows = "".join([
-        _toolbox_row(_ICON_WRENCH, "var(--seafoam-deep)", "var(--seafoam-wash)",
-                     "Software", "The software high-growth finance teams actually use."),
-        _toolbox_row(_ICON_CHART, "var(--navy)", "var(--navy-wash)",
-                     "Benchmarking", "The benchmarking sources I actually rely on."),
-        _toolbox_row(_ICON_PEOPLE, "var(--coral-deep)", "var(--coral-wash)",
-                     "Communities", "CFO and finance communities worth joining."),
-        _toolbox_row(_ICON_FPA_BUDDY, "var(--seafoam-deep)", "var(--seafoam-wash)",
-                     "FP&amp;A Buddy", "Ask a real FP&amp;A question, get a sourced answer."),
-    ])
-    toolbox_card = f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;">
-  <div style="font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--seafoam-deep);margin-bottom:10px;">CFO Toolbox</div>
-  <h3 style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--ink);margin:0 0 8px;">Everything in the toolbox</h3>
-  <p style="font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 20px;">Software, benchmarks, communities, and an AI research buddy.</p>
-  <div style="display:flex;flex-direction:column;gap:16px;">{toolbox_rows}</div>
-  <a href="/tools" style="display:inline-block;margin-top:22px;font-size:14px;font-weight:600;color:var(--navy);">See the full toolbox &rarr;</a>
-</div>"""
-
-    # Reader access (admin-only): /read shipped in Phase 5 (PR 320, merged),
-    # so this is a real link now rather than the placeholder text it launched
-    # with&mdash;see webapp/app.py's homepage() for the admin-only gate.
-    reader_access_card = ""
-    if _is_authed(request):
-        reader_access_card = """<a href="/read" style="text-decoration:none;background:var(--seafoam);border:1.5px solid var(--seafoam-deep);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
-  <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only</div>
-  <div style="display:flex;align-items:center;gap:12px;">
-    <div style="flex-shrink:0;width:34px;height:34px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--navy)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h13a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 8h7"/><path d="M8 12h7"/><path d="M8 16h4"/><path d="M19 8h1a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2"/></svg>
-    </div>
-    <div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Reader access</div>
-  </div>
-  <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Saved, and Read Later in one place.</p>
-</a>"""
+    # Reader access (admin-only): /read shipped in the Phase 5 Reader-merge PR,
+    # so this is a real link now, not the placeholder text it launched with on
+    # this branch — adopted from a since-reconciled parallel session's PR,
+    # which built this same box against a slightly later main where /read
+    # already existed.
+    is_admin = _is_authed(request)
+    reader_access_box = (f"""
+      <a href="/read" rel="nofollow noreferrer" style="text-decoration:none;background:var(--seafoam);border:1.5px solid var(--seafoam-deep);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          {_card_icon(3, _ICON_NEWSPAPER)}
+          <div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Reader access</div>
+        </div>
+        <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Saved, and Read Later in one place.</p>
+      </a>""" if is_admin else "")
 
     body = f"""<div class="page page-full">
 <style>
-.home-hero{{display:flex;flex-direction:column;gap:28px;align-items:stretch;}}
-.home-hero-copy{{min-width:0;}}
-.home-hero-side{{display:flex;flex-direction:column;gap:20px;align-items:center;}}
-.home-hero-photo{{position:relative;z-index:2;flex-shrink:0;}}
-.home-status{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:100%;box-sizing:border-box;}}
-.home-cards{{display:grid;grid-template-columns:1fr;gap:14px;margin:28px 0 8px;}}
-@media(min-width:900px){{
-  .home-hero{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start;}}
-  .home-hero-copy{{grid-column:1 / 3;}}
-  .home-hero-side{{grid-column:3 / 4;align-items:flex-end;gap:20px;}}
-  .home-hero-photo{{margin-bottom:-74px;}}
-  .home-status{{padding-top:44px;}}
+{_TL_SHARED_CSS}
+/* Mobile (default): plain stacked flow, DOM order = hero -> photo card ->
+   Thought Leadership section -> Toolbox/Reader sidebar rest. That specific
+   order (photo card between the hero and Thought Leadership, not at the very
+   bottom with the rest of the sidebar) is a deliberate mobile-only ask —
+   see CLAUDE.md's Homepage Restructure mobile-order note. Desktop restores
+   the two-column layout via explicit grid placement below, independent of
+   this DOM order. */
+.home-grid{{display:flex;flex-direction:column;gap:48px;}}
+.home-sidebar-rest{{display:flex;flex-direction:column;gap:20px;}}
+.home-photo-wrap{{position:relative;width:100%;}}
+.home-avatar-wrap{{position:relative;width:200px;height:200px;margin:0 auto;z-index:3;}}
+/* _avatar() bakes a fixed pixel width/height into its <img>/placeholder
+   <div> inline style (shared helper, correct for every other call site).
+   This wrapper resizes to 240px at the desktop breakpoint below, so the
+   avatar itself has to be told to scale with it — otherwise the photo
+   stays pinned at its original 200px inside a now-larger frame, opening
+   an unintended gap between it and the status box beneath. */
+.home-avatar-wrap>img,.home-avatar-wrap>div[aria-label]{{width:100% !important;height:100% !important;}}
+/* .home-status used to be position:absolute with a hardcoded top offset,
+   which put it outside normal flow entirely — .home-photo-wrap's own
+   height (also hardcoded, 340/400px) was the only thing holding space for
+   it, so on any admin edit that made the status copy longer than that
+   guess, the box silently overflowed into whatever sat below it in the
+   next grid row (the Toolbox panel). Kept in flow instead, pulled up
+   under the avatar with a negative margin-top tuned to land at the same
+   visual offset the old absolute top values produced (200px/240px avatar
+   flow height minus the old 150px/190px top = -50px at both breakpoints)
+   — so .home-photo-wrap's height now genuinely reflects its content and
+   the grid row sizes itself correctly regardless of status copy length. */
+.home-status{{position:relative;margin-top:-50px;background:#fff;border:2px solid var(--ink-graffiti);border-radius:14px;padding:20px 22px;transform:rotate(-1.5deg);box-shadow:3px 3px 0 var(--ink-graffiti);box-sizing:border-box;z-index:2;}}
+.home-toolbox-panel,.home-reader-slot{{width:100%;}}
+.home-toolbox-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:26px;box-sizing:border-box;position:relative;}}
+.home-toolbox-rows{{display:flex;flex-direction:column;gap:16px;}}
+/* Homepage-only icon badge for the Toolbox panel's tile rows — deliberately
+   not _card_icon() here: that helper's margin-bottom:14px is meant for a
+   badge stacked above a title, and bleeds unwanted space into this
+   icon-beside-text row layout, which the design file's own badges don't have. */
+.home-toolbox-icon{{flex-shrink:0;width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;}}
+/* Bullet list — a manual flex layout with a "•" glyph (design file), not a
+   native <ul><li>, so the marker color/size/gap match the design exactly. */
+.home-tl-bullets{{display:flex;flex-direction:column;gap:14px;margin:0 0 37px;}}
+.home-tl-bullet{{display:flex;gap:12px;font-size:15.5px;line-height:1.55;color:var(--ink-soft);}}
+.home-tl-bullet-mark{{color:var(--navy);flex-shrink:0;font-size:18px;line-height:1.3;}}
+.home-tl-highlights-wrap{{border-top:1px solid var(--line);padding-top:28px;}}
+.home-tl-highlights-label{{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin-bottom:20px;}}
+.home-tl-highlights{{display:grid;grid-template-columns:1fr;gap:32px 40px;}}
+/* 1024px, not the sitewide-standard 900px other sections on this page use —
+   deliberately wider so the mobile stacked order (and its photo-card
+   placement above) holds through phone landscape too, not just portrait.
+   The largest common phones land around 930px wide in landscape, which
+   would otherwise cross a 900px breakpoint into the desktop 2-column grid
+   and undo the requested mobile ordering purely from a screen rotation. */
+@media(min-width:1024px){{
+  .home-grid{{display:grid;grid-template-columns:1fr 360px;grid-template-rows:auto auto;gap:56px;align-items:start;}}
+  .home-hero-block{{grid-column:1;grid-row:1;}}
+  .home-tl-section{{grid-column:1;grid-row:2;}}
+  .home-photo-wrap{{grid-column:2;grid-row:1;}}
+  .home-avatar-wrap{{width:240px;height:240px;left:40px;top:-16px;}}
+  .home-status{{margin-left:-30px;width:calc(100% + 30px);}}
+  .home-sidebar-rest{{grid-column:2;grid-row:2;}}
+}}
+@media(min-width:560px){{
+  .home-tl-highlights{{grid-template-columns:1fr 1fr;}}
 }}
 </style>
-<div class="home-hero">
-  <div class="home-hero-copy">
-    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A CFO, for CFOs</div>
-    <h1 style="margin:0 0 18px;font-size:42px;letter-spacing:-0.025em;line-height:1.05;">{_underline_last_word(homepage_headline)}</h1>
-    {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0 0 12px;")}
+<div class="home-grid">
+  <div class="home-hero-block" style="min-width:0;padding-top:8px;">
+    <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:18px;">A CFO, for CFOs</div>
+    <h1 style="margin:0 0 22px;font-family:var(--font-head);font-weight:700;font-size:clamp(32px,3.6vw,46px);line-height:1.1;">{_underline_phrase(homepage_headline, "strategic partner")}</h1>
+    {_copy_paragraphs_html(homepage_subhead, style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;")}
   </div>
-  <div class="home-hero-side">
-    <div class="home-hero-photo">
-      {_avatar(265, border_width=4)}
-      {_sticker("hi, I&rsquo;m Brian 🤙", rotate=6, top="-14px", right="-18px")}
+
+  <div class="home-photo-wrap">
+    <div class="home-avatar-wrap">
+      {_avatar(200, border_width=4)}
+      {_sticker("hi, I&rsquo;m Brian 🤙", rotate=-6, top="-18px", right="-10px")}
     </div>
     <div class="home-status">
-      <div style="font:700 15px var(--font-sticker);color:var(--seafoam-deep);margin-bottom:8px;">STATUS:</div>
-      {_copy_paragraphs_html(homepage_teaser, style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;")}
-      <div style="font-size:14.5px;color:var(--ink-soft);line-height:1.55;">{_copy_paragraphs_html(homepage_expanded)}</div>
+      <div style="font:700 16px var(--font-wordmark);color:var(--seafoam-deep);margin-bottom:10px;">Status:</div>
+      {_copy_paragraphs_html(homepage_teaser, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
+      {_copy_paragraphs_html(homepage_expanded, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
     </div>
-    {toolbox_card}
-    {reader_access_card}
+  </div>
+
+  <div class="home-tl-section" style="min-width:0;">
+    <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:14px;">Thought Leadership</div>
+    <h2 style="margin:0 0 16px;font-family:var(--font-head);font-weight:700;font-size:30px;">What I write about</h2>
+    <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0 0 22px;max-width:640px;">Frameworks, playbooks, and real opinions on building finance functions that scale&mdash;collected across writing, speaking, podcasts, and press.</p>
+
+    <ul class="home-tl-bullets" style="padding:0;list-style:none;">
+      <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing.</li>
+      <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Frameworks myself and others have built, real opinions, and stories from the trenches.</li>
+      <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>How to move from scorekeeper to strategic partner: stop reporting what happened, start shaping what&rsquo;s next.</li>
+      <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
+    </ul>
+
+    {_tl_featured_cards_html(_TL_FEATURED_CARDS)}
+
+    <div class="home-tl-highlights-wrap">
+      <div class="home-tl-highlights-label">Recent highlights</div>
+      <div class="home-tl-highlights">{recent_highlights}</div>
+    </div>
+
+    <a href="/thought-leadership" style="display:inline-block;margin-top:32px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
+  </div>
+
+  <div class="home-sidebar-rest">
+    <div class="home-toolbox-panel">
+      {_sticker("🚧 building", rotate=4, top="-14px", right="20px", size=14)}
+      <div style="font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:10px;">CFO Toolbox</div>
+      <h3 style="margin:0 0 8px;font-family:var(--font-head);font-weight:600;font-size:19px;">Everything in the toolbox</h3>
+      <p style="font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 20px;">Software, benchmarks, communities, and an AI research buddy.</p>
+      <div class="home-toolbox-rows">{toolbox_rows}</div>
+      <a href="/tools" style="display:inline-block;margin-top:22px;font-family:var(--font-body);font-weight:600;font-size:14px;color:var(--navy);text-decoration:none;">See the full toolbox &rarr;</a>
+    </div>
+
+    {reader_access_box}
   </div>
 </div>
-
-<div class="home-cards">{cards}</div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request)))
 
@@ -2180,76 +2276,27 @@ def thought_leadership(request: Request):
             f'{rows}{more}</div>'
         )
 
-    # Featured: three flagship pieces, one consistent card treatment. The only
-    # per-card variation is the small category tag colour — no full-colour floods,
-    # which is what made the old top read as busy.
-    def fcard(href, tag, tag_color, title, desc, cta):
-        return (
-            f'<a href="{href}" class="tl-card">'
-            f'<span class="tl-tag" style="color:{tag_color};">{tag}</span>'
-            f'<h3>{title}</h3><p>{desc}</p>'
-            f'<span class="tl-go">{cta} &rarr;</span></a>'
-        )
-
-    featured = (
-        '<div class="tl-featured">'
-        + fcard("/thought-leadership/growth-engine-ratio", "Framework", "var(--coral-deep)",
-                "The Growth Engine Ratio",
-                "A metric for how R&amp;D and GTM investments work together to drive growth—with an interactive calculator.",
-                "Read the framework")
-        + fcard("/thought-leadership/ai-hackathon-playbook", "Playbook", "var(--seafoam-deep)",
-                "Sail, Don&rsquo;t Row",
-                "How to run an AI hackathon with your finance team—the full format, facilitation mechanics, and how to make it stick.",
-                "Read the playbook")
-        + fcard("/thought-leadership/netsuite-mcp", "Setup Guide", "var(--navy-light)",
-                "Connecting Claude to NetSuite",
-                "End-to-end setup for the two-role OAuth architecture—what it is, why it&rsquo;s secure, and how to use it.",
-                "Read the guide")
-        + '</div>'
-    )
-
+    # Featured: three flagship pieces, one consistent card treatment — same
+    # shared _TL_FEATURED_CARDS content and _tl_fcard/_TL_SHARED_CSS markup
+    # as the homepage's own flagship cards, so the two surfaces can't drift
+    # apart (see _TL_FEATURED_CARDS' comment). The only per-card variation
+    # here is the small category tag colour — no full-colour floods, which
+    # is what made the old top read as busy.
     body = (
         '<div class="page page-full">'
         '<style>'
-        '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
-        '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'
-        'border-radius:14px;padding:22px 22px 18px;text-decoration:none;transition:border-color .15s,box-shadow .15s,transform .15s;}'
-        '.tl-card:hover{border-color:var(--navy-light);box-shadow:0 6px 20px rgba(0,41,117,.08);transform:translateY(-2px);text-decoration:none;}'
-        '.tl-tag{font:700 10px var(--font-body);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;}'
-        '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
-        '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
-        '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
-        '.tl-cols{display:flex;gap:24px;margin:8px 0 12px;}'
-        '.tl-col{flex:1;min-width:0;}'
-        '.tl-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}'
-        '.tl-col-head>div:first-child{margin-bottom:0;}'
-        '.tl-col-title{font:700 15px var(--font-head);color:var(--ink);}'
-        '.tl-col-item{margin-bottom:12px;}'
-        '.tl-col-item-title{display:block;font:600 13px var(--font-head);color:var(--ink);'
-        'margin:0 0 3px;line-height:1.35;text-decoration:none;}'
-        'a.tl-col-item-title:hover{color:var(--navy);text-decoration:underline;}'
-        '.tl-col-item-meta{font:400 11px var(--font-body);color:var(--muted);}'
-        '.tl-col-more{display:inline-block;margin-top:2px;font:600 12px var(--font-body);color:var(--navy);}'
-        '.tl-col-item-extra{display:none;}'
-        '.tl-col-item-toggle{display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:0;'
-        'font:600 11px var(--font-body);color:var(--navy);background:none;border:none;cursor:pointer;}'
-        '.tl-col-item-toggle:hover{text-decoration:underline;}'
-        '.tl-col-item-toggle svg{transition:transform .15s;flex-shrink:0;}'
-        '.tl-col-item-toggle[aria-expanded="true"] svg{transform:rotate(180deg);}'
-        '.tl-col-item-desc{margin:6px 0 0;font:400 12.5px var(--font-body);color:var(--ink-soft);line-height:1.5;}'
-        '@media(max-width:900px){.tl-cols{flex-wrap:wrap;}.tl-col{flex:1 1 calc(50% - 12px);}}'
-        '@media(max-width:560px){.tl-col{flex:1 1 100%;}}'
+        + _TL_SHARED_CSS + _TL_COLUMN_CSS +
         '</style>'
         '<h1>Thought Leadership</h1>'
         '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
-        + featured
+        + _tl_featured_cards_html(_TL_FEATURED_CARDS)
     )
 
     lib = _lib()
     try:
         sections = [
             ("Writing", "writing", lib.list_thought_leadership(type="writing")),
-            ("Speaking &amp; Events", "speaking", lib.list_thought_leadership(type="speaking") + [_TL_PHOTO_ENTRY]),
+            ("Speaking & Events", "speaking", lib.list_thought_leadership(type="speaking") + [_TL_PHOTO_ENTRY]),
             ("Podcasts", "podcast", lib.list_thought_leadership(type="podcast")),
             ("Press", "press", lib.list_thought_leadership(type="press")),
         ]
@@ -5694,46 +5741,104 @@ async def library_submit(request: Request):
     # Always confirm — never reveal whether the URL was already in the archive.
     return RedirectResponse("/library/submit?submitted=1", status_code=303)
 
+# The 4-tile 2x2 CFO Toolbox grid (Phase 3, "Toolbox Illustration Concepts"
+# design, option 2a) — shared between the /tools landing page's full-size
+# tiles and the homepage's compact teaser mini-tiles. (href, title, icon,
+# landing-size body copy, teaser one-liner). FP&A Buddy reuses _ICON_BRAIN
+# (already drawn for the homepage's Thought Leadership card) rather than a
+# new glyph — it already matches the "flat, two-tone line icon" look the
+# design spec calls for.
+_TOOLBOX_TILES = (
+    ("/tools/software", "Software", _ICON_WRENCH,
+     "A searchable, filterable directory of the software high-growth finance teams actually "
+     "use&mdash;try the Software Matchmaker if you&rsquo;re not sure where to start, plus a Warm "
+     "Intro button for the vendors I know well.",
+     "The software high-growth finance teams actually use."),
+    ("/tools/benchmarks", "Benchmarking", _ICON_CHART,
+     "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks "
+     "help and where they mislead.",
+     "The benchmarking sources I actually rely on."),
+    ("/tools/communities", "Communities", _ICON_PEOPLE,
+     "CFO and finance communities worth joining: peer groups, associations, and Slack "
+     "channels&mdash;searchable and filterable, with a Community Matchmaker if you&rsquo;re unsure "
+     "which one fits.",
+     "CFO and finance communities worth joining."),
+    ("/tools/fpa-buddy", "FP&amp;A Buddy", _ICON_BRAIN,
+     "An AI research assistant trained on the frameworks and metrics I actually use&mdash;ask it a "
+     "real FP&amp;A question, get a sourced answer instead of a half-day of Googling.",
+     "Ask a real FP&amp;A question, get a sourced answer."),
+)
+
+
+def _toolbox_tile(index: int, href: str, title: str, desc: str, icon_svg: str, *,
+                   border: str = "1.5px solid rgba(0,41,117,.15)") -> str:
+    """Landing-size CFO Toolbox tile (44x44 icon badge, no arrow — a grid
+    tile, not the sitewide card-row list-item pattern _card_icon()/_hcard()
+    render elsewhere)."""
+    return (
+        f'<a href="{href}" style="display:block;background:#fff;border:{border};'
+        f'border-radius:14px;padding:20px;text-decoration:none;">'
+        f'{_toolbox_icon_badge(index, icon_svg)}'
+        f'<div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);'
+        f'letter-spacing:-0.01em;">{title}</div>'
+        f'<p style="margin:6px 0 0;font-size:13.5px;line-height:1.5;color:rgba(20,23,28,.7);">{desc}</p></a>'
+    )
+
+
+def _toolbox_mini_tile(index: int, title: str, one_liner: str, icon_svg: str) -> str:
+    """Homepage Toolbox-panel tile row (Homepage Restructure design file) —
+    icon badge to the left, title + one-liner stacked to the right, no link
+    (the panel links out once via the "See the full toolbox" line below it,
+    not per-tile). Badge is built directly (.home-toolbox-icon), not via the
+    sitewide _card_icon() — that helper's margin-bottom:14px and 1.8 stroke-
+    width are meant for a badge stacked above a title, not this icon-beside-
+    text row, and don't match the design file's own 34px/stroke-2/16px-icon
+    badge here."""
+    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    badge = (
+        f'<div class="home-toolbox-icon" style="background:{bg};">'
+        f'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="{stroke}" '
+        f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_svg}</svg></div>'
+    )
+    return (
+        f'<div style="display:flex;gap:12px;align-items:flex-start;">'
+        f'{badge}'
+        f'<div><div style="font-family:var(--font-head);font-weight:600;font-size:14.5px;color:var(--navy);">{title}</div>'
+        f'<div style="margin-top:2px;font-size:13px;line-height:1.5;color:var(--muted);">{one_liner}</div></div></div>'
+    )
+
+
 @app.get("/tools", response_class=HTMLResponse)
 def tools_landing(request: Request):
-    """CFO Toolbox landing page: three pillars, each its own subpage."""
-    def _hcard(href, title, desc, icon_html):
-        return (
-            f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
-            f'border-radius:14px;padding:22px 24px;text-decoration:none;">'
-            f'{icon_html}'
-            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-            f'<span style="font-family:var(--font-head);font-weight:600;font-size:19px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
-            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
-            f'<p style="margin:7px 0 0;font-size:14.5px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
-        )
-
-    cards = "".join([
-        _hcard("/tools/software", "Software",
-               "A curated directory of the software high-growth finance teams actually use&mdash;searchable, "
-               "filterable, with a Warm Intro button for the vendors I know well.",
-               _card_icon(0, _ICON_WRENCH)),
-        _hcard("/tools/benchmarks", "Benchmarking",
-               "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks "
-               "help and where they mislead.",
-               _card_icon(1, _ICON_CHART)),
-        _hcard("/tools/communities", "Communities",
-               "CFO and finance communities worth joining: peer groups, associations, and Slack channels, "
-               "searchable and filterable.",
-               _card_icon(2, _ICON_PEOPLE)),
-    ])
+    """CFO Toolbox landing page: 2x2 tile grid (Phase 3) — Software, Benchmarking,
+    Communities, FP&A Buddy. Admins additionally see a 5th, seafoam-bordered tile
+    linking to /admin/library — rendered only when _is_authed(request), so it's
+    entirely absent from the HTML (not just CSS-hidden) for anyone else. That 5th
+    tile is landing-only; the homepage teaser (see homepage()) never shows it,
+    for any visitor, so it looks identical regardless of auth state."""
+    tiles = "".join(
+        _toolbox_tile(i, href, title, desc, icon)
+        for i, (href, title, icon, desc, _one_liner) in enumerate(_TOOLBOX_TILES)
+    )
+    if _is_authed(request):
+        tiles += _toolbox_tile(
+            len(_TOOLBOX_TILES), "/admin/library", "Library",
+            "Your private reading stash&mdash;Archive and Feed, admin only.",
+            _ICON_BOOK, border="1.5px solid var(--seafoam)")
 
     body = f"""<div class="page page-grid">
 <style>
-.toolbox-cards{{display:grid;grid-template-columns:1fr;gap:14px;}}
-@media(min-width:760px){{.toolbox-cards{{grid-template-columns:repeat(3,1fr);}}}}
+.toolbox-grid{{display:grid;grid-template-columns:1fr;gap:16px;}}
+@media(min-width:560px){{.toolbox-grid{{grid-template-columns:1fr 1fr;}}}}
 </style>
 <div style="position:relative;display:inline-block;">
   <h1 style="margin:0 0 6px;">CFO Toolbox</h1>
   {_sticker("🚧 building", rotate=-4, top="-14px", right="-52px", size=14)}
 </div>
-<p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO&mdash;still being built out.</p>
-<div class="toolbox-cards">{cards}</div>
+<p style="color:var(--muted);margin:0 0 26px;">Tools, benchmarks, and communities for the Office of the CFO.</p>
+<div style="background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:28px;">
+  <div class="toolbox-grid">{tiles}</div>
+</div>
 </div>"""
     return HTMLResponse(_page("CFO Toolbox—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
@@ -10635,6 +10740,145 @@ _TL_TYPES = [
     ("press", "Press"),
 ]
 _TL_TYPE_LABELS = dict(_TL_TYPES)
+# Same order as _TL_TYPES, so zip() pairs each type with the exact icon its
+# /thought-leadership column already renders (_TL_COLUMN_ICONS) — reused,
+# not redrawn, for the homepage's "Recent highlights" grid (_tl_recent_highlight_item).
+_TL_TYPE_ICON = dict(zip((t for t, _ in _TL_TYPES), _TL_COLUMN_ICONS))
+
+
+def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: str) -> str:
+    """Flagship-piece card — shared by /thought-leadership's featured row and
+    the homepage's consolidated Thought Leadership section (Homepage
+    Restructure phase), so the two surfaces render identically instead of
+    maintaining two copies of the same markup."""
+    return (
+        f'<a href="{href}" class="tl-card">'
+        f'<span class="tl-tag" style="color:{tag_color};">{tag}</span>'
+        f'<h3>{title}</h3><p>{desc}</p>'
+        f'<span class="tl-go">{cta} &rarr;</span></a>'
+    )
+
+
+# The 3 flagship pieces — one shared source for both /thought-leadership's
+# featured row and the homepage's consolidated Thought Leadership section, so
+# the two surfaces can't drift apart in content (title/description/link
+# label). This was the deliberate original intent; a brief detour during the
+# Homepage Restructure design-fidelity pass split this into two diverged
+# tuples (the design file showed shorter, homepage-specific copy) before
+# Brian confirmed the shared-content guarantee should hold regardless of what
+# the design file's placeholder copy showed — reverted back to one source.
+# Card *sizing* is still free to differ per page (each page's own .tl-featured
+# grid track width naturally narrows the cards on the homepage's tighter
+# column vs. /thought-leadership's full-width featured row) — only the
+# content itself is pinned. The "Sail Don't Row" entry's "Playbook" tag,
+# description, and "Read the playbook" link/title are the real, correct copy
+# for that piece (not the design file's arcade-game framing — see CLAUDE.md's
+# Homepage Restructure entries for that correction's history).
+_TL_FEATURED_CARDS = (
+    ("/thought-leadership/growth-engine-ratio", "Framework", "var(--coral-deep)",
+     "The Growth Engine Ratio",
+     "A metric for how R&amp;D and GTM investments work together to drive growth&mdash;with an interactive "
+     "calculator.",
+     "Read the framework"),
+    ("/thought-leadership/ai-hackathon-playbook", "Playbook", "var(--seafoam-deep)",
+     "Sail, Don&rsquo;t Row",
+     "How to run an AI hackathon with your finance team&mdash;the full format, facilitation mechanics, and "
+     "how to make it stick.",
+     "Read the playbook"),
+    ("/thought-leadership/netsuite-mcp", "Setup Guide", "var(--navy-light)",
+     "Connecting Claude to NetSuite",
+     "End-to-end setup for the two-role OAuth architecture&mdash;what it is, why it&rsquo;s secure, and how "
+     "to use it.",
+     "Read the guide"),
+)
+
+
+def _tl_featured_cards_html(cards) -> str:
+    return '<div class="tl-featured">' + "".join(_tl_fcard(*c) for c in cards) + '</div>'
+
+
+# Flagship-card CSS (.tl-featured/.tl-card*) — shared by /thought-leadership's
+# featured row and the homepage's flagship cards, same as their content
+# (_TL_FEATURED_CARDS above via _tl_fcard()).
+_TL_SHARED_CSS = (
+    '.tl-featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:6px 0 12px;}'
+    '.tl-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);'
+    'border-radius:14px;padding:22px 22px 18px;text-decoration:none;transition:border-color .15s,box-shadow .15s,transform .15s;}'
+    '.tl-card:hover{border-color:var(--navy-light);box-shadow:0 6px 20px rgba(0,41,117,.08);transform:translateY(-2px);text-decoration:none;}'
+    '.tl-tag{font:700 10px var(--font-body);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;}'
+    '.tl-card h3{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin:0 0 7px;line-height:1.25;}'
+    '.tl-card p{font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 16px;}'
+    '.tl-card .tl-go{margin-top:auto;font:600 13px var(--font-body);color:var(--navy);}'
+)
+
+# /thought-leadership-only CSS for its per-type columns (.tl-cols/.tl-col*):
+# full capped lists with a "Show all" toggle plus a per-item click-to-expand
+# description. The homepage's "Recent highlights" grid
+# (_tl_recent_highlight_item) is a single-representative-item design with its
+# own distinct 2-column grid markup, not a user of this class set — kept
+# page-scoped rather than folded into _TL_SHARED_CSS.
+_TL_COLUMN_CSS = (
+    '.tl-cols{display:flex;gap:24px;margin:8px 0 12px;}'
+    '.tl-col{flex:1;min-width:0;}'
+    '.tl-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}'
+    '.tl-col-head>div:first-child{margin-bottom:0;}'
+    '.tl-col-title{font:700 15px var(--font-head);color:var(--ink);}'
+    '.tl-col-item{margin-bottom:12px;}'
+    '.tl-col-item-title{display:block;font:600 13px var(--font-head);color:var(--ink);'
+    'margin:0 0 3px;line-height:1.35;text-decoration:none;}'
+    'a.tl-col-item-title:hover{color:var(--navy);text-decoration:underline;}'
+    '.tl-col-item-meta{font:400 11px var(--font-body);color:var(--muted);}'
+    '.tl-col-more{display:inline-block;margin-top:2px;font:600 12px var(--font-body);color:var(--navy);}'
+    '.tl-col-item-extra{display:none;}'
+    '.tl-col-item-toggle{display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:0;'
+    'font:600 11px var(--font-body);color:var(--navy);background:none;border:none;cursor:pointer;}'
+    '.tl-col-item-toggle:hover{text-decoration:underline;}'
+    '.tl-col-item-toggle svg{transition:transform .15s;flex-shrink:0;}'
+    '.tl-col-item-toggle[aria-expanded="true"] svg{transform:rotate(180deg);}'
+    '.tl-col-item-desc{margin:6px 0 0;font:400 12.5px var(--font-body);color:var(--ink-soft);line-height:1.5;}'
+    '@media(max-width:900px){.tl-cols{flex-wrap:wrap;}.tl-col{flex:1 1 calc(50% - 12px);}}'
+    '@media(max-width:560px){.tl-col{flex:1 1 100%;}}'
+)
+
+
+def _tl_recent_highlight_item(index: int, icon_svg: str, type_label: str, item: dict | None) -> str:
+    """One tile of the homepage's "Recent highlights" 2-column grid
+    (Homepage Restructure design file) — one representative entry per type:
+    a small icon + type-label row, the title (linked when a URL exists),
+    venue/date metadata, and the entry's own description. Collapses to
+    nothing when the type has zero entries at all (`item` is None), same
+    empty-column convention /thought-leadership's own column() uses."""
+    if not item:
+        return ""
+    meta_bits = [b for b in (item.get("venue"), item.get("date_label")) if b]
+    meta_html = (f'<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">'
+                 f'{" &middot; ".join(_esc(b) for b in meta_bits)}</div>') if meta_bits else ""
+    title_html = (f'<a href="{_esc(item["url"])}" target="_blank" rel="noopener" style="font-family:var(--font-head);'
+                  f'font-weight:600;font-size:15px;color:var(--ink);line-height:1.4;display:block;margin-bottom:4px;'
+                  f'text-decoration:none;">{_esc(item["title"])}</a>'
+                  if item.get("url") else
+                  f'<div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);'
+                  f'line-height:1.4;margin-bottom:4px;">{_esc(item["title"])}</div>')
+    desc_html = (f'<p style="font-size:13px;line-height:1.55;color:var(--muted);margin:0;">{_esc(item["description"])}</p>'
+                 if item.get("description") else "")
+    # Badge built inline rather than via _card_icon() — that helper's
+    # margin-bottom:14px (meant for a badge stacked above a title) would
+    # throw off align-items:center in this icon-beside-label row.
+    bg, stroke = _CARD_ICON_STYLES[index % 3]
+    badge = (
+        f'<div style="width:32px;height:32px;border-radius:8px;background:{bg};'
+        f'display:flex;align-items:center;justify-content:center;flex-shrink:0;">'
+        f'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="{stroke}" '
+        f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_svg}</svg></div>'
+    )
+    return (
+        f'<div>'
+        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">'
+        f'{badge}'
+        f'<div style="font-size:11.5px;font-weight:600;letter-spacing:.06em;color:var(--muted);'
+        f'text-transform:uppercase;">{_esc(type_label)}</div></div>'
+        f'{title_html}{meta_html}{desc_html}</div>'
+    )
 
 
 def _sort_key_from_date_label(date_label: str) -> str:
@@ -10741,6 +10985,17 @@ def _tl_form_fields(item: dict | None = None) -> str:
       <input type="checkbox" name="needs_synopsis" value="1" {checked}>
       Needs synopsis (shows a "Synopsis pending" placeholder instead of the description above)
     </label>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--navy);">
+      <input type="checkbox" name="featured_home" value="1" {"checked" if item.get("featured_home") else ""}>
+      Feature on homepage
+    </label>
+    <p style="margin:4px 0 0 26px;font-size:12px;color:var(--muted);">
+      Represents this entry's type (Writing, Speaking &amp; Events, Podcasts, or Press) in the homepage's
+      4-column breakdown. If more than one entry of the same type is checked, the most recently updated one
+      wins. Leave unchecked and the most recent entry of that type is used automatically.
+    </p>
   </div>"""
 
 
@@ -10867,6 +11122,7 @@ def _tl_form_values(form) -> dict:
         "description": (form.get("description") or "").strip(),
         "needs_synopsis": bool(form.get("needs_synopsis")),
         "display_order": display_order,
+        "featured_home": bool(form.get("featured_home")),
     }
 
 
@@ -10881,7 +11137,8 @@ async def admin_thought_leadership_new_submit(request: Request):
         # display_order left as None (blank on the add form) auto-assigns
         # the next value for this type — see Library.add_thought_leadership.
         lib.add_thought_leadership(v["type"], v["title"], v["url"], v["venue"], v["date_label"],
-                                   v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"])
+                                   v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"],
+                                   v["featured_home"])
     finally:
         lib.close()
     return RedirectResponse("/admin/thought-leadership", status_code=303)
@@ -10923,7 +11180,8 @@ async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
         # value, so a blank submission here is a deliberate clear — treat
         # it as 0 rather than re-triggering the add-only auto-assign.
         lib.update_thought_leadership(item_id, v["type"], v["title"], v["url"], v["venue"], v["date_label"],
-                                      v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"] or 0)
+                                      v["sort_key"], v["description"], v["needs_synopsis"], v["display_order"] or 0,
+                                      v["featured_home"])
     finally:
         lib.close()
     return RedirectResponse("/admin/thought-leadership", status_code=303)

@@ -55,8 +55,10 @@ def test_homepage_subhead_renders_multiple_paragraphs(env):
     r = c.get("/")
     assert r.status_code == 200
     assert "<p" in r.text
-    assert "<p style=\"font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0 0 12px;\">First subhead paragraph.</p>" in r.text
-    assert "<p style=\"font-size:18px;line-height:1.6;color:var(--ink-soft);margin:0 0 12px;\">Second subhead paragraph.</p>" in r.text
+    assert ('<p style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;">'
+            'First subhead paragraph.</p>') in r.text
+    assert ('<p style="font-size:18px;line-height:1.65;color:var(--ink-soft);margin:0 0 12px;">'
+            'Second subhead paragraph.</p>') in r.text
 
 
 def test_homepage_teaser_renders_multiple_paragraphs(env):
@@ -68,8 +70,8 @@ def test_homepage_teaser_renders_multiple_paragraphs(env):
     c = _client(env)
     r = c.get("/")
     assert r.status_code == 200
-    assert '<p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">First teaser line.</p>' in r.text
-    assert '<p style="margin:0 0 8px;font-size:14.5px;color:var(--ink-soft);line-height:1.55;">Second teaser line.</p>' in r.text
+    assert '<p style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;">First teaser line.</p>' in r.text
+    assert '<p style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;">Second teaser line.</p>' in r.text
 
 
 def test_homepage_expanded_still_renders_multiple_paragraphs(env):
@@ -81,8 +83,12 @@ def test_homepage_expanded_still_renders_multiple_paragraphs(env):
     c = _client(env)
     r = c.get("/")
     assert r.status_code == 200
-    assert "<p>Expanded para one.</p>" in r.text
-    assert "<p>Expanded para two.</p>" in r.text
+    # Homepage Restructure phase: the expanded-copy block shares the same
+    # explicit style as the teaser-copy block above it in the status box
+    # (previously it fell through to the sitewide default <p> margin, which
+    # read as a different spacing rhythm within the same box — see CLAUDE.md).
+    assert '<p style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;">Expanded para one.</p>' in r.text
+    assert '<p style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;">Expanded para two.</p>' in r.text
 
 
 def test_about_page_renders_multiple_paragraphs(env):

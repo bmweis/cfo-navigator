@@ -673,6 +673,415 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   and unaffected by, the pre-existing "Show all N" cap/expand mechanism —
   the two toggles coexist on the same entries without conflict.
 
+- **Library/Toolbox restructure, Phase 3 — CFO Toolbox landing page and the homepage
+  both move to a 4-tile 2x2 grid, plus a 5th admin-only tile.** `/tools`'s old 3-card
+  `repeat(3,1fr)` list (Software, Benchmarking, Communities) is replaced by a 2x2 grid
+  of Software/Benchmarking/Communities/FP&A Buddy tiles, sourced from one shared
+  `_TOOLBOX_TILES` tuple in `webapp/app.py` — the FP&A Buddy tile is the first link
+  into `/tools/fpa-buddy` from the Toolbox itself since it moved there in Phase 2. The
+  same tuple drives a new, more compact "Everything in the toolbox" teaser section on
+  the homepage (mini icon + heading + one-liner, no per-tile links — one "See the full
+  toolbox" link out), which replaces the homepage's old standalone "CFO Toolbox" card
+  in the top card row outright (redundant with the new teaser directly below it); with
+  only the Thought Leadership card left in that row, `.home-cards` dropped its 2-column
+  breakpoint and caps at a single-card width instead of stretching edge-to-edge. FP&A
+  Buddy's tile reuses the existing `_ICON_BRAIN` glyph (already drawn for the
+  homepage's Thought Leadership card) rather than drawing a new one — the build brief
+  assumed no brain icon existed yet, but this one already matches the flat, two-tone,
+  stroke-width-2 look the design spec called for, so reusing it was a straight
+  simplification, not a spec deviation. A 5th tile — seafoam-bordered (vs. the other
+  four's navy-wash border), linking to `/admin/library`, using a newly-drawn
+  `_ICON_BOOK` glyph (nothing existing fit "Library") — appears only on `/tools`, and
+  only when `_is_authed(request)`: it's built conditionally in Python, not hidden by
+  CSS, so it's absent from the response HTML entirely for a signed-out or non-admin
+  visitor. The homepage teaser never includes it under any auth state — it's built from
+  the public-only `_TOOLBOX_TILES` tuple, which the 5th tile was deliberately kept out
+  of. **Design-file caveat:** the build brief pointed at a Claude Design project
+  (`Toolbox Illustration Concepts.dc.html`, option 2a) as the source of truth for exact
+  markup/spacing over the written spec, but the design MCP requires an interactive
+  `/design-login` unavailable in this headless session, and a direct fetch of the
+  claude.ai/design URL 403'd — the design file itself was never actually checked
+  against. Implemented straight off the written spec instead (which was pixel-specific:
+  exact hex colors, badge/icon sizes, padding), flagged here rather than silently
+  assumed equivalent — worth a visual diff against the design file next time someone
+  can reach it.
+- **Phase 3 addendum — a matching homepage Thought Leadership teaser, a
+  `featured_home` pin field, and a real schema change (unlike Phase 3 itself).**
+  Removing the redundant "CFO Toolbox" homepage card left the top card row with
+  just one lone card (Thought Leadership) sitting above a full teaser section for
+  Toolbox alone — a visible asymmetry once the Phase 3 preview was actually
+  looked at. Fixed by giving Thought Leadership the identical compact-teaser
+  treatment: same eyebrow style, same panel, same mini-tile grid — the CSS
+  classes backing both sections were renamed from `.home-toolbox-*` to the
+  shared `.home-teaser*` to make that a literal shared component rather than
+  two near-duplicates. Only the content between the heading and the panel
+  differs: Toolbox keeps its one-line subline, while Thought Leadership gets a
+  four-item bulleted list (generous line-height/spacing, deliberately not
+  compressed) since its themes don't compress to a single sentence the way
+  Toolbox's four nouns do. Tile selection needed a real decision, not just
+  most-recent-3: `thought_leadership.featured_home` is a new column — a
+  "Feature on homepage" checkbox on both the add and edit admin
+  forms — with `Library.list_thought_leadership_for_home` picking pinned
+  entries first (reusing the exact same `_TL_ORDER_SQL` recency rule
+  `/thought-leadership`'s own columns already sort by, not a reinvented one),
+  backfilling with the most-recent unpinned entries until 3 tiles are filled,
+  and truncating rather than overflowing if more than 3 are pinned at once.
+  Defaults to 0 for every existing row — no retroactive pinning, same
+  precedent as every other needs-verification-style column's migration. Each
+  tile reuses the exact per-type icon already drawn for the `/thought-leadership`
+  columns (`_TL_COLUMN_ICONS`, via a new `_TL_TYPE_ICON` lookup keyed off
+  `_TL_TYPES`' existing order) rather than drawing anything new, and links
+  straight to the piece using the same venue/date_label metadata the full page
+  already shows. **Also fixed while in the same template:** the "Speaking &
+  Events" section header was rendering literally as "Speaking &amp;amp; Events"
+  — the section-title string was hardcoded as the already-HTML-escaped
+  `"Speaking &amp; Events"` in Python, then passed through `_esc()` a second
+  time by `column()`, which escapes every title it's given. Fixed by storing
+  the plain, unescaped `"Speaking & Events"` at the source (matching
+  `_TL_TYPES`' own label, which was never double-escaped) and letting `_esc()`
+  do its one intended escaping pass — checked the rest of `/thought-leadership`
+  for the same pattern (any hardcoded `&amp;`-containing string later run
+  through `_esc()`) and found no other instance. The four teaser list items'
+  copy was supplied verbatim by Brian in the build brief for this addendum,
+  em dashes included — flagging that per the em-dash policy above, but noting
+  the copy was pre-approved by the person the policy asks it be flagged to,
+  not independently written and shipped.
+- **Homepage Restructure — the Thought Leadership addendum's recency-pin panel is
+  gone; the homepage gets one consolidated Thought Leadership section instead, and
+  `featured_home` is repurposed rather than left orphaned.** The redesign replaced
+  the addendum's "3 tiles, pinned-then-recency-backfilled" panel outright with a
+  fixed, curated section: the same eyebrow/heading, an intro line (reusing
+  `/thought-leadership`'s own intro copy verbatim), the **3 flagship pieces**
+  (Growth Engine Ratio, Sail Don't Row, Connecting Claude to NetSuite) in their
+  existing card treatment, a **4-column type breakdown** (Writing/Speaking &amp;
+  Events/Podcasts/Press, one representative entry each), and the 4 existing
+  bullets — replacing both the old standalone homepage "Thought Leadership" card
+  and the addendum's separate lower teaser, which are both gone now (not two
+  sections stacked). Investigated first, per the build brief's explicit ask,
+  rather than guessed at: `featured_home` (the addendum's "pin to homepage
+  teaser" checkbox) had no role in a hardcoded-flagship-pieces design, so its
+  recency-backfill purpose was genuinely dead — but the checkbox mechanism itself
+  was still useful, just for a different question ("which entry represents this
+  type?"), so it's **repurposed, not removed**: no new column, no migration,
+  same admin form location, only the meaning and helper copy changed. Resolution
+  rule (`Library.get_thought_leadership_representative`, replacing
+  `list_thought_leadership_for_home`): the most recently updated `featured_home=1`
+  entry of that type wins if more than one is checked (`updated_at DESC`); if
+  none is checked, falls back to the most recent entry by the existing
+  `_TL_ORDER_SQL` ordering, so an admin who hasn't curated a type yet still sees
+  something instead of a broken/empty column; a type with zero entries at all
+  renders no column, same empty-collapse convention `/thought-leadership`'s own
+  `column()` already uses. The flagship-card markup/CSS and the per-type-column
+  markup/CSS are now shared module-level constants (`_TL_FEATURED_CARDS`/
+  `_tl_fcard`/`_TL_SHARED_CSS`, `_tl_type_column`) used by both
+  `/thought-leadership` and the homepage, rather than two copies that could
+  drift — `/thought-leadership` itself is otherwise unchanged (still full capped
+  lists with "Show all", not single representatives). **Hero polish:** avatar
+  sized to 176px (80% of the prior 220px), the headline capped to a 520px
+  max-width so it wraps more deliberately instead of stretching the full copy
+  column, and the status box's two copy blocks now share one style call (the
+  expanded-copy block previously fell through to the sitewide default
+  `p{{margin:0 0 16px}}` while the teaser block above it used an explicit
+  `margin:0 0 8px`, so the two paragraph groups inside one box read with two
+  different rhythms). **Toolbox teaser sticker regression, caught and fixed
+  here:** the "🚧 building" sticker was on the old homepage "CFO Toolbox" card
+  before Phase 3, but never carried over when Phase 3 rebuilt that card into
+  the current full-width Toolbox teaser section — it had been silently missing
+  since that phase shipped until this build brief's acceptance criteria called
+  for verifying it explicitly. Re-added to the teaser section's corner (same
+  `_sticker()` component, same rotate/positioning convention as its other
+  sitewide uses). **Design-file caveat (same limitation as Phase 3, still
+  unresolved):** the build brief pointed at a second Claude Design project
+  (`Homepage Restructure.dc.html`, importing `image-slot.js`/`support.js`) as
+  the source of truth for the hero/Toolbox-teaser-placement/section layout —
+  `/design-login` is still unavailable in this headless session and the direct
+  claude.ai/design URL still 403s, so this file was never actually checked
+  against either. In particular, the Toolbox teaser's placement (moved into the
+  hero's right column vs. kept full-width and built out further — both
+  explicitly named as live possibilities in the build brief) was decided by
+  judgment, not verified: kept full-width, since restructuring the hero grid
+  to absorb it is a materially bigger, riskier change to guess at blind than
+  polishing the section in place. Flagged for a visual diff against the design
+  file, same as Phase 3's still-open caveat above.
+- **Homepage Restructure, design-fidelity pass — the actual design file
+  (previously unreachable) supersedes both judgment calls above; the Toolbox
+  teaser really does move into the hero's right column, and the "Recent
+  highlights" grid replaces the 4-column breakdown outright.** The headless
+  `/design-login` limitation flagged in the two bullets above turned out to
+  be a session limitation, not a permanent one — Brian supplied the design
+  as a self-contained bundled HTML export instead (a runtime-unpacking
+  artifact, not plain static markup; read by rendering it in the
+  pre-installed headless Chromium via Playwright and diffing the resulting
+  DOM, since the bundler's JS reconstructs the real page client-side). That
+  changed several calls made blind in the two bullets above:
+  - **Layout is a real two-column grid**, not a stack of full-width
+    sections: a `1fr / ~360px` grid, left column holding the hero copy and
+    the entire consolidated Thought Leadership section, right column (the
+    sidebar) holding the photo/status-box block, the Toolbox panel, and the
+    Reader-access placeholder — collapsing to a single stacked column below
+    900px, the same convention every other responsive section on this page
+    already uses.
+  - **The Toolbox panel moved into that right column**, resolving the
+    previous bullet's judgment call the other way — and its whole
+    eyebrow/heading/subline/tile-list/link now lives inside *one* white
+    bordered card (previously two nested layers: a bare eyebrow/heading
+    above a separately-bordered tile panel).
+  - **The Thought Leadership section's "4-column breakdown" is actually a
+    "Recent highlights" 2-column grid** (`_tl_recent_highlight_item`,
+    replacing `_tl_type_column`) — visually and structurally different from
+    `/thought-leadership`'s own `.tl-cols` per-type columns (this reuses
+    `Library.get_thought_leadership_representative`'s existing selection
+    logic unchanged, just a different renderer for the result): a divider,
+    a plain "Recent highlights" label, then one tile per type with an
+    icon+type-label row, linked title, venue/date metadata, **and the
+    entry's own description** (the earlier `_tl_type_column` didn't surface
+    description at all). Order also changed to match the file exactly:
+    eyebrow → heading → intro → bullets → flagship cards → divider +
+    Recent Highlights → "See all" link (bullets used to come after the
+    breakdown, not before the flagship cards).
+  - **The bullet list is a manual flex layout with a "•" glyph**
+    (`.home-tl-bullet*`), not a native `<ul><li>` — matching the file's own
+    treatment (14px item gap, 15.5px text) rather than the more generous
+    spacing an earlier round guessed at without the file to check against.
+  - **The 3 flagship cards' content stays shared between the homepage and
+    `/thought-leadership`'s own featured row — a short-lived un-sharing
+    detour, reverted per Brian's explicit call.** The design file shows the
+    homepage's cards with shorter copy, a single consistent seafoam-deep tag
+    color (vs. `/thought-leadership`'s 3-color cycle), and a "Read the
+    piece →" CTA. A first pass at this design-fidelity round took that at
+    face value and split `_TL_FEATURED_CARDS` into two diverged tuples (one
+    per page) — but the single-shared-tuple design was deliberate from the
+    original build specifically so the two surfaces *can't* drift apart in
+    content, and that intent still holds: the design file's placeholder copy
+    doesn't override it. Reverted back to one `_TL_FEATURED_CARDS`, rendered
+    on both pages through the same `_tl_fcard()`/`.tl-card` markup — title,
+    description, and link label are now guaranteed identical (test-enforced:
+    `test_flagship_cards_content_shared_between_homepage_and_thought_leadership`
+    renders every card via `_tl_fcard()` and asserts the exact markup appears
+    on both pages). Card *sizing* is still free to differ per page — each
+    page's own `.tl-featured` grid track width naturally narrows the cards
+    on the homepage's tighter column vs. `/thought-leadership`'s full-width
+    row — only the content itself is pinned.
+    **Sail Don't Row correction (Brian's explicit call before building):**
+    the design file's copy for that card describes the arcade game itself
+    ("Interactive" tag, "a game about strategic leverage", "Play it →") —
+    wrong; that card is meant to represent the AI hackathon playbook
+    article. `_TL_FEATURED_CARDS`' entry for it already carries the real
+    "Playbook" tag, description, title, and "Read the playbook →" link —
+    that was true before this round and stays true now that both pages
+    share it again — instead of the design file's placeholder copy.
+  - **Avatar is 200px** (not the ~176px estimated in the earlier hero-polish
+    bullet) with a repositioned, rotated status box overlapping it — closer
+    to the file's own 265px-at-1720px-wide layout, scaled down slightly to
+    fit this site's narrower right-column width.
+  - **The "Status:" label switches to `var(--font-wordmark)`** (Permanent
+    Marker, already loaded sitewide for the nav logo — no new font) instead
+    of `var(--font-sticker)` (Caveat), matching the file exactly; the "hi,
+    I'm Brian" sticker keeps its existing 🤙 emoji rather than the file's
+    plain-text placeholder, since that emoji is established site copy this
+    file wasn't asking to change.
+  - **The "🚧 building" sticker's absence from the design file turned out to
+    be an export omission, not an intentional removal — confirmed by Brian
+    after this was flagged, and restored.** The design file the panel was
+    rebuilt from didn't show the sticker, so the first pass at this round
+    dropped it, reversing the "must not drop it" regression guard the two
+    prior bullets above established — and said so explicitly rather than
+    silently. That flag is what surfaced the omission: Brian confirmed the
+    sticker was the one thing missing from the file itself, not a deliberate
+    design change, so it's back on the rebuilt Toolbox panel and
+    `test_toolbox_panel_present_and_matches_design` asserts its *presence*
+    again. Kept here as the concrete case for why flagging a reversal
+    explicitly (instead of just making the call and moving on) is worth the
+    friction — it's what let a real omission get caught and corrected in one
+    round-trip instead of shipping silently wrong.
+  - **New: an admin-only "Reader access" placeholder box** in the sidebar,
+    below the Toolbox panel — seafoam background, navy border, the reused
+    `_ICON_NEWSPAPER` glyph, static copy ("Shown here only when logged in as
+    admin. Links into the Reader—build pending."), gated on `_is_authed`
+    the same way the `/tools` 5th tile is (built conditionally in Python,
+    absent from the HTML entirely for non-admins, not CSS-hidden). No
+    actual link yet — it's explicitly a placeholder per the file, and stays
+    one; wiring it to `/read` is future work, not this round's.
+  - **Expected, not a bug:** the same Thought Leadership entry can appear
+    in both the flagship cards and "Recent highlights" (e.g. if Growth
+    Engine Ratio is also Writing's `get_thought_leadership_representative`
+    pick) — the two sections pull from different, independent data sources
+    (a hardcoded tuple vs. a per-type DB query) with no dedup between them,
+    same as the file shows no such guard either.
+- **Homepage Restructure — mobile-only DOM reorder: the photo/status card
+  moves between the hero and Thought Leadership sections, not to the very
+  bottom with the rest of the sidebar.** A follow-up request from Brian after
+  seeing the mobile render: on narrow viewports the photo/status card should
+  sit right after the hero copy (ending "...CFO Toolbox and Digital Library I
+  built along the way.") and before the "Thought Leadership / What I write
+  about" section — not stacked at the bottom alongside the Toolbox panel and
+  Reader-access placeholder, which is where plain DOM order had put the whole
+  former `.home-side` sidebar bundle. Fixed by splitting the homepage's single
+  two-item grid (`.home-hero-copy`+`.home-tl-section` / `.home-side`) into
+  four independent top-level grid children — `.home-hero-block`,
+  `.home-photo-wrap`, `.home-tl-section`, `.home-sidebar-rest` (Toolbox panel
+  + Reader-access box) — in that exact DOM order. Below the 900px breakpoint
+  `.home-grid` is a plain `flex-direction:column` stack with no per-item
+  overrides, so DOM order *is* the rendered mobile order for free. At 900px+
+  the existing two-column desktop layout is restored via explicit
+  `grid-column`/`grid-row` placement on each of the four children (hero at
+  column 1 row 1, Thought Leadership at column 1 row 2, photo card at column
+  2 row 1, sidebar-rest at column 2 row 2) — completely independent of DOM
+  order, so the desktop design-file layout is unaffected by this change.
+  `test_mobile_dom_order_photo_card_between_hero_and_thought_leadership`
+  asserts the DOM order directly.
+- **Homepage Restructure — a parallel session's stray PR landed a second,
+  independent homepage rebuild on `main` mid-flight; reconciled by keeping
+  this branch's fuller redesign and adopting one piece from the other.**
+  While this branch's design-fidelity work was in progress, a different
+  session (working off a different, narrower design export —
+  `CFO_Navigator_Feed_Redesign`, not `Homepage_Restructure_Standalone.html`)
+  independently rebuilt the same `homepage()` function and merged straight
+  to `main` as its own PR — a duplicate/stray session, confirmed by Brian,
+  not the intended direction. Its version never touched the Thought
+  Leadership section at all (the old standalone card was still live, not
+  duplicated with this branch's consolidated section — checked directly
+  against the then-live homepage before reconciling, since two rewrites of
+  the same page landing separately raised the real possibility of visibly
+  broken output), moved the Toolbox teaser into the right column as a
+  narrower vertical list, resized the avatar to 265px, and — the one piece
+  worth keeping — wired the "Reader access" box to a real `/read` link
+  instead of the placeholder text it launched with, since the Phase 5
+  Reader merge had landed by the time that session built it. Reconciled via
+  a real merge (lower-risk than a from-scratch rebuild given it was really
+  only two conflicting functions, `_avatar()` and `homepage()`): kept this
+  branch's full consolidated Thought Leadership section, flagship-card
+  sharing, Sail Don't Row correction, and mobile-order/breakpoint work;
+  adopted the real `/read` link and `_avatar()`'s new `border_width` param
+  (set to 4 here, matching the design file's own 4px ring — a discrepancy
+  this branch hadn't caught before the param existed to fix it); kept this
+  branch's 200px avatar size and narrower Toolbox-panel-as-single-white-card
+  treatment rather than the other session's 265px/vertical-list version,
+  since neither was specifically requested to be adopted. The other
+  session's now-superseded `_toolbox_row`/`_ICON_FPA_BUDDY`/`toolbox_card`/
+  `reader_access_card` helpers were dead code after the merge and removed
+  outright rather than left unused. Same brand-check false positive as
+  before recurred here too (a `PR #320`/`#321` reference this time, not
+  `#318`) — reworded away from the `#NNN` pattern again rather than adding
+  a general suppression, consistent with the earlier fix's approach.
+- **Homepage Restructure — a direct post-merge cross-check against the
+  design file (not memory of it) caught real drift the reconciliation merge
+  introduced, beyond the two deliberately-approved deviations.** After
+  reconciling with the stray parallel-session PR above, Brian asked for the
+  final markup to be checked against the actual design file again, the same
+  way the Sail Don't Row and shared-card issues were originally caught —
+  re-rendered the bundled export fresh (same Playwright approach as the
+  original build) rather than relying on the first pass's notes. Found and
+  fixed genuine, non-shared-CSS drift: the Toolbox panel's tile-row icon
+  badges were reusing `_card_icon()`, whose `margin-bottom:14px` (meant for
+  a badge stacked *above* a title) and `1.8` stroke-width don't match the
+  design's own badges for this icon-*beside*-text row — replaced with a
+  dedicated `.home-toolbox-icon` class built to the file's exact spec (34px,
+  radius 8, stroke-width 2, 16px icon, no margin). Also fixed three
+  typography/spacing values that had drifted from the file with no
+  justification for the drift: the "What I write about" heading (28px ->
+  30px), the bullet list's bottom margin (28px -> 37px), and the "Recent
+  highlights" grid's gap (`24px` uniform -> `32px 40px` row/column, per the
+  file), plus restructuring the "Recent highlights" label from a grid item
+  sharing the items' own gap into its own element with the file's explicit
+  20px margin-bottom and 28px divider padding-top. **Explicitly NOT
+  "fixed" back to the file, and confirmed as deliberate on this pass, not
+  overlooked:** the flagship-card CSS (`.tl-card` padding, `.tl-featured`
+  gap) and the "Recent highlights" label/type-label color both differ from
+  the file's literal values — the former because that CSS is intentionally
+  shared with `/thought-leadership`'s own pre-existing card treatment (see
+  the flagship-cards-shared bullet above; changing it to match the design
+  file would also change the live `/thought-leadership` page, which Brian's
+  instruction was specifically protecting), the latter because the file's
+  `rgb(138,143,153)` isn't an established site token and `--muted`
+  (`#6F6A60`) already covers this role elsewhere on the page — introducing
+  a new off-brand gray to chase an exact pixel match would trip
+  `brand_check.py`'s own off-palette check. **The "🚧 building" sticker
+  stays, per explicit standing instruction, even though the design file
+  still doesn't show it** — this is the second time this exact point has
+  come up (first as the Homepage Restructure regression bullet above), and
+  the file's omission is confirmed to be a known gap in the export, not a
+  design decision to match.
+- **Homepage Restructure — Brian re-exported the design file with the
+  building sticker added, and its position/rotation differs from the
+  earlier guess.** A follow-up upload of `Homepage_Restructure_Standalone.html`
+  (re-rendered fresh via Playwright, same as every prior cross-check round)
+  turned out to be an updated export, not a duplicate: the Toolbox panel now
+  genuinely includes a sticker in the file itself — confirming the earlier
+  "known gap in the export" bullet above was correct, and Brian has since
+  closed that gap at the source rather than leaving it a standing exception.
+  Position/rotation differs from what this branch had been using since
+  Phase 3 (`rotate(-4deg)`, `right:14px`): the updated file shows
+  `rotate(4deg)`, `right:20px` — corrected to match exactly. The file's
+  sticker text is plain "building" with no emoji (likely the same design-
+  tool text-field limitation noted for the "hi, I'm Brian" sticker
+  elsewhere), but the emoji is kept — established sitewide copy
+  (`"🚧 building"`, identical wording already live on `/tools`), not
+  something this pass should silently change based on an export artifact.
+- **Homepage Restructure — a live-preview check (not a design-file re-read)
+  caught four real layout/logic bugs the prior design-fidelity passes
+  missed, all confirmed against actual rendered output rather than guessed
+  at.** Brian flagged that the Railway preview didn't match what had been
+  signed off; since this session's sandbox can't reach `*.up.railway.app`
+  directly (network policy blocks it), verification used a locally-served
+  copy of the exact same commit instead — comparing element bounding boxes
+  (`getBoundingClientRect()`) between the live app and the bundled design
+  export at matching viewport widths, not just eyeballing screenshots.
+  Four distinct bugs surfaced this way, each already covered by a
+  regression test:
+  1. **Hero headline/subhead were capped at `max-width:640px`** — a
+     leftover from an earlier hero-polish pass that predates the current
+     two-column grid giving the hero column ~975px to work with. The cap
+     made the text wrap narrower than the design (design lets it fill the
+     column) and left a large unused gap next to the sidebar. Removed
+     outright.
+  2. **The avatar `<img>` didn't scale with its own wrapper.** `_avatar()`
+     bakes a fixed pixel `width`/`height` into its inline style — correct
+     for every other call site, which use one fixed size throughout. The
+     homepage hero photo is the one place the *wrapper* itself resizes
+     (200px -> 240px at the desktop breakpoint), so without an override the
+     photo stayed pinned at 200px inside a now-larger frame, opening a gap
+     before the status box that isn't in the design. Fixed with a CSS
+     override scoped to `.home-avatar-wrap>img,.home-avatar-wrap>div[aria-label]`
+     specifically — not every child div, since the "hi, I'm Brian" sticker
+     is a sibling div in that same wrapper and must not get stretched.
+  3. **`.home-status` was `position:absolute` with a hardcoded top offset**,
+     so its actual rendered height was invisible to `.home-photo-wrap`
+     (also hardcoded, 340/400px) — any status copy longer than that guess
+     (this text is admin-editable via `/admin/copy`) would silently
+     overflow into the Toolbox panel in the next grid row. Moved into
+     normal flow, pulled up under the avatar with `margin-top:-50px`
+     instead of an absolute offset — tuned to land at the exact same visual
+     position the old absolute values produced (avatar flow height minus
+     the old top offset, -50px at both breakpoints) — so
+     `.home-photo-wrap`'s height now genuinely reflects its content and the
+     grid row sizes itself correctly regardless of copy length.
+  4. **The wrong word was underlined in the hero headline.** The existing
+     `_underline_last_word()` helper (by design, for arbitrary admin-edited
+     heading text) always accents whichever word ends the sentence — for
+     the current default copy that's "scorekeeper.", not the design's
+     intended "strategic partner" mid-sentence accent. This was wrong on
+     both breakpoints, not just mobile — easy to miss at full-page zoom,
+     which is likely why earlier design-fidelity passes didn't catch it.
+     Added `_underline_phrase()`, which targets a specific phrase
+     case-insensitively and falls back to `_underline_last_word()`'s
+     behavior if the phrase isn't found (e.g. an admin rewrites the
+     headline without "strategic partner" in it) — same underline
+     mechanism, just phrase-targeted instead of always-last-word. Homepage
+     hero heading now calls `_underline_phrase(homepage_headline,
+     "strategic partner")`; the unrelated `_underline_last_word("Brian
+     Weisberg", ...)` use elsewhere is untouched.
+  **Also confirmed, not a bug:** this session's headless Chromium can't
+  actually load the sitewide Google Fonts (`fonts.googleapis.com` requests
+  measured taking 12+ seconds before failing in this sandbox, vs. a
+  same-second success from plain `curl` — a sandbox networking quirk, not
+  a CSS issue), so local screenshots taken here render the nav
+  wordmark/stickers in a fallback system font rather than Permanent
+  Marker/Caveat. Checked via `getComputedStyle().fontFamily`, which
+  correctly returns the intended `@font-face` stack — confirming the CSS
+  itself is right and this is purely a rendering limitation of the
+  comparison tooling, not something to chase in the app.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
