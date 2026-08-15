@@ -577,6 +577,29 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   point Phase 1 deferred to this phase rather than adding two separate
   Archive/Feed links that would've just been deleted again once the merge
   landed.
+- **Reader follow-up pass — a live post-launch walkthrough surfaced a real
+  click-hijack bug, a content-flattening bug, and a few gaps.** Paywalled
+  Feed items were wrapped in a real `<a target="_blank">` instead of getting
+  the normal `rrOpen()` click handler, so a click hijacked straight to an
+  external tab before the reader pane's own "Original →" link ever got a
+  chance to render — fixed by removing the special-casing entirely (the
+  paywall badge stays; the click behavior no longer differs from any other
+  row). Article content rendered as one flattened paragraph with no images
+  or links because `linklib/extract.py`'s always-active BeautifulSoup
+  fallback (trafilatura isn't a declared dependency, so this is the path
+  that actually runs) used `get_text(" ", strip=True)`, which drops
+  paragraph breaks entirely — fixed there, plus a new `extract_reader_html()`
+  gives the Reader's live-fetch path real structured HTML (paragraphs,
+  headings, lists, absolute-ized images/links) via a new `PageData.raw_html`
+  field, without changing `_extract_content()`'s plain-text contract that
+  ingest/search/enrichment depend on. See ARCHITECTURE.md's Reader-merge
+  section for the full list, including the known gap (already-saved
+  articles' cached content isn't retroactively restructured), the reader
+  body's width fix (640px → 700px, matched to Instapaper's own reading
+  column), the two new Instapaper-parity features (in-article find, a
+  distraction-free reading toggle), the sitewide thousands-separator sweep,
+  and the confirmed non-gap on Feed-view search (the original design export
+  never wired one up, even decoratively).
 - **Thought Leadership Admin CRUD, Phase 1 — the four `/thought-leadership`
   columns (Writing, Speaking & Events, Podcasts, Press) are now admin-managed,
   not hardcoded.** Phase 0 investigation found all four columns reading from

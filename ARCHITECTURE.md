@@ -1559,6 +1559,69 @@ other retired-route call in this doc). The three panes:
 `/read`, first in the list — the entry point Phase 1 deliberately deferred
 to this phase.
 
+**Reader fixes/follow-ups (post-launch pass):**
+- **Paywalled Feed items now open in-app like any other row.** They used to
+  be wrapped in a real `<a target="_blank">` instead of getting `rrOpen()`'s
+  normal click handler — a genuine bug (the click hijacked straight to an
+  external tab before the reader pane, and its own "Original →" toolbar
+  link, ever got a chance to render), not a deliberate "no in-app reader for
+  paywalled sources" design. Extraction still runs and gracefully falls back
+  to "Content could not be extracted, Open original →" when a paywall blocks
+  it, same as any other fetch failure — the "🔒 Paywalled" badge stays, only
+  the click behavior changed.
+- **Article content is now real structured HTML for a live fetch, not
+  flattened plain text.** `linklib/extract.py` gained `extract_reader_html()`
+  — a BeautifulSoup-based sanitizer that keeps paragraphs/headings/lists,
+  absolute-izes and preserves `<img>`/`<a>`, and strips everything else
+  (chrome tags, all non-safelisted attributes) — used only by
+  `_resolve_reader_content`'s live-fetch branch, over `PageData.raw_html` (a
+  new field on the existing dataclass; the fetched HTML, kept only so a
+  caller wanting structure doesn't need a second HTTP round trip).
+  `_extract_content()` itself — the plain-text extractor the ingest/search/
+  enrichment pipeline depends on staying plain text (`articles.content`,
+  FTS5, the Claude enrichment prompt, `looks_paywalled()`'s length check) —
+  is deliberately untouched in contract, only its always-active BeautifulSoup
+  fallback (trafilatura isn't a declared dependency, so in practice this is
+  the path that runs) was fixed to actually preserve paragraph breaks
+  (`\n\n`-joined blocks) instead of `get_text(" ", strip=True)` flattening
+  everything into one line. **Known gap:** a saved article's cached
+  `content` in the DB is still whatever plain text ingest-time extraction
+  produced — this fix doesn't retroactively restore images/links for
+  already-saved articles (no backfill shipped in this pass; would need a
+  live re-fetch per article, out of scope here), though newly-ingested or
+  re-enriched articles going forward at least get real paragraph breaks in
+  their plain-text `content`.
+- **Reader body column widened** 640px → 700px, matched against Instapaper's
+  own desktop reading column width (~680–700px, measured off the reference
+  screenshots in the original design handoff) — the original build brief's
+  target, which the initial implementation undershot.
+- **Two new reader-pane features**, both Instapaper-parity asks:
+  - **Find in article** — a separate, article-scoped text search (distinct
+    from Saved-view's list search) via a toggleable find bar in
+    `.rr-reader-actions`; walks `#rr-reader-body-text`'s text nodes with a
+    `TreeWalker`, wraps matches in `<mark>`, next/prev navigation, closes
+    and clears on Escape.
+  - **Distraction-free reading** — a header toggle (outward/inward diagonal-
+    arrow icon, immediately next to the close button, matching Instapaper's
+    own icon and placement) that collapses the middle list pane to a thin
+    sliver (title/source/live time-remaining, computed from reader-pane
+    scroll position; a duplicate collapse button sits above that content) and
+    lets the reader pane take the freed width. Keyed only to whether an
+    article is open, not to which quick view it came from, so it behaves
+    identically for Feed and Saved.
+- **Thousands separators** (`:,` format spec) added to every large-count
+  render sitewide that was missing one — the Reader's quick-view badges and
+  list-pane item counts (inherited the gap from the pre-merge Archive page),
+  plus `/admin/system/page-index`'s stat cards and the Tag cleanup admin
+  table's per-tag counts. An audit of every other `lib.count()`/large-list
+  count site found no other gaps.
+- **Feed view has no search box** (Saved view does) — confirmed against the
+  original `Feed.dc.html` design export: its list-pane header has only a
+  decorative magnifying-glass *shape* (no `onClick`, no search-state
+  variable) — never actually wired to search even in the design tool itself.
+  Not a shipped-vs-designed gap; flagged as a possible future addition, not
+  built in this pass.
+
 ### Auth: three tiers, one cookie
 
 Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no

@@ -14039,7 +14039,7 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
     pane calls) — exactly one implementation of "resolve id-or-url to article
     content," not two. Returns None when neither an id nor a url resolves to
     anything."""
-    from linklib.extract import fetch_page
+    from linklib.extract import fetch_page, extract_reader_html
     import html as html_mod
 
     article = None
@@ -14060,6 +14060,10 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
 
     cached_content = (article or {}).get("content", "")
     cached_title = (article or {}).get("title", "")
+    is_structured = False   # True only when `content` is already real HTML from a
+                             # live fetch (extract_reader_html) — a cached article's
+                             # `content` in the DB is always plain text from ingest
+                             # time, so it can't carry images/links either way.
 
     if cached_content and len(cached_content) > 200:
         title = cached_title or url
@@ -14068,13 +14072,18 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
         try:
             page = fetch_page(url)
             title = page.title or cached_title or url
-            content = page.content or ""
+            structured = extract_reader_html(page.raw_html, url) if page.raw_html else ""
+            if structured:
+                content = structured
+                is_structured = True
+            else:
+                content = page.content or ""
         except Exception:
             title = cached_title or url
             content = ""
 
     if content:
-        if "<p>" in content or "<div" in content:
+        if is_structured:
             body_html = content
             word_count = len(re.sub(r"<[^>]+>", " ", content).split())
         else:
@@ -14381,11 +14390,26 @@ _READER_SHELL_CSS = """
 .rr-search-form input{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:9px;
   font-size:14px;background:var(--surface);font-family:inherit;}
 .rr-list-rows{flex:1;overflow-y:auto;}
+/* Distraction-free reading: the middle list pane collapses to a thin sliver
+   (title/source/time-remaining) and the reader pane takes the freed width.
+   Works identically regardless of which quick view the open article came
+   from — nothing here is keyed to `view`, only to whether an article is open. */
+.rr-shell.rr-focus-mode .rr-list-pane{flex:0 0 220px;min-width:180px;max-width:260px;}
+.rr-shell.rr-focus-mode #rr-resize-list{display:none;}
+.rr-shell.rr-focus-mode .rr-list-header,
+.rr-shell.rr-focus-mode .rr-list-rows,
+.rr-shell.rr-focus-mode #rr-alert-wrap{display:none;}
+.rr-sliver{display:none;flex-direction:column;gap:14px;padding:20px 16px;}
+.rr-shell.rr-focus-mode .rr-sliver{display:flex;}
+.rr-sliver-collapse{align-self:flex-start;background:none;border:1px solid var(--line);border-radius:8px;
+  padding:6px;cursor:pointer;color:var(--navy);display:flex;}
+.rr-sliver-collapse:hover{background:var(--surface-2);}
+.rr-sliver-title{font-family:var(--font-head);font-weight:600;font-size:14px;color:var(--ink);line-height:1.35;}
+.rr-sliver-meta{font-size:12px;color:var(--muted);}
 .rr-row{display:flex;gap:14px;padding:15px 22px;border-bottom:1px solid var(--line);}
 .rr-row:hover{background:var(--surface-2);}
 .rr-row-selected{background:var(--navy-wash);border-left:3px solid var(--navy);padding-left:19px;}
 .rr-row-main{flex:1;min-width:0;cursor:pointer;}
-.rr-row-main.rr-row-disabled{cursor:default;}
 .rr-row-meta{display:flex;align-items:baseline;gap:6px;margin-bottom:4px;font-size:12px;}
 .rr-row-source{font-weight:600;letter-spacing:.02em;color:var(--navy-light);}
 .rr-row-date{color:var(--muted);}
@@ -14405,12 +14429,27 @@ _READER_SHELL_CSS = """
 .rr-reader-pane{flex:1 1 320px;min-width:240px;background:var(--surface);overflow-y:auto;position:relative;}
 .rr-reader-header{position:sticky;top:0;background:var(--surface);display:flex;align-items:center;
   justify-content:space-between;flex-wrap:wrap;row-gap:8px;padding:13px 20px;border-bottom:1px solid var(--line);z-index:5;}
+.rr-reader-header-left{display:flex;align-items:center;gap:6px;}
 .rr-reader-close{cursor:pointer;font-size:20px;color:var(--muted);line-height:1;background:none;border:none;}
+.rr-reader-expand{cursor:pointer;background:none;border:none;color:var(--muted);display:flex;
+  align-items:center;padding:4px;border-radius:6px;}
+.rr-reader-expand:hover{background:var(--surface-2);color:var(--navy);}
 .rr-reader-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;}
 .rr-reader-actions button{cursor:pointer;font-size:12px;font-weight:600;background:none;border:1px solid var(--line);
   border-radius:6px;padding:4px 9px;color:var(--navy-light);font-family:inherit;}
 .rr-reader-actions button.rr-row-btn-on{background:var(--seafoam-wash);border-color:var(--seafoam-deep);color:var(--seafoam-deep);}
-.rr-reader-body{max-width:640px;margin:0 auto;padding:44px 32px 100px;}
+.rr-find-bar{display:none;align-items:center;gap:6px;padding:8px 20px;border-bottom:1px solid var(--line);
+  background:var(--surface-2);position:sticky;top:53px;z-index:4;}
+.rr-find-bar.rr-find-open{display:flex;}
+.rr-find-bar input{flex:1;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:7px;
+  font-size:13px;font-family:inherit;background:var(--surface);}
+.rr-find-bar button{cursor:pointer;background:none;border:1px solid var(--line);border-radius:6px;
+  padding:4px 9px;color:var(--navy-light);font-family:inherit;font-size:12px;flex-shrink:0;}
+.rr-find-bar button:hover{background:var(--navy-wash);}
+.rr-find-count{font-size:12px;color:var(--muted);white-space:nowrap;min-width:34px;text-align:center;flex-shrink:0;}
+mark.rr-find-hit{background:var(--seafoam);color:var(--ink);border-radius:2px;padding:0 1px;}
+mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
+.rr-reader-body{max-width:700px;margin:0 auto;padding:44px 32px 100px;}
 .rr-reader-category{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
   color:var(--seafoam-deep);margin-bottom:12px;}
 .rr-reader-title{font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:30px;line-height:1.18;
@@ -14492,7 +14531,7 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
     # -- left rail ----------------------------------------------------------
     def _qv(v, label, count):
         cls = "rr-qv rr-qv-on" if view == v else "rr-qv"
-        return f'<a href="/read?view={v}" class="{cls}"><span>{_esc(label)}</span><span class="rr-qv-count">{count}</span></a>'
+        return f'<a href="/read?view={v}" class="{cls}"><span>{_esc(label)}</span><span class="rr-qv-count">{count:,}</span></a>'
 
     quick_views_html = (
         _qv("feed", "Feed", len(feed_items))
@@ -14548,14 +14587,20 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
         category = item.get("category") or "Other"
         date = _reader_fmt_date(item.get("published_at") or "")
         is_rl = url in rl_urls
+        # Paywalled items still open in the in-app reader pane, same as any other
+        # row — the pane's own "Original ->" toolbar link (rrRenderArticle) is the
+        # one intended way to jump to source. They used to be wrapped in a real
+        # <a target="_blank"> instead, which hijacked the click into an external
+        # tab before the reader pane (and its "Original ->" link) ever got a
+        # chance to render — a genuine bug, not a deliberate "no in-app reader for
+        # paywalled sources" design (extraction still runs and gracefully falls
+        # back to "Content could not be extracted, Open original ->" when a
+        # paywall blocks it, same as any other fetch failure).
         badge = '<span class="rr-paywall-badge">&#128274; Paywalled</span>' if paywalled else ""
-        main_cls = "rr-row-main rr-row-disabled" if paywalled else "rr-row-main"
-        main_onclick = "" if paywalled else ' onclick="rrOpen(this)"'
-        main_open = (
-            f'<a href="{_esc(url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">'
-            if paywalled else ""
-        )
-        main_close = "</a>" if paywalled else ""
+        main_cls = "rr-row-main"
+        main_onclick = ' onclick="rrOpen(this)"'
+        main_open = ""
+        main_close = ""
         actions = ""
         if not paywalled:
             save_btn = '<button class="rr-row-btn" onclick="rrSaveItem(this)">+ Save</button>'
@@ -14611,15 +14656,15 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
     if view == "saved":
         rows_html = "".join(_saved_row(r) for r in saved_rows) or '<p style="padding:24px;color:var(--muted);">No matches.</p>'
         list_title = "Saved"
-        list_count_label = f"{len(saved_rows)} of {saved_total} shown" if q else f"{saved_total} saved"
+        list_count_label = f"{len(saved_rows):,} of {saved_total:,} shown" if q else f"{saved_total:,} saved"
     elif view == "readlater":
         rows_html = "".join(_rl_row(r) for r in rl_rows) or '<p style="padding:24px;color:var(--muted);">No items saved to Read Later yet.</p>'
         list_title = "Read Later"
-        list_count_label = f"{len(rl_rows)} items"
+        list_count_label = f"{len(rl_rows):,} items"
     else:
         rows_html = "".join(_feed_row(i) for i in feed_items) or '<p style="padding:24px;color:var(--muted);">No items loaded—feeds may be warming up. Try refreshing in a moment.</p>'
         list_title = "Feed"
-        list_count_label = f"{len(feed_items)} items"
+        list_count_label = f"{len(feed_items):,} items"
 
     alert_html = ""
     if stale:
@@ -14640,8 +14685,9 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
     <div class="rr-list-title" id="rr-list-title">{_esc(list_title)}</div>
     <div class="rr-list-count" id="rr-list-count">{_esc(list_count_label)}</div>
   </div>
-  {alert_html}
+  <div id="rr-alert-wrap">{alert_html}</div>
   <div class="rr-list-rows" id="rr-list-rows">{rows_html}</div>
+  <div class="rr-sliver" id="rr-sliver"></div>
 </div>"""
 
     reader_pane_html = """<div class="rr-reader-pane" id="rr-reader">
@@ -14702,6 +14748,19 @@ function rrOpen(el) {{
 var rrCurrent = null;
 var rrFsStep = 0;
 var rrFsSizes = [17, 15, 20];
+// Distraction-free reading (matches Instapaper's own expand/collapse toggle).
+// State lives here, not per-article, so it survives a scroll-driven "time
+// left" update without re-deriving anything from `view`/`d` — the whole
+// point is it behaves identically whether the open article came from Feed
+// or Saved.
+var rrFocusMode = false;
+var RR_ICON_EXPAND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+var RR_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+var RR_ICON_SEARCH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>';
+// In-article find (a separate, article-scoped search — not the list search).
+var rrFindMatches = [];
+var rrFindIndex = -1;
+var rrFindBodyHtml = '';
 async function rrLoadArticle(id, url, fallback) {{
   var pane = document.getElementById('rr-reader');
   pane.innerHTML = '<div class="rr-reader-empty"><div>Loading&hellip;</div></div>';
@@ -14730,13 +14789,29 @@ function rrRenderArticle(d) {{
     (isRl ? '&#10003; Read later' : '&#128204; Read later') + '</button>';
   var body = d.has_content ? d.body_html :
     '<p style="color:var(--muted);">Content could not be extracted. <a href="' + rrEsc(d.url) + '" target="_blank" rel="noopener">Open original &rarr;</a></p>';
+  rrFindMatches = []; rrFindIndex = -1; rrFindBodyHtml = '';
   pane.innerHTML =
     '<div class="rr-reader-header">' +
-      '<button class="rr-reader-close" onclick="rrCloseReader()">&times;</button>' +
+      '<div class="rr-reader-header-left">' +
+        '<button class="rr-reader-close" onclick="rrCloseReader()">&times;</button>' +
+        '<button class="rr-reader-expand" id="rr-reader-expand" onclick="rrToggleFocusMode()" title="' +
+          (rrFocusMode ? 'Exit distraction-free reading' : 'Distraction-free reading') + '">' +
+          (rrFocusMode ? RR_ICON_COLLAPSE : RR_ICON_EXPAND) +
+        '</button>' +
+      '</div>' +
       '<div class="rr-reader-actions">' + saveBtn + rlBtn +
         '<button onclick="rrCycleFontSize()">Aa</button>' +
+        '<button onclick="rrToggleFind()" title="Find in article">' + RR_ICON_SEARCH + '</button>' +
         '<a href="' + rrEsc(d.url) + '" target="_blank" rel="noopener" style="font-size:12px;">Original &rarr;</a>' +
       '</div>' +
+    '</div>' +
+    '<div class="rr-find-bar" id="rr-find-bar">' +
+      '<input type="text" id="rr-find-input" placeholder="Find in article&hellip;" ' +
+        'oninput="rrFindRun()" onkeydown="rrFindKeydown(event)">' +
+      '<span class="rr-find-count" id="rr-find-count"></span>' +
+      '<button onclick="rrFindPrev()" title="Previous match">&uarr;</button>' +
+      '<button onclick="rrFindNext()" title="Next match">&darr;</button>' +
+      '<button onclick="rrToggleFind()" title="Close">&times;</button>' +
     '</div>' +
     '<div class="rr-reader-body">' +
       '<div class="rr-reader-category">' + rrEsc(d.category) + '</div>' +
@@ -14744,17 +14819,130 @@ function rrRenderArticle(d) {{
       '<div class="rr-reader-byline">' + byline + '</div>' +
       '<div class="rr-reader-body-text" id="rr-reader-body-text" style="--rr-fs:' + rrFsSizes[rrFsStep] + 'px;">' + body + '</div>' +
     '</div>';
+  rrUpdateSliver();
 }}
 function rrCloseReader() {{
   document.querySelectorAll('.rr-row').forEach(function(r) {{ r.classList.remove('rr-row-selected'); }});
   document.getElementById('rr-reader').innerHTML =
     '<div class="rr-reader-empty"><div style="font-size:14px;">Select an article to start reading</div></div>';
   rrCurrent = null;
+  rrFindMatches = []; rrFindIndex = -1; rrFindBodyHtml = '';
+  if (rrFocusMode) rrSetFocusMode(false);
 }}
 function rrCycleFontSize() {{
   rrFsStep = (rrFsStep + 1) % rrFsSizes.length;
   var el = document.getElementById('rr-reader-body-text');
   if (el) el.style.setProperty('--rr-fs', rrFsSizes[rrFsStep] + 'px');
+}}
+function rrSetFocusMode(on) {{
+  rrFocusMode = on;
+  var shell = document.querySelector('.rr-shell');
+  if (shell) shell.classList.toggle('rr-focus-mode', rrFocusMode);
+  var btn = document.getElementById('rr-reader-expand');
+  if (btn) {{
+    btn.innerHTML = rrFocusMode ? RR_ICON_COLLAPSE : RR_ICON_EXPAND;
+    btn.title = rrFocusMode ? 'Exit distraction-free reading' : 'Distraction-free reading';
+  }}
+  rrUpdateSliver();
+}}
+function rrToggleFocusMode() {{ rrSetFocusMode(!rrFocusMode); }}
+function rrUpdateSliver(remainMin) {{
+  var el = document.getElementById('rr-sliver');
+  if (!el || !rrCurrent) return;
+  var mins = (remainMin === undefined) ? rrCurrent.reading_minutes : remainMin;
+  var timeLabel = mins ? (mins + (mins === 1 ? ' min left' : ' mins left')) : '';
+  var meta = [rrCurrent.source, timeLabel].filter(Boolean).join(' \\u00b7 ');
+  el.innerHTML =
+    '<button class="rr-sliver-collapse" onclick="rrToggleFocusMode()" title="Exit distraction-free reading">' + RR_ICON_COLLAPSE + '</button>' +
+    '<div class="rr-sliver-title">' + rrEsc(rrCurrent.title) + '</div>' +
+    '<div class="rr-sliver-meta">' + meta + '</div>';
+}}
+// Non-bubbling scroll events still reach a capturing listener on document,
+// which is the standard way to delegate them without binding directly to
+// #rr-reader (whose content is fully replaced on every article load).
+document.addEventListener('scroll', function(e) {{
+  if (!rrFocusMode || !rrCurrent || !rrCurrent.reading_minutes) return;
+  if (!e.target || e.target.id !== 'rr-reader') return;
+  var pane = e.target;
+  var scrollable = pane.scrollHeight - pane.clientHeight;
+  var frac = scrollable > 0 ? Math.min(1, pane.scrollTop / scrollable) : 0;
+  rrUpdateSliver(Math.max(0, Math.round(rrCurrent.reading_minutes * (1 - frac))));
+}}, true);
+function rrToggleFind() {{
+  var bar = document.getElementById('rr-find-bar');
+  if (!bar) return;
+  var opening = !bar.classList.contains('rr-find-open');
+  bar.classList.toggle('rr-find-open', opening);
+  if (opening) {{
+    var input = document.getElementById('rr-find-input');
+    if (input) input.focus();
+  }} else {{
+    rrFindReset();
+  }}
+}}
+function rrFindReset() {{
+  var body = document.getElementById('rr-reader-body-text');
+  if (body && rrFindBodyHtml) body.innerHTML = rrFindBodyHtml;
+  rrFindMatches = []; rrFindIndex = -1;
+  var input = document.getElementById('rr-find-input');
+  if (input) input.value = '';
+  var count = document.getElementById('rr-find-count');
+  if (count) count.textContent = '';
+}}
+function rrFindRun() {{
+  var body = document.getElementById('rr-reader-body-text');
+  var input = document.getElementById('rr-find-input');
+  var count = document.getElementById('rr-find-count');
+  if (!body || !input) return;
+  if (!rrFindBodyHtml) rrFindBodyHtml = body.innerHTML;
+  body.innerHTML = rrFindBodyHtml;
+  rrFindMatches = []; rrFindIndex = -1;
+  var q = input.value.trim();
+  if (!q) {{ if (count) count.textContent = ''; return; }}
+  var re = new RegExp(q.replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\\\$&'), 'gi');
+  var walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, null);
+  var textNodes = [];
+  var n;
+  while ((n = walker.nextNode())) textNodes.push(n);
+  textNodes.forEach(function(node) {{
+    var text = node.nodeValue;
+    re.lastIndex = 0;
+    if (!re.test(text)) return;
+    re.lastIndex = 0;
+    var frag = document.createDocumentFragment();
+    var last = 0;
+    var m;
+    while ((m = re.exec(text))) {{
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      var mark = document.createElement('mark');
+      mark.className = 'rr-find-hit';
+      mark.textContent = m[0];
+      frag.appendChild(mark);
+      rrFindMatches.push(mark);
+      last = m.index + m[0].length;
+      if (m[0].length === 0) re.lastIndex++;
+    }}
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(frag, node);
+  }});
+  if (rrFindMatches.length) rrFindGoTo(0);
+  if (count) count.textContent = rrFindMatches.length ? ((rrFindIndex + 1) + '/' + rrFindMatches.length) : '0/0';
+}}
+function rrFindGoTo(i) {{
+  if (!rrFindMatches.length) return;
+  if (rrFindIndex >= 0 && rrFindMatches[rrFindIndex]) rrFindMatches[rrFindIndex].classList.remove('rr-find-current');
+  rrFindIndex = ((i % rrFindMatches.length) + rrFindMatches.length) % rrFindMatches.length;
+  var el = rrFindMatches[rrFindIndex];
+  el.classList.add('rr-find-current');
+  el.scrollIntoView({{block: 'center', behavior: 'smooth'}});
+  var count = document.getElementById('rr-find-count');
+  if (count) count.textContent = (rrFindIndex + 1) + '/' + rrFindMatches.length;
+}}
+function rrFindNext() {{ if (rrFindMatches.length) rrFindGoTo(rrFindIndex + 1); }}
+function rrFindPrev() {{ if (rrFindMatches.length) rrFindGoTo(rrFindIndex - 1); }}
+function rrFindKeydown(e) {{
+  if (e.key === 'Enter') {{ e.preventDefault(); if (e.shiftKey) rrFindPrev(); else rrFindNext(); }}
+  else if (e.key === 'Escape') {{ rrToggleFind(); }}
 }}
 async function rrSaveItem(btn) {{
   var main = btn.closest('.rr-row').querySelector('.rr-row-main');
@@ -16961,7 +17149,7 @@ def admin_system_page_index(request: Request):
         f'<div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;'
         f'padding:10px 14px;">'
         f'<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">{label}</div>'
-        f'<div style="font-size:20px;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;">{count}</div></div>'
+        f'<div style="font-size:20px;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;">{count:,}</div></div>'
         for label, count in (("Pages", len(rows)), ("Flagged", len(flagged)))
     )
 
@@ -18057,7 +18245,7 @@ def admin_tags(request: Request, msg: str = "", merging: int = 0):
         t = _esc(tag)
         rows += f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:9px 12px;font-size:14px;font-weight:500;">{t}</td>
-  <td style="padding:9px 12px;font-size:13px;color:var(--muted);">{count}</td>
+  <td style="padding:9px 12px;font-size:13px;color:var(--muted);">{count:,}</td>
   <td style="padding:9px 12px;">
     <form method="post" action="/admin/library/tags/rename" style="display:flex;gap:6px;align-items:center;margin:0;">
       <input type="hidden" name="old" value="{t}">
