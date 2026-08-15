@@ -166,6 +166,58 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
     return done
 
 
+def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
+    """Re-fetch one already-saved article and, if the fetch produced real
+    structured content, store it as `content_html` — the Phase 5b backfill's
+    per-article glue (fetch via extract.py, store via db.py; same "glue
+    lives in pipeline.py" convention as ingest_url above).
+
+    Returns (ok, reason). `ok=True` on a real, sanity-checked success (a row
+    is stored, no log-worthy detail beyond the durable content_refetch_log
+    row this function also writes). `ok=False, reason='fetch-error'` when
+    the HTTP fetch itself failed outright; `ok=False, reason in
+    {'paywall','bot-challenge','too-thin'}` when the fetch "succeeded" but
+    extract.assess_extraction_quality() judged the result unusable. Every
+    call — success or failure — writes one content_refetch_log row.
+
+    Never destructive: a failure never touches articles.content or
+    articles.content_html, so a bad re-fetch can't erase what a good ingest
+    (or an earlier successful backfill run) already stored.
+    """
+    from .extract import fetch_page, extract_reader_html, assess_extraction_quality
+
+    article_id = article["id"]
+    url = article["url"]
+    try:
+        page = fetch_page(url)
+    except Exception as exc:
+        lib.log_content_refetch_attempt(article_id, "failure", reason="fetch-error", detail=str(exc)[:500])
+        return False, "fetch-error"
+
+    if not page.raw_html:
+        # fetch_page swallows its own request/HTTP errors and returns an
+        # empty PageData rather than raising — this is that case.
+        lib.log_content_refetch_attempt(article_id, "failure", reason="fetch-error")
+        return False, "fetch-error"
+
+    ok, reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
+    if not ok:
+        lib.log_content_refetch_attempt(article_id, "failure", reason=reason)
+        return False, reason
+
+    structured = extract_reader_html(page.raw_html, url)
+    if not structured:
+        # Passed the content sanity check on plain text, but the structured
+        # extractor itself came back empty (e.g. no <article>/<body> the
+        # extractor recognizes) — nothing usable to store.
+        lib.log_content_refetch_attempt(article_id, "failure", reason="too-thin")
+        return False, "too-thin"
+
+    lib.set_article_content_html(article_id, structured)
+    lib.log_content_refetch_attempt(article_id, "success")
+    return True, ""
+
+
 def _now() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()

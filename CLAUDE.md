@@ -622,6 +622,46 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   verification, mobile viewports included, for every UI-facing change going
   forward) — the mobile bug above is exactly the kind of thing a desktop-only
   verification pass structurally cannot catch.
+- **Phase 5b — Reader content backfill: reprocessing the ~4,500 already-saved
+  articles for real structure, not just live fetches.** The Reader
+  follow-up pass above shipped `extract_reader_html()`, but it only ever ran
+  against a live fetch — every already-saved article was still flattened
+  plain text from ingest time, and no raw HTML was ever kept for them, so
+  restoring structure needs a genuine re-fetch of each one. Investigated
+  first, per the standing gate: confirmed no raw HTML exists anywhere to
+  reprocess offline, so a live re-fetch of all ~4,516 URLs is unavoidable;
+  Historical sweep and the re-enrich job (near-identical background-thread/
+  `_JOB_STATE` patterns) are the right admin-batch-job template to copy,
+  not Archive Queue (a review UI, not a fetch loop) or Content de-dupe
+  (synchronous/foreground, wrong for a multi-hour job); and nothing in the
+  codebase rate-limits outbound crawling today, so a new ~1.5s delay between
+  fetches is a deliberate first, not a reuse. Built as
+  `/admin/library/backfill-content`: a new `articles.content_html` column
+  (never reusing `content`, which stays plain text — see `_resolve_reader_
+  content`, now preferring `content_html` when populated) and a new
+  `content_refetch_log` table (shape mirrors `backup_log` — one row per
+  attempt, success or failure, so a re-run's history stays visible).
+  **Never destructive**: a failed re-fetch never touches `articles.content`
+  or `articles.content_html`, only the log. Two refinements added after the
+  initial proposal, both requested before implementation began: (1) a real
+  content sanity check beyond HTTP status — `extract.
+  assess_extraction_quality()` catches a bot-challenge or paywall
+  interstitial that returned 200 with garbage instead of the real page,
+  logging `paywall`/`bot-challenge`/`too-thin` as distinct, groupable
+  reasons rather than silently storing a bad result; `bot-challenge` (a new
+  Cloudflare/PerimeterX/DataDome marker list, `looks_like_bot_challenge()`)
+  is a genuinely new detection path with no prior track record in this
+  codebase, unlike `paywall`, which reuses the existing `looks_paywalled()`/
+  `PageData.blocked` signal — so it got its own dedicated test, not just
+  incidental coverage riding behind the paywall case. (2) A real stop
+  control, not just crash-recovery resumability — neither Historical sweep
+  nor re-enrich had one (confirmed by direct grep, not just relayed from an
+  investigation report); added a `stop_requested` flag on the job state,
+  checked once per article between fetches, sharing the exact same
+  resumability mechanism a crash-recovery restart already used (both just
+  skip whatever `content_html` is already populated). See ARCHITECTURE.md's
+  "Reader content-structure backfill" section for the full technical
+  write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found
@@ -641,11 +681,17 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   url=?` so a Feed item that's already in the library opens as saved (it used
   to offer "+ Save" again, which would have left the new editor unreachable
   for exactly the "any Feed item that's been saved" case). That url-matched
-  row still gets a **live fetch** for its content — only an explicit by-id
-  open prefers the DB's cached copy, since cached `content` is plain text
-  from ingest time and using it here would silently strip images/links from a
-  Feed item that currently reads with them intact (the known cached-content
-  gap from the follow-up pass above). Investigation also resolved the
+  row skips only the **plain-text `content` cache** — using it there would
+  silently strip images/links from a Feed item that currently reads with them
+  intact, whereas an explicit by-id open accepts it. **Phase 5b's
+  `content_html` is deliberately not skipped**, since it's real structured
+  HTML and therefore a strict upgrade over both the plain-text cache and a
+  live re-fetch, however the row was reached. That distinction is the merge
+  point between the two phases and is worth remembering: 5c was written
+  against the pre-5b premise that a cached article's content is *always*
+  flattened plain text — true when 5c was built, and made false for any
+  backfilled row the moment 5b landed. The two phases were developed in
+  parallel and reconciled at merge, not sequentially. Investigation also resolved the
   never-settled question about the two Admin tag tools: both are
   **vocabulary-level, not per-article** — "Tag cleanup" merges/renames/deletes
   a tag across the whole library, "Tagging style" learns the tagging style for

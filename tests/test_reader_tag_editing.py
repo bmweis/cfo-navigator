@@ -263,11 +263,46 @@ def test_url_already_in_library_resolves_to_its_saved_row(env, monkeypatch):
     assert d["tags"] == ["kept"]
 
 
+def test_url_matched_article_prefers_backfilled_content_html(env, monkeypatch):
+    """The seam between Phase 5b and 5c, reconciled at merge.
+
+    5c skips the cached `content` on a url match because it's flattened plain
+    text. 5b's `content_html` is the opposite: real structured HTML, a strict
+    upgrade over both the plain-text cache and a live re-fetch. So it must be
+    used even on a url match — skipping it would re-fetch over the network to
+    rebuild something already on disk, and lose 5b's quality-checked output.
+    """
+    _seed(env, url="https://example.com/backfilled", tags=())
+    lib = env._lib()
+    try:
+        lib.conn.execute(
+            "UPDATE articles SET content_html=? WHERE url=?",
+            ("<p>Backfilled <em>structured</em> body.</p>", "https://example.com/backfilled"),
+        )
+        lib.conn.commit()
+    finally:
+        lib.close()
+
+    import linklib.extract as ex
+    calls = []
+
+    def _boom(url, **k):
+        calls.append(url)
+        raise AssertionError("must not live-fetch when content_html is on file")
+
+    monkeypatch.setattr(ex, "fetch_page", _boom)
+    c = _admin_client(env)
+    d = c.get("/api/read-article", params={"url": "https://example.com/backfilled"}).json()
+    assert not calls, "a backfilled row should never trigger a live fetch"
+    assert "<em>structured</em>" in d["body_html"]
+    assert d["id"], "still resolves as saved, so the tag editor stays available"
+
+
 def test_url_matched_article_still_uses_live_fetched_structure(env, monkeypatch):
-    """A url-matched row must not fall back to the DB's cached plain text —
-    that would silently strip images/links from a Feed item that currently
-    reads with them intact (the known cached-content gap from the Phase 5
-    follow-up pass)."""
+    """A url-matched row with no `content_html` must not fall back to the DB's
+    cached plain text — that would silently strip images/links from a Feed item
+    that currently reads with them intact (the cached-content gap from the
+    Phase 5 follow-up pass, for rows Phase 5b hasn't reached yet)."""
     _seed(env, url="https://example.com/known2", tags=())
     import linklib.extract as ex
 

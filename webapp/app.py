@@ -14332,18 +14332,30 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
         finally:
             lib.close()
 
-    # Only an explicit by-id open (a Saved-view click) prefers the DB's cached
-    # copy. A url-matched row is still opened with a live fetch, because cached
-    # `content` is plain text from ingest time — using it here would silently
-    # downgrade a Feed item that currently reads with images and links intact.
+    # Only the plain-text `content` cache is skipped for a url-matched row:
+    # using it there would silently downgrade a Feed item that currently reads
+    # with images and links intact, whereas an explicit by-id open (a Saved-view
+    # click) accepts it. Phase 5b's `content_html` is deliberately NOT skipped —
+    # it's real structured HTML, so it's a strict upgrade over both the
+    # plain-text cache and a live re-fetch, however the row was reached.
     cached_content = "" if matched_by_url else (article or {}).get("content", "")
+    cached_content_html = (article or {}).get("content_html", "")
     cached_title = (article or {}).get("title", "")
-    is_structured = False   # True only when `content` is already real HTML from a
-                             # live fetch (extract_reader_html) — a cached article's
-                             # `content` in the DB is always plain text from ingest
-                             # time, so it can't carry images/links either way.
+    is_structured = False   # True whenever `content` is real HTML — either the
+                             # Phase 5b backfill's stored content_html, or a live
+                             # fetch's own extract_reader_html() output. A cached
+                             # article's plain-text `content` (pre-backfill) can't
+                             # carry images/links either way.
 
-    if cached_content and len(cached_content) > 200:
+    if cached_content_html:
+        # Phase 5b backfill: this article was reprocessed and has real
+        # structured HTML on file — always prefer it over the plain-text
+        # `content` cache, since it's a strict upgrade (never re-fetched live
+        # just because content_html happens to exist).
+        title = cached_title or url
+        content = cached_content_html
+        is_structured = True
+    elif cached_content and len(cached_content) > 200:
         title = cached_title or url
         content = cached_content
     else:
@@ -16754,6 +16766,7 @@ _LIBRARY_TOOLS = [
     ("/read",                       "Open Reader",         "The day-to-day reading surface (Phase 5): Feed, Saved, and Read Later in one three-pane view, with an in-app reader pane. This is where you actually read—the tools below are curation."),
     ("/admin/library/backup",       "Archive backup",      "Snapshot the database before you start, so you can roll back if needed."),
     ("/admin/library/backfill",     "Historical sweep",    "One-time catch-up: crawl each source's sitemap for older articles you saved before this tool existed, and queue them for review. Run once per source; new candidates land in Archive Queue below."),
+    ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable."),
     ("/admin/library/queue",        "Archive Queue",       "Review every proposed save from the historical sweep or an ongoing feed scan—fix dates, edit tags, and approve into the archive or dismiss."),
     ("/admin/library/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
     ("/admin/library/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
@@ -17561,7 +17574,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                                 "community_gap_submissions", "community_profile_views"]),
     ("Thought Leadership / Game", ["thought_leadership", "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
-                            "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback"]),
+                            "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
+                            "content_refetch_log"]),
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "enrichment_cost", "manual_overhead",
                                   "field_reviews", "narrative_review_log", "matchmaker_questions"]),
@@ -21852,6 +21866,263 @@ def admin_backfill_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
     return JSONResponse(_job_get("backfill"))
+
+
+# ---------------------------------------------------------------------------
+# Reader content-structure backfill (Phase 5b) — reprocess already-saved
+# articles so the merged Reader can show real structure (paragraphs, images,
+# links) instead of the flattened plain text every save was stored as before
+# the Reader-bugfixes PR. Same background-thread/_JOB_STATE pattern as re-enrich and Historical
+# sweep above, with two additions neither of those has: a `stop_requested`
+# flag (checked once per article, between fetches — a 2+ hour realistic
+# runtime makes "let me stop this without waiting for a crash" worth having,
+# not just crash-recovery resumability) and a fixed delay between fetches
+# (nothing in this codebase rate-limits outbound crawling today — Historical
+# sweep's sitemap fetches and the queue scanner both hit sources back-to-back
+# — so this is a deliberate new, explicit convention for this tool, not a
+# reuse of an existing one).
+# ---------------------------------------------------------------------------
+
+_CONTENT_BACKFILL_DELAY_SEC = 1.5
+
+
+def _content_backfill_job(limit: int, force: bool) -> None:
+    """Background thread: re-fetch articles needing content_html, updating
+    _JOB_STATE["content_backfill"]. Stoppable via stop_requested — checked
+    before each article (never mid-fetch), so a stop always lands cleanly
+    between attempts and a later run resumes from the same
+    articles_needing_content_backfill() scope (already-succeeded rows are
+    skipped, same as a crash-recovery restart would see)."""
+    _job_set("content_backfill", running=True, stop_requested=False,
+             done=0, total=0, ok=0, failed=0, error="", stopped=False)
+    lib = _lib()
+    try:
+        from linklib import pipeline as _pl
+
+        rows = lib.articles_needing_content_backfill(limit=limit, force=force)
+        total = len(rows)
+        _job_set("content_backfill", total=total)
+        ok_count = 0
+        failed_count = 0
+        for i, row in enumerate(rows):
+            if _job_get("content_backfill").get("stop_requested"):
+                _job_set("content_backfill", running=False, stopped=True,
+                         done=i, ok=ok_count, failed=failed_count)
+                return
+            ok, _reason = _pl.backfill_article_content(lib, row)
+            if ok:
+                ok_count += 1
+            else:
+                failed_count += 1
+            _job_set("content_backfill", done=i + 1, ok=ok_count, failed=failed_count)
+            if i < total - 1:
+                time.sleep(_CONTENT_BACKFILL_DELAY_SEC)
+        backup.maybe_backup(DB_PATH)
+        _job_set("content_backfill", running=False, done=total, ok=ok_count, failed=failed_count)
+    except Exception as exc:
+        _job_set("content_backfill", running=False, error=str(exc))
+    finally:
+        lib.close()
+
+
+@app.get("/admin/library/backfill-content", response_class=HTMLResponse)
+def admin_backfill_content(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        remaining = lib.count_content_backfill_remaining()
+        total_articles = lib.count()
+        failure_counts = lib.content_refetch_failure_counts()
+        log_rows = lib.list_content_refetch_log(limit=50)
+    finally:
+        lib.close()
+
+    job = _job_get("content_backfill")
+    running = job.get("running", False)
+    job_done = job.get("done", 0)
+    job_total = job.get("total", 0)
+    job_ok = job.get("ok", 0)
+    job_failed = job.get("failed", 0)
+    job_error = job.get("error", "")
+    job_stopped = job.get("stopped", False)
+
+    done_count = total_articles - remaining
+
+    status_html = ""
+    if running:
+        prog_pct = round(job_done / job_total * 100) if job_total else 0
+        status_html = f"""
+<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">
+  <div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:6px;">Content backfill in progress&hellip;</div>
+  <div style="font-size:13px;color:var(--muted);">{job_done} / {job_total} processed &middot; {job_ok} succeeded &middot; {job_failed} failed</div>
+  <div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">
+    <div style="background:#2563eb;height:8px;width:{prog_pct}%;transition:width .3s;"></div>
+  </div>
+  <form method="post" action="/admin/library/backfill-content/stop" style="margin-top:12px;">
+    <button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button>
+  </form>
+</div>"""
+    elif job_error:
+        status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: {_esc(job_error)}</div>'
+    elif job_stopped:
+        status_html = f'<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#92400e;">Stopped after {job_done} / {job_total} &mdash; {job_ok} succeeded, {job_failed} failed. Already-succeeded articles are skipped on the next run, so it&rsquo;s safe to press Start again.</div>'
+    elif job_done and not running:
+        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Done&mdash;{job_ok} succeeded, {job_failed} failed out of {job_done} processed.</div>'
+
+    def _failure_pill(reason, count):
+        labels = {"paywall": "Paywall", "bot-challenge": "Bot challenge",
+                  "too-thin": "Too thin", "fetch-error": "Fetch error"}
+        return (f'<span style="display:inline-flex;align-items:center;gap:5px;background:var(--bg);'
+                f'border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:12.5px;">'
+                f'<strong>{count}</strong> {_esc(labels.get(reason, reason))}</span>')
+
+    failures_html = ""
+    if failure_counts:
+        pills = "".join(_failure_pill(r, c) for r, c in sorted(failure_counts.items(), key=lambda x: -x[1]))
+        failures_html = f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0;">{pills}</div>'
+
+    def _log_row(r):
+        color = "#16a34a" if r["status"] == "success" else "#b91c1c"
+        label = "Success" if r["status"] == "success" else _esc(r.get("reason") or "failure")
+        title = _esc(r.get("article_title") or r.get("article_url") or f'#{r["article_id"]}')
+        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title}</td>'
+                f'<td style="padding:7px 12px;font-size:13px;color:{color};font-weight:500;">{label}</td>'
+                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{_esc((r.get("attempted_at") or "")[:19].replace("T", " "))}</td></tr>')
+
+    log_html = ""
+    if log_rows:
+        rows_html = "".join(_log_row(r) for r in log_rows)
+        log_html = f"""
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:20px;">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;font-size:14px;">Recent attempts</div>
+  <div style="overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Result</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">When</th>
+    </tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+  </div>
+</div>"""
+
+    disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<h1>Reader content backfill</h1>
+<p style="color:var(--muted);margin:-6px 0 6px;">Re-fetches already-saved articles so the Reader can show real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as.</p>
+<p style="color:var(--muted);margin:0 0 20px;">A failed re-fetch never touches an article&rsquo;s existing content&mdash;it&rsquo;s only logged. Rate-limited (~{_CONTENT_BACKFILL_DELAY_SEC}s between requests) and safe to stop and resume; a re-run only touches articles that still need it.</p>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
+  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:26px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{total_articles:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Total articles</div>
+  </div>
+  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:26px;font-weight:700;color:#16a34a;font-family:var(--font-head);">{done_count:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Structured</div>
+  </div>
+  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{remaining:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Remaining</div>
+  </div>
+</div>
+
+<div id="poll-container">{status_html}</div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;">
+  <form id="content-backfill-form" method="post" action="/admin/library/backfill-content/start" style="display:grid;gap:18px;">
+    <div>
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Limit</label>
+      <input type="number" name="limit" value="25" min="1" max="100000"
+        style="width:100%;max-width:220px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Verify on a small batch first&mdash;a full run against the whole remaining count is a multi-hour job.</p>
+    </div>
+    <div>
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="force" value="1" style="margin-top:3px;accent-color:var(--accent);">
+        <span><strong>Re-run articles that already have structured content</strong>
+        <span style="display:block;font-size:12px;color:var(--muted);">Unchecked (default)&mdash;only articles still on flattened plain text are processed. Check this only to re-run everything after an extraction-logic change.</span></span>
+      </label>
+    </div>
+    <div>
+      <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {disable}>Start backfill</button>
+      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side&mdash;you can leave this page.</span>
+    </div>
+  </form>
+</div>
+
+{failures_html}
+{log_html}
+</div>
+<script>
+(function() {{
+  var reloadOnDone = false;
+  function poll() {{
+    fetch('/admin/library/backfill-content/status').then(r => r.json()).then(function(s) {{
+      var container = document.getElementById('poll-container');
+      if (!container) return;
+      var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
+      if (s.running) {{
+        reloadOnDone = true;
+        container.innerHTML = '<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">'
+          + '<div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:6px;">Content backfill in progress&hellip;</div>'
+          + '<div style="font-size:13px;color:var(--muted);">' + s.done + ' / ' + s.total + ' processed &middot; ' + s.ok + ' succeeded &middot; ' + s.failed + ' failed</div>'
+          + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
+          + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div>'
+          + '<form method="post" action="/admin/library/backfill-content/stop" style="margin-top:12px;">'
+          + '<button type="submit" class="btn" style="background:#fff;color:#b91c1c;border:1px solid #fca5a5;font-size:13px;padding:7px 16px;">Stop</button></form></div>';
+        setTimeout(poll, 3000);
+      }} else if (reloadOnDone) {{
+        window.location.reload();
+      }} else if (s.error) {{
+        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
+      }}
+    }}).catch(function() {{ setTimeout(poll, 4000); }});
+  }}
+  if ({str(running).lower()}) {{ reloadOnDone = true; setTimeout(poll, 3000); }}
+  document.getElementById('content-backfill-form').addEventListener('submit', function() {{
+    setTimeout(function() {{ poll(); }}, 2000);
+  }});
+}})();
+</script>"""
+    return HTMLResponse(_page("Reader content backfill—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/library/backfill-content/start")
+async def admin_backfill_content_start(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if _job_get("content_backfill").get("running"):
+        return RedirectResponse("/admin/library/backfill-content?running=1", status_code=303)
+    form = await request.form()
+    try:
+        limit = int(form.get("limit") or 25)
+    except ValueError:
+        limit = 25
+    force = bool(form.get("force"))
+    t = threading.Thread(target=_content_backfill_job, args=(limit, force), daemon=True)
+    t.start()
+    return RedirectResponse("/admin/library/backfill-content", status_code=303)
+
+
+@app.post("/admin/library/backfill-content/stop")
+def admin_backfill_content_stop(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if _job_get("content_backfill").get("running"):
+        _job_set("content_backfill", stop_requested=True)
+    return RedirectResponse("/admin/library/backfill-content", status_code=303)
+
+
+@app.get("/admin/library/backfill-content/status")
+def admin_backfill_content_status(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401)
+    return JSONResponse(_job_get("content_backfill"))
 
 
 def _backup_status_banner(backup_rows: list[dict]) -> str:
