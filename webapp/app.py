@@ -17284,7 +17284,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                                 "community_gap_submissions", "community_profile_views"]),
     ("Thought Leadership / Game", ["thought_leadership", "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
-                            "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback"]),
+                            "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
+                            "content_refetch_log"]),
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "enrichment_cost", "manual_overhead",
                                   "field_reviews", "narrative_review_log", "matchmaker_questions"]),
@@ -21580,8 +21581,8 @@ def admin_backfill_status(request: Request):
 # ---------------------------------------------------------------------------
 # Reader content-structure backfill (Phase 5b) — reprocess already-saved
 # articles so the merged Reader can show real structure (paragraphs, images,
-# links) instead of the flattened plain text every pre-#322 save was stored
-# as. Same background-thread/_JOB_STATE pattern as re-enrich and Historical
+# links) instead of the flattened plain text every save was stored as before
+# the Reader-bugfixes PR. Same background-thread/_JOB_STATE pattern as re-enrich and Historical
 # sweep above, with two additions neither of those has: a `stop_requested`
 # flag (checked once per article, between fetches — a 2+ hour realistic
 # runtime makes "let me stop this without waiting for a crash" worth having,

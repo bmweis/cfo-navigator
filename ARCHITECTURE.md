@@ -125,7 +125,7 @@ Every table in the file, grouped by feature area:
 
 | Group | Tables |
 |---|---|
-| Content spine | `articles`, `articles_fts`, `articles_vec`, `article_embeddings`, `enrichment_cost`, `library_queue`, `dedupe_decisions`, `read_later` |
+| Content spine | `articles`, `articles_fts`, `articles_vec`, `article_embeddings`, `enrichment_cost`, `library_queue`, `dedupe_decisions`, `read_later`, `content_refetch_log` |
 | FP&A Buddy (Ask) | `ask_questions`, `ask_feedback` |
 | Chat Matchmaker | `matchmaker_questions` |
 | Accounts | `users`, `password_reset_requests` |
@@ -274,6 +274,7 @@ used manual check rather than a per-turn or overhead cost.
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
+| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error`), `detail` (optional extra context) |
 
 ### FP&A Buddy (Ask)
 
