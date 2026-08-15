@@ -640,8 +640,16 @@ CREATE INDEX IF NOT EXISTS idx_backup_log_created ON backup_log(created_at);
 -- are groupable/countable by cause on the admin page. A failed attempt never
 -- touches articles.content or articles.content_html — see
 -- linklib.pipeline.backfill_article_content. `source` ('direct' | 'wayback',
--- added via migration below — see that migration's comment) distinguishes a
--- Wayback-archived-snapshot success from a normal live-fetch success.
+-- added via migration below — see that migration's comment; 'migration' added
+-- in the Phase 5b follow-up #2 domain-migration tier — see
+-- linklib.pipeline._DOMAIN_MIGRATIONS) distinguishes a Wayback-archived-
+-- snapshot or known-domain-migration success from a normal live-fetch
+-- success. Attempt COUNT per article (not just latest-attempt state) backs
+-- the "needs-manual-review" capped-retry tier (Phase 5b follow-up #2, see
+-- Library._manual_review_article_ids) — a URL correction via
+-- url_correction_log resets what counts as "since the last correction", so a
+-- corrected article's attempt count starts fresh rather than inheriting a
+-- pre-correction failure streak forever.
 CREATE TABLE IF NOT EXISTS content_refetch_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     article_id    INTEGER NOT NULL,
@@ -652,6 +660,30 @@ CREATE TABLE IF NOT EXISTS content_refetch_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_content_refetch_log_article ON content_refetch_log(article_id);
+
+-- Phase 5b follow-up #2 (retry backoff + manual URL correction): a durable,
+-- distinct trace every time an article's stored URL is corrected via the
+-- manual-review CSV import (webapp /admin/library/backfill-content's export/
+-- import round trip) — see CLAUDE.md's "every production data change leaves
+-- a trace" rule. Deliberately its own table, not folded into
+-- content_refetch_log (which records FETCH attempts, not URL edits) or
+-- tool_audit_log/community_audit_log (a different entity type). old_url is
+-- captured immediately before the UPDATE, same reasoning as those audit
+-- logs snapshotting state right before a destructive write. admin_id stays
+-- nullable — this app has no per-admin user accounts (a single shared
+-- secret, see CLAUDE.md's Authentication & security section), so it's
+-- forward-looking only and always NULL today.
+CREATE TABLE IF NOT EXISTS url_correction_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id  INTEGER NOT NULL,
+    old_url     TEXT NOT NULL DEFAULT '',
+    new_url     TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT 'csv-import',
+    admin_id    INTEGER,
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_url_correction_log_article ON url_correction_log(article_id);
 
 -- Overhead cost ledger for embed-on-save + the one-off backfill (#93) — one
 -- row per embedded article, upserted by article_id. content_hash is the
@@ -2491,6 +2523,139 @@ class Library:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    # Failed attempts (excluding defunct-service, which is already permanent)
+    # after which an article is pulled out of default-scope auto-retry and
+    # into the "needs manual review" tier — see _manual_review_article_ids.
+    # 3, per Brian's own call in the Phase 5b follow-up #2 brief (his
+    # assumption, flagged rather than silently picked): enough attempts to
+    # rule out a one-off fluke (a timeout, a transient block) without
+    # burning indefinite future batches' time and Wayback's scarce rate-limit
+    # budget on a domain/link that's been failing every single time.
+    _MANUAL_REVIEW_ATTEMPT_THRESHOLD = 3
+
+    def _manual_review_article_ids(self, threshold: int | None = None) -> set[int]:
+        """Article ids whose most recent content_refetch_log attempt is a
+        failure (not defunct-service — that's a separate, permanent
+        exclusion, never merged with this one per the Phase 5b follow-up #2
+        brief) AND have failed at least `threshold` times IN A ROW SINCE
+        THEIR LAST URL CORRECTION (or ever, if never corrected).
+
+        "Since their last correction" is the key design point: a URL
+        correction via apply_article_url_correction doesn't delete or mutate
+        any content_refetch_log history (full audit trail stays intact —
+        same non-destructive precedent as everywhere else in this codebase),
+        so this only counts attempts with attempted_at strictly after the
+        article's most recent url_correction_log row. That's what makes a
+        corrected article naturally re-qualify for default-scope retry
+        (attempt count resets to zero against the new URL) without a
+        separate "clear attempt count" write.
+
+        Deliberately query-time-derived, not written as its own
+        content_refetch_log reason the way defunct-service is: unlike
+        defunct-service (a fact knowable from a single attempt — this host
+        is discontinued), "3rd failure in a row" is a judgment about
+        accumulated history that can only be computed by looking at several
+        rows at once."""
+        threshold = threshold if threshold is not None else self._MANUAL_REVIEW_ATTEMPT_THRESHOLD
+        rows = self.conn.execute(
+            """WITH cutoffs AS (
+                 SELECT article_id, MAX(created_at) AS cutoff
+                 FROM url_correction_log GROUP BY article_id
+               ),
+               attempts AS (
+                 SELECT l.article_id, l.status, l.reason, l.attempted_at,
+                        ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.attempted_at DESC) AS rn
+                 FROM content_refetch_log l
+                 LEFT JOIN cutoffs c ON c.article_id = l.article_id
+                 WHERE c.cutoff IS NULL OR l.attempted_at > c.cutoff
+               ),
+               counts AS (
+                 SELECT article_id, COUNT(*) AS attempt_count FROM attempts GROUP BY article_id
+               )
+               SELECT a.article_id FROM attempts a
+               JOIN counts c ON c.article_id = a.article_id
+               WHERE a.rn=1 AND a.status='failure' AND a.reason!='defunct-service'
+                 AND c.attempt_count>=?""",
+            (threshold,),
+        ).fetchall()
+        return {r[0] for r in rows}
+
+    def count_articles_needing_manual_review(self) -> int:
+        return len(self._manual_review_article_ids())
+
+    def list_articles_needing_manual_review(self, limit: int = 500) -> list[dict]:
+        """One row per needs-manual-review article: title, current stored
+        URL, the real last failure reason/detail (not a synthetic
+        "needs-manual-review" tag — see _manual_review_article_ids'
+        docstring for why this is derived, not stored), the post-correction
+        attempt count, and the last attempt's timestamp. Backs both the
+        admin page's list section and the CSV export (webapp/app.py)."""
+        rows = self.conn.execute(
+            """WITH cutoffs AS (
+                 SELECT article_id, MAX(created_at) AS cutoff
+                 FROM url_correction_log GROUP BY article_id
+               ),
+               attempts AS (
+                 SELECT l.article_id, l.status, l.reason, l.detail, l.attempted_at,
+                        ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.attempted_at DESC) AS rn
+                 FROM content_refetch_log l
+                 LEFT JOIN cutoffs c ON c.article_id = l.article_id
+                 WHERE c.cutoff IS NULL OR l.attempted_at > c.cutoff
+               ),
+               counts AS (
+                 SELECT article_id, COUNT(*) AS attempt_count FROM attempts GROUP BY article_id
+               )
+               SELECT a.article_id AS article_id, art.title AS title, art.url AS current_url,
+                      a.reason AS reason, a.detail AS detail, a.attempted_at AS last_attempted_at,
+                      c.attempt_count AS attempt_count
+               FROM attempts a
+               JOIN counts c ON c.article_id = a.article_id
+               JOIN articles art ON art.id = a.article_id
+               WHERE a.rn=1 AND a.status='failure' AND a.reason!='defunct-service'
+                 AND c.attempt_count>=?
+               ORDER BY a.attempted_at DESC LIMIT ?""",
+            (self._MANUAL_REVIEW_ATTEMPT_THRESHOLD, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def apply_article_url_correction(self, article_id: int, new_url: str,
+                                      source: str = "csv-import",
+                                      admin_id: int | None = None) -> bool:
+        """Corrects one article's stored URL (e.g. from the manual-review CSV
+        import) and leaves a durable, distinct trace in url_correction_log —
+        per CLAUDE.md's "every production data change leaves a trace" rule,
+        and distinguishable later from a fetch attempt or any other kind of
+        one-off fix. Does NOT touch content_refetch_log or content_html
+        directly — resuming default-scope retry against the new URL, and
+        the attempt-count reset that makes that possible, both fall out of
+        _manual_review_article_ids' own cutoff logic once this row exists;
+        nothing here needs to special-case that. Returns False (no write) if
+        the article_id doesn't exist; True on a verified single-row update —
+        same 'assert the write actually happened' discipline as CLAUDE.md's
+        one-off-admin-fix guidance, just built into the library method since
+        this is a repeatable path, not a one-off script."""
+        row = self.conn.execute("SELECT url FROM articles WHERE id=?", (article_id,)).fetchone()
+        if row is None:
+            return False
+        old_url = row[0] or ""
+        cur = self.conn.execute("UPDATE articles SET url=? WHERE id=?", (new_url, article_id))
+        if cur.rowcount != 1:
+            self.conn.rollback()
+            return False
+        self.conn.execute(
+            "INSERT INTO url_correction_log (article_id, old_url, new_url, source, admin_id, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (article_id, old_url, new_url, source, admin_id, _now()),
+        )
+        self.conn.commit()
+        return True
+
+    def list_url_correction_log(self, limit: int = 200) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM url_correction_log ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def articles_needing_content_backfill(self, limit: int = 100000, force: bool = False) -> list[dict]:
         """Scope for the Reader content-structure backfill (Phase 5b) —
         mirrors unenriched()/all_articles()'s own resumability idiom exactly.
@@ -2498,36 +2663,47 @@ class Library:
         stopped/crashed run and a deliberate re-run both just pick up where
         they left off, and articles a prior run already succeeded on are
         never re-fetched (rate-limit-friendly, and safe to press "start"
-        again after a stop). ALSO excludes, in the default scope only, any
-        article whose most recent content_refetch_log attempt was
-        reason='defunct-service' (linklib.pipeline._DEFUNCT_SERVICE_DOMAINS)
-        — a confirmed-permanently-dead host (e.g. Google's discontinued
-        FeedBurner proxy) can never succeed no matter how many times it's
-        retried, so retrying it on every future batch would only burn fetch
-        attempts and Wayback's own scarce rate-limit budget for a known
-        outcome. `force=True` re-runs every row with a saved URL, defunct-
-        service included — for standardizing the whole library after an
-        extraction-logic change, or re-checking a domain that's since been
-        removed from the defunct list, same escape hatch as the re-enrich
-        job's own force option."""
+        again after a stop). ALSO excludes, in the default scope only:
+        - any article whose most recent content_refetch_log attempt was
+          reason='defunct-service' (linklib.pipeline._DEFUNCT_SERVICE_DOMAINS)
+          — a confirmed-permanently-dead host (e.g. Google's discontinued
+          FeedBurner proxy) can never succeed no matter how many times it's
+          retried, so retrying it on every future batch would only burn
+          fetch attempts and Wayback's own scarce rate-limit budget for a
+          known outcome.
+        - (Phase 5b follow-up #2) any article in the "needs manual review"
+          tier (_manual_review_article_ids) — failed repeatedly enough
+          (_MANUAL_REVIEW_ATTEMPT_THRESHOLD) that further automatic retries
+          are unlikely to help without a human correcting the URL first.
+          Distinct from defunct-service: NOT considered permanently dead
+          (a Cloudflare block can lift, a 404 can be relinked), so it's
+          reachable again the moment a correction resets its attempt count,
+          not just via force=True.
+        `force=True` re-runs every row with a saved URL, defunct-service and
+        needs-manual-review both included — for standardizing the whole
+        library after an extraction-logic change, or re-checking a domain
+        that's since recovered, same escape hatch as the re-enrich job's own
+        force option."""
         if force:
             rows = self.conn.execute(
                 "SELECT * FROM articles WHERE url!='' ORDER BY id LIMIT ?", (limit,)
             ).fetchall()
-        else:
-            rows = self.conn.execute(
-                """SELECT a.* FROM articles a
-                   WHERE a.url!='' AND a.content_html=''
-                     AND a.id NOT IN (
-                       SELECT article_id FROM (
-                         SELECT article_id, reason,
-                                ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
-                         FROM content_refetch_log
-                       ) WHERE rn=1 AND reason='defunct-service'
-                     )
-                   ORDER BY a.id LIMIT ?""",
-                (limit,),
-            ).fetchall()
+            return [self._row_to_dict(r) for r in rows]
+
+        manual_review_ids = self._manual_review_article_ids()
+        rows = self.conn.execute(
+            """SELECT a.* FROM articles a
+               WHERE a.url!='' AND a.content_html=''
+                 AND a.id NOT IN (
+                   SELECT article_id FROM (
+                     SELECT article_id, reason,
+                            ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                     FROM content_refetch_log
+                   ) WHERE rn=1 AND reason='defunct-service'
+                 )
+               ORDER BY a.id"""
+        ).fetchall()
+        rows = [r for r in rows if r["id"] not in manual_review_ids][:limit]
         return [self._row_to_dict(r) for r in rows]
 
     def count_structured_content(self) -> int:
@@ -2543,21 +2719,25 @@ class Library:
 
     def count_content_backfill_remaining(self) -> int:
         """Matches articles_needing_content_backfill()'s default (non-force)
-        scope exactly, including the defunct-service exclusion — so this
-        stat reads as "how many articles the next default-scope run will
-        actually attempt," not an inflated count that includes articles
-        already known permanently unrecoverable."""
-        return self.conn.execute(
-            """SELECT COUNT(*) FROM articles a
-               WHERE a.url!='' AND a.content_html=''
-                 AND a.id NOT IN (
-                   SELECT article_id FROM (
-                     SELECT article_id, reason,
-                            ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
-                     FROM content_refetch_log
-                   ) WHERE rn=1 AND reason='defunct-service'
-                 )"""
-        ).fetchone()[0]
+        scope exactly, including both the defunct-service AND (Phase 5b
+        follow-up #2) needs-manual-review exclusions — so this stat reads as
+        "how many articles the next default-scope run will actually
+        attempt," not an inflated count that includes articles already
+        known permanently unrecoverable or parked for a human to correct."""
+        base_ids = {
+            r[0] for r in self.conn.execute(
+                """SELECT a.id FROM articles a
+                   WHERE a.url!='' AND a.content_html=''
+                     AND a.id NOT IN (
+                       SELECT article_id FROM (
+                         SELECT article_id, reason,
+                                ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                         FROM content_refetch_log
+                       ) WHERE rn=1 AND reason='defunct-service'
+                     )"""
+            ).fetchall()
+        }
+        return len(base_ids - self._manual_review_article_ids())
 
     def count_permanently_excluded_content(self) -> int:
         """How many articles have been marked defunct-service on their most
@@ -2961,6 +3141,19 @@ class Library:
                         ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
                  FROM content_refetch_log
                ) WHERE rn=1 AND status='success' AND source='wayback'"""
+        ).fetchone()[0]
+
+    def count_migration_content(self) -> int:
+        """How many articles currently have content_html sourced from the
+        known-domain-migration tier (linklib.pipeline._DOMAIN_MIGRATIONS,
+        Phase 5b follow-up #2) rather than a direct fetch or Wayback —
+        same shape/reasoning as count_wayback_content()."""
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM (
+                 SELECT article_id, status, source,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               ) WHERE rn=1 AND status='success' AND source='migration'"""
         ).fetchone()[0]
 
     # -- tools directory ---------------------------------------------------
