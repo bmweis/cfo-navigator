@@ -14302,6 +14302,7 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
     import html as html_mod
 
     article = None
+    matched_by_url = False
     if id:
         lib = _lib()
         try:
@@ -14317,7 +14318,28 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
     if not url:
         return None
 
-    cached_content = (article or {}).get("content", "")
+    if article is None:
+        # A Feed or Read Later row carries only a url. If that url is already in
+        # the library (url is the natural key), resolve it to the real row so the
+        # reader knows the article is saved — that's what gates the inline tag
+        # editor, and it's what "any Feed item that's been saved" needs to work.
+        lib = _lib()
+        try:
+            row = lib.conn.execute("SELECT * FROM articles WHERE url=?", (url,)).fetchone()
+            if row:
+                article = dict(row)
+                article["tags"] = json.loads(article.get("tags_json") or "[]")
+                matched_by_url = True
+        finally:
+            lib.close()
+
+    # Only the plain-text `content` cache is skipped for a url-matched row:
+    # using it there would silently downgrade a Feed item that currently reads
+    # with images and links intact, whereas an explicit by-id open (a Saved-view
+    # click) accepts it. Phase 5b's `content_html` is deliberately NOT skipped —
+    # it's real structured HTML, so it's a strict upgrade over both the
+    # plain-text cache and a live re-fetch, however the row was reached.
+    cached_content = "" if matched_by_url else (article or {}).get("content", "")
     cached_content_html = (article or {}).get("content_html", "")
     cached_title = (article or {}).get("title", "")
     is_structured = False   # True whenever `content` is real HTML — either the
@@ -14718,7 +14740,12 @@ _READER_SHELL_CSS = """
 .rr-sliver-collapse:hover{background:var(--surface-2);}
 .rr-sliver-title{font-family:var(--font-head);font-weight:600;font-size:14px;color:var(--ink);line-height:1.35;}
 .rr-sliver-meta{font-size:12px;color:var(--muted);}
-.rr-row{display:flex;gap:14px;padding:15px 22px;border-bottom:1px solid var(--line);}
+/* flex-wrap lets the save-time tag form (.rr-row-tagform, flex:0 0 100%) drop
+   onto its own line below the row instead of becoming a third column that
+   squeezes .rr-row-main. It can't change the collapsed layout: .rr-row-main is
+   min-width:0 so it shrinks rather than wrapping, and the form is display:none
+   until opened, which removes it as a flex item entirely. */
+.rr-row{display:flex;flex-wrap:wrap;gap:14px;padding:15px 22px;border-bottom:1px solid var(--line);}
 .rr-row:hover{background:var(--surface-2);}
 .rr-row-selected{background:var(--navy-wash);border-left:3px solid var(--navy);padding-left:19px;}
 .rr-row-main{flex:1;min-width:0;cursor:pointer;}
@@ -14761,6 +14788,48 @@ _READER_SHELL_CSS = """
 .rr-find-count{font-size:12px;color:var(--muted);white-space:nowrap;min-width:34px;text-align:center;flex-shrink:0;}
 mark.rr-find-hit{background:var(--seafoam);color:var(--ink);border-radius:2px;padding:0 1px;}
 mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
+
+/* Inline tag editor (Phase 5c). Collapsed by default — the reading view only
+   ever shows the toolbar tag button until someone actually engages with it.
+   Same sticky-under-the-header treatment as .rr-find-bar so the two behave
+   identically when both are open. */
+.rr-tag-panel{display:none;align-items:center;flex-wrap:wrap;gap:7px;padding:9px 20px;
+  border-bottom:1px solid var(--line);background:var(--surface-2);position:sticky;top:53px;z-index:3;}
+.rr-tag-panel.rr-tag-open{display:flex;}
+.rr-tag-chip{display:inline-flex;align-items:center;gap:5px;background:var(--seafoam);color:var(--navy);
+  font-size:11.5px;font-weight:600;padding:3px 5px 3px 9px;border-radius:11px;}
+.rr-tag-chip button{cursor:pointer;background:none;border:none;color:var(--navy);opacity:.55;
+  font-size:14px;line-height:1;padding:0 2px;font-family:inherit;}
+.rr-tag-chip button:hover{opacity:1;}
+/* The input needs a real typing width, not whatever's left over. A floor of
+   220px (rather than the original 110px, which chips could squeeze it down to)
+   means that once the chips on a line leave less than that, flex-wrap drops the
+   input onto its own line instead — where flex-grow then gives it the panel's
+   full width. min() keeps the floor from overflowing a container narrower than
+   220px, which min-width alone would. Deliberately kept in the reader pane
+   rather than moved to the list pane: that pane collapses to a sliver in
+   distraction-free mode (which mobile portrait auto-enters), so a tag editor
+   living there would be unreachable exactly while reading. */
+.rr-tag-input{flex:1 1 220px;min-width:min(220px,100%);padding:5px 9px;border:1px solid var(--line);border-radius:7px;
+  font-size:12.5px;font-family:inherit;background:var(--surface);}
+.rr-tag-status{font-size:11.5px;color:var(--muted);white-space:nowrap;}
+.rr-tag-empty{font-size:12px;color:var(--muted);}
+/* Count badge on the toolbar tag button — the collapsed-state summary, so the
+   number of tags is legible without opening the panel. */
+.rr-tag-count{display:inline-block;background:var(--seafoam-deep);color:#fff;font-size:10px;
+  font-weight:700;border-radius:8px;padding:0 5px;margin-left:5px;line-height:15px;}
+/* Save-time tag entry on a Feed row — expands in place under the row's own
+   actions, replacing the old window.prompt() dialog. */
+.rr-row-tagform{display:none;flex:0 0 100%;gap:6px;align-items:center;flex-wrap:wrap;margin-top:-4px;}
+.rr-row-tagform.rr-tag-open{display:flex;}
+.rr-row-tagform input{flex:1 1 140px;min-width:120px;padding:5px 9px;border:1px solid var(--line);
+  border-radius:7px;font-size:12.5px;font-family:inherit;background:var(--surface);}
+.rr-row-tagform button{cursor:pointer;font-size:11.5px;font-weight:600;background:none;
+  border:1px solid var(--line);border-radius:6px;padding:4px 10px;color:var(--navy-light);font-family:inherit;}
+.rr-row-tagform button.rr-tag-go{background:var(--seafoam-wash);border-color:var(--seafoam-deep);color:var(--seafoam-deep);}
+.rr-tag-panel button.rr-tag-go{cursor:pointer;font-size:11.5px;font-weight:600;background:var(--seafoam-wash);
+  border:1px solid var(--seafoam-deep);border-radius:6px;padding:4px 10px;color:var(--seafoam-deep);font-family:inherit;}
+.rr-tag-panel button.rr-tag-go[hidden],.rr-reader-actions button[hidden]{display:none;}
 .rr-reader-body{max-width:700px;margin:0 auto;padding:44px 32px 100px;}
 .rr-reader-category{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
   color:var(--seafoam-deep);margin-bottom:12px;}
@@ -14837,11 +14906,18 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
         except Exception:
             feed_items = []
 
+        # One all_tags() read serves both the Saved view's filter bar and the
+        # <datalist> behind every tag input on the page (save-time and the
+        # reader's inline editor). The vocabulary is needed in every view, not
+        # just Saved — a Feed item can be tagged at save time — so this is read
+        # unconditionally rather than inside the `view == "saved"` branch.
+        all_tags_ranked = lib.all_tags()
+        tag_vocab = [t for t, _ in all_tags_ranked]
         saved_rows, saved_tags = [], []
         rl_rows = []
         if view == "saved":
             saved_rows = lib.search(q, limit=200)
-            saved_tags = lib.all_tags()[:25]
+            saved_tags = all_tags_ranked[:25]
         elif view == "readlater":
             rl_rows = lib.list_read_later(user_id) if user_id is not None else []
     finally:
@@ -14952,7 +15028,19 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
             rl_lbl = "&#10003; Read later" if is_rl else "&#128204; Read later"
             rl_cls = "rr-row-btn rr-row-btn-on" if is_rl else "rr-row-btn"
             rl_btn = f'<button class="{rl_cls}" onclick="rrToggleReadLater(this)">{rl_lbl}</button>'
-            actions = f'<div class="rr-row-actions">{save_btn}{rl_btn}</div>'
+            # Save-time tags (Phase 5c): collapsed until "+ Save" is clicked, then
+            # expands in place. Tags stay optional — the Save button commits with an
+            # empty input exactly as the old one-click save did.
+            tagform = (
+                '<div class="rr-row-tagform">'
+                '<input type="text" list="rr-tag-vocab" placeholder="Tags (comma-separated, optional)" '
+                'onkeydown="rrRowTagKeydown(event,this)">'
+                '<button class="rr-tag-go" onclick="rrRowSaveGo(this)">Save</button>'
+                '<button onclick="rrRowSaveCancel(this)">Cancel</button>'
+                '<span class="rr-tag-status"></span>'
+                "</div>"
+            )
+            actions = f'<div class="rr-row-actions">{save_btn}{rl_btn}</div>{tagform}'
         return (
             f'<div class="rr-row" data-category="{_esc(category)}" data-source="{_esc(source)}" data-rl="{1 if is_rl else 0}">'
             f'<div class="{main_cls}"{main_onclick} data-url="{_esc(url)}" data-title="{_esc(item.get("title", ""))}" '
@@ -15041,9 +15129,21 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
   </div>
 </div>"""
 
+    # Shared autocomplete vocabulary for every tag input on the page (save-time
+    # row form and the reader's inline editor). Native <datalist>, same pattern
+    # the overhead-category admin inputs already use — no JS autocomplete
+    # widget, and it degrades to a plain text input where unsupported. This is
+    # the same vocabulary /admin/library/tags curates, read live from all_tags().
+    tag_vocab_html = (
+        '<datalist id="rr-tag-vocab">'
+        + "".join(f'<option value="{_esc(t)}"></option>' for t in tag_vocab)
+        + "</datalist>"
+    )
+
     body = (
         _READER_SHELL_CSS
         + '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">'
+        + tag_vocab_html
         + f"""<div class="rr-shell">
   {rail_html}
   <div class="rr-resize" id="rr-resize-rail"></div>
@@ -15114,6 +15214,9 @@ var rrFocusMode = false;
 var RR_ICON_EXPAND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
 var RR_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
 var RR_ICON_SEARCH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>';
+// Tag glyph for the reader toolbar — the collapsed state of the inline tag
+// editor, matching Instapaper's own toolbar tag affordance.
+var RR_ICON_TAG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4L12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"></path><circle cx="7.5" cy="7.5" r="1.3"></circle></svg>';
 // In-article find (a separate, article-scoped search — not the list search).
 var rrFindMatches = [];
 var rrFindIndex = -1;
@@ -15141,7 +15244,14 @@ function rrRenderArticle(d) {{
   var isRl = document.querySelector('.rr-row-selected .rr-row-btn-on') !== null;
   var byline = [d.source, (d.published_at || '').slice(0, 10)].filter(Boolean).join(' &middot; ');
   if (d.reading_minutes) byline += (byline ? ' &middot; ' : '') + d.reading_minutes + ' min read';
-  var saveBtn = isSaved ? '' : '<button onclick="rrSaveCurrent()">+ Save</button>';
+  if (!Array.isArray(d.tags)) d.tags = [];
+  // Both buttons are always rendered and toggled with `hidden`, so saving from
+  // inside the reader can swap them without a full re-render (which would reset
+  // find state and scroll a part-read article back to the top).
+  var saveBtn = '<button id="rr-reader-save" onclick="rrSaveCurrent()"' + (isSaved ? ' hidden' : '') + '>+ Save</button>';
+  var tagBtn = '<button id="rr-tag-btn" onclick="rrToggleTagPanel()" title="Tags"' +
+    (isSaved ? '' : ' hidden') + '>' + RR_ICON_TAG +
+    (d.tags.length ? '<span class="rr-tag-count">' + d.tags.length + '</span>' : '') + '</button>';
   var rlBtn = '<button id="rr-reader-rl" class="' + (isRl ? 'rr-row-btn-on' : '') + '" onclick="rrToggleReadLaterCurrent()">' +
     (isRl ? '&#10003; Read later' : '&#128204; Read later') + '</button>';
   var body = d.has_content ? d.body_html :
@@ -15165,11 +15275,21 @@ function rrRenderArticle(d) {{
           (rrFocusMode ? RR_ICON_COLLAPSE : RR_ICON_EXPAND) +
         '</button>' +
       '</div>' +
-      '<div class="rr-reader-actions">' + saveBtn + rlBtn +
+      '<div class="rr-reader-actions">' + saveBtn + tagBtn + rlBtn +
         '<button onclick="rrCycleFontSize()">Aa</button>' +
         '<button onclick="rrToggleFind()" title="Find in article">' + RR_ICON_SEARCH + '</button>' +
         '<a href="' + rrEsc(d.url) + '" target="_blank" rel="noopener" style="font-size:12px;">Original &rarr;</a>' +
       '</div>' +
+    '</div>' +
+    // Collapsed by default — nothing but the toolbar icon shows until opened.
+    '<div class="rr-tag-panel" id="rr-tag-panel">' +
+      '<span id="rr-tag-chips"></span>' +
+      '<input class="rr-tag-input" id="rr-tag-input" list="rr-tag-vocab" ' +
+        'placeholder="' + (isSaved ? 'Add a tag&hellip;' : 'Tags (comma-separated, optional)') + '" ' +
+        'onkeydown="rrTagKeydown(event)">' +
+      '<button class="rr-tag-go" id="rr-tag-savebtn" onclick="rrSaveCurrentGo()"' +
+        (isSaved ? ' hidden' : '') + '>Save article</button>' +
+      '<span class="rr-tag-status" id="rr-tag-status"></span>' +
     '</div>' +
     '<div class="rr-find-bar" id="rr-find-bar">' +
       '<input type="text" id="rr-find-input" placeholder="Find in article&hellip;" ' +
@@ -15330,29 +15450,198 @@ function rrFindKeydown(e) {{
   if (e.key === 'Enter') {{ e.preventDefault(); if (e.shiftKey) rrFindPrev(); else rrFindNext(); }}
   else if (e.key === 'Escape') {{ rrToggleFind(); }}
 }}
-async function rrSaveItem(btn) {{
-  var main = btn.closest('.rr-row').querySelector('.rr-row-main');
-  var url = main.dataset.url;
-  var t = prompt('Tags (comma-separated, optional):');
-  if (t === null) return;
-  btn.textContent = 'Saving…';
-  btn.disabled = true;
+// -- Save-time tagging on a Feed row -----------------------------------------
+// "+ Save" opens the row's own inline tag input instead of a window.prompt().
+// Tags stay optional: committing with an empty input saves exactly as before.
+function rrSaveItem(btn) {{
+  var form = btn.closest('.rr-row').querySelector('.rr-row-tagform');
+  if (!form) return;
+  var opening = !form.classList.contains('rr-tag-open');
+  form.classList.toggle('rr-tag-open', opening);
+  if (opening) {{
+    var input = form.querySelector('input');
+    if (input) input.focus();
+  }}
+}}
+function rrRowTagKeydown(e, input) {{
+  if (e.key === 'Enter') {{ e.preventDefault(); rrRowSaveGo(input); }}
+  else if (e.key === 'Escape') {{ e.preventDefault(); rrRowSaveCancel(input); }}
+}}
+function rrRowSaveCancel(el) {{
+  var form = el.closest('.rr-row-tagform');
+  if (!form) return;
+  form.classList.remove('rr-tag-open');
+  var input = form.querySelector('input');
+  if (input) input.value = '';
+  var status = form.querySelector('.rr-tag-status');
+  if (status) status.textContent = '';
+}}
+async function rrRowSaveGo(el) {{
+  var form = el.closest('.rr-row-tagform');
+  var row = el.closest('.rr-row');
+  var main = row.querySelector('.rr-row-main');
+  var input = form.querySelector('input');
+  var goBtn = form.querySelector('.rr-tag-go');
+  var status = form.querySelector('.rr-tag-status');
+  var saveBtn = row.querySelector('.rr-row-actions button');
+  // The server splits on commas itself, so the raw input goes across as-is.
+  var tags = input ? input.value : '';
+  goBtn.disabled = true;
+  goBtn.textContent = 'Saving\\u2026';
+  if (status) status.textContent = '';
   try {{
     var r = await fetch('/feed/save', {{method: 'POST',
       headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-      body: 'url=' + encodeURIComponent(url) + '&tags=' + encodeURIComponent(t)}});
-    btn.textContent = r.ok ? '\\u2713 Saved' : '\\u2717 Error';
-  }} catch (e) {{ btn.textContent = '\\u2717 Error'; btn.disabled = false; }}
+      body: 'url=' + encodeURIComponent(main.dataset.url) + '&tags=' + encodeURIComponent(tags)}});
+    if (!r.ok) throw new Error('save failed');
+    form.classList.remove('rr-tag-open');
+    if (input) input.value = '';
+    goBtn.disabled = false;
+    goBtn.textContent = 'Save';
+    if (saveBtn) {{ saveBtn.textContent = '\\u2713 Saved'; saveBtn.disabled = true; }}
+  }} catch (e) {{
+    goBtn.disabled = false;
+    goBtn.textContent = 'Save';
+    if (status) status.textContent = 'Could not save.';
+  }}
 }}
-async function rrSaveCurrent() {{
-  if (!rrCurrent) return;
-  var t = prompt('Tags (comma-separated, optional):');
-  if (t === null) return;
+// -- Inline tag editor in the reader pane -------------------------------------
+function rrToggleTagPanel(force) {{
+  var panel = document.getElementById('rr-tag-panel');
+  if (!panel) return;
+  var opening = (force === undefined) ? !panel.classList.contains('rr-tag-open') : force;
+  panel.classList.toggle('rr-tag-open', opening);
+  if (opening) {{
+    rrRenderTagChips('');
+    var input = document.getElementById('rr-tag-input');
+    // Focusing an input makes the browser scroll it into view on its own. On a
+    // mobile-portrait viewport that scrolled the document far enough to clip
+    // the panel's first chip row (and the toolbar above it) off the top of the
+    // screen — the panel opened somewhere the user couldn't fully see it, the
+    // same shape as the Phase 5 "tapping an article does nothing" bug.
+    // preventScroll suppresses that; the explicit scroll below then anchors the
+    // pane's top to the viewport the same way opening an article does. It only
+    // moves the document, never the pane's own scrollTop, so a part-read
+    // article keeps its reading position.
+    if (input) {{
+      try {{ input.focus({{preventScroll: true}}); }} catch (err) {{ input.focus(); }}
+    }}
+    var pane = document.getElementById('rr-reader');
+    if (pane) pane.scrollIntoView({{behavior: 'instant', block: 'start'}});
+  }}
+}}
+function rrRenderTagChips(status) {{
+  var wrap = document.getElementById('rr-tag-chips');
+  if (!wrap) return;
+  var tags = (rrCurrent && rrCurrent.tags) || [];
+  // Removal is by index, not by tag text — an index can't break out of the
+  // inline handler the way an apostrophe in a tag name could.
+  wrap.innerHTML = tags.length
+    ? tags.map(function(t, i) {{
+        return '<span class="rr-tag-chip">' + rrEsc(t) +
+          '<button onclick="rrTagRemove(' + i + ')" title="Remove tag" aria-label="Remove tag">&times;</button></span>';
+      }}).join('')
+    : '<span class="rr-tag-empty">No tags yet.</span>';
+  var st = document.getElementById('rr-tag-status');
+  if (st) st.textContent = status || '';
+  rrUpdateTagCount();
+}}
+function rrUpdateTagCount() {{
+  var btn = document.getElementById('rr-tag-btn');
+  if (!btn) return;
+  var n = ((rrCurrent && rrCurrent.tags) || []).length;
+  btn.innerHTML = RR_ICON_TAG + (n ? '<span class="rr-tag-count">' + n + '</span>' : '');
+}}
+function rrTagKeydown(e) {{
+  if (e.key === 'Enter') {{
+    e.preventDefault();
+    if (rrCurrent && rrCurrent.id) rrTagAdd(); else rrSaveCurrentGo();
+  }} else if (e.key === 'Escape') {{
+    e.preventDefault();
+    rrToggleTagPanel(false);
+  }}
+}}
+function rrTagAdd() {{
+  var input = document.getElementById('rr-tag-input');
+  if (!input || !rrCurrent) return;
+  var added = false;
+  input.value.split(',').forEach(function(t) {{
+    t = t.trim();
+    if (t && rrCurrent.tags.indexOf(t) === -1) {{ rrCurrent.tags.push(t); added = true; }}
+  }});
+  input.value = '';
+  if (added) rrTagsPersist();
+}}
+function rrTagRemove(i) {{
+  if (!rrCurrent || !rrCurrent.tags) return;
+  rrCurrent.tags.splice(i, 1);
+  rrTagsPersist();
+}}
+// Every add/remove writes through immediately — no separate submit step. The
+// input element itself is never re-rendered, so focus survives a save and tags
+// can be typed one after another.
+async function rrTagsPersist() {{
+  if (!rrCurrent || !rrCurrent.id) return;
+  rrRenderTagChips('Saving\\u2026');
   try {{
-    await fetch('/feed/save', {{method: 'POST',
+    var r = await fetch('/library/' + rrCurrent.id + '/tags', {{method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{tags: rrCurrent.tags}})}});
+    if (!r.ok) throw new Error('save failed');
+    var d = await r.json();
+    rrCurrent.tags = d.tags || [];
+    rrRenderTagChips('Saved');
+    rrSyncRowTags(rrCurrent.id, rrCurrent.tags);
+  }} catch (e) {{
+    rrRenderTagChips('Could not save.');
+  }}
+}}
+// Keep the Saved-view list row's own chips in step with an edit made in the
+// reader, so the two panes never disagree without a reload.
+function rrSyncRowTags(id, tags) {{
+  var el = document.querySelector('.rr-row[data-id="' + id + '"] .rr-row-tags');
+  if (!el) return;
+  el.innerHTML = tags.map(function(t) {{ return '<span>' + rrEsc(t) + '</span>'; }}).join('');
+}}
+function rrSaveCurrent() {{
+  if (!rrCurrent) return;
+  rrToggleTagPanel(true);
+}}
+async function rrSaveCurrentGo() {{
+  if (!rrCurrent || rrCurrent.id) return;
+  var input = document.getElementById('rr-tag-input');
+  var tags = input ? input.value : '';
+  rrRenderTagChips('Saving\\u2026');
+  try {{
+    var r = await fetch('/feed/save', {{method: 'POST',
       headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-      body: 'url=' + encodeURIComponent(rrCurrent.url) + '&tags=' + encodeURIComponent(t)}});
-  }} catch (e) {{}}
+      body: 'url=' + encodeURIComponent(rrCurrent.url) + '&tags=' + encodeURIComponent(tags)}});
+    if (!r.ok) throw new Error('save failed');
+    var d = await r.json();
+    rrCurrent.id = d.id || null;
+    rrCurrent.tags = d.tags || [];
+    if (input) input.value = '';
+    // Swap the toolbar into saved state in place rather than re-rendering the
+    // article, so a part-read page keeps its scroll position and find state.
+    rrRefreshSaveState();
+    rrRenderTagChips('Saved');
+    var selected = document.querySelector('.rr-row-selected .rr-row-actions button');
+    if (selected) {{ selected.textContent = '\\u2713 Saved'; selected.disabled = true; }}
+  }} catch (e) {{
+    rrRenderTagChips('Could not save.');
+  }}
+}}
+function rrRefreshSaveState() {{
+  var isSaved = !!(rrCurrent && rrCurrent.id);
+  var save = document.getElementById('rr-reader-save');
+  if (save) save.hidden = isSaved;
+  var tag = document.getElementById('rr-tag-btn');
+  if (tag) tag.hidden = !isSaved;
+  var go = document.getElementById('rr-tag-savebtn');
+  if (go) go.hidden = isSaved;
+  var input = document.getElementById('rr-tag-input');
+  if (input) input.placeholder = isSaved ? 'Add a tag\\u2026' : 'Tags (comma-separated, optional)';
+  rrUpdateTagCount();
 }}
 async function rrToggleReadLater(btn) {{
   var row = btn.closest('.rr-row');
@@ -23420,7 +23709,10 @@ async def feed_save(request: Request, background_tasks: BackgroundTasks):
         row = ingest_url(lib, url, tags=tags)
         _log_archive_audit(lib, request, "add", row.get("id"), detail=url)
         background_tasks.add_task(backup.maybe_backup, DB_PATH)
-        return JSONResponse({"ok": True})
+        # The saved article's id comes back so the Reader can flip straight into
+        # its "saved" state (inline tag editor, no "+ Save" button) without a
+        # reload or a second lookup — POST /library/{id}/tags needs the id.
+        return JSONResponse({"ok": True, "id": row.get("id"), "tags": sorted(set(tags))})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

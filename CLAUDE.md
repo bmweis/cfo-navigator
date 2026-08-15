@@ -840,6 +840,64 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   pre-existing `tests/test_fetch_reliability.py` suite passes unmodified as
   the regression check. See ARCHITECTURE.md's Reader content-structure
   backfill section for the full write-up.
+- **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
+  Phase 5's "no inline management in the Reader" rule; delete/archive stay
+  admin-only and unchanged.** The investigation that opened the phase found
+  that **both write paths already existed and were simply unreachable**, so
+  this is overwhelmingly a UI phase, not a backend one.
+  `POST /library/{article_id}/tags` survived Phase 5 **with zero callers** —
+  the old Archive page's "Edit tags" button was removed, its endpoint wasn't
+  — and `POST /feed/save` **already accepted a `tags` field**. What was
+  actually missing was a usable UI: both save paths collected tags through a
+  blocking `window.prompt()`, which is neither inline nor able to
+  autocomplete. (The build brief's premise that there was "no way to add tags
+  at all when saving from Feed" was therefore slightly off — a clunky path
+  existed; it's been replaced, not invented.) The only backend changes are
+  `/feed/save` returning `{"ok","id","tags"}` instead of `{"ok"}` so the
+  reader can flip into its saved state without a reload, and
+  `_resolve_reader_content` falling back to `SELECT * FROM articles WHERE
+  url=?` so a Feed item that's already in the library opens as saved (it used
+  to offer "+ Save" again, which would have left the new editor unreachable
+  for exactly the "any Feed item that's been saved" case). That url-matched
+  row skips only the **plain-text `content` cache** — using it there would
+  silently strip images/links from a Feed item that currently reads with them
+  intact, whereas an explicit by-id open accepts it. **Phase 5b's
+  `content_html` is deliberately not skipped**, since it's real structured
+  HTML and therefore a strict upgrade over both the plain-text cache and a
+  live re-fetch, however the row was reached. That distinction is the merge
+  point between the two phases and is worth remembering: 5c was written
+  against the pre-5b premise that a cached article's content is *always*
+  flattened plain text — true when 5c was built, and made false for any
+  backfilled row the moment 5b landed. The two phases were developed in
+  parallel and reconciled at merge, not sequentially. Investigation also resolved the
+  never-settled question about the two Admin tag tools: both are
+  **vocabulary-level, not per-article** — "Tag cleanup" merges/renames/deletes
+  a tag across the whole library, "Tagging style" learns the tagging style for
+  the enrichment prompt — so nothing here duplicates them; they read and write
+  the same `articles.tags_json` through the same `Library` methods, and
+  autocomplete is a native `<datalist>` built from the same `all_tags()`
+  vocabulary Tag cleanup curates. **Propagation matches those tools exactly:**
+  `update_tags` writes `tags_text`, so the `articles_au` FTS trigger reindexes
+  automatically, and — like rename/delete — nothing re-embeds inline even
+  though tags are part of the embedded document text; `article_embeddings`'
+  content hash means the next `embed_backfill` picks up the change. Two real
+  bugs were caught **only** by the standing live-verification rule, neither of
+  which a rendered-HTML assertion could have surfaced: (1) the save-time form,
+  as a plain third flex child of `.rr-row`, became a third column and squeezed
+  the row's title into an unreadable sliver (fixed with `flex-wrap` on the row
+  and `flex:0 0 100%` on the form); (2) on mobile portrait, focusing the tag
+  input let the browser scroll the document far enough to clip the panel's
+  first chip row *and the entire toolbar* off the top — the panel opened where
+  the user couldn't see it, the same shape as the Phase 5 "tapping an article
+  does nothing" bug (fixed with `focus({preventScroll:true})` plus an explicit
+  `pane.scrollIntoView`, which moves only the document, never the pane's own
+  `scrollTop`, so a part-read article keeps its position). Both have
+  regression tests. Also worth carrying forward: the Reader's `<script>` is
+  built **inline in the route**, not as a module-level `*_JS` constant, so
+  `webapp.checks.script_syntax_problems()` does **not** cover it —
+  `tests/test_reader_tag_editing.py` node-checks the rendered response
+  directly, per the standing "validate what the browser actually receives"
+  lesson.
 - **Thought Leadership Admin CRUD, Phase 1 — the four `/thought-leadership`
   columns (Writing, Speaking & Events, Podcasts, Press) are now admin-managed,
   not hardcoded.** Phase 0 investigation found all four columns reading from
@@ -1416,7 +1474,9 @@ tables, no third-party dependency.
     now 405s rather than 404s since `POST /ask` still lives there.) The
     `/library` hub route was removed outright in Phase 1 — no redirect.
   - Private API → **401** when unauthenticated, but also accept a valid token (cookie OR
-    `X-Save-Token`/`?token=`): `/ask`, `/post`, `/feed/save`, `/api/search`.
+    `X-Save-Token`/`?token=`): `/ask`, `/post`, `/feed/save`, `/api/search`,
+    `/library/{article_id}/tags` (the Reader's inline tag editor, Phase 5c —
+    the route predates it but had no callers until then).
   - `/save` is **token-only** (`X-Save-Token` header or `?token=`) because the bookmarklet
     calls it cross-origin, where the login cookie can't be sent.
 - **No secret in rendered HTML.** Internal links no longer carry `?token=`; the cookie
