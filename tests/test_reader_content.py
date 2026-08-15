@@ -189,3 +189,89 @@ def test_reader_counts_use_thousands_separators(env):
     html = r.text
     assert "1,050" in html, "saved count should be comma-formatted"
     assert "1050 saved" not in html
+
+
+# ---------------------------------------------------------------------------
+# 4. Real Feed-view search (the original design file only had a decorative
+#    magnifying-glass shape, never wired to anything — confirmed and flagged
+#    in the prior round; built for real here). Full interactive behavior
+#    (search composing with an active category filter) is covered live by
+#    a headless-browser session — see this PR's description — since jsdom-
+#    free pytest can't execute the client-side filtering JS. This is a
+#    static-markup regression check that the box and its JS hook exist.
+# ---------------------------------------------------------------------------
+
+def test_feed_search_box_renders(env, monkeypatch):
+    fake_items = [{
+        "url": "https://example.com/a",
+        "title": "An Item",
+        "source": "Some Source",
+        "category": "News",
+        "published_at": "2026-08-14T00:00:00Z",
+        "summary": "Summary text.",
+        "paywalled": False,
+    }]
+
+    def _fake_get_feed_items(opml_path, category="", max_total=120):
+        return fake_items, ["News"]
+
+    import linklib.feed as feed_mod
+    monkeypatch.setattr(feed_mod, "get_feed_items", _fake_get_feed_items)
+
+    c = _admin_client(env)
+    r = c.get("/read?view=feed")
+    assert r.status_code == 200
+    html = r.text
+    assert 'id="rr-feed-search"' in html
+    assert 'oninput="rrApplyFilter()"' in html
+    assert "rrFeedCat" in html and "rrFeedSrc" in html, \
+        "filter state must be sticky module vars so a search keystroke can re-run the active category/source filter"
+
+
+def test_saved_search_box_still_renders_unchanged(env):
+    """The Feed search addition reused rrApplyFilter's plumbing — confirm it
+    didn't disturb Saved view's separate, pre-existing server-rendered search."""
+    c = _admin_client(env)
+    r = c.get("/read?view=saved")
+    assert r.status_code == 200
+    assert 'action="/read"' in r.text
+    assert 'name="q"' in r.text
+
+
+# ---------------------------------------------------------------------------
+# 5. Mobile: the orientation-aware breakpoint (item 3's actual root cause
+#    was never a broken click handler — rrOpen always fired; the update
+#    just landed off-screen with nothing to scroll to it) and the
+#    auto-focus-mode-on-open default for portrait/too-narrow viewports.
+#    Full interactive behavior (real device viewports, both orientations)
+#    is covered live by headless-browser sessions — see this PR's
+#    description — since layout/paint behavior isn't something a DOM-less
+#    TestClient render can exercise. These are static regression checks
+#    that the mechanism is actually present in the shipped page.
+# ---------------------------------------------------------------------------
+
+def test_reader_mobile_breakpoint_is_orientation_aware(env):
+    c = _admin_client(env)
+    r = c.get("/read")
+    assert r.status_code == 200
+    html = r.text
+    assert "orientation:portrait" in html, \
+        "stacking breakpoint must distinguish phone-portrait from phone-landscape at the same width"
+    assert "699px" in html, "hard too-narrow-regardless-of-orientation floor should still exist"
+
+
+def test_reader_has_auto_focus_and_scroll_into_view_js(env):
+    c = _admin_client(env)
+    r = c.get("/read")
+    assert r.status_code == 200
+    html = r.text
+    assert "function rrMobileNoRoom" in html
+    assert "scrollIntoView" in html
+    # The auto-focus-on-open call must live inside rrRenderArticle (fires on
+    # every article open, Feed or Saved alike), not bolted on somewhere that
+    # only one view's open path reaches.
+    render_start = html.index("function rrRenderArticle(")
+    render_end = html.index("function rrMobileNoRoom(")
+    render_body = html[render_start:render_end]
+    assert "rrMobileNoRoom()" in render_body
+    assert "scrollIntoView" in render_body

@@ -14462,10 +14462,30 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
   color:var(--muted);font-size:14px;padding:40px;text-align:center;}
 .rr-resize{width:6px;flex-shrink:0;margin:0 -3px;cursor:col-resize;background:transparent;z-index:6;}
 .rr-resize:hover{background:var(--seafoam);}
-@media(max-width:900px){
+/* Stacked mobile layout: portrait at typical phone/tablet widths, OR any
+   orientation once genuinely too narrow for 3 real panes even at their own
+   CSS min-widths (150+300+240=690px floor). A pure width cutoff can't tell
+   phone-portrait (truly cramped) from phone-landscape (has real horizontal
+   room, just short) at the same width — the mirror image of the homepage's
+   own 1024px note (webapp/app.py's home-grid breakpoint), which pushes
+   *its* threshold up so landscape phones stay on the mobile order; here we
+   want the opposite outcome (landscape phones get the real desktop layout),
+   so this stays orientation-aware instead of reusing that number. Common
+   landscape-phone widths run ~667-932px; only the smallest (iPhone
+   SE-class, ~667px) falls under the 700px floor and stays stacked in
+   landscape too — correct, since 667 < 690 means it can't fit 3 panes at
+   their minimums regardless of rotation. */
+@media (max-width:900px) and (orientation:portrait), (max-width:699px){
   .rr-shell{display:block;height:auto;}
   .rr-rail,.rr-list-pane{max-width:none;flex:none;border-right:none;border-bottom:1px solid var(--line);}
   .rr-resize{display:none;}
+  /* Distraction-free reading is forced here, not just offered — see
+     rrMobileNoRoom()/rrRenderArticle — so the rail (untouched by the
+     desktop focus-mode toggle, which only collapses the list pane) also
+     needs to get out of the way for the view to read as genuinely
+     full-screen instead of "list pane collapsed, but a whole nav rail
+     still stacked above the article." */
+  .rr-shell.rr-focus-mode .rr-rail{display:none;}
 }
 </style>
 """
@@ -14540,7 +14560,18 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
     )
 
     sources_html = ""
-    if view == "feed" and cat_order:
+    if view == "feed":
+        # Real search, not the decorative magnifying-glass shape the original
+        # design file had (never wired to anything, not even in the design
+        # tool itself). Client-side, same as the existing category/source
+        # filtering it composes with — searches whichever rows are currently
+        # listed, respecting the active category/source filter.
+        search_html = (
+            '<div class="rr-search-form">'
+            '<input type="search" id="rr-feed-search" placeholder="Search this feed&hellip;" '
+            'oninput="rrApplyFilter()" autocomplete="off">'
+            '</div>'
+        )
         cat_rows = ""
         for c in cat_order:
             srcs = cat_sources[c]
@@ -14560,7 +14591,9 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
                 f'<div class="rr-src-list">{src_rows}</div>'
                 f'</div>'
             )
-        sources_html = f'<div class="rr-rail-label">Sources</div>{cat_rows}'
+        if cat_rows:
+            cat_rows = f'<div class="rr-rail-label">Sources</div>{cat_rows}'
+        sources_html = search_html + cat_rows
     elif view == "saved":
         tagbar = "".join(f'<a href="/read?view=saved&q={_esc(t)}">{_esc(t)} ({c})</a>' for t, c in saved_tags)
         sources_html = f"""<div class="rr-rail-label">Search</div>
@@ -14711,25 +14744,37 @@ function rrToggleCat(el) {{
   el.classList.toggle('rr-open');
   el.closest('.rr-cat').nextElementSibling.classList.toggle('rr-open');
 }}
+// Category/source selection are sticky filter state, not one-shot args —
+// rrApplyFilter() re-reads them (plus the search box) on every call, so a
+// search-input keystroke can re-run the same combination without needing
+// to know which category/source is currently active.
+var rrFeedCat = null, rrFeedSrc = null;
 function rrSelectCategory(el) {{
   var cat = el.closest('.rr-cat').dataset.cat;
   document.querySelectorAll('.rr-cat').forEach(function(c) {{ c.classList.remove('rr-cat-on'); }});
   document.querySelectorAll('.rr-src').forEach(function(s) {{ s.classList.remove('rr-src-on'); }});
   el.closest('.rr-cat').classList.add('rr-cat-on');
-  rrApplyFilter(cat, null);
+  rrFeedCat = cat; rrFeedSrc = null;
+  rrApplyFilter();
 }}
 function rrSelectSource(el) {{
   var cat = el.dataset.cat, src = el.dataset.src;
   document.querySelectorAll('.rr-cat').forEach(function(c) {{ c.classList.remove('rr-cat-on'); }});
   document.querySelectorAll('.rr-src').forEach(function(s) {{ s.classList.remove('rr-src-on'); }});
   el.classList.add('rr-src-on');
-  rrApplyFilter(cat, src);
+  rrFeedCat = cat; rrFeedSrc = src;
+  rrApplyFilter();
 }}
-function rrApplyFilter(cat, src) {{
+function rrApplyFilter() {{
+  var cat = rrFeedCat, src = rrFeedSrc;
+  var searchEl = document.getElementById('rr-feed-search');
+  var q = searchEl ? searchEl.value.trim().toLowerCase() : '';
   var rows = document.querySelectorAll('#rr-list-rows > .rr-row');
   var shown = 0;
   rows.forEach(function(r) {{
-    var ok = (!cat || r.dataset.category === cat) && (!src || r.dataset.source === src);
+    var okFilter = (!cat || r.dataset.category === cat) && (!src || r.dataset.source === src);
+    var okSearch = !q || r.textContent.toLowerCase().indexOf(q) !== -1;
+    var ok = okFilter && okSearch;
     r.style.display = ok ? '' : 'none';
     if (ok) shown++;
   }});
@@ -14819,7 +14864,26 @@ function rrRenderArticle(d) {{
       '<div class="rr-reader-byline">' + byline + '</div>' +
       '<div class="rr-reader-body-text" id="rr-reader-body-text" style="--rr-fs:' + rrFsSizes[rrFsStep] + 'px;">' + body + '</div>' +
     '</div>';
-  rrUpdateSliver();
+  // Mobile fix: opening an article used to leave #rr-reader wherever it
+  // already sat in the stacked mobile layout — often 600px+ below the
+  // fold, well past the tapped row, with nothing scrolling the page to it.
+  // The click/tap itself was never broken (rrOpen always fired correctly);
+  // the update just happened off-screen, which reads as "does nothing."
+  // On a real "no room for 3 panes" viewport, default straight into
+  // distraction-free reading (collapses the rail + list to a sliver, see
+  // the .rr-focus-mode CSS) rather than just scrolling past a still-full
+  // mobile-stacked list; on any other viewport this scrollIntoView is a
+  // no-op in practice since .rr-shell is already height-constrained to
+  // the viewport with its own internal scroll.
+  if (rrMobileNoRoom()) {{
+    if (!rrFocusMode) rrSetFocusMode(true); else rrUpdateSliver();
+  }} else {{
+    rrUpdateSliver();
+  }}
+  pane.scrollIntoView({{behavior: 'instant', block: 'start'}});
+}}
+function rrMobileNoRoom() {{
+  return window.matchMedia('(max-width:900px) and (orientation:portrait), (max-width:699px)').matches;
 }}
 function rrCloseReader() {{
   document.querySelectorAll('.rr-row').forEach(function(r) {{ r.classList.remove('rr-row-selected'); }});

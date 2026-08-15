@@ -1615,12 +1615,57 @@ to this phase.
   plus `/admin/system/page-index`'s stat cards and the Tag cleanup admin
   table's per-tag counts. An audit of every other `lib.count()`/large-list
   count site found no other gaps.
-- **Feed view has no search box** (Saved view does) — confirmed against the
-  original `Feed.dc.html` design export: its list-pane header has only a
-  decorative magnifying-glass *shape* (no `onClick`, no search-state
-  variable) — never actually wired to search even in the design tool itself.
-  Not a shipped-vs-designed gap; flagged as a possible future addition, not
-  built in this pass.
+- **Feed view now has a real search box.** Confirmed against the original
+  `Feed.dc.html` design export first (its list-pane header only ever had a
+  decorative magnifying-glass *shape* — no `onClick`, no search-state
+  variable, never wired to anything even in the design tool itself, so this
+  was never a shipped-vs-designed gap) and flagged for a decision rather
+  than built; built in the very next round once the decision came back yes.
+  `#rr-feed-search`, client-side, same mechanism the existing category/
+  source filtering already used (`rrApplyFilter`) rather than a second
+  parallel filter — `rrFeedCat`/`rrFeedSrc` became sticky module-level state
+  (previously passed as one-shot function args from `rrSelectCategory`/
+  `rrSelectSource`) so a search keystroke can re-run the same active
+  category/source combination without needing to know it externally.
+  Matches a row against its whole visible text (title, source, excerpt,
+  tags), same broad-match spirit as Saved view's server-rendered search.
+
+**Second follow-up round — a real mobile bug, root-caused before fixing (not
+assumed from the bug report's own guess):** "clicking an article on mobile
+does nothing" turned out not to be a broken click handler or a hidden touch
+target at all — `rrOpen()` fired correctly every time, confirmed live via a
+real touch-enabled mobile-viewport session (`element.tap()`, not just
+`.click()`) that hit-tested the row's own coordinates and found nothing
+overlapping it. The actual mechanism: on the mobile stacked layout
+(`.rr-shell{display:block}`), `#rr-reader` sits at the bottom of the DOM,
+after the full item list — often 600px+ below the fold — and nothing ever
+scrolled the page to it, so the update was real but invisible. Fixed with an
+unconditional `pane.scrollIntoView(...)` at the end of `rrRenderArticle`
+(a no-op on desktop, where `.rr-shell` is already viewport-height-
+constrained with its own internal scroll) plus, going further than a pure
+scroll fix per the follow-up ask below, an auto-focus-mode default.
+
+**Responsive default: mobile portrait now opens straight into distraction-
+free reading; landscape (with room) gets the real 3-pane layout.**
+`rrMobileNoRoom()` — `window.matchMedia('(max-width:900px) and
+(orientation:portrait), (max-width:699px)')` — gates both the CSS stacking
+breakpoint and a call in `rrRenderArticle` to auto-`rrSetFocusMode(true)`
+when it matches. Deliberately orientation-aware rather than reusing the
+homepage's own `1024px` mobile-stacking breakpoint (`.home-grid`, same
+file) — that number solves the *mirror-image* problem: it's pushed *up*
+so a landscape phone (~930px) still gets the homepage's mobile stacked
+order instead of flipping into its 2-column desktop grid on pure rotation.
+The Reader wants the opposite outcome (a landscape phone *should* get the
+real 3-pane layout, since it has the width for it), so a single shared
+number can't serve both goals — this stays a combined width+orientation
+query instead. The `699px` fallback (any orientation) is the hard floor
+below which 3 panes can't fit even at their own CSS min-widths
+(150+300+240px); only the smallest common landscape phones (iPhone
+SE-class, ~667px) fall under it and stay stacked in landscape too, correctly.
+In the forced-focus state, `.rr-shell.rr-focus-mode .rr-rail{display:none}`
+additionally hides the rail (untouched by desktop focus mode, which only
+collapses the list pane to a sliver) — without it, "distraction-free" on
+mobile would still mean scrolling past a full nav rail before the article.
 
 ### Auth: three tiers, one cookie
 
