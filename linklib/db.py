@@ -635,7 +635,9 @@ CREATE INDEX IF NOT EXISTS idx_backup_log_created ON backup_log(created_at);
 -- outright (timeout, DNS, non-2xx) — never a generic message, so failures
 -- are groupable/countable by cause on the admin page. A failed attempt never
 -- touches articles.content or articles.content_html — see
--- linklib.pipeline.backfill_article_content.
+-- linklib.pipeline.backfill_article_content. `source` ('direct' | 'wayback',
+-- added via migration below — see that migration's comment) distinguishes a
+-- Wayback-archived-snapshot success from a normal live-fetch success.
 CREATE TABLE IF NOT EXISTS content_refetch_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     article_id    INTEGER NOT NULL,
@@ -1653,6 +1655,19 @@ class Library:
             # `unenriched()` uses for `enriched=0`, just via an empty column
             # instead of a boolean.
             "ALTER TABLE articles ADD COLUMN content_html TEXT NOT NULL DEFAULT ''",
+            # Phase 5b follow-up (fetch reliability): distinguishes a Wayback-
+            # sourced success from a direct-fetch success in content_refetch_log
+            # — without this, a Wayback-archived (possibly stale, possibly
+            # different from what the live page shows today) version looks
+            # identical to a normal live fetch, which matters for spotting a
+            # drifted/stale re-fetch later. 'direct' for every existing row
+            # (all prior attempts were direct fetches, no Wayback fallback
+            # existed yet) and every non-Wayback attempt going forward,
+            # including failures — a failure's `source` isn't really
+            # meaningful (nothing was fetched from anywhere), but defaulting
+            # it to 'direct' rather than adding a third empty-string state
+            # keeps every row's column populated and queryable.
+            "ALTER TABLE content_refetch_log ADD COLUMN source TEXT NOT NULL DEFAULT 'direct'",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -2805,13 +2820,17 @@ class Library:
     # -- Reader content-structure backfill (Phase 5b) ------------------------
 
     def log_content_refetch_attempt(self, article_id: int, status: str,
-                                     reason: str = "", detail: str = "") -> int:
+                                     reason: str = "", detail: str = "",
+                                     source: str = "direct") -> int:
         """One row per re-fetch attempt — see content_refetch_log's CREATE
-        TABLE comment for why every attempt is logged, not just failures."""
+        TABLE comment for why every attempt is logged, not just failures.
+        `source` ('direct' | 'wayback') distinguishes a Wayback-archived
+        success from a normal live-fetch success — see linklib.wayback and
+        linklib.pipeline.backfill_article_content."""
         cur = self.conn.execute(
-            "INSERT INTO content_refetch_log (article_id, status, reason, detail, attempted_at) "
-            "VALUES (?,?,?,?,?)",
-            (article_id, status, reason, detail, _now()),
+            "INSERT INTO content_refetch_log (article_id, status, reason, detail, source, attempted_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (article_id, status, reason, detail, source, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -2866,6 +2885,21 @@ class Library:
             [{"domain": d, "count": c} for d, c in counts.items()],
             key=lambda x: -x["count"],
         )[:limit]
+
+    def count_wayback_content(self) -> int:
+        """How many articles currently have content_html sourced from a
+        Wayback Machine snapshot rather than a direct fetch — the same
+        latest-attempt-per-article de-dupe as content_refetch_failure_counts,
+        restricted to successes. Surfaced on the admin page so it's obvious
+        at a glance how much of the archive is running on a possibly-stale
+        archived copy, not just visible per-row in the attempts log."""
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM (
+                 SELECT article_id, status, source,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               ) WHERE rn=1 AND status='success' AND source='wayback'"""
+        ).fetchone()[0]
 
     # -- tools directory ---------------------------------------------------
 

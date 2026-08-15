@@ -707,6 +707,60 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   that first batch keep an empty `detail`; only future attempts capture it.
   See ARCHITECTURE.md's "Reader content-structure backfill" section for the
   full write-up.
+- **Phase 5b second follow-up — fetch reliability (browser UA + Wayback
+  fallback), and a real investigation finding that reshaped what got
+  built.** The domain-clustering work above surfaced 17/18 failures in a
+  follow-up batch tracing to 4 domains. **Investigated with real requests
+  before writing any code**, per the standing gate — not assumed:
+  - The proposed browser-User-Agent swap was tested against real 403 URLs
+    from all four domains and **confirmed it does NOT fix any of them**.
+    Three of four return the byte-identical Cloudflare "Just a moment..."
+    challenge with the old bot UA or a real Chrome UA — Cloudflare
+    fingerprints the TLS/connection layer, not the UA string, so no UA swap
+    alone gets past it (defeating that stays explicitly out of scope). Kept
+    as the new sitewide default anyway (`fetch_page()` now always sends
+    `extract._BROWSER_HEADERS`, not just on the auth-cookie path) since
+    there's no downside and it may help elsewhere in the corpus — but the
+    PR says plainly it's confirmed *not* to solve this specific batch.
+    `continuations.com` returning an identical 404 either way usefully
+    confirmed its failures are genuine link rot, not blocking.
+  - The Wayback Machine fallback's investigation ran into archive.org's own
+    Availability API rate-limiting (429) **broadly and unpredictably** —
+    confirmed across three rounds from two independent networks (a Railway
+    production container and a residential connection), on both a
+    previously-queried URL and one nobody had ever queried before (even an
+    unrelated Wikipedia page 429'd immediately). That ruled out "Railway's
+    IP is blocked" and "one URL got hammered by testing," leaving "archive.org
+    itself is having a rough stretch, for anyone" as the only theory left
+    standing — an external condition unrelated to this codebase.
+    `linklib/wayback.py` (new module) is built defensively around exactly
+    that: every function returns `None`/`""` on ANY failure, never raises,
+    never retries — a retry loop would just add load against a service
+    already struggling.
+  - **Explicit, discussed trade-off, not a shortcut**: rather than block on
+    archive.org recovering, Brian chose to ship both fixes now, with the
+    Wayback fallback wired correctly regardless of today's outage
+    (`pipeline.backfill_article_content()` tries it as a last resort after
+    ANY direct-fetch failure — not just 404s, since a stubborn 403 may
+    still have a real archived snapshot the Internet Archive's own crawler
+    could reach even though a generic bot request couldn't), but "a real
+    snapshot's content actually comes back correctly" is explicitly
+    **unverified at merge time** — deferred to Brian, via the backfill
+    tool's own existing small-batch-first convention, once archive.org's
+    rate limiting clears.
+  - `content_refetch_log.source` (new column, migration, default
+    `'direct'`) distinguishes a Wayback-sourced success from a direct
+    fetch — a "via Wayback" badge on the admin page's attempts log, plus a
+    count of currently-Wayback-sourced articles
+    (`Library.count_wayback_content()`). The Reader's live-fetch path
+    (`_resolve_reader_content`) gets the identical fallback for
+    consistency, with a `content_via` field and a coral in-reader notice
+    when content came from an archived snapshot rather than the live page
+    — added interactive-path latency from this is **also flagged as
+    unverified**, for the same archive.org reason, rather than silently
+    assumed fine.
+  See ARCHITECTURE.md's "Reader content-structure backfill" section
+  (fetch-reliability sub-section) for the full investigation write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found
