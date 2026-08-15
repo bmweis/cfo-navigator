@@ -197,6 +197,116 @@ def _defunct_service_domain(url: str) -> str:
     return host if host in _DEFUNCT_SERVICE_DOMAINS else ""
 
 
+# Known domain migrations — Phase 5b follow-up #2. UNLIKE
+# _DEFUNCT_SERVICE_DOMAINS above, a source domain here is NOT considered
+# permanently dead; it's simply known to have moved wholesale to a new host,
+# so its articles are worth trying to relocate on the new domain (via Exa,
+# see linklib.domain_migration) before falling back to Wayback. Deliberately
+# a short, hand-curated map — same discipline as _DEFUNCT_SERVICE_DOMAINS:
+# each entry requires a live confirmation, not a hunch, before being added,
+# since a wrong mapping would have this tool confidently attach a WRONG
+# article's content to a saved link.
+#
+#   pointsandfigures.com -> jeffreycarter.substack.com
+#     Confirmed live (Phase 5b follow-up #2 investigation): Jeff Carter's
+#     "Points and Figures" blog relaunched on Substack under this domain;
+#     the old domain is Cloudflare-blocked for this tool's fetches (2 of the
+#     archive's 20 pointsandfigures.com articles already have a logged
+#     failure — consistent with that).
+#   avc.com -> avc.xyz
+#     Confirmed live (same investigation): Fred Wilson's "AVC" blog moved to
+#     this domain. Unlike the mapping above, none of the archive's 55
+#     avc.com articles have a logged failure yet as of this writing (most
+#     haven't been attempted in a batch since backfill reliability work
+#     began) — the domain move itself is still independently confirmed by
+#     direct observation, just not yet exercised against a real failing
+#     article in this codebase.
+_DOMAIN_MIGRATIONS: dict[str, str] = {
+    "pointsandfigures.com": "jeffreycarter.substack.com",
+    "avc.com": "avc.xyz",
+}
+
+
+def _domain_migration_target(url: str) -> str:
+    """The new domain _DOMAIN_MIGRATIONS maps `url`'s host to, or "" if it
+    doesn't match a known migration."""
+    from urllib.parse import urlsplit
+    host = (urlsplit(url).netloc or "").lower().split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return _DOMAIN_MIGRATIONS.get(host, "")
+
+
+def _try_domain_migration(lib: Library, new_domain: str, title: str,
+                           original_url: str) -> tuple[bool, str, str]:
+    """Attempts the domain-migration tier for one article: find a candidate
+    on `new_domain` via Exa (linklib.domain_migration.find_migrated_url),
+    then fetch and sanity-check it exactly as a direct fetch or a Wayback
+    snapshot would have to. Returns (ok, structured_html, migrated_url).
+    Never raises — any failure at any stage (no title to search with, no Exa
+    hit, the candidate fails to fetch, fails assess_extraction_quality, or
+    has no extractable structure) resolves to (False, "", ""), same
+    best-effort contract as the Wayback fallback."""
+    from .extract import fetch_page, extract_reader_html, assess_extraction_quality
+    from . import domain_migration
+
+    if not title.strip():
+        return False, "", ""
+    candidate_url = domain_migration.find_migrated_url(lib, new_domain, title)
+    if not candidate_url:
+        return False, "", ""
+
+    try:
+        page = fetch_page(candidate_url)
+    except Exception:
+        return False, "", ""
+    if not page.raw_html:
+        return False, "", ""
+
+    ok, _reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
+    if not ok:
+        return False, "", ""
+
+    structured = extract_reader_html(page.raw_html, candidate_url)
+    if not structured:
+        return False, "", ""
+    return True, structured, candidate_url
+
+
+def _finish_backfill_after_direct_failure(lib: Library, article: dict,
+                                           direct_reason: str, direct_detail: str
+                                           ) -> tuple[bool, str]:
+    """Called only once a direct fetch has already failed — the shared exit
+    point for all of backfill_article_content's failure branches (Phase 5b
+    follow-up #2). Tries the domain-migration tier first (only if the
+    article's URL host is a known migration AND the article has a title to
+    search with), then falls through to the pre-existing Wayback fallback on
+    ANY migration-tier miss.
+
+    Preserves the "exactly one content_refetch_log row per
+    backfill_article_content() call" invariant: a migration-tier SUCCESS
+    logs its own single success row (source='migration') and returns
+    immediately without ever calling _finish_backfill_via_wayback; a
+    migration-tier miss (no match, wrong domain, or the candidate failed its
+    own sanity check) logs NOTHING here and simply delegates to
+    _finish_backfill_via_wayback, which does its own single log — so there's
+    never a double-log, whichever tier ultimately succeeds or fails."""
+    article_id = article["id"]
+    url = article["url"]
+
+    migration_domain = _domain_migration_target(url)
+    if migration_domain:
+        title = article.get("title") or ""
+        ok, structured, migrated_url = _try_domain_migration(lib, migration_domain, title, url)
+        if ok:
+            lib.set_article_content_html(article_id, structured)
+            lib.log_content_refetch_attempt(article_id, "success",
+                                            source="migration", detail=migrated_url)
+            return True, ""
+
+    return _finish_backfill_via_wayback(lib, article_id, url, direct_reason, direct_detail)
+
+
 def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
     """Re-fetch one already-saved article and, if the fetch produced real
     structured content, store it as `content_html` — the Phase 5b backfill's
@@ -217,14 +327,21 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
     unrecoverable. Every call — success or failure — writes one
     content_refetch_log row.
 
-    On a direct-fetch failure of any OTHER kind above, tries the Wayback
-    Machine as a last resort before giving up (see linklib.wayback's module
-    docstring — deliberately not scoped to 404 only, since a stubborn
-    bot-block a direct fetch can't get past may still have a usable archived
-    snapshot). A Wayback-sourced success is logged with source='wayback' so
-    it's distinguishable from a normal direct fetch (linklib.wayback's
-    docstring covers why this fallback's real-world reliability is
-    unverified at the time this was built).
+    On a direct-fetch failure of any OTHER kind above, first tries the
+    known-domain-migration tier (Phase 5b follow-up #2 — see
+    _DOMAIN_MIGRATIONS' comment and linklib.domain_migration) if the URL's
+    host is a confirmed migrated domain, then the Wayback Machine as a last
+    resort before giving up (see linklib.wayback's module docstring —
+    deliberately not scoped to 404 only, since a stubborn bot-block a direct
+    fetch can't get past may still have a usable archived snapshot). Both
+    fallbacks funnel through _finish_backfill_after_direct_failure, which
+    guarantees exactly one content_refetch_log row is written no matter
+    which tier (direct, migration, or wayback) ultimately succeeds or all
+    three fail. A migration-sourced success is logged with source='migration',
+    a Wayback-sourced success with source='wayback' — both distinguishable
+    from a normal direct fetch (linklib.wayback's docstring covers why the
+    Wayback fallback's real-world reliability is unverified at the time it
+    was built).
 
     Never destructive: a failure — even after the Wayback fallback is also
     exhausted — never touches articles.content or articles.content_html, so
@@ -246,7 +363,7 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
     try:
         page = fetch_page(url)
     except Exception as exc:
-        return _finish_backfill_via_wayback(lib, article_id, url, "fetch-error", str(exc)[:500])
+        return _finish_backfill_after_direct_failure(lib, article, "fetch-error", str(exc)[:500])
 
     if not page.raw_html:
         # fetch_page swallows its own request/HTTP errors and returns an
@@ -255,18 +372,18 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
         # timeout, a connection error) so a batch of failures can be told
         # apart: independent dead links vs. one host systematically
         # blocking/throttling this tool — see PageData.fetch_error.
-        return _finish_backfill_via_wayback(lib, article_id, url, "fetch-error", page.fetch_error)
+        return _finish_backfill_after_direct_failure(lib, article, "fetch-error", page.fetch_error)
 
     ok, reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
     if not ok:
-        return _finish_backfill_via_wayback(lib, article_id, url, reason, "")
+        return _finish_backfill_after_direct_failure(lib, article, reason, "")
 
     structured = extract_reader_html(page.raw_html, url)
     if not structured:
         # Passed the content sanity check on plain text, but the structured
         # extractor itself came back empty (e.g. no <article>/<body> the
         # extractor recognizes) — nothing usable to store.
-        return _finish_backfill_via_wayback(lib, article_id, url, "too-thin", "")
+        return _finish_backfill_after_direct_failure(lib, article, "too-thin", "")
 
     lib.set_article_content_html(article_id, structured)
     lib.log_content_refetch_attempt(article_id, "success", source="direct")

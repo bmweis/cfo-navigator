@@ -125,7 +125,7 @@ Every table in the file, grouped by feature area:
 
 | Group | Tables |
 |---|---|
-| Content spine | `articles`, `articles_fts`, `articles_vec`, `article_embeddings`, `enrichment_cost`, `library_queue`, `dedupe_decisions`, `read_later`, `content_refetch_log` |
+| Content spine | `articles`, `articles_fts`, `articles_vec`, `article_embeddings`, `enrichment_cost`, `library_queue`, `dedupe_decisions`, `read_later`, `content_refetch_log`, `url_correction_log` |
 | FP&A Buddy (Ask) | `ask_questions`, `ask_feedback` |
 | Chat Matchmaker | `matchmaker_questions` |
 | Accounts | `users`, `password_reset_requests` |
@@ -274,7 +274,8 @@ used manual check rather than a per-turn or overhead cost.
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
-| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback success, the snapshot URL used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` — distinguishes a Wayback-archived-snapshot success from a normal live-fetch success; see the "fetch reliability" note in §3 below) |
+| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). Also backs the "needs manual review" capped-retry tier (Phase 5b follow-up #2, see the write-up below) — `Library._manual_review_article_ids()` counts attempts per article *since its last `url_correction_log` row* (or ever, if never corrected). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error` \| `defunct-service`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback or migration success, the URL actually used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` \| `'migration'` — distinguishes a Wayback-archived-snapshot or known-domain-migration success from a normal live-fetch success; see the "fetch reliability" and "retry backoff" notes in §3 below) |
+| `url_correction_log` | Durable trace of every manual URL correction applied via the manual-review CSV import (Phase 5b follow-up #2) — per CLAUDE.md's "every production data change leaves a trace" rule. Written by `Library.apply_article_url_correction()`, one row per correction, `old_url` snapshotted immediately before the `UPDATE` (same precedent as `tool_audit_log`/`community_audit_log`). No SQL-level FK to `articles`. `admin_id` is nullable and always `NULL` today — this app has no per-admin accounts (a single shared secret), so the column is forward-looking only. | `article_id` (no FK), `old_url`, `new_url`, `source` (default `'csv-import'`), `admin_id` (nullable, unused today) |
 
 ### FP&A Buddy (Ask)
 
@@ -2005,6 +2006,114 @@ failures. Diagnosed live via `railway ssh` one-off scripts rather than guessed a
   pattern as the failure-count methods) surfaces the exclusion count itself, with
   an explanatory note on the admin page and a "Defunct service" pill in the
   failure-reason breakdown, so the exclusion is visible, not a silent scope change.
+
+**Fourth follow-up — retry backoff (a distinct, non-permanent exclusion tier) + manual
+URL correction, plus a known-domain-migration fetch tier tried before Wayback.**
+Everything that wasn't `defunct-service` (a Cloudflare-blocked domain, genuine 404
+link rot) stayed in the default-scope retry pool *forever* — every future batch
+re-attempted it indefinitely, burning both time and Wayback's own scarce rate-limit
+budget for an outcome that had already failed the same way several times running.
+Two investigation gates ran before any of this was built, per Brian's explicit ask:
+(1) confirmed no existing admin capability lets an article's stored `url` be edited
+anywhere in the codebase — `tools`/`benchmarks`/`thought_leadership`/`communities` all
+have this, `articles` never does, even `Library.upsert()` only uses `url` as a dedup
+match key — so `apply_article_url_correction` is new, not a reuse; (2)
+confirmed `content_refetch_log` is genuinely one-row-per-attempt (a plain `INSERT`, no
+upsert) with no existing raw per-article attempt-count query, only latest-attempt-only
+aggregates — so a new counting query was needed.
+
+- **"Needs manual review" is a second, DELIBERATELY SEPARATE exclusion tier from
+  `defunct-service` — not merged into it.** A Cloudflare block can lift; a 404 can be
+  relinked; neither is "confirmed permanently dead" the way a discontinued service is.
+  `Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD = 3` (Brian's own assumption, flagged
+  plainly rather than silently picked): an article whose most recent attempt is a
+  failure (reason != `defunct-service`) and has failed at least 3 times **since its
+  last URL correction** (or ever, if never corrected) is pulled out of default-scope
+  auto-retry. Deliberately **query-time-derived**, not written as its own
+  `content_refetch_log` reason the way `defunct-service` is: unlike `defunct-service`
+  (a fact knowable from a single attempt), "3rd failure in a row" is a judgment about
+  accumulated history only computable by looking at several rows at once
+  (`Library._manual_review_article_ids()`, a `WITH cutoffs ... attempts ... counts`
+  CTE). This also means the admin page's needs-review list shows the article's REAL
+  last failure reason/detail (e.g. `bot-challenge`), not a synthetic tag.
+- **A URL correction resets the count WITHOUT deleting history.** `Library.
+  apply_article_url_correction(article_id, new_url)` updates `articles.url` and writes
+  one `url_correction_log` row (durable trace, per CLAUDE.md's one-off-fix rule) — it
+  never touches `content_refetch_log` at all. `_manual_review_article_ids()`'s cutoff
+  logic (only counting attempts strictly after the article's most recent
+  `url_correction_log.created_at`) is what makes the reset happen: a corrected article's
+  post-correction attempt count starts at zero, so it naturally re-qualifies for
+  default-scope retry the moment the correction lands, while its full pre-correction
+  failure history stays intact and queryable (non-destructive, same precedent as every
+  other correction path in this codebase).
+- **`articles_needing_content_backfill()`/`count_content_backfill_remaining()` now
+  exclude needs-manual-review too**, alongside the pre-existing `defunct-service`
+  exclusion — "Remaining" reads as "what the next default-scope run will actually
+  attempt." `force=True` still reaches needs-manual-review articles (unlike
+  `defunct-service`, this was never in question — it's the whole point of the tier not
+  being permanent).
+- **Export/import CSV round trip is the correction mechanism** (`/admin/library/
+  backfill-content`'s new "Needs manual review" section): **Export**
+  (`GET .../manual-review/export.csv`) — one row per needs-manual-review article,
+  keyed by the stable `article_id` (the URL itself is what's changing, so it can't be
+  the match key), with title/current URL/failure reason/attempt count/last-attempted
+  for reference and a blank `corrected_url` column to fill in. **Import** is a
+  preview-then-confirm pair, same convention as the pre-existing `/admin/
+  overhead-spend/csv/preview`+`/commit` routes (`linklib/manual_review_csv.py` mirrors
+  `linklib/overhead_csv.py`'s shape): `POST .../manual-review/import/preview` parses the
+  re-uploaded CSV into a three-way split — `updates` (a well-formed, changed
+  `corrected_url`), `skipped` (blank or identical — a normal no-op, not an error), and
+  `errors` (malformed URL, or an `article_id` that isn't a recognized needs-manual-review
+  row) — and renders a **nothing-written-yet preview** with the valid corrections
+  round-tripped as hidden form fields (same state-carry mechanism as the overhead-CSV
+  pair: this app has no server-side session store). `POST .../manual-review/import/
+  commit` is the only route that actually calls `apply_article_url_correction`, one
+  call per row, tolerant of a bad row rather than aborting the batch.
+- **Known-domain-migration fetch tier** (`linklib/domain_migration.py`, tried by a new
+  `linklib.pipeline._finish_backfill_after_direct_failure` orchestrator BEFORE the
+  pre-existing Wayback fallback): `_DOMAIN_MIGRATIONS` is a small, hand-curated map
+  (`pointsandfigures.com` → `jeffreycarter.substack.com`, `avc.com` → `avc.xyz`), same
+  discipline as `_DEFUNCT_SERVICE_DOMAINS` — each entry requires live confirmation, not
+  a hunch. A domain-count diagnostic run against the full production archive (not a test
+  batch) before building found 20 `pointsandfigures.com` articles (2 with a logged
+  failure — consistent with that domain's known Cloudflare block) and 55 `avc.com`
+  articles (0 logged failures yet, since most hadn't been attempted in a batch since the
+  fetch-reliability work landed — the domain move is still independently confirmed by
+  direct observation, just not yet exercised against a real failing article here). For a
+  matching domain with a title to search with, `domain_migration.find_migrated_url()`
+  reuses the exact Exa integration FP&A Buddy's `retrieve_exa()` already uses (same
+  endpoint, same `EXA_API_KEY`/`exa_enabled` kill switch, a plain `requests.post`),
+  restricted via `includeDomains` to just the destination domain, searching for the
+  article's stored TITLE — a hit is only accepted if its own title plausibly matches
+  (word-overlap ratio, not exact string match, since a migrated post's title can be
+  lightly reformatted by the new platform). The candidate still has to clear
+  `extract.assess_extraction_quality()`, the identical bar a direct fetch or Wayback
+  snapshot has to clear — this module only finds a candidate URL, it never decides the
+  content is good. **This is explicitly NOT a general search fallback** — it's only
+  trusted because the destination domain is already confirmed as the legitimate
+  continuation of that specific source, not because Exa found *something* plausible.
+- **Preserves the "exactly one `content_refetch_log` row per
+  `backfill_article_content()` call" invariant** — confirmed true before building, since
+  the migration tier and the retry-cap attempt-counting design would otherwise conflict.
+  `_finish_backfill_after_direct_failure` tries the migration tier first; on success it
+  logs its own single row (`source='migration'`) and returns immediately without ever
+  calling `_finish_backfill_via_wayback`; on any migration-tier miss (no domain match, no
+  title, no Exa hit, or the candidate fails its own sanity check) it logs NOTHING and
+  simply delegates to the pre-existing `_finish_backfill_via_wayback`, which does its own
+  single log — never a double-log, whichever tier ultimately succeeds or all three fail.
+- **Admin page**: the 3-tile stats grid became 5 tiles (Total / Structured / Remaining /
+  Needs review / Defunct service) — CSS changed from a fixed `repeat(3,1fr)` to
+  `repeat(auto-fit,minmax(130px,1fr))`, per the standing CSS-Grid-blowout lesson (Phase
+  P) rather than hardcoding a new fixed column count. A "via Migration" badge (mirroring
+  the existing "via Wayback" badge) appears on a migration-sourced success row in the
+  attempts log, plus a `Library.count_migration_content()` note (mirrors
+  `count_wayback_content()`) when nonzero.
+- **Out of scope, deliberately**: no automated search integration replaces the manual
+  CSV workflow for needs-manual-review articles generally — only the specific,
+  pre-confirmed domain migrations above get an automated tier; whether to broaden that is
+  a separate future decision. `defunct-service` logic and its permanent exclusion are
+  completely untouched by this change — regression-covered by the pre-existing
+  `tests/test_fetch_reliability.py` suite passing unmodified.
 
 ### Auth: three tiers, one cookie
 
