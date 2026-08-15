@@ -166,6 +166,37 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
     return done
 
 
+# Domains confirmed permanently dead — a discontinued service, not a
+# recoverable block or a moved page. Deliberately a short, hand-curated set:
+# each entry requires a real confirmation (a live request showing the
+# service itself is gone, not just this one URL), not a hunch, because
+# articles_needing_content_backfill() permanently excludes these from every
+# future default-scope backfill run (see that method's docstring) — getting
+# an entry here wrong means silently giving up on a recoverable article
+# forever.
+#
+#   feedproxy.google.com — Google's FeedBurner proxy, retired ~2018-2019.
+#     Confirmed via a live request (Phase 5b follow-up investigation):
+#     returns Google's own genuine "Error 404 (Not Found)!!1" page, not a
+#     WAF block or a redirect — the service itself is gone. A feedproxy URL
+#     was only ever a redirect shim to the real article elsewhere; once the
+#     shim is gone, the original URL is unrecoverable through it (Wayback
+#     included — see backfill_article_content's early-exit below).
+_DEFUNCT_SERVICE_DOMAINS = frozenset({
+    "feedproxy.google.com",
+})
+
+
+def _defunct_service_domain(url: str) -> str:
+    """The matching entry in _DEFUNCT_SERVICE_DOMAINS for `url`'s host, or
+    "" if it doesn't match one."""
+    from urllib.parse import urlsplit
+    host = (urlsplit(url).netloc or "").lower().split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host if host in _DEFUNCT_SERVICE_DOMAINS else ""
+
+
 def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
     """Re-fetch one already-saved article and, if the fetch produced real
     structured content, store it as `content_html` — the Phase 5b backfill's
@@ -177,17 +208,23 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
     row this function also writes). `ok=False, reason='fetch-error'` when
     the HTTP fetch itself failed outright; `ok=False, reason in
     {'paywall','bot-challenge','too-thin'}` when the fetch "succeeded" but
-    extract.assess_extraction_quality() judged the result unusable. Every
-    call — success or failure — writes one content_refetch_log row.
+    extract.assess_extraction_quality() judged the result unusable;
+    `ok=False, reason='defunct-service'` when the URL's host is a known
+    permanently-discontinued service (see _DEFUNCT_SERVICE_DOMAINS) — no
+    fetch or Wayback attempt is made at all in that case, since neither can
+    ever succeed and both would just spend a request (Wayback's especially
+    scarce given its own rate limiting) on something already known
+    unrecoverable. Every call — success or failure — writes one
+    content_refetch_log row.
 
-    On a direct-fetch failure of ANY kind above, tries the Wayback Machine as
-    a last resort before giving up (see linklib.wayback's module docstring —
-    deliberately not scoped to 404 only, since a stubborn bot-block a direct
-    fetch can't get past may still have a usable archived snapshot). A
-    Wayback-sourced success is logged with source='wayback' so it's
-    distinguishable from a normal direct fetch (linklib.wayback's docstring
-    covers why this fallback's real-world reliability is unverified at the
-    time this was built).
+    On a direct-fetch failure of any OTHER kind above, tries the Wayback
+    Machine as a last resort before giving up (see linklib.wayback's module
+    docstring — deliberately not scoped to 404 only, since a stubborn
+    bot-block a direct fetch can't get past may still have a usable archived
+    snapshot). A Wayback-sourced success is logged with source='wayback' so
+    it's distinguishable from a normal direct fetch (linklib.wayback's
+    docstring covers why this fallback's real-world reliability is
+    unverified at the time this was built).
 
     Never destructive: a failure — even after the Wayback fallback is also
     exhausted — never touches articles.content or articles.content_html, so
@@ -198,6 +235,14 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
 
     article_id = article["id"]
     url = article["url"]
+
+    defunct_domain = _defunct_service_domain(url)
+    if defunct_domain:
+        lib.log_content_refetch_attempt(
+            article_id, "failure", reason="defunct-service",
+            detail=f"{defunct_domain} is a discontinued service", source="direct")
+        return False, "defunct-service"
+
     try:
         page = fetch_page(url)
     except Exception as exc:
@@ -240,20 +285,24 @@ def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
     If Wayback comes up empty at ANY stage (no snapshot, the snapshot itself
     fails to fetch, or it fails the same sanity check a live page would —
     e.g. an archived paywall preview), this logs and returns the ORIGINAL
-    `direct_reason`/`direct_detail` — that's still the true diagnostic
-    signal for this article, not a synthetic "wayback also failed" reason,
-    so the admin failure-reason breakdown stays meaningful and comparable to
-    a pre-Wayback run. Never destructive at any stage.
+    `direct_reason` — that's still the true diagnostic signal for this
+    article, not a synthetic "wayback also failed" reason, so the admin
+    failure-reason breakdown stays meaningful and comparable to a
+    pre-Wayback run. The logged `detail` DOES append what Wayback itself
+    returned (e.g. "HTTP 403 (wayback: connection error: ...)") — a real
+    production batch needed a `railway ssh` round-trip to answer "was
+    Wayback even attempted, and what happened" before this existed; now
+    that's answered by the log directly. Never destructive at any stage.
     """
     from .extract import extract_reader_html, assess_extraction_quality, _page_data_from_html
     from . import wayback
 
-    snap_url = wayback.find_snapshot(url)
+    snap_url, wb_note = wayback.find_snapshot_verbose(url)
     if snap_url:
-        snap_html = wayback.fetch_snapshot(snap_url)
+        snap_html, fetch_note = wayback.fetch_snapshot_verbose(snap_url)
         if snap_html:
             page = _page_data_from_html(snap_html)
-            ok, _reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
+            ok, sanity_reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
             if ok:
                 structured = extract_reader_html(snap_html, snap_url)
                 if structured:
@@ -261,9 +310,15 @@ def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
                     lib.log_content_refetch_attempt(article_id, "success",
                                                     source="wayback", detail=snap_url)
                     return True, ""
+                wb_note = "snapshot fetched but had no extractable structure"
+            else:
+                wb_note = f"snapshot failed its own sanity check ({sanity_reason})"
+        else:
+            wb_note = f"snapshot found but fetch failed: {fetch_note}" if fetch_note else "snapshot found but fetch failed"
 
+    combined_detail = f"{direct_detail} (wayback: {wb_note})" if direct_detail else f"wayback: {wb_note}"
     lib.log_content_refetch_attempt(article_id, "failure", reason=direct_reason,
-                                    detail=direct_detail, source="direct")
+                                    detail=combined_detail, source="direct")
     return False, direct_reason
 
 

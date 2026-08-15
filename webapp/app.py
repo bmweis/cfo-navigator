@@ -22006,6 +22006,8 @@ def admin_backfill_content(request: Request):
     try:
         remaining = lib.count_content_backfill_remaining()
         total_articles = lib.count()
+        done_count = lib.count_structured_content()
+        excluded_count = lib.count_permanently_excluded_content()
         failure_counts = lib.content_refetch_failure_counts()
         failure_domains = lib.content_refetch_failure_domains(limit=15)
         wayback_count = lib.count_wayback_content()
@@ -22021,8 +22023,6 @@ def admin_backfill_content(request: Request):
     job_failed = job.get("failed", 0)
     job_error = job.get("error", "")
     job_stopped = job.get("stopped", False)
-
-    done_count = total_articles - remaining
 
     status_html = ""
     if running:
@@ -22047,7 +22047,8 @@ def admin_backfill_content(request: Request):
 
     def _failure_pill(reason, count):
         labels = {"paywall": "Paywall", "bot-challenge": "Bot challenge",
-                  "too-thin": "Too thin", "fetch-error": "Fetch error"}
+                  "too-thin": "Too thin", "fetch-error": "Fetch error",
+                  "defunct-service": "Defunct service"}
         return (f'<span style="display:inline-flex;align-items:center;gap:5px;background:var(--bg);'
                 f'border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:12.5px;">'
                 f'<strong>{count}</strong> {_esc(labels.get(reason, reason))}</span>')
@@ -22136,7 +22137,8 @@ def admin_backfill_content(request: Request):
   </div>
 </div>
 
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 20px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch&mdash;the live page couldn&rsquo;t be reached for those. A snapshot can be stale or differ from what the current page shows; look for the &ldquo;via Wayback&rdquo; badge in the attempts log below to spot which ones.</p>' if wayback_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch&mdash;the live page couldn&rsquo;t be reached for those. A snapshot can be stale or differ from what the current page shows; look for the &ldquo;via Wayback&rdquo; badge in the attempts log below to spot which ones.</p>' if wayback_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service (e.g. Google&rsquo;s retired FeedBurner proxy), so re-fetching can never succeed. Not counted in Remaining above. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry them anyway.</p>' if excluded_count else ''}
 
 <div id="poll-container">{status_html}</div>
 
