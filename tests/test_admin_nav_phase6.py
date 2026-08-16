@@ -7,6 +7,15 @@ CFO Toolbox; Features is removed entirely once it's empty.
 Pure reorganization — no route changes, no new functionality. See
 tests/test_admin_how_buddy_works.py for the "How FP&A Buddy works" page's
 own content tests, and tests/test_game_settings.py for /admin/game-settings'.
+
+**Superseded in part by the later Phase 6 (Layout Width Fixes, Admin Nav
+Restructure, Library Admin Cleanup)**: FP&A Buddy is no longer its own
+top-level `_ADMIN_GROUPS` entry — it nests inside CFO Toolbox as a
+sub-group (`_FPA_BUDDY_TOOLS`, rendered via a recursive `_group_html()`
+call inside `admin_page()`, not stored in `_ADMIN_GROUPS` itself), matching
+the public nav's own Toolbox->FP&A Buddy relationship. Sail, Don't Row
+staying inside CFO Toolbox, Features staying gone, and the four routes
+themselves are all still true and still covered below.
 """
 import pathlib
 import sys
@@ -43,13 +52,20 @@ def test_features_section_no_longer_exists(env):
     assert "Features" not in group_names
 
 
-def test_fpa_buddy_is_its_own_section_with_all_expected_pages(env):
+def test_fpa_buddy_is_no_longer_a_top_level_admin_group(env):
+    """Superseded by the later Admin Nav Restructure: FP&A Buddy moved from
+    a standalone top-level _ADMIN_GROUPS entry into a nested sub-group under
+    CFO Toolbox — see test_admin_nav_restructure_phase6.py for the current
+    nesting/badge/rendering assertions."""
+    group_names = [gname for gname, _, _ in env._ADMIN_GROUPS]
+    assert "FP&A Buddy" not in group_names
+
+
+def test_fpa_buddy_tools_list_has_all_expected_pages(env):
     # 4th entry (/admin/exa-settings) added in Phase 7 — this test only
     # pins the original Phase 6 moves; Phase 7's own tests cover the toggle
     # page itself (tests/test_admin_exa_settings.py).
-    fpa_groups = [items for gname, _, items in env._ADMIN_GROUPS if gname == "FP&A Buddy"]
-    assert len(fpa_groups) == 1
-    hrefs = [href for href, _, _ in fpa_groups[0]]
+    hrefs = [href for href, _, _ in env._FPA_BUDDY_TOOLS]
     assert hrefs == [
         "/admin/system/how-fpa-buddy-works",
         "/admin/ask-report",

@@ -1541,17 +1541,17 @@ compatibility redirect (nothing was bookmarked, same precedent as every
 other retired-route call in this doc). The three panes:
 
 - **Left rail** — navigation and filter vocabularies only, never search
-  (see "Search placement" below). Quick views (Feed / Saved / Read Later,
+  (see "Search placement" below). Quick views (Feed / Archive / Read Later,
   each with a live count), plus one per-view vocabulary: a Sources tree in
   the Feed view (OPML category → per-source counts) driving client-side
   filtering over one already-loaded batch of feed items — same approach the
   old Feed page's source checkboxes used, just restyled — and a "Tags" bar
-  in the Saved view, its direct counterpart. Switching quick views is a real
+  in the Archive view, its direct counterpart. Switching quick views is a real
   page load (`/read?view=feed|saved|readlater`); filtering *within* the Feed
   view is client-side JS, no round trip.
 - **Middle list pane** — server-rendered rows for whichever view is active,
   with that view's search in the pane's own header (`.rr-list-search`),
-  directly above the rows it filters. Saved search is a plain GET reload
+  directly above the rows it filters. Archive search is a plain GET reload
   (`/read?view=saved&q=...`), matching this codebase's existing
   server-rendered-search convention rather than a client-side SPA search;
   Feed search filters client-side through `rrApplyFilter`. Read Later has
@@ -1593,7 +1593,12 @@ other retired-route call in this doc). The three panes:
 
 `/admin/library`'s `_LIBRARY_TOOLS` gained a ninth entry, "Open Reader" →
 `/read`, first in the list — the entry point Phase 1 deliberately deferred
-to this phase.
+to this phase. **Superseded by the later Layout/Admin Nav/Library Cleanup
+phase** (see that section below): "Open Reader" was pulled back out of
+`_LIBRARY_TOOLS` (now 8 entries) in favor of a dedicated, more prominent
+callout at the top of `/admin/library` itself, plus a new direct link from
+`/admin`'s CFO Toolbox group — `/admin/library`'s own tool list is no
+longer the only, or the primary, way to reach `/read`.
 
 **Reader fixes/follow-ups (post-launch pass):**
 - **Paywalled Feed items now open in-app like any other row.** They used to
@@ -1633,7 +1638,7 @@ to this phase.
   target, which the initial implementation undershot.
 - **Two new reader-pane features**, both Instapaper-parity asks:
   - **Find in article** — a separate, article-scoped text search (distinct
-    from Saved-view's list search) via a toggleable find bar in
+    from Archive-view's list search) via a toggleable find bar in
     `.rr-reader-actions`; walks `#rr-reader-body-text`'s text nodes with a
     `TreeWalker`, wraps matches in `<mark>`, next/prev navigation, closes
     and clears on Escape.
@@ -1644,7 +1649,7 @@ to this phase.
     scroll position; a duplicate collapse button sits above that content) and
     lets the reader pane take the freed width. Keyed only to whether an
     article is open, not to which quick view it came from, so it behaves
-    identically for Feed and Saved.
+    identically for Feed and Archive.
 - **Thousands separators** (`:,` format spec) added to every large-count
   render sitewide that was missing one — the Reader's quick-view badges and
   list-pane item counts (inherited the gap from the pre-merge Archive page),
@@ -1664,7 +1669,7 @@ to this phase.
   `rrSelectSource`) so a search keystroke can re-run the same active
   category/source combination without needing to know it externally.
   Matches a row against its whole visible text (title, source, excerpt,
-  tags), same broad-match spirit as Saved view's server-rendered search.
+  tags), same broad-match spirit as Archive view's server-rendered search.
 
 **Second follow-up round — a real mobile bug, root-caused before fixing (not
 assumed from the bug report's own guess):** "clicking an article on mobile
@@ -1714,7 +1719,7 @@ placement. The evidence, since a claim like that should be checkable:
   bar **directly above the list**, in the same 960px column as the cards.
   That page had no rail at all.
 - Phase 5's own ARCHITECTURE.md (added in the very commit that moved it)
-  describes Saved search under its **middle list pane** bullet, and its
+  describes Archive search under its **middle list pane** bullet, and its
   exhaustive left-rail inventory — quick views, plus a Sources tree in Feed
   view only — never mentions search. The same commit's code put the form in
   the rail. A doc/code contradiction inside one commit.
@@ -1736,9 +1741,9 @@ header**, and none describes a search box in a rail — but that is testimony
 about the file, not the file itself.
 
 Only placement changed. Each view keeps its own mechanism (Feed client-side
-via `rrApplyFilter`, Saved a server GET), and the rail keeps the Sources
+via `rrApplyFilter`, Archive a server GET), and the rail keeps the Sources
 tree and tag bar, which are filter vocabularies rather than search. The
-Saved rail's heading was "Search" — describing the form that used to sit
+Archive rail's heading was "Search" — describing the form that used to sit
 above the tag bar — so with the form moved it reads "Tags", matching Feed's
 "Sources". Covered by `tests/test_reader_search_placement.py`, which asserts
 DOM ancestry rather than geometry: on the stacked mobile layout the rail and
@@ -1861,7 +1866,7 @@ changed text. Vector search is eventually consistent by design.
   and `#rr-tag-status` re-render, never the input, so focus survives a save
   and tags can be typed one after another. Chip removal passes an index, not
   the tag text, so an apostrophe in a tag name can't break out of the inline
-  handler. `rrSyncRowTags` keeps the Saved-view row's own chips in step, so
+  handler. `rrSyncRowTags` keeps the Archive-view row's own chips in step, so
   the two panes never disagree without a reload.
   The input carries a 220px width floor (`min(220px,100%)`), not the 110px it
   launched with: below that, chips on the same line could squeeze it too narrow
@@ -2176,6 +2181,135 @@ aggregates — so a new counting query was needed.
   completely untouched by this change — regression-covered by the pre-existing
   `tests/test_fetch_reliability.py` suite passing unmodified.
 
+### Admin nav restructure, Library page cleanup, and page-width fixes (Phase 6)
+
+Three related but distinct pieces, shipped as one PR because the second and
+third are coupled (Library's own management entry point moves as part of
+the nav restructure).
+
+**Page-width/centering.** `/about`'s bio column had a real bug: bare inline
+`style="max-width:760px;"` instead of `.tool-prose`, so it never inherited
+the sitewide centering `.page{margin:0 auto}` rule provides — fixed by
+switching to `.tool-prose`. A live pixel-measurement check (`getBoundingClientRect`/
+`getComputedStyle` at 1920px and 1440px) of `/tools` and `/admin` — both
+flagged as possibly having the same bug — found they were already correctly
+centered (symmetric margins at 1920px, full-width with 0 margin at 1440px);
+no fix was needed there. The homepage and `/thought-leadership` stay
+`.page-full` (1900px), unchanged by design. A fresh sweep for the same
+bare-inline-style anti-pattern elsewhere in `webapp/app.py` found no other
+occurrence — `/read`/`/read/{article_id}` are a documented custom-exception
+layout (see `_page_index_snapshot()`), not an instance of the bug.
+
+Two different "this is admin-only" visual treatments had drifted apart:
+`/tools`' 5th "Library" tile (white background, `var(--seafoam)` border —
+the original Phase 3 spec) vs. the homepage's "Reader access" box (filled
+`var(--seafoam)` background, `var(--seafoam-deep)` border — the later
+design file's own treatment, never reconciled back onto `/tools`).
+Standardized on the homepage's filled treatment via two new shared
+constants, `_ADMIN_ONLY_BG`/`_ADMIN_ONLY_BORDER`, both call sites now pull
+from — `_toolbox_tile()` grew a `background` kwarg to make this possible
+without duplicating its markup.
+
+**Admin nav restructure.** `/admin`'s right column (`_ADMIN_GROUPS`) is
+reordered to mirror the public site's own nav order: Thought Leadership
+first (unchanged content, just repositioned), then CFO Toolbox — now an
+expandable parent, same native `<details>`/`<summary>` disclosure every
+other admin group already uses — containing Software / Toolbox categories /
+Benchmarking resources / Communities / Sail, Don't Row settings (the
+existing 5 `_TOOLBOX_TOOLS`, kept as-is rather than trimmed to match a
+shorter prose description) plus two new nested items: a recursive **FP&A
+Buddy** sub-group (`_FPA_BUDDY_TOOLS`, its own expand/collapse and its own
+aggregate badge — `_group_html()` calls itself, no new mechanism) and a
+plain **Library** link (what used to be a standalone top-level card,
+relocated). Then "Brand, voice, and content" (renamed from "Brand &
+Voice"), holding exactly Site copy / Verbal identity / Email templates /
+Brand standards in that order. **System** (7 tools) stays a fourth,
+unchanged group — it has no public-nav counterpart, so it remains its own
+catch-all rather than being folded into one of the three above.
+
+The parent "CFO Toolbox" badge aggregates pending-task counts across its
+*entire* subtree — all 5 direct tools plus all 4 FP&A Buddy tools plus all
+8 Library tools (19 hrefs total via `badge_hrefs`) — not just its 5 direct
+children, so the header reflects the true nested count. `_ADMIN_GROUPS`
+itself only stores the 5 direct `_TOOLBOX_TOOLS` tuples for "CFO Toolbox";
+the FP&A Buddy sub-group and the Library link are built and appended inside
+`admin_page()` at render time, not present in the static list — code/tests
+that need every admin-linked route should read `_ADMIN_SECTIONS` (a flat
+view that folds `_LIBRARY_TOOLS` + `_FPA_BUDDY_TOOLS` + every
+`_ADMIN_GROUPS` item together) rather than iterating `_ADMIN_GROUPS`
+directly, or they'll silently miss the two nested groups.
+`_group_html()` was generalized to accept either `(href,title,desc)` tuples
+(rendered as cards) or pre-rendered HTML strings (for nesting a sub-group
+or a plain link card), plus a `nested` flag for the lighter visual
+treatment (smaller padding/font, `var(--bg)` fill) a sub-group needs so it
+doesn't compete visually with its parent.
+
+**Library page cleanup (`/admin/library`).** "Open Reader" is no longer a
+listed tool here — it's reachable via the admin nav restructure above
+(`/admin` → CFO Toolbox → Library, which lands back on this page) and via a
+new, prominent, non-numbered callout at the very top of `/admin/library`
+itself linking straight to `/read` — added because neither of the other two
+paths is locally obvious enough on the one page that used to list Open
+Reader as tool #1. `_LIBRARY_TOOLS` is now 8 entries (down from 10):
+"Open Reader" is gone (moved to the callout) and "Historical sweep" is gone
+(merged into Archive Queue, next paragraph). Two descriptions were rewritten
+for clarity: **Archive backup**'s now explicitly says automated backups
+already run weekly via the GitHub Action (Phase O) and that this manual
+tool is for an on-demand snapshot right before something risky, not a
+day-to-day safety net; **Reader content backfill**'s now explicitly
+differentiates itself from Archive Queue's Historical sweep panel
+("re-processes articles you've *already* saved for better structure; it
+never finds new ones").
+
+**Historical Sweep + Archive Queue merge.** These read as two pages doing
+one job (a one-time sitemap producer and the queue that consumes it) once
+`_content_flow_diagram()` existed to show that relationship explicitly —
+so `GET /admin/library/backfill` (Historical sweep's old standalone page)
+is retired as a page and now 301-redirects to `/admin/library/queue`,
+which embeds the entire sweep form/report/poller as a collapsible
+`<details class="admin-group">` panel at the top of the page (open by
+default only when there's something to show — running, error, or a prior
+report). The underlying mechanism is untouched: `POST
+/admin/library/backfill/start` and `GET /admin/library/backfill/status`
+keep their exact paths and behavior, both redirect targets on the POST
+route were repointed from `/admin/library/backfill` to
+`/admin/library/queue`, and the background-thread `_job_get("backfill")`/
+`_job_set("backfill", ...)` job-state pattern is unchanged. One real bug
+surfaced and fixed during the merge: the sweep panel's own poll script was
+calling `fetch('/admin/backfill/status')` — missing the `/library` path
+segment, silently 404ing forever, so the UI never live-updated without a
+full page reload. The redirect (not a hard removal) is deliberate: this was
+a real bookmarked admin tool, not a public URL nobody had saved.
+
+The remaining 7 `/admin/library` tools (Archive backup stays standalone,
+reasoning below) are grouped into three labeled sections:
+- **Archive additions** — bringing new content in: Archive Queue (which now
+  contains the merged Historical sweep panel) plus the ongoing feed-scan
+  button on the same page.
+- **Existing archive management** — working with what's already saved:
+  Reader content backfill, Content de-dupe, Remove content.
+- **Tagging** — how tags get created, taught, and kept tidy: Tag cleanup,
+  Tagging style, Enrich archive.
+
+Two placements were genuinely ambiguous and decided by judgment rather than
+silently: **Archive backup** sits outside all three sections (applies to
+the whole archive, not just "existing" content, so folding it into either
+group would misrepresent its scope). **Enrich archive** stayed in Tagging
+rather than moving to "Existing archive management" — it drafts both
+summaries and tags, but tags are the vocabulary the other two Tagging tools
+curate and teach, and that relationship felt like the stronger fit.
+
+**Reader rename: "Saved" → "Archive".** The Reader's own quick-view label,
+list-pane header, and every related admin-facing description previously
+called this view "Saved" — inconsistent with every admin reference to the
+same content as "the archive"/"Archive" (Archive Queue, Archive backup,
+Archive additions, and this very page's own name). Renamed the
+user-visible label only — `view=saved` stays the URL param (`GET
+/read?view=saved`), and every internal identifier (`saved_rows`,
+`saved_total`, `saved_tags`, the `view == "saved"` branches) is unchanged,
+to keep the diff purely cosmetic and avoid touching any tested route
+contract.
+
 ### Auth: three tiers, one cookie
 
 Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
@@ -2266,7 +2400,7 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   - *Admin* (`_is_authed` — session with `role=admin`): everything under
     `/admin/*`, plus admin-only actions on shared pages, plus **the digital
     Library**, now the merged Reader — `GET /read` (the three-pane shell:
-    Feed/Saved/Read Later) and `GET /read/{article_id}` (the standalone
+    Feed/Archive/Read Later) and `GET /read/{article_id}` (the standalone
     single-article view) — tightened from member to admin-only back in
     Phase 1, carried into the Phase 5 Reader merge below. The old flat
     `/archive`, `/feed` URLs, and the pre-merge `/library/archive` and

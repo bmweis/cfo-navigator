@@ -1537,6 +1537,33 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   correctly returns the intended `@font-face` stack — confirming the CSS
   itself is right and this is purely a rendering limitation of the
   comparison tooling, not something to chase in the app.
+- **Phase 6 — Layout Width Fixes, Admin Nav Restructure, Library Admin
+  Cleanup.** Three coupled pieces in one PR (Library's management entry
+  point moves as part of the nav restructure, so splitting wasn't clean).
+  `/about`'s bio column had a real centering bug (bare inline
+  `style="max-width:760px;"` instead of `.tool-prose`) — fixed. A live
+  pixel-measurement check found `/tools` and `/admin`, also flagged as
+  possibly affected, were already correctly centered — no fix needed there,
+  confirmed rather than assumed. `/admin`'s right column now mirrors the
+  public nav's order (Thought Leadership, then an expandable CFO Toolbox —
+  Software/Toolbox categories/Benchmarking resources/Communities/Sail Don't
+  Row settings plus a nested FP&A Buddy sub-group and a Library link, then
+  "Brand, voice, and content", then System unchanged). `/admin/library`
+  dropped "Open Reader" from its tool list (now reachable via a dedicated
+  callout at the top of the page, and via Admin's CFO Toolbox &rarr;
+  Library) and merged Historical Sweep into Archive Queue as a collapsible
+  panel — `/admin/library/backfill` now 301s to `/admin/library/queue`; the
+  underlying `POST .../backfill/start` and `GET .../backfill/status` routes
+  are unchanged. The remaining 7 Library tools are grouped into three
+  sections (Archive additions / Existing archive management / Tagging),
+  with Archive backup standalone (applies to the whole archive, not just
+  "existing" content) and Enrich archive kept in Tagging (it drafts the
+  vocabulary the other Tagging tools curate). The Reader's own "Saved"
+  quick view/list-pane label is renamed "Archive" to match every admin
+  reference to the same content — display text only; `view=saved` stays the
+  URL param and every internal identifier is unchanged. See
+  ARCHITECTURE.md's "Admin nav restructure, Library page cleanup, and
+  page-width fixes (Phase 6)" section for the full write-up.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
