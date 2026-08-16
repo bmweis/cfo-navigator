@@ -262,6 +262,7 @@ def _send(msg: MIMEMultipart) -> None:
 NOTIFICATION_TYPE_LABELS = {
     "contact": "Contact Form",
     "tool_submission": "Tool Submission",
+    "community_submission": "Community Submission",
     "password_reset_no_email": "Password Reset",
 }
 
