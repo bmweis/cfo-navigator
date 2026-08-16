@@ -14,7 +14,6 @@ Note the fixtures point LINKLIB_SITES_OPML at a tmp copy. Booting the app runs
 the seed-and-regenerate startup hook, which would otherwise write into the
 repo's working tree during a test run.
 """
-import os
 import pathlib
 import shutil
 import sys
