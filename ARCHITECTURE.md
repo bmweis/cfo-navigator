@@ -2281,23 +2281,48 @@ segment, silently 404ing forever, so the UI never live-updated without a
 full page reload. The redirect (not a hard removal) is deliberate: this was
 a real bookmarked admin tool, not a public URL nobody had saved.
 
-The remaining 7 `/admin/library` tools (Archive backup stays standalone,
-reasoning below) are grouped into three labeled sections:
-- **Archive additions** — bringing new content in: Archive Queue (which now
-  contains the merged Historical sweep panel) plus the ongoing feed-scan
-  button on the same page.
+The remaining 7 `/admin/library` tools are grouped into three labeled
+sections:
+- **Archive additions & backup** — bringing new content in, plus protecting
+  what's already there: Archive Queue (which now contains the merged
+  Historical sweep panel) and the ongoing feed-scan button on the same
+  page, plus Archive backup.
 - **Existing archive management** — working with what's already saved:
   Reader content backfill, Content de-dupe, Remove content.
 - **Tagging** — how tags get created, taught, and kept tidy: Tag cleanup,
   Tagging style, Enrich archive.
 
 Two placements were genuinely ambiguous and decided by judgment rather than
-silently: **Archive backup** sits outside all three sections (applies to
-the whole archive, not just "existing" content, so folding it into either
-group would misrepresent its scope). **Enrich archive** stayed in Tagging
-rather than moving to "Existing archive management" — it drafts both
-summaries and tags, but tags are the vocabulary the other two Tagging tools
-curate and teach, and that relationship felt like the stronger fit.
+silently. **Archive backup** first shipped as its own standalone,
+headingless card above the three sections — it applies to the whole
+archive, not just "existing" content, so folding it into "Existing archive
+management" would misrepresent its scope — but a live-preview follow-up
+flagged that as visually odd once every other tool had a labeled section
+above it. Folded into "Archive additions" instead (renamed "Archive
+additions & backup" so the heading still says what's inside it): it still
+doesn't fit "existing" content, but reads fine alongside "bringing new
+content in" as one shared idea — both are about keeping the archive intact
+and current, not a single curation pass over content that's already there.
+**Enrich archive** stayed in Tagging rather than moving to "Existing
+archive management" — it drafts both summaries and tags, but tags are the
+vocabulary the other two Tagging tools curate and teach, and that
+relationship felt like the stronger fit.
+
+**Page layout — a 2x2 grid, added in the same live-preview follow-up.**
+The page's four content blocks (Open Reader + the flow diagram; "Saving
+articles from anywhere"; "Archive additions & backup"; "Existing archive
+management" + "Tagging") originally rendered as one long single column.
+Reflowed into a `.lib-two-col` CSS grid (`grid-template-columns:1fr 1fr`,
+plain DOM-order auto-placement — no explicit `grid-column`/`grid-row`
+needed since 4 items in a 2-column grid naturally fill row-by-row) pairing
+Open Reader/flow with "Saving articles from anywhere" on top, and "Archive
+additions & backup" with "Existing archive management"/"Tagging" below.
+Collapses to a single column below 900px, same breakpoint convention as
+every other responsive section on the site — DOM order (top-left,
+top-right, bottom-left, bottom-right) is also the sensible mobile reading
+order, so no separate mobile-order override was needed (unlike the
+homepage's `.home-grid`, which needed one because its desktop and mobile
+orders genuinely diverge).
 
 **Reader rename: "Saved" → "Archive".** The Reader's own quick-view label,
 list-pane header, and every related admin-facing description previously

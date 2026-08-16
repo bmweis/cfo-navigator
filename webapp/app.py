@@ -18538,15 +18538,18 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     )
 
     # Regrouped by function (Phase 6), not the old single top-to-bottom
-    # workflow list. Archive backup deliberately sits OUTSIDE all three
-    # groups: it applies to the whole archive, not just "existing" content,
-    # so filing it under "Existing archive management" would misdescribe
-    # it — flagged as one of the two genuinely ambiguous placements in the
-    # Phase 6 brief. Enrich archive stays in "Tagging" (the other ambiguous
-    # one) even though it also drafts summaries: it's what actually applies
-    # the tag vocabulary Tag cleanup curates and Tagging style teaches, so
-    # the three read as "how tags get created, taught, and refined" as one
-    # cluster, even though summaries are a real second output of the third.
+    # workflow list. Archive backup was originally a standalone headingless
+    # card outside all three groups — it applies to the whole archive, not
+    # just "existing" content, so filing it under "Existing archive
+    # management" would misdescribe it — but that read oddly once every
+    # other tool had a labeled section, so it's now folded into "Archive
+    # additions & backup" instead (see that section below). Enrich archive
+    # stays in "Tagging" (the other genuinely ambiguous placement from the
+    # Phase 6 brief) even though it also drafts summaries: it's what
+    # actually applies the tag vocabulary Tag cleanup curates and Tagging
+    # style teaches, so the three read as "how tags get created, taught,
+    # and refined" as one cluster, even though summaries are a real second
+    # output of the third.
     lib_by_href = {href: (title, desc) for href, title, desc in _LIBRARY_TOOLS}
 
     def _lib_section(label, hrefs, desc_line):
@@ -18560,32 +18563,27 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
             f'<div style="display:grid;gap:12px;">{section_cards}</div>'
         )
 
-    archive_backup_card = _lib_card(
-        "/admin/library/backup", *lib_by_href["/admin/library/backup"],
-        _badge_for_href("/admin/library/backup", task_counts.get("/admin/library/backup", 0)))
+    # Archive backup used to render as its own headingless card above the
+    # three labeled sections — visually odd once everything else had a
+    # heading (flagged live after this shipped). Folded into "Archive
+    # additions" instead, first in that section, rather than kept standalone:
+    # it doesn't fit "existing archive management" (see the note above), but
+    # it reads fine alongside "bringing new content in" as one shared idea —
+    # both are about keeping the archive intact and current, not a single
+    # curation pass over content that's already there. Renamed the section to
+    # "Archive additions & backup" so the heading still says what's inside it.
+    # Four content blocks, laid out as a 2x2 grid (Brian's live-preview
+    # follow-up ask): top-left pairs Open Reader + the flow diagram with
+    # top-right's "Saving articles from anywhere" reference block, and
+    # bottom-left's "Archive additions & backup" pairs with bottom-right's
+    # "Existing archive management" + "Tagging". DOM order matches the
+    # visual reading order (top row, then bottom row) so the mobile
+    # single-column stack — see the CSS below — reads sensibly without a
+    # separate mobile-order override, same reasoning as the homepage's own
+    # `.home-grid` breakpoint.
+    top_left_html = f"{open_reader_callout}{_content_flow_diagram()}"
 
-    sections_html = (
-        _lib_section("Archive additions", ["/admin/library/queue"],
-                    "Bringing new content in&mdash;an ongoing feed scan plus an occasional historical sweep, both reviewed on one page before anything's saved.")
-        + _lib_section("Existing archive management",
-                       ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals"],
-                       "Working with what's already saved.")
-        + _lib_section("Tagging",
-                       ["/admin/library/tags", "/admin/library/tag-style", "/admin/library/enrich"],
-                       "How tags get created, taught, and kept tidy&mdash;and the summaries that ride along with them.")
-    )
-
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Library</h1>
-{auth_banner}
-<p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
-{open_reader_callout}
-{_content_flow_diagram()}
-{archive_backup_card}
-{sections_html}
-
-<h2 style="margin:40px 0 6px;">Saving articles from anywhere</h2>
+    top_right_html = f"""<h2 style="margin:0 0 6px;">Saving articles from anywhere</h2>
 <p style="color:var(--muted);font-size:14px;margin:0 0 8px;line-height:1.6;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 <p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong>&mdash;the old copies embed the old values. Set them up again from this page's instructions.</p>
 
@@ -18622,7 +18620,39 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 </ol>
 <p style="margin:0;color:var(--muted);font-size:13px;">Articles saved this way arrive untagged&mdash;tag them later in the Library, or add a second JSON text field named <code>tags</code> with a comma-separated list if you want a fixed default.</p>
 </div>
-</details>
+</details>"""
+
+    bottom_left_html = _lib_section(
+        "Archive additions & backup", ["/admin/library/backup", "/admin/library/queue"],
+        "Bringing new content in&mdash;an ongoing feed scan plus an occasional historical sweep, both reviewed on one page before anything's saved&mdash;plus an on-demand snapshot for right before something risky.")
+
+    bottom_right_html = (
+        _lib_section("Existing archive management",
+                     ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals"],
+                     "Working with what's already saved.")
+        + _lib_section("Tagging",
+                       ["/admin/library/tags", "/admin/library/tag-style", "/admin/library/enrich"],
+                       "How tags get created, taught, and kept tidy&mdash;and the summaries that ride along with them.")
+    )
+
+    body = f"""<div class="page page-admin">
+<style>
+.lib-two-col{{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;}}
+.lib-two-col>div{{min-width:0;}}
+@media (max-width:900px){{
+  .lib-two-col{{display:block;}}
+}}
+</style>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Library</h1>
+{auth_banner}
+<p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
+<div class="lib-two-col">
+<div>{top_left_html}</div>
+<div>{top_right_html}</div>
+<div>{bottom_left_html}</div>
+<div>{bottom_right_html}</div>
+</div>
 </div>"""
     return HTMLResponse(_page("Library—Admin", "Admin", body, authed=True))
 

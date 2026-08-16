@@ -1555,15 +1555,20 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   panel — `/admin/library/backfill` now 301s to `/admin/library/queue`; the
   underlying `POST .../backfill/start` and `GET .../backfill/status` routes
   are unchanged. The remaining 7 Library tools are grouped into three
-  sections (Archive additions / Existing archive management / Tagging),
-  with Archive backup standalone (applies to the whole archive, not just
-  "existing" content) and Enrich archive kept in Tagging (it drafts the
-  vocabulary the other Tagging tools curate). The Reader's own "Saved"
-  quick view/list-pane label is renamed "Archive" to match every admin
-  reference to the same content — display text only; `view=saved` stays the
-  URL param and every internal identifier is unchanged. See
-  ARCHITECTURE.md's "Admin nav restructure, Library page cleanup, and
-  page-width fixes (Phase 6)" section for the full write-up.
+  sections (Archive additions &amp; backup / Existing archive management /
+  Tagging), with Archive backup folded into the first section (a live-preview
+  follow-up moved it there from a standalone headingless card, which read
+  oddly once every other tool had a section heading above it) and Enrich
+  archive kept in Tagging (it drafts the vocabulary the other Tagging tools
+  curate). That same follow-up also reflowed the page into a 2x2 CSS grid:
+  Open Reader/flow diagram pairs with "Saving articles from anywhere" on
+  top, "Archive additions &amp; backup" pairs with "Existing archive
+  management"/"Tagging" below, collapsing to one column under 900px. The
+  Reader's own "Saved" quick view/list-pane label is renamed "Archive" to
+  match every admin reference to the same content — display text only;
+  `view=saved` stays the URL param and every internal identifier is
+  unchanged. See ARCHITECTURE.md's "Admin nav restructure, Library page
+  cleanup, and page-width fixes (Phase 6)" section for the full write-up.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
