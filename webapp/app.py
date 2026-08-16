@@ -18528,13 +18528,21 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # point (which lands back HERE, not on /read) or the homepage's
     # admin-only Reader-access box. A dedicated callout above everything
     # else does that without pretending it's tool #1 of a workflow list.
+    # Live-preview follow-up: restyled to match the homepage's Reader-access
+    # box / /tools' Library tile — same _ADMIN_ONLY_BG/_ADMIN_ONLY_BORDER
+    # seafoam treatment and vertical icon-badge card shape, instead of this
+    # page's own one-off navy horizontal bar — since it now sits in a narrow
+    # column next to the flow diagram (see the top row below) rather than
+    # spanning the full page width.
     open_reader_callout = (
-        '<a href="/read" style="display:flex;align-items:center;justify-content:space-between;gap:16px;'
-        'background:var(--navy-wash);border:1.5px solid var(--navy-light);border-radius:14px;'
-        'padding:18px 22px;text-decoration:none;margin-bottom:22px;">'
-        '<span><span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Open Reader</span>'
-        '<span style="display:block;margin-top:4px;font-size:13.5px;color:var(--ink-soft);">The day-to-day reading surface&mdash;Feed, Archive, and Read Later in one three-pane view. This is where you actually read; everything below is curation.</span></span>'
-        '<span style="color:var(--navy);font-size:20px;flex-shrink:0;">&rarr;</span></a>'
+        f'<a href="/read" style="display:flex;flex-direction:column;gap:8px;height:100%;box-sizing:border-box;'
+        f'text-decoration:none;background:{_ADMIN_ONLY_BG};border:{_ADMIN_ONLY_BORDER};border-radius:16px;padding:26px;">'
+        f'<div style="display:flex;align-items:center;gap:12px;">'
+        f'{_card_icon(3, _ICON_NEWSPAPER)}'
+        f'<div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Open Reader</div>'
+        f'</div>'
+        f'<p style="font-size:13.5px;line-height:1.5;color:var(--navy);margin:0;">The day-to-day reading surface&mdash;Feed, Archive, and Read Later in one three-pane view. This is where you actually read; everything below is curation.</p>'
+        f'</a>'
     )
 
     # Regrouped by function (Phase 6), not the old single top-to-bottom
@@ -18572,18 +18580,27 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # both are about keeping the archive intact and current, not a single
     # curation pass over content that's already there. Renamed the section to
     # "Archive additions & backup" so the heading still says what's inside it.
-    # Four content blocks, laid out as a 2x2 grid (Brian's live-preview
-    # follow-up ask): top-left pairs Open Reader + the flow diagram with
-    # top-right's "Saving articles from anywhere" reference block, and
-    # bottom-left's "Archive additions & backup" pairs with bottom-right's
-    # "Existing archive management" + "Tagging". DOM order matches the
-    # visual reading order (top row, then bottom row) so the mobile
-    # single-column stack — see the CSS below — reads sensibly without a
-    # separate mobile-order override, same reasoning as the homepage's own
-    # `.home-grid` breakpoint.
-    top_left_html = f"{open_reader_callout}{_content_flow_diagram()}"
+    # Second live-preview round: Open Reader + the flow diagram go back to
+    # full page width, as their own row above everything else — but not
+    # simply stacked like before this whole redesign started: the diagram
+    # takes the left 2/3 of that row and Open Reader's now-seafoam card
+    # takes the right 1/3, side by side (`.lib-top-row`). "Saving articles
+    # from anywhere" drops down to take the top-left slot of the two-column
+    # grid below (freed up now that Open Reader/flow moved out of it
+    # entirely), pairing with "Archive additions & backup" on its right;
+    # "Existing archive management" + "Tagging" fill the row under that.
+    # DOM order (saving-articles, archive-additions-and-backup,
+    # existing-mgmt-and-tagging) drives both the desktop auto-placement
+    # (3 items in a 2-column grid fill left-to-right, top-to-bottom, leaving
+    # the last cell empty) and the mobile single-column stack, so no
+    # separate mobile-order override is needed — same reasoning as the
+    # homepage's own `.home-grid` breakpoint.
+    top_row_html = f"""<div class="lib-top-row">
+<div>{_content_flow_diagram()}</div>
+<div>{open_reader_callout}</div>
+</div>"""
 
-    top_right_html = f"""<h2 style="margin:0 0 6px;">Saving articles from anywhere</h2>
+    saving_articles_html = f"""<h2 style="margin:0 0 6px;">Saving articles from anywhere</h2>
 <p style="color:var(--muted);font-size:14px;margin:0 0 8px;line-height:1.6;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 <p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong>&mdash;the old copies embed the old values. Set them up again from this page's instructions.</p>
 
@@ -18637,9 +18654,13 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 
     body = f"""<div class="page page-admin">
 <style>
+.lib-top-row{{display:grid;grid-template-columns:2fr 1fr;column-gap:28px;align-items:stretch;margin-bottom:24px;}}
+.lib-top-row>div{{min-width:0;}}
 .lib-two-col{{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;}}
 .lib-two-col>div{{min-width:0;}}
 @media (max-width:900px){{
+  .lib-top-row{{display:block;}}
+  .lib-top-row>div:last-child{{margin-top:22px;}}
   .lib-two-col{{display:block;}}
 }}
 </style>
@@ -18647,9 +18668,9 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 <h1>Library</h1>
 {auth_banner}
 <p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
+{top_row_html}
 <div class="lib-two-col">
-<div>{top_left_html}</div>
-<div>{top_right_html}</div>
+<div>{saving_articles_html}</div>
 <div>{bottom_left_html}</div>
 <div>{bottom_right_html}</div>
 </div>
