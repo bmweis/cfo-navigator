@@ -16914,6 +16914,7 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 # admin_library()'s 3-way visual grouping (Archive backup stands outside all
 # three — see that function's own note on why).
 _LIBRARY_TOOLS = [
+    ("/admin/library/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into sections, and set which ones are read-only (in the Reader, but never proposed into the archive queue). The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
     ("/admin/library/backup",       "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run weekly on a schedule (a GitHub Action syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
     ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. Different from Archive Queue's Historical sweep panel: this re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
     ("/admin/library/queue",        "Archive queue",       "Review every proposed save—from an ongoing feed scan, or the page's own Historical sweep panel (a one-time catch-up on an older source's back catalog)—fix dates, edit tags, and approve into the archive or dismiss."),
@@ -18672,13 +18673,14 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 </ol>
 <p style="margin:0;color:var(--muted);font-size:13px;">Articles saved this way arrive untagged&mdash;tag them later in the Library, or add a second JSON text field named <code>tags</code> with a comma-separated list if you want a fixed default.</p>
 </div>
-</details>
+</details>"""
 
-<div style="margin-top:20px;">{_lib_card(
-    "/admin/library/feeds", "Manage feeds",
-    "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, and set which "
-    "sections are read-only. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is "
-    "restricted to, so a source added here becomes citable there too.")}</div>"""
+    # First of the labeled tool sections (Brian's call), ahead of the three
+    # that were here before. Feed management is where content starts, so it
+    # reads ahead of what happens to content once it's in.
+    feed_mgmt_html = _lib_section(
+        "Feed management", ["/admin/library/feeds"],
+        "The RSS sources behind the Reader&mdash;and the same list FP&amp;A Buddy&rsquo;s web search is restricted to.")
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -18723,6 +18725,7 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 <p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
 {top_row_html}
 <div class="lib-two-col">
+<div>{feed_mgmt_html}</div>
 <div>{saving_articles_html}</div>
 <div>{existing_mgmt_html}</div>
 <div>{archive_additions_html}</div>

@@ -2367,13 +2367,22 @@ margin), the diagram isn't grown, and nothing is clipped. The correction is
 dropped inside the existing `max-width:900px` block, where the stacked layout
 has no shared row height to match and it would only add a stray gap.
 
-**"Manage feeds" link box.** Added below the two capture-path accordions in
-"Saving articles from anywhere", using the same `_lib_card()` component as
-every other link box on the page. Placement is deliberate rather than obvious:
-feed management is arguably closer to "Archive additions" than to "saving
-articles from anywhere", but the capture section is where the question "where
-does content come from" actually gets asked, and the section had unused space
-below the accordions where the neighbouring cell ran longer.
+**"Feed management" section.** `/admin/library/feeds` is a `_LIBRARY_TOOLS`
+entry rendered through the same `_lib_section()`/`_lib_card()` components as
+every other tool on the page, as its own labeled section placed **first** among
+the labeled sections (ahead of Existing archive management, Archive additions &
+backup, and Tag management). An earlier round put it as a bare card below the
+capture-path accordions inside "Saving articles from anywhere"; it was promoted
+to a section of its own because feed management is where content originates,
+which reads ahead of what happens to content once it is in.
+
+Adding it to `_LIBRARY_TOOLS` also means the Admin hub's Library card now
+counts 9 tools rather than 8, and the entry picks up badge support for free.
+
+Side effect worth knowing: the `.lib-two-col` grid now holds five blocks rather
+than four, so the last row has one empty cell. Phase 6 had specifically
+reflowed this page to avoid an empty cell; with an odd number of sections that
+is no longer achievable without pairing two unrelated sections into one cell.
 
 **Reader rename: "Saved" → "Archive".** The Reader's own quick-view label,
 list-pane header, and every related admin-facing description previously

@@ -71,14 +71,26 @@ def test_manage_feeds_box_links_to_the_feed_admin_page(env):
     assert "Manage feeds" in html
 
 
-def test_manage_feeds_box_sits_in_the_saving_articles_section(env):
-    """Placement is deliberate (Brian's call), so pin it: the box belongs below
-    the two capture-path accordions, not in one of the three tool sections."""
+def test_feed_management_is_its_own_section_first_among_the_tool_sections(env):
+    """Placement is deliberate (Brian's call), so pin it: Feed management is a
+    labeled section of its own, ahead of the three that were here before, not a
+    box tucked under the capture-path accordions."""
+    html = _library_html(env)
+    assert "Feed management" in html
+    feed_mgmt = html.index("Feed management")
+    for later in ("Existing archive management", "Archive additions &",
+                  "Tag management"):
+        assert feed_mgmt < html.index(later), later
+
+
+def test_manage_feeds_card_is_no_longer_inside_saving_articles(env):
+    """It moved out of that section; the capture-path accordions should be the
+    last thing in it."""
     html = _library_html(env)
     share_sheet = html.index("Share-Sheet shortcut")
-    manage_feeds = html.index('href="/admin/library/feeds"')
-    existing_mgmt = html.index("Existing archive management")
-    assert share_sheet < manage_feeds < existing_mgmt
+    saving_end = html.index("Existing archive management")
+    between = html[share_sheet:saving_end]
+    assert 'href="/admin/library/feeds"' not in between
 
 
 def test_manage_feeds_box_reuses_the_page_link_card_style(env):
