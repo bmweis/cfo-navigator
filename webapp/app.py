@@ -16885,7 +16885,7 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 _LIBRARY_TOOLS = [
     ("/admin/library/backup",       "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run weekly on a schedule (a GitHub Action syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
     ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. Different from Archive Queue's Historical sweep panel: this re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
-    ("/admin/library/queue",        "Archive Queue",       "Review every proposed save—from an ongoing feed scan, or the page's own Historical sweep panel (a one-time catch-up on an older source's back catalog)—fix dates, edit tags, and approve into the archive or dismiss."),
+    ("/admin/library/queue",        "Archive queue",       "Review every proposed save—from an ongoing feed scan, or the page's own Historical sweep panel (a one-time catch-up on an older source's back catalog)—fix dates, edit tags, and approve into the archive or dismiss."),
     ("/admin/library/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
     ("/admin/library/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
     ("/admin/library/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
@@ -18584,24 +18584,27 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # full page width, as their own row above everything else — but not
     # simply stacked like before this whole redesign started: the diagram
     # takes the left 2/3 of that row and Open Reader's now-seafoam card
-    # takes the right 1/3, side by side (`.lib-top-row`). "Saving articles
-    # from anywhere" drops down to take the top-left slot of the two-column
-    # grid below (freed up now that Open Reader/flow moved out of it
-    # entirely), pairing with "Archive additions & backup" on its right;
-    # "Existing archive management" + "Tagging" fill the row under that.
-    # DOM order (saving-articles, archive-additions-and-backup,
-    # existing-mgmt-and-tagging) drives both the desktop auto-placement
-    # (3 items in a 2-column grid fill left-to-right, top-to-bottom, leaving
-    # the last cell empty) and the mobile single-column stack, so no
-    # separate mobile-order override is needed — same reasoning as the
-    # homepage's own `.home-grid` breakpoint.
+    # takes the right 1/3, side by side (`.lib-top-row`), both stretched to
+    # the same height by the grid's default `align-items:stretch`.
+    #
+    # Third live-preview round: the grid below is a genuine 2x2 now, not
+    # 3 blocks auto-placed into 4 cells (which left the last cell empty) —
+    # "Existing archive management" and "Tagging" (renamed "Tag management"
+    # to read as a matched pair with "Archive additions & backup") split
+    # into two independent cells instead of stacking together in one, so
+    # every cell is filled: top-left "Saving articles from anywhere",
+    # top-right "Existing archive management", bottom-left "Archive
+    # additions & backup", bottom-right "Tag management". DOM order
+    # (saving-articles, existing-mgmt, archive-additions-and-backup,
+    # tag-mgmt) drives both the desktop auto-placement and the mobile
+    # single-column stack, same reasoning as the homepage's `.home-grid`.
     top_row_html = f"""<div class="lib-top-row">
 <div>{_content_flow_diagram()}</div>
 <div>{open_reader_callout}</div>
 </div>"""
 
-    saving_articles_html = f"""<h2 style="margin:0 0 6px;">Saving articles from anywhere</h2>
-<p style="color:var(--muted);font-size:14px;margin:0 0 8px;line-height:1.6;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
+    saving_articles_html = f"""<h2 style="margin:0 0 4px;font-size:17px;">Saving articles from anywhere</h2>
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 <p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong>&mdash;the old copies embed the old values. Set them up again from this page's instructions.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
@@ -18639,24 +18642,25 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 </div>
 </details>"""
 
-    bottom_left_html = _lib_section(
+    existing_mgmt_html = _lib_section(
+        "Existing archive management",
+        ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals"],
+        "Working with what's already saved.")
+
+    archive_additions_html = _lib_section(
         "Archive additions & backup", ["/admin/library/backup", "/admin/library/queue"],
         "Bringing new content in&mdash;an ongoing feed scan plus an occasional historical sweep, both reviewed on one page before anything's saved&mdash;plus an on-demand snapshot for right before something risky.")
 
-    bottom_right_html = (
-        _lib_section("Existing archive management",
-                     ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals"],
-                     "Working with what's already saved.")
-        + _lib_section("Tagging",
-                       ["/admin/library/tags", "/admin/library/tag-style", "/admin/library/enrich"],
-                       "How tags get created, taught, and kept tidy&mdash;and the summaries that ride along with them.")
-    )
+    tag_mgmt_html = _lib_section(
+        "Tag management",
+        ["/admin/library/tags", "/admin/library/tag-style", "/admin/library/enrich"],
+        "How tags get created, taught, and kept tidy&mdash;and the summaries that ride along with them.")
 
     body = f"""<div class="page page-admin">
 <style>
 .lib-top-row{{display:grid;grid-template-columns:2fr 1fr;column-gap:28px;align-items:stretch;margin-bottom:24px;}}
 .lib-top-row>div{{min-width:0;}}
-.lib-two-col{{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;}}
+.lib-two-col{{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;row-gap:28px;}}
 .lib-two-col>div{{min-width:0;}}
 @media (max-width:900px){{
   .lib-top-row{{display:block;}}
@@ -18671,8 +18675,9 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 {top_row_html}
 <div class="lib-two-col">
 <div>{saving_articles_html}</div>
-<div>{bottom_left_html}</div>
-<div>{bottom_right_html}</div>
+<div>{existing_mgmt_html}</div>
+<div>{archive_additions_html}</div>
+<div>{tag_mgmt_html}</div>
 </div>
 </div>"""
     return HTMLResponse(_page("Library—Admin", "Admin", body, authed=True))
