@@ -2353,36 +2353,61 @@ order, so no separate mobile-order override was needed (unlike the
 homepage's `.home-grid`, which needed one because its desktop and mobile
 orders genuinely diverge).
 
-**Top-row height mismatch, fixed later.** In that same `.lib-top-row`, the
-seafoam Open Reader callout rendered visibly taller than the flow diagram
-beside it. The cause was not the callout: `_content_flow_diagram()`'s card
-carries `margin:0 0 22px` (correct on the Archive Queue page, where it sits
-above body copy), and inside a `align-items:stretch` grid that margin becomes
-phantom space — the row sized to 241px of card plus 22px of margin, and the
-callout's `height:100%` stretched to the full 263px. Measured live before and
-after rather than inferred. Fixed by giving the row's last cell the same 22px
-bottom margin, so the callout's box ends where the diagram's visible card ends;
-the shared diagram helper is untouched (the Archive Queue page depends on that
-margin), the diagram isn't grown, and nothing is clipped. The correction is
-dropped inside the existing `max-width:900px` block, where the stacked layout
-has no shared row height to match and it would only add a stray gap.
+**Superseded: the two-up top row is gone.** An intermediate round had the
+seafoam Open Reader callout sharing a `.lib-top-row` grid with the flow
+diagram, where it rendered 22px taller than the diagram beside it — the
+diagram card's own `margin:0 0 22px` (correct on the Archive Queue page, where
+it sits above body copy) becoming phantom space inside a stretch-aligned grid,
+so the row sized to card-height plus margin while the callout's `height:100%`
+filled all of it. That was fixed by matching the margin on the row's last cell,
+and then the row itself was removed in the restructure below, which retires the
+whole class of problem: nothing shares a row with the diagram any more.
 
-**"Feed management" section.** `/admin/library/feeds` is a `_LIBRARY_TOOLS`
-entry rendered through the same `_lib_section()`/`_lib_card()` components as
-every other tool on the page, as its own labeled section placed **first** among
-the labeled sections (ahead of Existing archive management, Archive additions &
-backup, and Tag management). An earlier round put it as a bare card below the
-capture-path accordions inside "Saving articles from anywhere"; it was promoted
-to a section of its own because feed management is where content originates,
-which reads ahead of what happens to content once it is in.
+### /admin/library page restructure: header action, full-width flow, four quadrants
 
-Adding it to `_LIBRARY_TOOLS` also means the Admin hub's Library card now
-counts 9 tools rather than 8, and the entry picks up badge support for free.
+This supersedes the layout described above rather than extending it.
 
-Side effect worth knowing: the `.lib-two-col` grid now holds five blocks rather
-than four, so the last row has one empty cell. Phase 6 had specifically
-reflowed this page to avoid an empty cell; with an odd number of sections that
-is no longer achievable without pairing two unrelated sections into one cell.
+**Open Reader is a header action, not a box.** The seafoam callout card is
+removed. In its place, a ghost button beside the `<h1>`, using the same
+flex + `.btn` header pattern `/admin/tools/software` and
+`/admin/tools/benchmarks` already use for their "+ Add" links.
+
+*Colour, deliberately:* the button is a **ghost outline** in
+`--seafoam-deep` (text and border), **not** a seafoam fill. BRAND.md's do/don't
+table reads "Buttons navy or ghost" / "Make a seafoam or coral button", and
+`_CSS`'s own comment says "Seafoam is NEVER a button". `--seafoam-deep`
+(`#1F7A66`) is the documented text-capable-on-light token, so the control reads
+as seafoam and stays a subtle outline action rather than a filled CTA. A filled
+seafoam button would violate both.
+
+**The flow diagram runs full width**, on its own, between the intro paragraph
+and the grid.
+
+**Four quadrants on named grid areas.** `.lib-quads` declares
+`grid-template-areas:"newcontent existing" "tags backup"` rather than relying on
+auto-placement. Auto-flow is what produced the earlier ragged layout: blocks
+landed wherever content length pushed them, and an odd block count left a hole.
+Named areas pin each quadrant regardless of content length, and the grid's
+default `align-items:stretch` keeps both cells in a row the same height
+(measured live: 560/560 in the top row, 483/483 in the bottom).
+
+- **Upper-left, "New content"** — merges the former Feed management section with
+  "Saving articles from anywhere". The Manage feeds `_lib_card` sits above the
+  two capture-path accordions under one quadrant heading, with an `<h3>`
+  separating them, so the two halves stay visually distinct rather than blending
+  into one block.
+- **Upper-right** — Existing archive management (unchanged content).
+- **Lower-left** — Tag management (unchanged content).
+- **Lower-right** — Archive additions & backup (unchanged content).
+
+`/admin/library/feeds` remains a `_LIBRARY_TOOLS` entry (so the Admin hub's
+Library card counts 9 tools and the link picks up badge support); only where its
+card renders changed.
+
+**Mobile** collapses to one column at the same 900px breakpoint by redeclaring
+`grid-template-areas` as a single column, so the stacking order — New content,
+Existing archive management, Tag management, Archive additions & backup — is
+declared in one place rather than depending on DOM order happening to match it.
 
 **Reader rename: "Saved" → "Archive".** The Reader's own quick-view label,
 list-pane header, and every related admin-facing description previously

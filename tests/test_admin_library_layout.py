@@ -50,47 +50,87 @@ def _library_html(appmod):
         return client.get("/admin/library").text
 
 
-def test_top_row_last_cell_offsets_the_diagrams_phantom_margin(env):
-    """Without this rule the seafoam callout (height:100%) stretches into the
-    22px margin the flow-diagram card carries, rendering taller than the
-    diagram beside it."""
+def test_open_reader_is_a_header_button_not_a_callout_box(env):
+    """The seafoam callout card is gone; Open Reader is a header-adjacent
+    action beside the H1."""
     html = _library_html(env)
-    assert ".lib-top-row>div:last-child{margin-bottom:22px;}" in html
+    assert "The day-to-day reading surface" not in html      # callout copy gone
+    assert 'href="/read" class="btn btn-ghost"' in html
+    assert "Open Reader" in html
+    # It sits in the H1's flex row, before the intro paragraph.
+    assert html.index("Open Reader") < html.index("The tools below cover")
 
 
-def test_the_margin_correction_is_dropped_on_the_stacked_mobile_layout(env):
-    """Stacked, there's no shared row height to match, so carrying the desktop
-    correction down would just add a stray gap."""
+def test_open_reader_is_a_ghost_outline_not_a_seafoam_fill(env):
+    """BRAND.md: "Buttons navy or ghost" / "Make a seafoam or coral button",
+    and _CSS says "Seafoam is NEVER a button". Seafoam-deep is used for the
+    text and border only; there must be no seafoam background."""
     html = _library_html(env)
-    assert ".lib-top-row>div:last-child{margin-top:22px;margin-bottom:0;}" in html
+    start = html.index('href="/read" class="btn btn-ghost"')
+    button = html[start:start + 320]
+    assert "color:var(--seafoam-deep)" in button
+    assert "border-color:var(--seafoam-deep)" in button
+    assert "background" not in button
+
+
+def test_flow_diagram_is_full_width_above_the_grid(env):
+    html = _library_html(env)
+    assert "lib-top-row" not in html                          # the two-up row is gone
+    flow = html.index("How new content reaches the archive")
+    grid = html.index('class="lib-quads"')
+    assert flow < grid
+
+
+def test_four_quadrants_use_named_grid_areas(env):
+    """Named areas rather than auto-placement — auto-flow is what let content
+    length push blocks around and leave a hole."""
+    html = _library_html(env)
+    assert 'grid-template-areas:"newcontent existing" "tags backup"' in html
+    for cls in ("lib-q-new", "lib-q-existing", "lib-q-tags", "lib-q-backup"):
+        assert f'class="{cls}"' in html
+
+
+def test_mobile_collapses_to_one_column_in_reading_order(env):
+    html = _library_html(env)
+    assert "@media (max-width:900px)" in html
+    assert 'grid-template-areas:"newcontent" "existing" "tags" "backup"' in html
+
+
+def test_new_content_quadrant_holds_feeds_card_and_both_accordions(env):
+    """Merged, but the two halves stay distinct: a _lib_card over the existing
+    accordion pattern, not one blended block."""
+    html = _library_html(env)
+    start = html.index('class="lib-q-new"')
+    end = html.index('class="lib-q-existing"')
+    quadrant = html[start:end]
+    assert "New content" in quadrant
+    assert 'href="/admin/library/feeds"' in quadrant
+    assert "Saving articles from anywhere" in quadrant
+    assert quadrant.count("<details") == 2                    # bookmarklet + Share Sheet
+    assert "border-radius:14px" in quadrant                   # the _lib_card box
+
+
+def test_each_quadrant_holds_its_specified_tools(env):
+    html = _library_html(env)
+    bounds = [("lib-q-existing", ["/admin/library/backfill-content", "/admin/library/dedupe",
+                                  "/admin/library/review-removals"]),
+              ("lib-q-tags", ["/admin/library/tags", "/admin/library/tag-style",
+                              "/admin/library/enrich"]),
+              ("lib-q-backup", ["/admin/library/backup", "/admin/library/queue"])]
+    for cls, hrefs in bounds:
+        start = html.index(f'class="{cls}"')
+        rest = html[start + 1:]
+        nxt = min((rest.index(f'class="{c}"') for c, _ in bounds if c != cls
+                   and f'class="{c}"' in rest), default=len(rest))
+        quadrant = rest[:nxt]
+        for href in hrefs:
+            assert f'href="{href}"' in quadrant, (cls, href)
 
 
 def test_manage_feeds_box_links_to_the_feed_admin_page(env):
     html = _library_html(env)
     assert 'href="/admin/library/feeds"' in html
     assert "Manage feeds" in html
-
-
-def test_feed_management_is_its_own_section_first_among_the_tool_sections(env):
-    """Placement is deliberate (Brian's call), so pin it: Feed management is a
-    labeled section of its own, ahead of the three that were here before, not a
-    box tucked under the capture-path accordions."""
-    html = _library_html(env)
-    assert "Feed management" in html
-    feed_mgmt = html.index("Feed management")
-    for later in ("Existing archive management", "Archive additions &",
-                  "Tag management"):
-        assert feed_mgmt < html.index(later), later
-
-
-def test_manage_feeds_card_is_no_longer_inside_saving_articles(env):
-    """It moved out of that section; the capture-path accordions should be the
-    last thing in it."""
-    html = _library_html(env)
-    share_sheet = html.index("Share-Sheet shortcut")
-    saving_end = html.index("Existing archive management")
-    between = html[share_sheet:saving_end]
-    assert 'href="/admin/library/feeds"' not in between
 
 
 def test_manage_feeds_box_reuses_the_page_link_card_style(env):

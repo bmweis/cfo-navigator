@@ -18555,27 +18555,21 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    # Open Reader — Phase 6 dropped it from the numbered tool list (it's not
-    # a management tool), but it needs to stay reachable and obvious from
-    # this page, not just from Admin's own CFO Toolbox -> Library entry
-    # point (which lands back HERE, not on /read) or the homepage's
-    # admin-only Reader-access box. A dedicated callout above everything
-    # else does that without pretending it's tool #1 of a workflow list.
-    # Live-preview follow-up: restyled to match the homepage's Reader-access
-    # box / /tools' Library tile — same _ADMIN_ONLY_BG/_ADMIN_ONLY_BORDER
-    # seafoam treatment and vertical icon-badge card shape, instead of this
-    # page's own one-off navy horizontal bar — since it now sits in a narrow
-    # column next to the flow diagram (see the top row below) rather than
-    # spanning the full page width.
-    open_reader_callout = (
-        f'<a href="/read" style="display:flex;flex-direction:column;gap:8px;height:100%;box-sizing:border-box;'
-        f'text-decoration:none;background:{_ADMIN_ONLY_BG};border:{_ADMIN_ONLY_BORDER};border-radius:16px;padding:26px;">'
-        f'<div style="display:flex;align-items:center;gap:12px;">'
-        f'{_card_icon(3, _ICON_NEWSPAPER)}'
-        f'<div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Open Reader</div>'
-        f'</div>'
-        f'<p style="font-size:13.5px;line-height:1.5;color:var(--navy);margin:0;">The day-to-day reading surface&mdash;Feed, Archive, and Read Later in one three-pane view. This is where you actually read; everything below is curation.</p>'
-        f'</a>'
+    # Open Reader — a header-adjacent page action beside the H1, reusing the
+    # flex + `.btn` pattern /admin/tools/software and /admin/tools/benchmarks
+    # already use for their "+ Add" links, rather than the seafoam callout box
+    # that used to sit beside the flow diagram.
+    #
+    # Ghost-button shape with seafoam-deep border and text, NOT a seafoam fill.
+    # BRAND.md's do/don't table ("Buttons navy or ghost" / "Make a seafoam or
+    # coral button") and _CSS's own "Seafoam is NEVER a button" comment both
+    # rule out a filled seafoam button. --seafoam-deep is the documented
+    # text-capable-on-light token (AA), so this reads as seafoam and stays a
+    # subtle outline action rather than a filled CTA.
+    open_reader_button = (
+        '<a href="/read" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;'
+        'color:var(--seafoam-deep);border-color:var(--seafoam-deep);white-space:nowrap;">'
+        'Open Reader</a>'
     )
 
     # Regrouped by function (Phase 6), not the old single top-to-bottom
@@ -18613,30 +18607,26 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # both are about keeping the archive intact and current, not a single
     # curation pass over content that's already there. Renamed the section to
     # "Archive additions & backup" so the heading still says what's inside it.
-    # Second live-preview round: Open Reader + the flow diagram go back to
-    # full page width, as their own row above everything else — but not
-    # simply stacked like before this whole redesign started: the diagram
-    # takes the left 2/3 of that row and Open Reader's now-seafoam card
-    # takes the right 1/3, side by side (`.lib-top-row`), both stretched to
-    # the same height by the grid's default `align-items:stretch`.
-    #
-    # Third live-preview round: the grid below is a genuine 2x2 now, not
-    # 3 blocks auto-placed into 4 cells (which left the last cell empty) —
-    # "Existing archive management" and "Tagging" (renamed "Tag management"
-    # to read as a matched pair with "Archive additions & backup") split
-    # into two independent cells instead of stacking together in one, so
-    # every cell is filled: top-left "Saving articles from anywhere",
-    # top-right "Existing archive management", bottom-left "Archive
-    # additions & backup", bottom-right "Tag management". DOM order
-    # (saving-articles, existing-mgmt, archive-additions-and-backup,
-    # tag-mgmt) drives both the desktop auto-placement and the mobile
-    # single-column stack, same reasoning as the homepage's `.home-grid`.
-    top_row_html = f"""<div class="lib-top-row">
-<div>{_content_flow_diagram()}</div>
-<div>{open_reader_callout}</div>
-</div>"""
+    # The flow diagram runs full width on its own now, between the intro and
+    # the quadrant grid. Nothing shares its row (Open Reader is a header action
+    # above), which also retires the phantom-margin height mismatch that row's
+    # `align-items:stretch` used to produce against the diagram card's own
+    # margin-bottom.
+    flow_html = _content_flow_diagram()
 
-    saving_articles_html = f"""<h2 style="margin:0 0 4px;font-size:17px;">Saving articles from anywhere</h2>
+    # Upper-left quadrant, "New content": the Manage feeds card over the two
+    # capture-path accordions. Both halves keep their own shape — a _lib_card
+    # and the existing accordion group — under one quadrant heading, rather
+    # than being blended into a single undifferentiated block.
+    saving_articles_html = f"""<h2 style="margin:0 0 4px;font-size:17px;">New content</h2>
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus the two ways to save a page by hand.</p>
+<div style="margin-bottom:22px;">{_lib_card(
+    "/admin/library/feeds", "Manage feeds",
+    "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into "
+    "sections, and set which ones are read-only. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
+    "web search is restricted to.",
+    _badge_for_href("/admin/library/feeds", task_counts.get("/admin/library/feeds", 0)))}</div>
+<h3 style="margin:0 0 4px;font-size:15.5px;font-family:var(--font-head);font-weight:600;color:var(--navy);">Saving articles from anywhere</h3>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 <p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong>&mdash;the old copies embed the old values. Set them up again from this page's instructions.</p>
 
@@ -18675,13 +18665,6 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 </div>
 </details>"""
 
-    # First of the labeled tool sections (Brian's call), ahead of the three
-    # that were here before. Feed management is where content starts, so it
-    # reads ahead of what happens to content once it's in.
-    feed_mgmt_html = _lib_section(
-        "Feed management", ["/admin/library/feeds"],
-        "The RSS sources behind the Reader&mdash;and the same list FP&amp;A Buddy&rsquo;s web search is restricted to.")
-
     existing_mgmt_html = _lib_section(
         "Existing archive management",
         ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals"],
@@ -18698,38 +18681,38 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 
     body = f"""<div class="page page-admin">
 <style>
-.lib-top-row{{display:grid;grid-template-columns:2fr 1fr;column-gap:28px;align-items:stretch;margin-bottom:24px;}}
-.lib-top-row>div{{min-width:0;}}
-/* The flow diagram's own card carries margin-bottom:22px (it's shared with
-   the Archive Queue page, where it sits above body copy and needs that gap).
-   Inside this stretch-aligned grid that margin becomes phantom space: the row
-   sizes to 241px of card + 22px of margin, and the seafoam callout's
-   height:100% stretches to the full 263px, so it rendered 22px taller than
-   the diagram beside it. Measured live before and after. Matching the margin
-   on this cell shortens the callout's box to the diagram's visible height
-   instead of growing the diagram or clipping the callout. */
-.lib-top-row>div:last-child{{margin-bottom:22px;}}
-.lib-two-col{{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;row-gap:28px;}}
-.lib-two-col>div{{min-width:0;}}
+/* Four quadrants on explicitly named grid areas, not auto-placement. Auto-flow
+   is what produced the earlier ragged layout — blocks landed wherever content
+   length pushed them, and an odd count left a hole. Named areas pin each
+   quadrant regardless of how much content it holds. */
+.lib-quads{{display:grid;grid-template-columns:1fr 1fr;
+  grid-template-areas:"newcontent existing" "tags backup";
+  column-gap:28px;row-gap:34px;}}
+.lib-quads>div{{min-width:0;}}
+.lib-q-new{{grid-area:newcontent;}}
+.lib-q-existing{{grid-area:existing;}}
+.lib-q-tags{{grid-area:tags;}}
+.lib-q-backup{{grid-area:backup;}}
 @media (max-width:900px){{
-  .lib-top-row{{display:block;}}
-  /* Stacked, there's no shared row height to match, so the desktop margin
-     correction above would just add a stray 22px gap. */
-  .lib-top-row>div:last-child{{margin-top:22px;margin-bottom:0;}}
-  .lib-two-col{{display:block;}}
+  /* One column. The area list IS the stacking order, so reading order lives in
+     one place rather than depending on DOM order matching it. */
+  .lib-quads{{grid-template-columns:1fr;
+    grid-template-areas:"newcontent" "existing" "tags" "backup";row-gap:30px;}}
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Library</h1>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;flex-wrap:wrap;">
+  <h1 style="margin:0;">Library</h1>
+  {open_reader_button}
+</div>
 {auth_banner}
 <p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
-{top_row_html}
-<div class="lib-two-col">
-<div>{feed_mgmt_html}</div>
-<div>{saving_articles_html}</div>
-<div>{existing_mgmt_html}</div>
-<div>{archive_additions_html}</div>
-<div>{tag_mgmt_html}</div>
+{flow_html}
+<div class="lib-quads">
+<div class="lib-q-new">{saving_articles_html}</div>
+<div class="lib-q-existing">{existing_mgmt_html}</div>
+<div class="lib-q-tags">{tag_mgmt_html}</div>
+<div class="lib-q-backup">{archive_additions_html}</div>
 </div>
 </div>"""
     return HTMLResponse(_page("Library—Admin", "Admin", body, authed=True))
