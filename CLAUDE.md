@@ -1782,6 +1782,28 @@ phone-landscape one at a similar or even narrower width.
 This applies to every UI-facing feature going forward, not just the Reader
 batch that prompted it.
 
+**Known limitation: `capture_homepage()` screenshot testing inside a sandboxed
+Code session may fail with a Chromium-not-found error, even though production
+is unaffected.** Cause: `requirements.txt` doesn't pin an exact Playwright
+version. A sandbox's pre-baked Chromium browser cache (built once, when that
+sandbox image was created) can drift out of sync with whatever Playwright
+version pip resolves at session start — Playwright's own `.executable_path`
+property is computed purely from the installed package's internal revision
+registry, not from what's actually on disk, so it can report a path that
+doesn't exist in a given sandbox. **Do not "fix" this by adding an explicit
+`executable_path=` argument to the Chromium launch call in
+`capture_homepage()`.** This was investigated during the 2026-08 QA
+regression pass and deliberately not shipped — it doesn't reliably fix
+sandbox testability (the mismatch can recur any time pip resolves a newer
+Playwright version than a given sandbox's pre-baked cache), and it's a no-op
+in production, where Railway's Dockerfile always installs the browser and
+the package together at build time, so they can never drift apart there. If
+this needs to actually be fixed for testability, the correct angle is
+environment-level, not a code change to `capture_homepage()`: pin an exact
+Playwright version in `requirements.txt` matching a known-good sandbox
+browser cache, or have the session re-run `playwright install chromium`
+fresh before testing.
+
 ## Contributing — pull requests
 
 **All changes ship via pull request. Never push or merge directly to `main`.**
