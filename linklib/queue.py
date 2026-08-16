@@ -34,14 +34,16 @@ from .db import Library, normalize_url
 # https://docs.claude.com/en/docs/about-claude/models
 QUEUE_ENRICH_MODEL = os.environ.get("LINKLIB_QUEUE_ENRICH_MODEL", "claude-opus-4-8")
 
-# OPML categories that belong in the /feed reader but NOT the curated library.
-# News is timely and high-volume — good to read, not something Brian saves. These
-# sources stay live in the feed; they're just never proposed into the queue.
-# Comma-separated env override, e.g. LINKLIB_QUEUE_EXCLUDE_CATEGORIES="News,Market Insights".
-QUEUE_EXCLUDE_CATEGORIES = {
-    c.strip() for c in os.environ.get("LINKLIB_QUEUE_EXCLUDE_CATEGORIES", "News").split(",")
-    if c.strip()
-}
+# Feed sections that belong in the Reader but NOT the curated library. News is
+# timely and high-volume — good to read, not something Brian saves. Those
+# sources stay live in the Reader; they're just never proposed into the queue.
+#
+# This used to be a module-level set built from LINKLIB_QUEUE_EXCLUDE_CATEGORIES,
+# matched against a section's NAME. It's now a stored per-section boolean
+# (feed_sections.exclude_from_queue), read via Library.excluded_feed_section_names().
+# The old shape meant renaming a section in the admin UI would silently change
+# which sources reached the archive queue; exclusion is a property of the
+# section itself, not of what it happens to be called. The env var is retired.
 
 
 def suggest_tags_heuristic(title: str, summary: str, source: str,
@@ -179,7 +181,7 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
     /feed but never proposed to the library, so the queue stays curation-grade.
     """
     if exclude_categories is None:
-        exclude_categories = QUEUE_EXCLUDE_CATEGORIES
+        exclude_categories = lib.excluded_feed_section_names()
     try:
         from .feed import get_feed_items
         items, _ = get_feed_items(opml_path, max_total=max_total)
@@ -369,7 +371,7 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
     friends) are skipped — they belong in /feed, not the curated library.
     """
     if exclude_categories is None:
-        exclude_categories = QUEUE_EXCLUDE_CATEGORIES
+        exclude_categories = lib.excluded_feed_section_names()
     since = _ensure_aware(since)
     seen = {normalize_url(u) for u in (lib.article_urls() | lib.queue_urls())}
     from . import tagstyle

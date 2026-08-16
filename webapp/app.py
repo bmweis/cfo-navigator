@@ -411,6 +411,37 @@ def _seed_toolbox():
         lib.close()
 
 
+@app.on_event("startup")
+def _seed_and_publish_feeds():
+    """Import preferred_sites.opml into the feeds tables once, then regenerate
+    the file from the DB on every boot.
+
+    The regeneration is the load-bearing half. preferred_sites.opml lives
+    inside the Docker image, which Railway rebuilds on every deploy, so an
+    edit made through the admin UI would otherwise survive only until the next
+    deploy and then silently revert to whatever's in git. Rewriting it from
+    the DB at startup makes the file a pure cache of the database, so its
+    ephemerality stops mattering and the four consumers that read it
+    (parse_opml, preferred_domains, scan_feed_into_queue, authcheck) need no
+    changes at all.
+
+    Both halves are individually guarded: seeding is settings-flagged so it
+    happens exactly once per database (never resurrecting a deleted feed on a
+    restart), and write_opml no-ops on an empty feeds table so a fresh deploy
+    can't overwrite the curated repo copy before seeding has run.
+    """
+    lib = _lib()
+    try:
+        lib.seed_feeds_from_opml(OPML_PATH)
+        lib.write_opml(OPML_PATH)
+    except Exception:
+        # Never block boot on this. A failure here leaves the existing OPML
+        # in place, which is exactly the pre-feature behavior.
+        pass
+    finally:
+        lib.close()
+
+
 def _lib() -> Library:
     return Library(DB_PATH)
 
@@ -18681,6 +18712,456 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 </div>
 </div>"""
     return HTMLResponse(_page("Library—Admin", "Admin", body, authed=True))
+
+
+# ---------------------------------------------------------------------------
+# Feed management — the RSS subscription list behind the Reader and FP&A Buddy
+# ---------------------------------------------------------------------------
+
+def _publish_feeds(lib) -> None:
+    """Regenerate preferred_sites.opml from the feeds tables.
+
+    Call after every mutation of feed_sections/feeds. Library.write_opml also
+    clears sources.preferred_domains' lru_cache, so this single call covers
+    both halves of "make the change visible downstream" — see that method's
+    docstring for why those two are deliberately inseparable rather than two
+    things each route has to remember.
+    """
+    lib.write_opml(OPML_PATH)
+
+
+def _feed_form_fields(sections: list, values: dict) -> str:
+    """Shared field markup for the add-feed and edit-feed forms."""
+    opts = "".join(
+        f'<option value="{s["id"]}"{" selected" if str(values.get("section_id", "")) == str(s["id"]) else ""}>'
+        f'{_esc(s["name"])}</option>'
+        for s in sections
+    )
+    inp = ("width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;"
+           "font:inherit;font-size:15px;background:#fff;box-sizing:border-box;")
+    lab = "display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;"
+    hint = "font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;"
+    return f"""  <div>
+    <label style="{lab}">Feed URL *</label>
+    <input type="url" name="xml_url" required value="{_esc(values.get('xml_url', ''))}"
+      placeholder="https://example.com/feed/" style="{inp}">
+    <p style="{hint}">The RSS or Atom address, not the site's homepage. It's checked before saving, so a wrong address is rejected here rather than sitting in the list producing nothing.</p>
+  </div>
+  <div>
+    <label style="{lab}">Name *</label>
+    <input type="text" name="name" required maxlength="120" value="{_esc(values.get('name', ''))}"
+      placeholder="e.g. Mostly Metrics (CJ Gustafson)" style="{inp}">
+    <p style="{hint}">How the source is labelled in the Reader. Leave blank to use the feed's own title.</p>
+  </div>
+  <div>
+    <label style="{lab}">Section *</label>
+    <select name="section_id" required style="{inp}">{opts}</select>
+  </div>
+  <div>
+    <label style="{lab}">Site URL <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+    <input type="url" name="html_url" value="{_esc(values.get('html_url', ''))}"
+      placeholder="https://example.com/" style="{inp}">
+    <p style="{hint}">The publication's own address. This is the one FP&amp;A Buddy's web search is restricted to, and the one the historical sweep crawls for back catalog. Left blank, it's taken from the feed itself.</p>
+  </div>"""
+
+
+@app.get("/admin/library/feeds", response_class=HTMLResponse)
+def admin_feeds(request: Request, msg: str = "", error: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        sections = lib.list_feed_sections()
+        feeds = lib.list_feeds()
+    finally:
+        lib.close()
+
+    banner = (f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
+              f'font-size:14px;margin:-6px 0 16px;">{_esc(msg)}</p>' if msg else '')
+    error_banner = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                    f'padding:10px 16px;font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>'
+                    if error else '')
+
+    by_section: dict[int, list] = {}
+    for f in feeds:
+        by_section.setdefault(f["section_id"], []).append(f)
+
+    inp_sm = ("padding:8px 12px;border:1px solid var(--line);border-radius:7px;"
+              "font:inherit;font-size:14px;background:var(--bg);")
+    section_blocks = ""
+    for s in sections:
+        sid = s["id"]
+        s_feeds = by_section.get(sid, [])
+        n = len(s_feeds)
+        form_id = f"sec-edit-{sid}"
+
+        excluded_badge = (
+            '<span style="background:var(--navy-wash);color:var(--navy);border-radius:999px;'
+            'padding:2px 10px;font-size:11.5px;font-weight:600;white-space:nowrap;">Not queued</span>'
+            if s["exclude_from_queue"] else '')
+
+        # Delete is offered only for an empty section. A section holding feeds
+        # shows what has to move first instead of a button that would fail.
+        if n:
+            delete_control = (
+                f'<span style="font-size:12.5px;color:var(--muted);">Move its {n} '
+                f'feed{"s" if n != 1 else ""} elsewhere to delete this section.</span>')
+        else:
+            delete_control = (
+                f'<form method="post" action="/admin/library/feeds/sections/{sid}/delete" style="margin:0;" '
+                f'onsubmit="return confirm(\'Delete the empty section &quot;{_esc(s["name"])}&quot;?\');">'
+                f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;'
+                f'color:#b91c1c;border-color:#fca5a5;">Delete section</button></form>')
+
+        feed_rows = "".join(f"""<tr class="ff-row">
+  <td class="ff-name">{_esc(f['name'])}</td>
+  <td class="ff-url"><a href="{_esc(f['xml_url'])}" target="_blank" rel="noopener">{_esc(f['xml_url'])}</a></td>
+  <td class="ff-actions">
+    <a href="/admin/library/feeds/{f['id']}/edit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Edit</a>
+    <form method="post" action="/admin/library/feeds/{f['id']}/delete" style="display:inline;margin:0 0 0 4px;"
+          onsubmit="return confirm('Remove &quot;{_esc(f['name'])}&quot; from your feeds? Articles already saved from it stay in the archive.');">
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button>
+    </form>
+  </td>
+</tr>""" for f in s_feeds) or ('<tr class="ff-row"><td colspan="3" class="ff-empty">'
+                              'No feeds in this section yet.</td></tr>')
+
+        section_blocks += f"""<details open style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:14px;">
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:center;gap:10px;">
+  <span class="disclosure-caret">&#9654;</span><span>{_esc(s['name'])}</span>
+  <span style="font-size:13px;font-weight:400;color:var(--muted);">{n} feed{'s' if n != 1 else ''}</span>
+  {excluded_badge}
+</summary>
+<div style="margin-top:14px;">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+    <form id="{form_id}" method="post" action="/admin/library/feeds/sections/{sid}/edit"
+          style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0;">
+      <input type="text" name="name" value="{_esc(s['name'])}" required maxlength="80" style="{inp_sm}">
+      <label style="display:flex;align-items:center;gap:7px;font-size:13.5px;color:var(--ink-soft);">
+        <input type="checkbox" name="exclude_from_queue" value="1"{' checked' if s['exclude_from_queue'] else ''}>
+        Read only, never propose to the archive queue
+      </label>
+      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save section</button>
+    </form>
+    {delete_control}
+  </div>
+  <div style="background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;">
+    <table class="ff-table"><tbody>{feed_rows}</tbody></table>
+  </div>
+</div>
+</details>"""
+
+    if not sections:
+        section_blocks = ('<p style="color:var(--muted);background:var(--surface);border:1px solid var(--line);'
+                          'border-radius:14px;padding:18px 20px;">No sections yet. Add one below, then add feeds to it.</p>')
+
+    body = f"""<div class="page page-admin">
+<style>
+/* table-layout:fixed gives the five per-section tables the same column widths,
+   so the Edit/Remove buttons line up down the page instead of landing wherever
+   each section's longest URL happens to push them. */
+.ff-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
+.ff-row>td{{padding:9px 12px;vertical-align:middle;border-top:1px solid var(--line);}}
+.ff-table tr:first-child>td{{border-top:0;}}
+.ff-name{{font-weight:600;font-size:14px;width:30%;}}
+.ff-url{{font-size:13px;color:var(--muted);width:46%;}}
+.ff-url a{{word-break:break-all;}}
+.ff-actions{{width:24%;text-align:right;white-space:nowrap;}}
+.ff-empty{{padding:16px 12px;color:var(--muted);font-size:13.5px;}}
+/* Below this width the three columns can't coexist: the URL column gets narrow
+   enough that word-break:break-all wraps a feed address one character per line,
+   which turned a single row several hundred pixels tall on a phone. Stacking
+   the cells gives each one the full width instead. */
+@media (max-width:720px){{
+  .ff-table,.ff-table tbody,.ff-row,.ff-row>td{{display:block;width:auto;}}
+  .ff-row{{border-top:1px solid var(--line);padding:8px 0;}}
+  .ff-table tr:first-child{{border-top:0;}}
+  .ff-row>td{{border-top:0;padding:2px 12px;}}
+  .ff-actions{{text-align:left;padding-top:8px;}}
+}}
+</style>
+<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;flex-wrap:wrap;">
+  <h1 style="margin:0;">Feeds</h1>
+  <a href="/admin/library/feeds/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add feed</a>
+</div>
+<p style="color:var(--muted);margin:8px 0 6px;">The RSS subscriptions behind the Reader's Feed view. This same list is the domain allowlist FP&amp;A Buddy's web search is restricted to, so a source added here becomes citable there too. Changes take effect on the next page load, with no restart or deploy needed.</p>
+<ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
+<li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
+<li><strong>Read only</strong> sections stay live in the Reader but are never proposed into the <a href="/admin/library/queue">archive queue</a>. Renaming a section has no effect on that either way.</li>
+</ul>
+{banner}{error_banner}
+{section_blocks}
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:520px;margin-top:24px;">
+  <h2 style="font-size:16px;font-weight:600;margin:0 0 14px;">Add a section</h2>
+  <form method="post" action="/admin/library/feeds/sections/new" style="display:grid;gap:12px;">
+    <div>
+      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
+      <input type="text" name="name" required maxlength="80" placeholder="e.g. Operators"
+        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
+    </div>
+    <label style="display:flex;align-items:center;gap:7px;font-size:13.5px;color:var(--ink-soft);">
+      <input type="checkbox" name="exclude_from_queue" value="1">
+      Read only, never propose to the archive queue
+    </label>
+    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add section</button></div>
+  </form>
+</div>
+</div>"""
+    return HTMLResponse(_page("Feeds—Library Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/library/feeds/sections/new")
+async def admin_feeds_section_new(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    exclude = bool(form.get("exclude_from_queue"))
+    if not name:
+        return RedirectResponse(
+            f"/admin/library/feeds?error={quote('Give the section a name.')}", status_code=303)
+    lib = _lib()
+    try:
+        if any(s["name"].lower() == name.lower() for s in lib.list_feed_sections()):
+            return RedirectResponse(
+                f"/admin/library/feeds?error={quote(f'A section called {name} already exists.')}",
+                status_code=303)
+        lib.add_feed_section(name, exclude)
+        _publish_feeds(lib)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Added the {name} section.')}",
+                            status_code=303)
+
+
+@app.post("/admin/library/feeds/sections/{section_id}/edit")
+async def admin_feeds_section_edit(request: Request, section_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    exclude = bool(form.get("exclude_from_queue"))
+    if not name:
+        return RedirectResponse(
+            f"/admin/library/feeds?error={quote('A section needs a name.')}", status_code=303)
+    lib = _lib()
+    try:
+        if not lib.get_feed_section(section_id):
+            raise HTTPException(status_code=404, detail="section not found")
+        clash = [s for s in lib.list_feed_sections()
+                 if s["name"].lower() == name.lower() and s["id"] != section_id]
+        if clash:
+            return RedirectResponse(
+                f"/admin/library/feeds?error={quote(f'A section called {name} already exists.')}",
+                status_code=303)
+        lib.update_feed_section(section_id, name, exclude)
+        _publish_feeds(lib)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Saved the {name} section.')}",
+                            status_code=303)
+
+
+@app.post("/admin/library/feeds/sections/{section_id}/delete")
+def admin_feeds_section_delete(request: Request, section_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        section = lib.get_feed_section(section_id)
+        if not section:
+            raise HTTPException(status_code=404, detail="section not found")
+        name = section["name"]
+        remaining = lib.count_feeds_in_section(section_id)
+        if remaining:
+            # Also enforced in delete_feed_section; checked here so the admin
+            # gets the count rather than a 500.
+            plural = "s" if remaining != 1 else ""
+            detail = (f"{name} still has {remaining} feed{plural}. "
+                      f"Move them to another section first.")
+            return RedirectResponse(f"/admin/library/feeds?error={quote(detail)}",
+                                    status_code=303)
+        lib.delete_feed_section(section_id)
+        _publish_feeds(lib)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Deleted the {name} section.')}",
+                            status_code=303)
+
+
+@app.get("/admin/library/feeds/new", response_class=HTMLResponse)
+def admin_feeds_new(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        sections = lib.list_feed_sections()
+    finally:
+        lib.close()
+    if not sections:
+        return RedirectResponse(
+            f"/admin/library/feeds?error={quote('Add a section first, then add feeds to it.')}",
+            status_code=303)
+    return HTMLResponse(_page("Add a feed—Library Admin", "Admin",
+                              _feed_form_page("Add a feed", "/admin/library/feeds/new",
+                                              sections, {}, "", "Add feed"),
+                              authed=True))
+
+
+def _feed_form_page(heading: str, action: str, sections: list, values: dict,
+                    error: str, submit_label: str) -> str:
+    error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                  f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
+                  if error else '')
+    return f"""<div class="page page-form">
+<p style="margin:0 0 4px;"><a href="/admin/library/feeds" style="font-size:13px;color:var(--muted);">&larr; Feeds</a></p>
+<h1>{_esc(heading)}</h1>
+{error_html}
+<form method="post" action="{action}" style="display:grid;gap:20px;">
+{_feed_form_fields(sections, values)}
+  <div>
+    <button type="submit" class="btn">{_esc(submit_label)}</button>
+    <a href="/admin/library/feeds" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+
+
+@app.post("/admin/library/feeds/new")
+async def admin_feeds_new_submit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    values = {
+        "name": (form.get("name") or "").strip(),
+        "xml_url": (form.get("xml_url") or "").strip(),
+        "html_url": (form.get("html_url") or "").strip(),
+        "section_id": (form.get("section_id") or "").strip(),
+    }
+    lib = _lib()
+    try:
+        sections = lib.list_feed_sections()
+
+        def _reject(message: str):
+            return HTMLResponse(_page(
+                "Add a feed—Library Admin", "Admin",
+                _feed_form_page("Add a feed", "/admin/library/feeds/new",
+                                sections, values, message, "Add feed"),
+                authed=True), status_code=400)
+
+        if not values["section_id"].isdigit() or not lib.get_feed_section(int(values["section_id"])):
+            return _reject("Pick a section for this feed.")
+        if lib.find_feed_by_url(values["xml_url"]):
+            return _reject("That feed URL is already in your list.")
+
+        from linklib.feed import probe_feed
+        probe = probe_feed(values["xml_url"])
+        if not probe.ok:
+            return _reject(probe.error)
+
+        name = values["name"] or probe.title or values["xml_url"]
+        html_url = values["html_url"] or probe.html_url
+        lib.add_feed(int(values["section_id"]), name, values["xml_url"], html_url)
+        _publish_feeds(lib)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Added {name}.')}", status_code=303)
+
+
+@app.get("/admin/library/feeds/{feed_id}/edit", response_class=HTMLResponse)
+def admin_feeds_edit(request: Request, feed_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        feed = lib.get_feed(feed_id)
+        sections = lib.list_feed_sections()
+    finally:
+        lib.close()
+    if not feed:
+        raise HTTPException(status_code=404, detail="feed not found")
+    values = {"name": feed["name"], "xml_url": feed["xml_url"],
+              "html_url": feed["html_url"], "section_id": feed["section_id"]}
+    return HTMLResponse(_page("Edit feed—Library Admin", "Admin",
+                              _feed_form_page(f'Edit {feed["name"]}',
+                                              f"/admin/library/feeds/{feed_id}/edit",
+                                              sections, values, "", "Save feed"),
+                              authed=True))
+
+
+@app.post("/admin/library/feeds/{feed_id}/edit")
+async def admin_feeds_edit_submit(request: Request, feed_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    values = {
+        "name": (form.get("name") or "").strip(),
+        "xml_url": (form.get("xml_url") or "").strip(),
+        "html_url": (form.get("html_url") or "").strip(),
+        "section_id": (form.get("section_id") or "").strip(),
+    }
+    lib = _lib()
+    try:
+        feed = lib.get_feed(feed_id)
+        if not feed:
+            raise HTTPException(status_code=404, detail="feed not found")
+        sections = lib.list_feed_sections()
+
+        def _reject(message: str):
+            return HTMLResponse(_page(
+                "Edit feed—Library Admin", "Admin",
+                _feed_form_page(f'Edit {feed["name"]}',
+                                f"/admin/library/feeds/{feed_id}/edit",
+                                sections, values, message, "Save feed"),
+                authed=True), status_code=400)
+
+        if not values["section_id"].isdigit() or not lib.get_feed_section(int(values["section_id"])):
+            return _reject("Pick a section for this feed.")
+        if not values["name"]:
+            return _reject("Give this feed a name.")
+
+        url_changed = values["xml_url"] != feed["xml_url"]
+        html_url = values["html_url"]
+        if url_changed:
+            existing = lib.find_feed_by_url(values["xml_url"])
+            if existing and existing["id"] != feed_id:
+                return _reject("Another feed in your list already uses that URL.")
+            # Only re-probe when the URL actually changed: a rename or a section
+            # move shouldn't fail because the source happens to be down today.
+            from linklib.feed import probe_feed
+            probe = probe_feed(values["xml_url"])
+            if not probe.ok:
+                return _reject(probe.error)
+            html_url = values["html_url"] or probe.html_url
+
+        lib.update_feed(feed_id, int(values["section_id"]), values["name"],
+                        values["xml_url"], html_url)
+        _publish_feeds(lib)
+        saved_name = values["name"]
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Saved {saved_name}.')}",
+                            status_code=303)
+
+
+@app.post("/admin/library/feeds/{feed_id}/delete")
+def admin_feeds_delete(request: Request, feed_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        feed = lib.get_feed(feed_id)
+        if not feed:
+            raise HTTPException(status_code=404, detail="feed not found")
+        name = feed["name"]
+        lib.delete_feed(feed_id)
+        _publish_feeds(lib)
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Removed {name}.')}",
+                            status_code=303)
 
 
 def _auth_recheck_background() -> None:

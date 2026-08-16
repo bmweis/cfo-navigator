@@ -1051,6 +1051,48 @@ CREATE TABLE IF NOT EXISTS tool_name_dedupe_decisions (
     verdict    TEXT NOT NULL DEFAULT 'dismissed',  -- 'duplicate' | 'dismissed'
     created_at TEXT NOT NULL
 );
+
+-- RSS subscription list — the source of truth behind preferred_sites.opml.
+--
+-- The OPML file is NOT the source of truth anymore; it's a derived cache,
+-- regenerated from these two tables by Library.write_opml() on every mutation
+-- and again on every app boot. That inversion exists because the file lives
+-- inside the Docker image (/app/preferred_sites.opml), which Railway rebuilds
+-- on every deploy — anything written there by the running app is destroyed on
+-- the next deploy. Regenerating at boot makes that ephemerality irrelevant.
+--
+-- All four downstream consumers still read the FILE, unmodified:
+--   feed.parse_opml        -> the Reader's Feed view + its Sources tree
+--   sources.preferred_domains -> FP&A Buddy's web-search domain allowlist
+--   queue.scan_feed_into_queue -> the ongoing feed scan into the archive queue
+--   authcheck              -> picks a probe URL per paywalled domain
+--
+-- exclude_from_queue replaces the old QUEUE_EXCLUDE_CATEGORIES string-match
+-- set (a name-matched env var). Exclusion is now a stored property of the
+-- section, so renaming a section no longer silently changes which sources
+-- reach the archive queue. Seeded 1 for "News" only, preserving the exact
+-- pre-migration behavior.
+CREATE TABLE IF NOT EXISTS feed_sections (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    name               TEXT NOT NULL UNIQUE,
+    exclude_from_queue INTEGER NOT NULL DEFAULT 0,  -- 1 = read in the Reader, never proposed to the queue
+    display_order      INTEGER NOT NULL DEFAULT 0,
+    created_at         TEXT NOT NULL DEFAULT ''
+);
+
+-- One row per RSS/Atom subscription. xml_url is the natural key (the same
+-- feed can't be subscribed twice); html_url is the publication's own site,
+-- used by the historical sitemap sweep and by preferred_domains, which
+-- prefers it over xml_url when building the allowlist.
+CREATE TABLE IF NOT EXISTS feeds (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    section_id    INTEGER NOT NULL REFERENCES feed_sections(id),
+    name          TEXT NOT NULL,
+    xml_url       TEXT NOT NULL UNIQUE,
+    html_url      TEXT NOT NULL DEFAULT '',
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT ''
+);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -5551,6 +5593,264 @@ class Library:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- RSS subscription list (feed_sections / feeds) -----------------------
+    #
+    # These two tables are the source of truth; preferred_sites.opml is a
+    # derived cache. See the feed_sections table comment in _SCHEMA for why
+    # the file can't be authoritative on Railway, and which four consumers
+    # still read it unmodified.
+
+    # Legacy default, preserved for the one case where the tables can't answer:
+    # a DB that has never been seeded (a fresh test fixture, or the window
+    # before the boot-time seed runs). Without this, an unseeded DB would report
+    # "nothing is excluded" and start funnelling News into the archive queue —
+    # a silent behavior change in the wrong direction. Matches the value the
+    # retired QUEUE_EXCLUDE_CATEGORIES set defaulted to.
+    _LEGACY_QUEUE_EXCLUDED_SECTIONS = frozenset({"News"})
+
+    def list_feed_sections(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM feed_sections ORDER BY display_order ASC, name ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_feed_section(self, section_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM feed_sections WHERE id = ?", (section_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_feeds(self, section_id: Optional[int] = None) -> list[dict]:
+        """Every feed, newest sections first, with its section name attached.
+
+        Ordered to match the OPML's own document order so write_opml() and the
+        admin list render the same sequence.
+        """
+        sql = ("SELECT f.*, s.name AS section_name, s.exclude_from_queue, "
+               "       s.display_order AS section_display_order "
+               "FROM feeds f JOIN feed_sections s ON s.id = f.section_id ")
+        params: list = []
+        if section_id is not None:
+            sql += "WHERE f.section_id = ? "
+            params.append(section_id)
+        sql += ("ORDER BY s.display_order ASC, s.name ASC, "
+                "f.display_order ASC, f.name ASC")
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def get_feed(self, feed_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT f.*, s.name AS section_name FROM feeds f "
+            "JOIN feed_sections s ON s.id = f.section_id WHERE f.id = ?",
+            (feed_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def find_feed_by_url(self, xml_url: str) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM feeds WHERE xml_url = ?", (xml_url.strip(),)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def count_feeds_in_section(self, section_id: int) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM feeds WHERE section_id = ?", (section_id,)
+        ).fetchone()[0]
+
+    def excluded_feed_section_names(self) -> set[str]:
+        """Section names whose feeds are read in the Reader but never proposed
+        into the archive queue. Replaces QUEUE_EXCLUDE_CATEGORIES."""
+        rows = self.conn.execute(
+            "SELECT name FROM feed_sections WHERE exclude_from_queue = 1"
+        ).fetchall()
+        if not self.conn.execute("SELECT 1 FROM feed_sections LIMIT 1").fetchone():
+            return set(self._LEGACY_QUEUE_EXCLUDED_SECTIONS)
+        return {r[0] for r in rows}
+
+    def add_feed_section(self, name: str, exclude_from_queue: bool = False) -> int:
+        next_order = self.conn.execute(
+            "SELECT COALESCE(MAX(display_order), -1) + 1 FROM feed_sections"
+        ).fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO feed_sections (name, exclude_from_queue, display_order, created_at) "
+            "VALUES (?,?,?,?)",
+            (name.strip(), int(bool(exclude_from_queue)), next_order, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_feed_section(self, section_id: int, name: str,
+                            exclude_from_queue: bool) -> None:
+        self.conn.execute(
+            "UPDATE feed_sections SET name=?, exclude_from_queue=? WHERE id=?",
+            (name.strip(), int(bool(exclude_from_queue)), section_id),
+        )
+        self.conn.commit()
+
+    def delete_feed_section(self, section_id: int) -> None:
+        """Delete an EMPTY section. Callers must check count_feeds_in_section
+        first and surface the count; this raises rather than cascading, so a
+        section's feeds can never be silently destroyed along with it."""
+        remaining = self.count_feeds_in_section(section_id)
+        if remaining:
+            raise ValueError(f"section still has {remaining} feed(s)")
+        self.conn.execute("DELETE FROM feed_sections WHERE id = ?", (section_id,))
+        self.conn.commit()
+
+    def add_feed(self, section_id: int, name: str, xml_url: str,
+                 html_url: str = "") -> int:
+        next_order = self.conn.execute(
+            "SELECT COALESCE(MAX(display_order), -1) + 1 FROM feeds WHERE section_id = ?",
+            (section_id,),
+        ).fetchone()[0]
+        cur = self.conn.execute(
+            "INSERT INTO feeds (section_id, name, xml_url, html_url, display_order, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (section_id, name.strip(), xml_url.strip(), html_url.strip(),
+             next_order, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_feed(self, feed_id: int, section_id: int, name: str,
+                    xml_url: str, html_url: str) -> None:
+        self.conn.execute(
+            "UPDATE feeds SET section_id=?, name=?, xml_url=?, html_url=? WHERE id=?",
+            (section_id, name.strip(), xml_url.strip(), html_url.strip(), feed_id),
+        )
+        self.conn.commit()
+
+    def delete_feed(self, feed_id: int) -> None:
+        self.conn.execute("DELETE FROM feeds WHERE id = ?", (feed_id,))
+        self.conn.commit()
+
+    # -- OPML generation ----------------------------------------------------
+
+    def opml_xml(self, title: str = "Brian subscriptions") -> str:
+        """Render the current subscription list as OPML text.
+
+        Two attribute rules matter and are not cosmetic:
+        1. Section outlines carry NO htmlUrl. sources.preferred_domains walks
+           every outline at any depth and reads `htmlUrl or xmlUrl`, so an
+           htmlUrl on a section would leak a bogus domain into FP&A Buddy's
+           web-search allowlist.
+        2. A feed's htmlUrl is omitted entirely when empty, rather than written
+           as htmlUrl="". preferred_domains prefers htmlUrl over xmlUrl, and an
+           empty string is falsy there, so both shapes behave the same today —
+           omitting it keeps the file honest and matches the hand-written
+           original.
+        """
+        def esc(s: str) -> str:
+            return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+                    .replace(">", "&gt;").replace('"', "&quot;"))
+
+        by_section: dict[int, list[dict]] = {}
+        for f in self.list_feeds():
+            by_section.setdefault(f["section_id"], []).append(f)
+
+        lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+                 f'<opml version="1.0"><head><title>{esc(title)}</title></head><body>']
+        for section in self.list_feed_sections():
+            sname = esc(section["name"])
+            lines.append(f'  <outline text="{sname}" title="{sname}">')
+            for f in by_section.get(section["id"], []):
+                fname = esc(f["name"])
+                attrs = (f'type="rss" text="{fname}" title="{fname}" '
+                         f'xmlUrl="{esc(f["xml_url"])}"')
+                if f["html_url"]:
+                    attrs += f' htmlUrl="{esc(f["html_url"])}"'
+                lines.append(f'    <outline {attrs}/>')
+            lines.append('  </outline>')
+        lines.append('</body></opml>')
+        return "\n".join(lines) + "\n"
+
+    def write_opml(self, path: str) -> bool:
+        """Regenerate `path` from the feeds tables. Returns True if written.
+
+        Call this after EVERY mutation of feed_sections/feeds, and once at app
+        startup. It also clears sources.preferred_domains' lru_cache, which is
+        deliberately folded in here rather than left to each caller: that cache
+        is read once per process and never re-read, so a regenerated file with
+        a stale cache would leave FP&A Buddy's allowlist wrong until the next
+        deploy, silently. Making the two inseparable means no write path can
+        forget one.
+
+        Writes atomically (temp file + os.replace) because four separate
+        consumers read this file at request time; a half-written file would be
+        a parse error for all of them at once.
+
+        No-ops when there are no feeds. An empty table means the seed hasn't
+        run yet (or the DB is a fresh fixture), and regenerating from it would
+        overwrite the curated repo copy with an empty subscription list.
+
+        Also no-ops when the file on disk already matches what we'd write.
+        That keeps the common boot (nothing changed since last deploy) from
+        rewriting the file at all, and keeps any test that boots the app from
+        touching the repo's working copy as a side effect. Skipping the cache
+        clear in that branch is deliberate, not an oversight: identical
+        content means the cached allowlist is already correct.
+        """
+        if not self.conn.execute("SELECT 1 FROM feeds LIMIT 1").fetchone():
+            return False
+        xml = self.opml_xml()
+        try:
+            with open(path, encoding="utf-8") as fh:
+                if fh.read() == xml:
+                    return False
+        except OSError:
+            pass
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(xml)
+        os.replace(tmp, path)
+        try:
+            from .sources import preferred_domains
+            preferred_domains.cache_clear()
+        except Exception:
+            pass
+        return True
+
+    def seed_feeds_from_opml(self, path: str) -> dict:
+        """One-time import of an existing OPML file into the feeds tables.
+
+        Guarded by a settings flag, NOT by "is the table empty". Those look
+        identical on a fresh DB but diverge the moment an admin deletes every
+        feed in a section, or the last feed outright: an emptiness check would
+        re-import the whole file on the next restart and resurrect deliberately
+        deleted feeds. This is the same bug _seed_toolbox shipped and had to
+        fix; the flag means seeding happens exactly once per database, ever.
+
+        Returns {"seeded": bool, "sections": n, "feeds": n}.
+        """
+        if self.get_setting("feeds_seeded_from_opml") == "1":
+            return {"seeded": False, "sections": 0, "feeds": 0}
+
+        from .feed import parse_opml
+        try:
+            metas = parse_opml(path)
+        except Exception:
+            return {"seeded": False, "sections": 0, "feeds": 0}
+        if not metas:
+            # Nothing to import — don't burn the flag, so a later boot with a
+            # readable file still gets its chance to seed.
+            return {"seeded": False, "sections": 0, "feeds": 0}
+
+        section_ids: dict[str, int] = {s["name"]: s["id"] for s in self.list_feed_sections()}
+        new_sections = new_feeds = 0
+        for meta in metas:
+            cat = meta.category or "Other"
+            if cat not in section_ids:
+                section_ids[cat] = self.add_feed_section(
+                    cat, exclude_from_queue=cat in self._LEGACY_QUEUE_EXCLUDED_SECTIONS)
+                new_sections += 1
+            if self.find_feed_by_url(meta.xml_url):
+                continue
+            self.add_feed(section_ids[cat], meta.name or meta.xml_url,
+                          meta.xml_url, meta.html_url or "")
+            new_feeds += 1
+
+        self.set_setting("feeds_seeded_from_opml", "1")
+        return {"seeded": True, "sections": new_sections, "feeds": new_feeds}
 
     def close(self) -> None:
         self.conn.close()

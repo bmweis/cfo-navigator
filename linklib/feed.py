@@ -71,6 +71,86 @@ def parse_opml(path: str) -> list[FeedMeta]:
 
 
 # ---------------------------------------------------------------------------
+# Feed URL validation (admin add/edit)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FeedProbe:
+    """Result of validating a candidate feed URL before it's saved."""
+    ok: bool
+    error: str = ""
+    title: str = ""       # the feed's own <title>, offered as a default name
+    html_url: str = ""    # the publication's site, from the feed's alternate link
+    item_count: int = 0
+
+
+def probe_feed(url: str, timeout: int = FETCH_TIMEOUT) -> FeedProbe:
+    """Fetch `url` and confirm it's a parseable RSS or Atom feed.
+
+    Exists so the admin feed form can reject a bad URL at save time instead of
+    storing something that silently yields nothing forever. Deliberately
+    separate from _fetch_feed, which swallows every failure and returns [] —
+    correct for a background fetch of 22 feeds, useless for telling an admin
+    WHY their URL didn't take.
+
+    A feed that parses but currently has zero items is still ok=True: some
+    low-volume sources legitimately sit empty between posts, and that's not a
+    reason to refuse the subscription.
+    """
+    url = (url or "").strip()
+    if not url:
+        return FeedProbe(False, "Enter a feed URL.")
+    if not url.lower().startswith(("http://", "https://")):
+        return FeedProbe(False, "The URL must start with http:// or https://.")
+    # Feedly's proxy URLs require a logged-in Feedly session, so _fetch_feed
+    # skips them outright (see the guard in _fetch_feed). Without this check
+    # one would save cleanly and then never produce a single item.
+    if "feedly.com/web/" in url:
+        return FeedProbe(False, "That's a Feedly proxy link, which needs a Feedly "
+                                "login to read. Open the source's own site and use "
+                                "its direct RSS or Atom URL instead.")
+
+    try:
+        resp = requests.get(url, timeout=timeout, headers={"User-Agent": _UA},
+                            allow_redirects=True)
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        code = getattr(exc.response, "status_code", "")
+        return FeedProbe(False, f"The server returned HTTP {code} for that URL.")
+    except requests.Timeout:
+        return FeedProbe(False, f"That URL didn't respond within {timeout} seconds.")
+    except Exception:
+        return FeedProbe(False, "Couldn't reach that URL. Check the address and try again.")
+
+    try:
+        root = ET.fromstring(resp.content)
+    except ET.ParseError:
+        return FeedProbe(False, "That URL responded, but it isn't a valid RSS or Atom "
+                                "feed. It may be the site's homepage rather than its "
+                                "feed address.")
+
+    atom = "{http://www.w3.org/2005/Atom}"
+    if root.tag in (f"{atom}feed", "feed"):
+        title = _text(root.find(f"{atom}title"))
+        site = ""
+        for link in root.findall(f"{atom}link"):
+            if link.get("rel") in (None, "alternate") and link.get("href"):
+                site = link.get("href", "")
+                break
+        return FeedProbe(True, title=title, html_url=site,
+                         item_count=len(root.findall(f"{atom}entry")))
+
+    channel = root.find("channel")
+    if channel is None and root.tag != "rss":
+        return FeedProbe(False, "That URL returned XML, but not an RSS or Atom feed.")
+    if channel is None:
+        channel = root
+    return FeedProbe(True, title=_text(channel.find("title")),
+                     html_url=_text(channel.find("link")),
+                     item_count=len(channel.findall("item")))
+
+
+# ---------------------------------------------------------------------------
 # Feed fetching + parsing
 # ---------------------------------------------------------------------------
 
