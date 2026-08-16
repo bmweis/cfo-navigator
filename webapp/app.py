@@ -18765,7 +18765,13 @@ def admin_library(request: Request):
      lets `order` interleave them across the columns — DOM order is
      new/tags/existing/backup (column order), the required reading order is
      new/existing/tags/backup. */
-  .lib-cols{{flex-direction:column;gap:30px;}}
+  /* align-items must be reset here, not just inherited from the desktop rule.
+     It governs the CROSS axis, so `flex-start` — correct in row direction,
+     where it stops the two columns stretching to a shared height — becomes
+     horizontal once this flips to column, shrinking every box to its own
+     content width (measured 261/342/306/342px at 390px wide before this).
+     `stretch` gives all four the container's full width. */
+  .lib-cols{{flex-direction:column;gap:30px;align-items:stretch;}}
   .lib-col{{display:contents;}}
   .lib-q-new{{order:1;}}
   .lib-q-existing{{order:2;}}

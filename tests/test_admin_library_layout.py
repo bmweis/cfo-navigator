@@ -121,6 +121,17 @@ def test_columns_pair_the_right_quadrants(env):
     assert left < tags < right < backup            # column-major DOM order
 
 
+def test_mobile_resets_align_items_on_the_axis_flip(env):
+    """align-items governs the CROSS axis, so `flex-start` — correct in the
+    desktop row direction, where it stops the two columns stretching to a
+    shared height — becomes horizontal once the mobile query flips to column,
+    shrinking each box to its own content width. Measured 261/342/306/342px at
+    390px before the reset; 342px across after."""
+    html = _library_html(env)
+    assert ".lib-cols{display:flex;gap:28px;align-items:flex-start;}" in html
+    assert ".lib-cols{flex-direction:column;gap:30px;align-items:stretch;}" in html
+
+
 def test_mobile_collapses_to_one_column_in_reading_order(env):
     """DOM order is column-major (new, tags, existing, backup) but the required
     reading order is new, existing, tags, backup — `display:contents` on the
