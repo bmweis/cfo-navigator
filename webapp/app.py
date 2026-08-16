@@ -18626,9 +18626,8 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     "sections, and set which ones are read-only. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
     "web search is restricted to.",
     _badge_for_href("/admin/library/feeds", task_counts.get("/admin/library/feeds", 0)))}</div>
-<h3 style="margin:0 0 4px;font-size:15.5px;font-family:var(--font-head);font-weight:600;color:var(--navy);">Saving articles from anywhere</h3>
+<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving articles from anywhere</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
-<p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong>&mdash;the old copies embed the old values. Set them up again from this page's instructions.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
 <summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>Desktop&mdash;the bookmarklet</summary>
@@ -18663,7 +18662,9 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 </ol>
 <p style="margin:0;color:var(--muted);font-size:13px;">Articles saved this way arrive untagged&mdash;tag them later in the Library, or add a second JSON text field named <code>tags</code> with a comma-separated list if you want a fixed default.</p>
 </div>
-</details>"""
+</details>
+
+<p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working&mdash;the old copies embed the old values. Set them up again from the instructions above.</p>"""
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",

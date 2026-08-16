@@ -110,6 +110,42 @@ def test_new_content_quadrant_holds_feeds_card_and_both_accordions(env):
     assert "border-radius:14px" in quadrant                   # the _lib_card box
 
 
+def test_saving_articles_is_a_muted_label_not_a_competing_heading(env):
+    """It sat as a bold navy h3, reading like a section nested in a section and
+    competing with the card headings right above it. Now a small muted eyebrow,
+    the same idiom the flow diagram's own label uses."""
+    html = _library_html(env)
+    start = html.index('class="lib-q-new"')
+    quadrant = html[start:html.index('class="lib-q-existing"')]
+    assert "<h3" not in quadrant
+    label_at = quadrant.index("Saving articles from anywhere")
+    label = quadrant[label_at - 200:label_at]
+    assert "font-size:12px" in label
+    assert "color:var(--muted)" in label
+    assert "var(--navy)" not in label
+
+
+def test_token_warning_is_a_footnote_below_the_accordions(env):
+    """Moved out of the inline flow and de-bolded: label, intro, accordions,
+    then the warning as caption-weight text."""
+    html = _library_html(env)
+    start = html.index('class="lib-q-new"')
+    quadrant = html[start:html.index('class="lib-q-existing"')]
+
+    label = quadrant.index("Saving articles from anywhere")
+    first_accordion = quadrant.index("<details")
+    last_accordion = quadrant.rindex("</details>")
+    warning = quadrant.index("If you ever rotate")
+    assert label < first_accordion < last_accordion < warning
+
+    footnote = quadrant[warning - 200:warning]
+    assert "font-size:12.5px" in footnote
+    assert "color:var(--muted)" in footnote
+    # Content is unchanged apart from the pointer now facing up, not down.
+    assert "<strong>If you ever rotate" not in quadrant
+    assert "LINKLIB_SAVE_TOKEN" in quadrant and "LINKLIB_PUBLIC_BASE" in quadrant
+
+
 def test_each_quadrant_holds_its_specified_tools(env):
     html = _library_html(env)
     bounds = [("lib-q-existing", ["/admin/library/backfill-content", "/admin/library/dedupe",
