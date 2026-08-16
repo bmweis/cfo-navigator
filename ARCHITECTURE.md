@@ -2372,13 +2372,13 @@ removed. In its place, a ghost button beside the `<h1>`, using the same
 flex + `.btn` header pattern `/admin/tools/software` and
 `/admin/tools/benchmarks` already use for their "+ Add" links.
 
-*Colour, deliberately:* the button is a **ghost outline** in
-`--seafoam-deep` (text and border), **not** a seafoam fill. BRAND.md's do/don't
-table reads "Buttons navy or ghost" / "Make a seafoam or coral button", and
-`_CSS`'s own comment says "Seafoam is NEVER a button". `--seafoam-deep`
-(`#1F7A66`) is the documented text-capable-on-light token, so the control reads
-as seafoam and stays a subtle outline action rather than a filled CTA. A filled
-seafoam button would violate both.
+*Colour:* stock `.btn.btn-ghost` with **no colour override** — navy border,
+navy text, transparent fill, `--navy-wash` hover, 10px radius, which is exactly
+BRAND.md §"Buttons"' secondary style. An intermediate round of this build
+tinted it `--seafoam-deep`; that was wrong (BRAND.md: "Buttons navy or ghost" /
+"Make a seafoam or coral button") and has been reverted. Note `--accent-light`,
+which `.btn-ghost:hover` uses, is a legacy alias for the same hex as
+`--navy-wash`, so the stock hover is already the navy wash.
 
 **The flow diagram runs full width**, on its own, between the intro paragraph
 and the grid.
@@ -2396,20 +2396,21 @@ content quadrant contains the two capture-path `<details>`, and
 `.disclosure-caret`'s rotate rule is scoped `details[open] > summary`, so an
 inner accordion can never rotate the outer quadrant's caret (verified live).
 
-**Four quadrants on named grid areas.** `.lib-quads` declares
-`grid-template-areas:"newcontent existing" "tags backup"` rather than relying on
-auto-placement. Auto-flow is what produced the earlier ragged layout: blocks
-landed wherever content length pushed them, and an odd block count left a hole.
-Named areas plus explicit `grid-template-rows:auto auto` pin each quadrant
-regardless of content length. This matters more with collapsing than without:
-when one quadrant in a row is expanded and its partner is still collapsed, the
-row grows to fit the expanded one and the collapsed partner simply has blank
-space below its own header, rather than the two columns sliding out of
-alignment. Verified live across every open/closed combination — default
-(all closed), one open, two open in different rows, and all four open — with
-both row-1 headers sharing a Y and both row-2 headers sharing a Y in every
-case. `align-items:start` keeps a collapsed quadrant from stretching into an
-empty box.
+**Two independent flowing columns, NOT a row-coupled grid.** `.lib-cols` is a
+flex row of two `.lib-col` flex columns: left holds New content then Tag
+management, right holds Existing archive management then Archive additions &
+backup. Each column lays out on its own, so **expanding a quadrant in one
+column never moves anything in the other** (verified live in both directions:
+opening New content leaves both right-column headings at their exact Y, and
+opening Existing archive management leaves both left-column headings put).
+
+*This reverses an earlier round of this build*, which used
+`grid-template-areas` with explicit rows to guarantee that row-1 and row-2
+headings shared a Y. That guarantee is deliberately dropped: a real 2-row grid
+makes both cells in a row share that row's height, so expanding one quadrant
+pushed the next row down in **both** columns at once, which read wrong in
+practice. Row-2 heading alignment ("Tag management" vs "Archive additions &
+backup") is explicitly no longer required.
 
 - **Upper-left, "New content"** — merges the former Feed management section with
   "Saving articles from anywhere". The Manage feeds `_lib_card` sits above the
@@ -2424,10 +2425,23 @@ empty box.
 Library card counts 9 tools and the link picks up badge support); only where its
 card renders changed.
 
-**Mobile** collapses to one column at the same 900px breakpoint by redeclaring
-`grid-template-areas` as a single column, so the stacking order — New content,
-Existing archive management, Tag management, Archive additions & backup — is
-declared in one place rather than depending on DOM order happening to match it.
+**Mobile** collapses to one column at the same 900px breakpoint. DOM order is
+column-major (new, tags, existing, backup) but the required reading order is
+new, existing, tags, backup, so the two `.lib-col` wrappers get
+`display:contents` below the breakpoint — dissolving them so all four quadrants
+become direct flex children of `.lib-cols`, which is what lets `order` interleave
+them across the columns. Verified live at 390px portrait and 844px landscape:
+single column, correct order, no horizontal overflow, taps still toggle.
+
+**Caret parity.** The quadrant summaries use `gap:8px` with
+`align-items:baseline`, copied from the nested capture-path accordions, so the
+arrow sits the same distance from its label at both levels; the glyph's
+size/weight/colour already came from the shared
+`details > summary .disclosure-caret` rule. Measured identical in both states:
+closed, 15px / 11.5x15px box / 8px gap / no transform; open, 15px /
+15x11.5px box / 6.3px gap / `rotate(90deg)` — the box-swap and tighter gap when
+open are the rotation pivoting about the glyph's centre, and they happen the
+same way at both levels.
 
 **Reader rename: "Saved" → "Archive".** The Reader's own quick-view label,
 list-pane header, and every related admin-facing description previously

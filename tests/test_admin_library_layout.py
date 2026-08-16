@@ -50,6 +50,19 @@ def _library_html(appmod):
         return client.get("/admin/library").text
 
 
+# DOM order is column-major since the two-independent-columns change: left
+# column (new, tags) then right column (existing, backup). Slicing a quadrant
+# means stopping at whichever marker actually follows it, not at a fixed one.
+_QUADRANT_ORDER = ["lib-q-new", "lib-q-tags", "lib-q-existing", "lib-q-backup"]
+
+
+def _quadrant(html, cls):
+    start = html.index(f'class="{cls}"')
+    after = _QUADRANT_ORDER[_QUADRANT_ORDER.index(cls) + 1:]
+    ends = [html.index(f'class="{c}"') for c in after if f'class="{c}"' in html]
+    return html[start:min(ends)] if ends else html[start:]
+
+
 def test_open_reader_is_a_header_button_not_a_callout_box(env):
     """The seafoam callout card is gone; Open Reader is a header-adjacent
     action beside the H1."""
@@ -61,48 +74,70 @@ def test_open_reader_is_a_header_button_not_a_callout_box(env):
     assert html.index("Open Reader") < html.index("The tools below cover")
 
 
-def test_open_reader_is_a_ghost_outline_not_a_seafoam_fill(env):
-    """BRAND.md: "Buttons navy or ghost" / "Make a seafoam or coral button",
-    and _CSS says "Seafoam is NEVER a button". Seafoam-deep is used for the
-    text and border only; there must be no seafoam background."""
+def test_open_reader_is_a_stock_navy_ghost_button(env):
+    """BRAND.md allows exactly two button styles: navy fill and navy ghost.
+    An earlier round tinted this seafoam; `.btn.btn-ghost` with no colour
+    override is already navy border + navy text + transparent + navy-wash
+    hover + 10px radius."""
     html = _library_html(env)
     start = html.index('href="/read" class="btn btn-ghost"')
-    button = html[start:start + 320]
-    assert "color:var(--seafoam-deep)" in button
-    assert "border-color:var(--seafoam-deep)" in button
+    button = html[start:html.index("</a>", start)]
+    assert "seafoam" not in button
+    assert "color:" not in button and "border-color:" not in button
     assert "background" not in button
 
 
-def test_flow_diagram_is_full_width_above_the_grid(env):
+def test_flow_diagram_is_full_width_above_the_columns(env):
     html = _library_html(env)
     assert "lib-top-row" not in html                          # the two-up row is gone
     flow = html.index("How new content reaches the archive")
-    grid = html.index('class="lib-quads"')
-    assert flow < grid
+    cols = html.index('class="lib-cols"')
+    assert flow < cols
 
 
-def test_four_quadrants_use_named_grid_areas(env):
-    """Named areas rather than auto-placement — auto-flow is what let content
-    length push blocks around and leave a hole."""
+def test_layout_is_two_independent_columns_not_a_coupled_grid(env):
+    """Reverses the earlier named-grid-areas approach: a real 2-row grid makes
+    both cells in a row share that row's height, so expanding one quadrant
+    pushed the next row down in BOTH columns. Column independence is the
+    deliberate trade-off; row-2 heading alignment is no longer guaranteed."""
     html = _library_html(env)
-    assert 'grid-template-areas:"newcontent existing" "tags backup"' in html
+    assert "grid-template-areas" not in html
+    assert "grid-template-rows" not in html
+    assert '.lib-cols{display:flex;gap:28px;align-items:flex-start;}' in html
+    assert '.lib-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column' in html
     for cls in ("lib-q-new", "lib-q-existing", "lib-q-tags", "lib-q-backup"):
         assert f'class="{cls}"' in html
 
 
+def test_columns_pair_the_right_quadrants(env):
+    """Left: New content then Tag management. Right: Existing archive
+    management then Archive additions & backup."""
+    html = _library_html(env)
+    cols = html[html.index('class="lib-cols"'):]
+    left = cols.index("lib-q-new")
+    tags = cols.index("lib-q-tags")
+    right = cols.index("lib-q-existing")
+    backup = cols.index("lib-q-backup")
+    assert left < tags < right < backup            # column-major DOM order
+
+
 def test_mobile_collapses_to_one_column_in_reading_order(env):
+    """DOM order is column-major (new, tags, existing, backup) but the required
+    reading order is new, existing, tags, backup — `display:contents` on the
+    column wrappers plus `order` is what interleaves them."""
     html = _library_html(env)
     assert "@media (max-width:900px)" in html
-    assert 'grid-template-areas:"newcontent" "existing" "tags" "backup"' in html
+    assert ".lib-col{display:contents;}" in html
+    for cls, order in (("lib-q-new", 1), ("lib-q-existing", 2),
+                       ("lib-q-tags", 3), ("lib-q-backup", 4)):
+        assert f".{cls}{{order:{order};}}" in html
 
 
 def test_new_content_quadrant_holds_feeds_card_and_both_accordions(env):
     """Merged, but the two halves stay distinct: a _lib_card over the existing
     accordion pattern, not one blended block."""
     html = _library_html(env)
-    start = html.index('class="lib-q-new"')
-    end = html.index('class="lib-q-existing"')
-    quadrant = html[start:end]
+    quadrant = _quadrant(html, "lib-q-new")
     assert "New content" in quadrant
     assert 'href="/admin/library/feeds"' in quadrant
     assert "Saving articles from anywhere" in quadrant
@@ -116,8 +151,7 @@ def test_saving_articles_is_a_muted_label_not_a_competing_heading(env):
     competing with the card headings right above it. Now a small muted eyebrow,
     the same idiom the flow diagram's own label uses."""
     html = _library_html(env)
-    start = html.index('class="lib-q-new"')
-    quadrant = html[start:html.index('class="lib-q-existing"')]
+    quadrant = _quadrant(html, "lib-q-new")
     assert "<h3" not in quadrant
     label_at = quadrant.index("Saving articles from anywhere")
     label = quadrant[label_at - 200:label_at]
@@ -130,8 +164,7 @@ def test_token_warning_is_a_footnote_below_the_accordions(env):
     """Moved out of the inline flow and de-bolded: label, intro, accordions,
     then the warning as caption-weight text."""
     html = _library_html(env)
-    start = html.index('class="lib-q-new"')
-    quadrant = html[start:html.index('class="lib-q-existing"')]
+    quadrant = _quadrant(html, "lib-q-new")
 
     label = quadrant.index("Saving articles from anywhere")
     # Skip the quadrant's own <details> wrapper; the capture accordions are the
@@ -153,7 +186,7 @@ def test_all_four_quadrants_are_collapsible_and_closed_by_default(env):
     """Landing on the page shows a tidy 2x2 of four headers. Native <details>
     with no `open` attribute, matching the capture accordions already here."""
     html = _library_html(env)
-    start = html.index('class="lib-quads"')
+    start = html.index('class="lib-cols"')
     grid = html[start:]
     assert grid.count('<details class="lib-quad">') == 4
     assert "<details class=\"lib-quad\" open" not in grid
@@ -175,12 +208,14 @@ def test_quadrants_use_the_existing_caret_accordion_idiom(env):
     assert "toggleQuad" not in html and "lib-quad-toggle" not in html
 
 
-def test_grid_declares_two_explicit_rows(env):
-    """Two named rows are what guarantee the row-1 and row-2 headers share a Y
-    even when one quadrant in a row is expanded and its partner is collapsed."""
+def test_quadrant_caret_offset_matches_the_nested_accordions(env):
+    """The glyph's size/weight/colour already come from the shared
+    `details > summary .disclosure-caret` rule; the gap is what differed
+    (9px vs 8px), so the arrow sat further from its label at quadrant level."""
     html = _library_html(env)
-    assert 'grid-template-areas:"newcontent existing" "tags backup"' in html
-    assert "grid-template-rows:auto auto" in html
+    assert ".lib-quad>summary{cursor:pointer;display:flex;align-items:baseline;gap:8px" in html
+    # The nested capture accordions' own summaries use the same 8px gap.
+    assert "align-items:baseline;gap:8px" in html
 
 
 def test_each_quadrant_holds_its_specified_tools(env):

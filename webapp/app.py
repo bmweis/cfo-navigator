@@ -18560,16 +18560,16 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # already use for their "+ Add" links, rather than the seafoam callout box
     # that used to sit beside the flow diagram.
     #
-    # Ghost-button shape with seafoam-deep border and text, NOT a seafoam fill.
-    # BRAND.md's do/don't table ("Buttons navy or ghost" / "Make a seafoam or
-    # coral button") and _CSS's own "Seafoam is NEVER a button" comment both
-    # rule out a filled seafoam button. --seafoam-deep is the documented
-    # text-capable-on-light token (AA), so this reads as seafoam and stays a
-    # subtle outline action rather than a filled CTA.
+    # Stock secondary button, no colour overrides: `.btn.btn-ghost` is already
+    # navy border + navy text + transparent fill + --navy-wash hover + 10px
+    # radius, which is exactly BRAND.md §"Buttons" secondary. An earlier round
+    # of this build tinted it seafoam; that was wrong ("Buttons navy or ghost /
+    # Make a seafoam or coral button") and is reverted here. Only size is
+    # overridden, matching the "+ Add" header actions on the Toolbox admin
+    # pages.
     open_reader_button = (
         '<a href="/read" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;'
-        'color:var(--seafoam-deep);border-color:var(--seafoam-deep);white-space:nowrap;">'
-        'Open Reader</a>'
+        'white-space:nowrap;">Open Reader</a>'
     )
 
     # Regrouped by function (Phase 6), not the old single top-to-bottom
@@ -18709,16 +18709,22 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
    is what produced the earlier ragged layout — blocks landed wherever content
    length pushed them, and an odd count left a hole. Named areas pin each
    quadrant regardless of how much content it holds. */
-.lib-quads{{display:grid;grid-template-columns:1fr 1fr;
-  grid-template-areas:"newcontent existing" "tags backup";
-  grid-template-rows:auto auto;
-  column-gap:28px;row-gap:34px;align-items:start;}}
-.lib-quads>div{{min-width:0;}}
+/* Two INDEPENDENT flowing columns, not a row-coupled grid. A real 2-row grid
+   makes both cells in a row share that row's height, so expanding one quadrant
+   pushed the whole next row down in both columns at once. Column independence
+   is the deliberate trade-off: row-2 headings ("Tag management" vs "Archive
+   additions & backup") are no longer guaranteed to share a Y. */
+.lib-cols{{display:flex;gap:28px;align-items:flex-start;}}
+.lib-col{{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:34px;}}
 /* Collapsible quadrants. Same native <details> mechanism as the capture-path
    accordions below, closed by default so the page opens as a tidy 2x2 of four
    headers. display:flex on the summary suppresses the browser's own marker so
    the caret span isn't doubled. */
-.lib-quad>summary{{cursor:pointer;display:flex;align-items:baseline;gap:9px;padding:2px 0;}}
+/* gap 8px and align-items:baseline are copied from the nested capture-path
+   accordions, so the caret sits the same distance from its label and on the
+   same baseline at both levels. The glyph's own size/weight/colour already come
+   from the shared `details > summary .disclosure-caret` rule. */
+.lib-quad>summary{{cursor:pointer;display:flex;align-items:baseline;gap:8px;padding:2px 0;}}
 .lib-quad>summary::-webkit-details-marker{{display:none;}}
 .lib-quad-body{{margin-top:10px;}}
 .lib-q-new{{grid-area:newcontent;}}
@@ -18726,10 +18732,17 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 .lib-q-tags{{grid-area:tags;}}
 .lib-q-backup{{grid-area:backup;}}
 @media (max-width:900px){{
-  /* One column. The area list IS the stacking order, so reading order lives in
-     one place rather than depending on DOM order matching it. */
-  .lib-quads{{grid-template-columns:1fr;
-    grid-template-areas:"newcontent" "existing" "tags" "backup";row-gap:30px;}}
+  /* One column. `display:contents` dissolves the two column wrappers so all
+     four quadrants become direct flex children of .lib-cols, which is what
+     lets `order` interleave them across the columns — DOM order is
+     new/tags/existing/backup (column order), the required reading order is
+     new/existing/tags/backup. */
+  .lib-cols{{flex-direction:column;gap:30px;}}
+  .lib-col{{display:contents;}}
+  .lib-q-new{{order:1;}}
+  .lib-q-existing{{order:2;}}
+  .lib-q-tags{{order:3;}}
+  .lib-q-backup{{order:4;}}
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -18740,11 +18753,15 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 {auth_banner}
 <p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
 {flow_html}
-<div class="lib-quads">
+<div class="lib-cols">
+<div class="lib-col">
 <div class="lib-q-new">{saving_articles_html}</div>
-<div class="lib-q-existing">{existing_mgmt_html}</div>
 <div class="lib-q-tags">{tag_mgmt_html}</div>
+</div>
+<div class="lib-col">
+<div class="lib-q-existing">{existing_mgmt_html}</div>
 <div class="lib-q-backup">{archive_additions_html}</div>
+</div>
 </div>
 </div>"""
     return HTMLResponse(_page("Library—Admin", "Admin", body, authed=True))
