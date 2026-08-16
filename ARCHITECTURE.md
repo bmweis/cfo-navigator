@@ -1525,17 +1525,22 @@ and `/library/feed` (the RSS reader) pages — both retired outright, no
 compatibility redirect (nothing was bookmarked, same precedent as every
 other retired-route call in this doc). The three panes:
 
-- **Left rail** — quick views (Feed / Saved / Read Later, each with a live
-  count) plus, only in the Feed view, a Sources tree (OPML category →
-  per-source counts) driving client-side filtering over one already-loaded
-  batch of feed items — same approach the old Feed page's source checkboxes
-  used, just restyled. Switching quick views is a real page load
-  (`/read?view=feed|saved|readlater`); filtering *within* the Feed view is
-  client-side JS, no round trip.
-- **Middle list pane** — server-rendered rows for whichever view is active.
-  Saved search is a plain GET reload (`/read?view=saved&q=...`), matching
-  this codebase's existing server-rendered-search convention rather than a
-  client-side SPA search. A subtle coral alert renders here (via
+- **Left rail** — navigation and filter vocabularies only, never search
+  (see "Search placement" below). Quick views (Feed / Saved / Read Later,
+  each with a live count), plus one per-view vocabulary: a Sources tree in
+  the Feed view (OPML category → per-source counts) driving client-side
+  filtering over one already-loaded batch of feed items — same approach the
+  old Feed page's source checkboxes used, just restyled — and a "Tags" bar
+  in the Saved view, its direct counterpart. Switching quick views is a real
+  page load (`/read?view=feed|saved|readlater`); filtering *within* the Feed
+  view is client-side JS, no round trip.
+- **Middle list pane** — server-rendered rows for whichever view is active,
+  with that view's search in the pane's own header (`.rr-list-search`),
+  directly above the rows it filters. Saved search is a plain GET reload
+  (`/read?view=saved&q=...`), matching this codebase's existing
+  server-rendered-search convention rather than a client-side SPA search;
+  Feed search filters client-side through `rrApplyFilter`. Read Later has
+  no search and renders none. A subtle coral alert renders here (via
   `authcheck.stale_domains`) only when a subscriber cookie has actually gone
   stale — same underlying `authcheck.check_auth_cookies`/`get_auth_status`
   mechanism `/admin/library`'s banner already used, just a second,
@@ -1682,6 +1687,47 @@ In the forced-focus state, `.rr-shell.rr-focus-mode .rr-rail{display:none}`
 additionally hides the rail (untouched by desktop focus mode, which only
 collapses the list pane to a sliver) — without it, "distraction-free" on
 mobile would still mean scrolling past a full nav rail before the article.
+
+### Search placement: list-pane header, not the left rail
+
+Both views' search boxes render in the list pane's header. They spent from
+the Phase 5 merge until this correction in the **left rail** instead, which
+was drift rather than a decision — nothing in the repo ever evaluated the
+placement. The evidence, since a claim like that should be checkable:
+
+- The pre-merge `/library/archive` page put search in a page-width header
+  bar **directly above the list**, in the same 960px column as the cards.
+  That page had no rail at all.
+- Phase 5's own ARCHITECTURE.md (added in the very commit that moved it)
+  describes Saved search under its **middle list pane** bullet, and its
+  exhaustive left-rail inventory — quick views, plus a Sources tree in Feed
+  view only — never mentions search. The same commit's code put the form in
+  the rail. A doc/code contradiction inside one commit.
+- The mechanism was assignment to a variable named `sources_html`, which
+  exists to hold Feed's Sources tree and is only ever interpolated into
+  `rail_html`. No commit message, comment, or doc anywhere says a relocation
+  happened, and the merge's "what got removed, deliberately" list doesn't
+  mention it either.
+- The Feed search box's CSS (`.rr-search-form{padding:14px 22px 0}`) carried
+  the **list pane's** 22px gutter while rendering inside a 232px rail whose
+  own gutter is 14px, and every sibling in that rail uses rail-scale insets.
+  The box was styled for a pane it wasn't in.
+
+**Caveat, recorded rather than papered over:** the `Feed.dc.html` design
+export is not in this repo and could not be re-read when this was corrected
+(`/design-login` is unavailable in a headless session). Every second-hand
+account of it in git history places its magnifying glass in the **list-pane
+header**, and none describes a search box in a rail — but that is testimony
+about the file, not the file itself.
+
+Only placement changed. Each view keeps its own mechanism (Feed client-side
+via `rrApplyFilter`, Saved a server GET), and the rail keeps the Sources
+tree and tag bar, which are filter vocabularies rather than search. The
+Saved rail's heading was "Search" — describing the form that used to sit
+above the tag bar — so with the form moved it reads "Tags", matching Feed's
+"Sources". Covered by `tests/test_reader_search_placement.py`, which asserts
+DOM ancestry rather than geometry: on the stacked mobile layout the rail and
+list pane both span the full width, so bounding boxes can't tell them apart.
 
 ### Reader content-structure backfill (Phase 5b)
 
