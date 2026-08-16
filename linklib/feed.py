@@ -231,7 +231,7 @@ def _fetch_feed(meta: FeedMeta) -> list[dict]:
                 items.append({
                     "title": title, "url": url,
                     "source": meta.name, "category": meta.category,
-                    "html_url": meta.html_url,
+                    "html_url": meta.html_url, "feed_url": meta.xml_url,
                     "published_at": pub.isoformat() if pub else "",
                     "pub_dt": pub,
                     "summary": summary,
@@ -252,7 +252,7 @@ def _fetch_feed(meta: FeedMeta) -> list[dict]:
             items.append({
                 "title": title, "url": url,
                 "source": meta.name, "category": meta.category,
-                "html_url": meta.html_url,
+                "html_url": meta.html_url, "feed_url": meta.xml_url,
                 "published_at": pub.isoformat() if pub else "",
                 "pub_dt": pub,
                 "summary": summary,

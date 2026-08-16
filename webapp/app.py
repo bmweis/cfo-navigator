@@ -17738,7 +17738,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Thought Leadership / Game", ["thought_leadership", "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
-                            "content_refetch_log", "url_correction_log"]),
+                            "content_refetch_log", "url_correction_log",
+                            "feed_sections", "feeds"]),
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "enrichment_cost", "manual_overhead",
                                   "field_reviews", "narrative_review_log", "matchmaker_questions"]),
@@ -18741,11 +18742,12 @@ def _feed_form_fields(sections: list, values: dict) -> str:
            "font:inherit;font-size:15px;background:#fff;box-sizing:border-box;")
     lab = "display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;"
     hint = "font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;"
+    exclude_checked = " checked" if values.get("exclude_from_queue") else ""
     return f"""  <div>
     <label style="{lab}">Feed URL *</label>
     <input type="url" name="xml_url" required value="{_esc(values.get('xml_url', ''))}"
       placeholder="https://example.com/feed/" style="{inp}">
-    <p style="{hint}">The RSS or Atom address, not the site's homepage. It's checked before saving, so a wrong address is rejected here rather than sitting in the list producing nothing.</p>
+    <p style="{hint}">The RSS or Atom address, not the site's homepage. It's checked before saving, so a wrong address is rejected here rather than sitting in the list producing nothing. Stored exactly as entered: if a paid subscription gives you a feed URL with a token in it, paste the whole thing and nothing will trim it.</p>
   </div>
   <div>
     <label style="{lab}">Name *</label>
@@ -18762,6 +18764,13 @@ def _feed_form_fields(sections: list, values: dict) -> str:
     <input type="url" name="html_url" value="{_esc(values.get('html_url', ''))}"
       placeholder="https://example.com/" style="{inp}">
     <p style="{hint}">The publication's own address. This is the one FP&amp;A Buddy's web search is restricted to, and the one the historical sweep crawls for back catalog. Left blank, it's taken from the feed itself.</p>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">
+      <input type="checkbox" name="exclude_from_queue" value="1"{exclude_checked}>
+      Read only
+    </label>
+    <p style="{hint}">Read it in the Reader, but never propose it into the archive queue. Set per feed, so one source in a section can be read-only without affecting the rest.</p>
   </div>"""
 
 
@@ -18773,6 +18782,7 @@ def admin_feeds(request: Request, msg: str = "", error: str = ""):
     try:
         sections = lib.list_feed_sections()
         feeds = lib.list_feeds()
+        section_counts = {s["id"]: lib.count_feeds_in_section(s["id"]) for s in sections}
     finally:
         lib.close()
 
@@ -18782,40 +18792,30 @@ def admin_feeds(request: Request, msg: str = "", error: str = ""):
                     f'padding:10px 16px;font-size:14px;margin:-6px 0 16px;">{_esc(error)}</p>'
                     if error else '')
 
-    by_section: dict[int, list] = {}
+    # -- one flat feed table -------------------------------------------------
+    # Section is a per-row dropdown and read-only a per-row checkbox, both
+    # posting on change, so a feed's grouping and its queue eligibility are
+    # edited in place rather than through a section-level control.
+    feed_rows = ""
     for f in feeds:
-        by_section.setdefault(f["section_id"], []).append(f)
-
-    inp_sm = ("padding:8px 12px;border:1px solid var(--line);border-radius:7px;"
-              "font:inherit;font-size:14px;background:var(--bg);")
-    section_blocks = ""
-    for s in sections:
-        sid = s["id"]
-        s_feeds = by_section.get(sid, [])
-        n = len(s_feeds)
-        form_id = f"sec-edit-{sid}"
-
-        excluded_badge = (
-            '<span style="background:var(--navy-wash);color:var(--navy);border-radius:999px;'
-            'padding:2px 10px;font-size:11.5px;font-weight:600;white-space:nowrap;">Not queued</span>'
-            if s["exclude_from_queue"] else '')
-
-        # Delete is offered only for an empty section. A section holding feeds
-        # shows what has to move first instead of a button that would fail.
-        if n:
-            delete_control = (
-                f'<span style="font-size:12.5px;color:var(--muted);">Move its {n} '
-                f'feed{"s" if n != 1 else ""} elsewhere to delete this section.</span>')
-        else:
-            delete_control = (
-                f'<form method="post" action="/admin/library/feeds/sections/{sid}/delete" style="margin:0;" '
-                f'onsubmit="return confirm(\'Delete the empty section &quot;{_esc(s["name"])}&quot;?\');">'
-                f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;'
-                f'color:#b91c1c;border-color:#fca5a5;">Delete section</button></form>')
-
-        feed_rows = "".join(f"""<tr class="ff-row">
+        opts = "".join(
+            f'<option value="{s["id"]}"{" selected" if s["id"] == f["section_id"] else ""}>'
+            f'{_esc(s["name"])}</option>' for s in sections)
+        feed_rows += f"""<tr class="ff-row">
   <td class="ff-name">{_esc(f['name'])}</td>
   <td class="ff-url"><a href="{_esc(f['xml_url'])}" target="_blank" rel="noopener">{_esc(f['xml_url'])}</a></td>
+  <td class="ff-section">
+    <form method="post" action="/admin/library/feeds/{f['id']}/section" style="margin:0;">
+      <select name="section_id" onchange="this.form.submit()" aria-label="Section for {_esc(f['name'])}"
+        style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">{opts}</select>
+    </form>
+  </td>
+  <td class="ff-readonly">
+    <form method="post" action="/admin/library/feeds/{f['id']}/read-only" style="margin:0;">
+      <input type="checkbox" name="exclude_from_queue" value="1" onchange="this.form.submit()"
+        aria-label="Read only: {_esc(f['name'])}"{' checked' if f['exclude_from_queue'] else ''}>
+    </form>
+  </td>
   <td class="ff-actions">
     <a href="/admin/library/feeds/{f['id']}/edit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Edit</a>
     <form method="post" action="/admin/library/feeds/{f['id']}/delete" style="display:inline;margin:0 0 0 4px;"
@@ -18823,61 +18823,67 @@ def admin_feeds(request: Request, msg: str = "", error: str = ""):
       <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Remove</button>
     </form>
   </td>
-</tr>""" for f in s_feeds) or ('<tr class="ff-row"><td colspan="3" class="ff-empty">'
-                              'No feeds in this section yet.</td></tr>')
+</tr>"""
+    if not feeds:
+        feed_rows = ('<tr class="ff-row"><td colspan="5" class="ff-empty">'
+                     'No feeds yet. Add a section below, then add a feed to it.</td></tr>')
 
-        section_blocks += f"""<details open style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:14px;">
-<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:center;gap:10px;">
-  <span class="disclosure-caret">&#9654;</span><span>{_esc(s['name'])}</span>
-  <span style="font-size:13px;font-weight:400;color:var(--muted);">{n} feed{'s' if n != 1 else ''}</span>
-  {excluded_badge}
-</summary>
-<div style="margin-top:14px;">
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-    <form id="{form_id}" method="post" action="/admin/library/feeds/sections/{sid}/edit"
-          style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0;">
-      <input type="text" name="name" value="{_esc(s['name'])}" required maxlength="80" style="{inp_sm}">
-      <label style="display:flex;align-items:center;gap:7px;font-size:13.5px;color:var(--ink-soft);">
-        <input type="checkbox" name="exclude_from_queue" value="1"{' checked' if s['exclude_from_queue'] else ''}>
-        Read only, never propose to the archive queue
-      </label>
-      <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save section</button>
-    </form>
-    {delete_control}
-  </div>
-  <div style="background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;">
-    <table class="ff-table"><tbody>{feed_rows}</tbody></table>
-  </div>
-</div>
-</details>"""
-
+    # -- manage sections: plain rows, no bordered box per section ------------
+    section_rows = ""
+    for s in sections:
+        n = section_counts.get(s["id"], 0)
+        if n:
+            remove = (f'<span style="font-size:12.5px;color:var(--muted);">'
+                      f'Move its {n} feed{"s" if n != 1 else ""} to another section to remove it.</span>')
+        else:
+            remove = (
+                f'<form method="post" action="/admin/library/feeds/sections/{s["id"]}/delete" style="margin:0;" '
+                f'onsubmit="return confirm(\'Remove the empty section &quot;{_esc(s["name"])}&quot;?\');">'
+                f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;'
+                f'color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
+        section_rows += f"""<div class="fs-row">
+  <form method="post" action="/admin/library/feeds/sections/{s['id']}/rename" style="display:flex;align-items:center;gap:8px;margin:0;">
+    <input type="text" name="name" value="{_esc(s['name'])}" required maxlength="80"
+      style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;min-width:0;">
+    <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;">Rename</button>
+  </form>
+  <span style="font-size:12.5px;color:var(--muted);white-space:nowrap;">{n} feed{'s' if n != 1 else ''}</span>
+  {remove}
+</div>"""
     if not sections:
-        section_blocks = ('<p style="color:var(--muted);background:var(--surface);border:1px solid var(--line);'
-                          'border-radius:14px;padding:18px 20px;">No sections yet. Add one below, then add feeds to it.</p>')
+        section_rows = '<p style="color:var(--muted);font-size:13.5px;margin:0;">No sections yet.</p>'
 
     body = f"""<div class="page page-admin">
 <style>
-/* table-layout:fixed gives the five per-section tables the same column widths,
-   so the Edit/Remove buttons line up down the page instead of landing wherever
-   each section's longest URL happens to push them. */
 .ff-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
 .ff-row>td{{padding:9px 12px;vertical-align:middle;border-top:1px solid var(--line);}}
-.ff-table tr:first-child>td{{border-top:0;}}
-.ff-name{{font-weight:600;font-size:14px;width:30%;}}
-.ff-url{{font-size:13px;color:var(--muted);width:46%;}}
+.ff-table thead th{{padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;
+  text-transform:uppercase;letter-spacing:.06em;background:var(--bg);}}
+.ff-name{{font-weight:600;font-size:14px;width:22%;}}
+.ff-url{{font-size:13px;color:var(--muted);width:32%;}}
 .ff-url a{{word-break:break-all;}}
-.ff-actions{{width:24%;text-align:right;white-space:nowrap;}}
+.ff-section{{width:17%;}}
+.ff-readonly{{width:9%;text-align:center;}}
+.ff-actions{{width:20%;text-align:right;white-space:nowrap;}}
 .ff-empty{{padding:16px 12px;color:var(--muted);font-size:13.5px;}}
-/* Below this width the three columns can't coexist: the URL column gets narrow
-   enough that word-break:break-all wraps a feed address one character per line,
-   which turned a single row several hundred pixels tall on a phone. Stacking
-   the cells gives each one the full width instead. */
-@media (max-width:720px){{
+.fs-row{{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line);}}
+.fs-row:first-child{{border-top:0;}}
+/* Below this width five columns can't coexist: the URL cell gets narrow enough
+   that word-break:break-all wraps a feed address one character per line, which
+   turned a single row several hundred pixels tall on a phone. Stacking the
+   cells gives each one the full width, with a label so the section dropdown
+   and the read-only box are still identifiable out of table context. */
+@media (max-width:820px){{
   .ff-table,.ff-table tbody,.ff-row,.ff-row>td{{display:block;width:auto;}}
-  .ff-row{{border-top:1px solid var(--line);padding:8px 0;}}
-  .ff-table tr:first-child{{border-top:0;}}
-  .ff-row>td{{border-top:0;padding:2px 12px;}}
-  .ff-actions{{text-align:left;padding-top:8px;}}
+  .ff-table thead{{display:none;}}
+  .ff-row{{border-top:1px solid var(--line);padding:10px 0;}}
+  .ff-table tbody tr:first-child{{border-top:0;}}
+  .ff-row>td{{border-top:0;padding:3px 12px;}}
+  .ff-readonly,.ff-actions{{text-align:left;}}
+  .ff-section::before{{content:"Section";display:block;font-size:11.5px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
+  .ff-readonly::before{{content:"Read only";display:block;font-size:11.5px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
@@ -18888,26 +18894,31 @@ def admin_feeds(request: Request, msg: str = "", error: str = ""):
 <p style="color:var(--muted);margin:8px 0 6px;">The RSS subscriptions behind the Reader's Feed view. This same list is the domain allowlist FP&amp;A Buddy's web search is restricted to, so a source added here becomes citable there too. Changes take effect on the next page load, with no restart or deploy needed.</p>
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
-<li><strong>Read only</strong> sections stay live in the Reader but are never proposed into the <a href="/admin/library/queue">archive queue</a>. Renaming a section has no effect on that either way.</li>
+<li><strong>Read only</strong> feeds stay live in the Reader but are never proposed into the <a href="/admin/library/queue">archive queue</a>. It's set per feed, so one source in a section can be read-only without affecting the rest.</li>
 </ul>
 {banner}{error_banner}
-{section_blocks}
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:520px;margin-top:24px;">
-  <h2 style="font-size:16px;font-weight:600;margin:0 0 14px;">Add a section</h2>
-  <form method="post" action="/admin/library/feeds/sections/new" style="display:grid;gap:12px;">
-    <div>
-      <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
-      <input type="text" name="name" required maxlength="80" placeholder="e.g. Operators"
-        style="width:100%;padding:9px 13px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;box-sizing:border-box;">
-    </div>
-    <label style="display:flex;align-items:center;gap:7px;font-size:13.5px;color:var(--ink-soft);">
-      <input type="checkbox" name="exclude_from_queue" value="1">
-      Read only, never propose to the archive queue
-    </label>
-    <div><button type="submit" class="btn" style="font-size:14px;padding:8px 18px;">+ Add section</button></div>
-  </form>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
+  <table class="ff-table">
+    <thead><tr>
+      <th style="width:22%;">Name</th><th style="width:32%;">URL</th>
+      <th style="width:17%;">Section</th><th style="width:9%;">Read only</th>
+      <th style="width:20%;text-align:right;">Actions</th>
+    </tr></thead>
+    <tbody>{feed_rows}</tbody>
+  </table>
 </div>
+
+<h2 style="font-size:17px;margin:34px 0 4px;">Manage sections</h2>
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Sections group feeds in the Reader's Sources rail. They carry no settings of their own: whether a source reaches the archive queue is set per feed in the table above.</p>
+<div style="max-width:620px;">
+{section_rows}
+</div>
+<form method="post" action="/admin/library/feeds/sections/new"
+      style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 0;">
+  <input type="text" name="name" required maxlength="80" placeholder="New section name"
+    style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;">
+  <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">+ Add section</button>
+</form>
 </div>"""
     return HTMLResponse(_page("Feeds—Library Admin", "Admin", body, authed=True))
 
@@ -18918,7 +18929,6 @@ async def admin_feeds_section_new(request: Request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
     name = (form.get("name") or "").strip()
-    exclude = bool(form.get("exclude_from_queue"))
     if not name:
         return RedirectResponse(
             f"/admin/library/feeds?error={quote('Give the section a name.')}", status_code=303)
@@ -18928,7 +18938,7 @@ async def admin_feeds_section_new(request: Request):
             return RedirectResponse(
                 f"/admin/library/feeds?error={quote(f'A section called {name} already exists.')}",
                 status_code=303)
-        lib.add_feed_section(name, exclude)
+        lib.add_feed_section(name)
         _publish_feeds(lib)
     finally:
         lib.close()
@@ -18936,13 +18946,12 @@ async def admin_feeds_section_new(request: Request):
                             status_code=303)
 
 
-@app.post("/admin/library/feeds/sections/{section_id}/edit")
-async def admin_feeds_section_edit(request: Request, section_id: int):
+@app.post("/admin/library/feeds/sections/{section_id}/rename")
+async def admin_feeds_section_rename(request: Request, section_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
     name = (form.get("name") or "").strip()
-    exclude = bool(form.get("exclude_from_queue"))
     if not name:
         return RedirectResponse(
             f"/admin/library/feeds?error={quote('A section needs a name.')}", status_code=303)
@@ -18956,11 +18965,11 @@ async def admin_feeds_section_edit(request: Request, section_id: int):
             return RedirectResponse(
                 f"/admin/library/feeds?error={quote(f'A section called {name} already exists.')}",
                 status_code=303)
-        lib.update_feed_section(section_id, name, exclude)
+        lib.rename_feed_section(section_id, name)
         _publish_feeds(lib)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Saved the {name} section.')}",
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Renamed the section to {name}.')}",
                             status_code=303)
 
 
@@ -18987,8 +18996,65 @@ def admin_feeds_section_delete(request: Request, section_id: int):
         _publish_feeds(lib)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Deleted the {name} section.')}",
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(f'Removed the {name} section.')}",
                             status_code=303)
+
+
+@app.post("/admin/library/feeds/{feed_id}/section")
+async def admin_feeds_set_section(request: Request, feed_id: int):
+    """Move a feed to another section, from the table's per-row dropdown.
+
+    Deliberately narrow: it touches section_id only and never re-writes
+    xml_url, so a feed whose URL carries a subscriber token can be regrouped
+    with no chance of the URL being rewritten in passing.
+    """
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    raw = (form.get("section_id") or "").strip()
+    lib = _lib()
+    try:
+        feed = lib.get_feed(feed_id)
+        if not feed:
+            raise HTTPException(status_code=404, detail="feed not found")
+        if not raw.isdigit() or not lib.get_feed_section(int(raw)):
+            return RedirectResponse(
+                f"/admin/library/feeds?error={quote('Pick an existing section.')}",
+                status_code=303)
+        section = lib.get_feed_section(int(raw))
+        lib.move_feed_to_section(feed_id, int(raw))
+        _publish_feeds(lib)
+        detail = f"Moved {feed['name']} to {section['name']}."
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
+
+
+@app.post("/admin/library/feeds/{feed_id}/read-only")
+async def admin_feeds_set_read_only(request: Request, feed_id: int):
+    """Toggle a feed's archive-queue eligibility from the table's checkbox.
+
+    Same narrowness as the section route: exclude_from_queue only, never the
+    URL. An unchecked box posts no field at all, which is the off state.
+    """
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    excluded = bool(form.get("exclude_from_queue"))
+    lib = _lib()
+    try:
+        feed = lib.get_feed(feed_id)
+        if not feed:
+            raise HTTPException(status_code=404, detail="feed not found")
+        lib.set_feed_excluded(feed_id, excluded)
+        # No OPML rewrite: the file has no field for this flag, and the queue
+        # reads it straight from the DB. Regenerating here would be a no-op
+        # write that only churns the file's mtime.
+        state = "read only" if excluded else "eligible for the archive queue"
+        detail = f"{feed['name']} is now {state}."
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
 
 
 @app.get("/admin/library/feeds/new", response_class=HTMLResponse)
@@ -19036,9 +19102,13 @@ async def admin_feeds_new_submit(request: Request):
     form = await request.form()
     values = {
         "name": (form.get("name") or "").strip(),
+        # .strip() removes surrounding whitespace only. The URL is otherwise
+        # stored byte for byte — no normalization, no query-string handling —
+        # because a feed URL can carry a subscriber token.
         "xml_url": (form.get("xml_url") or "").strip(),
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
+        "exclude_from_queue": bool(form.get("exclude_from_queue")),
     }
     lib = _lib()
     try:
@@ -19063,7 +19133,8 @@ async def admin_feeds_new_submit(request: Request):
 
         name = values["name"] or probe.title or values["xml_url"]
         html_url = values["html_url"] or probe.html_url
-        lib.add_feed(int(values["section_id"]), name, values["xml_url"], html_url)
+        lib.add_feed(int(values["section_id"]), name, values["xml_url"], html_url,
+                     exclude_from_queue=values["exclude_from_queue"])
         _publish_feeds(lib)
     finally:
         lib.close()
@@ -19083,7 +19154,8 @@ def admin_feeds_edit(request: Request, feed_id: int):
     if not feed:
         raise HTTPException(status_code=404, detail="feed not found")
     values = {"name": feed["name"], "xml_url": feed["xml_url"],
-              "html_url": feed["html_url"], "section_id": feed["section_id"]}
+              "html_url": feed["html_url"], "section_id": feed["section_id"],
+              "exclude_from_queue": bool(feed["exclude_from_queue"])}
     return HTMLResponse(_page("Edit feed—Library Admin", "Admin",
                               _feed_form_page(f'Edit {feed["name"]}',
                                               f"/admin/library/feeds/{feed_id}/edit",
@@ -19098,9 +19170,11 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
     form = await request.form()
     values = {
         "name": (form.get("name") or "").strip(),
+        # Verbatim apart from surrounding whitespace — see the add route.
         "xml_url": (form.get("xml_url") or "").strip(),
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
+        "exclude_from_queue": bool(form.get("exclude_from_queue")),
     }
     lib = _lib()
     try:
@@ -19137,7 +19211,8 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
             html_url = values["html_url"] or probe.html_url
 
         lib.update_feed(feed_id, int(values["section_id"]), values["name"],
-                        values["xml_url"], html_url)
+                        values["xml_url"], html_url,
+                        exclude_from_queue=values["exclude_from_queue"])
         _publish_feeds(lib)
         saved_name = values["name"]
     finally:

@@ -57,11 +57,17 @@ def test_seed_imports_every_section_and_feed(lib):
         "News", "Market Insights", "Blogs", "Tools", "Substacks"]
 
 
-def test_seed_marks_only_news_excluded_from_queue(lib):
+def test_seed_marks_only_the_two_news_feeds_read_only(lib):
     """Preserves the exact pre-migration behavior of QUEUE_EXCLUDE_CATEGORIES,
-    which defaulted to {"News"}."""
+    which defaulted to {"News"} — now expressed per feed rather than per
+    section, so the set of excluded SOURCES must come out identical."""
     lib.seed_feeds_from_opml(REPO_OPML)
-    assert lib.excluded_feed_section_names() == {"News"}
+    assert lib.excluded_feed_urls() == {
+        "https://news.crunchbase.com/sections/enterprise/feed/",
+        "https://techcrunch.com/enterprise/feed/",
+    }
+    excluded_names = {f["name"] for f in lib.list_feeds() if f["exclude_from_queue"]}
+    assert excluded_names == {"Enterprise Archives - Crunchbase News", "TechCrunch"}
 
 
 def test_seed_runs_once_and_never_resurrects_a_deleted_feed(seeded):
@@ -186,17 +192,36 @@ def test_delete_section_succeeds_once_empty(seeded):
 
 
 def test_renaming_a_section_does_not_change_queue_exclusion(seeded):
-    """The whole point of moving exclusion out of a name-matched env var."""
+    """The whole point of moving exclusion off a name match."""
+    before = seeded.excluded_feed_urls()
     news = [s for s in seeded.list_feed_sections() if s["name"] == "News"][0]
-    seeded.update_feed_section(news["id"], "Headlines", exclude_from_queue=True)
-    assert seeded.excluded_feed_section_names() == {"Headlines"}
+    seeded.rename_feed_section(news["id"], "Headlines")
+    assert seeded.excluded_feed_urls() == before
 
 
-def test_excluded_sections_fall_back_to_the_legacy_default_when_unseeded(lib):
-    """An unseeded DB reporting "nothing is excluded" would start funnelling
-    News into the archive queue — a silent behavior change in the wrong
-    direction."""
-    assert lib.excluded_feed_section_names() == {"News"}
+def test_moving_a_feed_between_sections_does_not_change_its_exclusion(seeded):
+    """Exclusion belongs to the feed, so regrouping must not disturb it."""
+    feed = [f for f in seeded.list_feeds() if f["exclude_from_queue"]][0]
+    target = [s for s in seeded.list_feed_sections() if s["name"] == "Blogs"][0]
+    seeded.move_feed_to_section(feed["id"], target["id"])
+    assert seeded.get_feed(feed["id"])["exclude_from_queue"] == 1
+    assert feed["xml_url"] in seeded.excluded_feed_urls()
+
+
+def test_one_feed_can_be_read_only_without_its_section_mates(seeded):
+    blogs = [s for s in seeded.list_feed_sections() if s["name"] == "Blogs"][0]
+    in_blogs = seeded.list_feeds(section_id=blogs["id"])
+    seeded.set_feed_excluded(in_blogs[0]["id"], True)
+    still_eligible = [f for f in seeded.list_feeds(section_id=blogs["id"])
+                      if not f["exclude_from_queue"]]
+    assert len(still_eligible) == len(in_blogs) - 1
+
+
+def test_unseeded_db_is_distinguishable_from_nothing_excluded(lib):
+    """An unseeded DB reporting an empty exclusion set would start funnelling
+    News into the archive queue. has_feeds() is what separates the two."""
+    assert lib.has_feeds() is False
+    assert lib.excluded_feed_urls() == set()
 
 
 def test_moving_a_feed_between_sections_moves_it_in_the_opml(seeded, tmp_path):
@@ -209,6 +234,106 @@ def test_moving_a_feed_between_sections_moves_it_in_the_opml(seeded, tmp_path):
     seeded.write_opml(str(out))
     moved = [f for f in parse_opml(str(out)) if f.xml_url == feed["xml_url"]][0]
     assert moved.category == target["name"]
+
+
+# ---------------------------------------------------------------------------
+# Verbatim URL round trip
+#
+# Some feeds are paid subscriptions whose feed URL carries a per-subscriber
+# token. Nothing in the seed -> DB -> OPML path may normalize, trim, re-encode,
+# or otherwise touch that string: a rewritten token is a silently dead feed.
+#
+# Note on the current data: as of this writing NO feed in preferred_sites.opml
+# actually has a query string — Mostly Metrics is stored as the plain
+# https://www.mostlymetrics.com/feed, and its paywall is handled by a cookie
+# (LINKLIB_AUTH_COOKIES, applied in extract.fetch_page), not by a URL token.
+# These tests therefore pin both: the real stored string, and a synthetic
+# tokenized URL that proves the guarantee holds if one is ever added.
+# ---------------------------------------------------------------------------
+
+MOSTLY_METRICS_URL = "https://www.mostlymetrics.com/feed"
+
+TOKENIZED = ("https://www.example-paid.com/feed?auth_token=abc123XYZ"
+             "&user_id=42&format=rss")
+
+
+def test_mostly_metrics_url_survives_seed_to_db_to_opml_unchanged(lib, tmp_path):
+    """Pins the exact stored string end to end."""
+    stored_in_file = [f.xml_url for f in parse_opml(REPO_OPML)
+                      if "mostlymetrics" in f.xml_url]
+    assert stored_in_file == [MOSTLY_METRICS_URL]
+
+    lib.seed_feeds_from_opml(REPO_OPML)
+    in_db = lib.find_feed_by_url(MOSTLY_METRICS_URL)
+    assert in_db is not None
+    assert in_db["xml_url"] == MOSTLY_METRICS_URL
+
+    out = tmp_path / "gen.opml"
+    lib.write_opml(str(out))
+    regenerated = [f.xml_url for f in parse_opml(str(out))
+                   if "mostlymetrics" in f.xml_url]
+    assert regenerated == [MOSTLY_METRICS_URL]
+
+
+def test_a_tokenized_url_round_trips_through_db_and_opml_exactly(lib, tmp_path):
+    sid = lib.add_feed_section("Paid")
+    lib.add_feed(sid, "Paid Newsletter", TOKENIZED, "https://www.example-paid.com/")
+
+    assert lib.find_feed_by_url(TOKENIZED)["xml_url"] == TOKENIZED
+
+    out = tmp_path / "gen.opml"
+    lib.write_opml(str(out))
+    from_file = [f.xml_url for f in parse_opml(str(out))]
+    assert TOKENIZED in from_file, from_file
+
+
+def test_editing_a_feeds_name_leaves_a_tokenized_url_untouched(lib, tmp_path):
+    sid = lib.add_feed_section("Paid")
+    fid = lib.add_feed(sid, "Paid Newsletter", TOKENIZED, "https://www.example-paid.com/")
+
+    feed = lib.get_feed(fid)
+    lib.update_feed(fid, sid, "Renamed", feed["xml_url"], feed["html_url"])
+
+    assert lib.get_feed(fid)["xml_url"] == TOKENIZED
+
+
+def test_moving_a_feed_between_sections_never_rewrites_its_url(lib):
+    """move_feed_to_section touches section_id only, so the table's per-row
+    dropdown can't disturb a token."""
+    a = lib.add_feed_section("Paid")
+    b = lib.add_feed_section("Other")
+    fid = lib.add_feed(a, "Paid Newsletter", TOKENIZED)
+
+    lib.move_feed_to_section(fid, b)
+
+    assert lib.get_feed(fid)["xml_url"] == TOKENIZED
+
+
+def test_read_only_toggle_never_rewrites_the_url(lib):
+    sid = lib.add_feed_section("Paid")
+    fid = lib.add_feed(sid, "Paid Newsletter", TOKENIZED)
+
+    lib.set_feed_excluded(fid, True)
+
+    assert lib.get_feed(fid)["xml_url"] == TOKENIZED
+
+
+def test_probe_does_not_reject_a_url_carrying_a_token(monkeypatch):
+    """Validation must not treat query params as malformed."""
+    xml = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+      <title>Paid Newsletter</title><link>https://www.example-paid.com/</link>
+    </channel></rss>"""
+    seen = {}
+
+    def _fake_get(url, *a, **k):
+        seen["url"] = url
+        return _FakeResponse(xml)
+
+    monkeypatch.setattr("linklib.feed.requests.get", _fake_get)
+    result = probe_feed(TOKENIZED)
+    assert result.ok is True
+    # The probe must request the URL exactly as given, token intact.
+    assert seen["url"] == TOKENIZED
 
 
 # ---------------------------------------------------------------------------
@@ -330,13 +455,55 @@ def test_feeds_page_requires_admin(app_env):
     assert "/login" in resp.headers["location"]
 
 
-def test_feeds_page_lists_every_section_and_feed(app_env):
+def test_feeds_page_lists_every_feed_in_one_flat_table(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
     for section in ("News", "Market Insights", "Blogs", "Tools", "Substacks"):
-        assert section in html
+        assert section in html           # as dropdown options and section rows
     assert "Mostly Metrics (CJ Gustafson)" in html
-    assert "Not queued" in html          # the News exclusion badge
+    # One table, one row per feed — not a bordered box per section.
+    assert html.count('class="ff-row"') == len(parse_opml(REPO_OPML))
+    assert "Manage sections" in html
+
+
+def test_feeds_page_shows_the_mostly_metrics_url_exactly(app_env):
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds").text
+    assert MOSTLY_METRICS_URL in html
+
+
+def test_row_dropdown_moves_a_feed_and_row_checkbox_sets_read_only(app_env):
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = [f for f in lib.list_feeds() if not f["exclude_from_queue"]][0]
+            target = [s for s in lib.list_feed_sections()
+                      if s["id"] != feed["section_id"]][0]
+        finally:
+            lib.close()
+
+        client.post(f"/admin/library/feeds/{feed['id']}/section",
+                    data={"section_id": str(target["id"])}, follow_redirects=False)
+        client.post(f"/admin/library/feeds/{feed['id']}/read-only",
+                    data={"exclude_from_queue": "1"}, follow_redirects=False)
+
+        lib = app_env._lib()
+        try:
+            moved = lib.get_feed(feed["id"])
+            assert moved["section_id"] == target["id"]
+            assert moved["exclude_from_queue"] == 1
+            assert moved["xml_url"] == feed["xml_url"]   # never rewritten
+        finally:
+            lib.close()
+
+        # Unchecked posts no field at all, which is the off state.
+        client.post(f"/admin/library/feeds/{feed['id']}/read-only",
+                    data={}, follow_redirects=False)
+        lib = app_env._lib()
+        try:
+            assert lib.get_feed(feed["id"])["exclude_from_queue"] == 0
+        finally:
+            lib.close()
 
 
 def test_add_feed_writes_through_to_the_opml_file(app_env, monkeypatch):
@@ -456,23 +623,20 @@ def test_delete_section_is_blocked_while_it_holds_feeds(app_env):
 def test_section_crud_round_trip(app_env):
     with _client(app_env) as client:
         client.post("/admin/library/feeds/sections/new",
-                    data={"name": "Operators", "exclude_from_queue": "1"},
-                    follow_redirects=False)
+                    data={"name": "Operators"}, follow_redirects=False)
         lib = app_env._lib()
         try:
             created = [s for s in lib.list_feed_sections() if s["name"] == "Operators"][0]
-            assert created["exclude_from_queue"] == 1
+            # Sections carry no settings of their own any more.
+            assert "exclude_from_queue" not in created
         finally:
             lib.close()
 
-        client.post(f"/admin/library/feeds/sections/{created['id']}/edit",
+        client.post(f"/admin/library/feeds/sections/{created['id']}/rename",
                     data={"name": "Operator blogs"}, follow_redirects=False)
         lib = app_env._lib()
         try:
-            renamed = lib.get_feed_section(created["id"])
-            assert renamed["name"] == "Operator blogs"
-            # Unchecked box means the section is queue-eligible again.
-            assert renamed["exclude_from_queue"] == 0
+            assert lib.get_feed_section(created["id"])["name"] == "Operator blogs"
         finally:
             lib.close()
 
@@ -490,3 +654,80 @@ def test_duplicate_section_name_is_rejected(app_env):
         resp = client.post("/admin/library/feeds/sections/new",
                            data={"name": "blogs"}, follow_redirects=False)
     assert "error=" in resp.headers["location"]
+
+
+# ---------------------------------------------------------------------------
+# Archive-queue exclusion (replaces QUEUE_EXCLUDE_CATEGORIES)
+# ---------------------------------------------------------------------------
+
+def _fake_items():
+    """Two News items and one Blogs item, shaped like feed.get_feed_items output."""
+    return ([
+        {"url": "https://news.crunchbase.com/a", "title": "CB", "source": "Crunchbase",
+         "category": "News", "feed_url": "https://news.crunchbase.com/sections/enterprise/feed/"},
+        {"url": "https://techcrunch.com/b", "title": "TC", "source": "TechCrunch",
+         "category": "News", "feed_url": "https://techcrunch.com/enterprise/feed/"},
+        {"url": "https://kellblog.com/c", "title": "Kell", "source": "Kellblog",
+         "category": "Blogs", "feed_url": "http://kellblog.com/feed/"},
+    ], [])
+
+
+def test_queue_scan_skips_read_only_feeds_and_keeps_the_rest(seeded, monkeypatch):
+    from linklib import queue as qmod
+
+    monkeypatch.setattr("linklib.feed.get_feed_items", lambda *a, **k: _fake_items())
+    queued = []
+    monkeypatch.setattr(qmod, "_enrich_candidate",
+                        lambda item, vocab, **k: dict(url=item["url"], title="", source="",
+                                                      summary="", content="", suggested_tags=[],
+                                                      published_at=None, origin="feed",
+                                                      enriched=False, enrich_model="",
+                                                      enrich_rules="", in_scope=True,
+                                                      input_tokens=0, output_tokens=0,
+                                                      cost_usd=0.0))
+    monkeypatch.setattr(seeded, "add_to_queue",
+                        lambda **kw: (queued.append(kw["url"]), True)[1])
+
+    stats = qmod.scan_feed_into_queue(seeded, "ignored.opml", enrich=False)
+
+    assert stats["scanned"] == 3
+    assert queued == ["https://kellblog.com/c"]   # both News feeds skipped
+
+
+def test_queue_scan_follows_the_feed_not_the_section_name(seeded, monkeypatch):
+    """Renaming News, or moving a News feed into Blogs, must not change what
+    the queue skips — the old name-matched set got this wrong."""
+    from linklib import queue as qmod
+
+    news_section = [s for s in seeded.list_feed_sections() if s["name"] == "News"][0]
+    blogs = [s for s in seeded.list_feed_sections() if s["name"] == "Blogs"][0]
+    tc = seeded.find_feed_by_url("https://techcrunch.com/enterprise/feed/")
+    seeded.move_feed_to_section(tc["id"], blogs["id"])
+    seeded.rename_feed_section(news_section["id"], "Headlines")
+
+    monkeypatch.setattr("linklib.feed.get_feed_items", lambda *a, **k: _fake_items())
+    queued = []
+    monkeypatch.setattr(qmod, "_enrich_candidate",
+                        lambda item, vocab, **k: dict(url=item["url"], title="", source="",
+                                                      summary="", content="", suggested_tags=[],
+                                                      published_at=None, origin="feed",
+                                                      enriched=False, enrich_model="",
+                                                      enrich_rules="", in_scope=True,
+                                                      input_tokens=0, output_tokens=0,
+                                                      cost_usd=0.0))
+    monkeypatch.setattr(seeded, "add_to_queue",
+                        lambda **kw: (queued.append(kw["url"]), True)[1])
+
+    qmod.scan_feed_into_queue(seeded, "ignored.opml", enrich=False)
+
+    assert queued == ["https://kellblog.com/c"]
+
+
+def test_sitemap_sweep_skips_read_only_feeds(seeded):
+    from linklib import queue as qmod
+    from linklib.feed import parse_opml as _parse
+
+    feeds = _parse(REPO_OPML)
+    report = qmod.scan_sitemaps_into_queue(seeded, feeds, "2020-01-01", dry_run=True)
+    skipped = [r["source"] for r in report if "read-only" in r.get("note", "")]
+    assert set(skipped) == {"Enterprise Archives - Crunchbase News", "TechCrunch"}

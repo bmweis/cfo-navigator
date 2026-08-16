@@ -158,13 +158,26 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   regenerated file with a stale cache leaves FP&A Buddy's allowlist wrong until the
   next deploy with no error anywhere, and making the two inseparable means no write
   path can forget one; (4) **`QUEUE_EXCLUDE_CATEGORIES` is retired** in favor of
-  `feed_sections.exclude_from_queue`, a stored per-section boolean — the old set was
-  built from `LINKLIB_QUEUE_EXCLUDE_CATEGORIES` (env var, now unused) and matched
-  against a section's *name*, so once sections became renameable, renaming "News" would
-  have silently started funnelling News into the archive queue.
-  `Library.excluded_feed_section_names()` falls back to the legacy `{"News"}` when the
-  table is empty, so an unseeded DB keeps the pre-migration behavior instead of
-  defaulting to "nothing is excluded." Adding a feed validates it server-side first
+  `feeds.exclude_from_queue`, a stored per-FEED boolean — the old set was built from
+  `LINKLIB_QUEUE_EXCLUDE_CATEGORIES` (env var, now unused) and matched against a
+  section's *name*, so once sections became renameable, renaming "News" would have
+  silently started funnelling News into the archive queue. It's per feed rather than
+  per section because a section is a display grouping while queue eligibility is a
+  judgment about the individual source, so one feed can be read-only without dragging
+  its section-mates along and moving a feed between sections can't change it.
+  `scan_feed_into_queue` matches each item to its originating feed via the `feed_url`
+  key now carried on every item by `feed.get_feed_items`, not the `category` string;
+  `queue._excluded_feed_urls()` falls back to the two original News feed URLs when
+  `Library.has_feeds()` is False, so an unseeded DB keeps the pre-migration behavior
+  instead of defaulting to "nothing is excluded." **A feed's `xml_url` is stored and
+  regenerated verbatim** (only `.strip()` for surrounding whitespace) because a paid
+  subscription's feed URL can carry a per-subscriber token, and a normalized token is a
+  silently dead feed; the per-row section dropdown and read-only checkbox are backed by
+  deliberately narrow one-column update methods (`move_feed_to_section`,
+  `set_feed_excluded`) so neither can rewrite a URL in passing. **Sections are pure
+  grouping** — one flat feed table on the page, with a separate "Manage sections" area
+  for add/rename/remove and no per-section settings at all. Adding a feed validates it
+  server-side first
   (`feed.probe_feed()`), rejecting Feedly proxy links by name since those save cleanly
   and then produce nothing forever; editing re-probes only when the URL actually
   changed, so a rename doesn't fail because the source is down that day. **Known

@@ -1067,31 +1067,43 @@ CREATE TABLE IF NOT EXISTS tool_name_dedupe_decisions (
 --   queue.scan_feed_into_queue -> the ongoing feed scan into the archive queue
 --   authcheck              -> picks a probe URL per paywalled domain
 --
--- exclude_from_queue replaces the old QUEUE_EXCLUDE_CATEGORIES string-match
--- set (a name-matched env var). Exclusion is now a stored property of the
--- section, so renaming a section no longer silently changes which sources
--- reach the archive queue. Seeded 1 for "News" only, preserving the exact
--- pre-migration behavior.
+-- Sections are pure grouping: a name and an order, nothing else. Read-only
+-- (exclude_from_queue) deliberately lives on `feeds`, not here — see that
+-- table's comment.
 CREATE TABLE IF NOT EXISTS feed_sections (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    name               TEXT NOT NULL UNIQUE,
-    exclude_from_queue INTEGER NOT NULL DEFAULT 0,  -- 1 = read in the Reader, never proposed to the queue
-    display_order      INTEGER NOT NULL DEFAULT 0,
-    created_at         TEXT NOT NULL DEFAULT ''
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL UNIQUE,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT ''
 );
 
 -- One row per RSS/Atom subscription. xml_url is the natural key (the same
 -- feed can't be subscribed twice); html_url is the publication's own site,
 -- used by the historical sitemap sweep and by preferred_domains, which
 -- prefers it over xml_url when building the allowlist.
+--
+-- exclude_from_queue replaces the old QUEUE_EXCLUDE_CATEGORIES string-match
+-- set (a name-matched env var). It's per-FEED rather than per-section: a
+-- section is a display grouping, and "should this source be proposed into the
+-- archive queue" is a judgment about the source itself, so one feed in a
+-- section can be read-only without dragging its neighbours along. Because it's
+-- stored rather than matched on a name, renaming a section (or moving a feed
+-- between sections) can't silently change which sources reach the queue.
+-- Seeded 1 for the two feeds that were in the "News" section, preserving the
+-- exact pre-migration behavior.
+--
+-- NOTE: xml_url is stored and regenerated verbatim. Some feeds carry a
+-- subscriber token in the URL; nothing in the add/edit path may normalize,
+-- trim, or rewrite it. See the round-trip test in tests/test_feed_management.py.
 CREATE TABLE IF NOT EXISTS feeds (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    section_id    INTEGER NOT NULL REFERENCES feed_sections(id),
-    name          TEXT NOT NULL,
-    xml_url       TEXT NOT NULL UNIQUE,
-    html_url      TEXT NOT NULL DEFAULT '',
-    display_order INTEGER NOT NULL DEFAULT 0,
-    created_at    TEXT NOT NULL DEFAULT ''
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    section_id         INTEGER NOT NULL REFERENCES feed_sections(id),
+    name               TEXT NOT NULL,
+    xml_url            TEXT NOT NULL UNIQUE,
+    html_url           TEXT NOT NULL DEFAULT '',
+    exclude_from_queue INTEGER NOT NULL DEFAULT 0,  -- 1 = read in the Reader, never proposed to the queue
+    display_order      INTEGER NOT NULL DEFAULT 0,
+    created_at         TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -5622,12 +5634,12 @@ class Library:
         return dict(row) if row else None
 
     def list_feeds(self, section_id: Optional[int] = None) -> list[dict]:
-        """Every feed, newest sections first, with its section name attached.
+        """Every feed, in section order, with its section name attached.
 
         Ordered to match the OPML's own document order so write_opml() and the
         admin list render the same sequence.
         """
-        sql = ("SELECT f.*, s.name AS section_name, s.exclude_from_queue, "
+        sql = ("SELECT f.*, s.name AS section_name, "
                "       s.display_order AS section_display_order "
                "FROM feeds f JOIN feed_sections s ON s.id = f.section_id ")
         params: list = []
@@ -5657,34 +5669,43 @@ class Library:
             "SELECT COUNT(*) FROM feeds WHERE section_id = ?", (section_id,)
         ).fetchone()[0]
 
-    def excluded_feed_section_names(self) -> set[str]:
-        """Section names whose feeds are read in the Reader but never proposed
-        into the archive queue. Replaces QUEUE_EXCLUDE_CATEGORIES."""
+    def excluded_feed_urls(self) -> set[str]:
+        """`xml_url` of every feed that's read in the Reader but never proposed
+        into the archive queue. Replaces QUEUE_EXCLUDE_CATEGORIES.
+
+        Keyed on xml_url rather than feed name because names aren't unique and
+        are freely editable, while xml_url is the table's natural key — so the
+        queue's lookup can't be broken by a rename.
+        """
         rows = self.conn.execute(
-            "SELECT name FROM feed_sections WHERE exclude_from_queue = 1"
+            "SELECT xml_url FROM feeds WHERE exclude_from_queue = 1"
         ).fetchall()
-        if not self.conn.execute("SELECT 1 FROM feed_sections LIMIT 1").fetchone():
-            return set(self._LEGACY_QUEUE_EXCLUDED_SECTIONS)
         return {r[0] for r in rows}
 
-    def add_feed_section(self, name: str, exclude_from_queue: bool = False) -> int:
+    def has_feeds(self) -> bool:
+        """Whether the subscription tables have been populated at all.
+
+        Callers use this to decide whether `excluded_feed_urls()` is
+        authoritative: on an unseeded DB it returns an empty set, which is
+        indistinguishable from "nothing is excluded" and would start
+        funnelling News into the archive queue.
+        """
+        return self.conn.execute("SELECT 1 FROM feeds LIMIT 1").fetchone() is not None
+
+    def add_feed_section(self, name: str) -> int:
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(display_order), -1) + 1 FROM feed_sections"
         ).fetchone()[0]
         cur = self.conn.execute(
-            "INSERT INTO feed_sections (name, exclude_from_queue, display_order, created_at) "
-            "VALUES (?,?,?,?)",
-            (name.strip(), int(bool(exclude_from_queue)), next_order, _now()),
+            "INSERT INTO feed_sections (name, display_order, created_at) VALUES (?,?,?)",
+            (name.strip(), next_order, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
 
-    def update_feed_section(self, section_id: int, name: str,
-                            exclude_from_queue: bool) -> None:
-        self.conn.execute(
-            "UPDATE feed_sections SET name=?, exclude_from_queue=? WHERE id=?",
-            (name.strip(), int(bool(exclude_from_queue)), section_id),
-        )
+    def rename_feed_section(self, section_id: int, name: str) -> None:
+        self.conn.execute("UPDATE feed_sections SET name=? WHERE id=?",
+                          (name.strip(), section_id))
         self.conn.commit()
 
     def delete_feed_section(self, section_id: int) -> None:
@@ -5698,26 +5719,46 @@ class Library:
         self.conn.commit()
 
     def add_feed(self, section_id: int, name: str, xml_url: str,
-                 html_url: str = "") -> int:
+                 html_url: str = "", exclude_from_queue: bool = False) -> int:
+        """Store a feed. `xml_url` is written verbatim apart from surrounding
+        whitespace — no normalization, no query-string handling. A feed URL can
+        carry a subscriber token, and rewriting one silently breaks the feed."""
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(display_order), -1) + 1 FROM feeds WHERE section_id = ?",
             (section_id,),
         ).fetchone()[0]
         cur = self.conn.execute(
-            "INSERT INTO feeds (section_id, name, xml_url, html_url, display_order, created_at) "
-            "VALUES (?,?,?,?,?,?)",
+            "INSERT INTO feeds (section_id, name, xml_url, html_url, exclude_from_queue, "
+            "display_order, created_at) VALUES (?,?,?,?,?,?,?)",
             (section_id, name.strip(), xml_url.strip(), html_url.strip(),
-             next_order, _now()),
+             int(bool(exclude_from_queue)), next_order, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
 
     def update_feed(self, feed_id: int, section_id: int, name: str,
-                    xml_url: str, html_url: str) -> None:
+                    xml_url: str, html_url: str,
+                    exclude_from_queue: bool = False) -> None:
+        """Same verbatim-URL guarantee as add_feed — see its docstring."""
         self.conn.execute(
-            "UPDATE feeds SET section_id=?, name=?, xml_url=?, html_url=? WHERE id=?",
-            (section_id, name.strip(), xml_url.strip(), html_url.strip(), feed_id),
+            "UPDATE feeds SET section_id=?, name=?, xml_url=?, html_url=?, "
+            "exclude_from_queue=? WHERE id=?",
+            (section_id, name.strip(), xml_url.strip(), html_url.strip(),
+             int(bool(exclude_from_queue)), feed_id),
         )
+        self.conn.commit()
+
+    def move_feed_to_section(self, feed_id: int, section_id: int) -> None:
+        """Regroup a feed. Touches section_id only — never the URL, so a feed
+        carrying a subscriber token can be moved with no risk of a rewrite."""
+        self.conn.execute("UPDATE feeds SET section_id=? WHERE id=?",
+                          (section_id, feed_id))
+        self.conn.commit()
+
+    def set_feed_excluded(self, feed_id: int, excluded: bool) -> None:
+        """Toggle read-only straight from the feed table's row control."""
+        self.conn.execute("UPDATE feeds SET exclude_from_queue=? WHERE id=?",
+                          (int(bool(excluded)), feed_id))
         self.conn.commit()
 
     def delete_feed(self, feed_id: int) -> None:
@@ -5840,13 +5881,16 @@ class Library:
         for meta in metas:
             cat = meta.category or "Other"
             if cat not in section_ids:
-                section_ids[cat] = self.add_feed_section(
-                    cat, exclude_from_queue=cat in self._LEGACY_QUEUE_EXCLUDED_SECTIONS)
+                section_ids[cat] = self.add_feed_section(cat)
                 new_sections += 1
             if self.find_feed_by_url(meta.xml_url):
                 continue
+            # Every feed that was in a previously-excluded SECTION becomes an
+            # excluded FEED, so the queue sees exactly the same set of sources
+            # before and after the move. meta.xml_url goes in untouched.
             self.add_feed(section_ids[cat], meta.name or meta.xml_url,
-                          meta.xml_url, meta.html_url or "")
+                          meta.xml_url, meta.html_url or "",
+                          exclude_from_queue=cat in self._LEGACY_QUEUE_EXCLUDED_SECTIONS)
             new_feeds += 1
 
         self.set_setting("feeds_seeded_from_opml", "1")
