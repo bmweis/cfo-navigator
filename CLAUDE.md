@@ -622,6 +622,32 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   verification, mobile viewports included, for every UI-facing change going
   forward) — the mobile bug above is exactly the kind of thing a desktop-only
   verification pass structurally cannot catch.
+- **Reader search moves from the left rail into the list-pane header —
+  correcting Phase 5 drift, not redesigning.** Both views' search boxes had
+  been rendering in the left rail since the Phase 5 merge. Investigation
+  (prompted by Brian noticing it didn't match the old Archive page) found no
+  commit anywhere that evaluated the placement: the pre-merge Archive page put
+  search in a page-width bar directly above the list with no rail at all;
+  Phase 5's own ARCHITECTURE.md describes Saved search under its **middle list
+  pane** bullet while its exhaustive left-rail inventory never mentions search
+  — and the same commit's code put it in the rail; the mechanism was assignment
+  to a variable named `sources_html`, which exists for Feed's Sources tree and
+  only ever lands in `rail_html`; and the Feed search box's CSS carried the
+  *list pane's* 22px gutter while rendering in a rail whose gutter is 14px.
+  That last one is the tell worth remembering — **a component styled for a
+  container it isn't in is good evidence it was moved without being
+  reconsidered.** Only placement changed: Feed keeps client-side
+  `rrApplyFilter`, Saved keeps its server GET, and the rail keeps the Sources
+  tree and tag bar (filter vocabularies, not search), with the Saved rail's
+  now-orphaned "Search" heading relabelled "Tags" to match Feed's "Sources".
+  **Caveat kept in the docs rather than glossed:** `Feed.dc.html` isn't in the
+  repo and `/design-login` is unavailable headless, so this rests on git
+  archaeology plus every second-hand account of that file (all of which put its
+  magnifying glass in the list-pane header) — testimony about the design file,
+  not the file itself. Test note: `tests/test_reader_search_placement.py`
+  asserts **DOM ancestry, not geometry** — on the stacked mobile layout the
+  rail and list pane both span the full width, so a bounding-box containment
+  check passes for either and proves nothing.
 - **Phase 5b — Reader content backfill: reprocessing the ~4,500 already-saved
   articles for real structure, not just live fetches.** The Reader
   follow-up pass above shipped `extract_reader_html()`, but it only ever ran
