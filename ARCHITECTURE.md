@@ -2471,6 +2471,25 @@ sections could only be changed by hand-editing `preferred_sites.opml` and
 deploying. See §2, "Feed subscriptions" for the tables and §4 for why the OPML
 file is generated rather than edited.
 
+**Subscriber-access re-check lives here.** The "Re-check subscriber access"
+control sits at the top of this page, above the H1. It moved from
+`/admin/library` once this page existed: it probes a recent post per paywalled
+source (`authcheck.check_auth_cookies`) to confirm that source's subscriber
+cookie still fetches full text, which is feed-specific work. Only rendered when
+`LINKLIB_AUTH_COOKIES` is configured; dormant otherwise.
+
+`POST /admin/auth/recheck` keeps its path — the Reader's own subscriber-access
+banner posts to it as well, and the path isn't library-page-specific, so moving
+it under `/admin/library/feeds/...` would make that second caller read oddly.
+Only its redirect target moved, from `/admin/library` to `/admin/library/feeds`.
+
+*What the check actually probes, traced live:* for a configured domain it reads
+the OPML to find that domain's feed, requests **the stored feed URL verbatim**,
+takes the first item's article URL from the result, and probes **that article
+URL** with the cookie attached. So the feed URL is the input it routes through,
+not the thing it fetches for the access test — see the Mostly Metrics note in
+§4.
+
 **Layout: one flat feed table, plus a separate sections area.** `GET
 /admin/library/feeds` renders every feed as a row in a single table (Name, URL,
 Section, Read only, Edit, Remove) rather than grouping them into a bordered box
@@ -2739,6 +2758,19 @@ recorded anywhere, it's flagged rather than invented.
   string as ordinary. Covered by round-trip tests in
   `tests/test_feed_management.py` against both the real stored URLs and a
   synthetic tokenized one.
+- **The Mostly Metrics feed carries no token, and the subscriber-access check
+  confirms the stored URL is used verbatim.** A lot of care in this build went
+  into guaranteeing a tokenized feed URL would survive seed -> DB -> OPML
+  regeneration untouched. Worth recording plainly: **no feed in
+  `preferred_sites.opml` has a query string at all**, Mostly Metrics included —
+  it is stored as `https://www.mostlymetrics.com/feed` (34 characters). Its
+  paywall is handled by a **cookie** (`LINKLIB_AUTH_COOKIES`, applied by
+  `extract.fetch_page` on article pages), not by anything in the feed URL. The
+  verbatim-URL guarantee is built and tested regardless, so it holds if a
+  tokenized URL is ever added. Tracing `authcheck.check_auth_cookies` with its
+  outbound requests recorded shows it requesting exactly
+  `https://www.mostlymetrics.com/feed` — character-for-character the value in
+  the `feeds` table — before probing a discovered article URL with the cookie.
 - **Adding a feed validates the URL server-side before saving.**
   `feed.probe_feed()` fetches the candidate and confirms it parses as RSS or
   Atom, and rejects `feedly.com/web/...` proxy links by name. *Why the special

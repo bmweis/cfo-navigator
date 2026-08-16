@@ -18366,7 +18366,11 @@ def admin_checks(request: Request):
 
 
 def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:
-    """Subscriber-cookie status control, shown on /admin/library. Only rendered
+    """Subscriber-cookie status control, shown at the top of
+    /admin/library/feeds. It's a feed-specific tool — it probes a recent post
+    per paywalled source to confirm that source's subscriber cookie still
+    fetches full text — so it lives with feed management rather than on the
+    Library hub, where it sat before the Feeds page existed. Only rendered
     when LINKLIB_AUTH_COOKIES is set. Kicks a background re-check when the
     stored status is missing or stale.
 
@@ -18558,11 +18562,9 @@ def admin_page(request: Request):
 
 
 @app.get("/admin/library", response_class=HTMLResponse)
-def admin_library(request: Request, background_tasks: BackgroundTasks):
+def admin_library(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-
-    auth_banner = _auth_cookie_banner(request, background_tasks)
 
     from webapp import tasks as _tasks
     lib = _lib()
@@ -18776,7 +18778,6 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
   <h1 style="margin:0;">Library</h1>
   {open_reader_button}
 </div>
-{auth_banner}
 <p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
 {flow_html}
 <div class="lib-cols">
@@ -18853,9 +18854,11 @@ def _feed_form_fields(sections: list, values: dict) -> str:
 
 
 @app.get("/admin/library/feeds", response_class=HTMLResponse)
-def admin_feeds(request: Request, msg: str = "", error: str = ""):
+def admin_feeds(request: Request, background_tasks: BackgroundTasks,
+                msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
+    auth_banner = _auth_cookie_banner(request, background_tasks)
     lib = _lib()
     try:
         sections = lib.list_feed_sections()
@@ -18991,6 +18994,7 @@ def admin_feeds(request: Request, msg: str = "", error: str = ""):
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+{auth_banner}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;flex-wrap:wrap;">
   <h1 style="margin:0;">Feeds</h1>
   <a href="/admin/library/feeds/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add feed</a>
@@ -19371,7 +19375,12 @@ def admin_auth_recheck(request: Request):
         authcheck.check_auth_cookies(lib, OPML_PATH)
     finally:
         lib.close()
-    return RedirectResponse("/admin/library", status_code=303)
+    # Redirects to Feeds, where the control now lives. The PATH is deliberately
+    # unchanged: the Reader's own subscriber-access banner posts here too (see
+    # the fetch() in the reader shell), and /admin/auth/recheck isn't
+    # library-page-specific, so moving it under /admin/library/feeds/... would
+    # make that second caller read oddly for no gain.
+    return RedirectResponse("/admin/library/feeds", status_code=303)
 
 
 # ---------------------------------------------------------------------------

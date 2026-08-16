@@ -446,6 +446,43 @@ def test_startup_hook_seeds_the_tables(app_env):
             lib.close()
 
 
+def test_subscriber_access_control_lives_on_the_feeds_page(monkeypatch, tmp_path):
+    """Relocated from /admin/library: it probes a recent post per paywalled
+    source, so it belongs with feed management. Only renders when
+    LINKLIB_AUTH_COOKIES is configured."""
+    import importlib
+    import json as _json
+    import webapp.app as appmod
+
+    opml = tmp_path / "sites.opml"
+    shutil.copy(REPO_OPML, opml)
+    monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "auth.db"))
+    monkeypatch.setenv("LINKLIB_SITES_OPML", str(opml))
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    monkeypatch.setenv("LINKLIB_AUTH_COOKIES",
+                       _json.dumps({"mostlymetrics.com": "substack.sid=x"}))
+    importlib.reload(appmod)
+
+    with _client(appmod) as client:
+        feeds = client.get("/admin/library/feeds").text
+        library = client.get("/admin/library").text
+
+    assert "Re-check subscriber access" in feeds
+    assert "Re-check subscriber access" not in library
+    # Above the page's own H1.
+    assert feeds.index("Re-check subscriber access") < feeds.index("<h1")
+
+
+def test_recheck_redirects_back_to_feeds(app_env):
+    """The route path is unchanged (the Reader's own banner posts to it too);
+    only the redirect target follows the control."""
+    with _client(app_env) as client:
+        resp = client.post("/admin/auth/recheck", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/admin/library/feeds"
+
+
 def test_feeds_page_requires_admin(app_env):
     from fastapi.testclient import TestClient
     anon = TestClient(app_env.app)
