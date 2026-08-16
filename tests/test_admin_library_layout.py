@@ -183,39 +183,64 @@ def test_token_warning_is_a_footnote_below_the_accordions(env):
 
 
 def test_all_four_quadrants_are_collapsible_and_closed_by_default(env):
-    """Landing on the page shows a tidy 2x2 of four headers. Native <details>
-    with no `open` attribute, matching the capture accordions already here."""
+    """Landing on the page shows a tidy 2x2 of four header rows. Native
+    <details> with no `open` attribute."""
     html = _library_html(env)
-    start = html.index('class="lib-cols"')
-    grid = html[start:]
-    assert grid.count('<details class="lib-quad">') == 4
-    assert "<details class=\"lib-quad\" open" not in grid
-    # Note the bare "&": _lib_section's label has never been run through
-    # _esc(), which predates this change and is left as-is.
+    grid = html[html.index('class="lib-cols"'):]
+    assert grid.count('class="admin-group lib-quad"') == 4
+    assert 'class="admin-group lib-quad" open' not in grid
     for title in ("New content", "Existing archive management",
-                  "Tag management", "Archive additions & backup"):
-        assert f'<h2 style="margin:0;font-size:17px;">{title}</h2>' in grid
+                  "Tag management", "Archive additions &amp; backup"):
+        assert f">{title}</span>" in grid
 
 
-def test_quadrants_use_the_existing_caret_accordion_idiom(env):
-    """Same caret span the bookmarklet/Share-Sheet accordions use, not a new
-    JS toggle. display:flex on the summary suppresses the native marker so the
-    caret isn't doubled."""
+def test_quadrants_reuse_the_admin_index_disclosure_component(env):
+    """Same `_disclosure_group` row as /admin's sections — bordered box, bold
+    all-caps label plus muted count on the left, caret right-aligned — rather
+    than a bespoke header. Reused so the two surfaces can't drift."""
+    import webapp.app as appmod
+
     html = _library_html(env)
-    assert '<summary><span class="disclosure-caret">&#9654;</span>' in html
-    assert ".lib-quad>summary{cursor:pointer;display:flex" in html
-    # No bespoke toggle script for this.
+    grid = html[html.index('class="lib-cols"'):]
+
+    # The component's own output, rendered directly, appears on the page.
+    rendered = appmod._disclosure_group("Tag management", "<p>x</p>",
+                                        count_label="3 tools",
+                                        extra_class="lib-quad")
+    summary = rendered[rendered.index("<summary"):rendered.index("</summary>")]
+    assert summary in grid
+
+    # Right-aligned caret and all-caps label are the component's doing.
+    assert "justify-content:space-between" in summary
+    assert "text-transform:uppercase" in summary
+    assert summary.index("text-transform:uppercase") < summary.index("disclosure-caret")
+    # No bespoke toggle script.
     assert "toggleQuad" not in html and "lib-quad-toggle" not in html
 
 
-def test_quadrant_caret_offset_matches_the_nested_accordions(env):
-    """The glyph's size/weight/colour already come from the shared
-    `details > summary .disclosure-caret` rule; the gap is what differed
-    (9px vs 8px), so the arrow sat further from its label at quadrant level."""
+def test_admin_index_and_library_quadrants_share_one_component(env):
+    """Guards the extraction: /admin's groups and the Library quadrants must
+    both come from _disclosure_group, not two copies of the same markup."""
+    import inspect
+    import webapp.app as appmod
+
+    src = inspect.getsource(appmod.admin_library)
+    assert "_disclosure_group(" in src
+    admin_src = inspect.getsource(appmod.admin_page)
+    assert "_disclosure_group(" in admin_src
+
+
+def test_nested_capture_accordions_keep_the_item_level_variant(env):
+    """Only the quadrant headers move to the group-level component; the nested
+    toggles keep their caret-before-label box. See BRAND.md UI components."""
     html = _library_html(env)
-    assert ".lib-quad>summary{cursor:pointer;display:flex;align-items:baseline;gap:8px" in html
-    # The nested capture accordions' own summaries use the same 8px gap.
-    assert "align-items:baseline;gap:8px" in html
+    quadrant = _quadrant(html, "lib-q-new")
+    nested = quadrant[quadrant.index("Desktop&mdash;the bookmarklet") - 700:]
+    assert "disclosure-caret" in nested
+    # Item-level: caret precedes the label, no right-alignment.
+    caret = nested.index("disclosure-caret")
+    label = nested.index("Desktop&mdash;the bookmarklet")
+    assert caret < label
 
 
 def test_each_quadrant_holds_its_specified_tools(env):

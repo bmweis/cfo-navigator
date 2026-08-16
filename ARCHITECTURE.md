@@ -2433,15 +2433,25 @@ become direct flex children of `.lib-cols`, which is what lets `order` interleav
 them across the columns. Verified live at 390px portrait and 844px landscape:
 single column, correct order, no horizontal overflow, taps still toggle.
 
-**Caret parity.** The quadrant summaries use `gap:8px` with
-`align-items:baseline`, copied from the nested capture-path accordions, so the
-arrow sits the same distance from its label at both levels; the glyph's
-size/weight/colour already came from the shared
-`details > summary .disclosure-caret` rule. Measured identical in both states:
-closed, 15px / 11.5x15px box / 8px gap / no transform; open, 15px /
-15x11.5px box / 6.3px gap / `rotate(90deg)` — the box-swap and tighter gap when
-open are the rotation pivoting about the glyph's centre, and they happen the
-same way at both levels.
+**Quadrant headers reuse the /admin index's disclosure row.** Rather than a
+bespoke header, the four quadrants render through `_disclosure_group` — a
+module-level component extracted from `admin_page()`'s former inner
+`_group_html` closure so both surfaces share one implementation: bordered box,
+bold all-caps label with a muted tool count and any task badge on the left,
+caret right-aligned (`justify-content:space-between`), pointing right collapsed
+and down expanded.
+
+The extraction was verified non-destructive by diffing `/admin`'s full rendered
+HTML before and after — byte-for-byte identical — before the Library page was
+switched over to it.
+
+Two variants exist and are now documented in BRAND.md §"UI components": this
+group-level row, and the item-level box (caret left of its label) used by the
+nested capture-path toggles, which deliberately keep their own treatment. An
+earlier round of this build gave the quadrants a bare heading with a
+left-aligned caret and then chased glyph parity between the two levels; that's
+superseded — the hierarchy distinction is the point, and each level now uses
+the variant that belongs to it.
 
 **Reader rename: "Saved" → "Archive".** The Reader's own quick-view label,
 list-pane header, and every related admin-facing description previously

@@ -1085,6 +1085,47 @@ def _badge_for_href(href: str, n: int) -> str:
     return _task_badge_dot() if href in _tasks.DOT_ONLY_HREFS else _task_badge(n)
 
 
+def _disclosure_group(name: str, body_html: str, *, count_label: str = "",
+                      badge_html: str = "", open: bool = False,
+                      nested: bool = False, extra_class: str = "") -> str:
+    """The group-level disclosure row used across the admin surface.
+
+    A bordered box whose summary is a bold all-caps label plus an optional
+    muted count and task badge on the left, with the caret right-aligned
+    (`justify-content:space-between`) so it points right collapsed and down
+    expanded. Shared by the /admin index's section groups and /admin/library's
+    quadrants so the two can't drift.
+
+    This is the GROUP-level variant. The item-level variant — a bordered box
+    with the caret left-aligned before its label, used for nested toggles like
+    the capture-method instructions — is deliberately different and is not
+    produced here. See BRAND.md §"UI components".
+    """
+    summary_pad = "12px 16px" if nested else "16px 20px"
+    classes = "admin-group" + (" admin-group-nested" if nested else "")
+    if extra_class:
+        classes += " " + extra_class
+    count_span = (f'<span style="font-size:12px;color:var(--muted);">{count_label}</span>'
+                  if count_label else "")
+    return (
+        f'<details class="{classes}"{" open" if open else ""} '
+        f'style="margin-bottom:{"0" if nested else "14px"};background:{"var(--bg)" if nested else "transparent"};'
+        f'border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
+        f'<summary style="list-style:none;cursor:pointer;padding:{summary_pad};display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+        f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
+        f'<span style="font-size:{"13.5px" if nested else "15px"};text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(name)}</span>'
+        f'<span class="group-badge">{badge_html}</span>'
+        f'{count_span}'
+        f'</span>'
+        f'<span class="disclosure-caret">&#9654;</span>'
+        f'</summary>'
+        f'<div style="padding:0 {"16px" if nested else "20px"} {"16px" if nested else "20px"};">'
+        f'{body_html}'
+        f'</div>'
+        f'</details>'
+    )
+
+
 def _group_badge(task_counts: dict[str, int], hrefs) -> str:
     """Badge for a collapsed section aggregating several hrefs. Sums the
     individually-actionable ones into a real count; if only all-or-none
@@ -18449,25 +18490,15 @@ def admin_page(request: Request):
         )
         flat_hrefs = badge_hrefs if badge_hrefs is not None else [item[0] for item in items if not isinstance(item, str)]
         group_badge_html = _group_badge(task_counts, flat_hrefs)
-        open_attr = " open" if gname == "Inbox" else ""   # Inbox starts expanded — everything else is click-to-expand
-        summary_pad = "12px 16px" if nested else "16px 20px"
-        return (
-            f'<details class="admin-group{" admin-group-nested" if nested else ""}"{open_attr} '
-            f'style="margin-bottom:{"0" if nested else "14px"};background:{"var(--bg)" if nested else "transparent"};'
-            f'border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
-            f'<summary style="list-style:none;cursor:pointer;padding:{summary_pad};display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-            f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
-            f'<span style="font-size:{"13.5px" if nested else "15px"};text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(gname)}</span>'
-            f'<span class="group-badge">{group_badge_html}</span>'
-            f'<span style="font-size:12px;color:var(--muted);">{len(items)} {"tool" if len(items)==1 else "tools"}</span>'
-            f'</span>'
-            f'<span class="disclosure-caret">&#9654;</span>'
-            f'</summary>'
-            f'<div style="padding:0 {"16px" if nested else "20px"} {"16px" if nested else "20px"};">'
+        # Inbox starts expanded — everything else is click-to-expand.
+        return _disclosure_group(
+            gname,
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
-            f'<div style="display:grid;gap:14px;">{cards}</div>'
-            f'</div>'
-            f'</details>'
+            f'<div style="display:grid;gap:14px;">{cards}</div>',
+            count_label=f'{len(items)} {"tool" if len(items) == 1 else "tools"}',
+            badge_html=group_badge_html,
+            open=(gname == "Inbox"),
+            nested=nested,
         )
 
     # Library used to get its own always-expanded card floating above every
@@ -18587,27 +18618,27 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # output of the third.
     lib_by_href = {href: (title, desc) for href, title, desc in _LIBRARY_TOOLS}
 
-    def _lib_quadrant(title, inner_html):
+    def _lib_quadrant(title, inner_html, hrefs=()):
         """One collapsible quadrant, closed by default.
 
-        Native <details>/<summary> with the same caret span the bookmarklet and
-        Share-Sheet accordions on this page already use — no JS, no persistence,
-        and each one opens independently. `display:flex` on the summary is what
-        suppresses the browser's own marker, so the caret isn't doubled; that's
-        the existing convention here, not a new trick. The title stays an <h2>
-        inside the summary so the heading semantics survive the wrapping.
+        Uses the shared `_disclosure_group` component — the same group-level
+        row the /admin index's sections use: bordered box, bold all-caps label
+        with a muted tool count and any task badge on the left, caret
+        right-aligned pointing right collapsed and down expanded. Reused rather
+        than reimplemented so the two surfaces can't drift.
 
-        Nesting is deliberate and native: the New content quadrant contains the
-        two capture-path <details>, and `.disclosure-caret`'s rotate rule is
-        scoped `details[open] > summary`, so an inner accordion can never rotate
-        the outer quadrant's caret.
+        The nested capture-path accordions inside New content deliberately keep
+        the item-level variant (caret left of the label) — see BRAND.md
+        §"UI components". Nesting is native and safe: `.disclosure-caret`'s
+        rotate rule is scoped `details[open] > summary`, so an inner accordion
+        can never rotate the outer quadrant's caret.
         """
-        return (
-            '<details class="lib-quad">'
-            '<summary><span class="disclosure-caret">&#9654;</span>'
-            f'<h2 style="margin:0;font-size:17px;">{title}</h2></summary>'
-            f'<div class="lib-quad-body">{inner_html}</div>'
-            '</details>'
+        n = len(hrefs)
+        return _disclosure_group(
+            title, inner_html,
+            count_label=f'{n} {"tool" if n == 1 else "tools"}' if n else "",
+            badge_html=_group_badge(task_counts, list(hrefs)),
+            extra_class="lib-quad",
         )
 
     def _lib_section(label, hrefs, desc_line):
@@ -18618,7 +18649,7 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
         return _lib_quadrant(label, (
             f'<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">{desc_line}</p>'
             f'<div style="display:grid;gap:12px;">{section_cards}</div>'
-        ))
+        ), hrefs)
 
     # Archive backup used to render as its own headingless card above the
     # three labeled sections — visually odd once everything else had a
@@ -18687,7 +18718,8 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 
 <p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working&mdash;the old copies embed the old values. Set them up again from the instructions above.</p>"""
 
-    saving_articles_html = _lib_quadrant("New content", saving_articles_body)
+    saving_articles_html = _lib_quadrant("New content", saving_articles_body,
+                                         ["/admin/library/feeds"])
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -18716,17 +18748,11 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
    additions & backup") are no longer guaranteed to share a Y. */
 .lib-cols{{display:flex;gap:28px;align-items:flex-start;}}
 .lib-col{{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:34px;}}
-/* Collapsible quadrants. Same native <details> mechanism as the capture-path
-   accordions below, closed by default so the page opens as a tidy 2x2 of four
-   headers. display:flex on the summary suppresses the browser's own marker so
-   the caret span isn't doubled. */
-/* gap 8px and align-items:baseline are copied from the nested capture-path
-   accordions, so the caret sits the same distance from its label and on the
-   same baseline at both levels. The glyph's own size/weight/colour already come
-   from the shared `details > summary .disclosure-caret` rule. */
-.lib-quad>summary{{cursor:pointer;display:flex;align-items:baseline;gap:8px;padding:2px 0;}}
-.lib-quad>summary::-webkit-details-marker{{display:none;}}
-.lib-quad-body{{margin-top:10px;}}
+/* Quadrant boxes come from the shared `_disclosure_group` component (same row
+   as the /admin index's sections), so there's no bespoke summary styling here.
+   Only the bottom margin is dropped: the flex columns own the vertical rhythm
+   via their own gap. */
+.lib-quad{{margin-bottom:0 !important;}}
 .lib-q-new{{grid-area:newcontent;}}
 .lib-q-existing{{grid-area:existing;}}
 .lib-q-tags{{grid-area:tags;}}
