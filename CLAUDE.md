@@ -648,6 +648,83 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   asserts **DOM ancestry, not geometry** — on the stacked mobile layout the
   rail and list pane both span the full width, so a bounding-box containment
   check passes for either and proves nothing.
+- **Reader Build arc — full QA pass, and the three findings it produced.**
+  With Phase 5/5b/5c and the search-placement fix all shipped individually,
+  a first pass looking at the whole Reader/backfill surface *together* (not
+  per-PR) surfaced one real bug and two live design refinements — exactly
+  the kind of interaction individual-PR verification structurally can't
+  catch, the same lesson the 5b/5c merge conflict taught earlier in this
+  arc.
+  - **`Library.search()` 500'd on ordinary text — a hyphen, an apostrophe,
+    an unmatched quote, or a bareword that collides with an FTS5 operator
+    keyword (AND/OR/NOT) all threw `sqlite3.OperationalError`, uncaught.**
+    The raw query was passed straight into `articles_fts MATCH ?` with zero
+    escaping. Reproduced live via the Reader's own Saved search box
+    (`self-serve`, `well-being`, `brian's` all crashed to a blank page) and
+    independently against a bare FTS5 table with no app code involved, to
+    confirm it's intrinsic to unescaped `MATCH`, not this schema. Hit two
+    real call sites: the Reader's Saved search and `/api/search` (also
+    `scripts/mcp_server.py`'s path for Claude Desktop/Code search) — so
+    ordinary Claude-side search was affected too. Pre-existing (`git blame`
+    traces the method to the repo's root commit, well before Phase 5); the
+    Reader's own search box just gave it a direct, synchronous, easy-to-hit
+    path for the first time.
+    **Fix has two layers, in a specific order that matters**: try the query
+    exactly as given first; only if that raises, retry with the whole thing
+    wrapped as one FTS5 phrase (quoted, internal quotes doubled per FTS5's
+    own escaping rule); if even that somehow fails, return `[]` rather than
+    raise. **The "try raw first" ordering isn't cosmetic — it's what saved
+    this from becoming a second regression before it ever shipped.**
+    `Library.search()` has a THIRD caller besides the two above:
+    `linklib.agent.retrieve()` (FP&A Buddy's library retrieval) already
+    pre-sanitizes its own query via `_safe_fts_query()`, which tokenizes a
+    question into deliberately valid FTS5 syntax like
+    `"self" OR "serve" OR "churn"`. An earlier draft of this fix
+    unconditionally wrapped every query in an outer phrase-quote — which
+    turns that already-valid OR-query into one literal string search for
+    the doubly-quoted text verbatim, matching nothing. That would have
+    silently taken FP&A Buddy's library retrieval dark on every single
+    question, with no existing test to catch it (nothing exercised
+    `Library.search()` against `_safe_fts_query()`'s actual output shape).
+    Caught before shipping by tracing every existing caller of the method
+    being changed, not just the two that motivated the fix, and confirmed
+    live against the real `linklib.agent.retrieve()` function (not just the
+    helper) with realistic multi-word questions. Fixed by trying the raw
+    query first — a caller handing in already-valid syntax just succeeds on
+    that first attempt and is never touched by the quoting at all; only
+    genuinely raw, uncontrolled text (which fails to parse) falls through to
+    the safe quoted retry. New `tests/test_fts_search_query_safety.py`
+    covers both directions: every crash-inducing query from the QA report
+    now returns real results or `[]`, never raises; and
+    `_safe_fts_query()`'s OR-query shape still retrieves real matches
+    (`test_safe_fts_query_output_is_not_double_wrapped`, a regression test
+    for the exact bug caught mid-build).
+  - **Reader body width was pinned to a flat `700px` regardless of how much
+    room the reader pane actually had** — confirmed live: on a wide
+    viewport, or in distraction-free mode (where the pane gets
+    meaningfully wider), the text column stayed capped at 700px, leaving
+    large fixed empty margins the design brief flagged as reading nothing
+    like Instapaper's own adaptive column. Changed `.rr-reader-body`'s
+    `max-width` from a flat `700px` to `min(92%,880px)` — scales with the
+    pane's real width (confirmed at 1280/1600/2000px viewports: body width
+    genuinely differs at each, 521px/815px/880px, and grows further again
+    in distraction-free mode), while the `880px` upper cap still keeps line
+    length readable on an extreme-width pane rather than letting it run
+    edge-to-edge. Verified at 390px mobile too — no overflow, body still
+    fits inside the narrower pane's own 92%.
+  - **Find-in-article was a bare icon among a row of bare icon buttons
+    (Tag, Expand) — confirmed working, not a bug, but easy to miss by
+    design, not by accident.** Gave the toggle a visible "Find" text label
+    alongside its icon (`.rr-find-toggle`), matching the visual weight the
+    "Aa" and "Read later" buttons already carry in that same row, rather
+    than inventing a new highlight treatment. No behavior change — same
+    `rrToggleFind()` handler, confirmed still opens the find bar and still
+    finds real matches after the styling change, on both desktop and a
+    390px mobile tap.
+  See `tests/test_fts_search_query_safety.py` for the search-fix
+  regression coverage; the width and find-toggle changes are pure CSS/markup
+  with no new test file (verified live per the standing testing standard
+  above, same as every other UI-facing change in this arc).
 - **Phase 5b — Reader content backfill: reprocessing the ~4,500 already-saved
   articles for real structure, not just live fetches.** The Reader
   follow-up pass above shipped `extract_reader_html()`, but it only ever ran

@@ -2491,21 +2491,64 @@ class Library:
         return [t for t, _ in self.all_tags()[:limit]]
 
     def search(self, query: str, limit: int = 50) -> list[dict]:
-        """Full-text search ranked by relevance (bm25)."""
+        """Full-text search ranked by relevance (bm25).
+
+        The raw query used to be passed straight into `articles_fts MATCH
+        ?`, unescaped — but FTS5 has its own query mini-language, and plain
+        English collides with it constantly: a hyphen ("self-serve"), an
+        apostrophe ("brian's"), an unmatched quote, or a bareword that
+        happens to be an FTS5 operator keyword (AND/OR/NOT) all threw
+        sqlite3.OperationalError, which nothing caught — an ordinary search
+        500'd instead of returning "no results." Found live during the
+        Reader QA pass via the Saved search box and confirmed the same way
+        against a bare FTS5 table with no app code involved.
+
+        Fixed with two layers: try the query exactly as given first, then
+        fall back to the whole thing wrapped as a single FTS5 phrase
+        (quoted, with any literal double quotes doubled per FTS5's own
+        escaping rule) if that raises — a quoted phrase never throws,
+        whatever's inside it. Trying the raw query first matters: this
+        method already has one caller that hands it deliberately
+        well-formed FTS5 syntax, not free text —
+        linklib.agent.retrieve()'s `_safe_fts_query()` pre-tokenizes and
+        OR-joins a question into something like `"self" OR "serve"` for a
+        real multi-term match. Wrapping THAT in an outer phrase quote
+        (discovered while building this fix, before it shipped) turns the
+        whole thing into one literal string search for `"self" OR "serve"`
+        — everything doubly quoted, verbatim — which matches nothing;
+        FP&A Buddy's library retrieval would have silently gone dark on
+        every question. Trying the raw form first preserves that caller's
+        semantics exactly (it's already valid syntax, so the raw attempt
+        just succeeds); the raw-user-text case (invalid syntax) fails fast
+        on the first attempt and only then gets the safe quoted fallback.
+        Either an unrecoverable raw query or a failure on the quoted
+        fallback degrades to zero results, never a 500.
+        """
         if not query.strip():
             rows = self.conn.execute(
                 "SELECT * FROM articles ORDER BY saved_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [self._row_to_dict(r) for r in rows]
-        rows = self.conn.execute(
-            """SELECT a.*, bm25(articles_fts) AS rank
-               FROM articles_fts
-               JOIN articles a ON a.id = articles_fts.rowid
-               WHERE articles_fts MATCH ?
-               ORDER BY rank
-               LIMIT ?""",
-            (query, limit),
-        ).fetchall()
+
+        def _run(fts_query: str):
+            return self.conn.execute(
+                """SELECT a.*, bm25(articles_fts) AS rank
+                   FROM articles_fts
+                   JOIN articles a ON a.id = articles_fts.rowid
+                   WHERE articles_fts MATCH ?
+                   ORDER BY rank
+                   LIMIT ?""",
+                (fts_query, limit),
+            ).fetchall()
+
+        try:
+            rows = _run(query)
+        except sqlite3.OperationalError:
+            quoted = '"' + query.replace('"', '""') + '"'
+            try:
+                rows = _run(quoted)
+            except sqlite3.OperationalError:
+                return []
         return [self._row_to_dict(r) for r in rows]
 
     def unenriched(self, limit: int = 1000) -> list[dict]:

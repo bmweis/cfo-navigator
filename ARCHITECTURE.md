@@ -1407,6 +1407,21 @@ Details worth knowing:
   weight against, whereas RRF only needs rank position. Every failure mode —
   `sqlite-vec` unavailable, no `OPENAI_API_KEY`, the embed call erroring —
   degrades silently to FTS5-only, never blocking an answer.
+- **`Library.search()`'s FTS5 half tries the query as-given before ever
+  quoting it — a query-safety fix (Reader Build arc's full QA pass) whose
+  ordering specifically protects this retrieval path.** `agent._safe_fts_query()`
+  pre-tokenizes a question into deliberately valid FTS5 syntax
+  (`"self" OR "serve" OR "churn"`) before handing it to `Library.search()`.
+  The fix that stops a raw, unescaped user query from crashing FTS5
+  (a hyphen, an apostrophe, or an FTS5 operator keyword like AND/OR/NOT all
+  used to throw `sqlite3.OperationalError`, uncaught) tries the query
+  exactly as received first, and only falls back to wrapping the whole
+  thing as one quoted phrase if that raises — never unconditionally, which
+  would otherwise turn `_safe_fts_query()`'s already-valid OR-query into a
+  single literal-string search matching nothing, silently taking this
+  retrieval path dark. See CLAUDE.md's "Reader Build arc — full QA pass"
+  bullet for the full story, including how that regression was caught
+  before shipping.
 - **Citations are API-verified, not prompted.** When Exa is the provider,
   library, feed, and web sources all ride as Citations-API `document` blocks
   — one uniform citation shape. When the native tool is the provider instead

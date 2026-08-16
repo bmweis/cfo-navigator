@@ -14784,6 +14784,10 @@ _READER_SHELL_CSS = """
 .rr-reader-actions button{cursor:pointer;font-size:12px;font-weight:600;background:none;border:1px solid var(--line);
   border-radius:6px;padding:4px 9px;color:var(--navy-light);font-family:inherit;}
 .rr-reader-actions button.rr-row-btn-on{background:var(--seafoam-wash);border-color:var(--seafoam-deep);color:var(--seafoam-deep);}
+/* Wider + labeled vs. the plain icon buttons around it (Tag, Expand) — see
+   the markup comment in rrRenderArticle for why: icon-only in a row of
+   icon-only buttons read as easy to miss during live testing. */
+.rr-find-toggle{display:flex;align-items:center;gap:6px;padding:4px 12px;}
 .rr-find-bar{display:none;align-items:center;gap:6px;padding:8px 20px;border-bottom:1px solid var(--line);
   background:var(--surface-2);position:sticky;top:53px;z-index:4;}
 .rr-find-bar.rr-find-open{display:flex;}
@@ -14837,7 +14841,16 @@ mark.rr-find-hit.rr-find-current{background:var(--coral);color:#fff;}
 .rr-tag-panel button.rr-tag-go{cursor:pointer;font-size:11.5px;font-weight:600;background:var(--seafoam-wash);
   border:1px solid var(--seafoam-deep);border-radius:6px;padding:4px 10px;color:var(--seafoam-deep);font-family:inherit;}
 .rr-tag-panel button.rr-tag-go[hidden],.rr-reader-actions button[hidden]{display:none;}
-.rr-reader-body{max-width:700px;margin:0 auto;padding:44px 32px 100px;}
+/* Scales with the reader pane's own available width instead of staying
+   pinned to a fixed pixel value regardless of container size (the prior
+   flat 700px left large fixed empty margins once the pane itself grew
+   wider than that — e.g. distraction-free mode, or a wide viewport with
+   the list pane at its own max-width). 92% keeps a reader-chosen breathing
+   margin at any pane width; 880px is still an upper cap so an extreme-width
+   pane (a very wide monitor, or the list pane collapsed to its sliver)
+   doesn't stretch line length past a readable measure — not a return to a
+   fixed number, just a ceiling on top of the relative one. */
+.rr-reader-body{max-width:min(92%,880px);margin:0 auto;padding:44px 32px 100px;}
 .rr-reader-category{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
   color:var(--seafoam-deep);margin-bottom:12px;}
 .rr-reader-title{font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:30px;line-height:1.18;
@@ -15299,7 +15312,13 @@ function rrRenderArticle(d) {{
       '</div>' +
       '<div class="rr-reader-actions">' + saveBtn + tagBtn + rlBtn +
         '<button onclick="rrCycleFontSize()">Aa</button>' +
-        '<button onclick="rrToggleFind()" title="Find in article">' + RR_ICON_SEARCH + '</button>' +
+        // Icon-only among a row of icon-only buttons (Tag, Expand) reads as
+        // easy to miss — a real design gap flagged from live testing, not a
+        // bug. A visible "Find" label makes it read as its own affordance
+        // rather than blending into the row, same treatment the "Aa" and
+        // "+ Save" buttons already get (text, not just a glyph).
+        '<button onclick="rrToggleFind()" title="Find in article" class="rr-find-toggle">' +
+          RR_ICON_SEARCH + '<span>Find</span></button>' +
         '<a href="' + rrEsc(d.url) + '" target="_blank" rel="noopener" style="font-size:12px;">Original &rarr;</a>' +
       '</div>' +
     '</div>' +
