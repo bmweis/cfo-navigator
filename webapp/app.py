@@ -18672,7 +18672,13 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 </ol>
 <p style="margin:0;color:var(--muted);font-size:13px;">Articles saved this way arrive untagged&mdash;tag them later in the Library, or add a second JSON text field named <code>tags</code> with a comma-separated list if you want a fixed default.</p>
 </div>
-</details>"""
+</details>
+
+<div style="margin-top:20px;">{_lib_card(
+    "/admin/library/feeds", "Manage feeds",
+    "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, and set which "
+    "sections are read-only. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is "
+    "restricted to, so a source added here becomes citable there too.")}</div>"""
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -18692,11 +18698,22 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 <style>
 .lib-top-row{{display:grid;grid-template-columns:2fr 1fr;column-gap:28px;align-items:stretch;margin-bottom:24px;}}
 .lib-top-row>div{{min-width:0;}}
+/* The flow diagram's own card carries margin-bottom:22px (it's shared with
+   the Archive Queue page, where it sits above body copy and needs that gap).
+   Inside this stretch-aligned grid that margin becomes phantom space: the row
+   sizes to 241px of card + 22px of margin, and the seafoam callout's
+   height:100% stretches to the full 263px, so it rendered 22px taller than
+   the diagram beside it. Measured live before and after. Matching the margin
+   on this cell shortens the callout's box to the diagram's visible height
+   instead of growing the diagram or clipping the callout. */
+.lib-top-row>div:last-child{{margin-bottom:22px;}}
 .lib-two-col{{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;row-gap:28px;}}
 .lib-two-col>div{{min-width:0;}}
 @media (max-width:900px){{
   .lib-top-row{{display:block;}}
-  .lib-top-row>div:last-child{{margin-top:22px;}}
+  /* Stacked, there's no shared row height to match, so the desktop margin
+     correction above would just add a stray 22px gap. */
+  .lib-top-row>div:last-child{{margin-top:22px;margin-bottom:0;}}
   .lib-two-col{{display:block;}}
 }}
 </style>

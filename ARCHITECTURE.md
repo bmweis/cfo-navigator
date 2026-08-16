@@ -2353,6 +2353,28 @@ order, so no separate mobile-order override was needed (unlike the
 homepage's `.home-grid`, which needed one because its desktop and mobile
 orders genuinely diverge).
 
+**Top-row height mismatch, fixed later.** In that same `.lib-top-row`, the
+seafoam Open Reader callout rendered visibly taller than the flow diagram
+beside it. The cause was not the callout: `_content_flow_diagram()`'s card
+carries `margin:0 0 22px` (correct on the Archive Queue page, where it sits
+above body copy), and inside a `align-items:stretch` grid that margin becomes
+phantom space — the row sized to 241px of card plus 22px of margin, and the
+callout's `height:100%` stretched to the full 263px. Measured live before and
+after rather than inferred. Fixed by giving the row's last cell the same 22px
+bottom margin, so the callout's box ends where the diagram's visible card ends;
+the shared diagram helper is untouched (the Archive Queue page depends on that
+margin), the diagram isn't grown, and nothing is clipped. The correction is
+dropped inside the existing `max-width:900px` block, where the stacked layout
+has no shared row height to match and it would only add a stray gap.
+
+**"Manage feeds" link box.** Added below the two capture-path accordions in
+"Saving articles from anywhere", using the same `_lib_card()` component as
+every other link box on the page. Placement is deliberate rather than obvious:
+feed management is arguably closer to "Archive additions" than to "saving
+articles from anywhere", but the capture section is where the question "where
+does content come from" actually gets asked, and the section had unused space
+below the accordions where the neighbouring cell ran longer.
+
 **Reader rename: "Saved" → "Archive".** The Reader's own quick-view label,
 list-pane header, and every related admin-facing description previously
 called this view "Saved" — inconsistent with every admin reference to the
