@@ -2383,13 +2383,33 @@ seafoam button would violate both.
 **The flow diagram runs full width**, on its own, between the intro paragraph
 and the grid.
 
+**The four quadrants are collapsible, closed by default.** Each is a native
+`<details>`/`<summary>` carrying the same `.disclosure-caret` span the
+bookmarklet and Share-Sheet accordions on this page already use, so landing on
+the page shows a tidy 2x2 of four headers (measured: the whole grid is 98px
+tall closed, vs 1362px with all four open). No JS, no persistence between
+loads, and each opens independently. `display:flex` on the summary is what
+suppresses the browser's own marker so the caret isn't doubled — the existing
+convention here, not a new trick. The title stays an `<h2>` inside the summary
+so heading semantics survive the wrapping. Nesting is native and safe: the New
+content quadrant contains the two capture-path `<details>`, and
+`.disclosure-caret`'s rotate rule is scoped `details[open] > summary`, so an
+inner accordion can never rotate the outer quadrant's caret (verified live).
+
 **Four quadrants on named grid areas.** `.lib-quads` declares
 `grid-template-areas:"newcontent existing" "tags backup"` rather than relying on
 auto-placement. Auto-flow is what produced the earlier ragged layout: blocks
 landed wherever content length pushed them, and an odd block count left a hole.
-Named areas pin each quadrant regardless of content length, and the grid's
-default `align-items:stretch` keeps both cells in a row the same height
-(measured live: 560/560 in the top row, 483/483 in the bottom).
+Named areas plus explicit `grid-template-rows:auto auto` pin each quadrant
+regardless of content length. This matters more with collapsing than without:
+when one quadrant in a row is expanded and its partner is still collapsed, the
+row grows to fit the expanded one and the collapsed partner simply has blank
+space below its own header, rather than the two columns sliding out of
+alignment. Verified live across every open/closed combination — default
+(all closed), one open, two open in different rows, and all four open — with
+both row-1 headers sharing a Y and both row-2 headers sharing a Y in every
+case. `align-items:start` keeps a collapsed quadrant from stretching into an
+empty box.
 
 - **Upper-left, "New content"** — merges the former Feed management section with
   "Saving articles from anywhere". The Manage feeds `_lib_card` sits above the

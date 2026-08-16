@@ -106,7 +106,8 @@ def test_new_content_quadrant_holds_feeds_card_and_both_accordions(env):
     assert "New content" in quadrant
     assert 'href="/admin/library/feeds"' in quadrant
     assert "Saving articles from anywhere" in quadrant
-    assert quadrant.count("<details") == 2                    # bookmarklet + Share Sheet
+    # 3 now: the collapsible quadrant itself plus bookmarklet + Share Sheet.
+    assert quadrant.count("<details") == 3
     assert "border-radius:14px" in quadrant                   # the _lib_card box
 
 
@@ -133,10 +134,12 @@ def test_token_warning_is_a_footnote_below_the_accordions(env):
     quadrant = html[start:html.index('class="lib-q-existing"')]
 
     label = quadrant.index("Saving articles from anywhere")
-    first_accordion = quadrant.index("<details")
-    last_accordion = quadrant.rindex("</details>")
+    # Skip the quadrant's own <details> wrapper; the capture accordions are the
+    # two inside it.
+    first_accordion = quadrant.index("<details", quadrant.index("<details") + 1)
     warning = quadrant.index("If you ever rotate")
-    assert label < first_accordion < last_accordion < warning
+    share_sheet_end = quadrant.index("</details>", quadrant.index("Share-Sheet shortcut"))
+    assert label < first_accordion < share_sheet_end < warning
 
     footnote = quadrant[warning - 200:warning]
     assert "font-size:12.5px" in footnote
@@ -144,6 +147,40 @@ def test_token_warning_is_a_footnote_below_the_accordions(env):
     # Content is unchanged apart from the pointer now facing up, not down.
     assert "<strong>If you ever rotate" not in quadrant
     assert "LINKLIB_SAVE_TOKEN" in quadrant and "LINKLIB_PUBLIC_BASE" in quadrant
+
+
+def test_all_four_quadrants_are_collapsible_and_closed_by_default(env):
+    """Landing on the page shows a tidy 2x2 of four headers. Native <details>
+    with no `open` attribute, matching the capture accordions already here."""
+    html = _library_html(env)
+    start = html.index('class="lib-quads"')
+    grid = html[start:]
+    assert grid.count('<details class="lib-quad">') == 4
+    assert "<details class=\"lib-quad\" open" not in grid
+    # Note the bare "&": _lib_section's label has never been run through
+    # _esc(), which predates this change and is left as-is.
+    for title in ("New content", "Existing archive management",
+                  "Tag management", "Archive additions & backup"):
+        assert f'<h2 style="margin:0;font-size:17px;">{title}</h2>' in grid
+
+
+def test_quadrants_use_the_existing_caret_accordion_idiom(env):
+    """Same caret span the bookmarklet/Share-Sheet accordions use, not a new
+    JS toggle. display:flex on the summary suppresses the native marker so the
+    caret isn't doubled."""
+    html = _library_html(env)
+    assert '<summary><span class="disclosure-caret">&#9654;</span>' in html
+    assert ".lib-quad>summary{cursor:pointer;display:flex" in html
+    # No bespoke toggle script for this.
+    assert "toggleQuad" not in html and "lib-quad-toggle" not in html
+
+
+def test_grid_declares_two_explicit_rows(env):
+    """Two named rows are what guarantee the row-1 and row-2 headers share a Y
+    even when one quadrant in a row is expanded and its partner is collapsed."""
+    html = _library_html(env)
+    assert 'grid-template-areas:"newcontent existing" "tags backup"' in html
+    assert "grid-template-rows:auto auto" in html
 
 
 def test_each_quadrant_holds_its_specified_tools(env):

@@ -18587,16 +18587,38 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # output of the third.
     lib_by_href = {href: (title, desc) for href, title, desc in _LIBRARY_TOOLS}
 
+    def _lib_quadrant(title, inner_html):
+        """One collapsible quadrant, closed by default.
+
+        Native <details>/<summary> with the same caret span the bookmarklet and
+        Share-Sheet accordions on this page already use — no JS, no persistence,
+        and each one opens independently. `display:flex` on the summary is what
+        suppresses the browser's own marker, so the caret isn't doubled; that's
+        the existing convention here, not a new trick. The title stays an <h2>
+        inside the summary so the heading semantics survive the wrapping.
+
+        Nesting is deliberate and native: the New content quadrant contains the
+        two capture-path <details>, and `.disclosure-caret`'s rotate rule is
+        scoped `details[open] > summary`, so an inner accordion can never rotate
+        the outer quadrant's caret.
+        """
+        return (
+            '<details class="lib-quad">'
+            '<summary><span class="disclosure-caret">&#9654;</span>'
+            f'<h2 style="margin:0;font-size:17px;">{title}</h2></summary>'
+            f'<div class="lib-quad-body">{inner_html}</div>'
+            '</details>'
+        )
+
     def _lib_section(label, hrefs, desc_line):
         section_cards = "".join(
             _lib_card(h, lib_by_href[h][0], lib_by_href[h][1], _badge_for_href(h, task_counts.get(h, 0)))
             for h in hrefs
         )
-        return (
-            f'<h2 style="margin:28px 0 4px;font-size:17px;">{label}</h2>'
+        return _lib_quadrant(label, (
             f'<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">{desc_line}</p>'
             f'<div style="display:grid;gap:12px;">{section_cards}</div>'
-        )
+        ))
 
     # Archive backup used to render as its own headingless card above the
     # three labeled sections — visually odd once everything else had a
@@ -18618,8 +18640,7 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # capture-path accordions. Both halves keep their own shape — a _lib_card
     # and the existing accordion group — under one quadrant heading, rather
     # than being blended into a single undifferentiated block.
-    saving_articles_html = f"""<h2 style="margin:0 0 4px;font-size:17px;">New content</h2>
-<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus the two ways to save a page by hand.</p>
+    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus the two ways to save a page by hand.</p>
 <div style="margin-bottom:22px;">{_lib_card(
     "/admin/library/feeds", "Manage feeds",
     "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into "
@@ -18666,6 +18687,8 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 
 <p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working&mdash;the old copies embed the old values. Set them up again from the instructions above.</p>"""
 
+    saving_articles_html = _lib_quadrant("New content", saving_articles_body)
+
     existing_mgmt_html = _lib_section(
         "Existing archive management",
         ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals"],
@@ -18688,8 +18711,16 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
    quadrant regardless of how much content it holds. */
 .lib-quads{{display:grid;grid-template-columns:1fr 1fr;
   grid-template-areas:"newcontent existing" "tags backup";
-  column-gap:28px;row-gap:34px;}}
+  grid-template-rows:auto auto;
+  column-gap:28px;row-gap:34px;align-items:start;}}
 .lib-quads>div{{min-width:0;}}
+/* Collapsible quadrants. Same native <details> mechanism as the capture-path
+   accordions below, closed by default so the page opens as a tidy 2x2 of four
+   headers. display:flex on the summary suppresses the browser's own marker so
+   the caret span isn't doubled. */
+.lib-quad>summary{{cursor:pointer;display:flex;align-items:baseline;gap:9px;padding:2px 0;}}
+.lib-quad>summary::-webkit-details-marker{{display:none;}}
+.lib-quad-body{{margin-top:10px;}}
 .lib-q-new{{grid-area:newcontent;}}
 .lib-q-existing{{grid-area:existing;}}
 .lib-q-tags{{grid-area:tags;}}
