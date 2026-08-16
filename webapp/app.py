@@ -17,7 +17,7 @@ Public routes (no auth):
     GET  /health               Health check
 
 Private routes (require login cookie; API routes also accept a token):
-    GET  /read                 Merged Reader: Feed + Saved (Archive) + Read Later, three-pane (admin-only)
+    GET  /read                 Merged Reader: Feed + Archive + Read Later, three-pane (admin-only)
     GET  /read/{id}            Single-article standalone reader view (admin-only)
     GET  /api/read-article     JSON article content for the Reader pane's AJAX fetch (admin-only)
     GET  /tools/fpa-buddy      FP&A Buddy Q&A page + past-questions search (member-gated)
@@ -1606,6 +1606,20 @@ def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
     )
 
 
+# Two different "this is admin-only" visual treatments existed side by side
+# (Phase 6 investigation): the homepage's Reader-access box used a solid
+# filled var(--seafoam) background with a var(--seafoam-deep) border (the
+# later design file's own treatment), while /tools' Library tile used a
+# plain white background with just a var(--seafoam) border (the original
+# Phase 3 spec) — never reconciled once the homepage box shipped later.
+# Standardized on the homepage's filled treatment (the more recent, more
+# visually distinct of the two — an admin-only affordance should read as
+# clearly set apart, not just outlined); both call sites now pull from this
+# one helper so they can't drift apart again.
+_ADMIN_ONLY_BG = "var(--seafoam)"
+_ADMIN_ONLY_BORDER = "1.5px solid var(--seafoam-deep)"
+
+
 def _toolbox_icon_badge(index: int, svg_path: str, *, size: int = 44, icon_size: int = 22,
                          margin_bottom: int = 14) -> str:
     """Icon badge for the CFO Toolbox 2x2 tile grid (Phase 3, "Toolbox Illustration
@@ -2008,13 +2022,13 @@ def homepage(request: Request):
     # already existed.
     is_admin = _is_authed(request)
     reader_access_box = (f"""
-      <a href="/read" rel="nofollow noreferrer" style="text-decoration:none;background:var(--seafoam);border:1.5px solid var(--seafoam-deep);border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
+      <a href="/read" rel="nofollow noreferrer" style="text-decoration:none;background:{_ADMIN_ONLY_BG};border:{_ADMIN_ONLY_BORDER};border-radius:16px;padding:26px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">
         <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--navy);text-transform:uppercase;">Admin only</div>
         <div style="display:flex;align-items:center;gap:12px;">
           {_card_icon(3, _ICON_NEWSPAPER)}
           <div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Reader access</div>
         </div>
-        <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Saved, and Read Later in one place.</p>
+        <p style="font-size:13px;line-height:1.5;color:var(--navy);margin:0;">Shown here only when logged in as admin. Feed, Archive, and Read Later in one place.</p>
       </a>""" if is_admin else "")
 
     body = f"""<div class="page page-full">
@@ -2151,7 +2165,7 @@ def about_page(request: Request):
     finally:
         lib.close()
     body = f"""<div class="page page-full">
-<div style="max-width:760px;">
+<div class="tool-prose">
 <div style="display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;margin-bottom:28px;">
   {_avatar(140)}
   <div>
@@ -5772,12 +5786,16 @@ _TOOLBOX_TILES = (
 
 
 def _toolbox_tile(index: int, href: str, title: str, desc: str, icon_svg: str, *,
-                   border: str = "1.5px solid rgba(0,41,117,.15)") -> str:
+                   border: str = "1.5px solid rgba(0,41,117,.15)",
+                   background: str = "#fff") -> str:
     """Landing-size CFO Toolbox tile (44x44 icon badge, no arrow — a grid
     tile, not the sitewide card-row list-item pattern _card_icon()/_hcard()
-    render elsewhere)."""
+    render elsewhere). `background` defaults to plain white for the four
+    public tiles; the admin-only 5th tile overrides both `border` and
+    `background` to _ADMIN_ONLY_BORDER/_ADMIN_ONLY_BG (see that pair's own
+    comment) to match the homepage Reader-access box's treatment."""
     return (
-        f'<a href="{href}" style="display:block;background:#fff;border:{border};'
+        f'<a href="{href}" style="display:block;background:{background};border:{border};'
         f'border-radius:14px;padding:20px;text-decoration:none;">'
         f'{_toolbox_icon_badge(index, icon_svg)}'
         f'<div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);'
@@ -5825,7 +5843,7 @@ def tools_landing(request: Request):
         tiles += _toolbox_tile(
             len(_TOOLBOX_TILES), "/admin/library", "Library",
             "Your private reading stash&mdash;Archive and Feed, admin only.",
-            _ICON_BOOK, border="1.5px solid var(--seafoam)")
+            _ICON_BOOK, border=_ADMIN_ONLY_BORDER, background=_ADMIN_ONLY_BG)
 
     body = f"""<div class="page page-grid">
 <style>
@@ -14337,7 +14355,7 @@ def _resolve_reader_content(id: int = 0, url: str = "") -> dict | None:
 
     # Only the plain-text `content` cache is skipped for a url-matched row:
     # using it there would silently downgrade a Feed item that currently reads
-    # with images and links intact, whereas an explicit by-id open (a Saved-view
+    # with images and links intact, whereas an explicit by-id open (an Archive-view
     # click) accepts it. Phase 5b's `content_html` is deliberately NOT skipped —
     # it's real structured HTML, so it's a strict upgrade over both the
     # plain-text cache and a live re-fetch, however the row was reached.
@@ -14926,10 +14944,10 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
         except Exception:
             feed_items = []
 
-        # One all_tags() read serves both the Saved view's filter bar and the
+        # One all_tags() read serves both the Archive view's filter bar and the
         # <datalist> behind every tag input on the page (save-time and the
         # reader's inline editor). The vocabulary is needed in every view, not
-        # just Saved — a Feed item can be tagged at save time — so this is read
+        # just Archive — a Feed item can be tagged at save time — so this is read
         # unconditionally rather than inside the `view == "saved"` branch.
         all_tags_ranked = lib.all_tags()
         tag_vocab = [t for t, _ in all_tags_ranked]
@@ -14963,14 +14981,14 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
 
     quick_views_html = (
         _qv("feed", "Feed", len(feed_items))
-        + _qv("saved", "Saved", saved_total)
+        + _qv("saved", "Archive", saved_total)
         + _qv("readlater", "Read Later", len(rl_urls))
     )
 
     # Search lives in the list pane's header, directly above the rows it
     # filters — not in the left rail. See _list_search_html below; the rail
     # keeps only navigation (quick views) and per-view filter vocabularies
-    # (Feed's Sources tree, Saved's tag bar).
+    # (Feed's Sources tree, the Archive view's tag bar).
     sources_html = ""
     if view == "feed":
         cat_rows = ""
@@ -14996,7 +15014,7 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
             cat_rows = f'<div class="rr-rail-label">Sources</div>{cat_rows}'
         sources_html = cat_rows
     elif view == "saved":
-        # The tag bar stays in the rail: it's a filter vocabulary, the Saved
+        # The tag bar stays in the rail: it's a filter vocabulary, the Archive
         # view's counterpart to Feed's Sources tree, so it's labelled to match
         # rather than keeping the old "Search" heading the moved form left behind.
         tagbar = "".join(f'<a href="/read?view=saved&q={_esc(t)}">{_esc(t)} ({c})</a>' for t, c in saved_tags)
@@ -15099,8 +15117,8 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
 
     if view == "saved":
         rows_html = "".join(_saved_row(r) for r in saved_rows) or '<p style="padding:24px;color:var(--muted);">No matches.</p>'
-        list_title = "Saved"
-        list_count_label = f"{len(saved_rows):,} of {saved_total:,} shown" if q else f"{saved_total:,} saved"
+        list_title = "Archive"
+        list_count_label = f"{len(saved_rows):,} of {saved_total:,} shown" if q else f"{saved_total:,} archived"
     elif view == "readlater":
         rows_html = "".join(_rl_row(r) for r in rl_rows) or '<p style="padding:24px;color:var(--muted);">No items saved to Read Later yet.</p>'
         list_title = "Read Later"
@@ -15126,7 +15144,7 @@ def reader_shell(request: Request, view: str = "feed", q: str = ""):
 
     # Search sits in the list pane's own header, directly above the rows it
     # filters. Each view keeps its existing mechanism — Feed filters client-side
-    # through rrApplyFilter (composing with the active category/source), Saved
+    # through rrApplyFilter (composing with the active category/source), Archive
     # does a plain GET reload — only the placement is shared. Read Later has no
     # search today and renders none, same as before.
     if view == "feed":
@@ -15244,7 +15262,7 @@ var rrFsSizes = [17, 15, 20];
 // State lives here, not per-article, so it survives a scroll-driven "time
 // left" update without re-deriving anything from `view`/`d` — the whole
 // point is it behaves identically whether the open article came from Feed
-// or Saved.
+// or Archive.
 var rrFocusMode = false;
 var RR_ICON_EXPAND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
 var RR_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
@@ -15637,7 +15655,7 @@ async function rrTagsPersist() {{
     rrRenderTagChips('Could not save.');
   }}
 }}
-// Keep the Saved-view list row's own chips in step with an edit made in the
+// Keep the Archive-view list row's own chips in step with an edit made in the
 // reader, so the two panes never disagree without a reload.
 function rrSyncRowTags(id, tags) {{
   var el = document.querySelector('.rr-row[data-id="' + id + '"] .rr-row-tags');
@@ -16855,14 +16873,19 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
         lib.close()
 
 
-# Library management lives on its own page (/admin/library) so the hub stays
-# uncluttered. Ordered as the recommended workflow — top to bottom.
+# Library management lives on its own page (/admin/library). Phase 6:
+# "Open Reader" was dropped from this list — it's not a management tool, and
+# it's reachable via a dedicated callout at the top of the page instead (see
+# admin_library()), plus Admin's own CFO Toolbox -> Library entry point.
+# "Historical sweep" was dropped too — merged into Archive Queue (see
+# admin_queue()'s Historical sweep panel; GET /admin/library/backfill now
+# redirects there). This list backs BOTH the flat description text below AND
+# admin_library()'s 3-way visual grouping (Archive backup stands outside all
+# three — see that function's own note on why).
 _LIBRARY_TOOLS = [
-    ("/read",                       "Open Reader",         "The day-to-day reading surface (Phase 5): Feed, Saved, and Read Later in one three-pane view, with an in-app reader pane. This is where you actually read—the tools below are curation."),
-    ("/admin/library/backup",       "Archive backup",      "Snapshot the database before you start, so you can roll back if needed."),
-    ("/admin/library/backfill",     "Historical sweep",    "One-time catch-up: crawl each source's sitemap for older articles you saved before this tool existed, and queue them for review. Run once per source; new candidates land in Archive Queue below."),
-    ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable."),
-    ("/admin/library/queue",        "Archive Queue",       "Review every proposed save from the historical sweep or an ongoing feed scan—fix dates, edit tags, and approve into the archive or dismiss."),
+    ("/admin/library/backup",       "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run weekly on a schedule (a GitHub Action syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
+    ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. Different from Archive Queue's Historical sweep panel: this re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
+    ("/admin/library/queue",        "Archive queue",       "Review every proposed save—from an ongoing feed scan, or the page's own Historical sweep panel (a one-time catch-up on an older source's back catalog)—fix dates, edit tags, and approve into the archive or dismiss."),
     ("/admin/library/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
     ("/admin/library/tags",         "Tag cleanup",         "Merge, rename, or remove tags so the vocabulary is tidy before you learn from it."),
     ("/admin/library/tag-style",    "Tagging style",       "Learn how you tag from your archive and edit the guide, so auto-tagging matches your judgment."),
@@ -16899,14 +16922,26 @@ _FPA_BUDDY_TOOLS = [
 ]
 
 # Admin sections — grouped on the hub; each links to its own page.
-# Grouping logic (per the July 2026 IA review, revised Phase 6): Inbox holds
-# only things that actually arrive and wait on Brian; CFO Toolbox is
-# everything behind the public /tools directory (plus Sail, Don't Row's
-# settings, see the note on _TOOLBOX_TOOLS above); FP&A Buddy is its own
-# section now that it has three admin pages of its own; Brand & voice is the
-# design system; System is accounts, health, and plumbing. The old Features
-# catch-all is gone — every card that lived there had a real home once FP&A
-# Buddy became its own section and Sail Don't Row moved into CFO Toolbox.
+# Grouping logic (Phase 6 restructure): the right column now mirrors the
+# public site's own nav order — Thought Leadership, then CFO Toolbox, then
+# Brand/voice/content — with a catch-all System group last for the
+# operational tools that have no public-nav counterpart (see the "System"
+# placement note on admin_page below for why it stays a separate group
+# rather than folding into one of the three). CFO Toolbox is the one
+# genuinely different case: it's built as an expandable PARENT in
+# admin_page() itself, not a flat items list here — FP&A Buddy nests inside
+# it as its own sub-group, and Library is added as a direct link, both
+# assembled dynamically (see the CFO Toolbox special-case in admin_page())
+# because that nesting needs access to admin_page()'s own task_counts/
+# _group_html closures. The entry here still carries _TOOLBOX_TOOLS as its
+# base items (Software, Toolbox categories, Benchmarking, Communities, Sail
+# Don't Row settings) — every one of those is KEPT as a direct child rather
+# than dropped to match the brief's shorter "Software/Benchmarking/
+# Communities" prose list, since dropping "Toolbox categories" or "Sail,
+# Don't Row settings" would remove their only path without a replacement
+# (the same "don't just delete the only path" standard the brief applies
+# to Library's own "Open Reader" removal) — flagged in the Phase 6 PR.
+# Inbox holds only things that actually arrive and wait on Brian.
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
@@ -16914,18 +16949,17 @@ _ADMIN_GROUPS = [
         ("/admin/community-gaps", "Community gaps",        "Where visitors say finance communities fall short—what they're missing, and which community came closest."),
         ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
-    ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Thought Leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
         ("/admin/thought-leadership", "Thought Leadership", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
     ]),
-    ("FP&A Buddy", "The Q&amp;A tool's own explainer, usage report, and feedback triage.", _FPA_BUDDY_TOOLS),
-    ("Brand & voice", "How the site looks and sounds.", [
-        ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
-        ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
+    ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
+    ("Brand, voice, and content", "How the site looks and sounds.", [
         ("/admin/copy",          "Site copy",           "Edit the homepage and About page bio copy—changes go live immediately, no redeploy."),
+        ("/admin/voice",         "Verbal identity",     "The voice powering FP&amp;A Buddy and your site's tone, plus an on-demand check against it."),
         ("/admin/emails",        "Email templates",     "Edit subject, body, and sign-off for every outbound email (warm intro, welcome, password reset, and submission confirmations)—changes go live immediately, no redeploy."),
+        ("/admin/brand",         "Brand standards",     "Visual standards and color system for the site."),
     ]),
-    ("System", "Accounts, health, and plumbing.", [
+    ("System", "Accounts, health, and plumbing—no public-nav counterpart, so this stays its own catch-all rather than folding into one of the three above.", [
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
         ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
@@ -16936,8 +16970,11 @@ _ADMIN_GROUPS = [
     ]),
 ]
 
-# Flat view kept for any code/tests that iterate every section.
-_ADMIN_SECTIONS = _LIBRARY_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
+# Flat view kept for any code/tests that iterate every section. FP&A Buddy's
+# tools are folded into CFO Toolbox on the live page (see admin_page()), not
+# in this static list, so they're added explicitly here to keep this view
+# genuinely complete.
+_ADMIN_SECTIONS = _LIBRARY_TOOLS + _FPA_BUDDY_TOOLS + [s for _, _, items in _ADMIN_GROUPS for s in items]
 
 
 def _content_flow_diagram(highlight: str = "") -> str:
@@ -18356,47 +18393,84 @@ def admin_page(request: Request):
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    # Library gets a single prominent card linking to its own management page,
-    # so the hub stays uncluttered; everything else renders as the expandable
-    # groups defined in _ADMIN_GROUPS. The Library card is never
-    # inline-collapsible, so it always shows its aggregate badge here —
-    # the per-step breakdown lives on /admin/library itself.
-    library_card = _card("/admin/library", "Library",
-                         f"Build, curate, enrich, and back up your archive&mdash;{len(_LIBRARY_TOOLS)} tools.",
-                         _group_badge(task_counts, [href for href, _, _ in _LIBRARY_TOOLS]))
-
-    def _group_html(gname, gdesc, items):
-        cards = "".join(_card(href, title, desc, _badge_for_href(href, task_counts.get(href, 0)))
-                        for href, title, desc in items)
-        group_badge_html = _group_badge(task_counts, [href for href, _, _ in items])
+    # _group_html's `items` accepts either a plain (href, title, desc) tuple
+    # — rendered as a normal _card() link, navigating straight to that tool's
+    # own page like every group already did — or a pre-rendered HTML string
+    # (a nested _group_html() call's own output), included as-is. That's how
+    # CFO Toolbox nests FP&A Buddy as a real sub-group below: the exact same
+    # <details>/<summary> disclosure mechanism Inbox already uses, just
+    # called a second time and dropped into the parent's item list, with no
+    # new mechanism needed. `badge_hrefs` lets a caller show an aggregate
+    # badge covering more than just this group's own direct items — CFO
+    # Toolbox uses it to fold in FP&A Buddy's and Library's hrefs too, so the
+    # header badge reflects the true pending count across everything nested
+    # inside it, not just its 5 direct children. `nested=True` gives a
+    # sub-group a visually lighter treatment (smaller padding/caret, filled
+    # --bg instead of transparent) so it reads as nested rather than a
+    # sibling of the same visual weight.
+    def _group_html(gname, gdesc, items, badge_hrefs=None, nested=False):
+        cards = "".join(
+            item if isinstance(item, str) else
+            _card(item[0], item[1], item[2], _badge_for_href(item[0], task_counts.get(item[0], 0)))
+            for item in items
+        )
+        flat_hrefs = badge_hrefs if badge_hrefs is not None else [item[0] for item in items if not isinstance(item, str)]
+        group_badge_html = _group_badge(task_counts, flat_hrefs)
         open_attr = " open" if gname == "Inbox" else ""   # Inbox starts expanded — everything else is click-to-expand
+        summary_pad = "12px 16px" if nested else "16px 20px"
         return (
-            f'<details class="admin-group"{open_attr} style="margin-bottom:14px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
-            f'<summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<details class="admin-group{" admin-group-nested" if nested else ""}"{open_attr} '
+            f'style="margin-bottom:{"0" if nested else "14px"};background:{"var(--bg)" if nested else "transparent"};'
+            f'border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
+            f'<summary style="list-style:none;cursor:pointer;padding:{summary_pad};display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
-            f'<span style="font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(gname)}</span>'
+            f'<span style="font-size:{"13.5px" if nested else "15px"};text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(gname)}</span>'
             f'<span class="group-badge">{group_badge_html}</span>'
             f'<span style="font-size:12px;color:var(--muted);">{len(items)} {"tool" if len(items)==1 else "tools"}</span>'
             f'</span>'
             f'<span class="disclosure-caret">&#9654;</span>'
             f'</summary>'
-            f'<div style="padding:0 20px 20px;">'
+            f'<div style="padding:0 {"16px" if nested else "20px"} {"16px" if nested else "20px"};">'
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
             f'<div style="display:grid;gap:14px;">{cards}</div>'
             f'</div>'
             f'</details>'
         )
 
+    # Library used to get its own always-expanded card floating above every
+    # group; it's now a direct link inside CFO Toolbox instead (Phase 6 —
+    # "CFO Toolbox → Library" is the new entry point for archive/library
+    # management). Its own aggregate badge (from all _LIBRARY_TOOLS
+    # hrefs) is unchanged — just relocated.
+    library_hrefs = [href for href, _, _ in _LIBRARY_TOOLS]
+    library_link_card = _card("/admin/library", "Library",
+                              f"Build, curate, enrich, and back up your archive&mdash;{len(_LIBRARY_TOOLS)} tools.",
+                              _group_badge(task_counts, library_hrefs))
+
+    # FP&A Buddy moves from its own standalone top-level group into a nested
+    # sub-group inside CFO Toolbox — the same group, same 4 items, same
+    # description, just reparented.
+    fpa_hrefs = [href for href, _, _ in _FPA_BUDDY_TOOLS]
+    fpa_subgroup_html = _group_html(
+        "FP&A Buddy", "The Q&amp;A tool's own explainer, usage report, and feedback triage.",
+        _FPA_BUDDY_TOOLS, nested=True,
+    )
+
     # Two columns on wide viewports: left carries the group Brian triages
-    # most often (Inbox); right carries the Archive card plus the
-    # lower-cadence settings/reference groups (CFO Toolbox, FP&A Buddy,
-    # Brand & voice, System). Below the breakpoint both stacks concatenate
-    # into the original single-column order — unchanged from before this split.
+    # most often (Inbox); right carries the three public-nav-mirroring
+    # groups (Thought Leadership, CFO Toolbox, Brand/voice/content) plus the
+    # System catch-all. Below the breakpoint both stacks concatenate into a
+    # single-column order — unchanged from before this split.
     _LEFT_GROUPS = {"Inbox"}
     left_html = ""
-    right_html = f'<div style="margin-bottom:22px;">{library_card}</div>'
+    right_html = ""
     for gname, gdesc, items in _ADMIN_GROUPS:
-        html = _group_html(gname, gdesc, items)
+        if gname == "CFO Toolbox":
+            toolbox_hrefs = [href for href, _, _ in items] + fpa_hrefs + library_hrefs
+            html = _group_html(gname, gdesc, list(items) + [fpa_subgroup_html, library_link_card],
+                               badge_hrefs=toolbox_hrefs)
+        else:
+            html = _group_html(gname, gdesc, items)
         if gname in _LEFT_GROUPS:
             left_html += html
         else:
@@ -18433,40 +18507,104 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     finally:
         lib.close()
 
-    def _step(n, href, title, desc, badge_html=""):
+    # Card-style rendering (no numbered-step badge — Phase 6 dropped the
+    # implied strict top-to-bottom sequence once the tools were regrouped by
+    # function rather than workflow order; see the 3-way grouping below).
+    def _lib_card(href, title, desc, badge_html=""):
         return (
-            f'<a href="{href}" style="display:flex;gap:16px;align-items:flex-start;background:var(--surface);'
-            f'border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-decoration:none;">'
-            f'<span style="flex-shrink:0;width:30px;height:30px;border-radius:50%;background:var(--navy);color:#fff;'
-            f'display:flex;align-items:center;justify-content:center;font-family:var(--font-head);font-weight:600;font-size:15px;">{n}</span>'
-            f'<span style="flex:1;">'
-            f'<span style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+            f'<a href="{href}" style="display:block;background:var(--surface);border:1px solid var(--line);'
+            f'border-radius:14px;padding:18px 20px;text-decoration:none;">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
             f'<span style="display:flex;align-items:center;gap:8px;">'
             f'<span style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-0.01em;">{title}</span>'
             f'{badge_html}</span>'
-            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></span>'
-            f'<span style="display:block;margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</span>'
-            f'</span></a>'
+            f'<span style="color:var(--navy);font-size:18px;line-height:1;">&rarr;</span></div>'
+            f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    cards = "".join(_step(i + 1, href, title, desc, _badge_for_href(href, task_counts.get(href, 0)))
-                    for i, (href, title, desc) in enumerate(_LIBRARY_TOOLS))
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Library</h1>
-{auth_banner}
-<p style="color:var(--muted);margin:4px 0 6px;">Open Reader for your day-to-day reading. The other eight tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from.</p>
-<p style="color:var(--muted);margin:0 0 18px;">For a first-time cleanup, work top to bottom&mdash;each step sets up the next. Once set up, jump to any tool directly anytime.</p>
-{_content_flow_diagram()}
-<p style="color:var(--muted);font-size:14px;margin:-8px 0 6px;">New content always enters through the queue (step&nbsp;3 or&nbsp;4) for your review before it's saved. From there:</p>
-<ul style="color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px;padding-left:20px;">
-<li>De-duping and enrichment (steps&nbsp;5&ndash;6) get it ready for the FP&amp;A Buddy corpus.</li>
-<li>Filtering out anything off-target (step&nbsp;7) and tidying tags (steps&nbsp;8&ndash;9) keeps that corpus clean, on an ongoing basis.</li>
-</ul>
-<div style="display:grid;gap:12px;">{cards}</div>
+    # Open Reader — Phase 6 dropped it from the numbered tool list (it's not
+    # a management tool), but it needs to stay reachable and obvious from
+    # this page, not just from Admin's own CFO Toolbox -> Library entry
+    # point (which lands back HERE, not on /read) or the homepage's
+    # admin-only Reader-access box. A dedicated callout above everything
+    # else does that without pretending it's tool #1 of a workflow list.
+    # Live-preview follow-up: restyled to match the homepage's Reader-access
+    # box / /tools' Library tile — same _ADMIN_ONLY_BG/_ADMIN_ONLY_BORDER
+    # seafoam treatment and vertical icon-badge card shape, instead of this
+    # page's own one-off navy horizontal bar — since it now sits in a narrow
+    # column next to the flow diagram (see the top row below) rather than
+    # spanning the full page width.
+    open_reader_callout = (
+        f'<a href="/read" style="display:flex;flex-direction:column;gap:8px;height:100%;box-sizing:border-box;'
+        f'text-decoration:none;background:{_ADMIN_ONLY_BG};border:{_ADMIN_ONLY_BORDER};border-radius:16px;padding:26px;">'
+        f'<div style="display:flex;align-items:center;gap:12px;">'
+        f'{_card_icon(3, _ICON_NEWSPAPER)}'
+        f'<div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Open Reader</div>'
+        f'</div>'
+        f'<p style="font-size:13.5px;line-height:1.5;color:var(--navy);margin:0;">The day-to-day reading surface&mdash;Feed, Archive, and Read Later in one three-pane view. This is where you actually read; everything below is curation.</p>'
+        f'</a>'
+    )
 
-<h2 style="margin:40px 0 6px;">Saving articles from anywhere</h2>
-<p style="color:var(--muted);font-size:14px;margin:0 0 8px;line-height:1.6;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
+    # Regrouped by function (Phase 6), not the old single top-to-bottom
+    # workflow list. Archive backup was originally a standalone headingless
+    # card outside all three groups — it applies to the whole archive, not
+    # just "existing" content, so filing it under "Existing archive
+    # management" would misdescribe it — but that read oddly once every
+    # other tool had a labeled section, so it's now folded into "Archive
+    # additions & backup" instead (see that section below). Enrich archive
+    # stays in "Tagging" (the other genuinely ambiguous placement from the
+    # Phase 6 brief) even though it also drafts summaries: it's what
+    # actually applies the tag vocabulary Tag cleanup curates and Tagging
+    # style teaches, so the three read as "how tags get created, taught,
+    # and refined" as one cluster, even though summaries are a real second
+    # output of the third.
+    lib_by_href = {href: (title, desc) for href, title, desc in _LIBRARY_TOOLS}
+
+    def _lib_section(label, hrefs, desc_line):
+        section_cards = "".join(
+            _lib_card(h, lib_by_href[h][0], lib_by_href[h][1], _badge_for_href(h, task_counts.get(h, 0)))
+            for h in hrefs
+        )
+        return (
+            f'<h2 style="margin:28px 0 4px;font-size:17px;">{label}</h2>'
+            f'<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">{desc_line}</p>'
+            f'<div style="display:grid;gap:12px;">{section_cards}</div>'
+        )
+
+    # Archive backup used to render as its own headingless card above the
+    # three labeled sections — visually odd once everything else had a
+    # heading (flagged live after this shipped). Folded into "Archive
+    # additions" instead, first in that section, rather than kept standalone:
+    # it doesn't fit "existing archive management" (see the note above), but
+    # it reads fine alongside "bringing new content in" as one shared idea —
+    # both are about keeping the archive intact and current, not a single
+    # curation pass over content that's already there. Renamed the section to
+    # "Archive additions & backup" so the heading still says what's inside it.
+    # Second live-preview round: Open Reader + the flow diagram go back to
+    # full page width, as their own row above everything else — but not
+    # simply stacked like before this whole redesign started: the diagram
+    # takes the left 2/3 of that row and Open Reader's now-seafoam card
+    # takes the right 1/3, side by side (`.lib-top-row`), both stretched to
+    # the same height by the grid's default `align-items:stretch`.
+    #
+    # Third live-preview round: the grid below is a genuine 2x2 now, not
+    # 3 blocks auto-placed into 4 cells (which left the last cell empty) —
+    # "Existing archive management" and "Tagging" (renamed "Tag management"
+    # to read as a matched pair with "Archive additions & backup") split
+    # into two independent cells instead of stacking together in one, so
+    # every cell is filled: top-left "Saving articles from anywhere",
+    # top-right "Existing archive management", bottom-left "Archive
+    # additions & backup", bottom-right "Tag management". DOM order
+    # (saving-articles, existing-mgmt, archive-additions-and-backup,
+    # tag-mgmt) drives both the desktop auto-placement and the mobile
+    # single-column stack, same reasoning as the homepage's `.home-grid`.
+    top_row_html = f"""<div class="lib-top-row">
+<div>{_content_flow_diagram()}</div>
+<div>{open_reader_callout}</div>
+</div>"""
+
+    saving_articles_html = f"""<h2 style="margin:0 0 4px;font-size:17px;">Saving articles from anywhere</h2>
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 <p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong>&mdash;the old copies embed the old values. Set them up again from this page's instructions.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
@@ -18502,7 +18640,45 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 </ol>
 <p style="margin:0;color:var(--muted);font-size:13px;">Articles saved this way arrive untagged&mdash;tag them later in the Library, or add a second JSON text field named <code>tags</code> with a comma-separated list if you want a fixed default.</p>
 </div>
-</details>
+</details>"""
+
+    existing_mgmt_html = _lib_section(
+        "Existing archive management",
+        ["/admin/library/backfill-content", "/admin/library/dedupe", "/admin/library/review-removals"],
+        "Working with what's already saved.")
+
+    archive_additions_html = _lib_section(
+        "Archive additions & backup", ["/admin/library/backup", "/admin/library/queue"],
+        "Bringing new content in&mdash;an ongoing feed scan plus an occasional historical sweep, both reviewed on one page before anything's saved&mdash;plus an on-demand snapshot for right before something risky.")
+
+    tag_mgmt_html = _lib_section(
+        "Tag management",
+        ["/admin/library/tags", "/admin/library/tag-style", "/admin/library/enrich"],
+        "How tags get created, taught, and kept tidy&mdash;and the summaries that ride along with them.")
+
+    body = f"""<div class="page page-admin">
+<style>
+.lib-top-row{{display:grid;grid-template-columns:2fr 1fr;column-gap:28px;align-items:stretch;margin-bottom:24px;}}
+.lib-top-row>div{{min-width:0;}}
+.lib-two-col{{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;row-gap:28px;}}
+.lib-two-col>div{{min-width:0;}}
+@media (max-width:900px){{
+  .lib-top-row{{display:block;}}
+  .lib-top-row>div:last-child{{margin-top:22px;}}
+  .lib-two-col{{display:block;}}
+}}
+</style>
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Library</h1>
+{auth_banner}
+<p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
+{top_row_html}
+<div class="lib-two-col">
+<div>{saving_articles_html}</div>
+<div>{existing_mgmt_html}</div>
+<div>{archive_additions_html}</div>
+<div>{tag_mgmt_html}</div>
+</div>
 </div>"""
     return HTMLResponse(_page("Library—Admin", "Admin", body, authed=True))
 
@@ -18623,6 +18799,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
     try:
         pending = lib.list_queue(status="pending")
         dismissed_n = lib.queue_count(status="dismissed")
+        last_saved = lib.last_saved_at()
         import json as _json
         suggestions = _json.loads(lib.get_setting("queue_suggestions") or "{}")
         suggest_status = _json.loads(lib.get_setting("queue_suggest_status") or "{}")
@@ -18697,6 +18874,144 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
     <button class="btn btn-ghost" onclick="dismissOne(this)" style="font-size:13px;padding:8px 18px;">Dismiss</button>
   </div>
 </div>"""
+
+    # -- Historical sweep panel (Phase 6 merge) --------------------------------
+    # Was its own page at /admin/library/backfill; now a collapsible section
+    # here since it's the producer half of the same discovery -> review
+    # workflow this page's own diagram describes (GET /admin/library/backfill
+    # now just redirects here). Same _job_set("backfill", ...) job state, same
+    # POST /admin/library/backfill/start + GET .../status routes, unchanged —
+    # only the page embedding this form moved. Collapsed by default (it's a
+    # rare tool, mainly right after adding a new source — see its own copy
+    # below) unless a sweep is running or just finished, so there's always
+    # something to see when it matters and nothing in the way when it doesn't.
+    from linklib.queue import QUEUE_ENRICH_MODEL
+    from linklib.models import models_for
+    sweep_model_options = "".join(
+        f'<option value="{m["id"]}" {"selected" if QUEUE_ENRICH_MODEL == m["id"] else ""}>'
+        f'{m["label"]}—{m["blurb"]}{" (recommended)" if m["id"] == QUEUE_ENRICH_MODEL else ""}</option>'
+        for m in reversed(models_for(blurb="short"))
+    )
+    sweep_default_since = (last_saved or "2024-06-01")[:10]
+    sweep_job = _job_get("backfill")
+    sweep_running = sweep_job.get("running", False)
+    sweep_error = sweep_job.get("error", "")
+    sweep_report = sweep_job.get("report", [])
+    sweep_done = sweep_job.get("done", 0)
+    sweep_total = sweep_job.get("total", 0)
+
+    sweep_status_html = ""
+    if sweep_running:
+        sweep_pct = round(sweep_done / sweep_total * 100) if sweep_total else 0
+        sweep_status_html = f"""
+<div id="sweep-job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">
+  <div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:4px;">Sitemap sweep in progress&hellip;</div>
+  <div style="font-size:13px;color:var(--muted);">{sweep_done} / {sweep_total} sources scanned</div>
+  <div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">
+    <div style="background:#2563eb;height:8px;width:{sweep_pct}%;transition:width .3s;"></div>
+  </div>
+</div>"""
+    elif sweep_error:
+        sweep_status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: {_esc(sweep_error)}</div>'
+    elif sweep_report:
+        sweep_added = sum(r.get("added", 0) for r in sweep_report)
+        sweep_cands = sum(r.get("candidates", 0) for r in sweep_report)
+        sweep_scope = sum(r.get("skipped_scope", 0) for r in sweep_report)
+        sweep_status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;{sweep_added} articles queued from {sweep_cands} candidates ({sweep_scope} skipped as off-audience)&mdash;see them in the queue below.</div>'
+
+    def _sweep_report_row(r):
+        added = r.get("added", 0)
+        cands = r.get("candidates", 0)
+        scope = r.get("skipped_scope", 0)
+        note = r.get("note", "")
+        sitemap = r.get("sitemap") or ""
+        sm_link = (f'<a href="{_esc(sitemap)}" style="font-size:11px;color:var(--muted);" target="_blank">'
+                   f'{_esc(sitemap[:60])}{"…" if len(sitemap) > 60 else ""}</a>'
+                   if sitemap else '<span style="font-size:11px;color:var(--muted);">—</span>')
+        extra = f" / {scope} off-audience" if scope else ""
+        status = note if note else f'{added} added / {cands} candidates{extra}'
+        status_color = "#b91c1c" if note else ("#16a34a" if added else "#92400e")
+        return (f'<tr><td style="padding:8px 12px;font-size:13px;font-weight:500;">{_esc(r.get("source", ""))}</td>'
+                f'<td style="padding:8px 12px;">{sm_link}</td>'
+                f'<td style="padding:8px 12px;font-size:13px;color:{status_color};">{_esc(status)}</td></tr>')
+
+    sweep_report_html = ""
+    if sweep_report:
+        sweep_rows_html = "".join(_sweep_report_row(r) for r in sweep_report)
+        sweep_report_html = f"""
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:8px;">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;font-size:14px;">Coverage report</div>
+  <div style="overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
+      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Sitemap</th>
+      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Result</th>
+    </tr></thead>
+    <tbody>{sweep_rows_html}</tbody>
+  </table>
+  </div>
+</div>"""
+
+    sweep_disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if sweep_running else ""
+    sweep_open_attr = " open" if (sweep_running or sweep_error or sweep_report) else ""
+
+    sweep_panel = f"""<details class="admin-group" style="margin-bottom:20px;background:transparent;border:1px solid var(--line);border-radius:14px;overflow:hidden;"{sweep_open_attr}>
+  <summary style="list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+    <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
+      <span style="font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">Historical sweep</span>
+      <span style="font-size:12px;color:var(--muted);">rare&mdash;mainly right after adding a new source</span>
+    </span>
+    <span class="disclosure-caret">&#9654;</span>
+  </summary>
+  <div style="padding:0 20px 20px;">
+    <p style="color:var(--muted);margin:0 0 6px;font-size:13.5px;">Walks a source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet&mdash;a one-time back-catalog catch-up, typically run once right after you add a new source, not something to reach for routinely. It doesn&rsquo;t save anything by itself, it just adds to the queue below for you to review. <strong>Different from Reader content backfill</strong> (elsewhere on the Library page), which re-processes articles you&rsquo;ve <em>already</em> saved for better structure&mdash;this only ever finds articles you haven&rsquo;t saved yet.</p>
+    <p style="color:var(--muted);margin:0 0 16px;font-size:13.5px;">Once a source&rsquo;s back catalog is swept, &ldquo;Scan feed&rdquo; below is what keeps you current going forward&mdash;you shouldn&rsquo;t need to run this again for that source.</p>
+    <div id="sweep-poll-container">{sweep_status_html}</div>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
+      <form id="backfill-form" method="post" action="/admin/library/backfill/start" style="display:grid;gap:18px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div>
+            <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Articles published since</label>
+            <input type="date" name="since" value="{sweep_default_since}" max="{datetime.now().strftime('%Y-%m-%d')}"
+              style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);" required>
+            <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Auto-detected from your oldest save: <strong>{sweep_default_since}</strong></p>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Max articles per source</label>
+            <input type="number" name="per_source" value="150" min="10" max="2000"
+              style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+            <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">150 is a safe starting point. Raise it to reach further back&mdash;the sweep takes the most recent N, so a low cap stops early on prolific sources.</p>
+          </div>
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Limit to sources <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
+          <input type="text" name="only_sources" placeholder="e.g. Kellblog, Stratechery, SaaStr"
+            style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+          <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Comma-separated. Leave blank to sweep everything. Re-running is safe&mdash;already-queued and saved URLs are skipped, so a bigger limit only adds the older articles you haven&rsquo;t seen yet.</p>
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Enrichment model</label>
+          <select name="model" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);min-width:240px;">
+            {sweep_model_options}
+          </select>
+        </div>
+        <div>
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
+            <input type="checkbox" name="dry_run" value="1" checked style="margin-top:3px;accent-color:var(--accent);">
+            <span><strong>Dry run</strong>
+            <span style="display:block;font-size:12px;color:var(--muted);">Count candidates without fetching or enriching anything. Uncheck to do the real sweep.</span></span>
+          </label>
+        </div>
+        <div>
+          <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {sweep_disable}>Run sweep</button>
+          <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side&mdash;you can leave this page.</span>
+        </div>
+      </form>
+    </div>
+    {sweep_report_html}
+  </div>
+</details>"""
 
     group_blocks = ""
     for source, cards in groups.items():
@@ -18773,8 +19088,10 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Archive Queue</h1>
-<p style="color:var(--muted);margin:4px 0 6px;">Proposed saves waiting for your review—from &ldquo;Scan feed&rdquo; below (ongoing) or a <a href="/admin/library/backfill">Historical sweep</a> (one-time back-catalog catch-up).</p>
+<p style="color:var(--muted);margin:4px 0 6px;">Proposed saves waiting for your review—from &ldquo;Scan feed&rdquo; below (ongoing) or the &ldquo;Historical sweep&rdquo; panel above it (occasional, mainly right after adding a new source).</p>
 <p style="color:var(--muted);margin:0 0 22px;">Approve into the archive (edit the tags first if you like), or dismiss what you don&rsquo;t want.</p>
+{_content_flow_diagram(highlight="queue")}
+{sweep_panel}
 {scan_notice}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
   <div><span id="pending-count" style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--ink);">{pending_n}</span> <span style="color:var(--muted);">pending</span> &nbsp; {dismissed_note} &nbsp; {expand_controls}</div>
@@ -18855,6 +19172,40 @@ async function dismissAll(btn){{
   const cards = Array.from(grp.querySelectorAll('[data-card]'));
   for (const c of cards) {{ await dismissOne(c.querySelector('.add-btn')); }}
 }}
+(function() {{
+  // Historical sweep's own status poller (Phase 6 merge) — was previously on
+  // its own page. Fixed a real bug while moving it: this used to fetch
+  // '/admin/backfill/status' (missing the /library segment), a 404 that
+  // silently never updated the UI; the real route is
+  // '/admin/library/backfill/status'.
+  var sweepReloadOnDone = false;
+  function pollSweep() {{
+    fetch('/admin/library/backfill/status').then(r => r.json()).then(function(s) {{
+      var container = document.getElementById('sweep-poll-container');
+      if (!container) return;
+      var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
+      if (s.running) {{
+        sweepReloadOnDone = true;
+        container.innerHTML = '<div id="sweep-job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">'
+          + '<div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:4px;">Sitemap sweep in progress&hellip;</div>'
+          + '<div style="font-size:13px;color:var(--muted);">' + s.done + ' / ' + s.total + ' sources scanned</div>'
+          + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
+          + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div></div>';
+        setTimeout(pollSweep, 3000);
+      }} else if (sweepReloadOnDone) {{
+        // Job finished while we were watching — reload so the full coverage table (and the queue below) render.
+        window.location.reload();
+      }} else if (s.error) {{
+        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
+      }}
+    }}).catch(function() {{ setTimeout(pollSweep, 4000); }});
+  }}
+  if ({str(sweep_running).lower()}) {{ sweepReloadOnDone = true; setTimeout(pollSweep, 3000); }}
+  var backfillForm = document.getElementById('backfill-form');
+  if (backfillForm) {{
+    backfillForm.addEventListener('submit', function() {{ setTimeout(function() {{ pollSweep(); }}, 2000); }});
+  }}
+}})();
 </script>"""
     return HTMLResponse(_page("Archive Queue—Admin", "Admin", body, authed=True))
 
@@ -21645,7 +21996,7 @@ def admin_enrich(request: Request):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
   <p style="font-size:13.5px;color:var(--muted);margin:0;line-height:1.6;">
     <strong>After finishing:</strong> visit <a href="/admin/library/review-removals">Review removals</a> to confirm any articles the enricher flagged as off-audience,
-    and check the enriched summaries in the <a href="/read?view=saved">Reader's Saved view</a>.
+    and check the enriched summaries in the <a href="/read?view=saved">Reader's Archive view</a>.
   </p>
 </div>
 
@@ -21756,183 +22107,14 @@ def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool,
         lib.close()
 
 
-@app.get("/admin/library/backfill", response_class=HTMLResponse)
+@app.get("/admin/library/backfill")
 def admin_backfill(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        last_saved = lib.last_saved_at()
-    finally:
-        lib.close()
-
-    from linklib.queue import QUEUE_ENRICH_MODEL
-    from linklib.models import models_for
-    # Curated (best-first); QUEUE_ENRICH_MODEL is the selected/recommended option.
-    model_options = "".join(
-        f'<option value="{m["id"]}" {"selected" if QUEUE_ENRICH_MODEL == m["id"] else ""}>'
-        f'{m["label"]}—{m["blurb"]}{" (recommended)" if m["id"] == QUEUE_ENRICH_MODEL else ""}</option>'
-        for m in reversed(models_for(blurb="short"))
-    )
-
-    default_since = (last_saved or "2024-06-01")[:10]
-    job = _job_get("backfill")
-    running = job.get("running", False)
-    job_error = job.get("error", "")
-    report = job.get("report", [])
-    job_done = job.get("done", 0)
-    job_total = job.get("total", 0)
-
-    status_html = ""
-    if running:
-        prog_pct = round(job_done / job_total * 100) if job_total else 0
-        status_html = f"""
-<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">
-  <div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:4px;">Sitemap sweep in progress&hellip;</div>
-  <div style="font-size:13px;color:var(--muted);">{job_done} / {job_total} sources scanned</div>
-  <div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">
-    <div style="background:#2563eb;height:8px;width:{prog_pct}%;transition:width .3s;"></div>
-  </div>
-</div>"""
-    elif job_error:
-        status_html = f'<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: {_esc(job_error)}</div>'
-    elif report:
-        total_added = sum(r.get("added", 0) for r in report)
-        total_cands = sum(r.get("candidates", 0) for r in report)
-        total_scope = sum(r.get("skipped_scope", 0) for r in report)
-        status_html = f'<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;{total_added} articles queued from {total_cands} candidates ({total_scope} skipped as off-audience). <a href="/admin/library/queue">Review in Archive Queue &rarr;</a></div>'
-
-    def _report_row(r):
-        added = r.get("added", 0)
-        cands = r.get("candidates", 0)
-        scope = r.get("skipped_scope", 0)
-        note = r.get("note", "")
-        sitemap = r.get("sitemap") or ""
-        sm_link = f'<a href="{_esc(sitemap)}" style="font-size:11px;color:var(--muted);" target="_blank">{_esc(sitemap[:60])}{"…" if len(sitemap)>60 else ""}</a>' if sitemap else '<span style="font-size:11px;color:var(--muted);">—</span>'
-        extra = (f" / {scope} off-audience" if scope else "")
-        status = note if note else f'{added} added / {cands} candidates{extra}'
-        status_color = "#b91c1c" if note else ("#16a34a" if added else "#92400e")
-        return (f'<tr><td style="padding:8px 12px;font-size:13px;font-weight:500;">{_esc(r.get("source",""))}</td>'
-                f'<td style="padding:8px 12px;">{sm_link}</td>'
-                f'<td style="padding:8px 12px;font-size:13px;color:{status_color};">{_esc(status)}</td></tr>')
-
-    report_html = ""
-    if report:
-        rows_html = "".join(_report_row(r) for r in report)
-        report_html = f"""
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:20px;">
-  <div style="padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;font-size:14px;">Coverage report</div>
-  <div style="overflow-x:auto;">
-  <table style="width:100%;border-collapse:collapse;">
-    <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Source</th>
-      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Sitemap</th>
-      <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Result</th>
-    </tr></thead>
-    <tbody>{rows_html}</tbody>
-  </table>
-  </div>
-</div>"""
-
-    disable = 'disabled style="opacity:.5;cursor:not-allowed;"' if running else ""
-
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
-<h1>Historical sweep</h1>
-<p style="color:var(--muted);margin:-6px 0 6px;">Walks each source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet, for your review.</p>
-<p style="color:var(--muted);margin:0 0 20px;">A one-time catch-up on your back catalog—it doesn&rsquo;t save anything by itself, it just fills the queue below for you to approve.</p>
-
-<div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:22px;font-size:13.5px;color:#92400e;line-height:1.6;">
-  <p style="margin:0 0 8px;"><strong>Run this once per source.</strong></p>
-  <ul style="margin:0 0 8px;padding-left:20px;">
-    <li>Results land in the <a href="/admin/library/queue">Archive Queue</a> for you to review—nothing is saved to the archive automatically.</li>
-    <li>After the first sweep, the Archive Queue&rsquo;s own &ldquo;Scan feed&rdquo; button is what keeps you current going forward.</li>
-  </ul>
-  <p style="margin:0;">Start with a <strong>dry run</strong> to see the reach before any sweep spends API calls.</p>
-</div>
-
-<div id="poll-container">{status_html}</div>
-
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
-  <form id="backfill-form" method="post" action="/admin/library/backfill/start" style="display:grid;gap:18px;">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-      <div>
-        <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Articles published since</label>
-        <input type="date" name="since" value="{default_since}" max="{datetime.now().strftime('%Y-%m-%d')}"
-          style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);" required>
-        <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Auto-detected from your oldest save: <strong>{default_since}</strong></p>
-      </div>
-      <div>
-        <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Max articles per source</label>
-        <input type="number" name="per_source" value="150" min="10" max="2000"
-          style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-        <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">150 is a safe starting point. Raise it to reach further back—the sweep takes the most recent N, so a low cap stops early on prolific sources.</p>
-      </div>
-    </div>
-    <div>
-      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Limit to sources <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
-      <input type="text" name="only_sources" placeholder="e.g. Kellblog, Stratechery, SaaStr"
-        style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
-      <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Comma-separated. Leave blank to sweep everything. Re-running is safe—already-queued and saved URLs are skipped, so a bigger limit only adds the older articles you haven&rsquo;t seen yet.</p>
-    </div>
-    <div>
-      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Enrichment model</label>
-      <select name="model" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);min-width:240px;">
-        {model_options}
-      </select>
-    </div>
-    <div>
-      <label style="display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" name="dry_run" value="1" checked style="margin-top:3px;accent-color:var(--accent);">
-        <span><strong>Dry run</strong>
-        <span style="display:block;font-size:12px;color:var(--muted);">Count candidates without fetching or enriching anything. Uncheck to do the real sweep.</span></span>
-      </label>
-    </div>
-    <div>
-      <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {disable}>Run sweep</button>
-      <span style="font-size:13px;color:var(--muted);margin-left:14px;">Runs server-side&mdash;you can leave this page. Results appear in the <a href="/admin/library/queue">Archive Queue</a>.</span>
-    </div>
-  </form>
-</div>
-
-{report_html}
-</div>
-<script>
-(function() {{
-  var reloadOnDone = false;
-  function poll() {{
-    fetch('/admin/backfill/status').then(r => r.json()).then(function(s) {{
-      var container = document.getElementById('poll-container');
-      if (!container) return;
-      var progPct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
-      if (s.running) {{
-        reloadOnDone = true;
-        container.innerHTML = '<div id="job-status" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;">'
-          + '<div style="font-weight:600;font-size:14px;color:#1d4ed8;margin-bottom:4px;">Sitemap sweep in progress&hellip;</div>'
-          + '<div style="font-size:13px;color:var(--muted);">' + s.done + ' / ' + s.total + ' sources scanned</div>'
-          + '<div style="background:#dbeafe;border-radius:6px;height:8px;margin-top:10px;overflow:hidden;">'
-          + '<div style="background:#2563eb;height:8px;width:' + progPct + '%;transition:width .3s;"></div></div></div>';
-        setTimeout(poll, 3000);
-      }} else if (reloadOnDone) {{
-        // Job finished while we were watching — reload so the full coverage table renders.
-        window.location.reload();
-      }} else if (s.report && s.report.length) {{
-        var totalAdded = s.report.reduce((a, r) => a + (r.added || 0), 0);
-        var totalCands = s.report.reduce((a, r) => a + (r.candidates || 0), 0);
-        var totalScope = s.report.reduce((a, r) => a + (r.skipped_scope || 0), 0);
-        container.innerHTML = '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#065f46;">Sweep complete&mdash;' + totalAdded + ' articles queued from ' + totalCands + ' candidates (' + totalScope + ' skipped as off-audience). <a href=\\"/admin/library/queue\\">Review in Archive Queue &rarr;</a></div>';
-      }} else if (s.error) {{
-        container.innerHTML = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#b91c1c;">Error: ' + s.error + '</div>';
-      }}
-    }}).catch(function() {{ setTimeout(poll, 4000); }});
-  }}
-  if ({str(running).lower()}) {{ reloadOnDone = true; setTimeout(poll, 3000); }}
-  document.getElementById('backfill-form').addEventListener('submit', function() {{
-    setTimeout(function() {{ poll(); }}, 2000);
-  }});
-}})();
-</script>"""
-    return HTMLResponse(_page("Historical sweep—Admin", "Admin", body, authed=True))
+    """Retired as its own page (Phase 6) — Historical sweep is now a
+    collapsible panel on /admin/library/queue, the same page that reviews
+    what it finds (see the panel-building code in admin_queue()). Redirects
+    rather than removed outright: this was a real bookmarked admin tool,
+    not a public URL nobody had saved."""
+    return RedirectResponse("/admin/library/queue", status_code=301)
 
 
 @app.post("/admin/library/backfill/start")
@@ -21940,7 +22122,7 @@ async def admin_backfill_start(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     if _job_get("backfill").get("running"):
-        return RedirectResponse("/admin/library/backfill?running=1", status_code=303)
+        return RedirectResponse("/admin/library/queue", status_code=303)
     form = await request.form()
     since = (form.get("since") or "2024-06-01").strip()
     try:
@@ -21953,7 +22135,7 @@ async def admin_backfill_start(request: Request):
     t = threading.Thread(target=_backfill_job,
                          args=(since, per_source, model, dry_run, only_sources), daemon=True)
     t.start()
-    return RedirectResponse("/admin/library/backfill", status_code=303)
+    return RedirectResponse("/admin/library/queue", status_code=303)
 
 
 @app.get("/admin/library/backfill/status")
@@ -23713,7 +23895,7 @@ def backup_now_route(request: Request, token: str | None = None):
         msg = f"Backup failed: {e}"
         status_code = 502
     body = f"""<div class="page page-admin"><h1>Backup</h1><p>{msg}</p>
-  <p style="margin-top:1rem;"><a href="/read?view=saved">Back to Saved →</a></p></div>"""
+  <p style="margin-top:1rem;"><a href="/read?view=saved">Back to Archive →</a></p></div>"""
     return HTMLResponse(_page("Backup", "", body, authed=True), status_code=status_code)
 
 
