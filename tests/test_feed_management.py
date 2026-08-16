@@ -465,6 +465,33 @@ def test_feeds_page_lists_every_feed_in_one_flat_table(app_env):
     assert "Manage sections" in html
 
 
+def test_sections_render_as_a_table_with_disabled_remove_when_non_empty(app_env):
+    """Remove is disabled rather than absent on a section that still holds
+    feeds, and there's no per-row explanatory line — the count plus the
+    disabled state carry it."""
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds").text
+
+    assert '<table class="fs-table">' in html
+    assert html.count('class="fs-row"') == 5          # one row per section
+    assert html.count('class="btn btn-ghost fs-remove-off"') == 5   # all five non-empty
+    assert "disabled" in html
+    # The old per-row line is gone.
+    assert "to another section to remove it." not in html
+
+
+def test_an_emptied_section_gets_a_live_remove_button(app_env):
+    with _client(app_env) as client:
+        client.post("/admin/library/feeds/sections/new",
+                    data={"name": "Operators"}, follow_redirects=False)
+        html = client.get("/admin/library/feeds").text
+
+    assert html.count('class="fs-row"') == 6
+    # The new empty section has a real Remove form; the other five stay disabled.
+    assert html.count('class="btn btn-ghost fs-remove-off"') == 5
+    assert 'class="btn btn-ghost fs-remove"' in html
+
+
 def test_feeds_page_shows_the_mostly_metrics_url_exactly(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text

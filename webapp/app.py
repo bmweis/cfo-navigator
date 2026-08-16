@@ -18828,37 +18828,53 @@ def admin_feeds(request: Request, msg: str = "", error: str = ""):
         feed_rows = ('<tr class="ff-row"><td colspan="5" class="ff-empty">'
                      'No feeds yet. Add a section below, then add a feed to it.</td></tr>')
 
-    # -- manage sections: plain rows, no bordered box per section ------------
+    # -- manage sections: a table matching the feed table above --------------
+    # The rename form lives in the Section cell while its submit button sits in
+    # Actions, associated by the `form` attribute rather than nesting a form
+    # across cells (invalid HTML). Same plain-HTML trick /admin/tools/categories
+    # already uses for exactly this two-column split — no JS.
     section_rows = ""
     for s in sections:
         n = section_counts.get(s["id"], 0)
+        form_id = f"sec-rename-{s['id']}"
         if n:
-            remove = (f'<span style="font-size:12.5px;color:var(--muted);">'
-                      f'Move its {n} feed{"s" if n != 1 else ""} to another section to remove it.</span>')
+            # Only an empty section can be removed, so the button is disabled
+            # rather than absent: an absent control reads as "you can't remove
+            # sections at all", a disabled one reads as "not this one, yet".
+            remove = (
+                f'<button type="button" class="btn btn-ghost fs-remove-off" disabled '
+                f'title="Only an empty section can be removed. Move its {n} '
+                f'feed{"s" if n != 1 else ""} to another section first.">Remove</button>')
         else:
             remove = (
-                f'<form method="post" action="/admin/library/feeds/sections/{s["id"]}/delete" style="margin:0;" '
+                f'<form method="post" action="/admin/library/feeds/sections/{s["id"]}/delete" '
+                f'style="display:inline;margin:0 0 0 4px;" '
                 f'onsubmit="return confirm(\'Remove the empty section &quot;{_esc(s["name"])}&quot;?\');">'
-                f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;'
-                f'color:#b91c1c;border-color:#fca5a5;">Remove</button></form>')
-        section_rows += f"""<div class="fs-row">
-  <form method="post" action="/admin/library/feeds/sections/{s['id']}/rename" style="display:flex;align-items:center;gap:8px;margin:0;">
-    <input type="text" name="name" value="{_esc(s['name'])}" required maxlength="80"
-      style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;min-width:0;">
-    <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;">Rename</button>
-  </form>
-  <span style="font-size:12.5px;color:var(--muted);white-space:nowrap;">{n} feed{'s' if n != 1 else ''}</span>
-  {remove}
-</div>"""
+                f'<button type="submit" class="btn btn-ghost fs-remove">Remove</button></form>')
+        section_rows += f"""<tr class="fs-row">
+  <td class="fs-name">
+    <form id="{form_id}" method="post" action="/admin/library/feeds/sections/{s['id']}/rename" style="margin:0;">
+      <input type="text" name="name" value="{_esc(s['name'])}" required maxlength="80"
+        aria-label="Section name" style="width:100%;box-sizing:border-box;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13.5px;background:#fff;">
+    </form>
+  </td>
+  <td class="fs-count">{n} feed{'s' if n != 1 else ''}</td>
+  <td class="fs-actions">
+    <button type="submit" form="{form_id}" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Rename</button>
+    {remove}
+  </td>
+</tr>"""
     if not sections:
-        section_rows = '<p style="color:var(--muted);font-size:13.5px;margin:0;">No sections yet.</p>'
+        section_rows = ('<tr class="fs-row"><td colspan="3" class="ff-empty">'
+                        'No sections yet.</td></tr>')
 
     body = f"""<div class="page page-admin">
 <style>
-.ff-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
-.ff-row>td{{padding:9px 12px;vertical-align:middle;border-top:1px solid var(--line);}}
-.ff-table thead th{{padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;
-  text-transform:uppercase;letter-spacing:.06em;background:var(--bg);}}
+.ff-table,.fs-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
+.ff-row>td,.fs-row>td{{padding:9px 12px;vertical-align:middle;border-top:1px solid var(--line);}}
+.ff-table thead th,.fs-table thead th{{padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);
+  font-weight:600;text-transform:uppercase;letter-spacing:.06em;background:var(--bg);}}
+.ff-table tbody tr:first-child>td,.fs-table tbody tr:first-child>td{{border-top:0;}}
 .ff-name{{font-weight:600;font-size:14px;width:22%;}}
 .ff-url{{font-size:13px;color:var(--muted);width:32%;}}
 .ff-url a{{word-break:break-all;}}
@@ -18866,20 +18882,30 @@ def admin_feeds(request: Request, msg: str = "", error: str = ""):
 .ff-readonly{{width:9%;text-align:center;}}
 .ff-actions{{width:20%;text-align:right;white-space:nowrap;}}
 .ff-empty{{padding:16px 12px;color:var(--muted);font-size:13.5px;}}
-.fs-row{{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line);}}
-.fs-row:first-child{{border-top:0;}}
+/* Sections table — same shape as the feed table, three columns. */
+.fs-name{{width:50%;}}
+.fs-count{{width:18%;font-size:13px;color:var(--muted);}}
+.fs-actions{{width:32%;text-align:right;white-space:nowrap;}}
+.fs-remove{{font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;}}
+/* Disabled rather than absent: an absent control reads as "sections can't be
+   removed at all", a disabled one reads as "not this one, yet". The title
+   attribute carries the reason on desktop; the Feeds count carries it
+   everywhere, including touch, where there's no hover. */
+.fs-remove-off{{font-size:12px;padding:5px 12px;color:var(--muted);border-color:var(--line);
+  opacity:.55;cursor:not-allowed;margin-left:4px;}}
 /* Below this width five columns can't coexist: the URL cell gets narrow enough
    that word-break:break-all wraps a feed address one character per line, which
    turned a single row several hundred pixels tall on a phone. Stacking the
    cells gives each one the full width, with a label so the section dropdown
    and the read-only box are still identifiable out of table context. */
 @media (max-width:820px){{
-  .ff-table,.ff-table tbody,.ff-row,.ff-row>td{{display:block;width:auto;}}
-  .ff-table thead{{display:none;}}
-  .ff-row{{border-top:1px solid var(--line);padding:10px 0;}}
-  .ff-table tbody tr:first-child{{border-top:0;}}
-  .ff-row>td{{border-top:0;padding:3px 12px;}}
-  .ff-readonly,.ff-actions{{text-align:left;}}
+  .ff-table,.ff-table tbody,.ff-row,.ff-row>td,
+  .fs-table,.fs-table tbody,.fs-row,.fs-row>td{{display:block;width:auto;}}
+  .ff-table thead,.fs-table thead{{display:none;}}
+  .ff-row,.fs-row{{border-top:1px solid var(--line);padding:10px 0;}}
+  .ff-table tbody tr:first-child,.fs-table tbody tr:first-child{{border-top:0;}}
+  .ff-row>td,.fs-row>td{{border-top:0;padding:3px 12px;}}
+  .ff-readonly,.ff-actions,.fs-actions{{text-align:left;}}
   .ff-section::before{{content:"Section";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   .ff-readonly::before{{content:"Read only";display:block;font-size:11.5px;color:var(--muted);
@@ -18909,9 +18935,15 @@ def admin_feeds(request: Request, msg: str = "", error: str = ""):
 </div>
 
 <h2 style="font-size:17px;margin:34px 0 4px;">Manage sections</h2>
-<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Sections group feeds in the Reader's Sources rail. They carry no settings of their own: whether a source reaches the archive queue is set per feed in the table above.</p>
-<div style="max-width:620px;">
-{section_rows}
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Sections group feeds in the Reader's Sources rail. They carry no settings of their own: whether a source reaches the archive queue is set per feed in the table above. A section can only be removed once it's empty.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;max-width:680px;">
+  <table class="fs-table">
+    <thead><tr>
+      <th style="width:50%;">Section</th><th style="width:18%;">Feeds</th>
+      <th style="width:32%;text-align:right;">Actions</th>
+    </tr></thead>
+    <tbody>{section_rows}</tbody>
+  </table>
 </div>
 <form method="post" action="/admin/library/feeds/sections/new"
       style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 0;">
