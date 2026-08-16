@@ -13385,29 +13385,31 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </div>
 
   <div>
-    <h2 style="font-size:16px;font-weight:600;margin:32px 0 16px;padding-top:24px;border-top:1px solid var(--line);">Business summary</h2>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin:32px 0 16px;padding-top:24px;border-top:1px solid var(--line);">
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Business summary</h2>
+      <span>
+        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err', 'gen-host-tool-business-summary')">Generate summary</button>
+        <span id="tool-gen-status" class="qe-status"></span>
+      </span>
+    </div>
+    <p id="tool-desc-gen-err" style="display:none;"></p>
     <div style="display:grid;gap:20px;">
-      <div>
-        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
-        <textarea id="tool-summary" name="summary" required maxlength="400" rows="4"
-          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-          placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
-        <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—shares its verification status, not tracked separately.</p>
-      </div>
-      <div id="gen-host-tool-desc-edit">
-        <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-          <label style="font-size:14px;font-weight:500;color:var(--navy);">Description *{_description_verify_badge}</label>
-          <span>
-            <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err', 'gen-host-tool-desc-edit')">Generate summary</button>
-            <span id="tool-gen-status" class="qe-status"></span>
-          </span>
+      <div id="gen-host-tool-business-summary" style="display:grid;gap:20px;">
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Short summary *</label>
+          <textarea id="tool-summary" name="summary" required maxlength="400" rows="4"
+            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+            placeholder="2-3 sentences—shown on the directory card and in search results.">{_esc(tool.get('summary') or '')}</textarea>
+          <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted together with Description below—shares its verification status, not tracked separately.</p>
         </div>
-        <p id="tool-desc-gen-err" style="display:none;"></p>
-        <textarea id="tool-desc" name="description" required maxlength="2500" rows="14"
-          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
-          placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
-        {_description_verify_action}
-        {_description_review_line_html}
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Description *{_description_verify_badge}</label>
+          <textarea id="tool-desc" name="description" required maxlength="2500" rows="14"
+            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
+            placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
+          {_description_verify_action}
+          {_description_review_line_html}
+        </div>
       </div>
       <div id="gen-host-tool-taxonomy">
         <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
