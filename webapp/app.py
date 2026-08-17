@@ -429,10 +429,18 @@ def _seed_and_publish_feeds():
     happens exactly once per database (never resurrecting a deleted feed on a
     restart), and write_opml no-ops on an empty feeds table so a fresh deploy
     can't overwrite the curated repo copy before seeding has run.
+
+    The paywall-cookie notes seed here too, on their own flag. They're
+    deliberately not part of the OPML round trip: the file has no field for
+    them, so a note edit never rewrites it.
     """
     lib = _lib()
     try:
         lib.seed_feeds_from_opml(OPML_PATH)
+        # After seeding, so the notes land on rows that exist. Also flag-
+        # guarded, and it no-ops on an empty table rather than burning its
+        # flag, so an unreadable OPML on one boot doesn't permanently skip it.
+        lib.seed_paywall_cookie_notes()
         lib.write_opml(OPML_PATH)
     except Exception:
         # Never block boot on this. A failure here leaves the existing OPML
@@ -18620,8 +18628,21 @@ def admin_library(request: Request):
     # output of the third.
     lib_by_href = {href: (title, desc) for href, title, desc in _LIBRARY_TOOLS}
 
-    def _lib_quadrant(title, inner_html, hrefs=()):
+    def _lib_quadrant(title, inner_html, hrefs=(), count_override=None):
         """One collapsible quadrant, closed by default.
+
+        `count_override` sets the displayed tool count independently of
+        `hrefs`, which otherwise drives it. Only "New content" uses it: that
+        quadrant holds one _lib_card plus the two capture-method accordions,
+        which are real tools a person uses even though they aren't cards, so
+        the literal card count of 1 undersold it. Overriding the one label is
+        deliberately narrower than redefining what counts as a "tool"
+        everywhere — `hrefs` still drives the task badge, so the override
+        can't desynchronise a badge from the pages it aggregates.
+
+        This cannot affect the /admin index's counts: that page computes its
+        own `count_label` from `len(items)` before calling _disclosure_group,
+        which only ever receives a finished string.
 
         Uses the shared `_disclosure_group` component — the same group-level
         row the /admin index's sections use: bordered box, bold all-caps label
@@ -18635,7 +18656,7 @@ def admin_library(request: Request):
         rotate rule is scoped `details[open] > summary`, so an inner accordion
         can never rotate the outer quadrant's caret.
         """
-        n = len(hrefs)
+        n = len(hrefs) if count_override is None else count_override
         return _disclosure_group(
             title, inner_html,
             count_label=f'{n} {"tool" if n == 1 else "tools"}' if n else "",
@@ -18720,8 +18741,11 @@ def admin_library(request: Request):
 
 <p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working&mdash;the old copies embed the old values. Set them up again from the instructions above.</p>"""
 
+    # 3, not the literal 1 card: Manage feeds plus the bookmarklet and
+    # Share-Sheet accordions. See _lib_quadrant's count_override note.
     saving_articles_html = _lib_quadrant("New content", saving_articles_body,
-                                         ["/admin/library/feeds"])
+                                         ["/admin/library/feeds"],
+                                         count_override=3)
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -18814,6 +18838,34 @@ def _publish_feeds(lib) -> None:
     lib.write_opml(OPML_PATH)
 
 
+def _paywall_cookie_indicator(feed: dict) -> str:
+    """Small badge for the feed table's "Paywall cookie" cell.
+
+    Renders nothing at all when the feed has no note, so the column stays a
+    sparse set of marks rather than a grid of mostly-empty checkboxes. The note
+    text itself never renders inline — the column is too narrow for it, and it's
+    reference detail rather than something to scan. It rides on `title` instead,
+    with `role="img"` + `aria-label` so the same text is available to a screen
+    reader, which a bare `title` on a span is not reliably.
+
+    Touch has no hover, so the page-level footnote carries the general meaning
+    and the edit form shows the full note; this badge is the "which rows" signal.
+    """
+    note = (feed.get("paywall_cookie_note") or "").strip()
+    if not note:
+        return ""
+    label = f'Paywall cookie. {note}'
+    return (
+        f'<span class="ff-cookie-badge" role="img" title="{_esc(note)}" '
+        f'aria-label="{_esc(label)}">'
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+        f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        f'<rect x="4" y="10.5" width="16" height="10" rx="2"></rect>'
+        f'<path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"></path></svg>'
+        f'</span>'
+    )
+
+
 def _feed_form_fields(sections: list, values: dict) -> str:
     """Shared field markup for the add-feed and edit-feed forms."""
     opts = "".join(
@@ -18854,6 +18906,13 @@ def _feed_form_fields(sections: list, values: dict) -> str:
       Read only
     </label>
     <p style="{hint}">Read it in the Reader, but never propose it into the archive queue. Set per feed, so one source in a section can be read-only without affecting the rest.</p>
+  </div>
+  <div>
+    <label style="{lab}">Paywall cookie <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+    <input type="text" name="paywall_cookie_note" maxlength="200"
+      value="{_esc(values.get('paywall_cookie_note', ''))}"
+      placeholder="e.g. Cookie auth via LINKLIB_AUTH_COOKIES" style="{inp}">
+    <p style="{hint}">Where this feed's cookie is configured, if any&mdash;<strong>not the cookie value itself</strong>. This is a descriptive note so a source that stops returning full text points at the right place to check. Anything typed here is stored in the database as plain text and shown in the admin table, so keep secrets out of it. Leave blank for feeds that need no cookie.</p>
   </div>"""
 
 
@@ -18901,6 +18960,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
         aria-label="Read only: {_esc(f['name'])}"{' checked' if f['exclude_from_queue'] else ''}>
     </form>
   </td>
+  <td class="ff-cookie">{_paywall_cookie_indicator(f)}</td>
   <td class="ff-actions">
     <a href="/admin/library/feeds/{f['id']}/edit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Edit</a>
     <form method="post" action="/admin/library/feeds/{f['id']}/delete" style="display:inline;margin:0 0 0 4px;"
@@ -18910,7 +18970,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   </td>
 </tr>"""
     if not feeds:
-        feed_rows = ('<tr class="ff-row"><td colspan="5" class="ff-empty">'
+        feed_rows = ('<tr class="ff-row"><td colspan="6" class="ff-empty">'
                      'No feeds yet. Add a section below, then add a feed to it.</td></tr>')
 
     # -- manage sections: a table matching the feed table above --------------
@@ -18960,12 +19020,20 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .ff-table thead th,.fs-table thead th{{padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);
   font-weight:600;text-transform:uppercase;letter-spacing:.06em;background:var(--bg);}}
 .ff-table tbody tr:first-child>td,.fs-table tbody tr:first-child>td{{border-top:0;}}
-.ff-name{{font-weight:600;font-size:14px;width:22%;}}
-.ff-url{{font-size:13px;color:var(--muted);width:32%;}}
+.ff-name{{font-weight:600;font-size:14px;width:20%;}}
+.ff-url{{font-size:13px;color:var(--muted);width:27%;}}
 .ff-url a{{word-break:break-all;}}
-.ff-section{{width:17%;}}
-.ff-readonly{{width:9%;text-align:center;}}
-.ff-actions{{width:20%;text-align:right;white-space:nowrap;}}
+.ff-section{{width:15%;}}
+.ff-readonly{{width:8%;text-align:center;}}
+.ff-cookie{{width:11%;text-align:center;}}
+.ff-actions{{width:19%;text-align:right;white-space:nowrap;}}
+/* Seafoam is the badge accent per BRAND.md; it's never a button, and this
+   isn't one — the cell is a read-only marker, edited from the feed's own
+   form. Empty cells render no badge at all. */
+.ff-cookie-badge{{display:inline-flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:8px;background:var(--seafoam-wash);
+  color:var(--seafoam-deep);border:1px solid var(--seafoam);cursor:help;}}
+.ff-cookie-badge svg{{width:14px;height:14px;}}
 .ff-empty{{padding:16px 12px;color:var(--muted);font-size:13.5px;}}
 /* Sections table — same shape as the feed table, three columns. */
 .fs-name{{width:50%;}}
@@ -18990,11 +19058,18 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   .ff-row,.fs-row{{border-top:1px solid var(--line);padding:10px 0;}}
   .ff-table tbody tr:first-child,.fs-table tbody tr:first-child{{border-top:0;}}
   .ff-row>td,.fs-row>td{{border-top:0;padding:3px 12px;}}
-  .ff-readonly,.ff-actions,.fs-actions{{text-align:left;}}
+  .ff-readonly,.ff-cookie,.ff-actions,.fs-actions{{text-align:left;}}
   .ff-section::before{{content:"Section";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   .ff-readonly::before{{content:"Read only";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
+  /* Only labelled when there's a badge to label. An unconditional ::before
+     would print "Paywall cookie" above an empty cell on every unpaywalled
+     feed — noise on exactly the rows the column is meant to stay quiet on. */
+  .ff-cookie:has(.ff-cookie-badge)::before{{content:"Paywall cookie";display:block;
+    font-size:11.5px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.06em;margin-bottom:3px;}}
+  .ff-cookie:not(:has(.ff-cookie-badge)){{display:none;}}
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
@@ -19007,14 +19082,16 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
 <li><strong>Read only</strong> feeds stay live in the Reader but are never proposed into the <a href="/admin/library/queue">archive queue</a>. It's set per feed, so one source in a section can be read-only without affecting the rest.</li>
+<li><strong>Paywall cookie</strong> marks a feed whose full text depends on a subscriber cookie set in the host environment, not on anything stored here. Hover the badge for which one, or open the feed's Edit form to read and change the note. The note is a label pointing at the cookie; the cookie value itself never lives in this database.</li>
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
   <table class="ff-table">
     <thead><tr>
-      <th style="width:22%;">Name</th><th style="width:32%;">URL</th>
-      <th style="width:17%;">Section</th><th style="width:9%;">Read only</th>
-      <th style="width:20%;text-align:right;">Actions</th>
+      <th style="width:20%;">Name</th><th style="width:27%;">URL</th>
+      <th style="width:15%;">Section</th><th style="width:8%;">Read only</th>
+      <th style="width:11%;">Paywall cookie</th>
+      <th style="width:19%;text-align:right;">Actions</th>
     </tr></thead>
     <tbody>{feed_rows}</tbody>
   </table>
@@ -19227,6 +19304,9 @@ async def admin_feeds_new_submit(request: Request):
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
         "exclude_from_queue": bool(form.get("exclude_from_queue")),
+        # Descriptive label only — never a cookie value. See the column's
+        # migration comment in linklib/db.py.
+        "paywall_cookie_note": (form.get("paywall_cookie_note") or "").strip(),
     }
     lib = _lib()
     try:
@@ -19252,7 +19332,8 @@ async def admin_feeds_new_submit(request: Request):
         name = values["name"] or probe.title or values["xml_url"]
         html_url = values["html_url"] or probe.html_url
         lib.add_feed(int(values["section_id"]), name, values["xml_url"], html_url,
-                     exclude_from_queue=values["exclude_from_queue"])
+                     exclude_from_queue=values["exclude_from_queue"],
+                     paywall_cookie_note=values["paywall_cookie_note"])
         _publish_feeds(lib)
     finally:
         lib.close()
@@ -19273,7 +19354,10 @@ def admin_feeds_edit(request: Request, feed_id: int):
         raise HTTPException(status_code=404, detail="feed not found")
     values = {"name": feed["name"], "xml_url": feed["xml_url"],
               "html_url": feed["html_url"], "section_id": feed["section_id"],
-              "exclude_from_queue": bool(feed["exclude_from_queue"])}
+              "exclude_from_queue": bool(feed["exclude_from_queue"]),
+              # Round-tripped so a save that doesn't touch this field can't
+              # blank it — update_feed writes the column on every call.
+              "paywall_cookie_note": feed["paywall_cookie_note"]}
     return HTMLResponse(_page("Edit feed—Library Admin", "Admin",
                               _feed_form_page(f'Edit {feed["name"]}',
                                               f"/admin/library/feeds/{feed_id}/edit",
@@ -19293,6 +19377,8 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
         "exclude_from_queue": bool(form.get("exclude_from_queue")),
+        # Descriptive label only — see the add route.
+        "paywall_cookie_note": (form.get("paywall_cookie_note") or "").strip(),
     }
     lib = _lib()
     try:
@@ -19330,7 +19416,8 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
 
         lib.update_feed(feed_id, int(values["section_id"]), values["name"],
                         values["xml_url"], html_url,
-                        exclude_from_queue=values["exclude_from_queue"])
+                        exclude_from_queue=values["exclude_from_queue"],
+                        paywall_cookie_note=values["paywall_cookie_note"])
         _publish_feeds(lib)
         saved_name = values["name"]
     finally:
