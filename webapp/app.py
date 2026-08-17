@@ -17355,6 +17355,18 @@ _SCRIPT_REGISTRY = [
      ["None, but needs real network egress — run from railway ssh or a dev machine, not a "
       "sandboxed build session."],
      ["python -m scripts.verify_screenshot_capture --url https://example.com --out /tmp/verify.png"]),
+    ("medium_platform_scale_check.py", "scripts.medium_platform_scale_check", "Reusable diagnostic",
+     "Built for the Reader content backfill's Medium-platform investigation (bothsidesofthetable.com/"
+     "medium.com/link.medium.com), but generalizes to any future 'how big is this actually, and can "
+     "Exa retrieve it' question about a fetch-failure cluster: reports how many saved articles across "
+     "the whole library match a given set of domains and how many already have content_refetch_log "
+     "history, then spikes Exa search+contents against the ones currently in the manual-review queue "
+     "on those domains to report whether Exa can find/retrieve real content for them at all.",
+     "Recurring-manual — run again whenever a new fetch-failure domain cluster needs the same "
+     "scale-and-Exa-feasibility check before scoping a fetch-tier fix.",
+     ["EXA_API_KEY (only for the Exa spike — omit or pass --skip-exa to run the scale check alone)"],
+     ["python -m scripts.medium_platform_scale_check --db library.db --skip-exa   # scale check only",
+      "railway run python -m scripts.medium_platform_scale_check --db /data/library.db   # full report against prod"]),
 ]
 
 
