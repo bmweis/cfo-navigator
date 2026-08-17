@@ -225,6 +225,23 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   change to three consumers, not a label. **The note points at the cookie; the procedure
   for actually refreshing an expired one is `RUNBOOK.md` §5** — including the still-open
   question of the real per-domain cookie names, which no commit in the repo records.
+- **The feeds page shows cookie HEALTH separately from the cookie DECLARATION.**
+  The Cookie checkbox is static ("this feed needs one"); a summary panel under the
+  page header is dynamic ("it still works / it expired / it could not be tested"),
+  read from the persisted `settings.auth_cookie_status` record so it survives
+  reloads. Built because only the expired state used to render anything at all:
+  a healthy cookie and an unprobeable one were both blank, so an empty page meant
+  both "fine" and "unknown". Colours are true stoplight values
+  (`#15803D`/`#b91c1c`/`#CA8A04`), a sanctioned exception in
+  `brand_check.AUX_COLORS` and BRAND.md §6 — the semantic triple was tried first
+  and `--good` is navy, too close to the site's dominant colour to register as a
+  status signal. The red reuses the destructive-action `#b91c1c` rather than
+  adding a second red. **Amber is dot-only** (2.94:1 as text, under AA), so the
+  state word stays `--ink-soft`. **Amber means only `ok: None`**: a passing check stays green no
+  matter how old, with age shown as relative text; the real staleness mechanism
+  is the existing 12-hour background re-probe, not a colour. It's a per-domain
+  panel rather than a table column because cookies are keyed by domain and the
+  table is keyed by feed.
 - **The Reader's Feed view caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
   item dicts are shallow-copied before mutation — never mutate a cached entry in place.
   Editing the OPML won't show up live until the cache expires or the app restarts.
@@ -1927,6 +1944,29 @@ environment-level, not a code change to `capture_homepage()`: pin an exact
 Playwright version in `requirements.txt` matching a known-good sandbox
 browser cache, or have the session re-run `playwright install chromium`
 fresh before testing.
+
+**A passing pytest count can under-report what actually ran: duplicate test
+names silently shadow each other.** Python rebinds the name, so only the last
+definition in a file executes and the earlier one vanishes with no warning from
+pytest. Six tests in #341 never ran for exactly this reason, having reused names
+from an existing section of the same file; only `pyflakes` flagged it
+("redefinition of unused..."), and the count went 39 -> 45 once renamed. pyflakes
+is already part of the standard local CI substitute, so the discipline is simply
+to read its redefinition warnings as real findings rather than lint noise, and to
+sanity-check that a suite's test count moved the way an added file should have
+moved it.
+
+**Verify computed/rendered values, not a screenshot glance — CSS specificity
+fails silently and desktop-first.** #341's mobile alignment fix was correct in
+the stylesheet and still wrong in the browser, because an inline
+`justify-content:center` on the same element outranked it; inline styles beat
+any selector short of `!important`. It looked fine at desktop width, where the
+intended and actual values happened to agree. Caught only by measuring the
+element's real offsets at each viewport. When a layout fix targets a specific
+breakpoint, assert the computed value (`getComputedStyle`, a bounding rect, a
+`Range` line-box count) at that breakpoint; "the CSS says so" and "it looks
+right in the screenshot I took at 1280px" are both weaker evidence than they
+appear.
 
 ## Contributing — pull requests
 

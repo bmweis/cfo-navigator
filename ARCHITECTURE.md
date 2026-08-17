@@ -2801,6 +2801,39 @@ recorded anywhere, it's flagged rather than invented.
   legacy note **or** any feed on a `PAYWALLED_DOMAINS` domain. On an existing
   database both arms select the same three feeds; the domain arm exists so a
   fresh deploy isn't left with every box unticked.
+- **Subscriber-cookie health is a persisted, always-on summary; the Cookie
+  checkbox is a static declaration.** Two different things on the same page, so
+  they are deliberately different shapes in different places. The checkbox says
+  "this feed needs a cookie"; the summary panel under the page header says
+  "here is whether that cookie still works". `authcheck.check_auth_cookies`
+  probes one recent post per domain in `LINKLIB_AUTH_COOKIES` and persists the
+  result to `settings.auth_cookie_status`, so the panel shows the last known
+  result across reloads rather than only after a Re-check click.
+  *Why it exists:* previously only `ok: False` rendered anything — the page
+  showed a coral panel when `stale_domains()` was non-empty and nothing
+  otherwise, so a working cookie and one that could not be probed were both
+  invisible. "Nothing on screen" meant both "healthy" and "no idea".
+  Three states, one row each: `ok: True` -> green `#15803D`, `ok: False` -> red
+  `#b91c1c`, `ok: None` -> amber `#CA8A04`. True stoplight values, a **sanctioned
+  brand exception** registered in `brand_check.AUX_COLORS` and documented in
+  BRAND.md §6 — the semantic `--good`/`--caution`/`--alert` triple was tried
+  first and `--good` is navy, the site's dominant colour, so a healthy cookie
+  read as ordinary text rather than a signal. Scoped to these three dots only.
+  The red deliberately reuses the destructive-action `#b91c1c` rather than
+  introducing a second red. **The amber is dot-only**: `#CA8A04` as text on
+  `--surface` measures 2.94:1, under AA (4.5) and AA-large (3.0), so the state
+  word beside it stays `--ink-soft` and the colour lives on the indicator.
+  *Amber is strictly "could not be tested".* A passing check stays green
+  however old it is — `checked_at` is rendered as relative text ("3h ago") so
+  staleness is visible, but it is never promoted to its own colour. Loading the
+  page still kicks a background re-probe when the stored record is missing or
+  over 12 hours old, which is the actual staleness mechanism.
+  *Keyed by domain, not by feed*, which is why it is a summary panel rather
+  than a column in the feed table: cookies are configured per domain while the
+  table is keyed per feed, so a per-row light would misstate the relationship
+  the moment two feeds shared a domain. The coral expired panel still appears
+  on top when something is broken, but now carries only the refresh steps — the
+  per-domain detail it used to repeat is in the summary above it.
 - **`feeds.has_active_subscription` is informational only — nothing reads it.**
   A per-feed note about whether Brian currently pays for that source. It does
   not gate fetching, does not reach the Reader, and is independent of both

@@ -470,8 +470,13 @@ def test_subscriber_access_control_lives_on_the_feeds_page(monkeypatch, tmp_path
 
     assert "Re-check subscriber access" in feeds
     assert "Re-check subscriber access" not in library
-    # Above the page's own H1.
-    assert feeds.index("Re-check subscriber access") < feeds.index("<h1")
+    # Now in the header's action group beside "+ Add feed", not stranded above
+    # the H1 on a line of its own.
+    assert feeds.index("<h1") < feeds.index("Re-check subscriber access")
+    assert feeds.index("Re-check subscriber access") < feeds.index("+ Add feed")
+    assert '<div class="ff-head-actions">' in feeds
+    # Exactly one trigger: the coral panel no longer renders its own copy.
+    assert feeds.count("Re-check subscriber access") == 1
 
 
 def test_recheck_redirects_back_to_feeds(app_env):
