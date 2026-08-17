@@ -18954,7 +18954,7 @@ def _feed_form_fields(sections: list, values: dict) -> str:
       <input type="checkbox" name="has_active_subscription" value="1"{sub_checked}>
       Subscriber
     </label>
-    <p style="{hint}">Whether you currently pay for this source&mdash;for your own tracking, doesn't affect fetching. Nothing in the app reads this: it doesn't gate anything, doesn't reach the Reader, and is separate from the paywall cookie above.</p>
+    <p style="{hint}">Whether you currently pay for this source, as a note to yourself. It doesn't affect fetching. Nothing in the app reads this: it doesn't gate anything, doesn't reach the Reader, and is separate from the paywall cookie above.</p>
   </div>"""
 
 
@@ -19168,7 +19168,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
 <li><strong>Read only</strong> feeds stay live in the Reader but are never proposed into the <a href="/admin/library/queue">archive queue</a>. It's set per feed, so one source in a section can be read-only without affecting the rest.</li>
-<li><strong>Cookie</strong> marks a feed whose full text needs a subscriber cookie. There's one mechanism for the whole app: cookies live in <code>LINKLIB_AUTH_COOKIES</code> in the host environment, keyed by domain, and <code>extract.fetch_page</code> applies them automatically wherever they match. Ticking this box records the dependency so a source that quietly starts returning previews points at the right place to check&mdash;see <code>RUNBOOK.md</code> &sect;5 for refreshing an expired one. <strong>No cookie value is ever stored in this database</strong>, and the box changes nothing about how pages are fetched.</li>
+<li><strong>Cookie</strong> marks a feed whose full text needs a subscriber cookie. There's one mechanism for the whole app: cookies live in <code>LINKLIB_AUTH_COOKIES</code> in the host environment, keyed by domain, and <code>extract.fetch_page</code> applies them automatically wherever they match. Ticking this box records the dependency so a source that quietly starts returning previews points at the right place to check (see <code>RUNBOOK.md</code> &sect;5 for refreshing an expired one). <strong>No cookie value is ever stored in this database</strong>, and the box changes nothing about how pages are fetched.</li>
 <li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
 </ul>
 {banner}{error_banner}

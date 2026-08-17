@@ -527,8 +527,10 @@ def test_editing_a_feed_without_touching_the_flag_keeps_it(app_env):
 def test_form_helper_copy_says_it_is_informational(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds/new").text
-    assert "for your own tracking, doesn&#x27;t affect fetching" in html or \
-           "for your own tracking, doesn't affect fetching" in html
+    assert "as a note to yourself" in html
+    assert "doesn&#x27;t affect fetching" in html or \
+           "doesn't affect fetching" in html
+    assert "Nothing in the app reads this" in html
 
 
 def test_page_footnote_explains_the_flag(app_env):
