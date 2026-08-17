@@ -193,6 +193,33 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   (`LINKLIB_AUTH_COOKIES`), not URL-token-based. The verbatim-URL guarantee is built and
   tested anyway so it holds if one is ever added; tracing the access check shows it
   requesting exactly the stored URL before probing a discovered article URL.
+- **`feeds.paywall_cookie_note` makes the cookie dependency visible without storing the
+  cookie.** Follow-up to the Mostly Metrics finding above: the cookie mechanism works,
+  but nothing on `/admin/library/feeds` showed that a feed depended on one, or which env
+  var to check when it stopped returning full text. The column holds a human-readable
+  note ("Cookie auth via `LINKLIB_AUTH_COOKIES`"); the table shows a small seafoam lock
+  badge for any feed that has one, with the note on `title`/`aria-label` rather than
+  inline, plus a page-level footnote explaining the column and a form field labelled
+  descriptive-only. **The cookie value never enters the database** — it stays in
+  `LINKLIB_AUTH_COOKIES` where `extract.fetch_page` reads it, and nothing writes it back.
+  Three decisions worth not re-litigating: (1) **seeded from `feed.PAYWALLED_DOMAINS`,
+  so all three paywalled feeds get the note, not just Mostly Metrics** — leaving
+  Stratechery and Public Comps blank would read as "these need no cookie", the exact
+  false signal the column exists to remove, and it keeps `PAYWALLED_DOMAINS` the single
+  source of which domains are paywalled rather than forking that knowledge into the DB;
+  (2) **seeding is settings-flagged (`paywall_cookie_notes_seeded`), not
+  emptiness-checked** — an empty note and a deliberately cleared one are
+  indistinguishable, so an emptiness check would resurrect a cleared note on the next
+  restart, the same `_seed_toolbox` bug the feed seeding itself had to avoid; it also
+  no-ops *without* burning its flag while the feeds table is still empty, so one boot
+  with an unreadable OPML can't permanently skip every feed seeded afterwards;
+  (3) **`update_feed` writes the column on every call**, so the edit form round-trips the
+  current value — a save that only renames a feed would otherwise blank the note.
+  Migrating `PAYWALLED_DOMAINS` itself to be DB-backed stayed out of scope: it also
+  drives the Reader's paywall badge and `authcheck`'s probe list, so that's a behavioural
+  change to three consumers, not a label. **The note points at the cookie; the procedure
+  for actually refreshing an expired one is `RUNBOOK.md` §5** — including the still-open
+  question of the real per-domain cookie names, which no commit in the repo records.
 - **The Reader's Feed view caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
   item dicts are shallow-copied before mutation — never mutate a cached entry in place.
   Editing the OPML won't show up live until the cache expires or the app restarts.

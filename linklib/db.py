@@ -1758,6 +1758,30 @@ class Library:
             # it to 'direct' rather than adding a third empty-string state
             # keeps every row's column populated and queryable.
             "ALTER TABLE content_refetch_log ADD COLUMN source TEXT NOT NULL DEFAULT 'direct'",
+            # A human-readable note about where this feed's paywall cookie is
+            # configured — e.g. "Cookie auth via LINKLIB_AUTH_COOKIES". It is
+            # DESCRIPTIVE ONLY and must never hold a cookie value: the secret
+            # itself stays in the host env, where extract._auth_cookies() reads
+            # it, and nothing in this codebase writes it back here. The column
+            # exists because that dependency was previously invisible from the
+            # admin feed table — a source could stop returning full text with
+            # nothing on the page saying which env var to go check.
+            #
+            # Also deliberately absent from the OPML: the file has no field for
+            # it, exactly like exclude_from_queue, so opml_xml() ignores it and
+            # a note edit doesn't churn the generated file.
+            "ALTER TABLE feeds ADD COLUMN paywall_cookie_note TEXT NOT NULL DEFAULT ''",
+            # Whether Brian currently pays for this source. PURELY
+            # INFORMATIONAL — nothing reads it. It does not gate fetching, does
+            # not reach the Reader, and is independent of both
+            # paywall_cookie_note (a label pointing at where a cookie lives)
+            # and feed.PAYWALLED_DOMAINS (which drives the paywall badge and
+            # authcheck's probe list). Linking it to cookie-apply behaviour was
+            # discussed and dropped; that's separate, later work. If a future
+            # change wants to make it functional, that's a deliberate decision
+            # to make then, not an assumption to inherit from this column
+            # existing.
+            "ALTER TABLE feeds ADD COLUMN has_active_subscription INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -5719,33 +5743,65 @@ class Library:
         self.conn.commit()
 
     def add_feed(self, section_id: int, name: str, xml_url: str,
-                 html_url: str = "", exclude_from_queue: bool = False) -> int:
+                 html_url: str = "", exclude_from_queue: bool = False,
+                 paywall_cookie_note: str = "",
+                 has_active_subscription: bool = False) -> int:
         """Store a feed. `xml_url` is written verbatim apart from surrounding
         whitespace — no normalization, no query-string handling. A feed URL can
-        carry a subscriber token, and rewriting one silently breaks the feed."""
+        carry a subscriber token, and rewriting one silently breaks the feed.
+
+        `paywall_cookie_note` is a descriptive label only. Never pass a cookie
+        value — see the column's migration comment.
+        """
         next_order = self.conn.execute(
             "SELECT COALESCE(MAX(display_order), -1) + 1 FROM feeds WHERE section_id = ?",
             (section_id,),
         ).fetchone()[0]
         cur = self.conn.execute(
             "INSERT INTO feeds (section_id, name, xml_url, html_url, exclude_from_queue, "
-            "display_order, created_at) VALUES (?,?,?,?,?,?,?)",
+            "paywall_cookie_note, has_active_subscription, display_order, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (section_id, name.strip(), xml_url.strip(), html_url.strip(),
-             int(bool(exclude_from_queue)), next_order, _now()),
+             int(bool(exclude_from_queue)), paywall_cookie_note.strip(),
+             int(bool(has_active_subscription)), next_order, _now()),
         )
         self.conn.commit()
         return cur.lastrowid
 
     def update_feed(self, feed_id: int, section_id: int, name: str,
                     xml_url: str, html_url: str,
-                    exclude_from_queue: bool = False) -> None:
-        """Same verbatim-URL guarantee as add_feed — see its docstring."""
+                    exclude_from_queue: bool = False,
+                    paywall_cookie_note: str = "",
+                    has_active_subscription: bool = False) -> None:
+        """Same verbatim-URL guarantee as add_feed — see its docstring.
+
+        `paywall_cookie_note` and `has_active_subscription` are written on every
+        call, so the edit form has to round-trip the current values or a save
+        would clear them. That's the same contract every other field on this
+        method already has.
+        """
         self.conn.execute(
             "UPDATE feeds SET section_id=?, name=?, xml_url=?, html_url=?, "
-            "exclude_from_queue=? WHERE id=?",
+            "exclude_from_queue=?, paywall_cookie_note=?, has_active_subscription=? "
+            "WHERE id=?",
             (section_id, name.strip(), xml_url.strip(), html_url.strip(),
-             int(bool(exclude_from_queue)), feed_id),
+             int(bool(exclude_from_queue)), paywall_cookie_note.strip(),
+             int(bool(has_active_subscription)), feed_id),
         )
+        self.conn.commit()
+
+    def set_feed_paywall_cookie_note(self, feed_id: int, note: str) -> None:
+        """Narrow single-column update, same shape as move_feed_to_section and
+        set_feed_excluded: it can't rewrite a URL in passing."""
+        self.conn.execute("UPDATE feeds SET paywall_cookie_note=? WHERE id=?",
+                          (note.strip(), feed_id))
+        self.conn.commit()
+
+    def set_feed_active_subscription(self, feed_id: int, active: bool) -> None:
+        """Toggle the informational subscription flag from the feed table's own
+        row control. Narrow single-column update, same as the two above."""
+        self.conn.execute("UPDATE feeds SET has_active_subscription=? WHERE id=?",
+                          (int(bool(active)), feed_id))
         self.conn.commit()
 
     def move_feed_to_section(self, feed_id: int, section_id: int) -> None:
@@ -5895,6 +5951,95 @@ class Library:
 
         self.set_setting("feeds_seeded_from_opml", "1")
         return {"seeded": True, "sections": new_sections, "feeds": new_feeds}
+
+    # Wording lives here rather than at the call site so the seeded note and
+    # any later re-seed can't drift apart.
+    _PAYWALL_COOKIE_SEED_NOTE = "Cookie auth via LINKLIB_AUTH_COOKIES"
+
+    def seed_paywall_cookie_notes(self) -> dict:
+        """Fill in the paywall-cookie note for feeds on known-paywalled domains.
+
+        Guarded by a settings flag, NOT by "is the note empty" — same reasoning
+        as seed_feeds_from_opml above, and the same bug _seed_toolbox shipped.
+        An emptiness check would look correct on a fresh DB and then resurrect
+        a note the admin deliberately cleared on the very next restart, because
+        "never had one" and "had one and it was removed" are indistinguishable
+        from an empty column. The flag means this runs exactly once per DB.
+
+        Domains come from feed.PAYWALLED_DOMAINS — the codebase's own list of
+        sources whose full text needs a cookie — so all of them get the note,
+        not just the one that prompted the feature. Leaving a sibling blank
+        would read as "this one needs no cookie", which is exactly the false
+        signal this column exists to remove.
+
+        Returns {"seeded": bool, "feeds": n}.
+        """
+        if self.get_setting("paywall_cookie_notes_seeded") == "1":
+            return {"seeded": False, "feeds": 0}
+
+        feeds = self.list_feeds()
+        if not feeds:
+            # Nothing to annotate yet — don't burn the flag, so a later boot
+            # that successfully seeds the feeds table still gets its chance.
+            # Without this, one boot with an unreadable OPML would permanently
+            # skip the notes for every feed seeded afterwards.
+            return {"seeded": False, "feeds": 0}
+
+        from .feed import PAYWALLED_DOMAINS
+        updated = 0
+        for feed in feeds:
+            if feed.get("paywall_cookie_note"):
+                continue
+            haystack = f'{feed["xml_url"]} {feed.get("html_url") or ""}'
+            if any(dom in haystack for dom in PAYWALLED_DOMAINS):
+                self.set_feed_paywall_cookie_note(
+                    feed["id"], self._PAYWALL_COOKIE_SEED_NOTE)
+                updated += 1
+
+        # Burn the flag even when nothing matched. The table is non-empty by
+        # this point, so "no paywalled feeds" is a real answer rather than a
+        # not-ready-yet signal, and re-checking it on every future boot would
+        # only risk re-adding a cleared note.
+        self.set_setting("paywall_cookie_notes_seeded", "1")
+        return {"seeded": True, "feeds": updated}
+
+    # Sources Brian currently pays for, as of this column's introduction. Only
+    # domains listed here are switched on; every other feed keeps the column's
+    # 0 default. Stratechery and Public Comps are deliberately absent — they're
+    # paywalled (they carry a cookie note) but not currently subscribed, which
+    # is exactly the distinction this flag exists to record.
+    _ACTIVE_SUBSCRIPTION_SEED_DOMAINS = ("mostlymetrics.com",)
+
+    def seed_active_subscriptions(self) -> dict:
+        """Set the informational subscription flag for known-paid sources.
+
+        Flag-guarded rather than emptiness-checked, same reasoning as
+        seed_paywall_cookie_notes: an unchecked box and a deliberately
+        unchecked one are indistinguishable, so a re-run on every boot would
+        silently re-check a feed Brian had just unchecked. Runs once per DB.
+
+        Returns {"seeded": bool, "feeds": n}.
+        """
+        if self.get_setting("active_subscriptions_seeded") == "1":
+            return {"seeded": False, "feeds": 0}
+
+        feeds = self.list_feeds()
+        if not feeds:
+            # Same not-ready-yet guard as seed_paywall_cookie_notes — don't
+            # burn the flag before there's anything to annotate.
+            return {"seeded": False, "feeds": 0}
+
+        updated = 0
+        for feed in feeds:
+            if feed.get("has_active_subscription"):
+                continue
+            haystack = f'{feed["xml_url"]} {feed.get("html_url") or ""}'
+            if any(dom in haystack for dom in self._ACTIVE_SUBSCRIPTION_SEED_DOMAINS):
+                self.set_feed_active_subscription(feed["id"], True)
+                updated += 1
+
+        self.set_setting("active_subscriptions_seeded", "1")
+        return {"seeded": True, "feeds": updated}
 
     def close(self) -> None:
         self.conn.close()
