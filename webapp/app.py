@@ -18755,10 +18755,8 @@ def admin_library(request: Request):
    Only the bottom margin is dropped: the flex columns own the vertical rhythm
    via their own gap. */
 .lib-quad{{margin-bottom:0 !important;}}
-.lib-q-new{{grid-area:newcontent;}}
-.lib-q-existing{{grid-area:existing;}}
-.lib-q-tags{{grid-area:tags;}}
-.lib-q-backup{{grid-area:backup;}}
+/* The .lib-q-* classes carry no desktop rules — they exist to give the mobile
+   query below something to `order`, and to name each quadrant for tests. */
 @media (max-width:900px){{
   /* One column. `display:contents` dissolves the two column wrappers so all
      four quadrants become direct flex children of .lib-cols, which is what
