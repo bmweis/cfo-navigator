@@ -430,9 +430,9 @@ def _seed_and_publish_feeds():
     restart), and write_opml no-ops on an empty feeds table so a fresh deploy
     can't overwrite the curated repo copy before seeding has run.
 
-    The paywall-cookie notes and the informational subscription flags seed here
-    too, each on its own flag. Neither is part of the OPML round trip: the file
-    has no field for either, so editing one never rewrites it.
+    The paywall-cookie flags and the informational subscription flags seed here
+    too, each on its own settings flag. Neither is part of the OPML round trip:
+    the file has no field for either, so editing one never rewrites it.
     """
     lib = _lib()
     try:
@@ -440,7 +440,7 @@ def _seed_and_publish_feeds():
         # After seeding, so the notes land on rows that exist. Also flag-
         # guarded, and it no-ops on an empty table rather than burning its
         # flag, so an unreadable OPML on one boot doesn't permanently skip it.
-        lib.seed_paywall_cookie_notes()
+        lib.seed_paywall_cookie_flags()
         lib.seed_active_subscriptions()
         lib.write_opml(OPML_PATH)
     except Exception:
@@ -18839,36 +18839,6 @@ def _publish_feeds(lib) -> None:
     lib.write_opml(OPML_PATH)
 
 
-def _paywall_cookie_indicator(feed: dict) -> str:
-    """Small badge for the feed table's "Cookie" cell.
-
-    Renders nothing at all when the feed has no note, so the column stays a
-    sparse set of marks rather than a grid of mostly-empty checkboxes. The note
-    text itself never renders inline — the column is too narrow for it, and it's
-    reference detail rather than something to scan. It rides on `title` instead,
-    with `role="img"` + `aria-label` so the same text is available to a screen
-    reader, which a bare `title` on a span is not reliably.
-
-    Touch has no hover, so the page-level footnote carries the general meaning
-    and the edit form shows the full note; this badge is the "which rows" signal.
-    """
-    note = (feed.get("paywall_cookie_note") or "").strip()
-    if not note:
-        return ""
-    # The accessible name is the column label plus the note, so it tracks the
-    # visible header. The `title` stays note-only and is untouched.
-    label = f'Cookie. {note}'
-    return (
-        f'<span class="ff-cookie-badge" role="img" title="{_esc(note)}" '
-        f'aria-label="{_esc(label)}">'
-        f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-        f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-        f'<rect x="4" y="10.5" width="16" height="10" rx="2"></rect>'
-        f'<path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"></path></svg>'
-        f'</span>'
-    )
-
-
 def _feed_form_fields(sections: list, values: dict) -> str:
     """Shared field markup for the add-feed and edit-feed forms."""
     opts = "".join(
@@ -18882,6 +18852,7 @@ def _feed_form_fields(sections: list, values: dict) -> str:
     hint = "font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;"
     exclude_checked = " checked" if values.get("exclude_from_queue") else ""
     sub_checked = " checked" if values.get("has_active_subscription") else ""
+    cookie_checked = " checked" if values.get("has_paywall_cookie") else ""
     return f"""  <div>
     <label style="{lab}">Feed URL *</label>
     <input type="url" name="xml_url" required value="{_esc(values.get('xml_url', ''))}"
@@ -18912,11 +18883,11 @@ def _feed_form_fields(sections: list, values: dict) -> str:
     <p style="{hint}">Read it in the Reader, but never propose it into the archive queue. Set per feed, so one source in a section can be read-only without affecting the rest.</p>
   </div>
   <div>
-    <label style="{lab}">Cookie <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
-    <input type="text" name="paywall_cookie_note" maxlength="200"
-      value="{_esc(values.get('paywall_cookie_note', ''))}"
-      placeholder="e.g. Cookie auth via LINKLIB_AUTH_COOKIES" style="{inp}">
-    <p style="{hint}">Where this feed's cookie is configured, if any&mdash;<strong>not the cookie value itself</strong>. This is a descriptive note so a source that stops returning full text points at the right place to check. Anything typed here is stored in the database as plain text and shown in the admin table, so keep secrets out of it. Leave blank for feeds that need no cookie.</p>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">
+      <input type="checkbox" name="has_paywall_cookie" value="1"{cookie_checked}>
+      Cookie
+    </label>
+    <p style="{hint}">Tick this when the source's full text needs a subscriber cookie. There's one cookie mechanism for the whole app&mdash;<code>LINKLIB_AUTH_COOKIES</code> in the host environment&mdash;so this only records <em>that</em> a feed depends on it, never where it lives or what it is. It changes nothing about how pages are fetched.</p>
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">
@@ -18971,7 +18942,12 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
         aria-label="Read only: {_esc(f['name'])}"{' checked' if f['exclude_from_queue'] else ''}>
     </form>
   </td>
-  <td class="ff-cookie">{_paywall_cookie_indicator(f)}</td>
+  <td class="ff-cookie">
+    <form method="post" action="/admin/library/feeds/{f['id']}/cookie" style="margin:0;">
+      <input type="checkbox" name="has_paywall_cookie" value="1" onchange="this.form.submit()"
+        aria-label="Cookie: {_esc(f['name'])}"{' checked' if f['has_paywall_cookie'] else ''}>
+    </form>
+  </td>
   <td class="ff-sub">
     <form method="post" action="/admin/library/feeds/{f['id']}/subscription" style="margin:0;">
       <input type="checkbox" name="has_active_subscription" value="1" onchange="this.form.submit()"
@@ -19045,13 +19021,6 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .ff-cookie{{width:10%;text-align:center;}}
 .ff-sub{{width:10%;text-align:center;}}
 .ff-actions{{width:17%;text-align:right;white-space:nowrap;}}
-/* Seafoam is the badge accent per BRAND.md; it's never a button, and this
-   isn't one — the cell is a read-only marker, edited from the feed's own
-   form. Empty cells render no badge at all. */
-.ff-cookie-badge{{display:inline-flex;align-items:center;justify-content:center;
-  width:26px;height:26px;border-radius:8px;background:var(--seafoam-wash);
-  color:var(--seafoam-deep);border:1px solid var(--seafoam);cursor:help;}}
-.ff-cookie-badge svg{{width:14px;height:14px;}}
 .ff-empty{{padding:16px 12px;color:var(--muted);font-size:13.5px;}}
 /* Sections table — same shape as the feed table, three columns. */
 .fs-name{{width:50%;}}
@@ -19085,13 +19054,12 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
      meaning in both states, so an unchecked box still needs its label. */
   .ff-sub::before{{content:"Subscriber";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
-  /* Only labelled when there's a badge to label. An unconditional ::before
-     would print "Cookie" above an empty cell on every unpaywalled
-     feed — noise on exactly the rows the column is meant to stay quiet on. */
-  .ff-cookie:has(.ff-cookie-badge)::before{{content:"Cookie";display:block;
-    font-size:11.5px;color:var(--muted);text-transform:uppercase;
-    letter-spacing:.06em;margin-bottom:3px;}}
-  .ff-cookie:not(:has(.ff-cookie-badge)){{display:none;}}
+  /* Labelled unconditionally, same as Subscriber. This used to be a
+     badge-only cell, hidden when empty; it now holds a checkbox that carries
+     meaning in both states, so an unchecked box still needs its label and the
+     cell can no longer be hidden when unchecked. */
+  .ff-cookie::before{{content:"Cookie";display:block;font-size:11.5px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
@@ -19104,7 +19072,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
 <li><strong>Read only</strong> feeds stay live in the Reader but are never proposed into the <a href="/admin/library/queue">archive queue</a>. It's set per feed, so one source in a section can be read-only without affecting the rest.</li>
-<li><strong>Cookie</strong> marks a feed whose full text depends on a subscriber cookie set in the host environment, not on anything stored here. Hover the badge for which one, or open the feed's Edit form to read and change the note. The note is a label pointing at the cookie; the cookie value itself never lives in this database.</li>
+<li><strong>Cookie</strong> marks a feed whose full text needs a subscriber cookie. There's one mechanism for the whole app: cookies live in <code>LINKLIB_AUTH_COOKIES</code> in the host environment, keyed by domain, and <code>extract.fetch_page</code> applies them automatically wherever they match. Ticking this box records the dependency so a source that quietly starts returning previews points at the right place to check&mdash;see <code>RUNBOOK.md</code> &sect;5 for refreshing an expired one. <strong>No cookie value is ever stored in this database</strong>, and the box changes nothing about how pages are fetched.</li>
 <li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
 </ul>
 {banner}{error_banner}
@@ -19112,9 +19080,10 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   <table class="ff-table">
     <thead><tr>
       <th style="width:18%;">Name</th><th style="width:23%;">URL</th>
-      <th style="width:14%;">Section</th><th style="width:8%;">Read only</th>
-      <th style="width:10%;">Cookie</th>
-      <th style="width:10%;">Subscriber</th>
+      <th style="width:14%;">Section</th>
+      <th style="width:8%;text-align:center;">Read only</th>
+      <th style="width:10%;text-align:center;">Cookie</th>
+      <th style="width:10%;text-align:center;">Subscriber</th>
       <th style="width:17%;text-align:right;">Actions</th>
     </tr></thead>
     <tbody>{feed_rows}</tbody>
@@ -19276,6 +19245,36 @@ async def admin_feeds_set_read_only(request: Request, feed_id: int):
     return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
 
 
+@app.post("/admin/library/feeds/{feed_id}/cookie")
+async def admin_feeds_set_cookie(request: Request, feed_id: int):
+    """Toggle the paywall-cookie flag from the table's checkbox.
+
+    Same narrowness as the read-only and subscription routes: one column,
+    never the URL. An unchecked box posts no field at all, which is the off
+    state.
+
+    This records a dependency; it does not create or remove one. Cookies are
+    applied by domain match inside extract.fetch_page, from
+    LINKLIB_AUTH_COOKIES, and nothing here changes that — so there's no OPML
+    rewrite and no cache to clear.
+    """
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    needs_cookie = bool(form.get("has_paywall_cookie"))
+    lib = _lib()
+    try:
+        feed = lib.get_feed(feed_id)
+        if not feed:
+            raise HTTPException(status_code=404, detail="feed not found")
+        lib.set_feed_paywall_cookie(feed_id, needs_cookie)
+        state = "marked as needing a subscriber cookie" if needs_cookie else "no longer marked as needing a cookie"
+        detail = f"{feed['name']} is {state}."
+    finally:
+        lib.close()
+    return RedirectResponse(f"/admin/library/feeds?msg={quote(detail)}", status_code=303)
+
+
 @app.post("/admin/library/feeds/{feed_id}/subscription")
 async def admin_feeds_set_subscription(request: Request, feed_id: int):
     """Toggle the informational subscription flag from the table's checkbox.
@@ -19355,9 +19354,9 @@ async def admin_feeds_new_submit(request: Request):
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
         "exclude_from_queue": bool(form.get("exclude_from_queue")),
-        # Descriptive label only — never a cookie value. See the column's
-        # migration comment in linklib/db.py.
-        "paywall_cookie_note": (form.get("paywall_cookie_note") or "").strip(),
+        # Records only THAT the feed needs the cookie; changes no fetch
+        # behaviour. See the column's migration comment in linklib/db.py.
+        "has_paywall_cookie": bool(form.get("has_paywall_cookie")),
         # Informational only — nothing reads it.
         "has_active_subscription": bool(form.get("has_active_subscription")),
     }
@@ -19386,7 +19385,7 @@ async def admin_feeds_new_submit(request: Request):
         html_url = values["html_url"] or probe.html_url
         lib.add_feed(int(values["section_id"]), name, values["xml_url"], html_url,
                      exclude_from_queue=values["exclude_from_queue"],
-                     paywall_cookie_note=values["paywall_cookie_note"],
+                     has_paywall_cookie=values["has_paywall_cookie"],
                      has_active_subscription=values["has_active_subscription"])
         _publish_feeds(lib)
     finally:
@@ -19411,7 +19410,7 @@ def admin_feeds_edit(request: Request, feed_id: int):
               "exclude_from_queue": bool(feed["exclude_from_queue"]),
               # Round-tripped so a save that doesn't touch these fields can't
               # clear them — update_feed writes both columns on every call.
-              "paywall_cookie_note": feed["paywall_cookie_note"],
+              "has_paywall_cookie": bool(feed["has_paywall_cookie"]),
               "has_active_subscription": bool(feed["has_active_subscription"])}
     return HTMLResponse(_page("Edit feed—Library Admin", "Admin",
                               _feed_form_page(f'Edit {feed["name"]}',
@@ -19432,8 +19431,8 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
         "html_url": (form.get("html_url") or "").strip(),
         "section_id": (form.get("section_id") or "").strip(),
         "exclude_from_queue": bool(form.get("exclude_from_queue")),
-        # Descriptive label only — see the add route.
-        "paywall_cookie_note": (form.get("paywall_cookie_note") or "").strip(),
+        # Records only THAT the feed needs the cookie — see the add route.
+        "has_paywall_cookie": bool(form.get("has_paywall_cookie")),
         # Informational only — see the add route.
         "has_active_subscription": bool(form.get("has_active_subscription")),
     }
@@ -19474,7 +19473,7 @@ async def admin_feeds_edit_submit(request: Request, feed_id: int):
         lib.update_feed(feed_id, int(values["section_id"]), values["name"],
                         values["xml_url"], html_url,
                         exclude_from_queue=values["exclude_from_queue"],
-                        paywall_cookie_note=values["paywall_cookie_note"],
+                        has_paywall_cookie=values["has_paywall_cookie"],
                         has_active_subscription=values["has_active_subscription"])
         _publish_feeds(lib)
         saved_name = values["name"]

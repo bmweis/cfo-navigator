@@ -318,6 +318,11 @@ Each domain reports one of three states:
 | **expired** | `got a preview/paywall — cookie missing or expired` | **This runbook.** |
 | **untested** | `no recent post found to test` | The probe found no post to check. Not a cookie failure—see 5.5. |
 
+The feed table's **Cookie** column is a separate, purely descriptive record of
+which feeds depend on a cookie. It drives nothing: it does not gate fetching and
+it is not what the probe reads. Treat a ticked box as documentation, and the
+panel above as the live signal.
+
 > **Only domains listed in `LINKLIB_AUTH_COOKIES` are probed at all.** The
 > probe list comes from that variable's keys, not from
 > `feed.PAYWALLED_DOMAINS`. A paywalled feed with no cookie configured is

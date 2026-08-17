@@ -250,6 +250,11 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
   hierarchy depth. The group-level row is one shared component, `_disclosure_group` in
   `webapp/app.py`; reuse it rather than rebuilding the markup.
 - **Tables** — navy header row with white text; alt rows `--surface-2`.
+  Checkbox/boolean-indicator columns are always center-justified, header and
+  cells alike. Text, link, and dropdown columns are left-justified. Actions
+  columns are right-aligned. Once a table collapses to stacked labelled rows on
+  mobile the centring is dropped, since there are no columns left to align
+  within.
 - **Links** — navy; optional seafoam underline for emphasis in editorial copy.
 
 ### Radius scale
