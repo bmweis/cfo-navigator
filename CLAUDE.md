@@ -217,7 +217,9 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   current value — a save that only renames a feed would otherwise blank the note.
   Migrating `PAYWALLED_DOMAINS` itself to be DB-backed stayed out of scope: it also
   drives the Reader's paywall badge and `authcheck`'s probe list, so that's a behavioural
-  change to three consumers, not a label.
+  change to three consumers, not a label. **The note points at the cookie; the procedure
+  for actually refreshing an expired one is `RUNBOOK.md` §5** — including the still-open
+  question of the real per-domain cookie names, which no commit in the repo records.
 - **The Reader's Feed view caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
   item dicts are shallow-copied before mutation — never mutate a cached entry in place.
   Editing the OPML won't show up live until the cache expires or the app restarts.
