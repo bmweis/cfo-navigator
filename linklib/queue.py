@@ -34,14 +34,17 @@ from .db import Library, normalize_url
 # https://docs.claude.com/en/docs/about-claude/models
 QUEUE_ENRICH_MODEL = os.environ.get("LINKLIB_QUEUE_ENRICH_MODEL", "claude-opus-4-8")
 
-# OPML categories that belong in the /feed reader but NOT the curated library.
-# News is timely and high-volume — good to read, not something Brian saves. These
-# sources stay live in the feed; they're just never proposed into the queue.
-# Comma-separated env override, e.g. LINKLIB_QUEUE_EXCLUDE_CATEGORIES="News,Market Insights".
-QUEUE_EXCLUDE_CATEGORIES = {
-    c.strip() for c in os.environ.get("LINKLIB_QUEUE_EXCLUDE_CATEGORIES", "News").split(",")
-    if c.strip()
-}
+# Feeds that belong in the Reader but NOT the curated library. News is timely
+# and high-volume — good to read, not something Brian saves. Those sources stay
+# live in the Reader; they're just never proposed into the queue.
+#
+# This used to be a module-level set built from LINKLIB_QUEUE_EXCLUDE_CATEGORIES
+# and matched against a section's NAME. It's now a stored per-FEED boolean
+# (feeds.exclude_from_queue), read via Library.excluded_feed_urls() and matched
+# on each item's originating feed URL. Two things the old shape got wrong:
+# renaming a section silently changed which sources reached the queue, and
+# exclusion was all-or-nothing per section when it's really a judgment about an
+# individual source. The env var is retired.
 
 
 def suggest_tags_heuristic(title: str, summary: str, source: str,
@@ -166,20 +169,49 @@ def redate_from_article_pages(lib: Library, source_substr: str = "",
     return {"scanned": scanned, "updated": updated}
 
 
+def _excluded_feed_urls(lib: Library,
+                        override: Optional[set[str]] = None) -> set[str]:
+    """`xml_url` of every read-only feed, or the legacy default when unseeded.
+
+    An unseeded DB returns an empty set from `excluded_feed_urls()`, which is
+    indistinguishable from "nothing is excluded" and would start funnelling
+    News into the queue. `has_feeds()` separates those two cases; when the
+    tables are empty we fall back to the pre-migration News feed URLs.
+    """
+    if override is not None:
+        return override
+    if lib.has_feeds():
+        return lib.excluded_feed_urls()
+    return set(_LEGACY_EXCLUDED_FEED_URLS)
+
+
+# The two feeds that sat in the "News" section before exclusion moved from
+# section to feed. Only consulted when the feeds tables are empty (a fresh test
+# fixture, or the window before the boot-time seed runs) — see
+# _excluded_feed_urls.
+_LEGACY_EXCLUDED_FEED_URLS = frozenset({
+    "https://news.crunchbase.com/sections/enterprise/feed/",
+    "https://techcrunch.com/enterprise/feed/",
+})
+
+
 def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
                          model: str = QUEUE_ENRICH_MODEL, max_total: int = 300,
-                         exclude_categories: Optional[set[str]] = None,
+                         excluded_feed_urls: Optional[set[str]] = None,
                          progress=lambda *_: None) -> dict:
     """Pull current feed items, queue the ones not already saved or queued.
 
     Returns stats: {"scanned", "new", "added"}. Deduping happens before
     enrichment, so we only spend API calls on genuinely new candidates.
 
-    Sources in `exclude_categories` (default: News and friends) are read in
-    /feed but never proposed to the library, so the queue stays curation-grade.
+    Feeds flagged `exclude_from_queue` are read in the Reader but never
+    proposed to the library, so the queue stays curation-grade. Each item is
+    matched back to its originating feed by `feed_url` (the feed's own
+    `xml_url`, carried on every item by `feed.get_feed_items`), NOT by the
+    section name it happens to sit under — a feed can be read-only while its
+    section-mates aren't, and names are editable while `xml_url` is the key.
     """
-    if exclude_categories is None:
-        exclude_categories = QUEUE_EXCLUDE_CATEGORIES
+    excluded = _excluded_feed_urls(lib, excluded_feed_urls)
     try:
         from .feed import get_feed_items
         items, _ = get_feed_items(opml_path, max_total=max_total)
@@ -189,7 +221,7 @@ def scan_feed_into_queue(lib: Library, opml_path: str, *, enrich: bool = True,
     seen = {normalize_url(u) for u in (lib.article_urls() | lib.queue_urls())}
     new_items = [it for it in items
                  if it.get("url") and normalize_url(it["url"]) not in seen
-                 and it.get("category", "") not in exclude_categories]
+                 and it.get("feed_url", "") not in excluded]
 
     added = 0
     skipped_scope = 0
@@ -356,7 +388,7 @@ def fetch_sitemap_entries(sitemap_url: str, *, _depth: int = 0,
 def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
                              model: str = QUEUE_ENRICH_MODEL,
                              per_source_limit: int = 150, dry_run: bool = False,
-                             exclude_categories: Optional[set[str]] = None,
+                             excluded_feed_urls: Optional[set[str]] = None,
                              progress=lambda *_: None) -> list[dict]:
     """One-time historical sweep across `feeds` (FeedMeta with .name/.html_url),
     queuing article candidates published on/after `since` (a datetime or ISO
@@ -365,11 +397,11 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
     `dry_run` reports candidate counts without fetching/enriching/saving — use
     it to preview reach before spending API calls.
 
-    Sources whose `.category` is in `exclude_categories` (default: News and
-    friends) are skipped — they belong in /feed, not the curated library.
+    Feeds flagged `exclude_from_queue` are skipped — they belong in the Reader,
+    not the curated library. Matched on each FeedMeta's `xml_url` against the
+    stored per-feed flag, not on its section name.
     """
-    if exclude_categories is None:
-        exclude_categories = QUEUE_EXCLUDE_CATEGORIES
+    excluded = _excluded_feed_urls(lib, excluded_feed_urls)
     since = _ensure_aware(since)
     seen = {normalize_url(u) for u in (lib.article_urls() | lib.queue_urls())}
     from . import tagstyle
@@ -381,8 +413,8 @@ def scan_sitemaps_into_queue(lib: Library, feeds, since, *, enrich: bool = True,
         stat = {"source": f.name, "site": site, "sitemap": None,
                 "candidates": 0, "added": 0, "undated": 0, "skipped_scope": 0,
                 "note": ""}
-        if getattr(f, "category", "") in exclude_categories:
-            stat["note"] = f"skipped — {f.category} category (feed-only, not library)"
+        if getattr(f, "xml_url", "") in excluded:
+            stat["note"] = "skipped — read-only feed (Reader only, not library)"
             report.append(stat)
             continue
         if not site:

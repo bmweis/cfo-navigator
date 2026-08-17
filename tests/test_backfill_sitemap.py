@@ -120,43 +120,71 @@ def test_scan_handles_source_without_sitemap(tmp_path, monkeypatch):
     lib.close()
 
 
-def test_excluded_category_skipped_before_network(tmp_path, monkeypatch):
-    """News-category sources are read in /feed but never swept into the library.
-    They must be skipped without touching the network."""
+def test_read_only_feed_skipped_before_network(tmp_path, monkeypatch):
+    """Read-only sources are read in the Reader but never swept into the
+    library. They must be skipped without touching the network.
+
+    Exclusion moved from a section-name match to a per-feed flag matched on
+    xml_url, so this identifies the feed by URL rather than category. The DB
+    here is unseeded, which exercises the legacy-default fallback in
+    queue._excluded_feed_urls.
+    """
     lib = Library(str(tmp_path / "t.db"))
 
     # Any sitemap call would be a test failure for the excluded source.
     def _boom(*a, **k):
-        raise AssertionError("network hit for an excluded-category source")
+        raise AssertionError("network hit for a read-only source")
     monkeypatch.setattr(q, "discover_sitemaps", _boom)
     monkeypatch.setattr(q, "fetch_sitemap_entries", _boom)
 
     feeds = [
-        FeedMeta(name="TechCrunch", xml_url="", html_url="https://techcrunch.com", category="News"),
+        FeedMeta(name="TechCrunch", xml_url="https://techcrunch.com/enterprise/feed/",
+                 html_url="https://techcrunch.com", category="News"),
     ]
     report = q.scan_sitemaps_into_queue(
         lib, feeds, datetime(2024, 8, 1, tzinfo=timezone.utc), enrich=False,
     )
     assert report[0]["candidates"] == 0
-    assert "News category" in report[0]["note"]
+    assert "read-only" in report[0]["note"]
     assert lib.queue_count() == 0
     lib.close()
 
 
-def test_exclude_categories_is_overridable(tmp_path, monkeypatch):
-    """A caller can pass its own exclusion set (e.g. to include News, or add
-    another category)."""
+def test_a_feed_is_skipped_by_its_own_flag_not_its_section(tmp_path, monkeypatch):
+    """A feed in a previously-excluded section is swept normally once its own
+    flag is clear — the section name has no say any more."""
+    lib = Library(str(tmp_path / "t.db"))
+    section = lib.add_feed_section("News")
+    lib.add_feed(section, "TechCrunch", "https://techcrunch.com/enterprise/feed/",
+                 "https://tc.com", exclude_from_queue=False)
+
+    entries = [{"url": "https://tc.com/post", "lastmod": datetime(2025, 3, 1, tzinfo=timezone.utc)}]
+    monkeypatch.setattr(q, "discover_sitemaps", lambda site: ["https://tc.com/sitemap.xml"])
+    monkeypatch.setattr(q, "fetch_sitemap_entries", lambda sm: entries)
+
+    feeds = [FeedMeta(name="TechCrunch", xml_url="https://techcrunch.com/enterprise/feed/",
+                      html_url="https://tc.com", category="News")]
+    report = q.scan_sitemaps_into_queue(
+        lib, feeds, datetime(2024, 8, 1, tzinfo=timezone.utc), enrich=False)
+
+    assert report[0]["candidates"] == 1
+    lib.close()
+
+
+def test_excluded_feed_urls_is_overridable(tmp_path, monkeypatch):
+    """A caller can pass its own exclusion set, by feed URL."""
     lib = Library(str(tmp_path / "t.db"))
     entries = [{"url": "https://tc.com/post", "lastmod": datetime(2025, 3, 1, tzinfo=timezone.utc)}]
     monkeypatch.setattr(q, "discover_sitemaps", lambda site: ["https://tc.com/sitemap.xml"])
     monkeypatch.setattr(q, "fetch_sitemap_entries", lambda sm: entries)
 
-    feeds = [FeedMeta(name="TechCrunch", xml_url="", html_url="https://tc.com", category="News")]
+    feeds = [FeedMeta(name="TechCrunch", xml_url="https://techcrunch.com/enterprise/feed/",
+                      html_url="https://tc.com", category="News")]
     cutoff = datetime(2024, 8, 1, tzinfo=timezone.utc)
 
-    # Override with an empty set → News is no longer excluded, so it scans.
+    # Override with an empty set → nothing is excluded, so it scans.
     report = q.scan_sitemaps_into_queue(lib, feeds, cutoff, enrich=False,
-                                        exclude_categories=set())
+                                        excluded_feed_urls=set())
     assert report[0]["candidates"] == 1
     assert report[0]["added"] == 1
     lib.close()
