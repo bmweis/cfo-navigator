@@ -23,7 +23,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib.db import Library
-from linklib.feed import PAYWALLED_DOMAINS, parse_opml
+from linklib.feed import PAYWALLED_DOMAINS
 
 REPO_OPML = str(pathlib.Path(__file__).resolve().parents[1] / "preferred_sites.opml")
 
@@ -74,162 +74,137 @@ def app_env(monkeypatch, tmp_path):
 # Column + seeding
 # ---------------------------------------------------------------------------
 
-def test_note_defaults_to_empty_for_every_seeded_feed(seeded):
-    """No retroactive flagging — same precedent as every other added column."""
-    assert all(f["paywall_cookie_note"] == "" for f in seeded.list_feeds())
+def test_flag_defaults_off_before_seeding(lib):
+    """No retroactive flagging — same precedent as every added column."""
+    lib.seed_feeds_from_opml(REPO_OPML)
+    assert all(f["has_paywall_cookie"] == 0 for f in lib.list_feeds())
 
 
-def test_seeding_annotates_every_known_paywalled_feed(seeded):
-    result = seeded.seed_paywall_cookie_notes()
+def test_seeding_flags_every_known_paywalled_feed(seeded):
+    result = seeded.seed_paywall_cookie_flags()
     assert result["seeded"] is True
 
-    annotated = {f["name"]: f["paywall_cookie_note"]
-                 for f in seeded.list_feeds() if f["paywall_cookie_note"]}
-    assert len(annotated) == result["feeds"]
-    assert annotated, "expected at least one paywalled feed in the curated OPML"
+    flagged = [f for f in seeded.list_feeds() if f["has_paywall_cookie"]]
+    assert len(flagged) == result["feeds"]
+    assert flagged, "expected paywalled feeds in the curated OPML"
 
-    # Every annotated feed really is on a known-paywalled domain, and every
-    # known-paywalled subscribed feed got annotated — not just the one that
-    # prompted the feature.
     for f in seeded.list_feeds():
         on_paywalled_domain = any(
             dom in f"{f['xml_url']} {f['html_url']}" for dom in PAYWALLED_DOMAINS)
-        assert bool(f["paywall_cookie_note"]) is on_paywalled_domain
+        assert bool(f["has_paywall_cookie"]) is on_paywalled_domain
 
 
-def test_seeded_note_names_the_env_var_and_holds_no_cookie_value(seeded):
-    """The note is a pointer, not a secret. It must name where to look and
-    carry nothing that resembles a cookie."""
-    seeded.seed_paywall_cookie_notes()
-    notes = {f["paywall_cookie_note"] for f in seeded.list_feeds()
-             if f["paywall_cookie_note"]}
-    assert notes == {"Cookie auth via LINKLIB_AUTH_COOKIES"}
-    for note in notes:
-        assert "=" not in note, "a '=' suggests a literal cookie pair"
-        assert ";" not in note
+def test_seeding_flags_exactly_the_three_expected_feeds(seeded):
+    """The set must not change shape when the free-text note became a boolean."""
+    seeded.seed_paywall_cookie_flags()
+    names = sorted(f["name"] for f in seeded.list_feeds() if f["has_paywall_cookie"])
+    assert names == ["Ben Thompson (Stratechery)", "Mostly Metrics (CJ Gustafson)",
+                     "Public Comps"]
 
 
-def test_mostly_metrics_specifically_gets_a_note(seeded):
-    """The feed that prompted the feature, called out by name so a future
-    change to PAYWALLED_DOMAINS can't silently drop it."""
-    seeded.seed_paywall_cookie_notes()
+def test_migrates_a_legacy_note_even_off_a_paywalled_domain(seeded):
+    """The migration arm: an existing DB's hand-written note becomes a tick,
+    whatever domain it sits on."""
+    other = [f for f in seeded.list_feeds()
+             if not any(d in f["xml_url"] for d in PAYWALLED_DOMAINS)][0]
+    seeded.conn.execute("UPDATE feeds SET paywall_cookie_note=? WHERE id=?",
+                        ("Cookie auth via LINKLIB_AUTH_COOKIES", other["id"]))
+    seeded.conn.commit()
+
+    seeded.seed_paywall_cookie_flags()
+    assert seeded.get_feed(other["id"])["has_paywall_cookie"] == 1
+
+
+def test_mostly_metrics_specifically_gets_the_flag(seeded):
+    seeded.seed_paywall_cookie_flags()
     mm = [f for f in seeded.list_feeds() if "mostlymetrics.com" in f["xml_url"]]
     assert len(mm) == 1
-    assert mm[0]["paywall_cookie_note"] == "Cookie auth via LINKLIB_AUTH_COOKIES"
-    # And its URL is untouched by the annotation pass.
+    assert mm[0]["has_paywall_cookie"] == 1
     assert mm[0]["xml_url"] == "https://www.mostlymetrics.com/feed"
 
 
 def test_seeding_is_flag_guarded_not_emptiness_guarded(seeded):
-    """A deliberately cleared note stays cleared across restarts.
+    """A deliberately unticked box stays unticked across restarts."""
+    seeded.seed_paywall_cookie_flags()
+    mm = [f for f in seeded.list_feeds() if f["has_paywall_cookie"]][0]
+    seeded.set_feed_paywall_cookie(mm["id"], False)
 
-    This is the _seed_toolbox bug in miniature: an "is it empty" check looks
-    identical on a fresh DB and then resurrects the note on the next boot.
-    """
-    seeded.seed_paywall_cookie_notes()
-    mm = [f for f in seeded.list_feeds() if "mostlymetrics.com" in f["xml_url"]][0]
-    seeded.set_feed_paywall_cookie_note(mm["id"], "")
-
-    again = seeded.seed_paywall_cookie_notes()
+    again = seeded.seed_paywall_cookie_flags()
     assert again["seeded"] is False
-    assert again["feeds"] == 0
-
-    after = seeded.get_feed(mm["id"])
-    assert after["paywall_cookie_note"] == ""
+    assert seeded.get_feed(mm["id"])["has_paywall_cookie"] == 0
 
 
 def test_seeding_does_not_burn_its_flag_on_an_empty_feeds_table(lib):
-    """An unreadable OPML on one boot must not permanently skip the notes for
-    every feed seeded afterwards."""
-    assert lib.list_feeds() == []
-    first = lib.seed_paywall_cookie_notes()
-    assert first == {"seeded": False, "feeds": 0}
-
+    assert lib.seed_paywall_cookie_flags() == {"seeded": False, "feeds": 0}
     lib.seed_feeds_from_opml(REPO_OPML)
-    second = lib.seed_paywall_cookie_notes()
-    assert second["seeded"] is True
-    assert second["feeds"] > 0
+    assert lib.seed_paywall_cookie_flags()["seeded"] is True
 
 
-def test_seeding_never_overwrites_an_existing_note(seeded):
+def test_setting_the_cookie_flag_touches_only_that_column(seeded):
     mm = [f for f in seeded.list_feeds() if "mostlymetrics.com" in f["xml_url"]][0]
-    seeded.set_feed_paywall_cookie_note(mm["id"], "Hand-written note")
-    seeded.seed_paywall_cookie_notes()
-    assert seeded.get_feed(mm["id"])["paywall_cookie_note"] == "Hand-written note"
-
-
-# ---------------------------------------------------------------------------
-# The note stays out of the OPML
-# ---------------------------------------------------------------------------
-
-def test_note_is_absent_from_the_generated_opml(seeded, tmp_path):
-    """The OPML has no field for it, exactly like exclude_from_queue. A note
-    edit must not churn the generated file."""
-    seeded.seed_paywall_cookie_notes()
-    assert "paywall_cookie_note" not in seeded.opml_xml()
-    assert "LINKLIB_AUTH_COOKIES" not in seeded.opml_xml()
-
-
-def test_editing_a_note_leaves_the_generated_opml_byte_identical(seeded):
-    before = seeded.opml_xml()
-    mm = [f for f in seeded.list_feeds() if "mostlymetrics.com" in f["xml_url"]][0]
-    seeded.set_feed_paywall_cookie_note(mm["id"], "Something completely different")
-    assert seeded.opml_xml() == before
-
-
-def test_the_note_column_survives_an_opml_round_trip(seeded, tmp_path):
-    """Regenerating and reparsing the file must not disturb stored notes —
-    the file is a cache of the DB, not the other way round."""
-    seeded.seed_paywall_cookie_notes()
-    before = {f["xml_url"]: f["paywall_cookie_note"] for f in seeded.list_feeds()}
-
-    out = tmp_path / "regen.opml"
-    seeded.write_opml(str(out))
-    assert len(parse_opml(str(out))) == len(before)
-
-    after = {f["xml_url"]: f["paywall_cookie_note"] for f in seeded.list_feeds()}
-    assert after == before
-
-
-# ---------------------------------------------------------------------------
-# Narrow writers can't rewrite a URL in passing
-# ---------------------------------------------------------------------------
-
-def test_setting_a_note_touches_only_that_column(seeded):
-    mm = [f for f in seeded.list_feeds() if "mostlymetrics.com" in f["xml_url"]][0]
-    seeded.set_feed_paywall_cookie_note(mm["id"], "Cookie auth via LINKLIB_AUTH_COOKIES")
+    seeded.set_feed_paywall_cookie(mm["id"], True)
     after = seeded.get_feed(mm["id"])
-    for field in ("xml_url", "html_url", "name", "section_id", "exclude_from_queue"):
+    for field in ("xml_url", "html_url", "name", "section_id",
+                  "exclude_from_queue", "has_active_subscription"):
         assert after[field] == mm[field]
 
 
-def test_note_round_trips_verbatim_through_add_and_update(lib):
+def test_cookie_flag_is_absent_from_the_generated_opml(seeded):
+    seeded.seed_paywall_cookie_flags()
+    assert "has_paywall_cookie" not in seeded.opml_xml()
+    assert "LINKLIB_AUTH_COOKIES" not in seeded.opml_xml()
+
+
+def test_toggling_the_cookie_flag_leaves_the_opml_byte_identical(seeded):
+    before = seeded.opml_xml()
+    mm = [f for f in seeded.list_feeds() if "mostlymetrics.com" in f["xml_url"]][0]
+    seeded.set_feed_paywall_cookie(mm["id"], True)
+    assert seeded.opml_xml() == before
+
+
+def test_flag_round_trips_through_add_and_update(lib):
     sid = lib.add_feed_section("Substacks")
-    note = "Cookie auth via LINKLIB_AUTH_COOKIES (beehiiv session)"
     fid = lib.add_feed(sid, "Paid", "https://paid.example/feed?tok=abc&u=1",
-                       "https://paid.example/", paywall_cookie_note=note)
-    assert lib.get_feed(fid)["paywall_cookie_note"] == note
-    # And the tokenized URL guarantee still holds alongside it.
+                       "https://paid.example/", has_paywall_cookie=True)
+    assert lib.get_feed(fid)["has_paywall_cookie"] == 1
     assert lib.get_feed(fid)["xml_url"] == "https://paid.example/feed?tok=abc&u=1"
 
     lib.update_feed(fid, sid, "Paid", "https://paid.example/feed?tok=abc&u=1",
-                    "https://paid.example/", paywall_cookie_note=note)
-    assert lib.get_feed(fid)["paywall_cookie_note"] == note
+                    "https://paid.example/", has_paywall_cookie=True)
+    assert lib.get_feed(fid)["has_paywall_cookie"] == 1
     assert lib.get_feed(fid)["xml_url"] == "https://paid.example/feed?tok=abc&u=1"
+
+
+def test_no_cookie_value_can_reach_the_database(seeded):
+    """The column is a boolean now, so there is nowhere for a cookie string to
+    be stored even by mistake."""
+    seeded.seed_paywall_cookie_flags()
+    for f in seeded.list_feeds():
+        assert f["has_paywall_cookie"] in (0, 1)
 
 
 # ---------------------------------------------------------------------------
 # Admin page rendering
 # ---------------------------------------------------------------------------
 
-def test_feed_table_has_a_paywall_cookie_column(app_env):
+def test_feed_table_has_a_cookie_column_with_a_checkbox(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
     assert ">Cookie</th>" in html
+    assert 'name="has_paywall_cookie"' in html
 
 
-def test_indicator_renders_only_for_annotated_feeds(app_env):
-    """Sparse marks, not a grid of mostly-empty cells."""
+def test_cookie_cell_is_a_plain_checkbox_like_its_neighbours(app_env):
+    """No badge, no icon, no separate hover element — the lock badge was a
+    leftover from the free-text era, where it triggered the per-row tooltip."""
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds").text
+    assert "ff-cookie-badge" not in html
+    assert "ff-cookie-form" not in html
+    assert '<td class="ff-cookie">' in html
+
+
+def test_every_row_has_a_cookie_checkbox_and_only_paywalled_ones_are_ticked(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
         lib = app_env._lib()
@@ -237,124 +212,132 @@ def test_indicator_renders_only_for_annotated_feeds(app_env):
             feeds = lib.list_feeds()
         finally:
             lib.close()
-
-    expected = sum(1 for f in feeds if f["paywall_cookie_note"])
-    assert 0 < expected < len(feeds), "need a mix of annotated and plain feeds"
-    # The badge markup appears once per annotated feed: once in the CSS rule
-    # block, then once per row.
-    assert html.count('class="ff-cookie-badge"') == expected
+    expected = sum(1 for f in feeds if f["has_paywall_cookie"])
+    assert 0 < expected < len(feeds)
+    assert html.count('name="has_paywall_cookie"') == len(feeds)
+    assert html.count('aria-label="Cookie:') == len(feeds)
 
 
-def test_note_text_rides_on_the_title_attribute_not_inline(app_env):
+def test_cookie_checkbox_is_labelled_like_read_only_and_subscriber(app_env):
+    """All three boolean columns use the same aria-label shape and carry no
+    per-row title, so one doesn't read differently from the others."""
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
         lib = app_env._lib()
         try:
-            note = [f for f in lib.list_feeds() if f["paywall_cookie_note"]][0]["paywall_cookie_note"]
+            name = lib.list_feeds()[0]["name"]
         finally:
             lib.close()
-
-    assert f'title="{note}"' in html
-    # The badge carries an accessible name too — a bare title on a span is not
-    # reliably announced.
-    assert f'aria-label="Cookie. {note}"' in html
-    # The note never renders as visible cell text.
-    assert f'<td class="ff-cookie">{note}' not in html
+    for label in ("Read only", "Cookie", "Subscriber"):
+        assert f'aria-label="{label}: {name}"' in html
 
 
-def test_page_footnote_explains_the_column(app_env):
+def test_footnote_explains_the_column_once(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
-    assert "<strong>Cookie</strong> marks a feed" in html
-    assert "the cookie value itself never lives in this database" in html
+    assert "<strong>Cookie</strong> marks a feed whose full text needs" in html
+    assert "No cookie value is ever stored in this database" in html
 
 
-def test_mobile_labels_only_the_cells_that_carry_a_badge(app_env):
-    """An unconditional ::before would print the label above an empty cell on
-    every unpaywalled feed."""
+def test_no_free_text_note_field_remains(app_env):
+    """The whole point of the change: no per-row text entry anywhere."""
     with _client(app_env) as client:
-        html = client.get("/admin/library/feeds").text
-    assert '.ff-cookie:has(.ff-cookie-badge)::before' in html
-    assert '.ff-cookie:not(:has(.ff-cookie-badge)){display:none;}' in html
+        table = client.get("/admin/library/feeds").text
+        form = client.get("/admin/library/feeds/new").text
+    for html in (table, form):
+        assert 'name="paywall_cookie_note"' not in html
 
 
-def test_edit_form_round_trips_the_note(app_env):
-    with _client(app_env) as client:
-        lib = app_env._lib()
-        try:
-            feed = [f for f in lib.list_feeds() if f["paywall_cookie_note"]][0]
-        finally:
-            lib.close()
-        html = client.get(f"/admin/library/feeds/{feed['id']}/edit").text
-    assert 'name="paywall_cookie_note"' in html
-    assert f'value="{feed["paywall_cookie_note"]}"' in html
-
-
-def test_form_helper_copy_warns_against_pasting_the_cookie(app_env):
-    with _client(app_env) as client:
-        html = client.get("/admin/library/feeds/new").text
-    assert "not the cookie value itself" in html
-    assert "keep secrets out of it" in html
-
-
-def test_editing_a_feed_without_touching_the_note_keeps_it(app_env):
-    """update_feed writes the column on every call, so the form has to
-    round-trip it — a save that only renames must not blank the note."""
+def test_cookie_row_toggle_posts_and_persists(app_env):
     with _client(app_env) as client:
         lib = app_env._lib()
         try:
-            feed = [f for f in lib.list_feeds() if f["paywall_cookie_note"]][0]
-        finally:
-            lib.close()
-        note, fid = feed["paywall_cookie_note"], feed["id"]
-
-        resp = client.post(f"/admin/library/feeds/{fid}/edit", data={
-            "name": "Renamed", "xml_url": feed["xml_url"],
-            "html_url": feed["html_url"], "section_id": str(feed["section_id"]),
-            "paywall_cookie_note": note,
-        }, follow_redirects=False)
-    assert resp.status_code == 303
-
-    lib = app_env._lib()
-    try:
-        after = lib.get_feed(fid)
-    finally:
-        lib.close()
-    assert after["name"] == "Renamed"
-    assert after["paywall_cookie_note"] == note
-    assert after["xml_url"] == feed["xml_url"]
-
-
-def test_clearing_the_note_through_the_form_really_clears_it(app_env):
-    with _client(app_env) as client:
-        lib = app_env._lib()
-        try:
-            feed = [f for f in lib.list_feeds() if f["paywall_cookie_note"]][0]
+            feed = [f for f in lib.list_feeds() if not f["has_paywall_cookie"]][0]
         finally:
             lib.close()
         fid = feed["id"]
+        resp = client.post(f"/admin/library/feeds/{fid}/cookie",
+                           data={"has_paywall_cookie": "1"}, follow_redirects=False)
+        assert resp.status_code == 303
 
+        lib = app_env._lib()
+        try:
+            after = lib.get_feed(fid)
+        finally:
+            lib.close()
+    assert after["has_paywall_cookie"] == 1
+    assert after["xml_url"] == feed["xml_url"]
+
+
+def test_row_toggle_unchecked_clears_it(app_env):
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = [f for f in lib.list_feeds() if f["has_paywall_cookie"]][0]
+        finally:
+            lib.close()
+        fid = feed["id"]
+        client.post(f"/admin/library/feeds/{fid}/cookie", data={},
+                    follow_redirects=False)
+        lib = app_env._lib()
+        try:
+            assert lib.get_feed(fid)["has_paywall_cookie"] == 0
+        finally:
+            lib.close()
+
+
+def test_edit_form_round_trips_the_cookie_flag(app_env):
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = [f for f in lib.list_feeds() if f["has_paywall_cookie"]][0]
+        finally:
+            lib.close()
+        html = client.get(f"/admin/library/feeds/{feed['id']}/edit").text
+    assert 'name="has_paywall_cookie" value="1" checked' in html
+
+
+def test_editing_a_feed_without_touching_the_cookie_flag_keeps_it(app_env):
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = [f for f in lib.list_feeds() if f["has_paywall_cookie"]][0]
+        finally:
+            lib.close()
+        fid = feed["id"]
         client.post(f"/admin/library/feeds/{fid}/edit", data={
-            "name": feed["name"], "xml_url": feed["xml_url"],
+            "name": "Renamed", "xml_url": feed["xml_url"],
             "html_url": feed["html_url"], "section_id": str(feed["section_id"]),
-            "paywall_cookie_note": "",
+            "has_paywall_cookie": "1",
         }, follow_redirects=False)
+        lib = app_env._lib()
+        try:
+            after = lib.get_feed(fid)
+        finally:
+            lib.close()
+    assert after["has_paywall_cookie"] == 1
+    assert after["name"] == "Renamed"
 
-    lib = app_env._lib()
-    try:
-        assert lib.get_feed(fid)["paywall_cookie_note"] == ""
-    finally:
-        lib.close()
 
-
-def test_startup_hook_seeds_the_notes(app_env):
+def test_startup_hook_seeds_the_flags(app_env):
     with _client(app_env):
         lib = app_env._lib()
         try:
-            annotated = [f for f in lib.list_feeds() if f["paywall_cookie_note"]]
+            flagged = [f for f in lib.list_feeds() if f["has_paywall_cookie"]]
         finally:
             lib.close()
-    assert annotated, "the startup hook should have annotated the paywalled feeds"
+    assert flagged
+
+
+def test_checkbox_columns_are_centre_justified(app_env):
+    """BRAND.md: checkbox/boolean-indicator columns centre, everything else
+    stays left."""
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds").text
+    for label in ("Read only", "Cookie", "Subscriber"):
+        assert f'text-align:center;">{label}</th>' in html
+    assert '<th style="width:18%;">Name</th>' in html
+    assert '<th style="width:14%;">Section</th>' in html
 
 
 # ---------------------------------------------------------------------------
@@ -377,12 +360,12 @@ def test_seeding_marks_only_the_subscribed_source(seeded):
 def test_paywalled_but_unsubscribed_sources_stay_off(seeded):
     """The distinction the flag exists to record: Stratechery and Public Comps
     are paywalled (they get a cookie note) but not subscribed."""
-    seeded.seed_paywall_cookie_notes()
+    seeded.seed_paywall_cookie_flags()
     seeded.seed_active_subscriptions()
     for f in seeded.list_feeds():
         host = f["xml_url"]
         if "stratechery.com" in host or "publiccomps.com" in host:
-            assert f["paywall_cookie_note"], "expected a cookie note"
+            assert f["has_paywall_cookie"] == 1, "expected the cookie flag"
             assert f["has_active_subscription"] == 0
 
 

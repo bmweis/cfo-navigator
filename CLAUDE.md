@@ -193,14 +193,19 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   (`LINKLIB_AUTH_COOKIES`), not URL-token-based. The verbatim-URL guarantee is built and
   tested anyway so it holds if one is ever added; tracing the access check shows it
   requesting exactly the stored URL before probing a discovered article URL.
-- **`feeds.paywall_cookie_note` makes the cookie dependency visible without storing the
-  cookie.** Follow-up to the Mostly Metrics finding above: the cookie mechanism works,
+- **`feeds.has_paywall_cookie` makes the cookie dependency visible without storing the
+  cookie.** (Started life as `paywall_cookie_note`, per-row free text; converted to a
+  boolean once it was clear every row restated the same sentence about the app's single
+  cookie mechanism. The old column is retired-not-dropped, same precedent as
+  `screenshot_is_product`/`field_reviews`, and is what `seed_paywall_cookie_flags`
+  migrates from. A boolean also makes pasting a cookie value structurally impossible
+  rather than merely discouraged.) Follow-up to the Mostly Metrics finding above: the cookie mechanism works,
   but nothing on `/admin/library/feeds` showed that a feed depended on one, or which env
   var to check when it stopped returning full text. The column holds a human-readable
-  note ("Cookie auth via `LINKLIB_AUTH_COOKIES`"); the table shows a small seafoam lock
-  badge for any feed that has one, with the note on `title`/`aria-label` rather than
-  inline, plus a page-level footnote explaining the column and a form field labelled
-  descriptive-only. **The cookie value never enters the database** — it stays in
+  boolean, rendered as a plain checkbox visually identical to Read only and Subscriber,
+  plus a page-level footnote naming `LINKLIB_AUTH_COOKIES` once for the whole page. (An
+  earlier round kept a seafoam lock badge beside the checkbox; it was the free-text era's
+  tooltip trigger and duplicated what the checkbox already says, so it was removed.) **The cookie value never enters the database** — it stays in
   `LINKLIB_AUTH_COOKIES` where `extract.fetch_page` reads it, and nothing writes it back.
   Three decisions worth not re-litigating: (1) **seeded from `feed.PAYWALLED_DOMAINS`,
   so all three paywalled feeds get the note, not just Mostly Metrics** — leaving
