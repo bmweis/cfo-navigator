@@ -18840,7 +18840,7 @@ def _publish_feeds(lib) -> None:
 
 
 def _paywall_cookie_indicator(feed: dict) -> str:
-    """Small badge for the feed table's "Paywall cookie" cell.
+    """Small badge for the feed table's "Cookie" cell.
 
     Renders nothing at all when the feed has no note, so the column stays a
     sparse set of marks rather than a grid of mostly-empty checkboxes. The note
@@ -18855,7 +18855,9 @@ def _paywall_cookie_indicator(feed: dict) -> str:
     note = (feed.get("paywall_cookie_note") or "").strip()
     if not note:
         return ""
-    label = f'Paywall cookie. {note}'
+    # The accessible name is the column label plus the note, so it tracks the
+    # visible header. The `title` stays note-only and is untouched.
+    label = f'Cookie. {note}'
     return (
         f'<span class="ff-cookie-badge" role="img" title="{_esc(note)}" '
         f'aria-label="{_esc(label)}">'
@@ -18910,7 +18912,7 @@ def _feed_form_fields(sections: list, values: dict) -> str:
     <p style="{hint}">Read it in the Reader, but never propose it into the archive queue. Set per feed, so one source in a section can be read-only without affecting the rest.</p>
   </div>
   <div>
-    <label style="{lab}">Paywall cookie <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+    <label style="{lab}">Cookie <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
     <input type="text" name="paywall_cookie_note" maxlength="200"
       value="{_esc(values.get('paywall_cookie_note', ''))}"
       placeholder="e.g. Cookie auth via LINKLIB_AUTH_COOKIES" style="{inp}">
@@ -18919,7 +18921,7 @@ def _feed_form_fields(sections: list, values: dict) -> str:
   <div>
     <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">
       <input type="checkbox" name="has_active_subscription" value="1"{sub_checked}>
-      Active subscription
+      Subscriber
     </label>
     <p style="{hint}">Whether you currently pay for this source&mdash;for your own tracking, doesn't affect fetching. Nothing in the app reads this: it doesn't gate anything, doesn't reach the Reader, and is separate from the paywall cookie above.</p>
   </div>"""
@@ -18973,7 +18975,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   <td class="ff-sub">
     <form method="post" action="/admin/library/feeds/{f['id']}/subscription" style="margin:0;">
       <input type="checkbox" name="has_active_subscription" value="1" onchange="this.form.submit()"
-        aria-label="Active subscription: {_esc(f['name'])}"{' checked' if f['has_active_subscription'] else ''}>
+        aria-label="Subscriber: {_esc(f['name'])}"{' checked' if f['has_active_subscription'] else ''}>
     </form>
   </td>
   <td class="ff-actions">
@@ -19081,12 +19083,12 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   /* Always labelled, unlike the cookie cell: this is a checkbox that carries
      meaning in both states, so an unchecked box still needs its label. */
-  .ff-sub::before{{content:"Active subscription";display:block;font-size:11.5px;color:var(--muted);
+  .ff-sub::before{{content:"Subscriber";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   /* Only labelled when there's a badge to label. An unconditional ::before
-     would print "Paywall cookie" above an empty cell on every unpaywalled
+     would print "Cookie" above an empty cell on every unpaywalled
      feed — noise on exactly the rows the column is meant to stay quiet on. */
-  .ff-cookie:has(.ff-cookie-badge)::before{{content:"Paywall cookie";display:block;
+  .ff-cookie:has(.ff-cookie-badge)::before{{content:"Cookie";display:block;
     font-size:11.5px;color:var(--muted);text-transform:uppercase;
     letter-spacing:.06em;margin-bottom:3px;}}
   .ff-cookie:not(:has(.ff-cookie-badge)){{display:none;}}
@@ -19102,8 +19104,8 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>
 <li><strong>Read only</strong> feeds stay live in the Reader but are never proposed into the <a href="/admin/library/queue">archive queue</a>. It's set per feed, so one source in a section can be read-only without affecting the rest.</li>
-<li><strong>Paywall cookie</strong> marks a feed whose full text depends on a subscriber cookie set in the host environment, not on anything stored here. Hover the badge for which one, or open the feed's Edit form to read and change the note. The note is a label pointing at the cookie; the cookie value itself never lives in this database.</li>
-<li><strong>Active subscription</strong> is a note to yourself about whether you currently pay for a source. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the paywall cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
+<li><strong>Cookie</strong> marks a feed whose full text depends on a subscriber cookie set in the host environment, not on anything stored here. Hover the badge for which one, or open the feed's Edit form to read and change the note. The note is a label pointing at the cookie; the cookie value itself never lives in this database.</li>
+<li><strong>Subscriber</strong> marks whether you currently pay for a source, as a note to yourself. Nothing reads it&mdash;it doesn't gate fetching, doesn't reach the Reader, and is separate from the cookie above. A source can be paywalled without you subscribing to it, which is the distinction this records.</li>
 </ul>
 {banner}{error_banner}
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
@@ -19111,8 +19113,8 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     <thead><tr>
       <th style="width:18%;">Name</th><th style="width:23%;">URL</th>
       <th style="width:14%;">Section</th><th style="width:8%;">Read only</th>
-      <th style="width:10%;">Paywall cookie</th>
-      <th style="width:10%;">Active subscription</th>
+      <th style="width:10%;">Cookie</th>
+      <th style="width:10%;">Subscriber</th>
       <th style="width:17%;text-align:right;">Actions</th>
     </tr></thead>
     <tbody>{feed_rows}</tbody>

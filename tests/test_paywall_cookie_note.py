@@ -1,4 +1,4 @@
-"""The feeds table's descriptive "Paywall cookie" note, and the New content
+"""The feeds table's descriptive "Cookie" note, and the New content
 quadrant's count override.
 
 The property worth protecting here is that this column is DESCRIPTIVE ONLY.
@@ -225,7 +225,7 @@ def test_note_round_trips_verbatim_through_add_and_update(lib):
 def test_feed_table_has_a_paywall_cookie_column(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
-    assert ">Paywall cookie</th>" in html
+    assert ">Cookie</th>" in html
 
 
 def test_indicator_renders_only_for_annotated_feeds(app_env):
@@ -257,7 +257,7 @@ def test_note_text_rides_on_the_title_attribute_not_inline(app_env):
     assert f'title="{note}"' in html
     # The badge carries an accessible name too — a bare title on a span is not
     # reliably announced.
-    assert f'aria-label="Paywall cookie. {note}"' in html
+    assert f'aria-label="Cookie. {note}"' in html
     # The note never renders as visible cell text.
     assert f'<td class="ff-cookie">{note}' not in html
 
@@ -265,7 +265,7 @@ def test_note_text_rides_on_the_title_attribute_not_inline(app_env):
 def test_page_footnote_explains_the_column(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
-    assert "<strong>Paywall cookie</strong> marks a feed" in html
+    assert "<strong>Cookie</strong> marks a feed" in html
     assert "the cookie value itself never lives in this database" in html
 
 
@@ -441,7 +441,7 @@ def test_nothing_outside_the_admin_surface_reads_the_flag(app_env):
 def test_feed_table_has_an_active_subscription_column(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
-    assert ">Active subscription</th>" in html
+    assert ">Subscriber</th>" in html
     assert 'name="has_active_subscription"' in html
 
 
@@ -455,7 +455,7 @@ def test_row_checkbox_reflects_the_seeded_state(app_env):
             lib.close()
     expected = sum(1 for f in feeds if f["has_active_subscription"])
     assert expected == 1
-    assert html.count('aria-label="Active subscription:') == len(feeds)
+    assert html.count('aria-label="Subscriber:') == len(feeds)
 
 
 def test_row_toggle_posts_and_persists(app_env):
@@ -547,7 +547,7 @@ def test_form_helper_copy_says_it_is_informational(app_env):
 def test_page_footnote_explains_the_flag(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
-    assert "<strong>Active subscription</strong> is a note to yourself" in html
+    assert "<strong>Subscriber</strong> marks whether you currently pay" in html
 
 
 def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
@@ -555,7 +555,7 @@ def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
     unchecked box still needs its label in the stacked layout."""
     with _client(app_env) as client:
         html = client.get("/admin/library/feeds").text
-    assert '.ff-sub::before{content:"Active subscription"' in html
+    assert '.ff-sub::before{content:"Subscriber"' in html
 
 
 # ---------------------------------------------------------------------------
