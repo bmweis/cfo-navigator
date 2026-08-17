@@ -18374,6 +18374,74 @@ def admin_checks(request: Request):
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
 
 
+def _relative_age(iso: str) -> str:
+    """"3h ago" for a stored ISO timestamp; "" when it can't be parsed.
+
+    Staleness is shown, never acted on: an old but passing check stays green.
+    How long ago it ran is context for the reader, not a fourth state.
+    """
+    if not iso:
+        return ""
+    try:
+        then = datetime.fromisoformat(iso)
+    except Exception:
+        return ""
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    secs = (datetime.now(timezone.utc) - then).total_seconds()
+    if secs < 0:
+        return "just now"          # clock skew, not a future check
+    if secs < 90:
+        return "just now"
+    if secs < 3600:
+        return f"{int(secs // 60)}m ago"
+    if secs < 86400:
+        return f"{int(secs // 3600)}h ago"
+    return f"{int(secs // 86400)}d ago"
+
+
+# Per-domain cookie health. Deliberately the palette's own semantic status
+# triple rather than a hand-picked green: an off-palette colour would trip
+# brand_check.py, and these are what the design system already means by
+# good/caution/alert. Amber is strictly "couldn't be tested" — a passing check
+# stays green however old it is (Brian's call), so there is no staleness tier.
+_COOKIE_STATE_STYLES = {
+    "working": ("var(--good)", "working"),
+    "expired": ("var(--alert)", "expired"),
+    "unknown": ("var(--caution)", "inconclusive"),
+}
+
+
+def _cookie_status_panel(cookies, status: dict) -> str:
+    """Always-on summary of the last stored probe result, one row per domain.
+
+    Reads the persisted `auth_cookie_status` record, so it survives reloads and
+    shows the last known result rather than going blank until someone clicks
+    Re-check. Distinct from the feed table's Cookie checkbox by design: that is
+    a static declaration that a feed needs a cookie, this is the dynamic health
+    of the cookie itself. Different surface, different shape (a dot, not a
+    checkbox), no seafoam, so the two don't read as one control.
+    """
+    rows = ""
+    for dom in cookies:
+        s = status.get(dom) or {}
+        ok = s.get("ok")
+        key = "working" if ok else ("unknown" if ok is None else "expired")
+        color, label = _COOKIE_STATE_STYLES[key]
+        detail = s.get("detail") or "not checked yet"
+        age = _relative_age(s.get("checked_at", ""))
+        rows += (
+            f'<div class="ck-row">'
+            f'<span class="ck-dot" style="background:{color};" aria-hidden="true"></span>'
+            f'<span class="ck-dom">{_esc(dom)}</span>'
+            f'<span class="ck-state" style="color:{color};">{label}</span>'
+            f'<span class="ck-detail">{_esc(detail)}</span>'
+            f'<span class="ck-age">{_esc(age)}</span>'
+            f'</div>')
+    return (f'<div class="ck-panel" role="group" aria-label="Subscriber cookie status">'
+            f'{rows}</div>')
+
+
 def _auth_cookie_controls(request: Request,
                           background_tasks: BackgroundTasks) -> tuple[str, str]:
     """Subscriber-cookie status control, shown at the top of
@@ -18420,29 +18488,9 @@ def _auth_cookie_controls(request: Request,
                      '<button type="submit" class="btn btn-ghost" style="font-size:13px;padding:6px 14px;">'
                      'Re-check subscriber access</button></form>')
 
+    summary = _cookie_status_panel(cookies, status)
     if not any_bad:
-        # Nothing wrong — no permanent status box, just the header trigger.
-        return recheck_form, ""
-
-    # Per-domain status lines — only shown once something's actually stale.
-    rows = ""
-    for dom in cookies:
-        s = status.get(dom)
-        if not s or s.get("ok") is None:
-            dot, label, detail = "&#9679;", "untested", (s or {}).get("detail", "not checked yet")
-            color = "var(--muted)"
-        elif s.get("ok"):
-            dot, label, color = "&#9679;", "working", "var(--seafoam-deep)"
-            detail = s.get("detail", "")
-        else:
-            dot, label, color = "&#9679;", "expired", "var(--coral-deep)"
-            detail = s.get("detail", "")
-        checked = _esc((s or {}).get("checked_at", "")[:16].replace("T", " ")) if s else ""
-        rows += (f'<div style="display:flex;align-items:baseline;gap:8px;font-size:13.5px;margin:2px 0;">'
-                 f'<span style="color:{color};">{dot}</span>'
-                 f'<strong>{_esc(dom)}</strong>'
-                 f'<span style="color:{color};font-weight:600;">{label}</span>'
-                 f'<span style="color:var(--muted);">&mdash; {_esc(detail)}{(" &middot; " + checked) if checked else ""}</span></div>')
+        return recheck_form, summary
 
     refresh_steps = ("""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">To refresh an expired cookie:</p>
 <ol style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">
@@ -18453,12 +18501,13 @@ def _auth_cookie_controls(request: Request,
 <li>Update <code>LINKLIB_AUTH_COOKIES</code> in Railway &rarr; Variables.</li>
 </ol>""")
 
+    # Which domains are stale is already shown, in colour, in the summary
+    # above — this panel now carries only what that can't: the fix.
     panel = f"""<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 22px;">
   <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);">Subscriber cookie expired</div>
-  <div style="margin-top:8px;">{rows}</div>
   {refresh_steps}
 </div>"""
-    return recheck_form, panel
+    return recheck_form, summary + panel
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -19013,6 +19062,25 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 
     body = f"""<div class="page page-admin">
 <style>
+/* Cookie health summary. Sits under the header actions, deliberately not in
+   the feed table: cookies are keyed by domain while the table is keyed by
+   feed, so a per-row light would misrepresent the relationship the moment two
+   feeds shared a domain. A dot, never a checkbox — the Cookie column declares
+   that a feed needs a cookie; this reports whether that cookie still works. */
+.ck-panel{{background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  padding:10px 14px;margin:0 0 18px;display:grid;gap:4px;}}
+.ck-row{{display:flex;align-items:baseline;gap:9px;font-size:13px;flex-wrap:wrap;}}
+.ck-dot{{width:9px;height:9px;border-radius:50%;flex:0 0 auto;
+  transform:translateY(-1px);}}
+.ck-dom{{font-weight:600;color:var(--ink-soft);}}
+.ck-state{{font-weight:600;}}
+.ck-detail{{color:var(--muted);min-width:0;overflow-wrap:anywhere;}}
+.ck-age{{color:var(--muted);margin-left:auto;white-space:nowrap;}}
+@media (max-width:560px){{
+  /* Let the timestamp sit with the text rather than stranded at the far edge
+     of a wrapped row, where it reads as belonging to the next line. */
+  .ck-age{{margin-left:0;}}
+}}
 .ff-head{{display:flex;align-items:center;justify-content:space-between;gap:12px;
   margin-bottom:4px;flex-wrap:wrap;}}
 /* Both actions in one group so they wrap together under the title rather than

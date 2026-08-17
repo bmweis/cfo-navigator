@@ -225,6 +225,20 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   change to three consumers, not a label. **The note points at the cookie; the procedure
   for actually refreshing an expired one is `RUNBOOK.md` §5** — including the still-open
   question of the real per-domain cookie names, which no commit in the repo records.
+- **The feeds page shows cookie HEALTH separately from the cookie DECLARATION.**
+  The Cookie checkbox is static ("this feed needs one"); a summary panel under the
+  page header is dynamic ("it still works / it expired / it could not be tested"),
+  read from the persisted `settings.auth_cookie_status` record so it survives
+  reloads. Built because only the expired state used to render anything at all:
+  a healthy cookie and an unprobeable one were both blank, so an empty page meant
+  both "fine" and "unknown". Colours are the palette's semantic triple
+  (`--good`/`--alert`/`--caution`), not hand-picked, so `brand_check.py` stays
+  happy — `--good` is navy, not green, which is worth knowing before someone
+  "fixes" it. **Amber means only `ok: None`**: a passing check stays green no
+  matter how old, with age shown as relative text; the real staleness mechanism
+  is the existing 12-hour background re-probe, not a colour. It's a per-domain
+  panel rather than a table column because cookies are keyed by domain and the
+  table is keyed by feed.
 - **The Reader's Feed view caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
   item dicts are shallow-copied before mutation — never mutate a cached entry in place.
   Editing the OPML won't show up live until the cache expires or the app restarts.
