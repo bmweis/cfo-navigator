@@ -284,7 +284,7 @@ paths against scratch files.
 
 **When:** a paid source stops returning full text. The archive keeps saving
 those articles, but with a preview instead of the body, so enrichment and
-FP&A Buddy quietly get less to work with. Nothing breaks loudly — that's why
+FP&A Buddy quietly get less to work with. Nothing breaks loudly—that's why
 the check below exists.
 
 **Cadence:** every few months, whenever a cookie ages out.
@@ -294,12 +294,12 @@ the check below exists.
 Two places surface it, both fed by the same stored record
 (`authcheck.check_auth_cookies` → `settings.auth_cookie_status`):
 
-- **`/admin/library/feeds`** — the primary surface. With everything healthy
+- **`/admin/library/feeds`**—the primary surface. With everything healthy
   you see only a compact **Re-check subscriber access** button, nothing else.
   When a cookie has actually gone stale, that button is absorbed into a coral
   **"Subscriber cookie expired"** panel carrying a status line per domain and
   an abbreviated version of 5.2–5.3 inline.
-- **The Reader** — its own banner, posting to the same
+- **The Reader**—its own banner, posting to the same
   `POST /admin/auth/recheck`.
 
 The page kicks a background re-check when the stored status is missing or
@@ -308,16 +308,20 @@ to force one.
 
 Each domain reports one of three states:
 
+<!-- The `detail` strings below are copied verbatim from authcheck.check_auth_cookies
+     so they match what the panel actually prints. The spaced em dash in the
+     "expired" row is the code's own; don't normalize it. -->
+
 | State | `detail` reads | Meaning |
 |---|---|---|
 | **working** | `full text fetched (N chars)` | Cookie is good. |
 | **expired** | `got a preview/paywall — cookie missing or expired` | **This runbook.** |
-| **untested** | `no recent post found to test` | The probe found no post to check. Not a cookie failure — see 5.5. |
+| **untested** | `no recent post found to test` | The probe found no post to check. Not a cookie failure—see 5.5. |
 
 > **Only domains listed in `LINKLIB_AUTH_COOKIES` are probed at all.** The
 > probe list comes from that variable's keys, not from
 > `feed.PAYWALLED_DOMAINS`. A paywalled feed with no cookie configured is
-> silently never checked — it just never returns full text. If a source you
+> silently never checked—it just never returns full text. If a source you
 > expect to see is absent from the panel entirely, that's the reason, and the
 > fix is to add it in 5.3 rather than to refresh anything.
 
@@ -328,17 +332,17 @@ Do this in a normal browser profile where you're a paying subscriber.
 1. Log into the site normally and open a post you can read in full.
 2. Open DevTools → **Network**, then reload the page.
 3. Click the top-level document request to that domain.
-4. Under **Request Headers**, find `Cookie:` and copy **the entire value** —
-   everything after `Cookie: `, semicolons and all.
+4. Under **Request Headers**, find `Cookie:` and copy **the entire value**—everything
+   after `Cookie: `, semicolons and all.
 
 **Copy the whole header rather than hunting for the one session cookie.**
 `extract._cookie_for` sends the stored string as the `Cookie` header
 verbatim, so a full copy is both correct and the reason you don't need to
 know which individual cookie carries the session. This is also exactly what
-the expired banner tells you on screen — the two are deliberately the same
+the expired banner tells you on screen—the two are deliberately the same
 procedure.
 
-> **On the specific cookie name — unconfirmed.** `extract._auth_cookies`'s
+> **On the specific cookie name—unconfirmed.** `extract._auth_cookies`'s
 > docstring shows `{"mostlymetrics.com": "substack.sid=..."}`, but treat that
 > as an illustrative example, not a verified fact: Mostly Metrics is a
 > **beehiiv** publication, not Substack, so `substack.sid` is unlikely to be
@@ -346,7 +350,7 @@ procedure.
 > introduced the feature (`43cd00b`), with no record of how the value was
 > originally obtained. Copying the full header (step 4) sidesteps the question
 > entirely. **If you do identify the real per-domain cookie names the next
-> time you run this, write them down here** — that's the gap this note marks.
+> time you run this, write them down here**—that's the gap this note marks.
 > DevTools → **Application** → **Cookies** → the domain lists them
 > individually if you want to look.
 
@@ -360,7 +364,7 @@ One JSON object, domain → full `Cookie` header value:
 
 Key rules, from `_auth_cookies` and `_cookie_for`:
 
-- **Bare registrable domain.** No scheme, no path, no `www.` — the lookup
+- **Bare registrable domain.** No scheme, no path, no `www.`—the lookup
   strips `www.` from the URL's host before matching.
 - Keys are lowercased and a leading `.` is stripped, so `.Example.com` and
   `example.com` are equivalent.
@@ -369,7 +373,7 @@ Key rules, from `_auth_cookies` and `_cookie_for`:
   `blog.publiccomps.com` is keyed as-is, because that's the host the feed
   actually uses.
 - **The whole variable is one JSON object.** Editing one domain means editing
-  the object, not appending. Malformed JSON fails *silently* — `_auth_cookies`
+  the object, not appending. Malformed JSON fails *silently*—`_auth_cookies`
   catches the parse error and returns `{}`, which reads downstream as "no
   cookies configured at all," and the panel disappears rather than turning
   red. If the banner vanishes after an edit, suspect a JSON typo first.
@@ -387,7 +391,7 @@ container.
 
 1. Open `/admin/library/feeds`.
 2. Press **Re-check subscriber access** (don't rely on the 12-hour
-   auto-refresh — you want a probe against the new value, now).
+   auto-refresh—you want a probe against the new value, now).
 3. The domain should flip to **working**, with `full text fetched (N chars)`.
    The coral panel disappears once no domain is left in the expired state.
 
@@ -398,7 +402,7 @@ actually read a full post in that same profile.
 ### 5.5 If it reports "untested"
 
 `no recent post found to test` means the probe couldn't find a post URL to
-check — not that the cookie failed. `authcheck._recent_post_url` tries the
+check—not that the cookie failed. `authcheck._recent_post_url` tries the
 OPML feed first, then falls back to the site's sitemap. Both coming up empty
 usually means the feed URL is wrong or the source was down at probe time.
 Check the feed in `/admin/library/feeds`, then re-check. The cookie may well

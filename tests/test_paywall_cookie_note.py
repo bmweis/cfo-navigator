@@ -358,6 +358,207 @@ def test_startup_hook_seeds_the_notes(app_env):
 
 
 # ---------------------------------------------------------------------------
+# has_active_subscription — informational only
+# ---------------------------------------------------------------------------
+
+def test_subscription_flag_defaults_off_for_every_seeded_feed(seeded):
+    assert all(f["has_active_subscription"] == 0 for f in seeded.list_feeds())
+
+
+def test_seeding_marks_only_the_subscribed_source(seeded):
+    result = seeded.seed_active_subscriptions()
+    assert result["seeded"] is True
+
+    on = [f for f in seeded.list_feeds() if f["has_active_subscription"]]
+    assert [f["xml_url"] for f in on] == ["https://www.mostlymetrics.com/feed"]
+    assert result["feeds"] == 1
+
+
+def test_paywalled_but_unsubscribed_sources_stay_off(seeded):
+    """The distinction the flag exists to record: Stratechery and Public Comps
+    are paywalled (they get a cookie note) but not subscribed."""
+    seeded.seed_paywall_cookie_notes()
+    seeded.seed_active_subscriptions()
+    for f in seeded.list_feeds():
+        host = f["xml_url"]
+        if "stratechery.com" in host or "publiccomps.com" in host:
+            assert f["paywall_cookie_note"], "expected a cookie note"
+            assert f["has_active_subscription"] == 0
+
+
+def test_subscription_seeding_is_flag_guarded(seeded):
+    """A deliberately unchecked box stays unchecked across restarts."""
+    seeded.seed_active_subscriptions()
+    mm = [f for f in seeded.list_feeds() if f["has_active_subscription"]][0]
+    seeded.set_feed_active_subscription(mm["id"], False)
+
+    again = seeded.seed_active_subscriptions()
+    assert again["seeded"] is False
+    assert seeded.get_feed(mm["id"])["has_active_subscription"] == 0
+
+
+def test_subscription_seeding_does_not_burn_its_flag_on_an_empty_table(lib):
+    assert lib.seed_active_subscriptions() == {"seeded": False, "feeds": 0}
+    lib.seed_feeds_from_opml(REPO_OPML)
+    assert lib.seed_active_subscriptions()["seeded"] is True
+
+
+def test_setting_the_flag_touches_only_that_column(seeded):
+    mm = [f for f in seeded.list_feeds() if "mostlymetrics.com" in f["xml_url"]][0]
+    seeded.set_feed_active_subscription(mm["id"], True)
+    after = seeded.get_feed(mm["id"])
+    for field in ("xml_url", "html_url", "name", "section_id",
+                  "exclude_from_queue", "paywall_cookie_note"):
+        assert after[field] == mm[field]
+
+
+def test_flag_is_absent_from_the_generated_opml(seeded):
+    seeded.seed_active_subscriptions()
+    assert "has_active_subscription" not in seeded.opml_xml()
+
+
+def test_toggling_the_flag_leaves_the_generated_opml_byte_identical(seeded):
+    before = seeded.opml_xml()
+    mm = [f for f in seeded.list_feeds() if "mostlymetrics.com" in f["xml_url"]][0]
+    seeded.set_feed_active_subscription(mm["id"], True)
+    assert seeded.opml_xml() == before
+
+
+def test_nothing_outside_the_admin_surface_reads_the_flag(app_env):
+    """Informational only. If a future change makes it functional that should
+    be a deliberate decision, not something inherited from the column
+    existing — so this pins the current contract."""
+    import pathlib as _pl
+    root = _pl.Path(__file__).resolve().parents[1]
+    readers = []
+    for path in list((root / "linklib").glob("*.py")) + list((root / "scripts").rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        if "has_active_subscription" in text and path.name != "db.py":
+            readers.append(path.name)
+    assert readers == [], f"unexpected readers of the flag: {readers}"
+
+
+def test_feed_table_has_an_active_subscription_column(app_env):
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds").text
+    assert ">Active subscription</th>" in html
+    assert 'name="has_active_subscription"' in html
+
+
+def test_row_checkbox_reflects_the_seeded_state(app_env):
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds").text
+        lib = app_env._lib()
+        try:
+            feeds = lib.list_feeds()
+        finally:
+            lib.close()
+    expected = sum(1 for f in feeds if f["has_active_subscription"])
+    assert expected == 1
+    assert html.count('aria-label="Active subscription:') == len(feeds)
+
+
+def test_row_toggle_posts_and_persists(app_env):
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = [f for f in lib.list_feeds() if not f["has_active_subscription"]][0]
+        finally:
+            lib.close()
+        fid = feed["id"]
+
+        resp = client.post(f"/admin/library/feeds/{fid}/subscription",
+                           data={"has_active_subscription": "1"},
+                           follow_redirects=False)
+        assert resp.status_code == 303
+
+        lib = app_env._lib()
+        try:
+            after = lib.get_feed(fid)
+        finally:
+            lib.close()
+    assert after["has_active_subscription"] == 1
+    assert after["xml_url"] == feed["xml_url"]
+
+
+def test_row_toggle_unchecked_posts_nothing_and_clears(app_env):
+    """An unchecked box posts no field at all, which is the off state."""
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = [f for f in lib.list_feeds() if f["has_active_subscription"]][0]
+        finally:
+            lib.close()
+        fid = feed["id"]
+
+        client.post(f"/admin/library/feeds/{fid}/subscription", data={},
+                    follow_redirects=False)
+
+        lib = app_env._lib()
+        try:
+            assert lib.get_feed(fid)["has_active_subscription"] == 0
+        finally:
+            lib.close()
+
+
+def test_edit_form_round_trips_the_flag(app_env):
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = [f for f in lib.list_feeds() if f["has_active_subscription"]][0]
+        finally:
+            lib.close()
+        html = client.get(f"/admin/library/feeds/{feed['id']}/edit").text
+    assert 'name="has_active_subscription" value="1" checked' in html
+
+
+def test_editing_a_feed_without_touching_the_flag_keeps_it(app_env):
+    with _client(app_env) as client:
+        lib = app_env._lib()
+        try:
+            feed = [f for f in lib.list_feeds() if f["has_active_subscription"]][0]
+        finally:
+            lib.close()
+        fid = feed["id"]
+
+        client.post(f"/admin/library/feeds/{fid}/edit", data={
+            "name": "Renamed", "xml_url": feed["xml_url"],
+            "html_url": feed["html_url"], "section_id": str(feed["section_id"]),
+            "paywall_cookie_note": feed["paywall_cookie_note"],
+            "has_active_subscription": "1",
+        }, follow_redirects=False)
+
+        lib = app_env._lib()
+        try:
+            after = lib.get_feed(fid)
+        finally:
+            lib.close()
+    assert after["has_active_subscription"] == 1
+    assert after["name"] == "Renamed"
+
+
+def test_form_helper_copy_says_it_is_informational(app_env):
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds/new").text
+    assert "for your own tracking, doesn&#x27;t affect fetching" in html or \
+           "for your own tracking, doesn't affect fetching" in html
+
+
+def test_page_footnote_explains_the_flag(app_env):
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds").text
+    assert "<strong>Active subscription</strong> is a note to yourself" in html
+
+
+def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
+    """Unlike the cookie cell, a checkbox carries meaning in both states, so an
+    unchecked box still needs its label in the stacked layout."""
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds").text
+    assert '.ff-sub::before{content:"Active subscription"' in html
+
+
+# ---------------------------------------------------------------------------
 # Part 2: the New content quadrant's count
 # ---------------------------------------------------------------------------
 
