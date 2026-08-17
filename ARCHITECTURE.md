@@ -2813,10 +2813,16 @@ recorded anywhere, it's flagged rather than invented.
   showed a coral panel when `stale_domains()` was non-empty and nothing
   otherwise, so a working cookie and one that could not be probed were both
   invisible. "Nothing on screen" meant both "healthy" and "no idea".
-  Three states, one row each: `ok: True` -> green (`--good`), `ok: False` ->
-  red (`--alert`), `ok: None` -> amber (`--caution`). The palette's own
-  semantic triple, not hand-picked colours, so `brand_check.py`'s off-palette
-  check still passes; note `--good` is navy rather than green.
+  Three states, one row each: `ok: True` -> green `#15803D`, `ok: False` -> red
+  `#b91c1c`, `ok: None` -> amber `#CA8A04`. True stoplight values, a **sanctioned
+  brand exception** registered in `brand_check.AUX_COLORS` and documented in
+  BRAND.md §6 — the semantic `--good`/`--caution`/`--alert` triple was tried
+  first and `--good` is navy, the site's dominant colour, so a healthy cookie
+  read as ordinary text rather than a signal. Scoped to these three dots only.
+  The red deliberately reuses the destructive-action `#b91c1c` rather than
+  introducing a second red. **The amber is dot-only**: `#CA8A04` as text on
+  `--surface` measures 2.94:1, under AA (4.5) and AA-large (3.0), so the state
+  word beside it stays `--ink-soft` and the colour lives on the indicator.
   *Amber is strictly "could not be tested".* A passing check stays green
   however old it is — `checked_at` is rendered as relative text ("3h ago") so
   staleness is visible, but it is never promoted to its own colour. Loading the

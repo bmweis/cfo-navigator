@@ -11,6 +11,12 @@ reload rather than only appearing right after a Re-check.
 
 Amber is strictly `ok: None`. A passing check stays green however old it is:
 staleness is shown as relative text, never promoted to its own colour.
+
+Colours are true stoplight values, a sanctioned exception registered in
+brand_check.AUX_COLORS and documented in BRAND.md §6 — the semantic tokens were
+tried first and `--good` is navy, which reads as ordinary text rather than a
+health signal. The amber is dot-only: #CA8A04 as text on white is 2.94:1, below
+AA, so the state word stays in --ink-soft.
 """
 import json
 import pathlib
@@ -119,13 +125,13 @@ def test_each_state_gets_its_own_colour_and_label(app_env):
     assert len(rows) == 3
 
     assert by_dom["mostlymetrics.com"]["state"] == "working"
-    assert by_dom["mostlymetrics.com"]["colour"] == "var(--good)"
+    assert by_dom["mostlymetrics.com"]["colour"] == "#15803D"
 
     assert by_dom["stratechery.com"]["state"] == "expired"
-    assert by_dom["stratechery.com"]["colour"] == "var(--alert)"
+    assert by_dom["stratechery.com"]["colour"] == "#b91c1c"
 
     assert by_dom["blog.publiccomps.com"]["state"] == "inconclusive"
-    assert by_dom["blog.publiccomps.com"]["colour"] == "var(--caution)"
+    assert by_dom["blog.publiccomps.com"]["colour"] == "#CA8A04"
 
 
 def test_working_and_inconclusive_now_render_at_all(app_env):
@@ -146,7 +152,7 @@ def test_a_stale_but_passing_check_stays_green(app_env):
                  hours=(11.5, 11.5, 11.5))
     with _client(app_env) as client:
         rows = _rows(client.get("/admin/library/feeds").text)
-    assert all(r["colour"] == "var(--good)" for r in rows)
+    assert all(r["colour"] == "#15803D" for r in rows)
     assert all(r["state"] == "working" for r in rows)
     assert all(r["age"].endswith("ago") for r in rows)
 
@@ -158,7 +164,7 @@ def test_a_never_checked_domain_reads_inconclusive(app_env):
         rows = _rows(client.get("/admin/library/feeds").text)
     assert len(rows) == 3
     assert all(r["state"] == "inconclusive" for r in rows)
-    assert all(r["colour"] == "var(--caution)" for r in rows)
+    assert all(r["colour"] == "#CA8A04" for r in rows)
 
 
 # ---------------------------------------------------------------------------
@@ -267,3 +273,32 @@ def test_relative_age_handles_a_naive_timestamp(app_env):
     raising on the subtraction."""
     naive = (datetime.utcnow() - timedelta(hours=2)).isoformat()
     assert app_env._relative_age(naive) == "2h ago"
+
+
+def test_the_state_word_is_not_tinted_amber(app_env):
+    """#CA8A04 as text on the panel's white surface is 2.94:1 — under AA (4.5)
+    and even AA-large (3.0). The colour belongs on the dot, which is a graphic;
+    the word stays readable ink."""
+    _seed_status(app_env)
+    with _client(app_env) as client:
+        panel = _panel_markup(client.get("/admin/library/feeds").text)
+    assert 'class="ck-state" style="color:' not in panel
+    assert "#CA8A04" in panel        # still present, on the dot
+
+
+def test_the_red_reuses_the_destructive_action_value(app_env):
+    """One red sitewide: the same #b91c1c as Delete/Reject, not a second red."""
+    _seed_status(app_env, mostly=True, strat=False, public=True)
+    with _client(app_env) as client:
+        html = client.get("/admin/library/feeds").text
+    assert "#b91c1c" in _panel_markup(html)
+    # It is the same value the Remove buttons already use on this page.
+    assert html.count("#b91c1c") > 1
+
+
+def test_the_stoplight_colours_are_registered_brand_exceptions(app_env):
+    """A brand-new off-palette hex fails the build by design; these three are
+    sanctioned, so they must be in the allowlist rather than silently passing."""
+    from linklib.brand_check import AUX_COLORS
+    for hexv in ("#15803d", "#ca8a04", "#b91c1c"):
+        assert hexv in AUX_COLORS, f"{hexv} missing from AUX_COLORS"

@@ -231,10 +231,13 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   read from the persisted `settings.auth_cookie_status` record so it survives
   reloads. Built because only the expired state used to render anything at all:
   a healthy cookie and an unprobeable one were both blank, so an empty page meant
-  both "fine" and "unknown". Colours are the palette's semantic triple
-  (`--good`/`--alert`/`--caution`), not hand-picked, so `brand_check.py` stays
-  happy — `--good` is navy, not green, which is worth knowing before someone
-  "fixes" it. **Amber means only `ok: None`**: a passing check stays green no
+  both "fine" and "unknown". Colours are true stoplight values
+  (`#15803D`/`#b91c1c`/`#CA8A04`), a sanctioned exception in
+  `brand_check.AUX_COLORS` and BRAND.md §6 — the semantic triple was tried first
+  and `--good` is navy, too close to the site's dominant colour to register as a
+  status signal. The red reuses the destructive-action `#b91c1c` rather than
+  adding a second red. **Amber is dot-only** (2.94:1 as text, under AA), so the
+  state word stays `--ink-soft`. **Amber means only `ok: None`**: a passing check stays green no
   matter how old, with age shown as relative text; the real staleness mechanism
   is the existing 12-hour background re-probe, not a colour. It's a per-domain
   panel rather than a table column because cookies are keyed by domain and the

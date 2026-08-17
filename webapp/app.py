@@ -18400,15 +18400,21 @@ def _relative_age(iso: str) -> str:
     return f"{int(secs // 86400)}d ago"
 
 
-# Per-domain cookie health. Deliberately the palette's own semantic status
-# triple rather than a hand-picked green: an off-palette colour would trip
-# brand_check.py, and these are what the design system already means by
-# good/caution/alert. Amber is strictly "couldn't be tested" — a passing check
-# stays green however old it is (Brian's call), so there is no staleness tier.
+# True stoplight colours, a sanctioned narrow exception to the palette — see
+# BRAND.md §Color. The semantic tokens were tried first and --good is navy,
+# which is the site's dominant colour and so reads as ordinary text rather
+# than a health signal. Scoped to these three dots and nowhere else; every
+# other pass/warn/error use stays on --good/--caution/--alert.
+#
+# The red is the existing destructive-action red (#b91c1c, the Delete/Remove
+# buttons) rather than a second red, so "red = bad" stays one value sitewide.
+#
+# Amber is strictly "couldn't be tested". A passing check stays green however
+# old it is, so there is no staleness tier.
 _COOKIE_STATE_STYLES = {
-    "working": ("var(--good)", "working"),
-    "expired": ("var(--alert)", "expired"),
-    "unknown": ("var(--caution)", "inconclusive"),
+    "working": ("#15803D", "working"),
+    "expired": ("#b91c1c", "expired"),
+    "unknown": ("#CA8A04", "inconclusive"),
 }
 
 
@@ -18434,7 +18440,7 @@ def _cookie_status_panel(cookies, status: dict) -> str:
             f'<div class="ck-row">'
             f'<span class="ck-dot" style="background:{color};" aria-hidden="true"></span>'
             f'<span class="ck-dom">{_esc(dom)}</span>'
-            f'<span class="ck-state" style="color:{color};">{label}</span>'
+            f'<span class="ck-state">{label}</span>'
             f'<span class="ck-detail">{_esc(detail)}</span>'
             f'<span class="ck-age">{_esc(age)}</span>'
             f'</div>')
@@ -19073,7 +19079,10 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .ck-dot{{width:9px;height:9px;border-radius:50%;flex:0 0 auto;
   transform:translateY(-1px);}}
 .ck-dom{{font-weight:600;color:var(--ink-soft);}}
-.ck-state{{font-weight:600;}}
+/* Deliberately NOT tinted to match its dot. #CA8A04 as text on --surface is
+   2.94:1, failing AA (4.5) and even AA-large (3.0); the colour lives on the
+   dot, which is a graphic, while the word stays in normal readable ink. */
+.ck-state{{font-weight:600;color:var(--ink-soft);}}
 .ck-detail{{color:var(--muted);min-width:0;overflow-wrap:anywhere;}}
 .ck-age{{color:var(--muted);margin-left:auto;white-space:nowrap;}}
 @media (max-width:560px){{

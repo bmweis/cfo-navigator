@@ -399,6 +399,16 @@ The one sanctioned exception to "buttons navy or ghost": Delete/Reject actions u
 status-red `#b91c1c`/`#fee2e2`/`#fca5a5` family (§5) — a destructive-action signal, the
 same category as `--alert`, not a decorative color choice.
 
+One sanctioned status-color exception: the cookie-status panel on `/admin/library/feeds`
+uses true stoplight colors (`#15803D` green / `#b91c1c` red / `#CA8A04` amber) instead of
+the semantic `--good`/`--caution`/`--alert` tokens — a working-vs-broken health check needs
+to read instantly, and navy (`--good`) is too close to the site's dominant color to register
+as a status signal at a glance. Scoped to that one panel; every other pass/warn/error use
+case stays on the semantic tokens. The red is the same `#b91c1c` as destructive actions
+rather than a second red, so "red = bad" is one value sitewide. **The amber is dot-only:**
+`#CA8A04` on white measures 2.94:1, below AA for text, so the state word beside it stays in
+`--ink-soft` and the color lives on the indicator dot alone.
+
 ---
 
 ## 7. Token reference (CSS variables)
@@ -472,8 +482,9 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
   slipped in before the refresh).
 - **Colors** — every hex in the codebase must be a brand token (parsed from the `:root` above, so the
   palette is its single source of truth) or one of the explicitly-documented auxiliary colors
-  (status/feedback, benchmark badges, chart tints, and two deliberate exceptions: destructive-action
-  buttons, §5/§6; and "Sail, Don't Row"'s realistic sky/water/skyline/boat illustration palette,
+  (status/feedback, benchmark badges, chart tints, and three deliberate exceptions: destructive-action
+  buttons, §5/§6; the cookie-status stoplight, §6; and "Sail, Don't Row"'s realistic
+  sky/water/skyline/boat illustration palette,
   which reads as an actual landscape rather than brand-token shading, confined entirely to that one
   game). A brand-new off-palette hex fails the build, forcing a deliberate choice: add it to the
   system or fix it.

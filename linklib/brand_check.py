@@ -99,6 +99,13 @@ AUX_COLORS = {
     # Status / feedback — semantic UI, not brand
     "#d1fae5", "#065f46",            # success toast (bg / text)
     "#b91c1c", "#fee2e2", "#fca5a5",  # danger: delete/error text, hover bg, reject border
+    # Cookie-status stoplight (sanctioned exception, BRAND.md §2/§6) — the ONLY
+    # place these appear. The semantic tokens were tried first: --good is navy,
+    # the site's dominant colour, so a healthy cookie read as ordinary text
+    # rather than a signal. Red deliberately reuses the destructive #b91c1c
+    # above rather than adding a second red.
+    "#15803d",                        # cookie status: working
+    "#ca8a04",                        # cookie status: inconclusive
     "#fef3c7", "#92400e",            # advisory amber (bg / text) — feed paywall badge,
                                       # "Needs verification" badges, and verify banners
     # Benchmark coverage badges (CFO Toolbox)
