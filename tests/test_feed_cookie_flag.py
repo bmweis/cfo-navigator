@@ -107,6 +107,10 @@ def test_migrates_a_legacy_note_even_off_a_paywalled_domain(seeded):
     whatever domain it sits on."""
     other = [f for f in seeded.list_feeds()
              if not any(d in f["xml_url"] for d in PAYWALLED_DOMAINS)][0]
+    # The retired column is dropped on fresh databases now, so recreate the
+    # pre-migration shape this arm exists to handle.
+    seeded.conn.execute(
+        "ALTER TABLE feeds ADD COLUMN paywall_cookie_note TEXT NOT NULL DEFAULT ''")
     seeded.conn.execute("UPDATE feeds SET paywall_cookie_note=? WHERE id=?",
                         ("Cookie auth via LINKLIB_AUTH_COOKIES", other["id"]))
     seeded.conn.commit()
@@ -391,7 +395,7 @@ def test_setting_the_flag_touches_only_that_column(seeded):
     seeded.set_feed_active_subscription(mm["id"], True)
     after = seeded.get_feed(mm["id"])
     for field in ("xml_url", "html_url", "name", "section_id",
-                  "exclude_from_queue", "paywall_cookie_note"):
+                  "exclude_from_queue", "has_paywall_cookie"):
         assert after[field] == mm[field]
 
 
@@ -507,7 +511,7 @@ def test_editing_a_feed_without_touching_the_flag_keeps_it(app_env):
         client.post(f"/admin/library/feeds/{fid}/edit", data={
             "name": "Renamed", "xml_url": feed["xml_url"],
             "html_url": feed["html_url"], "section_id": str(feed["section_id"]),
-            "paywall_cookie_note": feed["paywall_cookie_note"],
+            "has_paywall_cookie": "1" if feed["has_paywall_cookie"] else "",
             "has_active_subscription": "1",
         }, follow_redirects=False)
 

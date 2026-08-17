@@ -18374,7 +18374,8 @@ def admin_checks(request: Request):
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
 
 
-def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:
+def _auth_cookie_controls(request: Request,
+                          background_tasks: BackgroundTasks) -> tuple[str, str]:
     """Subscriber-cookie status control, shown at the top of
     /admin/library/feeds. It's a feed-specific tool — it probes a recent post
     per paywalled source to confirm that source's subscriber cookie still
@@ -18389,11 +18390,17 @@ def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> 
     the UI only surfaces a colored panel with per-domain detail when a cookie
     has actually gone stale (any_bad). Otherwise this renders just a compact
     "Re-check" control, so there's still a way to trigger a check by hand
-    without a status box sitting there permanently."""
+    without a status box sitting there permanently.
+
+    Returns (button_html, panel_html). The button now sits beside "+ Add feed"
+    in the page header, so the panel no longer renders a second copy of it —
+    two identical triggers a few hundred pixels apart read as two different
+    actions. Both halves are "" when no cookies are configured.
+    """
     from linklib.extract import _auth_cookies
     cookies = _auth_cookies()
     if not cookies:
-        return ""   # feature dormant until cookies are configured
+        return "", ""   # feature dormant until cookies are configured
 
     from linklib import authcheck
     lib = _lib()
@@ -18414,8 +18421,8 @@ def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> 
                      'Re-check subscriber access</button></form>')
 
     if not any_bad:
-        # Nothing wrong — no permanent status box, just the manual trigger.
-        return f'<p style="margin:0 0 22px;">{recheck_form}</p>'
+        # Nothing wrong — no permanent status box, just the header trigger.
+        return recheck_form, ""
 
     # Per-domain status lines — only shown once something's actually stale.
     rows = ""
@@ -18446,14 +18453,12 @@ def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> 
 <li>Update <code>LINKLIB_AUTH_COOKIES</code> in Railway &rarr; Variables.</li>
 </ol>""")
 
-    return f"""<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 22px;">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-    <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);">Subscriber cookie expired</div>
-    {recheck_form}
-  </div>
+    panel = f"""<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:12px;padding:16px 18px;margin:0 0 22px;">
+  <div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--navy);">Subscriber cookie expired</div>
   <div style="margin-top:8px;">{rows}</div>
   {refresh_steps}
 </div>"""
+    return recheck_form, panel
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -18903,7 +18908,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
                 msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
-    auth_banner = _auth_cookie_banner(request, background_tasks)
+    auth_button, auth_panel = _auth_cookie_controls(request, background_tasks)
     lib = _lib()
     try:
         sections = lib.list_feed_sections()
@@ -19008,6 +19013,17 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 
     body = f"""<div class="page page-admin">
 <style>
+.ff-head{{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-bottom:4px;flex-wrap:wrap;}}
+/* Both actions in one group so they wrap together under the title rather than
+   the primary button stranding on a line of its own. */
+.ff-head-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
+.ff-head-actions form{{margin:0;}}
+@media (max-width:560px){{
+  /* Too narrow for title-plus-two-buttons: let the group take the full width
+     and sit under the H1, secondary first so the primary stays rightmost. */
+  .ff-head-actions{{width:100%;justify-content:flex-start;}}
+}}
 .ff-table,.fs-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
 .ff-row>td,.fs-row>td{{padding:9px 12px;vertical-align:middle;border-top:1px solid var(--line);}}
 .ff-table thead th,.fs-table thead th{{padding:9px 12px;text-align:left;font-size:12px;color:var(--muted);
@@ -19063,11 +19079,14 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
-{auth_banner}
-<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;flex-wrap:wrap;">
+<div class="ff-head">
   <h1 style="margin:0;">Feeds</h1>
-  <a href="/admin/library/feeds/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add feed</a>
+  <div class="ff-head-actions">
+    {auth_button}
+    <a href="/admin/library/feeds/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add feed</a>
+  </div>
 </div>
+{auth_panel}
 <p style="color:var(--muted);margin:8px 0 6px;">The RSS subscriptions behind the Reader's Feed view. This same list is the domain allowlist FP&amp;A Buddy's web search is restricted to, so a source added here becomes citable there too. Changes take effect on the next page load, with no restart or deploy needed.</p>
 <ul style="color:var(--muted);margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.7;">
 <li>The Reader's <strong>Sources</strong> rail only lists feeds that currently have items in view, so a quiet or unreachable feed can appear here and not there. That's expected rather than a sync problem.</li>

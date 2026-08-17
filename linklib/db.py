@@ -1758,19 +1758,15 @@ class Library:
             # it to 'direct' rather than adding a third empty-string state
             # keeps every row's column populated and queryable.
             "ALTER TABLE content_refetch_log ADD COLUMN source TEXT NOT NULL DEFAULT 'direct'",
-            # A human-readable note about where this feed's paywall cookie is
-            # configured — e.g. "Cookie auth via LINKLIB_AUTH_COOKIES". It is
-            # DESCRIPTIVE ONLY and must never hold a cookie value: the secret
-            # itself stays in the host env, where extract._auth_cookies() reads
-            # it, and nothing in this codebase writes it back here. The column
-            # exists because that dependency was previously invisible from the
-            # admin feed table — a source could stop returning full text with
-            # nothing on the page saying which env var to go check.
-            #
-            # Also deliberately absent from the OPML: the file has no field for
-            # it, exactly like exclude_from_queue, so opml_xml() ignores it and
-            # a note edit doesn't churn the generated file.
-            "ALTER TABLE feeds ADD COLUMN paywall_cookie_note TEXT NOT NULL DEFAULT ''",
+            # paywall_cookie_note's ADD line used to sit here. It is gone rather
+            # than commented out: with _drop_retired_paywall_cookie_note below
+            # running on the same boot, leaving it would re-add the column
+            # immediately after every drop, churning the schema forever. A
+            # database that still HAS the column keeps it (this list only ever
+            # added it, never populated it), so the one-time conversion in
+            # seed_paywall_cookie_flags still finds its source; one that never
+            # had it converts from feed.PAYWALLED_DOMAINS instead, which
+            # seed_paywall_cookie_flags already handles via .get().
             # Whether Brian currently pays for this source. PURELY
             # INFORMATIONAL — nothing reads it. It does not gate fetching, does
             # not reach the Reader, and is independent of both
@@ -1788,12 +1784,11 @@ class Library:
             # (typos, inconsistent phrasing). The "where is it configured"
             # explanation now lives once in the page footnote instead.
             #
-            # paywall_cookie_note is deliberately NOT dropped: it's the source
-            # this migrates from, and the repo's convention for a superseded
-            # column is non-destructive retirement (see screenshot_is_product
-            # and field_reviews in CLAUDE.md) rather than a table rebuild.
-            # Nothing reads it after this migration; seed_paywall_cookie_flags
-            # converts it once and it is then frozen history.
+            # paywall_cookie_note shipped retired (present, unused) and is now
+            # dropped for real by _drop_retired_paywall_cookie_note below, once
+            # seed_paywall_cookie_flags has provably converted it. Dormant
+            # columns are clutter; retirement was the safe intermediate step,
+            # not the destination.
             "ALTER TABLE feeds ADD COLUMN has_paywall_cookie INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
@@ -1813,6 +1808,7 @@ class Library:
         # _POST_MIGRATION_INDEXES, which assumes user_id already exists.
         self._migrate_read_later_user_scope()
         self._migrate_community_local_markets()
+        self._drop_retired_paywall_cookie_note()
         # migrate_app_screenshot_from_product_flag is deliberately NOT called
         # here, unlike the two migrations above — it's a one-time DATA
         # migration touching pre-existing production rows (moving a legacy
@@ -1876,6 +1872,84 @@ class Library:
             return True
         except Exception:
             return False
+
+    def _feeds_has_column(self, name: str) -> bool:
+        return any(r[1] == name for r in
+                   self.conn.execute("PRAGMA table_info(feeds)").fetchall())
+
+    def _drop_retired_paywall_cookie_note(self) -> None:
+        """Remove the retired `paywall_cookie_note` column for real.
+
+        It shipped dormant when `has_paywall_cookie` replaced it, on the
+        non-destructive-retirement precedent. Dormant columns are clutter, so
+        this drops it once its one job — being the source
+        `seed_paywall_cookie_flags` migrates from — is provably done.
+
+        **Gated on `paywall_cookie_flags_seeded`, not on a human checking
+        production first.** That flag is set only after a successful
+        conversion pass, so:
+
+          * flag set   -> the column has already been read; dropping it can
+                          lose nothing.
+          * flag unset -> this database has never run the conversion. The drop
+                          is SKIPPED, the column survives, and the next boot
+                          converts from it as designed.
+
+        That makes the ordering hazard structurally impossible on any database,
+        including ones nobody inspected first, and it self-heals: a DB restored
+        from an old backup still converts before it drops. Idempotent either
+        way, since it no-ops once the column is gone.
+        """
+        if not self._feeds_has_column("paywall_cookie_note"):
+            return          # already dropped, or a fresh DB that never had it
+        if self.get_setting("paywall_cookie_flags_seeded") != "1":
+            return          # not yet converted — leave the source in place
+        try:
+            # SQLite >= 3.35. Atomic, and with no data copy there is no way to
+            # land a value in the wrong column.
+            self.conn.execute("ALTER TABLE feeds DROP COLUMN paywall_cookie_note")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            # Older SQLite has no DROP COLUMN: fall back to the rebuild.
+            self._rebuild_feeds_without_cookie_note()
+
+    # Every column of `feeds` except the one being dropped, in CREATE order.
+    _FEEDS_COLUMNS_AFTER_DROP = (
+        "id", "section_id", "name", "xml_url", "html_url", "exclude_from_queue",
+        "display_order", "created_at", "has_active_subscription",
+        "has_paywall_cookie",
+    )
+
+    def _rebuild_feeds_without_cookie_note(self) -> None:
+        """Pre-3.35 fallback for the drop above: copy into a fresh table.
+
+        Columns are named explicitly on both sides of the INSERT rather than
+        relying on positional order, so a future column added to `feeds` can't
+        silently shift values into the wrong slot.
+        """
+        cols = ", ".join(self._FEEDS_COLUMNS_AFTER_DROP)
+        self.conn.executescript(f"""
+            PRAGMA foreign_keys=off;
+            BEGIN;
+            CREATE TABLE feeds_migrated (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                section_id              INTEGER NOT NULL REFERENCES feed_sections(id),
+                name                    TEXT NOT NULL,
+                xml_url                 TEXT NOT NULL UNIQUE,
+                html_url                TEXT NOT NULL DEFAULT '',
+                exclude_from_queue      INTEGER NOT NULL DEFAULT 0,
+                display_order           INTEGER NOT NULL DEFAULT 0,
+                created_at              TEXT NOT NULL DEFAULT '',
+                has_active_subscription INTEGER NOT NULL DEFAULT 0,
+                has_paywall_cookie      INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO feeds_migrated ({cols}) SELECT {cols} FROM feeds;
+            DROP TABLE feeds;
+            ALTER TABLE feeds_migrated RENAME TO feeds;
+            COMMIT;
+            PRAGMA foreign_keys=on;
+        """)
+        self.conn.commit()
 
     def _migrate_read_later_user_scope(self) -> None:
         """One-time table recreation for DBs whose read_later predates

@@ -1928,6 +1928,29 @@ Playwright version in `requirements.txt` matching a known-good sandbox
 browser cache, or have the session re-run `playwright install chromium`
 fresh before testing.
 
+**A passing pytest count can under-report what actually ran: duplicate test
+names silently shadow each other.** Python rebinds the name, so only the last
+definition in a file executes and the earlier one vanishes with no warning from
+pytest. Six tests in #341 never ran for exactly this reason, having reused names
+from an existing section of the same file; only `pyflakes` flagged it
+("redefinition of unused..."), and the count went 39 -> 45 once renamed. pyflakes
+is already part of the standard local CI substitute, so the discipline is simply
+to read its redefinition warnings as real findings rather than lint noise, and to
+sanity-check that a suite's test count moved the way an added file should have
+moved it.
+
+**Verify computed/rendered values, not a screenshot glance — CSS specificity
+fails silently and desktop-first.** #341's mobile alignment fix was correct in
+the stylesheet and still wrong in the browser, because an inline
+`justify-content:center` on the same element outranked it; inline styles beat
+any selector short of `!important`. It looked fine at desktop width, where the
+intended and actual values happened to agree. Caught only by measuring the
+element's real offsets at each viewport. When a layout fix targets a specific
+breakpoint, assert the computed value (`getComputedStyle`, a bounding rect, a
+`Range` line-box count) at that breakpoint; "the CSS says so" and "it looks
+right in the screenshot I took at 1280px" are both weaker evidence than they
+appear.
+
 ## Contributing — pull requests
 
 **All changes ship via pull request. Never push or merge directly to `main`.**
