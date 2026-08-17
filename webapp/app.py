@@ -1085,6 +1085,47 @@ def _badge_for_href(href: str, n: int) -> str:
     return _task_badge_dot() if href in _tasks.DOT_ONLY_HREFS else _task_badge(n)
 
 
+def _disclosure_group(name: str, body_html: str, *, count_label: str = "",
+                      badge_html: str = "", open: bool = False,
+                      nested: bool = False, extra_class: str = "") -> str:
+    """The group-level disclosure row used across the admin surface.
+
+    A bordered box whose summary is a bold all-caps label plus an optional
+    muted count and task badge on the left, with the caret right-aligned
+    (`justify-content:space-between`) so it points right collapsed and down
+    expanded. Shared by the /admin index's section groups and /admin/library's
+    quadrants so the two can't drift.
+
+    This is the GROUP-level variant. The item-level variant — a bordered box
+    with the caret left-aligned before its label, used for nested toggles like
+    the capture-method instructions — is deliberately different and is not
+    produced here. See BRAND.md §"UI components".
+    """
+    summary_pad = "12px 16px" if nested else "16px 20px"
+    classes = "admin-group" + (" admin-group-nested" if nested else "")
+    if extra_class:
+        classes += " " + extra_class
+    count_span = (f'<span style="font-size:12px;color:var(--muted);">{count_label}</span>'
+                  if count_label else "")
+    return (
+        f'<details class="{classes}"{" open" if open else ""} '
+        f'style="margin-bottom:{"0" if nested else "14px"};background:{"var(--bg)" if nested else "transparent"};'
+        f'border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
+        f'<summary style="list-style:none;cursor:pointer;padding:{summary_pad};display:flex;align-items:center;justify-content:space-between;gap:12px;">'
+        f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
+        f'<span style="font-size:{"13.5px" if nested else "15px"};text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(name)}</span>'
+        f'<span class="group-badge">{badge_html}</span>'
+        f'{count_span}'
+        f'</span>'
+        f'<span class="disclosure-caret">&#9654;</span>'
+        f'</summary>'
+        f'<div style="padding:0 {"16px" if nested else "20px"} {"16px" if nested else "20px"};">'
+        f'{body_html}'
+        f'</div>'
+        f'</details>'
+    )
+
+
 def _group_badge(task_counts: dict[str, int], hrefs) -> str:
     """Badge for a collapsed section aggregating several hrefs. Sums the
     individually-actionable ones into a real count; if only all-or-none
@@ -16914,6 +16955,7 @@ async def save(request: Request, background_tasks: BackgroundTasks, token: str |
 # admin_library()'s 3-way visual grouping (Archive backup stands outside all
 # three — see that function's own note on why).
 _LIBRARY_TOOLS = [
+    ("/admin/library/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into sections, and set which ones are read-only (in the Reader, but never proposed into the archive queue). The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
     ("/admin/library/backup",       "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run weekly on a schedule (a GitHub Action syncs to Google Drive); reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
     ("/admin/library/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. Different from Archive Queue's Historical sweep panel: this re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
     ("/admin/library/queue",        "Archive queue",       "Review every proposed save—from an ongoing feed scan, or the page's own Historical sweep panel (a one-time catch-up on an older source's back catalog)—fix dates, edit tags, and approve into the archive or dismiss."),
@@ -18324,7 +18366,11 @@ def admin_checks(request: Request):
 
 
 def _auth_cookie_banner(request: Request, background_tasks: BackgroundTasks) -> str:
-    """Subscriber-cookie status control, shown on /admin/library. Only rendered
+    """Subscriber-cookie status control, shown at the top of
+    /admin/library/feeds. It's a feed-specific tool — it probes a recent post
+    per paywalled source to confirm that source's subscriber cookie still
+    fetches full text — so it lives with feed management rather than on the
+    Library hub, where it sat before the Feeds page existed. Only rendered
     when LINKLIB_AUTH_COOKIES is set. Kicks a background re-check when the
     stored status is missing or stale.
 
@@ -18448,25 +18494,15 @@ def admin_page(request: Request):
         )
         flat_hrefs = badge_hrefs if badge_hrefs is not None else [item[0] for item in items if not isinstance(item, str)]
         group_badge_html = _group_badge(task_counts, flat_hrefs)
-        open_attr = " open" if gname == "Inbox" else ""   # Inbox starts expanded — everything else is click-to-expand
-        summary_pad = "12px 16px" if nested else "16px 20px"
-        return (
-            f'<details class="admin-group{" admin-group-nested" if nested else ""}"{open_attr} '
-            f'style="margin-bottom:{"0" if nested else "14px"};background:{"var(--bg)" if nested else "transparent"};'
-            f'border:1px solid var(--line);border-radius:14px;overflow:hidden;">'
-            f'<summary style="list-style:none;cursor:pointer;padding:{summary_pad};display:flex;align-items:center;justify-content:space-between;gap:12px;">'
-            f'<span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
-            f'<span style="font-size:{"13.5px" if nested else "15px"};text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(gname)}</span>'
-            f'<span class="group-badge">{group_badge_html}</span>'
-            f'<span style="font-size:12px;color:var(--muted);">{len(items)} {"tool" if len(items)==1 else "tools"}</span>'
-            f'</span>'
-            f'<span class="disclosure-caret">&#9654;</span>'
-            f'</summary>'
-            f'<div style="padding:0 {"16px" if nested else "20px"} {"16px" if nested else "20px"};">'
+        # Inbox starts expanded — everything else is click-to-expand.
+        return _disclosure_group(
+            gname,
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
-            f'<div style="display:grid;gap:14px;">{cards}</div>'
-            f'</div>'
-            f'</details>'
+            f'<div style="display:grid;gap:14px;">{cards}</div>',
+            count_label=f'{len(items)} {"tool" if len(items) == 1 else "tools"}',
+            badge_html=group_badge_html,
+            open=(gname == "Inbox"),
+            nested=nested,
         )
 
     # Library used to get its own always-expanded card floating above every
@@ -18526,11 +18562,9 @@ def admin_page(request: Request):
 
 
 @app.get("/admin/library", response_class=HTMLResponse)
-def admin_library(request: Request, background_tasks: BackgroundTasks):
+def admin_library(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-
-    auth_banner = _auth_cookie_banner(request, background_tasks)
 
     from webapp import tasks as _tasks
     lib = _lib()
@@ -18554,27 +18588,21 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
             f'<p style="margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.5;">{desc}</p></a>'
         )
 
-    # Open Reader — Phase 6 dropped it from the numbered tool list (it's not
-    # a management tool), but it needs to stay reachable and obvious from
-    # this page, not just from Admin's own CFO Toolbox -> Library entry
-    # point (which lands back HERE, not on /read) or the homepage's
-    # admin-only Reader-access box. A dedicated callout above everything
-    # else does that without pretending it's tool #1 of a workflow list.
-    # Live-preview follow-up: restyled to match the homepage's Reader-access
-    # box / /tools' Library tile — same _ADMIN_ONLY_BG/_ADMIN_ONLY_BORDER
-    # seafoam treatment and vertical icon-badge card shape, instead of this
-    # page's own one-off navy horizontal bar — since it now sits in a narrow
-    # column next to the flow diagram (see the top row below) rather than
-    # spanning the full page width.
-    open_reader_callout = (
-        f'<a href="/read" style="display:flex;flex-direction:column;gap:8px;height:100%;box-sizing:border-box;'
-        f'text-decoration:none;background:{_ADMIN_ONLY_BG};border:{_ADMIN_ONLY_BORDER};border-radius:16px;padding:26px;">'
-        f'<div style="display:flex;align-items:center;gap:12px;">'
-        f'{_card_icon(3, _ICON_NEWSPAPER)}'
-        f'<div style="font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);">Open Reader</div>'
-        f'</div>'
-        f'<p style="font-size:13.5px;line-height:1.5;color:var(--navy);margin:0;">The day-to-day reading surface&mdash;Feed, Archive, and Read Later in one three-pane view. This is where you actually read; everything below is curation.</p>'
-        f'</a>'
+    # Open Reader — a header-adjacent page action beside the H1, reusing the
+    # flex + `.btn` pattern /admin/tools/software and /admin/tools/benchmarks
+    # already use for their "+ Add" links, rather than the seafoam callout box
+    # that used to sit beside the flow diagram.
+    #
+    # Stock secondary button, no colour overrides: `.btn.btn-ghost` is already
+    # navy border + navy text + transparent fill + --navy-wash hover + 10px
+    # radius, which is exactly BRAND.md §"Buttons" secondary. An earlier round
+    # of this build tinted it seafoam; that was wrong ("Buttons navy or ghost /
+    # Make a seafoam or coral button") and is reverted here. Only size is
+    # overridden, matching the "+ Add" header actions on the Toolbox admin
+    # pages.
+    open_reader_button = (
+        '<a href="/read" class="btn btn-ghost" style="font-size:14px;padding:8px 18px;'
+        'white-space:nowrap;">Open Reader</a>'
     )
 
     # Regrouped by function (Phase 6), not the old single top-to-bottom
@@ -18592,16 +18620,38 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # output of the third.
     lib_by_href = {href: (title, desc) for href, title, desc in _LIBRARY_TOOLS}
 
+    def _lib_quadrant(title, inner_html, hrefs=()):
+        """One collapsible quadrant, closed by default.
+
+        Uses the shared `_disclosure_group` component — the same group-level
+        row the /admin index's sections use: bordered box, bold all-caps label
+        with a muted tool count and any task badge on the left, caret
+        right-aligned pointing right collapsed and down expanded. Reused rather
+        than reimplemented so the two surfaces can't drift.
+
+        The nested capture-path accordions inside New content deliberately keep
+        the item-level variant (caret left of the label) — see BRAND.md
+        §"UI components". Nesting is native and safe: `.disclosure-caret`'s
+        rotate rule is scoped `details[open] > summary`, so an inner accordion
+        can never rotate the outer quadrant's caret.
+        """
+        n = len(hrefs)
+        return _disclosure_group(
+            title, inner_html,
+            count_label=f'{n} {"tool" if n == 1 else "tools"}' if n else "",
+            badge_html=_group_badge(task_counts, list(hrefs)),
+            extra_class="lib-quad",
+        )
+
     def _lib_section(label, hrefs, desc_line):
         section_cards = "".join(
             _lib_card(h, lib_by_href[h][0], lib_by_href[h][1], _badge_for_href(h, task_counts.get(h, 0)))
             for h in hrefs
         )
-        return (
-            f'<h2 style="margin:28px 0 4px;font-size:17px;">{label}</h2>'
+        return _lib_quadrant(label, (
             f'<p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">{desc_line}</p>'
             f'<div style="display:grid;gap:12px;">{section_cards}</div>'
-        )
+        ), hrefs)
 
     # Archive backup used to render as its own headingless card above the
     # three labeled sections — visually odd once everything else had a
@@ -18612,32 +18662,26 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
     # both are about keeping the archive intact and current, not a single
     # curation pass over content that's already there. Renamed the section to
     # "Archive additions & backup" so the heading still says what's inside it.
-    # Second live-preview round: Open Reader + the flow diagram go back to
-    # full page width, as their own row above everything else — but not
-    # simply stacked like before this whole redesign started: the diagram
-    # takes the left 2/3 of that row and Open Reader's now-seafoam card
-    # takes the right 1/3, side by side (`.lib-top-row`), both stretched to
-    # the same height by the grid's default `align-items:stretch`.
-    #
-    # Third live-preview round: the grid below is a genuine 2x2 now, not
-    # 3 blocks auto-placed into 4 cells (which left the last cell empty) —
-    # "Existing archive management" and "Tagging" (renamed "Tag management"
-    # to read as a matched pair with "Archive additions & backup") split
-    # into two independent cells instead of stacking together in one, so
-    # every cell is filled: top-left "Saving articles from anywhere",
-    # top-right "Existing archive management", bottom-left "Archive
-    # additions & backup", bottom-right "Tag management". DOM order
-    # (saving-articles, existing-mgmt, archive-additions-and-backup,
-    # tag-mgmt) drives both the desktop auto-placement and the mobile
-    # single-column stack, same reasoning as the homepage's `.home-grid`.
-    top_row_html = f"""<div class="lib-top-row">
-<div>{_content_flow_diagram()}</div>
-<div>{open_reader_callout}</div>
-</div>"""
+    # The flow diagram runs full width on its own now, between the intro and
+    # the quadrant grid. Nothing shares its row (Open Reader is a header action
+    # above), which also retires the phantom-margin height mismatch that row's
+    # `align-items:stretch` used to produce against the diagram card's own
+    # margin-bottom.
+    flow_html = _content_flow_diagram()
 
-    saving_articles_html = f"""<h2 style="margin:0 0 4px;font-size:17px;">Saving articles from anywhere</h2>
+    # Upper-left quadrant, "New content": the Manage feeds card over the two
+    # capture-path accordions. Both halves keep their own shape — a _lib_card
+    # and the existing accordion group — under one quadrant heading, rather
+    # than being blended into a single undifferentiated block.
+    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Where new material comes from: the subscription list the Reader pulls from, plus the two ways to save a page by hand.</p>
+<div style="margin-bottom:22px;">{_lib_card(
+    "/admin/library/feeds", "Manage feeds",
+    "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view, group them into "
+    "sections, and set which ones are read-only. The same list is the allowlist FP&amp;A Buddy&rsquo;s "
+    "web search is restricted to.",
+    _badge_for_href("/admin/library/feeds", task_counts.get("/admin/library/feeds", 0)))}</div>
+<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving articles from anywhere</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
-<p style="color:var(--muted);font-size:14px;margin:0 0 14px;line-height:1.6;"><strong>If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working</strong>&mdash;the old copies embed the old values. Set them up again from this page's instructions.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
 <summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>Desktop&mdash;the bookmarklet</summary>
@@ -18672,7 +18716,12 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 </ol>
 <p style="margin:0;color:var(--muted);font-size:13px;">Articles saved this way arrive untagged&mdash;tag them later in the Library, or add a second JSON text field named <code>tags</code> with a comma-separated list if you want a fixed default.</p>
 </div>
-</details>"""
+</details>
+
+<p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, both stop working&mdash;the old copies embed the old values. Set them up again from the instructions above.</p>"""
+
+    saving_articles_html = _lib_quadrant("New content", saving_articles_body,
+                                         ["/admin/library/feeds"])
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -18690,26 +18739,60 @@ def admin_library(request: Request, background_tasks: BackgroundTasks):
 
     body = f"""<div class="page page-admin">
 <style>
-.lib-top-row{{display:grid;grid-template-columns:2fr 1fr;column-gap:28px;align-items:stretch;margin-bottom:24px;}}
-.lib-top-row>div{{min-width:0;}}
-.lib-two-col{{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;row-gap:28px;}}
-.lib-two-col>div{{min-width:0;}}
+/* Four quadrants on explicitly named grid areas, not auto-placement. Auto-flow
+   is what produced the earlier ragged layout — blocks landed wherever content
+   length pushed them, and an odd count left a hole. Named areas pin each
+   quadrant regardless of how much content it holds. */
+/* Two INDEPENDENT flowing columns, not a row-coupled grid. A real 2-row grid
+   makes both cells in a row share that row's height, so expanding one quadrant
+   pushed the whole next row down in both columns at once. Column independence
+   is the deliberate trade-off: row-2 headings ("Tag management" vs "Archive
+   additions & backup") are no longer guaranteed to share a Y. */
+.lib-cols{{display:flex;gap:28px;align-items:flex-start;}}
+.lib-col{{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:34px;}}
+/* Quadrant boxes come from the shared `_disclosure_group` component (same row
+   as the /admin index's sections), so there's no bespoke summary styling here.
+   Only the bottom margin is dropped: the flex columns own the vertical rhythm
+   via their own gap. */
+.lib-quad{{margin-bottom:0 !important;}}
+/* The .lib-q-* classes carry no desktop rules — they exist to give the mobile
+   query below something to `order`, and to name each quadrant for tests. */
 @media (max-width:900px){{
-  .lib-top-row{{display:block;}}
-  .lib-top-row>div:last-child{{margin-top:22px;}}
-  .lib-two-col{{display:block;}}
+  /* One column. `display:contents` dissolves the two column wrappers so all
+     four quadrants become direct flex children of .lib-cols, which is what
+     lets `order` interleave them across the columns — DOM order is
+     new/tags/existing/backup (column order), the required reading order is
+     new/existing/tags/backup. */
+  /* align-items must be reset here, not just inherited from the desktop rule.
+     It governs the CROSS axis, so `flex-start` — correct in row direction,
+     where it stops the two columns stretching to a shared height — becomes
+     horizontal once this flips to column, shrinking every box to its own
+     content width (measured 261/342/306/342px at 390px wide before this).
+     `stretch` gives all four the container's full width. */
+  .lib-cols{{flex-direction:column;gap:30px;align-items:stretch;}}
+  .lib-col{{display:contents;}}
+  .lib-q-new{{order:1;}}
+  .lib-q-existing{{order:2;}}
+  .lib-q-tags{{order:3;}}
+  .lib-q-backup{{order:4;}}
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Library</h1>
-{auth_banner}
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;flex-wrap:wrap;">
+  <h1 style="margin:0;">Library</h1>
+  {open_reader_button}
+</div>
 <p style="color:var(--muted);margin:4px 0 18px;">The tools below cover backing the archive up, bringing in new content, keeping it clean, and readying it for the FP&amp;A Buddy assistant to reason from&mdash;grouped by what they're for, not a fixed order. Jump to whichever you need.</p>
-{top_row_html}
-<div class="lib-two-col">
-<div>{saving_articles_html}</div>
-<div>{existing_mgmt_html}</div>
-<div>{archive_additions_html}</div>
-<div>{tag_mgmt_html}</div>
+{flow_html}
+<div class="lib-cols">
+<div class="lib-col">
+<div class="lib-q-new">{saving_articles_html}</div>
+<div class="lib-q-tags">{tag_mgmt_html}</div>
+</div>
+<div class="lib-col">
+<div class="lib-q-existing">{existing_mgmt_html}</div>
+<div class="lib-q-backup">{archive_additions_html}</div>
+</div>
 </div>
 </div>"""
     return HTMLResponse(_page("Library—Admin", "Admin", body, authed=True))
@@ -18775,9 +18858,11 @@ def _feed_form_fields(sections: list, values: dict) -> str:
 
 
 @app.get("/admin/library/feeds", response_class=HTMLResponse)
-def admin_feeds(request: Request, msg: str = "", error: str = ""):
+def admin_feeds(request: Request, background_tasks: BackgroundTasks,
+                msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
+    auth_banner = _auth_cookie_banner(request, background_tasks)
     lib = _lib()
     try:
         sections = lib.list_feed_sections()
@@ -18913,6 +18998,7 @@ def admin_feeds(request: Request, msg: str = "", error: str = ""):
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
+{auth_banner}
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;flex-wrap:wrap;">
   <h1 style="margin:0;">Feeds</h1>
   <a href="/admin/library/feeds/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add feed</a>
@@ -19293,7 +19379,12 @@ def admin_auth_recheck(request: Request):
         authcheck.check_auth_cookies(lib, OPML_PATH)
     finally:
         lib.close()
-    return RedirectResponse("/admin/library", status_code=303)
+    # Redirects to Feeds, where the control now lives. The PATH is deliberately
+    # unchanged: the Reader's own subscriber-access banner posts here too (see
+    # the fetch() in the reader shell), and /admin/auth/recheck isn't
+    # library-page-specific, so moving it under /admin/library/feeds/... would
+    # make that second caller read oddly for no gain.
+    return RedirectResponse("/admin/library/feeds", status_code=303)
 
 
 # ---------------------------------------------------------------------------

@@ -2353,6 +2353,106 @@ order, so no separate mobile-order override was needed (unlike the
 homepage's `.home-grid`, which needed one because its desktop and mobile
 orders genuinely diverge).
 
+**Superseded: the two-up top row is gone.** An intermediate round had the
+seafoam Open Reader callout sharing a `.lib-top-row` grid with the flow
+diagram, where it rendered 22px taller than the diagram beside it — the
+diagram card's own `margin:0 0 22px` (correct on the Archive Queue page, where
+it sits above body copy) becoming phantom space inside a stretch-aligned grid,
+so the row sized to card-height plus margin while the callout's `height:100%`
+filled all of it. That was fixed by matching the margin on the row's last cell,
+and then the row itself was removed in the restructure below, which retires the
+whole class of problem: nothing shares a row with the diagram any more.
+
+### /admin/library page restructure: header action, full-width flow, four quadrants
+
+This supersedes the layout described above rather than extending it.
+
+**Open Reader is a header action, not a box.** The seafoam callout card is
+removed. In its place, a ghost button beside the `<h1>`, using the same
+flex + `.btn` header pattern `/admin/tools/software` and
+`/admin/tools/benchmarks` already use for their "+ Add" links.
+
+*Colour:* stock `.btn.btn-ghost` with **no colour override** — navy border,
+navy text, transparent fill, `--navy-wash` hover, 10px radius, which is exactly
+BRAND.md §"Buttons"' secondary style. An intermediate round of this build
+tinted it `--seafoam-deep`; that was wrong (BRAND.md: "Buttons navy or ghost" /
+"Make a seafoam or coral button") and has been reverted. Note `--accent-light`,
+which `.btn-ghost:hover` uses, is a legacy alias for the same hex as
+`--navy-wash`, so the stock hover is already the navy wash.
+
+**The flow diagram runs full width**, on its own, between the intro paragraph
+and the grid.
+
+**The four quadrants are collapsible, closed by default.** Each is a native
+`<details>`/`<summary>` carrying the same `.disclosure-caret` span the
+bookmarklet and Share-Sheet accordions on this page already use, so landing on
+the page shows a tidy 2x2 of four headers (measured: the whole grid is 98px
+tall closed, vs 1362px with all four open). No JS, no persistence between
+loads, and each opens independently. `display:flex` on the summary is what
+suppresses the browser's own marker so the caret isn't doubled — the existing
+convention here, not a new trick. The title stays an `<h2>` inside the summary
+so heading semantics survive the wrapping. Nesting is native and safe: the New
+content quadrant contains the two capture-path `<details>`, and
+`.disclosure-caret`'s rotate rule is scoped `details[open] > summary`, so an
+inner accordion can never rotate the outer quadrant's caret (verified live).
+
+**Two independent flowing columns, NOT a row-coupled grid.** `.lib-cols` is a
+flex row of two `.lib-col` flex columns: left holds New content then Tag
+management, right holds Existing archive management then Archive additions &
+backup. Each column lays out on its own, so **expanding a quadrant in one
+column never moves anything in the other** (verified live in both directions:
+opening New content leaves both right-column headings at their exact Y, and
+opening Existing archive management leaves both left-column headings put).
+
+*This reverses an earlier round of this build*, which used
+`grid-template-areas` with explicit rows to guarantee that row-1 and row-2
+headings shared a Y. That guarantee is deliberately dropped: a real 2-row grid
+makes both cells in a row share that row's height, so expanding one quadrant
+pushed the next row down in **both** columns at once, which read wrong in
+practice. Row-2 heading alignment ("Tag management" vs "Archive additions &
+backup") is explicitly no longer required.
+
+- **Upper-left, "New content"** — merges the former Feed management section with
+  "Saving articles from anywhere". The Manage feeds `_lib_card` sits above the
+  two capture-path accordions under one quadrant heading, with an `<h3>`
+  separating them, so the two halves stay visually distinct rather than blending
+  into one block.
+- **Upper-right** — Existing archive management (unchanged content).
+- **Lower-left** — Tag management (unchanged content).
+- **Lower-right** — Archive additions & backup (unchanged content).
+
+`/admin/library/feeds` remains a `_LIBRARY_TOOLS` entry (so the Admin hub's
+Library card counts 9 tools and the link picks up badge support); only where its
+card renders changed.
+
+**Mobile** collapses to one column at the same 900px breakpoint. DOM order is
+column-major (new, tags, existing, backup) but the required reading order is
+new, existing, tags, backup, so the two `.lib-col` wrappers get
+`display:contents` below the breakpoint — dissolving them so all four quadrants
+become direct flex children of `.lib-cols`, which is what lets `order` interleave
+them across the columns. Verified live at 390px portrait and 844px landscape:
+single column, correct order, no horizontal overflow, taps still toggle.
+
+**Quadrant headers reuse the /admin index's disclosure row.** Rather than a
+bespoke header, the four quadrants render through `_disclosure_group` — a
+module-level component extracted from `admin_page()`'s former inner
+`_group_html` closure so both surfaces share one implementation: bordered box,
+bold all-caps label with a muted tool count and any task badge on the left,
+caret right-aligned (`justify-content:space-between`), pointing right collapsed
+and down expanded.
+
+The extraction was verified non-destructive by diffing `/admin`'s full rendered
+HTML before and after — byte-for-byte identical — before the Library page was
+switched over to it.
+
+Two variants exist and are now documented in BRAND.md §"UI components": this
+group-level row, and the item-level box (caret left of its label) used by the
+nested capture-path toggles, which deliberately keep their own treatment. An
+earlier round of this build gave the quadrants a bare heading with a
+left-aligned caret and then chased glyph parity between the two levels; that's
+superseded — the hierarchy distinction is the point, and each level now uses
+the variant that belongs to it.
+
 **Reader rename: "Saved" → "Archive".** The Reader's own quick-view label,
 list-pane header, and every related admin-facing description previously
 called this view "Saved" — inconsistent with every admin reference to the
@@ -2370,6 +2470,25 @@ The admin surface for the RSS subscription list. Before this, feeds and their
 sections could only be changed by hand-editing `preferred_sites.opml` and
 deploying. See §2, "Feed subscriptions" for the tables and §4 for why the OPML
 file is generated rather than edited.
+
+**Subscriber-access re-check lives here.** The "Re-check subscriber access"
+control sits at the top of this page, above the H1. It moved from
+`/admin/library` once this page existed: it probes a recent post per paywalled
+source (`authcheck.check_auth_cookies`) to confirm that source's subscriber
+cookie still fetches full text, which is feed-specific work. Only rendered when
+`LINKLIB_AUTH_COOKIES` is configured; dormant otherwise.
+
+`POST /admin/auth/recheck` keeps its path — the Reader's own subscriber-access
+banner posts to it as well, and the path isn't library-page-specific, so moving
+it under `/admin/library/feeds/...` would make that second caller read oddly.
+Only its redirect target moved, from `/admin/library` to `/admin/library/feeds`.
+
+*What the check actually probes, traced live:* for a configured domain it reads
+the OPML to find that domain's feed, requests **the stored feed URL verbatim**,
+takes the first item's article URL from the result, and probes **that article
+URL** with the cookie attached. So the feed URL is the input it routes through,
+not the thing it fetches for the access test — see the Mostly Metrics note in
+§4.
 
 **Layout: one flat feed table, plus a separate sections area.** `GET
 /admin/library/feeds` renders every feed as a row in a single table (Name, URL,
@@ -2639,6 +2758,19 @@ recorded anywhere, it's flagged rather than invented.
   string as ordinary. Covered by round-trip tests in
   `tests/test_feed_management.py` against both the real stored URLs and a
   synthetic tokenized one.
+- **The Mostly Metrics feed carries no token, and the subscriber-access check
+  confirms the stored URL is used verbatim.** A lot of care in this build went
+  into guaranteeing a tokenized feed URL would survive seed -> DB -> OPML
+  regeneration untouched. Worth recording plainly: **no feed in
+  `preferred_sites.opml` has a query string at all**, Mostly Metrics included —
+  it is stored as `https://www.mostlymetrics.com/feed` (34 characters). Its
+  paywall is handled by a **cookie** (`LINKLIB_AUTH_COOKIES`, applied by
+  `extract.fetch_page` on article pages), not by anything in the feed URL. The
+  verbatim-URL guarantee is built and tested regardless, so it holds if a
+  tokenized URL is ever added. Tracing `authcheck.check_auth_cookies` with its
+  outbound requests recorded shows it requesting exactly
+  `https://www.mostlymetrics.com/feed` — character-for-character the value in
+  the `feeds` table — before probing a discovered article URL with the cookie.
 - **Adding a feed validates the URL server-side before saving.**
   `feed.probe_feed()` fetches the candidate and confirms it parses as RSS or
   Atom, and rejects `feedly.com/web/...` proxy links by name. *Why the special

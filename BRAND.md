@@ -242,6 +242,13 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
   The one confirmed exception is `.sdr-outcome-title` (Sail Don't Row's game-over overlay,
   800 weight) — deliberately bolder, verified side-by-side against the 600-weight standard and kept
   distinct because it's a single bespoke result overlay, not a family of cards sharing a role.
+- **Disclosure/accordion** — two variants. *Group-level* (top-level Admin sections, e.g. `/admin`
+  index groups, `/admin/library` quadrants): bordered/boxed row, bold all-caps label + muted item
+  count left-aligned, arrow right-aligned, points right collapsed / down expanded. *Item-level*
+  (nested toggles within a section, e.g. capture-method instructions): bordered box, arrow
+  left-aligned before the label. Don't invent a third variant — pick group or item based on
+  hierarchy depth. The group-level row is one shared component, `_disclosure_group` in
+  `webapp/app.py`; reuse it rather than rebuilding the markup.
 - **Tables** — navy header row with white text; alt rows `--surface-2`.
 - **Links** — navy; optional seafoam underline for emphasis in editorial copy.
 

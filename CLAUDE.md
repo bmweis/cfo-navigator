@@ -183,7 +183,16 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   changed, so a rename doesn't fail because the source is down that day. **Known
   asymmetry, stated in the page copy rather than fixed:** the Reader's Sources rail is
   built from fetched items, not from the subscription list, so a quiet or unreachable
-  feed shows on the admin page and not in the rail.
+  feed shows on the admin page and not in the rail. **"Re-check subscriber access"
+  moved here from `/admin/library`** (it probes a recent post per paywalled source, which
+  is feed-specific); `POST /admin/auth/recheck` keeps its path because the Reader's own
+  banner posts to it too, only the redirect target moved. **On Mostly Metrics
+  specifically:** despite repeated concern about preserving a tokenized URL, no feed in
+  the OPML has a query string at all — Mostly Metrics is stored as the plain
+  `https://www.mostlymetrics.com/feed`, and its paywall is cookie-based
+  (`LINKLIB_AUTH_COOKIES`), not URL-token-based. The verbatim-URL guarantee is built and
+  tested anyway so it holds if one is ever added; tracing the access check shows it
+  requesting exactly the stored URL before probing a discovered article URL.
 - **The Reader's Feed view caches per-feed for 30 minutes** (`feed.py`, in-memory). Cached
   item dicts are shallow-copied before mutation — never mutate a cached entry in place.
   Editing the OPML won't show up live until the cache expires or the app restarts.
