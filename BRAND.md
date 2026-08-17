@@ -399,15 +399,20 @@ The one sanctioned exception to "buttons navy or ghost": Delete/Reject actions u
 status-red `#b91c1c`/`#fee2e2`/`#fca5a5` family (§5) — a destructive-action signal, the
 same category as `--alert`, not a decorative color choice.
 
-One sanctioned status-color exception: the cookie-status panel on `/admin/library/feeds`
-uses true stoplight colors (`#15803D` green / `#b91c1c` red / `#CA8A04` amber) instead of
-the semantic `--good`/`--caution`/`--alert` tokens — a working-vs-broken health check needs
-to read instantly, and navy (`--good`) is too close to the site's dominant color to register
-as a status signal at a glance. Scoped to that one panel; every other pass/warn/error use
-case stays on the semantic tokens. The red is the same `#b91c1c` as destructive actions
-rather than a second red, so "red = bad" is one value sitewide. **The amber is dot-only:**
-`#CA8A04` on white measures 2.94:1, below AA for text, so the state word beside it stays in
-`--ink-soft` and the color lives on the indicator dot alone.
+**Sanctioned status-color exception — glanceable health indicators:** any UI element built
+specifically for instant pass/fail/warn recognition (test results, uptime/sync status, the
+cookie-status panel, and similar future indicators) uses true stoplight colors instead of the
+semantic `--good`/`--caution`/`--alert` tokens — a working-vs-broken signal needs to read
+instantly, and navy (`--good`) is too close to the site's dominant color to register as a
+status signal at a glance. Palette: `#15803D` green, `#b91c1c` red (reuse the existing
+destructive-action red — don't introduce a second red), `#CA8A04` amber. Color lives on the
+indicator itself (a dot, icon, or badge) only — accompanying state text stays in the page's
+normal text color (`--ink-soft` or equivalent), never tinted, since tinting some state words
+and not others (where one color fails text-contrast) reads as a bug. Register any new hex
+introduced under this exception in `brand_check.py`'s allowlist in the same PR, or the build
+fails as an off-palette leak rather than a sanctioned exception. Every other pass/warn/error
+use case — banners, callout text, inline copy — stays on the semantic tokens; this exception
+is scoped to glanceable indicator elements specifically, not status communication in general.
 
 ---
 
@@ -483,7 +488,7 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
 - **Colors** — every hex in the codebase must be a brand token (parsed from the `:root` above, so the
   palette is its single source of truth) or one of the explicitly-documented auxiliary colors
   (status/feedback, benchmark badges, chart tints, and three deliberate exceptions: destructive-action
-  buttons, §5/§6; the cookie-status stoplight, §6; and "Sail, Don't Row"'s realistic
+  buttons, §5/§6; glanceable health indicators' stoplight colors, §6; and "Sail, Don't Row"'s realistic
   sky/water/skyline/boat illustration palette,
   which reads as an actual landscape rather than brand-token shading, confined entirely to that one
   game). A brand-new off-palette hex fails the build, forcing a deliberate choice: add it to the
