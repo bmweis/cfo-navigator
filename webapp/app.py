@@ -932,6 +932,12 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .page-form{max-width:640px;}    /* forms — contact, admin edit forms */
 .page-admin{max-width:1500px;} /* admin data tables — communities list */
 
+/* Two-column split for Software's Add/Edit forms (2fr wide left column,
+   1fr narrow right column holding a few short fields). Stacks to one
+   column on narrow viewports. */
+.tool-form-cols{display:grid;grid-template-columns:2fr 1fr;gap:24px;align-items:start;}
+@media(max-width:700px){.tool-form-cols{grid-template-columns:1fr;}}
+
 /* Functional tools (FP&A Buddy, GER calculator, Sail Don't Row + leaderboard)
    used to sit in their own narrow .page-tool tier (960px), which read as
    visibly boxed-in next to every other content page, so a lone 960px card was
@@ -6026,7 +6032,7 @@ Not sure which tool's for you? {(
 <details open style="margin-bottom:8px;">
   <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-    <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#9733; Advisor</button>
+    <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#129308; Advisor</button>
     <button class="tcat-btn tcat-all tcat-active" data-cat="" onclick="filterCat(this)">All</button>
     {cat_buttons}
   </div>
@@ -6055,7 +6061,7 @@ Not sure which tool's for you? {(
 <p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
 
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
-  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these companies.</p>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#129308; Formal advisor to these companies.</p>
   <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
     {'<a href="/tools/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit →</a>'}</p>
 </div>
@@ -6220,7 +6226,7 @@ function renderTools(tools) {{
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
-    var star = t.advisor ? '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' : '';
+    var star = t.advisor ? '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129308;</span>' : '';
     var cats = (t.categories || []).map(function(c) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
     }}).join('');
@@ -6284,8 +6290,8 @@ function renderTools(tools) {{
     var introBtn = '';
     if (t.has_warm_intro) {{
       introBtn = MEMBER
-        ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ')">&#10024; Warm Intro</button>'
-        : '<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">&#10024; Warm Intro</button>';
+        ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ')">&#128232; Warm Intro</button>'
+        : '<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">&#128232; Warm Intro</button>';
     }}
     var fullProfileLink = '<a class="tool-full-link" href="/tools/software/' + esc(t.slug)
       + '" target="_blank" rel="noopener">Full profile &rarr;</a>';
@@ -6514,7 +6520,7 @@ renderTools(ALL_TOOLS);
       <button class="btn" id="intro-submit-btn" onclick="submitIntroForm()" style="justify-content:center;">Send intro request &rarr;</button>
     </div>
     <div id="intro-success" style="display:none;text-align:center;padding:16px 0;">
-      <div style="font-size:36px;margin-bottom:12px;">&#10024;</div>
+      <div style="font-size:36px;margin-bottom:12px;">&#128232;</div>
       <p style="font-size:16px;font-weight:600;color:var(--navy);margin:0 0 6px;">Request sent!</p>
       <p style="font-size:14px;color:var(--muted);margin:0 0 20px;line-height:1.5;">Brian will be in touch with an intro shortly.</p>
       <button class="btn btn-ghost" onclick="closeIntroModal()">Close</button>
@@ -6630,7 +6636,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
     {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if t.get('promoted') else ''}
-    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' if t.get('advisor') else ''}
+    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129308;</span>' if t.get('advisor') else ''}
   </div>
   <a href="/tools/software/{_esc(t['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(t['name'])}</a>
 </th>'''
@@ -7164,7 +7170,7 @@ def tools_software_profile(request: Request, slug: str):
     intro_modal_block = ""
     if has_warm_intro:
         if is_member:
-            intro_btn = '<button class="btn btn-ghost" onclick="openIntroModal()">&#10024; Warm Intro</button>'
+            intro_btn = '<button class="btn btn-ghost" onclick="openIntroModal()">&#128232; Warm Intro</button>'
             intro_modal_block = f"""
 <div class="intro-overlay" id="intro-overlay" onclick="if(event.target===this)closeIntroModal()">
   <div class="intro-modal">
@@ -7199,7 +7205,7 @@ def tools_software_profile(request: Request, slug: str):
       <button class="btn" id="intro-submit-btn" onclick="submitIntroForm()" style="justify-content:center;">Send intro request &rarr;</button>
     </div>
     <div id="intro-success" style="display:none;text-align:center;padding:16px 0;">
-      <div style="font-size:36px;margin-bottom:12px;">&#10024;</div>
+      <div style="font-size:36px;margin-bottom:12px;">&#128232;</div>
       <p style="font-size:16px;font-weight:600;color:var(--navy);margin:0 0 6px;">Request sent!</p>
       <p style="font-size:14px;color:var(--muted);margin:0 0 20px;line-height:1.5;">Brian will be in touch with an intro shortly.</p>
       <button class="btn btn-ghost" onclick="closeIntroModal()">Close</button>
@@ -7264,7 +7270,7 @@ function submitIntroForm() {{
 </script>"""
         else:
             intro_btn = ('<button class="btn btn-ghost" disabled title="Sign in to request a warm intro">'
-                         '&#10024; Warm Intro</button>')
+                         '&#128232; Warm Intro</button>')
 
     meta_parts = []
     if authed:
@@ -7582,7 +7588,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
   <input id="comm-search" type="search" placeholder="Search communities…"
     oninput="filterCommunities()"
     style="flex:1;min-width:200px;max-width:400px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  <button id="comm-advisor-btn" class="ccat-btn" onclick="toggleCommAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#9733; Advisor</button>
+  <button id="comm-advisor-btn" class="ccat-btn" onclick="toggleCommAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#129308; Advisor</button>
   <select id="comm-access" onchange="filterCommunities()"
     style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink);">
     <option value="">All access types</option>
@@ -7627,7 +7633,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 <p id="comm-empty" style="display:none;color:var(--muted);padding:32px 0;">No communities match your search.</p>
 
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
-  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#9733; Formal advisor to these communities.</p>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#129308; Formal advisor to these communities.</p>
   <p style="font-size:15px;color:var(--muted);">Know a community that belongs here?
     {'<a href="/tools/communities/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit →</a>'}</p>
   <p style="margin:8px 0 0;font-size:15px;color:var(--muted);">Can't find the right one, or the one you're in isn't quite enough? <a id="comm-gap-link" href="/tools/communities/gap" style="font-weight:500;">I'd love to know what's missing &rarr;</a></p>
@@ -7820,7 +7826,7 @@ function renderCommunities(list) {{
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
-    var advisorStar = c.advisor ? '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' : '';
+    var advisorStar = c.advisor ? '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129308;</span>' : '';
     var compareChecked = compareSelected.indexOf(c.id) !== -1;
     var compareDisabled = !compareChecked && compareSelected.length >= COMPARE_MAX;
     var costHtml = c.cost_band === NEEDS_VERIFICATION
@@ -8357,7 +8363,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
     {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if c.get('featured') else ''}
-    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#9733;</span>' if c.get('advisor') else ''}
+    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129308;</span>' if c.get('advisor') else ''}
   </div>
   <a href="/tools/communities/{_esc(c['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(c['name'])}</a>
   {_cost_badge(c)}
@@ -11362,35 +11368,21 @@ def _community_category_checkboxes(categories: list[dict], selected: list[str] |
          'No categories yet. <a href="/admin/tools/communities/categories">Add one</a> first.</p>'
 
 
-def _community_form_fields(c: dict | None = None, categories: list[dict] | None = None) -> str:
-    """Full field list in its original flat order — used unchanged by the
-    "Add community" form (/admin/tools/communities/new), which the Phase P
-    edit-page reorg deliberately left alone (see admin_communities_edit's
-    layout comment). Just concatenates the same five fragments
-    _community_form_fields_parts returns, in their original order, so this
-    keeps rendering byte-identical output for that caller."""
-    parts = _community_form_fields_parts(c, categories)
-    # Phase Q: wrapped in its own grid (matching the caller's 20px form gap,
-    # so internal spacing between these fields is unchanged) so
-    # generateCommunityListing has one host to draw its loading border
-    # around — same id the Edit-community page's own details wrapper uses,
-    # since only one of the two templates is ever on screen at a time.
-    details_host = f'<div id="gen-host-community-listing" style="display:grid;gap:20px;">{parts["details"]}</div>'
-    return (parts["identity"] + details_host + parts["categories"]
-            + parts["disclosures"] + parts["screenshot"])
-
-
 def _community_form_fields_parts(c: dict | None = None, categories: list[dict] | None = None) -> dict:
-    """Phase P: the same field markup _community_form_fields used to return
-    as one flat string, split into named fragments so the redesigned Edit
-    community page (admin_communities_edit) can regroup them under new
-    section headings — Name/URL + Disclosures in a condensed top row,
-    Categories on its own, the Reach/Cost/Sponsorship/Access/Format/Notes
-    block under "Program details", the homepage screenshot URL input moved
-    next to its existing recapture button/preview under "Screenshots" —
-    without changing a single field's name, id, or behavior. No dict key
-    here is new user-facing copy; the surrounding page composes these with
-    its own headings."""
+    """Phase P (extended by the admin intake form layout pass): field markup
+    for Add and Edit community, split into named fragments so each route can
+    compose them under its own section headings — Name/URL and Featured/
+    Advisor together under "Community Details" (identity + disclosures,
+    folded into a single column — see admin_communities_edit's layout
+    comment for why there's no second column here), Categories on its own,
+    the Reach/Cost/Sponsorship/Access/Format/Notes block under "Program
+    details", the homepage screenshot URL input next to its existing
+    recapture button/preview under "Screenshots" — without changing a single
+    field's name, id, or behavior. No dict key here is new user-facing copy;
+    the surrounding page composes these with its own headings. Both Add and
+    Edit build their own composition from these fragments directly (no
+    shared flat-order helper — that was retired once Add's order changed to
+    match Edit's)."""
     c = c or {}
     categories = categories or []
     # _NEEDS_VERIFICATION is appended as a literal, selectable option on every
@@ -11514,13 +11506,13 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     disclosures_html = f"""  <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="featured" value="1"{' checked' if c.get('featured') else ''}>
-      <span>&#10024; Featured: pin to top of directory with coral badge</span>
+      <span>&#10024; Featured</span>
     </label>
   </div>
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="advisor" value="1"{' checked' if c.get('advisor') else ''}>
-      <span>&#9733; Formal advisor: marks this community with an advisor star</span>
+      <span>&#129308; Formal advisor</span>
     </label>
   </div>"""
 
@@ -11547,7 +11539,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
 def _community_profile_form_fields(p: dict | None, community: dict,
                                     latest_review: dict | None = None) -> tuple[str, str]:
     """The Community Profile edit form (deep qualitative fields, distinct from
-    the directory metadata in _community_form_fields above). Field ids are
+    the directory metadata in _community_form_fields_parts above). Field ids are
     'cp-<column name>' — generateCommunityProfile (_GENERATE_PROFILE_JS)
     reads/writes them by that convention.
 
@@ -11681,7 +11673,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Quiz mention</strong> (inline at the end of the subtitle paragraph, top of page): &ldquo;...Slack channels. Not sure which community's for you? Take the quiz &rarr;&rdquo; &mdash; links to the recommender. Plain inline text link, not a separate CTA block.</li>
 <li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;, the link inline in the message itself rather than pointing the visitor to a separate CTA elsewhere on the page. Its href (and the bottom-of-page gap link's href) still carries the live search/filter state plus <code>?zero=1</code>, computed client-side by <code>gapFormHref()</code>, so the gap form can tailor its transparency note (see below).</li>
-<li><strong>Advisor legend:</strong> &ldquo;&#9733; Formal advisor to these communities.&rdquo;</li>
+<li><strong>Advisor legend:</strong> &ldquo;&#129308; Formal advisor to these communities.&rdquo;</li>
 <li><strong>Footer</strong> (bottom of page, no box/button chrome): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members, &ldquo;Sign in to submit &rarr;&rdquo; for everyone else (submission is member-gated, not public), directly followed by &ldquo;Can't find the right one, or the one you're in isn't quite enough? I'd love to know what's missing &rarr;&rdquo; (links to the gap form, public, no login required). The seafoam CTA card that used to carry both prompts plus a &ldquo;Suggest a community&rdquo; button was removed; these two lines used to sit together below the filters as a separate top-of-page block before moving to the footer.</li>
 </ul>
 </section>
@@ -12216,10 +12208,27 @@ def admin_communities_new(request: Request):
         categories = lib.list_community_categories()
     finally:
         lib.close()
-    body = f"""<div class="page page-form">
+    # Admin intake form layout pass: mirrors Edit community's grouping below
+    # (Name/URL + Featured/Advisor folded into one "Community Details" block,
+    # no separate "Disclosures" label) rather than the old fully-flat field
+    # order, so Add and Edit read the same way. Widened to page-grid to
+    # match — see admin_communities_edit's layout comment for why.
+    _parts = _community_form_fields_parts(categories=categories)
+    body = f"""<div class="page page-grid">
 <h1>Add a community</h1>
 <form method="post" action="/admin/tools/communities/new" style="display:grid;gap:20px;">
-{_community_form_fields(categories=categories)}
+  <div>
+    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community Details</h2>
+    <div style="display:grid;gap:14px;align-content:start;max-width:480px;">
+{_parts['identity']}
+{_parts['disclosures']}
+    </div>
+  </div>
+  <div id="gen-host-community-listing" style="display:grid;gap:20px;">
+{_parts['details']}
+  </div>
+{_parts['categories']}
+{_parts['screenshot']}
   <div>
     <button type="submit" class="btn">Add community</button>
     <a href="/admin/tools/communities" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
@@ -12406,11 +12415,22 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # that route's layout comment for the shared reasoning (form has to
     # close before a section that contains its own nested <form>s, so later
     # sections bind stray inputs back to it via form="comm-edit-form", the
-    # same trick Warm Intro already used on the Software page). No Agent
-    # taxonomy here (Communities don't have one) and no Warm-Intro-equivalent
-    # (no vendor-contact concept for a community), so the top identity row is
-    # two columns, not three: Name/URL + Disclosures. The structured
-    # Reach/Cost/Sponsorship/Access/Format/Notes block — the closest thing
+    # same trick Warm Intro already used on the Software page).
+    #
+    # Admin intake form layout pass: Software's Company Details / Warm Intro
+    # two-column split (.tool-form-cols, 2fr/1fr) is NOT reused here.
+    # Communities genuinely has no Warm-Intro-equivalent — no vendor_name/
+    # vendor_email/warm_intro_enabled columns exist on the communities table,
+    # no contact fields, no button anywhere on a community profile — so
+    # there's nothing to put in a right column. Featured and Advisor (both
+    # real, working checkboxes) instead fold directly into one single-column
+    # "Community Details" block alongside Name/URL, no separate "Disclosures"
+    # label — same idea as Software's merge, just without a second column
+    # to pair it against. Kept the "Community Details" heading rather than
+    # renaming to "Company Details": a community isn't a company, same
+    # reasoning that kept "Similar communities" instead of "Core competition"
+    # below. The structured Reach/Cost/Sponsorship/Access/Format/Notes block
+    # — the closest thing
     # Communities have to Software's "Business summary" — gets its own
     # "Program details" heading rather than reusing that label, since none of
     # it is prose Brian writes; it's the factual/categorical fields a listing
@@ -12427,7 +12447,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # line below) and is out of scope for this reorg — flagged in the PR
     # rather than restructured on assumption.
     _parts = _community_form_fields_parts(c, categories)
-    body = f"""<div class="page page-form">
+    body = f"""<div class="page page-grid">
 <h1>Edit community</h1>
 {_CROPPER_CDN_HTML}
 <p style="font-size:13px;color:var(--muted);margin:-8px 0 24px;"><a href="/admin/tools/communities/{c['id']}/profile">Edit the 23-field community profile draft &rarr;</a></p>
@@ -12436,14 +12456,9 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 
   <div>
     <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community Details</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;align-items:start;">
-      <div style="display:grid;gap:14px;align-content:start;">
+    <div style="display:grid;gap:14px;align-content:start;max-width:480px;">
 {_parts['identity']}
-      </div>
-      <div style="display:grid;gap:14px;align-content:start;">
-        <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Disclosures</div>
 {_parts['disclosures']}
-      </div>
     </div>
   </div>
 
@@ -13025,16 +13040,49 @@ def admin_tools_new(request: Request):
 <h1>Add software</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
 <form method="post" action="/admin/tools/new" style="display:grid;gap:20px;">
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
-    <input id="tool-name" name="name" required maxlength="200"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
-    <input id="tool-url" name="url" type="url" required maxlength="500"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-      placeholder="https://…">
+  <div class="tool-form-cols">
+    <div style="display:grid;gap:14px;align-content:start;">
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Company Details</h2>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor name *</label>
+        <input id="tool-name" name="name" required maxlength="200"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      </div>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
+        <input id="tool-url" name="url" type="url" required maxlength="500"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+          placeholder="https://…">
+      </div>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="advisor" value="1">
+        <span>&#129308; Formal advisor</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="promoted" value="1">
+        <span>&#10024; Featured</span>
+      </label>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm Intro</h2>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
+        <input name="vendor_name" maxlength="200"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+          placeholder="Jane Smith">
+      </div>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
+        <input name="vendor_email" type="email" maxlength="200"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+          placeholder="contact@vendor.com">
+      </div>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="warm_intro_enabled" value="1">
+        <span>&#128232; Offer warm intro</span>
+      </label>
+      <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in above—either alone isn&rsquo;t enough.</p>
+    </div>
   </div>
   <div id="gen-host-tool-desc-new">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
@@ -13059,38 +13107,6 @@ def admin_tools_new(request: Request):
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
       {_tool_category_checkboxes(categories)}
-    </div>
-  </div>
-  <div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="advisor" value="1">
-      <span>&#9733; Formal advisor—mark this tool with an advisor star</span>
-    </label>
-  </div>
-  <div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="promoted" value="1">
-      <span>&#10024; Featured—pin to top of directory with coral badge</span>
-    </label>
-  </div>
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;">
-    <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Warm Intro</div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="warm_intro_enabled" value="1">
-      <span>&#10024; Offer a Warm Intro button for this tool</span>
-    </label>
-    <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">The button only actually shows once this is checked <strong>and</strong> a vendor contact email is filled in below—either alone isn&rsquo;t enough.</p>
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
-      <input name="vendor_name" maxlength="200"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="Jane Smith">
-    </div>
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
-      <input name="vendor_email" type="email" maxlength="200"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-        placeholder="contact@vendor.com">
     </div>
   </div>
   <div>
@@ -13423,56 +13439,46 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
 
-  <div>
-    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Company Details</h2>
-    <!-- align-items:start (not the grid default of stretch): without it every
-         column stretches to match Warm Intro, the tallest of the three, which
-         reads as dead space under Name/URL and Disclosures once populated with
-         real data. Same fix applies to the two-column Community Details row
-         in admin_communities_edit below. -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;align-items:start;">
-      <div style="display:grid;gap:14px;align-content:start;">
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Software name *</label>
-          <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
-            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-        </div>
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
-          <input id="tool-url" name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
-            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-        </div>
+  <div class="tool-form-cols">
+    <div style="display:grid;gap:14px;align-content:start;">
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Company Details</h2>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor name *</label>
+        <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
       </div>
-      <div style="display:grid;gap:14px;align-content:start;">
-        <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Disclosures</div>
-        <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-          <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
-          <span>&#9733; Formal advisor—mark this tool with an advisor star</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-          <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
-          <span>&#10024; Featured—pin to top of directory with coral badge</span>
-        </label>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">URL *</label>
+        <input id="tool-url" name="url" type="url" required maxlength="500" value="{_esc(tool['url'])}"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
       </div>
-      <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
-        <div style="font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Warm Intro</div>
-        <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
-          <input type="checkbox" name="warm_intro_enabled" value="1"{'checked' if tool.get('warm_intro_enabled') else ''}>
-          <span>&#10024; Offer a Warm Intro button for this tool</span>
-        </label>
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
-          <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
-            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-            placeholder="Jane Smith">
-        </div>
-        <div>
-          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
-          <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
-            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
-            placeholder="contact@vendor.com">
-        </div>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
+        <span>&#129308; Formal advisor</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
+        <span>&#10024; Featured</span>
+      </label>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm Intro</h2>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
+        <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+          placeholder="Jane Smith">
       </div>
+      <div>
+        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact email</label>
+        <input name="vendor_email" type="email" maxlength="200" value="{_esc(tool.get('vendor_email') or '')}"
+          style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+          placeholder="contact@vendor.com">
+      </div>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="warm_intro_enabled" value="1"{'checked' if tool.get('warm_intro_enabled') else ''}>
+        <span>&#128232; Offer warm intro</span>
+      </label>
     </div>
   </div>
 
