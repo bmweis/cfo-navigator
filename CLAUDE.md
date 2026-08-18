@@ -1131,6 +1131,26 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   distinct from the existing Remaining tile (which is every row without
   `content_html` yet — true of the entire corpus by default, and says
   nothing about whether the original save itself looked suspect).
+- **Durability audit item 4 — a per-article "Accept as final" override for
+  the manual-review tier's one real false-positive.** An article with
+  real-but-short content fails `assess_extraction_quality()` identically
+  forever (no URL correction can fix it — the URL is already correct), with
+  no exit short of a direct DB edit. `Library.accept_article_content()`
+  writes a `content_refetch_log` row with a third `status` value,
+  `'accepted'` — chosen specifically because it composes for free with
+  `_manual_review_article_ids()`'s existing latest-attempt-is-`'failure'`
+  check, no query changes needed there. `articles_needing_content_backfill()`
+  and `count_content_backfill_remaining()` separately exclude the same
+  latest-row-`'accepted'` set, so the override is durable against future
+  automatic retries too, not just hidden from one admin list.
+  `POST /admin/library/backfill-content/{id}/accept` and `.../unaccept` are
+  per-article only — **no bulk/select-all form exists on purpose**, this is
+  a one-at-a-time escape hatch, not a backfill mechanism. Undo is fully
+  additive (a new `'failure'` row, never deleting the `'accepted'` one), so
+  an accept-then-reverse stays visible in the log. New admin-page section
+  ("Accepted as final", with Undo per row) and stats tile. See
+  ARCHITECTURE.md's "'Accept as final' manual-review override" section for
+  the full write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found

@@ -2907,6 +2907,11 @@ class Library:
           (a Cloudflare block can lift, a 404 can be relinked), so it's
           reachable again the moment a correction resets its attempt count,
           not just via force=True.
+        - (durability audit item 4) any article accept_article_content() has
+          marked accepted-as-final (_accepted_content_ids) — the admin's
+          explicit "this is fine as-is" call has to actually stick, not just
+          hide the article from one list while the next backfill run
+          silently re-fails and re-flags it.
         `force=True` re-runs every row with a saved URL, defunct-service and
         needs-manual-review both included — for standardizing the whole
         library after an extraction-logic change, or re-checking a domain
@@ -2954,6 +2959,8 @@ class Library:
                          )
                        ORDER BY a.id"""
                 ).fetchall()
+                accepted_ids = self._accepted_content_ids()
+                rows = [r for r in rows if r["id"] not in accepted_ids]
             matched = [r for r in rows if _host_matches(r["url"])][:limit]
             return [self._row_to_dict(r) for r in matched]
 
@@ -2976,7 +2983,9 @@ class Library:
                  )
                ORDER BY a.id"""
         ).fetchall()
-        rows = [r for r in rows if r["id"] not in manual_review_ids][:limit]
+        accepted_ids = self._accepted_content_ids()
+        rows = [r for r in rows if r["id"] not in manual_review_ids
+                and r["id"] not in accepted_ids][:limit]
         return [self._row_to_dict(r) for r in rows]
 
     def count_structured_content(self) -> int:
@@ -2992,11 +3001,13 @@ class Library:
 
     def count_content_backfill_remaining(self) -> int:
         """Matches articles_needing_content_backfill()'s default (non-force)
-        scope exactly, including both the defunct-service AND (Phase 5b
-        follow-up #2) needs-manual-review exclusions — so this stat reads as
-        "how many articles the next default-scope run will actually
-        attempt," not an inflated count that includes articles already
-        known permanently unrecoverable or parked for a human to correct."""
+        scope exactly, including the defunct-service, needs-manual-review
+        (Phase 5b follow-up #2), and accepted-as-final (durability audit
+        item 4) exclusions — so this stat reads as "how many articles the
+        next default-scope run will actually attempt," not an inflated
+        count that includes articles already known permanently
+        unrecoverable, parked for a human to correct, or explicitly
+        accepted as-is."""
         base_ids = {
             r[0] for r in self.conn.execute(
                 """SELECT a.id FROM articles a
@@ -3010,7 +3021,7 @@ class Library:
                      )"""
             ).fetchall()
         }
-        return len(base_ids - self._manual_review_article_ids())
+        return len(base_ids - self._manual_review_article_ids() - self._accepted_content_ids())
 
     def count_permanently_excluded_content(self) -> int:
         """How many articles have been marked defunct-service on their most
@@ -3386,6 +3397,122 @@ class Library:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- manual-review "accept as final" override (durability audit item 4) -
+
+    def accept_article_content(self, article_id: int) -> bool:
+        """Escape hatch for a false positive in the manual-review tier: an
+        article with real-but-short content (under
+        extract._MIN_CONTENT_WORDS) fails assess_extraction_quality()
+        identically forever, with no way out short of a DB edit — a URL
+        correction can't help, since the URL is already correct.
+
+        Composes with _manual_review_article_ids() by writing a new
+        content_refetch_log row with a THIRD status value, 'accepted' —
+        distinct from 'success'/'failure' — rather than a new column or a
+        special-cased reason string. That query already only looks at each
+        article's MOST RECENT attempt and requires status='failure', so an
+        'accepted' row as the latest attempt removes the article from the
+        manual-review list for free, with no change needed there. The same
+        latest-row idiom is reused in articles_needing_content_backfill()'s
+        default scope and count_content_backfill_remaining() to also pull an
+        accepted article OUT of automatic retry — durable, not just hidden
+        from one list — so a future backfill run can't silently overwrite an
+        admin's "this is fine as-is" call with a fresh failure row.
+
+        The prior failure reason (if any) is copied onto the accepted row
+        itself, purely for display (see list_accepted_content) and so
+        unaccept_article_content can restore it without a second query.
+        Per-article only — no bulk/select-all variant exists on purpose,
+        this is a deliberate one-at-a-time override, not a backfill
+        mechanism. Returns False if the article doesn't exist."""
+        row = self.conn.execute("SELECT id FROM articles WHERE id=?", (article_id,)).fetchone()
+        if row is None:
+            return False
+        last = self.conn.execute(
+            "SELECT reason FROM content_refetch_log WHERE article_id=? "
+            "ORDER BY attempted_at DESC LIMIT 1", (article_id,)
+        ).fetchone()
+        prior_reason = (last["reason"] if last else "") or ""
+        self.conn.execute(
+            "INSERT INTO content_refetch_log (article_id, status, reason, detail, source, attempted_at) "
+            "VALUES (?,'accepted',?,?,?,?)",
+            (article_id, prior_reason, "accepted as final by admin override", "accept", _now()),
+        )
+        self.conn.commit()
+        return True
+
+    def unaccept_article_content(self, article_id: int) -> bool:
+        """Undo accept_article_content — restores the article to whatever
+        state it would be in had it never been accepted, by writing a new
+        'failure' row carrying the same reason the accepted row had
+        recorded. Deliberately additive (content_refetch_log's full history
+        is never mutated or deleted, same non-destructive precedent as
+        everywhere else in this codebase) rather than deleting the
+        'accepted' row — the fact that it WAS accepted, and later reversed,
+        stays visible in the log. Returns False if the article was never
+        accepted (or the accepted state has already been superseded by a
+        later log row of any kind)."""
+        latest = self.conn.execute(
+            "SELECT status, reason FROM content_refetch_log WHERE article_id=? "
+            "ORDER BY attempted_at DESC LIMIT 1", (article_id,)
+        ).fetchone()
+        if latest is None or latest["status"] != "accepted":
+            return False
+        self.conn.execute(
+            "INSERT INTO content_refetch_log (article_id, status, reason, detail, source, attempted_at) "
+            "VALUES (?,'failure',?,?,?,?)",
+            (article_id, latest["reason"] or "too-thin",
+             "un-accepted by admin — resumes normal retry/manual-review scoring", "accept", _now()),
+        )
+        self.conn.commit()
+        return True
+
+    def list_accepted_content(self, limit: int = 500) -> list[dict]:
+        """Every article currently accepted-as-final (latest content_refetch_log
+        row has status='accepted') — backs the admin page's "Accepted as
+        final" section, the mirror of list_articles_needing_manual_review
+        for the escape hatch this composes with."""
+        rows = self.conn.execute(
+            """WITH latest AS (
+                 SELECT l.article_id, l.status, l.reason, l.attempted_at,
+                        ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.attempted_at DESC) AS rn
+                 FROM content_refetch_log l
+               )
+               SELECT lt.article_id AS article_id, art.title AS title, art.url AS current_url,
+                      lt.reason AS reason, lt.attempted_at AS accepted_at
+               FROM latest lt
+               JOIN articles art ON art.id = lt.article_id
+               WHERE lt.rn=1 AND lt.status='accepted'
+               ORDER BY lt.attempted_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_content_accepted(self) -> int:
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM (
+                 SELECT article_id, status,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               ) WHERE rn=1 AND status='accepted'"""
+        ).fetchone()[0]
+
+    def _accepted_content_ids(self) -> set[int]:
+        """Article ids whose most recent content_refetch_log attempt is
+        status='accepted' — the exclusion set articles_needing_content_backfill()
+        and count_content_backfill_remaining() both subtract out, so an
+        accepted article is durably out of automatic retry, not just hidden
+        from the manual-review list."""
+        return {
+            r[0] for r in self.conn.execute(
+                """SELECT article_id FROM (
+                     SELECT article_id, status,
+                            ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                     FROM content_refetch_log
+                   ) WHERE rn=1 AND status='accepted'"""
+            ).fetchall()
+        }
 
     def content_refetch_failure_counts(self) -> dict[str, int]:
         """Failure count by reason, most-recent-attempt-per-article only —

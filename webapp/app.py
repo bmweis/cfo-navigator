@@ -23200,6 +23200,8 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         needs_check_count = lib.count_needs_content_check()
         needs_review_count = lib.count_articles_needing_manual_review()
         needs_review_rows = lib.list_articles_needing_manual_review(limit=500)
+        accepted_count = lib.count_content_accepted()
+        accepted_rows = lib.list_accepted_content(limit=500)
         failure_counts = lib.content_refetch_failure_counts()
         failure_domains = lib.content_refetch_failure_domains(limit=15)
         wayback_count = lib.count_wayback_content()
@@ -23332,11 +23334,33 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
                       if url else title)
         last = _esc((r.get("last_attempted_at") or "")[:19].replace("T", " "))
+        accept_form = (f'<form method="post" action="/admin/library/backfill-content/{r["article_id"]}/accept" '
+                       f'onsubmit="return confirm(\'Accept this article\\u2019s current content as final? '
+                       f'It will stop showing up here and stop being auto-retried.\');">'
+                       f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;white-space:nowrap;">Accept as final</button></form>')
         return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}'
                 f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-all;">{_esc(url)}</div></td>'
                 f'<td style="padding:7px 12px;font-size:13px;">{reason_html}</td>'
                 f'<td style="padding:7px 12px;font-size:13px;text-align:center;">{r.get("attempt_count", 0)}</td>'
-                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{last}</td></tr>')
+                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{last}</td>'
+                f'<td style="padding:7px 12px;">{accept_form}</td></tr>')
+
+    def _accepted_row(r):
+        labels = {"paywall": "Paywall", "bot-challenge": "Bot challenge",
+                  "too-thin": "Too thin", "fetch-error": "Fetch error"}
+        reason_label = _esc(labels.get(r.get("reason") or "", r.get("reason") or "unknown"))
+        title = _esc(r.get("title") or f'article #{r["article_id"]}')
+        url = r.get("current_url") or ""
+        title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
+                      if url else title)
+        when = _esc((r.get("accepted_at") or "")[:19].replace("T", " "))
+        undo_form = (f'<form method="post" action="/admin/library/backfill-content/{r["article_id"]}/unaccept">'
+                     f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;white-space:nowrap;">Undo</button></form>')
+        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}'
+                f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-all;">{_esc(url)}</div></td>'
+                f'<td style="padding:7px 12px;font-size:13px;">{reason_label}</td>'
+                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{when}</td>'
+                f'<td style="padding:7px 12px;">{undo_form}</td></tr>')
 
     manual_review_html = ""
     if needs_review_rows:
@@ -23346,7 +23370,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
     <div>
       <div style="font-weight:600;font-size:14px;">Needs manual review ({needs_review_count:,})</div>
-      <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Failed {Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD}+ times in a row&mdash;excluded from automatic retry, but NOT considered permanently dead (unlike Defunct service below). Export, fill in a corrected URL for any you can find, and re-import to fix and requeue them.</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Failed {Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD}+ times in a row&mdash;excluded from automatic retry, but NOT considered permanently dead (unlike Defunct service below). Export, fill in a corrected URL for any you can find, and re-import to fix and requeue them. If the content that's already saved is actually fine as-is (a real but short article, say), use &ldquo;Accept as final&rdquo; on that row instead&mdash;per-article only, no bulk option.</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <a href="/admin/library/backfill-content/manual-review/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>
@@ -23366,8 +23390,31 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
       <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last failure</th>
       <th style="padding:7px 12px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Attempts</th>
       <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last attempt</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"></th>
     </tr></thead>
     <tbody>{review_rows_html}</tbody>
+  </table>
+  </div>
+</div>"""
+
+    accepted_html = ""
+    if accepted_rows:
+        accepted_rows_html = "".join(_accepted_row(r) for r in accepted_rows)
+        accepted_html = f"""
+<div id="accepted-content" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:20px 0;">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--line);">
+    <div style="font-weight:600;font-size:14px;">Accepted as final ({accepted_count:,})</div>
+    <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Marked &ldquo;good enough as-is&rdquo; by an admin&mdash;permanently out of automatic retry and out of Needs manual review above, until undone here.</div>
+  </div>
+  <div style="overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Reason it was flagged</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Accepted</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"></th>
+    </tr></thead>
+    <tbody>{accepted_rows_html}</tbody>
   </table>
   </div>
 </div>"""
@@ -23403,6 +23450,10 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
     <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{needs_check_count:,}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Flagged at save</div>
+  </div>
+  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:26px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{accepted_count:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Accepted as final</div>
   </div>
 </div>
 
@@ -23443,6 +23494,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 </div>
 
 {manual_review_html}
+{accepted_html}
 {failures_html}
 {domains_html}
 {log_html}
@@ -23514,6 +23566,41 @@ def admin_backfill_content_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
     return JSONResponse(_job_get("content_backfill"))
+
+
+@app.post("/admin/library/backfill-content/{article_id}/accept")
+def admin_backfill_content_accept(request: Request, article_id: int):
+    """Durability audit item 4 — mark one needs-manual-review article's
+    current content accepted as final. Per-article only, no bulk/select-all
+    form exists on purpose (this is a deliberate one-at-a-time override, not
+    a backfill mechanism) — see Library.accept_article_content."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        ok = lib.accept_article_content(article_id)
+    finally:
+        lib.close()
+    msg = "Accepted as final." if ok else "Article not found."
+    key = "msg" if ok else "error"
+    return RedirectResponse(f"/admin/library/backfill-content?{key}={quote(msg)}#accepted-content",
+                            status_code=303)
+
+
+@app.post("/admin/library/backfill-content/{article_id}/unaccept")
+def admin_backfill_content_unaccept(request: Request, article_id: int):
+    """Reverses accept_article_content — see its docstring. Also
+    per-article, same page."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        ok = lib.unaccept_article_content(article_id)
+    finally:
+        lib.close()
+    msg = "Un-accepted—back in normal scope." if ok else "That article isn't currently accepted."
+    key = "msg" if ok else "error"
+    return RedirectResponse(f"/admin/library/backfill-content?{key}={quote(msg)}", status_code=303)
 
 
 @app.get("/admin/library/backfill-content/manual-review/export.csv")
