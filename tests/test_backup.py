@@ -147,6 +147,10 @@ def test_backup_now_logs_success_with_drive_file_id_and_row_count(lib, monkeypat
     monkeypatch.setattr(backup, "_access_token", lambda: "faketoken")
     monkeypatch.setattr(backup.requests, "post",
                          lambda *a, **k: _FakeResponse({"id": "drivefile123", "name": "x"}))
+    # backup_now() now prunes after a successful upload (see the retention
+    # tests below) — an empty file listing keeps this test focused on its
+    # original purpose (logging), not pruning behavior.
+    monkeypatch.setattr(backup.requests, "get", lambda *a, **k: _FakeResponse({"files": []}))
 
     result = backup.backup_now(db)
     assert result["drive_file_id"] == "drivefile123"
@@ -335,3 +339,78 @@ def test_admin_backup_page_history_table_shows_no_backups_yet(admin_client, monk
     monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "folder123")
     r = client.get("/admin/library/backup")
     assert "no off-site backups recorded yet" in r.text.lower()
+
+
+# --- prune_old_backups / _select_backups_to_delete — daily-cadence retention -
+
+def _mk_file(idx, days_ago, base):
+    from datetime import timedelta
+    dt = base - timedelta(days=days_ago)
+    return {"id": f"f{idx}", "name": f"library-{dt.strftime('%Y%m%d')}.db",
+            "createdTime": dt.isoformat().replace("+00:00", "Z")}
+
+
+def test_select_backups_to_delete_keeps_daily_window_and_weekly_tail():
+    from datetime import datetime, timezone
+    base = datetime(2026, 8, 18, 9, 0, tzinfo=timezone.utc)
+    files = [_mk_file(i, i, base) for i in range(60)]  # newest first, i=0 is today
+
+    to_delete = backup._select_backups_to_delete(files, keep_daily=14, keep_weekly=8)
+    kept_ids = {f["id"] for f in files} - {f["id"] for f in to_delete}
+
+    # The 14 most recent must always survive, unconditionally.
+    assert all(f"f{i}" in kept_ids for i in range(14))
+    # At most 14 + 8 = 22 survive total.
+    assert len(kept_ids) <= 22
+    assert len(to_delete) == len(files) - len(kept_ids)
+
+
+def test_select_backups_to_delete_keeps_everything_under_the_daily_window():
+    from datetime import datetime, timezone
+    base = datetime(2026, 8, 18, 9, 0, tzinfo=timezone.utc)
+    files = [_mk_file(i, i, base) for i in range(10)]
+    to_delete = backup._select_backups_to_delete(files, keep_daily=14, keep_weekly=8)
+    assert to_delete == []
+
+
+def test_prune_old_backups_deletes_and_reports_counts(monkeypatch, configured_env):
+    from datetime import datetime, timezone
+    base = datetime(2026, 8, 18, 9, 0, tzinfo=timezone.utc)
+    files = [_mk_file(i, i, base) for i in range(30)]
+
+    monkeypatch.setattr(backup, "_access_token", lambda: "faketoken")
+    monkeypatch.setattr(backup, "_resolve_folder_id", lambda db_path, token: "folder123")
+    monkeypatch.setattr(backup.requests, "get", lambda *a, **k: _FakeResponse({"files": files}))
+
+    deleted_ids = []
+
+    def _fake_delete(*a, **k):
+        # url is the first positional arg to requests.delete(url, ...)
+        deleted_ids.append(a[0].rsplit("/", 1)[-1])
+        return _FakeResponse({})
+
+    monkeypatch.setattr(backup.requests, "delete", _fake_delete)
+
+    result = backup.prune_old_backups("unused.db", keep_daily=14, keep_weekly=8)
+    assert result["error"] == ""
+    assert result["deleted"] == len(deleted_ids)
+    assert result["kept"] == len(files) - result["deleted"]
+    assert result["deleted"] > 0
+    # Nothing from the unconditional daily window was ever sent for deletion.
+    assert all(f"f{i}" not in deleted_ids for i in range(14))
+
+
+def test_prune_old_backups_noop_when_not_configured(monkeypatch):
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GOOGLE_OAUTH_REFRESH_TOKEN", raising=False)
+    result = backup.prune_old_backups("unused.db")
+    assert result == {"deleted": 0, "kept": 0, "error": ""}
+
+
+def test_prune_old_backups_never_raises_on_failure(monkeypatch, configured_env):
+    monkeypatch.setattr(backup, "_access_token",
+                        lambda: (_ for _ in ()).throw(RuntimeError("token refresh failed")))
+    result = backup.prune_old_backups("unused.db")
+    assert result["deleted"] == 0
+    assert "token refresh failed" in result["error"]

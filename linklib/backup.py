@@ -23,13 +23,25 @@ Design notes
   what powers the status banner + history table on ``/admin/library/backup``
   (Phase O). The ``print()`` calls below stay as a redundant secondary
   signal in Railway's runtime logs, but they're no longer the only record.
-- **Scheduling lives outside this module.** A weekly GitHub Action
-  (``.github/workflows/backup.yml``) is the primary trigger, hitting
-  ``POST /admin/backup-now`` on the live site. The ~18 ``maybe_backup()``
-  call sites sprinkled through ``webapp/app.py``'s admin/save routes are a
-  harmless bonus trigger — they fire only when an admin action happens to
-  land more than a week after the last success, which historically hasn't
-  been reliable on its own (Phase O investigation).
+- **Scheduling lives outside this module.** A GitHub Action
+  (``.github/workflows/backup.yml``, daily as of 2026-08 — Railway-native
+  volume snapshots turned out unavailable on the current plan, so this is
+  the only recovery path and daily beats weekly for how much a restore
+  could lose) is the primary trigger, hitting ``POST /admin/backup-now`` on
+  the live site. The ~18 ``maybe_backup()`` call sites sprinkled through
+  ``webapp/app.py``'s admin/save routes are a harmless bonus trigger (still
+  debounced to once a week by default — see ``maybe_backup``'s own
+  ``min_interval_hours``) — they fire only when an admin action happens to
+  land more than that long after the last success, which historically
+  hasn't been reliable on its own (Phase O investigation).
+- **Retention.** Daily snapshots would grow the Drive folder without limit
+  where weekly never accumulated fast enough to matter — ``backup_now()``
+  calls ``prune_old_backups()`` after every successful upload, keeping the
+  most recent 14 snapshots unconditionally plus one per ISO week for 8
+  weeks further back, deleting everything older. Stateless and
+  self-healing: recomputed from Drive's actual file listing every run, not
+  a separate tracking table, so a missed prune just means one extra file
+  survives until the next run catches it.
 - **The target Drive folder is self-managed, not hand-picked.** The OAuth
   refresh token is minted with the ``drive.file`` scope (see below) —
   deliberately the narrowest Drive scope, not full ``drive`` access — which
@@ -194,6 +206,87 @@ def _article_count(db_path: str) -> int:
         conn.close()
 
 
+def _list_backup_files(token: str, folder_id: str) -> list[dict]:
+    """Every non-trashed file in the backup folder, newest first. Fresh
+    from Drive on every call — no separate tracking table — so a missed
+    prune pass just means one extra file survives until the next run
+    catches it, never permanent drift."""
+    r = requests.get(
+        _FILES_URL,
+        headers={"Authorization": f"Bearer {token}"},
+        params={"q": f"'{folder_id}' in parents and trashed=false",
+                "fields": "files(id,name,createdTime)",
+                "orderBy": "createdTime desc",
+                "pageSize": 1000},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json().get("files", [])
+
+
+def _select_backups_to_delete(files: list[dict], keep_daily: int = 14,
+                               keep_weekly: int = 8) -> list[dict]:
+    """`files` sorted newest-first (createdTime desc, matches
+    _list_backup_files's own ordering). Keeps the most recent `keep_daily`
+    files unconditionally (covers the daily cadence's most recent stretch),
+    then walks further back keeping at most one file per distinct ISO
+    calendar week for the next `keep_weekly` weeks — everything else is
+    marked for deletion. Deterministic and stateless: recomputed from
+    Drive's actual listing every call, same non-drifting design as
+    _list_backup_files above."""
+    keep_ids = {f["id"] for f in files[:keep_daily]}
+    seen_weeks = set()
+    for f in files[keep_daily:]:
+        try:
+            dt = datetime.fromisoformat(f["createdTime"].replace("Z", "+00:00"))
+        except Exception:
+            continue
+        week_key = dt.isocalendar()[:2]  # (ISO year, ISO week number)
+        if week_key in seen_weeks:
+            continue
+        if len(seen_weeks) >= keep_weekly:
+            continue
+        seen_weeks.add(week_key)
+        keep_ids.add(f["id"])
+    return [f for f in files if f["id"] not in keep_ids]
+
+
+def _delete_backup_file(token: str, file_id: str) -> None:
+    r = requests.delete(f"{_FILES_URL}/{file_id}", headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    r.raise_for_status()
+
+
+def prune_old_backups(db_path: str, keep_daily: int = 14, keep_weekly: int = 8) -> dict:
+    """Delete Drive snapshots beyond the retention policy — the most recent
+    `keep_daily` backups unconditionally, plus at most one per ISO week for
+    `keep_weekly` further weeks back. Added when the backup cadence moved
+    from weekly to daily (2026-08): unbounded daily snapshots would have
+    grown the Drive folder without limit, where weekly never accumulated
+    fast enough to matter.
+
+    Best-effort, same contract as maybe_backup: never raises. A pruning
+    failure must never affect whether the backup itself succeeded — this
+    is called from backup_now() AFTER a successful upload, wrapped so its
+    own failure can't turn a real backup success into a reported failure.
+    Returns {"deleted": N, "kept": N, "error": str} for the caller to log."""
+    if not is_configured():
+        return {"deleted": 0, "kept": 0, "error": ""}
+    try:
+        token = _access_token()
+        folder_id = _resolve_folder_id(db_path, token)
+        files = _list_backup_files(token, folder_id)
+        to_delete = _select_backups_to_delete(files, keep_daily=keep_daily, keep_weekly=keep_weekly)
+        for f in to_delete:
+            try:
+                _delete_backup_file(token, f["id"])
+            except Exception as del_err:
+                print(f"[backup] failed to delete old snapshot {f.get('name')}: {del_err}")
+        return {"deleted": len(to_delete), "kept": len(files) - len(to_delete), "error": ""}
+    except Exception as e:
+        print(f"[backup] prune failed: {e}")
+        return {"deleted": 0, "kept": 0, "error": str(e)}
+
+
 def _log_attempt(db_path: str, *, status: str, filename: str = "", drive_file_id: str = "",
                   size_bytes: int = 0, row_count: int = 0, error: str = "") -> None:
     """Write one backup_log row. Best-effort — a logging failure must never
@@ -283,6 +376,10 @@ def backup_now(db_path: str) -> dict:
         result = {"name": name, "bytes": len(data), "drive_file_id": drive_file_id, "row_count": row_count}
         _log_attempt(db_path, status="success", filename=name, drive_file_id=drive_file_id,
                      size_bytes=len(data), row_count=row_count)
+        prune_result = prune_old_backups(db_path)
+        if prune_result["deleted"]:
+            print(f"[backup] pruned {prune_result['deleted']} old snapshot(s), "
+                  f"{prune_result['kept']} kept under retention policy")
         return result
     except Exception as e:
         _log_attempt(db_path, status="failure", error=str(e))

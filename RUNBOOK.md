@@ -15,11 +15,16 @@ Related reading: `ARCHITECTURE.md` (deployment map, auth model),
 **When:** the production database on the Railway volume is corrupt, was
 accidentally bulk-deleted from, or the volume was lost/recreated.
 
-**What you're restoring from:** the weekly off-site snapshots in Google
-Drive, named `library-YYYYMMDD-HHMMSS.db`. They're produced by
-`linklib/backup.py::maybe_backup` (debounced to once per 168 h, tracked by a
-`.last_backup` marker beside the DB) using SQLite's online backup API, so
-every snapshot is a consistent, self-contained file — no WAL sidecar needed.
+**What you're restoring from:** the daily (bumped from weekly, 2026-08) off-site
+snapshots in Google Drive, named `library-YYYYMMDD-HHMMSS.db`, retained per
+`linklib.backup.prune_old_backups()`'s policy (most recent 14 unconditionally,
+plus one per week for 8 further weeks, everything older deleted). The daily
+cadence comes from `.github/workflows/backup.yml`'s scheduled Action, the
+primary trigger — the in-app `linklib/backup.py::maybe_backup` bonus trigger
+is still separately debounced to once per 168 h, tracked by a
+`.last_backup` marker beside the DB. Every snapshot is produced via SQLite's
+online backup API, so it's a consistent, self-contained file — no WAL sidecar
+needed.
 They land in a Drive folder named **"CFO Navigator — Library Backups"**,
 owned by the Workspace account behind `GOOGLE_OAUTH_REFRESH_TOKEN`. The app
 creates this folder itself on the first successful backup and remembers its
@@ -104,10 +109,11 @@ shell on the volume:
       URL is the natural key)
 - [ ] Trigger a fresh off-site snapshot: `POST /admin/backup-now`
       (admin cookie or `?token=`), so Drive holds a copy of the restored
-      state. Note the weekly auto-backup won't fire on its own right away if
-      the `.last_backup` marker on the volume is recent — but the weekly
-      GitHub Action (`.github/workflows/backup.yml`, Phase O) bypasses that
-      debounce, so it isn't the only path back to a fresh snapshot.
+      state. Note the in-app `maybe_backup` bonus trigger won't fire on its
+      own right away if the `.last_backup` marker on the volume is recent —
+      but the daily GitHub Action (`.github/workflows/backup.yml`, Phase O)
+      bypasses that debounce, so it isn't the only path back to a fresh
+      snapshot.
 - [ ] Confirm that snapshot on `/admin/library/backup` — the status banner
       should read green with this restore's timestamp, and the history table's
       top row should show `status=success` with a row count matching what you
@@ -156,7 +162,7 @@ passwords are their own (scrypt, in the DB).
    - The MCP server config for Claude Desktop / Claude Code
      (`scripts/mcp_server.py` reads `LINKLIB_SAVE_TOKEN` from its env —
      it's set in the client's MCP config JSON).
-   - The GitHub repo secret backing the weekly backup Action
+   - The GitHub repo secret backing the daily backup Action
      (`.github/workflows/backup.yml`, Phase O) — Settings → Secrets and
      variables → Actions → `LINKLIB_SAVE_TOKEN`. Miss this and the Action
      starts failing with `401` on the next scheduled run, silently, until
@@ -175,7 +181,7 @@ passwords are their own (scrypt, in the DB).
 The site is one FastAPI process on Railway behind Cloudflare. Cloudflare
 does not cache HTML (stock cache config), so if the origin is down, the
 site is down — there is no "stale but serving" mode. The good news: the
-data is two-way safe (Railway volume + weekly Drive snapshots), so an
+data is two-way safe (Railway volume + daily Drive snapshots), so an
 outage is availability, not data loss.
 
 Work down this list; each step splits the problem in half.
@@ -250,7 +256,7 @@ paths against scratch files.
    a "live" one (fewer/different rows — stands in for the damaged volume
    DB).
 2. Produce the "Drive snapshot" from the good DB with
-   `linklib.backup.snapshot_to_file()` — the exact function the weekly
+   `linklib.backup.snapshot_to_file()` — the exact function the daily
    upload uses, so the artifact is byte-for-byte what Drive would hold.
 3. Run the app against the live DB:
    `LINKLIB_DB=.../live.db LINKLIB_SAVE_TOKEN=<anything> uvicorn webapp.app:app --port 8123`
