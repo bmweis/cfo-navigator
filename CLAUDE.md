@@ -1052,6 +1052,65 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   pre-existing `tests/test_fetch_reliability.py` suite passes unmodified as
   the regression check. See ARCHITECTURE.md's Reader content-structure
   backfill section for the full write-up.
+- **Medium-platform Exa fetch tier (2026-08) — a third fetch tier for the
+  same backfill pipeline, targeting medium.com and its blocked lookalikes.**
+  Preceded by three read-only diagnostic rounds
+  (`scripts/medium_platform_scale_check.py`) that measured real scale (147
+  Medium-platform articles) and Exa-recovery feasibility before any of this
+  shipped — no user-agent swap gets past medium.com's Cloudflare block
+  (confirmed against real 403s), and unlike a `_DOMAIN_MIGRATIONS` entry
+  there's no single destination domain to redirect to, so this tier
+  (`linklib/medium_platform.py`) searches Exa broadly (no `includeDomains`
+  restriction) and validates whatever it finds via
+  `domain_migration._titles_match()` (reused, not reimplemented). Host
+  recognition (`is_medium_platform_host()`) is suffix-based — `medium.com`
+  itself, any `*.medium.com` subdomain (including author subdomains and the
+  `link.medium.com` short-link redirector), plus a hand-curated
+  `_MEDIUM_CUSTOM_DOMAINS` set (`bothsidesofthetable.com`, confirmed via its
+  Medium post-ID-hash URL slug) — the second diagnostic round specifically
+  found author subdomains slipping through an earlier exact-match carve-out
+  to a guaranteed-403 live re-fetch. **A same-domain carve-out splits
+  validation into two paths**, mirroring the exact split the diagnostic
+  found necessary: a candidate on some OTHER host is live re-fetched and run
+  through the standard `extract_reader_html()` + `assess_extraction_quality()`
+  gate; a candidate that resolves back onto a Medium-platform host itself
+  would just re-hit the same block on a live re-fetch — not a real test of
+  the candidate — so it's validated against Exa's own already-returned text
+  instead (a word-count floor), then converted to Reader HTML via the new
+  `extract.paragraphs_html_from_text()`. **Design principle behind that
+  formatter, and for any future fetch-tier work**: the Reader delivers a
+  consistent house reading experience regardless of publisher — a source is
+  an input to normalize, not a style to preserve. Concretely: markdown
+  headings become `<h2>`/`<h3>` (capped, plus an unmarked short Title-Case
+  line with no trailing punctuation is treated as a subheading too, since
+  Medium's own in-article headers arrive that way with no markdown surviving
+  the conversion), emphasis markers are stripped rather than converted
+  (cleanest read over markdown-parity), markdown links keep their visible
+  text and drop the URL, and a leading run of known Medium chrome ("Open in
+  app", "Sign up", "Get app", a lone "Follow"/"Listen"/"Share", the "N min
+  read" byline) is stripped — **conservative by design**: it only ever eats
+  from the top and stops for good at the first line that isn't chrome, so a
+  real paragraph that happens to echo a chrome phrase later in the piece
+  (e.g. "sign up for our newsletter") can never be dropped; the "N min read"
+  pattern alone is stripped wherever it lands, since no real sentence is
+  ever literally equal to it. Publisher boilerplate on the *live-refetch*
+  path (e.g. a TechCrunch promo banner) is explicitly out of scope for this
+  tier — a future Reader-quality pass, not this one's job. Tried before
+  Wayback (currently unreliable — archive.org rate-limiting), after
+  domain-migration, in `_finish_backfill_after_direct_failure` — same
+  "exactly one `content_refetch_log` row" invariant, `source='medium-search'`
+  on success. **Known gap, not fixed here**: a Medium-tier candidate on a
+  different host sometimes duplicates the article's own title/byline inline
+  (a syndication convention) — not deduped against the stored title, so a
+  synced article can occasionally show its title twice; flagged, not a
+  correctness bug. Also added: `Library.articles_needing_content_backfill()`'s
+  new `host_suffixes` parameter (plus a "Scope to host(s)" admin input) —
+  narrows a run to matching hosts and, for those hosts only, bypasses the
+  needs-manual-review exclusion (the point being to re-reach articles
+  stuck in manual review because this tier didn't exist yet when they were
+  last tried), while the defunct-service exclusion still applies regardless
+  of scope. See ARCHITECTURE.md's "Medium-platform Exa fetch tier" section
+  for the full write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found
@@ -1737,8 +1796,12 @@ tables, no third-party dependency.
 
 It's Brian's personal reading history (~1,500+ articles). It lives beside the code
 locally (on a Railway volume in production) and should never be committed —
-`.gitignore` covers it (`library.db` + `*.db`). Off-site weekly backups go to
-Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
+`.gitignore` covers it (`library.db` + `*.db`). Off-site daily backups (bumped from
+weekly, 2026-08 — Railway-native volume snapshots turned out unavailable on the
+current plan, so this is the only recovery path) go to Google Drive when the
+`GOOGLE_OAUTH_*` vars are set (see `.env.example`), with `linklib/backup.py`'s
+`prune_old_backups()` keeping the most recent 14 daily snapshots plus one per week
+for 8 further weeks, deleting the rest, so the folder doesn't grow without limit.
 
 ## Environment variables
 
@@ -1758,7 +1821,7 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 | `LINKLIB_CHAT_MODEL` | `claude-sonnet-4-6` | Claude model for Q&A and post drafting |
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
 | `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/read`'s Feed-view source list |
-| `GOOGLE_OAUTH_CLIENT_ID` | — | Google Cloud OAuth client ID. Required (with the two below) for `linklib/backup.py`'s weekly off-site Drive backup and `linklib/email_utils.py`'s outbound contact-form email — one client, both scopes. Absent → both features are a safe no-op, no error. |
+| `GOOGLE_OAUTH_CLIENT_ID` | — | Google Cloud OAuth client ID. Required (with the two below) for `linklib/backup.py`'s daily off-site Drive backup and `linklib/email_utils.py`'s outbound contact-form email — one client, both scopes. Absent → both features are a safe no-op, no error. |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | — | Google Cloud OAuth client secret, paired with the above. |
 | `GOOGLE_OAUTH_REFRESH_TOKEN` | — | OAuth refresh token (`drive.file` + `gmail.send` scopes), paired with the above. Mint once with both scopes — see `.env.example` for the exact steps. |
 | `GOOGLE_DRIVE_FOLDER_ID` | (self-managed) | Explicit override for the Drive folder id snapshots upload into. **Normally left unset** — the app creates its own folder ("CFO Navigator — Library Backups", in My Drive root) on the first successful backup and remembers its id in the `settings` table, since the `drive.file` OAuth scope can't see a folder made by hand in the Drive UI (Phase O — see the Key architecture decisions bullet above for the full 404 story). Only set this if a folder has been explicitly granted to the app some other way (e.g. a Drive Picker consent flow) and you want backups to target it instead. |
@@ -1883,8 +1946,9 @@ instead, off that page — kept for git history, not meant to run again.
 - Hosting/deployment on Railway (see Deployment below)
 - bmweis.com custom domain pointed at Railway (July 2026)
 - MCP server (`scripts/mcp_server.py`) wrapping `/api/search` for Claude Desktop/Code
-- Weekly off-site Drive backup, scheduled via GitHub Action (Phase O — see Key
-  architecture decisions above), with a persistent `backup_log` audit trail and a
+- Daily off-site Drive backup (bumped from weekly, 2026-08), scheduled via GitHub
+  Action (Phase O — see Key architecture decisions above), with retention pruning
+  (`linklib.backup.prune_old_backups`), a persistent `backup_log` audit trail, and a
   status banner + history table on `/admin/library/backup`
 
 **Not yet built (from the migration plan):**
@@ -1974,8 +2038,14 @@ appear.
 Work on a feature branch, push it, and open a PR into `main`; let the QA workflow
 (`tests` + `secret-scan`) run, then merge the PR. This keeps every change reviewable
 and traceable, and the **Checks** admin page (`/admin/checks`) mirrors what the PR
-must pass. (Enforced server-side by a branch-protection rule on `main` that requires
-a PR and passing checks — the convention here so tooling/agents follow it regardless.)
+must pass. **Mechanically enforced** (2026-08) by a GitHub ruleset (`main-protection`)
+on `main`: requires a PR before merging (0 required approvals — solo repo), requires
+the `tests` and `secret-scan` status checks to pass, requires the PR branch to be up
+to date with `main` before merge, blocks force pushes, restricts branch deletion, and
+has an empty bypass list — direct commits to `main` are blocked outright, not just
+discouraged by convention. (Before this, "requires a PR and passing checks" was
+convention only, not a real gate — worth knowing if a future investigation finds a
+commit that looks like it skipped review; anything from before this date could have.)
 
 **Open the PR as soon as there's a reviewable chunk — don't wait until a multi-phase
 task is fully done.** For work that's naturally sequenced into phases (e.g. a phased

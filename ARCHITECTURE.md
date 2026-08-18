@@ -35,8 +35,8 @@ flowchart LR
     A -.->|"native web_search tool<br/>(fallback: Exa off or no key)"| W
     R -->|"RSS/Atom + article<br/>full-text fetches"| F["Publisher sites"]
     R -->|"outbound email"| G["Gmail REST API"]
-    R -->|"weekly DB snapshot"| D["Google Drive"]
-    GH["GitHub Actions<br/>backup.yml, weekly cron"] -->|"POST /admin/backup-now<br/>(X-Save-Token, direct to<br/>Railway origin — bypasses CF)"| R
+    R -->|"daily DB snapshot"| D["Google Drive"]
+    GH["GitHub Actions<br/>backup.yml, daily cron"] -->|"POST /admin/backup-now<br/>(X-Save-Token, direct to<br/>Railway origin — bypasses CF)"| R
 ```
 
 Notes on the edges:
@@ -96,10 +96,10 @@ Notes on the edges:
   badge instead of dying in a log. At the DNS level (Cloudflare-managed) the
   domain has SPF and DKIM in place, plus DMARC in `p=none` monitoring mode —
   collecting reports, not yet enforcing.
-- **The weekly Drive backup is triggered by a GitHub Action, not a Railway
-  cron service.** `.github/workflows/backup.yml` calls `POST
-  /admin/backup-now` on a weekly schedule (`X-Save-Token` auth, same as
-  RUNBOOK.md's manual curl example) — this is Phase O's fix for the original
+- **The daily (bumped from weekly, 2026-08) Drive backup is triggered by a
+  GitHub Action, not a Railway cron service.** `.github/workflows/backup.yml`
+  calls `POST /admin/backup-now` on a daily schedule (`X-Save-Token` auth,
+  same as RUNBOOK.md's manual curl example) — this is Phase O's fix for the original
   mechanism (`linklib.backup.maybe_backup`, debounced and only fired as a
   side effect of ~18 admin/save routes in `webapp/app.py`) never getting a
   reliable weekly opportunity to run in practice. Those ~18 call sites are
@@ -274,7 +274,7 @@ used manual check rather than a per-turn or overhead cost.
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
-| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). Also backs the "needs manual review" capped-retry tier (Phase 5b follow-up #2, see the write-up below) — `Library._manual_review_article_ids()` counts attempts per article *since its last `url_correction_log` row* (or ever, if never corrected). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error` \| `defunct-service`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback or migration success, the URL actually used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` \| `'migration'` — distinguishes a Wayback-archived-snapshot or known-domain-migration success from a normal live-fetch success; see the "fetch reliability" and "retry backoff" notes in §3 below) |
+| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). Also backs the "needs manual review" capped-retry tier (Phase 5b follow-up #2, see the write-up below) — `Library._manual_review_article_ids()` counts attempts per article *since its last `url_correction_log` row* (or ever, if never corrected). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error` \| `defunct-service`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback or migration success, the URL actually used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` \| `'migration'` \| `'medium-search'` — distinguishes a Wayback-archived-snapshot, known-domain-migration, or Medium-platform-search success from a normal live-fetch success; see the "fetch reliability", "retry backoff", and "Medium-platform Exa fetch tier" notes in §3 below) |
 | `url_correction_log` | Durable trace of every manual URL correction applied via the manual-review CSV import (Phase 5b follow-up #2) — per CLAUDE.md's "every production data change leaves a trace" rule. Written by `Library.apply_article_url_correction()`, one row per correction, `old_url` snapshotted immediately before the `UPDATE` (same precedent as `tool_audit_log`/`community_audit_log`). No SQL-level FK to `articles`. `admin_id` is nullable and always `NULL` today — this app has no per-admin accounts (a single shared secret), so the column is forward-looking only. | `article_id` (no FK), `old_url`, `new_url`, `source` (default `'csv-import'`), `admin_id` (nullable, unused today) |
 
 ### FP&A Buddy (Ask)
@@ -1138,7 +1138,7 @@ from the public page. Not editable via the admin CRUD.
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
 | `contact_audit_log` | Same shape for contact deletions — kept separate so `item_id` is never ambiguous about which table it references. | as above, `item_id` → `contacts.id` |
-| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the weekly GitHub Action, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled Action run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
+| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily GitHub Action, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled Action run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
 
 ### Feed subscriptions
 
@@ -2212,6 +2212,116 @@ aggregates — so a new counting query was needed.
   completely untouched by this change — regression-covered by the pre-existing
   `tests/test_fetch_reliability.py` suite passing unmodified.
 
+### Medium-platform Exa fetch tier (2026-08)
+
+A third fetch tier for the same backfill pipeline, following three read-only
+diagnostic rounds (`scripts/medium_platform_scale_check.py`) that measured real
+scale (147 Medium-platform articles in the archive) and Exa-recovery feasibility
+before any of this shipped — see CLAUDE.md's Medium-platform investigation
+bullets for that history.
+
+- **Why a dedicated tier, not the general domain-migration one:** medium.com and
+  its custom-domain lookalikes (`bothsidesofthetable.com`) return an identical
+  Cloudflare block to every fetch attempt this tool makes — no user-agent swap
+  gets past it (confirmed against real 403s during the fetch-reliability work
+  above) — so unlike a `_DOMAIN_MIGRATIONS` entry, there's no single destination
+  domain to redirect to. Medium articles resolve to many different real hosts
+  (a publication's own site, a syndication partner, a Substack) or stay on
+  Medium itself under a different author/URL, so the tier searches broadly via
+  Exa (no `includeDomains` restriction, unlike the domain-migration tier's
+  single confirmed target) and validates whatever it finds.
+- **Host recognition is suffix-based** (`linklib/medium_platform.py`,
+  `is_medium_platform_host()`): `medium.com` itself, any `*.medium.com`
+  subdomain (an author's own `<handle>.medium.com`, or the `link.medium.com`
+  short-link redirector — both covered by the same suffix check, no separate
+  entries needed), and a short, hand-curated `_MEDIUM_CUSTOM_DOMAINS` set
+  (currently just `bothsidesofthetable.com`, confirmed live via its Medium
+  post-ID-hash URL slug format). The second diagnostic round specifically found
+  author subdomains slipping through an earlier exact-match carve-out to a
+  guaranteed-403 live re-fetch — the suffix check exists to close that gap.
+- **Candidate search and validation** (`find_medium_candidate()`, reusing
+  `linklib.domain_migration._titles_match()` — never reimplemented): the same
+  Exa Search API integration the domain-migration tier already uses (same
+  endpoint, `EXA_API_KEY`/`exa_enabled` kill switch, plain `requests.post`),
+  querying by title (+ author, if the article has one). Every candidate is
+  validated by title-match against the query results in order; the first that
+  clears the threshold wins.
+- **A same-domain carve-out splits validation into two paths**
+  (`pipeline._try_medium_platform()`, mirroring the exact split
+  `medium_platform_scale_check.py`'s diagnostic found necessary): if the Exa
+  candidate resolves to some OTHER host, it's live re-fetched and run through
+  the identical `extract_reader_html()` + `assess_extraction_quality()` gate a
+  direct fetch or a domain-migration candidate has to clear. If the candidate
+  resolves BACK onto a Medium-platform host itself, a live re-fetch would just
+  re-hit the same block that failed the original URL — not a real test of the
+  candidate — so it's validated against Exa's own already-returned
+  `contents.text` instead: a word-count floor matching
+  `extract._MIN_CONTENT_WORDS`, then converted to Reader HTML (below). The
+  diagnostic's revision #3 found 3-4 of an early sample's "unrecovered"
+  results were exactly this circular case, not genuinely bad candidates.
+- **`extract.paragraphs_html_from_text()`** turns Exa's plain-text Medium
+  extract into the same kind of structural HTML `extract_reader_html()`
+  produces from real markup — so a Medium-sourced article reads identically to
+  any other source in the Reader. This follows a standing design principle
+  established for this tier: **the Reader delivers a consistent house reading
+  experience regardless of publisher — a source is an input to normalize, not
+  a style to preserve.** Rules (resolved with Brian): markdown headings become
+  `<h2>`/`<h3>` (capped — Exa's plain text doesn't reliably distinguish deeper
+  levels; an unmarked short Title-Case line with no trailing punctuation is
+  also treated as a subheading, since Medium's own in-article section headers
+  arrive this way with no markdown syntax surviving the conversion), emphasis
+  markers (`*`/`**`/`_`/`__`) are stripped rather than converted to
+  `<em>`/`<strong>` (goal is the cleanest possible read, not markdown-parity
+  rendering), markdown links are reduced to their visible text only (the URL
+  adds nothing in a plain-text extract), paragraphs split on blank lines. A
+  leading run of known Medium navigation chrome ("Open in app", "Sign up",
+  "Get app", a lone "Follow"/"Listen"/"Share", the "N min read" byline) is
+  stripped before the real body — deliberately **conservative**: it only ever
+  eats from the top and stops for good at the first line that isn't a known
+  chrome phrase, so a real paragraph that happens to echo one of those words
+  later in the piece (e.g. a sentence about signing up for a newsletter) can
+  never be dropped. The "N min read" byline pattern is the one exception,
+  stripped wherever it lands (not just while still in the leading run) since
+  it's an unambiguous regex match no real sentence is ever literally equal to.
+  Out of scope, deliberately: publisher boilerplate on the *live-refetch* path
+  (e.g. a TechCrunch promo banner) — a future Reader-quality pass, not this
+  tier's job.
+- **Tried before Wayback, after domain-migration** in
+  `_finish_backfill_after_direct_failure`: domain-migration first (unrelated
+  host set, checked first purely by convention), then the Medium-platform tier
+  if the URL's host is recognized, then Wayback as the last resort — Wayback is
+  currently unreliable due to archive.org-side rate-limiting (see
+  `linklib.wayback`'s module docstring), while this tier's hit rate on real
+  diagnostic data was strong enough to go first. Same "exactly one
+  `content_refetch_log` row per `backfill_article_content()` call" invariant as
+  the other two tiers: a Medium-tier success logs its own row
+  (`source='medium-search'`, `detail`=the candidate URL actually used) and
+  returns immediately; a miss logs nothing and falls through to Wayback, which
+  does its own single log.
+- **Known gap, not fixed here**: a Medium-tier candidate on a different host
+  often duplicates the original article's title/byline inline in its own body
+  (a syndication republish convention) — `paragraphs_html_from_text()` doesn't
+  detect or dedupe that against the article's own stored title, so a synced
+  article can occasionally show its title twice. Flagged rather than
+  silently accepted; not a correctness bug (the content itself is real), just
+  a minor cosmetic duplication left for a future pass if it turns out to
+  matter in practice.
+- **Admin page**: a `Library.count_medium_search_content()` note (mirrors
+  `count_wayback_content()`/`count_migration_content()`) and a "via Medium
+  search" badge (mirroring the existing "via Wayback"/"via Migration" badges)
+  on a Medium-tier success row in the attempts log.
+- **`host_suffixes` scoping** (`Library.articles_needing_content_backfill()`,
+  new optional parameter, plus a "Scope to host(s)" text input on
+  `/admin/library/backfill-content`): narrows a backfill run to articles whose
+  URL host matches one of the given suffixes and, for those matching hosts
+  ONLY, bypasses the needs-manual-review exclusion — most of the point of
+  scoping a run to a specific host is re-attempting exactly the articles that
+  got stuck in manual review because a new fetch tier (like this one) didn't
+  exist yet when they were last tried. The defunct-service exclusion still
+  applies even when host-scoped — a confirmed-dead host can't be un-dead by
+  narrowing the run to it. Not Medium-specific — any host suffix works — but
+  this is the change that motivated building it.
+
 ### Admin nav restructure, Library page cleanup, and page-width fixes (Phase 6)
 
 Three related but distinct pieces, shipped as one PR because the second and
@@ -2285,7 +2395,7 @@ Reader as tool #1. `_LIBRARY_TOOLS` is now 8 entries (down from 10):
 "Open Reader" is gone (moved to the callout) and "Historical sweep" is gone
 (merged into Archive Queue, next paragraph). Two descriptions were rewritten
 for clarity: **Archive backup**'s now explicitly says automated backups
-already run weekly via the GitHub Action (Phase O) and that this manual
+already run daily via the GitHub Action (Phase O) and that this manual
 tool is for an on-demand snapshot right before something risky, not a
 day-to-day safety net; **Reader content backfill**'s now explicitly
 differentiates itself from Archive Queue's Historical sweep panel
@@ -2676,7 +2786,7 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   direct-origin hits) and `Cache-Control: no-store` on `/admin/*` (so task
   badges are never served stale from the back-forward cache).
 - **`/admin/backup-now` is a deliberate, narrowly-scoped exception to the
-  canonical-host redirect (Phase O).** The weekly backup GitHub Action calls
+  canonical-host redirect (Phase O).** The daily backup GitHub Action calls
   this one route directly on the legacy Railway hostname on purpose, to
   route around Cloudflare's Bot Fight Mode (see the "publicly reachable
   Railway origin" note above) — without this exception, the 301 the
@@ -2881,7 +2991,7 @@ recorded anywhere, it's flagged rather than invented.
   file — but treat that as inference, not recorded rationale.
 - **SQLite + FTS5 on a Railway volume, not a hosted database.** *Why:* the
   scale is one curator plus a small member base; a single file needs zero
-  operational overhead, backs up by copying (`/admin/library/backup/download-db`, weekly
+  operational overhead, backs up by copying (`/admin/library/backup/download-db`, daily
   Drive snapshots), and FTS5 gives ranked full-text search for free.
   `db.py`'s docstring records the exit path: the same schema works on
   libSQL/Turso/D1 later — only the connection changes.
