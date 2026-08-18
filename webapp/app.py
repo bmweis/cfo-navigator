@@ -17854,8 +17854,9 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                             "content_refetch_log", "url_correction_log",
                             "feed_sections", "feeds"]),
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
-                                  "email_failures", "backup_log", "enrichment_cost", "manual_overhead",
-                                  "field_reviews", "narrative_review_log", "matchmaker_questions"]),
+                                  "email_failures", "backup_log", "integrity_check_log", "enrichment_cost",
+                                  "manual_overhead", "field_reviews", "narrative_review_log",
+                                  "matchmaker_questions"]),
 ]
 
 
