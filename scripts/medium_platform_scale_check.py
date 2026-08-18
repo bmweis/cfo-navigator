@@ -30,10 +30,13 @@ Usage:
     python -m scripts.medium_platform_scale_check --db /data/library.db
     python -m scripts.medium_platform_scale_check --db /data/library.db --skip-exa
     python -m scripts.medium_platform_scale_check --db /data/library.db --json
+    python -m scripts.medium_platform_scale_check --db /data/library.db --list-empties
 
---skip-exa runs Task 1 (the scale check) only — no EXA_API_KEY / network
-calls needed. Task 2 (the Exa spike) needs EXA_API_KEY set in the
-environment, same as the app itself.
+--skip-exa runs Tasks 1/3/4 (no Exa calls needed) and skips Task 2. Task 2
+(the Exa spike) needs EXA_API_KEY set in the environment, same as the app
+itself. --list-empties additionally prints a CSV of every empty-bucket
+article found library-wide by Task 4 (see below) — listing only, never
+writes or flags anything.
 
 Phase 0 (Medium fetch tier build) revision #2: the first spike accepted
 Exa's top-1 result blind and trusted Exa's own returned snippet text as
@@ -69,10 +72,27 @@ article, regardless of attempt/manual-review status — a separate
 question from "can Exa find a replacement," report-only, no
 flagging/deletion logic (see the standing "human review before any
 destructive production action" rule).
+
+Revision #4: Task 3's first real run found 80/147 Medium-platform
+articles (54%) empty or thin. Before locking the recovery tier's design
+around "Medium-platform specifically," we need to know whether that
+emptiness is Medium-specific (Cloudflare blocking the original save-time
+fetches — a domain-triggered recovery tier is the right shape) or
+library-wide (the save mechanism itself under-captures, and recovery
+should eventually generalize beyond Medium). New Task 4,
+`library_wide_content_audit()`, runs the SAME bucketing logic as Task 3
+— `_content_word_count()`/`_bucket_for_word_count()`, factored out of
+`content_audit()` so the two reports can't drift apart — across every
+article in the library (~4,516), grouped by URL host, showing the top 25
+hosts by empty-article count plus a full-library summary. `--list-empties`
+additionally prints a CSV of every empty-bucket article library-wide
+(id/title/url/word_count) — the raw material for a later deletion
+review, not acted on here. Still report-only throughout.
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sys
@@ -406,41 +426,56 @@ def print_exa_spike(results: dict) -> None:
 
 
 # --------------------------------------------------------------------------
-# Task 3 — existing-content audit
+# Task 3 — existing-content audit (Medium-platform only)
+# Task 4 — the same audit, library-wide, grouped by host
 # --------------------------------------------------------------------------
 
-def content_audit(lib: Library) -> dict:
-    """Word count of what's ALREADY STORED, right now, for every
-    Medium-platform article — regardless of attempt or manual-review
-    status. A different question from _spike_one_article's 60-word
-    acceptance threshold for a FOUND REPLACEMENT: this doesn't fetch
-    anything, it audits existing rows. Prefers content_html (structured,
-    what the Reader has shown since Phase 5b) converted to plain text via
+def _content_word_count(content: str, content_html: str) -> int:
+    """Word count of what's ALREADY STORED for one article, right now —
+    no fetching. Prefers content_html (structured, what the Reader has
+    shown since Phase 5b) converted to plain text via
     extract._extract_content() — reused, not reimplemented, the same
     plain-text contract FTS5/enrichment/search already depend on — and
     falls back to the plain `content` column when content_html is empty.
+    Shared by content_audit() (Task 3, Medium-only) and
+    library_wide_content_audit() (Task 4, every host) so both reports use
+    identical bucketing logic — no drift between the two."""
+    html = content_html or ""
+    text = _extract_content(html) if html.strip() else (content or "")
+    return len((text or "").split())
 
-    Report only: three buckets (empty/near-zero, under
-    _CONTENT_AUDIT_THIN_WORDS, at-or-above), no flagging or deletion
-    logic — see this script's module docstring and the standing "human
-    review before any destructive production action" rule."""
+
+def _bucket_for_word_count(word_count: int) -> str:
+    """'empty' (<= _CONTENT_AUDIT_NEAR_ZERO_WORDS), 'thin' (<
+    _CONTENT_AUDIT_THIN_WORDS), or 'ok'."""
+    if word_count <= _CONTENT_AUDIT_NEAR_ZERO_WORDS:
+        return "empty"
+    if word_count < _CONTENT_AUDIT_THIN_WORDS:
+        return "thin"
+    return "ok"
+
+
+def content_audit(lib: Library) -> dict:
+    """Task 3: the three-bucket word-count audit, scoped to
+    Medium-platform articles only — regardless of attempt or
+    manual-review status. A different question from _spike_one_article's
+    60-word acceptance threshold for a FOUND REPLACEMENT: this doesn't
+    fetch anything, it audits existing rows.
+
+    Report only: no flagging or deletion logic — see this script's module
+    docstring and the standing "human review before any destructive
+    production action" rule."""
     rows = lib.conn.execute(
         "SELECT id, url, title, content, content_html FROM articles WHERE url != ''"
     ).fetchall()
     medium_rows = [r for r in rows if _host(r["url"]) in MEDIUM_DOMAINS]
 
     empty, under_thin, ok = [], [], []
+    buckets = {"empty": empty, "thin": under_thin, "ok": ok}
     for r in medium_rows:
-        html = r["content_html"] or ""
-        text = _extract_content(html) if html.strip() else (r["content"] or "")
-        word_count = len((text or "").split())
+        word_count = _content_word_count(r["content"], r["content_html"])
         entry = {"id": r["id"], "url": r["url"], "title": r["title"], "word_count": word_count}
-        if word_count <= _CONTENT_AUDIT_NEAR_ZERO_WORDS:
-            empty.append(entry)
-        elif word_count < _CONTENT_AUDIT_THIN_WORDS:
-            under_thin.append(entry)
-        else:
-            ok.append(entry)
+        buckets[_bucket_for_word_count(word_count)].append(entry)
 
     return {
         "total_checked": len(medium_rows),
@@ -451,7 +486,7 @@ def content_audit(lib: Library) -> dict:
 
 
 def print_content_audit(result: dict) -> None:
-    print("\n=== Task 3 — Existing-content audit (what's stored today, no fetching) ===\n")
+    print("\n=== Task 3 — Existing-content audit, Medium-platform only (what's stored today, no fetching) ===\n")
     print(f"  Total Medium-platform articles checked: {result['total_checked']}")
     print(f"  Empty or near-zero (<= {_CONTENT_AUDIT_NEAR_ZERO_WORDS} words) — genuinely "
           f"nothing saved: {len(result['empty_or_near_zero'])}")
@@ -462,13 +497,89 @@ def print_content_audit(result: dict) -> None:
     print("\n  (Report only — no article is flagged, excluded, or touched by this audit.)")
 
 
+# How many top-by-empty-count hosts to show in the library-wide breakdown —
+# the ask's own floor ("at least the top 25"), not exhaustive (~4,516
+# articles could span hundreds of distinct hosts).
+_LIBRARY_WIDE_TOP_HOSTS = 25
+
+
+def library_wide_content_audit(lib: Library, top_n: int = _LIBRARY_WIDE_TOP_HOSTS) -> dict:
+    """Task 4: the SAME three-bucket word-count audit as content_audit()
+    (Task 3) — same _content_word_count()/_bucket_for_word_count(), reused
+    not reimplemented, so the two reports can't drift apart — but across
+    EVERY article in the library, grouped by URL host. Answers the
+    question Task 3 alone couldn't: is the Medium-platform emptiness rate
+    (54% in the first run) specific to Medium's Cloudflare block, or does
+    the save mechanism itself under-capture library-wide? Report only —
+    same no-flagging/no-deletion contract as Task 3."""
+    rows = lib.conn.execute(
+        "SELECT id, url, title, content, content_html FROM articles WHERE url != ''"
+    ).fetchall()
+
+    by_host: dict[str, dict] = {}
+    empties: list[dict] = []
+    totals = {"empty": 0, "thin": 0, "ok": 0}
+    for r in rows:
+        host = _host(r["url"]) or "(no host)"
+        word_count = _content_word_count(r["content"], r["content_html"])
+        bucket = _bucket_for_word_count(word_count)
+        h = by_host.setdefault(host, {"total": 0, "empty": 0, "thin": 0, "ok": 0})
+        h["total"] += 1
+        h[bucket] += 1
+        totals[bucket] += 1
+        if bucket == "empty":
+            empties.append({"id": r["id"], "title": r["title"], "url": r["url"], "word_count": word_count})
+
+    top_hosts = sorted(by_host.items(), key=lambda kv: -kv[1]["empty"])[:top_n]
+
+    return {
+        "total_checked": len(rows),
+        "total_empty": totals["empty"],
+        "total_thin": totals["thin"],
+        "total_ok": totals["ok"],
+        "by_host_top": [{"host": h, **stats} for h, stats in top_hosts],
+        "empties": empties,
+    }
+
+
+def print_library_wide_audit(result: dict, list_empties: bool) -> None:
+    print("\n=== Task 4 — Library-wide content audit, grouped by host (what's stored today, no fetching) ===\n")
+    total = result["total_checked"]
+    te, tt, tok = result["total_empty"], result["total_thin"], result["total_ok"]
+
+    def pct(n: int) -> str:
+        return f"{n / total * 100:.1f}%" if total else "0.0%"
+
+    print(f"  Total articles checked (whole library): {total}")
+    print(f"  Empty or near-zero (<= {_CONTENT_AUDIT_NEAR_ZERO_WORDS} words): {te} ({pct(te)})")
+    print(f"  Thin (< {_CONTENT_AUDIT_THIN_WORDS} words, not already counted above): {tt} ({pct(tt)})")
+    print(f"  {_CONTENT_AUDIT_THIN_WORDS}+ words: {tok} ({pct(tok)})")
+
+    print(f"\n  Top {len(result['by_host_top'])} hosts by empty-article count:\n")
+    print(f"  {'HOST':<40s}{'TOTAL':>8s}{'EMPTY':>8s}{'THIN':>8s}{'OK':>8s}")
+    for row in result["by_host_top"]:
+        print(f"  {row['host'][:40]:<40s}{row['total']:>8d}{row['empty']:>8d}{row['thin']:>8d}{row['ok']:>8d}")
+
+    print("\n  (Report only — no article is flagged, excluded, or touched by this audit.)")
+
+    if list_empties:
+        print(f"\n-- Empty-bucket articles, library-wide, CSV ({len(result['empties'])} rows) --\n")
+        writer = csv.writer(sys.stdout)
+        writer.writerow(["article_id", "title", "url", "word_count"])
+        for e in result["empties"]:
+            writer.writerow([e["id"], e["title"], e["url"], e["word_count"]])
+
+
 # --------------------------------------------------------------------------
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", help="Path to library.db (or set LINKLIB_DB)")
-    ap.add_argument("--skip-exa", action="store_true", help="Run Task 1 only, no Exa calls")
+    ap.add_argument("--skip-exa", action="store_true", help="Run Tasks 1/3/4 only, no Exa calls")
     ap.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of the printed report")
+    ap.add_argument("--list-empties", action="store_true",
+                     help="Also print a CSV (id,title,url,word_count) of every empty-bucket article "
+                          "library-wide (Task 4) — listing only, never writes or flags anything")
     args = ap.parse_args()
 
     db_path = resolve_db_path(args.db)
@@ -477,16 +588,22 @@ def main() -> None:
         scale = scale_check(lib)
         exa_results = {"manual_review": [], "link_medium_sample": []} if args.skip_exa else exa_spike(lib)
         audit = content_audit(lib)
+        library_audit = library_wide_content_audit(lib)
     finally:
         lib.close()
 
     if args.json:
-        print(json.dumps({"scale_check": scale, "exa_spike": exa_results, "content_audit": audit}, indent=2))
+        payload = {"scale_check": scale, "exa_spike": exa_results, "content_audit": audit,
+                   "library_wide_content_audit": {k: v for k, v in library_audit.items() if k != "empties"}}
+        if args.list_empties:
+            payload["library_wide_content_audit"]["empties"] = library_audit["empties"]
+        print(json.dumps(payload, indent=2))
         return
 
     print_scale_check(scale)
     print_exa_spike(exa_results)
     print_content_audit(audit)
+    print_library_wide_audit(library_audit, args.list_empties)
 
 
 if __name__ == "__main__":
