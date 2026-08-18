@@ -1111,6 +1111,26 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   last tried), while the defunct-service exclusion still applies regardless
   of scope. See ARCHITECTURE.md's "Medium-platform Exa fetch tier" section
   for the full write-up.
+- **Durability audit item 1 — `ingest_url()` now runs the same content
+  sanity check the Reader backfill uses, at save time.** Previously a bad
+  fetch (paywall preview, bot-challenge interstitial, a fetch failure, real
+  content under the 60-word floor) was stored exactly like a good one, with
+  no signal anywhere — the same blind spot that let 54% of Medium-platform
+  articles sit empty and unnoticed. `ingest_url` now runs
+  `extract.assess_extraction_quality()` on every real fetch and, when it
+  fails, flags the row (`articles.needs_content_check`/`content_check_reason`
+  — additive columns, default 0/'') and logs a `content_refetch_log` row
+  (`source='save'`) — never blocking or rejecting the save itself. The flag
+  is only trusted when this fetch's content is what actually got stored
+  (the write-once merge in `upsert()` can silently keep better pre-existing
+  content on a resave — see `tests/test_content_downgrade_guard.py`), so a
+  bad resave of an already-good article never mis-flags it. Clears
+  automatically the moment `set_article_content_html` later succeeds for
+  that article (a real backfill, or a resave that gets good content).
+  Surfaced as a "Flagged at save" tile on `/admin/library/backfill-content`,
+  distinct from the existing Remaining tile (which is every row without
+  `content_html` yet — true of the entire corpus by default, and says
+  nothing about whether the original save itself looked suspect).
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found

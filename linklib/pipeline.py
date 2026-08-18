@@ -35,15 +35,43 @@ def ingest_url(
 
     New saves get auto-tagged against your existing board vocabulary, so a
     read-later queue stays organized in your own taxonomy.
+
+    Durability audit item 1: when a real fetch happens (fetch_fulltext=True),
+    the result is run through extract.assess_extraction_quality() before it's
+    stored. A bad result (paywall preview, bot-challenge interstitial, a
+    fetch that failed outright, or real content under _MIN_CONTENT_WORDS)
+    NEVER blocks or rejects the save — it's still stored exactly as before —
+    but the article is flagged via Library.set_content_check_flag with the
+    failure reason, and a content_refetch_log row (source='save') is written
+    so the article participates in the same manual-review/backfill-scope
+    machinery a failed Reader-backfill attempt would. The flag clears the
+    moment content_html is later populated for real (set_article_content_html).
     """
-    from .extract import fetch_page
+    from .extract import fetch_page, assess_extraction_quality
 
     page_title = ""
     content = ""
+    quality_checked = False
+    quality_ok = True
+    quality_reason = ""
     if fetch_fulltext:
         page = fetch_page(url)
         page_title = page.title
         content = page.content
+        # Durability audit item 1: run the same sanity check the Reader
+        # content backfill uses, right here at save time, instead of storing
+        # whatever came back with no judgment at all. A failed fetch (no
+        # HTML at all) is judged directly from PageData.fetch_error rather
+        # than assess_extraction_quality — which assumes a fetch that
+        # actually returned something and would otherwise mislabel a
+        # connection failure as "too-thin". Never blocks or rejects the
+        # save either way — see set_content_check_flag below.
+        quality_checked = True
+        if page.fetch_error:
+            quality_ok, quality_reason = False, "fetch-error"
+        else:
+            quality_ok, quality_reason = assess_extraction_quality(
+                page.raw_html, content, page.blocked)
 
     art = Article(
         url=url,
@@ -54,6 +82,21 @@ def ingest_url(
         saved_at=datetime.now(timezone.utc).isoformat(),
     )
     article_id = lib.upsert(art)
+
+    if quality_checked:
+        # upsert() is write-once for content (existing["content"] or
+        # art.content — see tests/test_content_downgrade_guard.py): a resave
+        # of an article that already had good content keeps that content
+        # even when THIS fetch came back bad. Flagging off this fetch's
+        # verdict would then wrongly mark a perfectly fine article as
+        # needing a content check. Only trust the verdict when the fetch we
+        # just judged is actually what ended up stored.
+        stored = lib.get_article(article_id)
+        if stored is not None and stored.get("content") == content:
+            lib.set_content_check_flag(article_id, not quality_ok, quality_reason)
+            if not quality_ok:
+                lib.log_content_refetch_attempt(article_id, "failure",
+                                                reason=quality_reason, source="save")
 
     if do_enrich:
         from . import tagstyle

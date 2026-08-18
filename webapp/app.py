@@ -23197,6 +23197,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         total_articles = lib.count()
         done_count = lib.count_structured_content()
         excluded_count = lib.count_permanently_excluded_content()
+        needs_check_count = lib.count_needs_content_check()
         needs_review_count = lib.count_articles_needing_manual_review()
         needs_review_rows = lib.list_articles_needing_manual_review(limit=500)
         failure_counts = lib.content_refetch_failure_counts()
@@ -23399,8 +23400,13 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <div style="font-size:26px;font-weight:700;color:var(--muted);font-family:var(--font-head);">{excluded_count:,}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Defunct service</div>
   </div>
+  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{needs_check_count:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Flagged at save</div>
+  </div>
 </div>
 
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{needs_check_count:,} article{"s" if needs_check_count != 1 else ""} above were flagged the moment they were saved&mdash;the fetch that saved them looked like a paywall preview, a bot-challenge page, a fetch failure, or real content under the length floor. Never blocked the save itself; each one also entered this page&rsquo;s Remaining/Needs review scope with a real failure reason attached instead of looking healthy. Clears automatically once a later backfill (or resave) succeeds.</p>' if needs_check_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch&mdash;the live page couldn&rsquo;t be reached for those. A snapshot can be stale or differ from what the current page shows; look for the &ldquo;via Wayback&rdquo; badge in the attempts log below to spot which ones.</p>' if wayback_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{migration_count:,} of the structured articles above came from a <strong>known domain migration</strong> (e.g. a blog that relocated to a new host), not the article&rsquo;s originally saved URL&mdash;look for the &ldquo;via Migration&rdquo; badge in the attempts log below.</p>' if migration_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_search_count:,} of the structured articles above came from a <strong>Medium-platform search match</strong> (medium.com and similar hosts block direct fetches, so a matching article found elsewhere or via Exa&rsquo;s own text is used instead)&mdash;look for the &ldquo;via Medium search&rdquo; badge in the attempts log below.</p>' if medium_search_count else ''}

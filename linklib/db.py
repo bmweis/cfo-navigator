@@ -1790,6 +1790,25 @@ class Library:
             # columns are clutter; retirement was the safe intermediate step,
             # not the destination.
             "ALTER TABLE feeds ADD COLUMN has_paywall_cookie INTEGER NOT NULL DEFAULT 0",
+            # Durability audit item 1 (2026-08): ingest_url() used to store
+            # whatever fetch_page() returned with no quality check at all — a
+            # bad save (paywall preview, bot-challenge interstitial, a stub
+            # under _MIN_CONTENT_WORDS) was indistinguishable from a good one
+            # until someone happened to read it, which is exactly how 54% of
+            # Medium-platform articles sat empty and unnoticed. These two
+            # columns are the save-time signal: set together, right after
+            # ingest_url runs extract.assess_extraction_quality() on the fresh
+            # fetch, by Library.set_content_check_flag. needs_content_check
+            # never blocks or rejects a save — see ingest_url's docstring —
+            # it only flags the row so /admin/library/backfill-content can
+            # surface it distinctly from "just hasn't been through a backfill
+            # run yet" (which is the entire existing corpus, by definition,
+            # since content_html starts empty for every row). Cleared back to
+            # 0/'' by set_article_content_html the moment a later backfill
+            # (or a resave through ingest_url) actually succeeds for that
+            # article — see that method's docstring.
+            "ALTER TABLE articles ADD COLUMN needs_content_check INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE articles ADD COLUMN content_check_reason TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -3013,11 +3032,39 @@ class Library:
         touches `content` (the plain-text contract) or `updated_at` — this
         is enrichment-adjacent bookkeeping, not an edit to the article
         itself, same reasoning as embeddings living in their own table
-        rather than bumping articles.updated_at on every embed."""
+        rather than bumping articles.updated_at on every embed.
+
+        Also clears needs_content_check/content_check_reason (durability
+        audit item 1): a successful structured re-fetch is direct proof the
+        article's content is real, so any save-time quality flag on it is
+        stale the moment this runs — see set_content_check_flag."""
         self.conn.execute(
-            "UPDATE articles SET content_html=? WHERE id=?", (content_html, article_id)
+            "UPDATE articles SET content_html=?, needs_content_check=0, "
+            "content_check_reason='' WHERE id=?", (content_html, article_id)
         )
         self.conn.commit()
+
+    def set_content_check_flag(self, article_id: int, needs_check: bool, reason: str = "") -> None:
+        """Set or clear the save-time content-quality flag (durability audit
+        item 1) — called by ingest_url right after extract.
+        assess_extraction_quality() judges a fresh fetch, and again (cleared)
+        by set_article_content_html whenever a later backfill succeeds.
+        Never blocks or rejects the save itself; this only marks the row."""
+        self.conn.execute(
+            "UPDATE articles SET needs_content_check=?, content_check_reason=? WHERE id=?",
+            (int(needs_check), reason if needs_check else "", article_id),
+        )
+        self.conn.commit()
+
+    def count_needs_content_check(self) -> int:
+        """How many articles are currently flagged at save time — surfaced
+        as its own tile on /admin/library/backfill-content, distinct from
+        Remaining (which is every article with no content_html yet,
+        structured-or-not, and says nothing about whether the save itself
+        looked suspect)."""
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM articles WHERE needs_content_check=1"
+        ).fetchone()[0]
 
     def recent_articles_by_source(self, source: str, limit: int = 20) -> list[dict]:
         """Most-recently-saved articles from one source — the 'what I keep' examples
