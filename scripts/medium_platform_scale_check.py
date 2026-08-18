@@ -35,22 +35,40 @@ Usage:
 calls needed. Task 2 (the Exa spike) needs EXA_API_KEY set in the
 environment, same as the app itself.
 
-Phase 0 (Medium fetch tier build) revision: the first spike accepted
+Phase 0 (Medium fetch tier build) revision #2: the first spike accepted
 Exa's top-1 result blind and trusted Exa's own returned snippet text as
 the content-length signal. Both were gaps in the SPIKE, not in the real
 tier design — linklib.domain_migration.find_migrated_url already loops
 candidates and validates via _titles_match(), and the real tier will
 validate a candidate via a genuine fetch_page()+assess_extraction_quality()
 pass (see linklib.pipeline._try_domain_migration), not Exa's own text
-field. This revision closes both gaps so the spike's numbers actually
-reflect what the real tier would do: every candidate is title-matched
+field. This revision closed both gaps: every candidate is title-matched
 (same _titles_match(), reused not reimplemented) before acceptance, and
 an accepted candidate is re-fetched live and run through the real
-quality check before its content length is reported. Also adds a small
+quality check before its content length is reported. Also added a small
 sample of `link.medium.com` articles regardless of manual-review status
 (that domain has zero manual-review articles yet, so the first spike
 never tested it at all) — labeled separately since these are UNTESTED
 articles, not known failures.
+
+Revision #3: the corrected run found a real recovery rate far below the
+first spike's uncorrected 100% — expected, since that was the whole
+point of revision #2 — but also surfaced a NEW gap: several
+"unrecovered" results were Exa resolving an article back onto another
+Medium-platform URL, which the live-refetch validation was then
+guaranteed to fail on (same Cloudflare block, not a genuine test of the
+candidate). Three fixes: (1) `candidate_url` is now printed on every
+result line, success or failure, so a same-domain circular failure is
+visible without re-running by hand; (2) a same-domain candidate now
+validates against Exa's own returned `contents.text` (a plain
+_MIN_CONTENT_WORDS word-count check, reused from extract.py) instead of
+re-fetching — `validation_path` on each result says which path ran
+('live-refetch' vs 'exa-text'); (3) a new Task 3, `content_audit()`,
+reports word counts of what's ALREADY STORED for every Medium-platform
+article, regardless of attempt/manual-review status — a separate
+question from "can Exa find a replacement," report-only, no
+flagging/deletion logic (see the standing "human review before any
+destructive production action" rule).
 """
 from __future__ import annotations
 
@@ -66,7 +84,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib.db import Library, resolve_db_path
 from linklib.domain_migration import _titles_match
-from linklib.extract import fetch_page, assess_extraction_quality, extract_reader_html
+from linklib.extract import (
+    fetch_page, assess_extraction_quality, extract_reader_html,
+    _extract_content, _MIN_CONTENT_WORDS,
+)
 
 # Same three hosts the Phase 0 investigation confirmed are one platform.
 MEDIUM_DOMAINS = frozenset({"bothsidesofthetable.com", "medium.com", "link.medium.com"})
@@ -76,6 +97,16 @@ MEDIUM_DOMAINS = frozenset({"bothsidesofthetable.com", "medium.com", "link.mediu
 # without this it would never appear in the Exa spike at all. Small on
 # purpose — this is a feasibility check, not exhaustive coverage.
 _LINK_MEDIUM_SAMPLE_SIZE = 5
+
+# Task 3 (existing-content audit) thresholds — Brian's own call, flagged
+# rather than silently picked, same as every other hand-set threshold in
+# this codebase (_MANUAL_REVIEW_ATTEMPT_THRESHOLD, etc.). 200 words is his
+# "effectively useless as saved" line for a preview/intro-only stub; 5
+# words separates "genuinely nothing saved" from "merely thin" (a handful
+# of words is more likely a leaked bot-block fragment than real content).
+# Audit-only — neither threshold feeds any retry/exclusion/deletion logic.
+_CONTENT_AUDIT_NEAR_ZERO_WORDS = 5
+_CONTENT_AUDIT_THIN_WORDS = 200
 
 # Same endpoint/contract linklib.agent.retrieve_exa and
 # linklib.domain_migration.find_migrated_url already use — nothing new here.
@@ -168,13 +199,15 @@ def _exa_search(query: str, api_key: str) -> tuple[list[dict], str]:
     """One Exa /search call, no domain restriction (unlike
     domain_migration.find_migrated_url, which restricts to one confirmed
     destination domain — here we don't know in advance where a Medium
-    article might resolve to). Returns (results, error) — error is "" on
-    success. Never raises."""
+    article might resolve to). Requests contents.text too — needed for the
+    same-domain carve-out in _spike_one_article, which validates against
+    Exa's own returned text rather than re-fetching (see there for why).
+    Returns (results, error) — error is "" on success. Never raises."""
     try:
         resp = requests.post(
             _EXA_SEARCH_URL,
             headers={"x-api-key": api_key, "Content-Type": "application/json"},
-            json={"query": query, "numResults": 5},
+            json={"query": query, "numResults": 5, "contents": {"text": True}},
             timeout=_EXA_TIMEOUT,
         )
         resp.raise_for_status()
@@ -188,17 +221,30 @@ def _exa_search(query: str, api_key: str) -> tuple[list[dict], str]:
 def _spike_one_article(title: str, author: str, current_url: str, api_key: str) -> dict:
     """Search Exa for one article, validate the first title-matching
     candidate (reusing linklib.domain_migration._titles_match — NOT top-1
-    blind, the exact gap the first spike round left open), then re-fetch
-    that candidate live and run it through the real
-    extract.assess_extraction_quality() check — the same validation path
-    linklib.pipeline._try_domain_migration already uses for the existing
-    domain-migration tier — rather than trusting Exa's own returned text
-    field, which the real tier will never do either."""
+    blind, the exact gap the first spike round left open).
+
+    Validation then splits on ONE thing: is the candidate itself on a
+    recognized Medium-platform domain? If it's on some OTHER host, re-fetch
+    it live and run the real extract.assess_extraction_quality() check —
+    the same validation path linklib.pipeline._try_domain_migration already
+    uses. But if Exa resolved the article back onto medium.com/
+    bothsidesofthetable.com/link.medium.com itself, a live re-fetch is
+    guaranteed to hit the exact same Cloudflare block the ORIGINAL url
+    already failed on — that's not a real test of the candidate, it's
+    re-proving the block exists. Revision #3's real finding: at least 3-4
+    of the manual-review sample's "unrecovered" results were exactly this
+    circular case, not genuinely bad candidates. For a same-domain
+    candidate, validate against Exa's own already-returned `contents.text`
+    instead — a plain word-count check against the same _MIN_CONTENT_WORDS
+    threshold assess_extraction_quality() uses, since the paywall/bot-
+    challenge marker checks need raw HTML Exa's text field doesn't carry.
+    `validation_path` on the result says which path ran: 'live-refetch' or
+    'exa-text'."""
     row = {
         "title": title, "author": author, "current_url": current_url,
         "found": False, "title_match": None, "candidate_url": "",
-        "candidate_title": "", "quality_ok": None, "quality_reason": "",
-        "content_length": 0, "excerpt": "", "error": "",
+        "candidate_title": "", "validation_path": "", "quality_ok": None,
+        "quality_reason": "", "content_length": 0, "excerpt": "", "error": "",
     }
     if not title.strip():
         row["error"] = "no stored title to search with"
@@ -231,6 +277,22 @@ def _spike_one_article(title: str, author: str, current_url: str, api_key: str) 
     row["candidate_url"] = candidate_url
     row["candidate_title"] = matched.get("title") or ""
 
+    if _host(candidate_url) in MEDIUM_DOMAINS:
+        # Same-domain carve-out: re-fetching would just re-hit the same
+        # block, so validate against what Exa already returned instead.
+        row["validation_path"] = "exa-text"
+        exa_text = (matched.get("text") or "").strip()
+        word_count = len(exa_text.split())
+        ok = word_count >= _MIN_CONTENT_WORDS
+        row["quality_ok"] = ok
+        row["quality_reason"] = "" if ok else "too-thin (exa-text word count)"
+        if not ok:
+            return row
+        row["content_length"] = len(exa_text)
+        row["excerpt"] = exa_text[:200]
+        return row
+
+    row["validation_path"] = "live-refetch"
     try:
         page = fetch_page(candidate_url)
     except Exception as exc:
@@ -305,12 +367,19 @@ def _print_spike_rows(results: list[dict]) -> None:
     for r in results:
         print(f"  article #{r['article_id']}: {r['title'][:70]!r}")
         print(f"    current_url:      {r['current_url']}")
+        # candidate_url printed unconditionally, success or failure — a
+        # failed live-refetch used to print only "HTTP 403" with no URL,
+        # making it impossible to tell a same-domain circular failure from
+        # a genuinely different newly-blocked host without re-running by
+        # hand. It's "" only when no title-matching candidate was ever
+        # found (nothing to show).
+        print(f"    candidate_url:    {r['candidate_url'] or '(none found)'}")
         if r["error"]:
             print(f"    result:           {r['error']}")
         else:
             print(f"    found:            {r['found']}  (title-matched: {r['title_match']})")
-            print(f"    candidate_url:    {r['candidate_url']}")
             print(f"    candidate_title:  {r['candidate_title']!r}")
+            print(f"    validation_path:  {r['validation_path']}")
             print(f"    quality_ok:       {r['quality_ok']}  (reason: {r['quality_reason'] or 'n/a'})")
             if r["quality_ok"]:
                 print(f"    content_len:      {r['content_length']}")
@@ -337,6 +406,63 @@ def print_exa_spike(results: dict) -> None:
 
 
 # --------------------------------------------------------------------------
+# Task 3 — existing-content audit
+# --------------------------------------------------------------------------
+
+def content_audit(lib: Library) -> dict:
+    """Word count of what's ALREADY STORED, right now, for every
+    Medium-platform article — regardless of attempt or manual-review
+    status. A different question from _spike_one_article's 60-word
+    acceptance threshold for a FOUND REPLACEMENT: this doesn't fetch
+    anything, it audits existing rows. Prefers content_html (structured,
+    what the Reader has shown since Phase 5b) converted to plain text via
+    extract._extract_content() — reused, not reimplemented, the same
+    plain-text contract FTS5/enrichment/search already depend on — and
+    falls back to the plain `content` column when content_html is empty.
+
+    Report only: three buckets (empty/near-zero, under
+    _CONTENT_AUDIT_THIN_WORDS, at-or-above), no flagging or deletion
+    logic — see this script's module docstring and the standing "human
+    review before any destructive production action" rule."""
+    rows = lib.conn.execute(
+        "SELECT id, url, title, content, content_html FROM articles WHERE url != ''"
+    ).fetchall()
+    medium_rows = [r for r in rows if _host(r["url"]) in MEDIUM_DOMAINS]
+
+    empty, under_thin, ok = [], [], []
+    for r in medium_rows:
+        html = r["content_html"] or ""
+        text = _extract_content(html) if html.strip() else (r["content"] or "")
+        word_count = len((text or "").split())
+        entry = {"id": r["id"], "url": r["url"], "title": r["title"], "word_count": word_count}
+        if word_count <= _CONTENT_AUDIT_NEAR_ZERO_WORDS:
+            empty.append(entry)
+        elif word_count < _CONTENT_AUDIT_THIN_WORDS:
+            under_thin.append(entry)
+        else:
+            ok.append(entry)
+
+    return {
+        "total_checked": len(medium_rows),
+        "empty_or_near_zero": empty,
+        "under_thin_threshold": under_thin,
+        "at_or_above_thin_threshold": ok,
+    }
+
+
+def print_content_audit(result: dict) -> None:
+    print("\n=== Task 3 — Existing-content audit (what's stored today, no fetching) ===\n")
+    print(f"  Total Medium-platform articles checked: {result['total_checked']}")
+    print(f"  Empty or near-zero (<= {_CONTENT_AUDIT_NEAR_ZERO_WORDS} words) — genuinely "
+          f"nothing saved: {len(result['empty_or_near_zero'])}")
+    print(f"  Under {_CONTENT_AUDIT_THIN_WORDS} words — likely a preview/intro-only stub: "
+          f"{len(result['under_thin_threshold'])}")
+    print(f"  {_CONTENT_AUDIT_THIN_WORDS}+ words — probably fine as a fallback even without "
+          f"an upgrade: {len(result['at_or_above_thin_threshold'])}")
+    print("\n  (Report only — no article is flagged, excluded, or touched by this audit.)")
+
+
+# --------------------------------------------------------------------------
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -350,15 +476,17 @@ def main() -> None:
     try:
         scale = scale_check(lib)
         exa_results = {"manual_review": [], "link_medium_sample": []} if args.skip_exa else exa_spike(lib)
+        audit = content_audit(lib)
     finally:
         lib.close()
 
     if args.json:
-        print(json.dumps({"scale_check": scale, "exa_spike": exa_results}, indent=2))
+        print(json.dumps({"scale_check": scale, "exa_spike": exa_results, "content_audit": audit}, indent=2))
         return
 
     print_scale_check(scale)
     print_exa_spike(exa_results)
+    print_content_audit(audit)
 
 
 if __name__ == "__main__":
