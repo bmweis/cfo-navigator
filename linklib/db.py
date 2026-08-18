@@ -641,6 +641,31 @@ CREATE TABLE IF NOT EXISTS integrity_check_log (
 
 CREATE INDEX IF NOT EXISTS idx_integrity_check_log_created ON integrity_check_log(created_at);
 
+-- Durability audit item 3 (2026-08): _JOB_STATE (webapp/app.py) is an
+-- in-process dict — the only record of whether the re-enrich job,
+-- Historical sweep, or the Reader content backfill last succeeded, failed,
+-- or ever ran at all, and a Railway redeploy (or crash) wipes it silently.
+-- This table is the durable record, written by all three _JOB_STATE-backed
+-- jobs at start (Library.start_job_run) and finish
+-- (Library.finish_job_run) — shape mirrors backup_log/integrity_check_log
+-- (one row per run, append-only), not a new convention. _JOB_STATE itself
+-- is UNCHANGED and still owns live in-request progress (poll-friendly,
+-- no DB round trip per tick) — this table is only ever written twice per
+-- run (start, finish), never polled during a run.
+CREATE TABLE IF NOT EXISTS job_run_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_name      TEXT NOT NULL,              -- 'enrich' | 'backfill' | 'content_backfill'
+    status        TEXT NOT NULL,              -- 'running' | 'success' | 'failure' | 'stopped'
+    summary       TEXT NOT NULL DEFAULT '',    -- short human-readable counts, e.g. '42/50 enriched'
+    error         TEXT NOT NULL DEFAULT '',    -- failure only
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT NOT NULL DEFAULT ''     -- '' while status='running' (a crash mid-run leaves this
+                                                -- empty forever, which is itself informative — see
+                                                -- Library.latest_job_run)
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_run_log_job_started ON job_run_log(job_name, started_at);
+
 -- Per-article attempt log for the Reader content-structure backfill (Phase
 -- 5b): PR #322's extract_reader_html() only ever ran against a live fetch
 -- (an unsaved Feed item, or a saved article whose cached content was too
@@ -3408,6 +3433,51 @@ class Library:
     def list_integrity_check_log(self, limit: int = 100) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM integrity_check_log ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -- background-job run history (durability audit item 3) ----------------
+
+    def start_job_run(self, job_name: str) -> int:
+        """Log the start of one background-job run (re-enrich, Historical
+        sweep, or the Reader content backfill) — see job_run_log's CREATE
+        TABLE comment. Returns the row id, passed back to finish_job_run
+        when the job exits (success, failure, or a deliberate stop)."""
+        cur = self.conn.execute(
+            "INSERT INTO job_run_log (job_name, status, started_at) VALUES (?,?,?)",
+            (job_name, "running", _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def finish_job_run(self, run_id: int, status: str, summary: str = "", error: str = "") -> None:
+        """Close out a job_run_log row started by start_job_run. `status` is
+        'success' | 'failure' | 'stopped' — never 'running' again (a run
+        that never reaches this call, e.g. a crash, is exactly what leaves
+        finished_at='' forever, which latest_job_run surfaces as-is rather
+        than guessing)."""
+        self.conn.execute(
+            "UPDATE job_run_log SET status=?, summary=?, error=?, finished_at=? WHERE id=?",
+            (status, summary, error, _now(), run_id),
+        )
+        self.conn.commit()
+
+    def latest_job_run(self, job_name: str) -> Optional[dict]:
+        """Most recent job_run_log row for one job, or None if it's never
+        run. Backs each job's admin-page "last run: outcome, N ago" line —
+        the durable fallback for exactly the case _JOB_STATE can't cover: a
+        redeploy or crash since the last run, when in-process state is
+        gone."""
+        row = self.conn.execute(
+            "SELECT * FROM job_run_log WHERE job_name=? ORDER BY started_at DESC LIMIT 1",
+            (job_name,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_job_run_log(self, job_name: str, limit: int = 20) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM job_run_log WHERE job_name=? ORDER BY started_at DESC LIMIT ?",
+            (job_name, limit),
         ).fetchall()
         return [dict(r) for r in rows]
 

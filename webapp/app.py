@@ -18463,6 +18463,52 @@ def _relative_age(iso: str) -> str:
     return f"{int(secs // 86400)}d ago"
 
 
+def _job_run_banner(job_name: str) -> str:
+    """Durability audit item 3 — "last run: outcome, N ago" for one
+    _JOB_STATE-backed background job, read from the durable job_run_log
+    table rather than the in-process _JOB_STATE dict (which a redeploy or
+    crash wipes with no trace). Same banner pattern as
+    _backup_status_banner/_integrity_status_banner: green on success, amber
+    on a deliberate stop or "never run", coral on failure — loud, not
+    routine. A row stuck at status='running' with no finished_at is what a
+    crash mid-run looks like, called out explicitly rather than shown as a
+    normal in-progress state (this banner never reflects LIVE progress —
+    that's still _JOB_STATE/the poll endpoint each page already has)."""
+    lib = _lib()
+    try:
+        last = lib.latest_job_run(job_name)
+    finally:
+        lib.close()
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    coral_wash, coral = "var(--coral-wash)", "var(--coral)"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+
+    if not last:
+        bg, border, color = amber_wash, amber_border, amber_text
+        html = "No run recorded yet."
+    elif last["status"] == "running" and not last.get("finished_at"):
+        bg, border, color = amber_wash, amber_border, amber_text
+        ago = _relative_age(last["started_at"])
+        html = f'Last run started {ago or "recently"} never finished&mdash;likely interrupted by a deploy or crash. Safe to start again; earlier progress isn&rsquo;t lost (see the job&rsquo;s own resumability notes above).'
+    elif last["status"] == "success":
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        ago = _relative_age(last["finished_at"] or last["started_at"])
+        summary = _esc(last.get("summary") or "")
+        html = f'Last run: <strong>succeeded</strong>, {ago}{f" &mdash; {summary}" if summary else ""}.'
+    elif last["status"] == "stopped":
+        bg, border, color = amber_wash, amber_border, amber_text
+        ago = _relative_age(last["finished_at"] or last["started_at"])
+        summary = _esc(last.get("summary") or "")
+        html = f'Last run: <strong>stopped</strong> by an admin, {ago}{f" &mdash; {summary}" if summary else ""}.'
+    else:
+        bg, border, color = coral_wash, coral, "inherit"
+        ago = _relative_age(last["finished_at"] or last["started_at"])
+        err = _esc(last.get("error") or "no error message recorded")
+        html = f'Last run: <strong>failed</strong>, {ago} &mdash; {err}.'
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:10px 16px;margin:0 0 16px;font-size:13px;line-height:1.5;">{html}</div>')
+
+
 # True stoplight colours, a sanctioned narrow exception to the palette — see
 # BRAND.md §Color. The semantic tokens were tried first and --good is navy,
 # which is the site's dominant colour and so reads as ordinary text rather
@@ -19949,6 +19995,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
   <div style="padding:0 20px 20px;">
     <p style="color:var(--muted);margin:0 0 6px;font-size:13.5px;">Walks a source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet&mdash;a one-time back-catalog catch-up, typically run once right after you add a new source, not something to reach for routinely. It doesn&rsquo;t save anything by itself, it just adds to the queue below for you to review. <strong>Different from Reader content backfill</strong> (elsewhere on the Library page), which re-processes articles you&rsquo;ve <em>already</em> saved for better structure&mdash;this only ever finds articles you haven&rsquo;t saved yet.</p>
     <p style="color:var(--muted);margin:0 0 16px;font-size:13.5px;">Once a source&rsquo;s back catalog is swept, &ldquo;Scan feed&rdquo; below is what keeps you current going forward&mdash;you shouldn&rsquo;t need to run this again for that source.</p>
+    {_job_run_banner("backfill")}
     <div id="sweep-poll-container">{sweep_status_html}</div>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
       <form id="backfill-form" method="post" action="/admin/library/backfill/start" style="display:grid;gap:18px;">
@@ -22848,9 +22895,16 @@ async def admin_review_remove(request: Request, background_tasks: BackgroundTask
 # ---------------------------------------------------------------------------
 
 def _enrich_job(force: bool, model: str, limit: int) -> None:
-    """Background thread: run enrich_library, updating _JOB_STATE["enrich"]."""
+    """Background thread: run enrich_library, updating _JOB_STATE["enrich"].
+
+    Durability audit item 3: also writes a durable job_run_log row (start,
+    then finish) — _JOB_STATE itself stays exactly as it was, for live
+    in-request progress, but it's wiped by every redeploy/crash with no
+    record left behind; job_run_log is what survives that and backs the
+    "last run" line on /admin/library/enrich."""
     _job_set("enrich", running=True, done=0, total=0, error="", model=model)
     lib = _lib()
+    run_id = lib.start_job_run("enrich")
     try:
         from linklib import pipeline as _pl
 
@@ -22865,8 +22919,10 @@ def _enrich_job(force: bool, model: str, limit: int) -> None:
                            model=model, progress=_progress)
         backup.maybe_backup(DB_PATH)
         _job_set("enrich", running=False, done=total)
+        lib.finish_job_run(run_id, "success", summary=f"{total:,} article(s) enriched")
     except Exception as exc:
         _job_set("enrich", running=False, error=str(exc))
+        lib.finish_job_run(run_id, "failure", error=str(exc))
     finally:
         lib.close()
 
@@ -22932,6 +22988,7 @@ def admin_enrich(request: Request):
 <h1>Re-enrich archive</h1>
 <p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what FP&A Buddy reasons from, so depth here pays off there.</p>
 
+{_job_run_banner("enrich")}
 <div id="poll-container">{status_html}</div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
@@ -23053,9 +23110,13 @@ def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool,
     `only_sources_raw` (comma/newline separated) restricts the sweep to matching
     sources — case-insensitive substring match against the OPML name, so
     "Stratechery" matches "Ben Thompson (Stratechery)". Empty = all sources.
-    """
+
+    Durability audit item 3: also writes a durable job_run_log row (start,
+    then finish) — see _enrich_job's docstring for why this doesn't touch
+    _JOB_STATE itself."""
     _job_set("backfill", running=True, report=[], error="", done=0, total=0)
     lib = _lib()
+    run_id = lib.start_job_run("backfill")
     try:
         from linklib.feed import parse_opml
         from linklib.queue import scan_sitemaps_into_queue
@@ -23083,8 +23144,14 @@ def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool,
         _job_set("backfill", running=False, report=report, done=total)
         if not dry_run:
             backup.maybe_backup(DB_PATH)
+        added = sum(r.get("added", 0) for r in report)
+        summary = f"{added:,} article(s) added across {total:,} source(s)"
+        if dry_run:
+            summary = f"dry run — {sum(r.get('candidates', 0) for r in report):,} candidate(s) across {total:,} source(s)"
+        lib.finish_job_run(run_id, "success", summary=summary)
     except Exception as exc:
         _job_set("backfill", running=False, error=str(exc))
+        lib.finish_job_run(run_id, "failure", error=str(exc))
     finally:
         lib.close()
 
@@ -23154,10 +23221,15 @@ def _content_backfill_job(limit: int, force: bool, host_suffixes: list[str] | No
     skipped, same as a crash-recovery restart would see). `host_suffixes`
     scopes the run to matching hosts and, for those hosts only, reaches
     articles otherwise parked in "needs manual review" — see
-    Library.articles_needing_content_backfill's docstring."""
+    Library.articles_needing_content_backfill's docstring.
+
+    Durability audit item 3: also writes a durable job_run_log row (start,
+    then finish, including on a deliberate stop) — see _enrich_job's
+    docstring for why this doesn't touch _JOB_STATE itself."""
     _job_set("content_backfill", running=True, stop_requested=False,
              done=0, total=0, ok=0, failed=0, error="", stopped=False)
     lib = _lib()
+    run_id = lib.start_job_run("content_backfill")
     try:
         from linklib import pipeline as _pl
 
@@ -23171,6 +23243,8 @@ def _content_backfill_job(limit: int, force: bool, host_suffixes: list[str] | No
             if _job_get("content_backfill").get("stop_requested"):
                 _job_set("content_backfill", running=False, stopped=True,
                          done=i, ok=ok_count, failed=failed_count)
+                lib.finish_job_run(run_id, "stopped",
+                                   summary=f"stopped after {i}/{total} — {ok_count} succeeded, {failed_count} failed")
                 return
             ok, _reason = _pl.backfill_article_content(lib, row)
             if ok:
@@ -23182,8 +23256,11 @@ def _content_backfill_job(limit: int, force: bool, host_suffixes: list[str] | No
                 time.sleep(_CONTENT_BACKFILL_DELAY_SEC)
         backup.maybe_backup(DB_PATH)
         _job_set("content_backfill", running=False, done=total, ok=ok_count, failed=failed_count)
+        lib.finish_job_run(run_id, "success",
+                           summary=f"{ok_count}/{total} succeeded, {failed_count} failed")
     except Exception as exc:
         _job_set("content_backfill", running=False, error=str(exc))
+        lib.finish_job_run(run_id, "failure", error=str(exc))
     finally:
         lib.close()
 
@@ -23464,6 +23541,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_search_count:,} of the structured articles above came from a <strong>Medium-platform search match</strong> (medium.com and similar hosts block direct fetches, so a matching article found elsewhere or via Exa&rsquo;s own text is used instead)&mdash;look for the &ldquo;via Medium search&rdquo; badge in the attempts log below.</p>' if medium_search_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service (e.g. Google&rsquo;s retired FeedBurner proxy), so re-fetching can never succeed. Not counted in Remaining above. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry them anyway.</p>' if excluded_count else ''}
 
+{_job_run_banner("content_backfill")}
 <div id="poll-container">{status_html}</div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;">

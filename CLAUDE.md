@@ -1180,6 +1180,24 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   merging into it, since "the backup succeeded" and "the DB is structurally
   sound" are two different facts. See ARCHITECTURE.md's `integrity_check_log`
   table row and `backup_now()`'s docstring for the full write-up.
+- **Durability audit item 3 — a durable start/finish record for the three
+  `_JOB_STATE`-backed background jobs, so a redeploy or crash doesn't erase
+  whether re-enrich, Historical sweep, or the Reader content backfill last
+  succeeded, failed, or ever ran.** `_JOB_STATE` (`webapp/app.py`) is an
+  in-process dict — correct and unchanged for LIVE progress polling, but
+  wiped silently on every Railway redeploy with no trace left behind. New
+  `job_run_log` table (shape mirrors `backup_log`/`integrity_check_log`),
+  written twice per run — `Library.start_job_run()` at the top of each of
+  the three job functions, `Library.finish_job_run()` at every exit path
+  (success, failure, and — for the content backfill, the one job with a
+  stop control — a deliberate stop too). A shared `_job_run_banner()`
+  helper renders "last run: outcome, N ago" on each job's own admin-page
+  section, reusing the already-shipped `_relative_age()` helper for the
+  "N ago" text — same green/amber/coral posture as the backup/integrity
+  banners above. A row stuck at `status='running'` with no `finished_at` is
+  exactly what a crash mid-run looks like, and the banner says so
+  explicitly rather than rendering it as ordinary live progress. See
+  ARCHITECTURE.md's `job_run_log` table row for the full write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found
