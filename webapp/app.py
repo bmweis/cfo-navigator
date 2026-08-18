@@ -23244,7 +23244,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
             label += (' <span style="background:#dbeafe;color:#1d4ed8;'
                       'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Migration</span>')
         elif r["status"] == "success" and (r.get("source") or "direct") == "medium-search":
-            label += (' <span style="background:#ede9fe;color:#6d28d9;'
+            label += (' <span style="background:var(--seafoam-wash);color:var(--seafoam-deep);'
                       'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Medium search</span>')
         title = _esc(r.get("article_title") or r.get("article_url") or f'#{r["article_id"]}')
         url = r.get("article_url") or ""
