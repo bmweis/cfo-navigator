@@ -620,6 +620,27 @@ CREATE TABLE IF NOT EXISTS backup_log (
 
 CREATE INDEX IF NOT EXISTS idx_backup_log_created ON backup_log(created_at);
 
+-- Durability audit item 2 (2026-08, elevated): nothing in this app ever ran
+-- PRAGMA integrity_check against the live database — corruption would only
+-- ever surface at restore time, by which point it had already been
+-- propagated into every retained daily/weekly snapshot. linklib.backup.
+-- check_integrity() now runs PRAGMA integrity_check plus the FTS5
+-- self-check (`INSERT INTO articles_fts(articles_fts) VALUES
+-- ('integrity-check')` — the same command RUNBOOK.md §4's restore rehearsal
+-- already runs by hand) against the live DB, on the same cadence as the
+-- backup itself, immediately before every snapshot — see backup_now()'s
+-- docstring for why a failure blocks that night's upload rather than
+-- uploading anyway. Shape mirrors backup_log exactly (one row per attempt,
+-- 'ok'|'failure', append-only) — same convention, not a new one.
+CREATE TABLE IF NOT EXISTS integrity_check_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    status        TEXT NOT NULL,              -- 'ok' | 'failure'
+    detail        TEXT NOT NULL DEFAULT '',    -- integrity_check's own output, or the FTS self-check's error
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_integrity_check_log_created ON integrity_check_log(created_at);
+
 -- Per-article attempt log for the Reader content-structure backfill (Phase
 -- 5b): PR #322's extract_reader_html() only ever ran against a live fetch
 -- (an unsaved Feed item, or a saved article whose cached content was too
@@ -3368,6 +3389,25 @@ class Library:
     def list_backup_log(self, limit: int = 100) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM backup_log ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -- integrity checks (durability audit item 2) --------------------------
+
+    def record_integrity_check(self, status: str, detail: str = "") -> int:
+        """Log one linklib.backup.check_integrity() run, ok or failure. See
+        the integrity_check_log CREATE TABLE comment for why this exists and
+        who calls it."""
+        cur = self.conn.execute(
+            "INSERT INTO integrity_check_log (status, detail, created_at) VALUES (?,?,?)",
+            (status, detail, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_integrity_check_log(self, limit: int = 100) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM integrity_check_log ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
 

@@ -1151,6 +1151,35 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   ("Accepted as final", with Undo per row) and stats tile. See
   ARCHITECTURE.md's "'Accept as final' manual-review override" section for
   the full write-up.
+- **Durability audit item 2 (elevated) — a pre-backup integrity check,
+  because the daily Drive backup is now the ONLY recovery path.**
+  Railway-native volume snapshots turned out unavailable on Brian's plan
+  (see the Phase O bullet above), and nothing in this app had ever
+  run `PRAGMA integrity_check` against the live database — corruption
+  would only ever have surfaced at restore time, by which point it would
+  already be baked into every retained snapshot (14 daily + 8 weekly).
+  `linklib.backup.check_integrity()` runs `PRAGMA integrity_check` plus the
+  FTS5 self-check RUNBOOK.md §4's restore rehearsal already runs by hand
+  (`INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')`)
+  against the live DB, wired into `backup_now()` immediately before every
+  snapshot — same cadence as the backup itself, whichever trigger fired it.
+  Every result (ok or failure) is logged to a new `integrity_check_log`
+  table, shape mirrors `backup_log`. **Decision, flagged rather than
+  decided silently: a failed check BLOCKS that night's upload**, logging a
+  `backup_log` failure row too (so the existing status banner picks it up
+  with no second code path) rather than uploading a possibly-corrupt
+  snapshot anyway. Reasoning: the whole point of checking first is to keep
+  corruption out of Drive; uploading it anyway would let it get pruned into
+  the "kept" set on a later run and, eventually, become what the restore
+  procedure reaches for — the exact failure mode this item exists to close.
+  Skipping the upload leaves every already-retained good snapshot untouched
+  (`prune_old_backups` only ever runs after a successful upload). A new
+  "Pre-backup integrity check" banner on `/admin/library/backup` — coral on
+  failure (not amber; a blocked backup isn't a routine/expected state),
+  seafoam on ok — sits above the existing backup-status banner rather than
+  merging into it, since "the backup succeeded" and "the DB is structurally
+  sound" are two different facts. See ARCHITECTURE.md's `integrity_check_log`
+  table row and `backup_now()`'s docstring for the full write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found

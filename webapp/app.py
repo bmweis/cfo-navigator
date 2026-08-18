@@ -23845,6 +23845,37 @@ def _backup_status_banner(backup_rows: list[dict]) -> str:
             f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
 
 
+def _integrity_status_banner(integrity_rows: list[dict]) -> str:
+    """Color-coded status for the pre-backup integrity check (durability
+    audit item 2), next to the existing backup banner above — same
+    green/amber-ish/red posture, but distinctly its own banner since "the
+    backup succeeded" and "the DB is structurally sound" are two different
+    facts. A failed check must be loud here: coral, not amber, since
+    backup.py already blocks the upload on a failure (see backup_now's
+    docstring) — this is not a routine/expected state the way "no backups
+    configured yet" is."""
+    last = integrity_rows[0] if integrity_rows else None
+    coral_wash, coral = "var(--coral-wash)", "var(--coral)"
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+
+    if not last:
+        bg, border, color = amber_wash, amber_border, amber_text
+        html = "No integrity check has run yet&mdash;runs automatically right before the next backup attempt."
+    elif last["status"] == "failure":
+        bg, border, color = coral_wash, coral, "inherit"
+        when = _esc(last["created_at"][:16].replace("T", " "))
+        detail = _esc(last["detail"]) or "no detail recorded"
+        html = (f'Integrity check <strong>failed</strong> ({when} UTC)&mdash;that night&rsquo;s backup upload was '
+                f'skipped to avoid capturing corruption into Drive: {detail}. See RUNBOOK.md for restore-from-snapshot steps.')
+    else:
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        when = _esc(last["created_at"][:16].replace("T", " "))
+        html = f'Last integrity check ({when} UTC): <strong>ok</strong>&mdash;structural check and FTS5 self-check both passed.'
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:0 0 16px;font-size:14px;line-height:1.5;">{html}</div>')
+
+
 @app.get("/admin/library/backup", response_class=HTMLResponse)
 def admin_backup(request: Request, uploaded: str = ""):
     if not _is_authed(request):
@@ -23853,6 +23884,7 @@ def admin_backup(request: Request, uploaded: str = ""):
     try:
         count = lib.count()
         backup_rows = lib.list_backup_log(limit=100)
+        integrity_rows = lib.list_integrity_check_log(limit=100)
     finally:
         lib.close()
     folder_id = backup.known_folder_id(DB_PATH)
@@ -23916,6 +23948,9 @@ def admin_backup(request: Request, uploaded: str = ""):
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">{folder_line}</p>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Setting <code>GOOGLE_DRIVE_FOLDER_ID</code> in Railway overrides this and points backups at that folder instead, starting with the next attempt&mdash;no redeploy needed. Leave it unset to keep using the folder above.</p>
 {_backup_status_banner(backup_rows)}
+<h2 style="font-size:16px;margin:24px 0 4px;">Pre-backup integrity check</h2>
+<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Runs automatically against the live database right before every backup attempt&mdash;<code>PRAGMA integrity_check</code> plus an FTS5 self-check. A failure blocks that night&rsquo;s upload so corruption is never captured into a retained snapshot.</p>
+{_integrity_status_banner(integrity_rows)}
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
