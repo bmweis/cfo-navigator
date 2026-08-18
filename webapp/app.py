@@ -6032,7 +6032,7 @@ Not sure which tool's for you? {(
 <details open style="margin-bottom:8px;">
   <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-    <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#129308; Advisor</button>
+    <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#129305; Advisor</button>
     <button class="tcat-btn tcat-all tcat-active" data-cat="" onclick="filterCat(this)">All</button>
     {cat_buttons}
   </div>
@@ -6061,7 +6061,7 @@ Not sure which tool's for you? {(
 <p id="tool-empty" style="display:none;color:var(--muted);padding:32px 0;">No tools match your search.</p>
 
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
-  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#129308; Formal advisor to these companies.</p>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#129305; Formal advisor to these companies.</p>
   <p style="font-size:15px;color:var(--muted);">Know a tool that belongs here?
     {'<a href="/tools/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit →</a>'}</p>
 </div>
@@ -6226,7 +6226,7 @@ function renderTools(tools) {{
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
-    var star = t.advisor ? '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129308;</span>' : '';
+    var star = t.advisor ? '<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' : '';
     var cats = (t.categories || []).map(function(c) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
     }}).join('');
@@ -6636,7 +6636,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
     {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if t.get('promoted') else ''}
-    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129308;</span>' if t.get('advisor') else ''}
+    {'<span class="tool-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if t.get('advisor') else ''}
   </div>
   <a href="/tools/software/{_esc(t['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(t['name'])}</a>
 </th>'''
@@ -7588,7 +7588,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
   <input id="comm-search" type="search" placeholder="Search communities…"
     oninput="filterCommunities()"
     style="flex:1;min-width:200px;max-width:400px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  <button id="comm-advisor-btn" class="ccat-btn" onclick="toggleCommAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#129308; Advisor</button>
+  <button id="comm-advisor-btn" class="ccat-btn" onclick="toggleCommAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#129305; Advisor</button>
   <select id="comm-access" onchange="filterCommunities()"
     style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink);">
     <option value="">All access types</option>
@@ -7633,7 +7633,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 <p id="comm-empty" style="display:none;color:var(--muted);padding:32px 0;">No communities match your search.</p>
 
 <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);">
-  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#129308; Formal advisor to these communities.</p>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">&#129305; Formal advisor to these communities.</p>
   <p style="font-size:15px;color:var(--muted);">Know a community that belongs here?
     {'<a href="/tools/communities/submit" style="font-weight:500;">Submit it for review →</a>' if is_member else '<a href="/login" style="font-weight:500;">Sign in to submit →</a>'}</p>
   <p style="margin:8px 0 0;font-size:15px;color:var(--muted);">Can't find the right one, or the one you're in isn't quite enough? <a id="comm-gap-link" href="/tools/communities/gap" style="font-weight:500;">I'd love to know what's missing &rarr;</a></p>
@@ -7826,7 +7826,7 @@ function renderCommunities(list) {{
       ? '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
         + 'background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;flex-shrink:0;">Featured</span>'
       : '';
-    var advisorStar = c.advisor ? '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129308;</span>' : '';
+    var advisorStar = c.advisor ? '<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' : '';
     var compareChecked = compareSelected.indexOf(c.id) !== -1;
     var compareDisabled = !compareChecked && compareSelected.length >= COMPARE_MAX;
     var costHtml = c.cost_band === NEEDS_VERIFICATION
@@ -8363,7 +8363,7 @@ to compare them side by side. Check the box on any card, then use the compare ba
         f'''<th class="cc-cell">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
     {'<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--coral);color:#fff;border-radius:5px;padding:2px 8px;">Featured</span>' if c.get('featured') else ''}
-    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129308;</span>' if c.get('advisor') else ''}
+    {'<span class="comm-star" title="Brian Weisberg is a formal advisor">&#129305;</span>' if c.get('advisor') else ''}
   </div>
   <a href="/tools/communities/{_esc(c['slug'])}" target="_blank" rel="noopener" class="comm-name" style="margin-bottom:0;">{_esc(c['name'])}</a>
   {_cost_badge(c)}
@@ -11359,30 +11359,47 @@ def _verify_html(value: str, cls: str = "comm-verify") -> str:
 
 def _community_category_checkboxes(categories: list[dict], selected: list[str] | None = None) -> str:
     selected = selected or []
+    # Alphabetized here (not in Library.list_community_categories, which
+    # orders by sort_order/name and also feeds the categories management
+    # page and public filter pills) — this fix is scoped to the form
+    # checkbox order specifically, matching Software's checkboxes, which
+    # are already alphabetical because list_tool_categories itself always
+    # orders by name.
+    ordered = sorted(categories, key=lambda cat: cat["name"].casefold())
     return "".join(
         f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">'
         f'<input type="checkbox" name="categories" value="{_esc(c["name"])}"'
         f'{" checked" if c["name"] in selected else ""}> {_esc(c["name"])}</label>'
-        for c in categories
+        for c in ordered
     ) or '<p style="grid-column:1/-1;font-size:13px;color:var(--muted);margin:0;">' \
          'No categories yet. <a href="/admin/tools/communities/categories">Add one</a> first.</p>'
 
 
 def _community_form_fields_parts(c: dict | None = None, categories: list[dict] | None = None) -> dict:
-    """Phase P (extended by the admin intake form layout pass): field markup
-    for Add and Edit community, split into named fragments so each route can
-    compose them under its own section headings — Name/URL and Featured/
-    Advisor together under "Community Details" (identity + disclosures,
-    folded into a single column — see admin_communities_edit's layout
-    comment for why there's no second column here), Categories on its own,
-    the Reach/Cost/Sponsorship/Access/Format/Notes block under "Program
-    details", the homepage screenshot URL input next to its existing
-    recapture button/preview under "Screenshots" — without changing a single
-    field's name, id, or behavior. No dict key here is new user-facing copy;
-    the surrounding page composes these with its own headings. Both Add and
+    """Phase P (extended by the admin intake form layout pass, and again by
+    a follow-up round after live review of that pass's shipped result):
+    field markup for Add and Edit community, split into named fragments so
+    each route can compose them under its own section headings — Name/URL
+    and Featured/Advisor together under "Community Details" (identity_block
+    is the ready-to-drop-in combined fragment: identity in a left column,
+    disclosures — Featured/Advisor — in a plain bordered right column via
+    .tool-form-cols, same split Software's Company Details/Warm Intro uses
+    but with no heading or extra content on the right; see
+    admin_communities_edit's layout comment for the fuller history), the
+    Reach/Cost/Sponsorship/Access/Format/Notes block under "Program details"
+    (Cost/Sponsor/Approach are their own auto-fit sub-columns within that
+    block, each with its own small group heading — see the follow-up-round
+    grid regroup below), Categories on its own (auto-fit grid, alphabetized),
+    the homepage screenshot URL input next to its existing recapture
+    button/preview under "Screenshots" — without changing a single field's
+    name, id, or behavior. No dict key here is new user-facing copy; the
+    surrounding page composes these with its own headings. Both Add and
     Edit build their own composition from these fragments directly (no
     shared flat-order helper — that was retired once Add's order changed to
-    match Edit's)."""
+    match Edit's); identity_block is the one exception, since Add and Edit
+    ended up wrapping identity+disclosures in byte-identical markup, so it
+    was pulled into the shared function instead of staying duplicated at
+    both call sites."""
     c = c or {}
     categories = categories or []
     # _NEEDS_VERIFICATION is appended as a literal, selectable option on every
@@ -11449,45 +11466,56 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
       placeholder="e.g. Boston, New York, SF Bay Area"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px 14px;">
     <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost band</label>
-      <select name="cost_band" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-        {cost_opts}
-      </select>
+      <h3 style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 10px;text-transform:uppercase;letter-spacing:.03em;">Cost</h3>
+      <div style="display:grid;gap:10px;">
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost band</label>
+          <select name="cost_band" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+            {cost_opts}
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost note</label>
+          <input name="cost_note" maxlength="300" value="{_esc(c.get('cost_note', ''))}"
+            placeholder="Exact dues, multi-seat pricing, etc."
+            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        </div>
+      </div>
     </div>
     <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Cost note</label>
-      <input name="cost_note" maxlength="300" value="{_esc(c.get('cost_note', ''))}"
-        placeholder="Exact dues, multi-seat pricing, etc."
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sponsorship</label>
-      <select name="sponsorship_type" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-        {sponsor_opts}
-      </select>
-    </div>
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sponsor name</label>
-      <input name="sponsor_name" maxlength="200" value="{_esc(c.get('sponsor_name', ''))}"
-        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-    <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Access</label>
-      <select name="access" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-        {access_opts}
-      </select>
+      <h3 style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 10px;text-transform:uppercase;letter-spacing:.03em;">Sponsor</h3>
+      <div style="display:grid;gap:10px;">
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sponsorship</label>
+          <select name="sponsorship_type" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+            {sponsor_opts}
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Sponsor name</label>
+          <input name="sponsor_name" maxlength="200" value="{_esc(c.get('sponsor_name', ''))}"
+            style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+        </div>
+      </div>
     </div>
     <div>
-      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Format</label>
-      <select name="format" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-        {format_opts}
-      </select>
+      <h3 style="font-size:13px;font-weight:600;color:var(--navy);margin:0 0 10px;text-transform:uppercase;letter-spacing:.03em;">Approach</h3>
+      <div style="display:grid;gap:10px;">
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Access</label>
+          <select name="access" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+            {access_opts}
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Format</label>
+          <select name="format" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+            {format_opts}
+          </select>
+        </div>
+      </div>
     </div>
   </div>
   <div>
@@ -11498,7 +11526,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
 
     categories_html = f"""  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:8px;">Categories</label>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;">
       {_community_category_checkboxes(categories, c.get('categories') or [])}
     </div>
   </div>"""
@@ -11512,8 +11540,31 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
   <div>
     <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
       <input type="checkbox" name="advisor" value="1"{' checked' if c.get('advisor') else ''}>
-      <span>&#129308; Formal advisor</span>
+      <span>&#129305; Formal advisor</span>
     </label>
+  </div>"""
+
+    # Fix 2 (follow-up round after the admin form layout pass's live review): Featured/Advisor
+    # used to render stacked below the Auto-fill button, inside the same
+    # single-column "Community Details" block as Name/URL. Moved beside
+    # Name/URL instead, as a light secondary grouping — reuses Software's
+    # own .tool-form-cols split (2fr/1fr, collapses to one column under
+    # 700px) and its established white/bordered "secondary box" treatment
+    # (the same one Software's Warm Intro column uses), but deliberately
+    # with NO heading and no new content in that right column — Communities
+    # still has no Warm-Intro-equivalent fields (see the no-second-column
+    # comment on admin_communities_edit below, which this supersedes for
+    # layout — Featured/Advisor now get that second column, just unlabeled).
+    identity_block_html = f"""  <div>
+    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community Details</h2>
+    <div class="tool-form-cols">
+      <div style="display:grid;gap:14px;align-content:start;">
+{identity_html}
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:10px;align-content:start;">
+{disclosures_html}
+      </div>
+    </div>
   </div>"""
 
     screenshot_html = f"""  <div>
@@ -11529,6 +11580,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
 
     return {
         "identity": identity_html,
+        "identity_block": identity_block_html,
         "details": details_html,
         "categories": categories_html,
         "disclosures": disclosures_html,
@@ -11673,7 +11725,7 @@ _COMMUNITIES_REFERENCE_HTML = """
 <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;">
 <li><strong>Quiz mention</strong> (inline at the end of the subtitle paragraph, top of page): &ldquo;...Slack channels. Not sure which community's for you? Take the quiz &rarr;&rdquo; &mdash; links to the recommender. Plain inline text link, not a separate CTA block.</li>
 <li><strong>Zero-result state:</strong> &ldquo;No communities match. Tell me what's missing &rarr;&rdquo;, the link inline in the message itself rather than pointing the visitor to a separate CTA elsewhere on the page. Its href (and the bottom-of-page gap link's href) still carries the live search/filter state plus <code>?zero=1</code>, computed client-side by <code>gapFormHref()</code>, so the gap form can tailor its transparency note (see below).</li>
-<li><strong>Advisor legend:</strong> &ldquo;&#129308; Formal advisor to these communities.&rdquo;</li>
+<li><strong>Advisor legend:</strong> &ldquo;&#129305; Formal advisor to these communities.&rdquo;</li>
 <li><strong>Footer</strong> (bottom of page, no box/button chrome): &ldquo;Know a community that belongs here? Submit it for review &rarr;&rdquo; for signed-in members, &ldquo;Sign in to submit &rarr;&rdquo; for everyone else (submission is member-gated, not public), directly followed by &ldquo;Can't find the right one, or the one you're in isn't quite enough? I'd love to know what's missing &rarr;&rdquo; (links to the gap form, public, no login required). The seafoam CTA card that used to carry both prompts plus a &ldquo;Suggest a community&rdquo; button was removed; these two lines used to sit together below the filters as a separate top-of-page block before moving to the footer.</li>
 </ul>
 </section>
@@ -12217,13 +12269,7 @@ def admin_communities_new(request: Request):
     body = f"""<div class="page page-grid">
 <h1>Add a community</h1>
 <form method="post" action="/admin/tools/communities/new" style="display:grid;gap:20px;">
-  <div>
-    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community Details</h2>
-    <div style="display:grid;gap:14px;align-content:start;max-width:480px;">
-{_parts['identity']}
-{_parts['disclosures']}
-    </div>
-  </div>
+{_parts['identity_block']}
   <div id="gen-host-community-listing" style="display:grid;gap:20px;">
 {_parts['details']}
   </div>
@@ -12418,15 +12464,19 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     # same trick Warm Intro already used on the Software page).
     #
     # Admin intake form layout pass: Software's Company Details / Warm Intro
-    # two-column split (.tool-form-cols, 2fr/1fr) is NOT reused here.
-    # Communities genuinely has no Warm-Intro-equivalent — no vendor_name/
-    # vendor_email/warm_intro_enabled columns exist on the communities table,
-    # no contact fields, no button anywhere on a community profile — so
-    # there's nothing to put in a right column. Featured and Advisor (both
-    # real, working checkboxes) instead fold directly into one single-column
-    # "Community Details" block alongside Name/URL, no separate "Disclosures"
-    # label — same idea as Software's merge, just without a second column
-    # to pair it against. Kept the "Community Details" heading rather than
+    # two-column split (.tool-form-cols, 2fr/1fr) was NOT reused at first —
+    # Communities genuinely has no Warm-Intro-equivalent (no vendor_name/
+    # vendor_email/warm_intro_enabled columns, no contact fields, no button
+    # anywhere on a community profile), so there was nothing for a right
+    # column to hold, and Featured/Advisor folded directly into one
+    # single-column "Community Details" block alongside Name/URL instead.
+    # Follow-up round (live review of the shipped result): that put Featured/
+    # Advisor stacked below the Auto-fill button, which read as buried, not
+    # secondary. _community_form_fields_parts' identity_block now DOES reuse
+    # .tool-form-cols for these two fields specifically — Name/URL/Auto-fill
+    # in the left column, Featured/Advisor in a plain bordered box on the
+    # right, deliberately with NO "Warm Intro"-style heading or any new
+    # content in that column. Kept the "Community Details" heading rather than
     # renaming to "Company Details": a community isn't a company, same
     # reasoning that kept "Similar communities" instead of "Core competition"
     # below. The structured Reach/Cost/Sponsorship/Access/Format/Notes block
@@ -12454,13 +12504,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 <form id="comm-edit-form" method="post" action="/tools/communities/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
 
-  <div>
-    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community Details</h2>
-    <div style="display:grid;gap:14px;align-content:start;max-width:480px;">
-{_parts['identity']}
-{_parts['disclosures']}
-    </div>
-  </div>
+{_parts['identity_block']}
 
 {_parts['categories']}
 
@@ -13056,7 +13100,7 @@ def admin_tools_new(request: Request):
       </div>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
         <input type="checkbox" name="advisor" value="1">
-        <span>&#129308; Formal advisor</span>
+        <span>&#129305; Formal advisor</span>
       </label>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
         <input type="checkbox" name="promoted" value="1">
@@ -13454,7 +13498,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       </div>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
         <input type="checkbox" name="advisor" value="1"{'checked' if tool.get('advisor') else ''}>
-        <span>&#129308; Formal advisor</span>
+        <span>&#129305; Formal advisor</span>
       </label>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
         <input type="checkbox" name="promoted" value="1"{'checked' if tool.get('promoted') else ''}>
