@@ -34,6 +34,15 @@ name: Daily off-site backup
 # never meant to gate this call — X-Save-Token is the real auth boundary
 # either way — so this routes around the CDN instead of trying to carve out
 # a Bot Fight Mode exception for a rotating set of GitHub-runner IPs.
+#
+# Same caveat as secret-scan-weekly.yml: GitHub auto-disables a scheduled
+# workflow after 60 days with no REPOSITORY activity (any push — the
+# schedule firing daily does not itself count), silently, with no
+# notification. Given this is the sole off-site recovery path for
+# library.db, a Railway-only stretch with no code pushes for two months is
+# the one scenario worth actively watching for — check the repo's Actions
+# tab if that ever happens, since a disabled schedule looks identical to
+# "quietly working" until a restore is actually needed.
 on:
   schedule:
     - cron: "0 9 * * *"   # Daily 09:00 UTC — same time slot as the old weekly run
