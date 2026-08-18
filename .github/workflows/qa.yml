@@ -1,12 +1,34 @@
 name: QA
 
-# Automated guards. Runs on every PR and on pushes to main, so dead code,
-# off-brand colors/fonts, off-voice copy, dependency drift, and leaked secrets
-# are all caught before anything ships. Mirrored live on /admin/checks.
+# Automated guards, run once per PR commit. Mirrored live on /admin/checks.
+#
+# CI cost optimization (2026-08-18): dropped the old `push: branches: [main]`
+# trigger. This repo only ever merges via a real PR (branch protection
+# requires it), so a push-to-main run always re-tested exactly what the PR's
+# own `pull_request` run had already verified green moments earlier —
+# doubling billed minutes for every single merge with zero coverage gained
+# (confirmed from run history: 346 push-triggered runs vs. 123
+# pull_request-triggered runs, all-time, with no SHA overlap between them).
+# Safe ONLY IF main's branch protection requires a PR branch to be up to
+# date with main before merging — so what the PR's checks verified is
+# exactly what lands, not a stale base. If that setting is ever turned off,
+# re-add the push trigger (or re-enable the setting instead).
+#
+# Also added `concurrency`, so a force-push or a rapid follow-up commit
+# cancels the now-superseded run instead of letting a ~14-minute run finish
+# for a commit nobody cares about anymore (confirmed real waste: 6 of the
+# last 30 PR-triggered runs were superseded by a same-branch push before
+# they could have finished). And `secret-scan` now scans only this PR's
+# diff instead of the full git history on every single run — the rest of
+# history doesn't change between runs, so re-scanning all of it every time
+# was pure waste in a repo this size. See secret-scan-weekly.yml for the
+# full-history backstop that keeps that coverage.
 on:
-  push:
-    branches: [main]
   pull_request:
+
+concurrency:
+  group: qa-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   tests:
@@ -16,6 +38,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements-dev.txt
       - name: Install dev dependencies
         run: pip install -r requirements-dev.txt
       - name: Lint — unused imports / dead code (pyflakes)
@@ -27,8 +51,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Secret scan (TruffleHog)
+        with:
+          fetch-depth: 0   # need real history so base/head below can diff, not just the shallow default
+      - name: Secret scan (TruffleHog) — this PR's diff only
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
           extra_args: --only-verified   # fail only on secrets verified as live

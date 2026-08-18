@@ -1796,8 +1796,12 @@ tables, no third-party dependency.
 
 It's Brian's personal reading history (~1,500+ articles). It lives beside the code
 locally (on a Railway volume in production) and should never be committed —
-`.gitignore` covers it (`library.db` + `*.db`). Off-site weekly backups go to
-Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
+`.gitignore` covers it (`library.db` + `*.db`). Off-site daily backups (bumped from
+weekly, 2026-08 — Railway-native volume snapshots turned out unavailable on the
+current plan, so this is the only recovery path) go to Google Drive when the
+`GOOGLE_OAUTH_*` vars are set (see `.env.example`), with `linklib/backup.py`'s
+`prune_old_backups()` keeping the most recent 14 daily snapshots plus one per week
+for 8 further weeks, deleting the rest, so the folder doesn't grow without limit.
 
 ## Environment variables
 
@@ -1817,7 +1821,7 @@ Google Drive when the `GOOGLE_OAUTH_*` vars are set (see `.env.example`).
 | `LINKLIB_CHAT_MODEL` | `claude-sonnet-4-6` | Claude model for Q&A and post drafting |
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
 | `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/read`'s Feed-view source list |
-| `GOOGLE_OAUTH_CLIENT_ID` | — | Google Cloud OAuth client ID. Required (with the two below) for `linklib/backup.py`'s weekly off-site Drive backup and `linklib/email_utils.py`'s outbound contact-form email — one client, both scopes. Absent → both features are a safe no-op, no error. |
+| `GOOGLE_OAUTH_CLIENT_ID` | — | Google Cloud OAuth client ID. Required (with the two below) for `linklib/backup.py`'s daily off-site Drive backup and `linklib/email_utils.py`'s outbound contact-form email — one client, both scopes. Absent → both features are a safe no-op, no error. |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | — | Google Cloud OAuth client secret, paired with the above. |
 | `GOOGLE_OAUTH_REFRESH_TOKEN` | — | OAuth refresh token (`drive.file` + `gmail.send` scopes), paired with the above. Mint once with both scopes — see `.env.example` for the exact steps. |
 | `GOOGLE_DRIVE_FOLDER_ID` | (self-managed) | Explicit override for the Drive folder id snapshots upload into. **Normally left unset** — the app creates its own folder ("CFO Navigator — Library Backups", in My Drive root) on the first successful backup and remembers its id in the `settings` table, since the `drive.file` OAuth scope can't see a folder made by hand in the Drive UI (Phase O — see the Key architecture decisions bullet above for the full 404 story). Only set this if a folder has been explicitly granted to the app some other way (e.g. a Drive Picker consent flow) and you want backups to target it instead. |
@@ -1942,8 +1946,9 @@ instead, off that page — kept for git history, not meant to run again.
 - Hosting/deployment on Railway (see Deployment below)
 - bmweis.com custom domain pointed at Railway (July 2026)
 - MCP server (`scripts/mcp_server.py`) wrapping `/api/search` for Claude Desktop/Code
-- Weekly off-site Drive backup, scheduled via GitHub Action (Phase O — see Key
-  architecture decisions above), with a persistent `backup_log` audit trail and a
+- Daily off-site Drive backup (bumped from weekly, 2026-08), scheduled via GitHub
+  Action (Phase O — see Key architecture decisions above), with retention pruning
+  (`linklib.backup.prune_old_backups`), a persistent `backup_log` audit trail, and a
   status banner + history table on `/admin/library/backup`
 
 **Not yet built (from the migration plan):**
@@ -2033,8 +2038,14 @@ appear.
 Work on a feature branch, push it, and open a PR into `main`; let the QA workflow
 (`tests` + `secret-scan`) run, then merge the PR. This keeps every change reviewable
 and traceable, and the **Checks** admin page (`/admin/checks`) mirrors what the PR
-must pass. (Enforced server-side by a branch-protection rule on `main` that requires
-a PR and passing checks — the convention here so tooling/agents follow it regardless.)
+must pass. **Mechanically enforced** (2026-08) by a GitHub ruleset (`main-protection`)
+on `main`: requires a PR before merging (0 required approvals — solo repo), requires
+the `tests` and `secret-scan` status checks to pass, requires the PR branch to be up
+to date with `main` before merge, blocks force pushes, restricts branch deletion, and
+has an empty bypass list — direct commits to `main` are blocked outright, not just
+discouraged by convention. (Before this, "requires a PR and passing checks" was
+convention only, not a real gate — worth knowing if a future investigation finds a
+commit that looks like it skipped review; anything from before this date could have.)
 
 **Open the PR as soon as there's a reviewable chunk — don't wait until a multi-phase
 task is fully done.** For work that's naturally sequenced into phases (e.g. a phased

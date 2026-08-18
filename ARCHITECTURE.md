@@ -35,8 +35,8 @@ flowchart LR
     A -.->|"native web_search tool<br/>(fallback: Exa off or no key)"| W
     R -->|"RSS/Atom + article<br/>full-text fetches"| F["Publisher sites"]
     R -->|"outbound email"| G["Gmail REST API"]
-    R -->|"weekly DB snapshot"| D["Google Drive"]
-    GH["GitHub Actions<br/>backup.yml, weekly cron"] -->|"POST /admin/backup-now<br/>(X-Save-Token, direct to<br/>Railway origin — bypasses CF)"| R
+    R -->|"daily DB snapshot"| D["Google Drive"]
+    GH["GitHub Actions<br/>backup.yml, daily cron"] -->|"POST /admin/backup-now<br/>(X-Save-Token, direct to<br/>Railway origin — bypasses CF)"| R
 ```
 
 Notes on the edges:
@@ -96,10 +96,10 @@ Notes on the edges:
   badge instead of dying in a log. At the DNS level (Cloudflare-managed) the
   domain has SPF and DKIM in place, plus DMARC in `p=none` monitoring mode —
   collecting reports, not yet enforcing.
-- **The weekly Drive backup is triggered by a GitHub Action, not a Railway
-  cron service.** `.github/workflows/backup.yml` calls `POST
-  /admin/backup-now` on a weekly schedule (`X-Save-Token` auth, same as
-  RUNBOOK.md's manual curl example) — this is Phase O's fix for the original
+- **The daily (bumped from weekly, 2026-08) Drive backup is triggered by a
+  GitHub Action, not a Railway cron service.** `.github/workflows/backup.yml`
+  calls `POST /admin/backup-now` on a daily schedule (`X-Save-Token` auth,
+  same as RUNBOOK.md's manual curl example) — this is Phase O's fix for the original
   mechanism (`linklib.backup.maybe_backup`, debounced and only fired as a
   side effect of ~18 admin/save routes in `webapp/app.py`) never getting a
   reliable weekly opportunity to run in practice. Those ~18 call sites are
@@ -1138,7 +1138,7 @@ from the public page. Not editable via the admin CRUD.
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
 | `contact_audit_log` | Same shape for contact deletions — kept separate so `item_id` is never ambiguous about which table it references. | as above, `item_id` → `contacts.id` |
-| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the weekly GitHub Action, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled Action run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
+| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily GitHub Action, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled Action run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
 
 ### Feed subscriptions
 
@@ -2395,7 +2395,7 @@ Reader as tool #1. `_LIBRARY_TOOLS` is now 8 entries (down from 10):
 "Open Reader" is gone (moved to the callout) and "Historical sweep" is gone
 (merged into Archive Queue, next paragraph). Two descriptions were rewritten
 for clarity: **Archive backup**'s now explicitly says automated backups
-already run weekly via the GitHub Action (Phase O) and that this manual
+already run daily via the GitHub Action (Phase O) and that this manual
 tool is for an on-demand snapshot right before something risky, not a
 day-to-day safety net; **Reader content backfill**'s now explicitly
 differentiates itself from Archive Queue's Historical sweep panel
@@ -2786,7 +2786,7 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   direct-origin hits) and `Cache-Control: no-store` on `/admin/*` (so task
   badges are never served stale from the back-forward cache).
 - **`/admin/backup-now` is a deliberate, narrowly-scoped exception to the
-  canonical-host redirect (Phase O).** The weekly backup GitHub Action calls
+  canonical-host redirect (Phase O).** The daily backup GitHub Action calls
   this one route directly on the legacy Railway hostname on purpose, to
   route around Cloudflare's Bot Fight Mode (see the "publicly reachable
   Railway origin" note above) — without this exception, the 301 the
@@ -2991,7 +2991,7 @@ recorded anywhere, it's flagged rather than invented.
   file — but treat that as inference, not recorded rationale.
 - **SQLite + FTS5 on a Railway volume, not a hosted database.** *Why:* the
   scale is one curator plus a small member base; a single file needs zero
-  operational overhead, backs up by copying (`/admin/library/backup/download-db`, weekly
+  operational overhead, backs up by copying (`/admin/library/backup/download-db`, daily
   Drive snapshots), and FTS5 gives ranked full-text search for free.
   `db.py`'s docstring records the exit path: the same schema works on
   libSQL/Turso/D1 later — only the connection changes.
