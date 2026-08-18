@@ -23100,20 +23100,24 @@ def admin_backfill_status(request: Request):
 _CONTENT_BACKFILL_DELAY_SEC = 1.5
 
 
-def _content_backfill_job(limit: int, force: bool) -> None:
+def _content_backfill_job(limit: int, force: bool, host_suffixes: list[str] | None = None) -> None:
     """Background thread: re-fetch articles needing content_html, updating
     _JOB_STATE["content_backfill"]. Stoppable via stop_requested — checked
     before each article (never mid-fetch), so a stop always lands cleanly
     between attempts and a later run resumes from the same
     articles_needing_content_backfill() scope (already-succeeded rows are
-    skipped, same as a crash-recovery restart would see)."""
+    skipped, same as a crash-recovery restart would see). `host_suffixes`
+    scopes the run to matching hosts and, for those hosts only, reaches
+    articles otherwise parked in "needs manual review" — see
+    Library.articles_needing_content_backfill's docstring."""
     _job_set("content_backfill", running=True, stop_requested=False,
              done=0, total=0, ok=0, failed=0, error="", stopped=False)
     lib = _lib()
     try:
         from linklib import pipeline as _pl
 
-        rows = lib.articles_needing_content_backfill(limit=limit, force=force)
+        rows = lib.articles_needing_content_backfill(limit=limit, force=force,
+                                                       host_suffixes=host_suffixes)
         total = len(rows)
         _job_set("content_backfill", total=total)
         ok_count = 0
@@ -23155,6 +23159,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         failure_domains = lib.content_refetch_failure_domains(limit=15)
         wayback_count = lib.count_wayback_content()
         migration_count = lib.count_migration_content()
+        medium_search_count = lib.count_medium_search_content()
         log_rows = lib.list_content_refetch_log(limit=50)
     finally:
         lib.close()
@@ -23238,6 +23243,9 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         elif r["status"] == "success" and (r.get("source") or "direct") == "migration":
             label += (' <span style="background:#dbeafe;color:#1d4ed8;'
                       'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Migration</span>')
+        elif r["status"] == "success" and (r.get("source") or "direct") == "medium-search":
+            label += (' <span style="background:var(--seafoam-wash);color:var(--seafoam-deep);'
+                      'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Medium search</span>')
         title = _esc(r.get("article_title") or r.get("article_url") or f'#{r["article_id"]}')
         url = r.get("article_url") or ""
         title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
@@ -23351,6 +23359,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch&mdash;the live page couldn&rsquo;t be reached for those. A snapshot can be stale or differ from what the current page shows; look for the &ldquo;via Wayback&rdquo; badge in the attempts log below to spot which ones.</p>' if wayback_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{migration_count:,} of the structured articles above came from a <strong>known domain migration</strong> (e.g. a blog that relocated to a new host), not the article&rsquo;s originally saved URL&mdash;look for the &ldquo;via Migration&rdquo; badge in the attempts log below.</p>' if migration_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_search_count:,} of the structured articles above came from a <strong>Medium-platform search match</strong> (medium.com and similar hosts block direct fetches, so a matching article found elsewhere or via Exa&rsquo;s own text is used instead)&mdash;look for the &ldquo;via Medium search&rdquo; badge in the attempts log below.</p>' if medium_search_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service (e.g. Google&rsquo;s retired FeedBurner proxy), so re-fetching can never succeed. Not counted in Remaining above. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry them anyway.</p>' if excluded_count else ''}
 
 <div id="poll-container">{status_html}</div>
@@ -23369,6 +23378,12 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         <span><strong>Re-run articles that already have structured content</strong>
         <span style="display:block;font-size:12px;color:var(--muted);">Unchecked (default)&mdash;only articles still on flattened plain text are processed. Check this only to re-run everything after an extraction-logic change.</span></span>
       </label>
+    </div>
+    <div>
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;">Scope to host(s) (optional)</label>
+      <input type="text" name="host_scope" placeholder="e.g. medium.com, bothsidesofthetable.com"
+        style="width:100%;max-width:420px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:var(--bg);">
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Comma-separated host suffixes. Narrows the run to matching articles and, for those only, also reaches ones stuck in &ldquo;Needs manual review&rdquo; below&mdash;useful right after a new fetch tier ships (e.g. re-running just <code>medium.com</code> once the Medium search tier existed).</p>
     </div>
     <div>
       <button type="submit" class="btn" style="font-size:15px;padding:11px 28px;" {disable}>Start backfill</button>
@@ -23428,7 +23443,9 @@ async def admin_backfill_content_start(request: Request):
     except ValueError:
         limit = 25
     force = bool(form.get("force"))
-    t = threading.Thread(target=_content_backfill_job, args=(limit, force), daemon=True)
+    host_scope_raw = (form.get("host_scope") or "").strip()
+    host_suffixes = [h.strip().lower() for h in host_scope_raw.split(",") if h.strip()] or None
+    t = threading.Thread(target=_content_backfill_job, args=(limit, force, host_suffixes), daemon=True)
     t.start()
     return RedirectResponse("/admin/library/backfill-content", status_code=303)
 

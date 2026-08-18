@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
+from html import escape
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -436,3 +438,148 @@ def extract_reader_html(html: str, base_url: str) -> str:
 
     out = "".join(str(c) for c in root.contents).strip()
     return out if ("<p" in out or "<h" in out or "<ul" in out or "<img" in out) else ""
+
+
+# --- Medium-platform Exa-text -> Reader HTML -----------------------------
+#
+# Exa's Search API returns Medium-platform articles as plain markdown-ish
+# text, not HTML (Medium's own markup is React-rendered client-side and
+# opaque to a normal fetch, which is the entire reason the Medium fetch tier
+# goes through Exa in the first place — see linklib/medium_platform.py).
+# This turns that plain text into the same kind of structural HTML
+# extract_reader_html() produces from real markup, so a Medium-sourced
+# article reads identically to any other in the Reader — the Reader gives a
+# consistent house reading experience regardless of publisher; the source is
+# an input to normalize, not a style to preserve.
+#
+# Formatting rules (resolved with Brian, 2026-08-18): headings become h2/h3
+# (capped — Exa text doesn't reliably distinguish deeper levels), emphasis
+# markers (*/**/_/__) are stripped rather than converted to <em>/<strong>
+# (goal is the cleanest possible read, not a markdown-parity render), links
+# are stripped to their visible text only (the URL adds nothing in a
+# plain-text extract and Medium's own link text is often already the
+# reference), paragraphs split on blank lines. Strip and simplify, never
+# restructure.
+_MIN_READ_RE = re.compile(r"^\d+\s*min\s*read$", re.IGNORECASE)
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+# [text](url) or bare markdown link syntax -> keep only the visible text.
+_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+# Matched emphasis markers only (not stray asterisks/underscores elsewhere,
+# e.g. "3*4" or a filename) — strip the markers, keep the wrapped text.
+_EMPHASIS_RE = re.compile(r"(\*\*|__)(.+?)\1|(\*|_)(.+?)\3")
+
+# Known Medium chrome lines that precede the real article body in Exa's
+# extracted text — "Open in app", "Sign up", "Get app", a lone "Follow",
+# member-paywall prompts, and the "N min read" byline line. Matched
+# case-insensitively against the whole line, not substring — conservative on
+# purpose: a real paragraph that happens to contain one of these words (e.g.
+# a sentence mentioning "sign up for our newsletter") must never be dropped,
+# only a line that IS one of these phrases in its entirety. Only applied as
+# a leading strip (see _is_medium_chrome_paragraph below) — once a line
+# doesn't match, stripping stops for good, so a real paragraph can never be
+# eaten even if it happens to echo one of these phrases later in the piece.
+_MEDIUM_CHROME_PHRASES = {
+    "open in app",
+    "sign up",
+    "sign in",
+    "get app",
+    "get the app",
+    "follow",
+    "listen",
+    "share",
+}
+
+
+def _normalize_chrome_check(line: str) -> str:
+    return line.strip().strip(".").lower()
+
+
+def _is_medium_chrome_paragraph(line: str) -> bool:
+    norm = _normalize_chrome_check(line)
+    if not norm:
+        return True
+    if norm in _MEDIUM_CHROME_PHRASES:
+        return True
+    if _MIN_READ_RE.match(norm):
+        return True
+    return False
+
+
+def _strip_markdown_inline(text: str) -> str:
+    text = _LINK_RE.sub(r"\1", text)
+    text = _EMPHASIS_RE.sub(lambda m: m.group(2) or m.group(4) or "", text)
+    return text
+
+
+def paragraphs_html_from_text(text: str) -> str:
+    """Turn Exa's plain-text Medium-article extract into Reader-consistent
+    HTML: real <h2>/<h3>/<p> structure, a leading strip of known Medium
+    navigation chrome, and markdown link/emphasis syntax reduced to plain
+    text. Deliberately conservative — see the module comment above and
+    _is_medium_chrome_paragraph's docstring for why the chrome strip only
+    ever eats from the top and stops at the first line that isn't chrome.
+    Returns "" on empty/whitespace-only input."""
+    if not text or not text.strip():
+        return ""
+
+    raw_blocks = [b.strip() for b in re.split(r"\n\s*\n", text.strip())]
+    raw_blocks = [b for b in raw_blocks if b]
+
+    # Strip leading Medium chrome blocks (each block is normally one line,
+    # but treat a multi-line block as chrome only if every line in it is
+    # chrome, so a real paragraph that happens to start on the same line as
+    # trailing chrome is never eaten).
+    idx = 0
+    while idx < len(raw_blocks):
+        lines = raw_blocks[idx].splitlines()
+        if lines and all(_is_medium_chrome_paragraph(ln) for ln in lines):
+            idx += 1
+            continue
+        break
+    blocks = raw_blocks[idx:]
+    if not blocks:
+        return ""
+
+    # The "N min read" byline is an unambiguous regex match — no real
+    # sentence is ever literally just that phrase — so unlike the fuzzy
+    # chrome-phrase list above, it's safe to drop wherever it lands, not
+    # just while still in the leading run. It typically follows the title
+    # heading (title, then "9 min read", then the real body), which is
+    # past the point the leading-chrome strip above already stopped at.
+    blocks = [b for b in blocks if not (
+        "\n" not in b and _MIN_READ_RE.match(_normalize_chrome_check(b)))]
+    if not blocks:
+        return ""
+
+    html_parts = []
+    for block in blocks:
+        heading_match = _HEADING_RE.match(block)
+        if heading_match:
+            level = len(heading_match.group(1))
+            tag = "h2" if level <= 2 else "h3"
+            content = _strip_markdown_inline(heading_match.group(2)).strip()
+            if content:
+                html_parts.append(f"<{tag}>{escape(content)}</{tag}>")
+            continue
+        # A short standalone line in Title Case with no trailing punctuation
+        # reads as a subheading even without markdown "#" markers — Medium's
+        # own in-article section headers arrive this way in Exa's plain-text
+        # extract, with no markdown syntax surviving the conversion.
+        single_line = "\n" not in block
+        if (single_line and len(block) <= 80 and not block.endswith((".", "!", "?", ":", ","))
+                and block[:1].isupper()):
+            content = _strip_markdown_inline(block).strip()
+            if content:
+                html_parts.append(f"<h3>{escape(content)}</h3>")
+            continue
+        content = _strip_markdown_inline(block).strip()
+        if not content:
+            continue
+        # A blank line inside a kept paragraph block was already the
+        # boundary that split blocks in the first place; a single newline
+        # within a block is a soft wrap — join it into one flowing
+        # paragraph rather than rendering a mid-sentence <br>.
+        content = " ".join(line.strip() for line in content.splitlines() if line.strip())
+        html_parts.append(f"<p>{escape(content)}</p>")
+
+    return "".join(html_parts)

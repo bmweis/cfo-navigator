@@ -2864,7 +2864,8 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def articles_needing_content_backfill(self, limit: int = 100000, force: bool = False) -> list[dict]:
+    def articles_needing_content_backfill(self, limit: int = 100000, force: bool = False,
+                                           host_suffixes: list[str] | None = None) -> list[dict]:
         """Scope for the Reader content-structure backfill (Phase 5b) —
         mirrors unenriched()/all_articles()'s own resumability idiom exactly.
         Default (force=False): only rows with content_html still empty, so a
@@ -2891,7 +2892,52 @@ class Library:
         needs-manual-review both included — for standardizing the whole
         library after an extraction-logic change, or re-checking a domain
         that's since recovered, same escape hatch as the re-enrich job's own
-        force option."""
+        force option.
+
+        `host_suffixes` (Medium-platform tier follow-through, 2026-08):
+        when given, scopes to articles whose URL host matches one of the
+        given suffixes (exact host match or a `.`-boundary subdomain match
+        — same convention as linklib.medium_platform.is_medium_platform_host
+        and _defunct_service_domain below) and, for those matching hosts
+        ONLY, bypasses the needs-manual-review exclusion — the whole reason
+        to scope a run to a specific host is usually to re-attempt exactly
+        the articles that got stuck in manual review because the new fetch
+        tier (e.g. Medium search) didn't exist yet when they were last
+        tried. The defunct-service exclusion still applies even when
+        host-scoped: a confirmed-dead host can't be un-dead by narrowing the
+        run to it. `force` and `host_suffixes` may be combined (force wins
+        on the manual-review/defunct-service exclusions; host_suffixes still
+        narrows which rows are returned)."""
+        if host_suffixes:
+            suffixes = [s.strip().lower() for s in host_suffixes if s.strip()]
+
+            def _host_matches(url: str) -> bool:
+                from urllib.parse import urlsplit
+                host = (urlsplit(url or "").netloc or "").lower().split(":")[0]
+                if host.startswith("www."):
+                    host = host[4:]
+                return any(host == s or host.endswith("." + s) for s in suffixes)
+
+            if force:
+                rows = self.conn.execute(
+                    "SELECT * FROM articles WHERE url!='' ORDER BY id"
+                ).fetchall()
+            else:
+                rows = self.conn.execute(
+                    """SELECT a.* FROM articles a
+                       WHERE a.url!='' AND a.content_html=''
+                         AND a.id NOT IN (
+                           SELECT article_id FROM (
+                             SELECT article_id, reason,
+                                    ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                             FROM content_refetch_log
+                           ) WHERE rn=1 AND reason='defunct-service'
+                         )
+                       ORDER BY a.id"""
+                ).fetchall()
+            matched = [r for r in rows if _host_matches(r["url"])][:limit]
+            return [self._row_to_dict(r) for r in matched]
+
         if force:
             rows = self.conn.execute(
                 "SELECT * FROM articles WHERE url!='' ORDER BY id LIMIT ?", (limit,)
@@ -3362,6 +3408,19 @@ class Library:
                         ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
                  FROM content_refetch_log
                ) WHERE rn=1 AND status='success' AND source='migration'"""
+        ).fetchone()[0]
+
+    def count_medium_search_content(self) -> int:
+        """How many articles currently have content_html sourced from the
+        Medium-platform Exa-search tier (linklib/medium_platform.py) rather
+        than a direct fetch, Wayback, or the domain-migration tier — same
+        shape/reasoning as count_wayback_content()/count_migration_content()."""
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM (
+                 SELECT article_id, status, source,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               ) WHERE rn=1 AND status='success' AND source='medium-search'"""
         ).fetchone()[0]
 
     # -- tools directory ---------------------------------------------------

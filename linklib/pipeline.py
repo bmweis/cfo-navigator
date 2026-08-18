@@ -273,6 +273,68 @@ def _try_domain_migration(lib: Library, new_domain: str, title: str,
     return True, structured, candidate_url
 
 
+def _try_medium_platform(lib: Library, title: str, author: str,
+                          original_url: str) -> tuple[bool, str, str]:
+    """Attempts the Medium-platform tier for one article: find a candidate
+    via Exa (linklib.medium_platform.find_medium_candidate), then validate
+    it one of two ways depending on where the candidate itself resolved to
+    (mirrors scripts/medium_platform_scale_check.py's `_spike_one_article`
+    validation split, the diagnostic that found this distinction necessary):
+
+    - Candidate resolved to some OTHER host: live re-fetch it and run the
+      exact same extract_reader_html + assess_extraction_quality gate a
+      direct fetch or a domain-migration candidate has to clear.
+    - Candidate resolved back onto a Medium-platform host itself (medium.com,
+      a *.medium.com subdomain, or a confirmed custom domain): a live
+      re-fetch would just re-hit the same block the ORIGINAL url already
+      failed on, not a real test of the candidate — validate against Exa's
+      own already-returned text instead (a word-count floor matching
+      extract._MIN_CONTENT_WORDS), then convert that plain text into
+      Reader-consistent HTML via extract.paragraphs_html_from_text — the
+      same Medium-navigation-chrome strip and structure normalization used
+      wherever else this tier's Exa text lands, so the Reader reads
+      identically to any other source (see extract.py's module comment on
+      that function for the "consistent house reading experience" principle).
+
+    Returns (ok, structured_html, candidate_url). Never raises — any
+    failure at any stage resolves to (False, "", ""), same best-effort
+    contract as _try_domain_migration."""
+    from .extract import (fetch_page, extract_reader_html, assess_extraction_quality,
+                           paragraphs_html_from_text, _MIN_CONTENT_WORDS)
+    from . import medium_platform
+
+    if not title.strip():
+        return False, "", ""
+    candidate_url, candidate_text = medium_platform.find_medium_candidate(lib, title, author)
+    if not candidate_url:
+        return False, "", ""
+
+    if medium_platform.is_medium_platform_host(candidate_url):
+        text = (candidate_text or "").strip()
+        if len(text.split()) < _MIN_CONTENT_WORDS:
+            return False, "", ""
+        structured = paragraphs_html_from_text(text)
+        if not structured:
+            return False, "", ""
+        return True, structured, candidate_url
+
+    try:
+        page = fetch_page(candidate_url)
+    except Exception:
+        return False, "", ""
+    if not page.raw_html:
+        return False, "", ""
+
+    ok, _reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
+    if not ok:
+        return False, "", ""
+
+    structured = extract_reader_html(page.raw_html, candidate_url)
+    if not structured:
+        return False, "", ""
+    return True, structured, candidate_url
+
+
 def _finish_backfill_after_direct_failure(lib: Library, article: dict,
                                            direct_reason: str, direct_detail: str
                                            ) -> tuple[bool, str]:
@@ -280,17 +342,25 @@ def _finish_backfill_after_direct_failure(lib: Library, article: dict,
     point for all of backfill_article_content's failure branches (Phase 5b
     follow-up #2). Tries the domain-migration tier first (only if the
     article's URL host is a known migration AND the article has a title to
-    search with), then falls through to the pre-existing Wayback fallback on
-    ANY migration-tier miss.
+    search with), then the Medium-platform tier (only if the URL's host is
+    recognized by linklib.medium_platform.is_medium_platform_host), then
+    falls through to the pre-existing Wayback fallback on ANY miss from
+    either of those.
 
     Preserves the "exactly one content_refetch_log row per
-    backfill_article_content() call" invariant: a migration-tier SUCCESS
-    logs its own single success row (source='migration') and returns
-    immediately without ever calling _finish_backfill_via_wayback; a
-    migration-tier miss (no match, wrong domain, or the candidate failed its
-    own sanity check) logs NOTHING here and simply delegates to
-    _finish_backfill_via_wayback, which does its own single log — so there's
-    never a double-log, whichever tier ultimately succeeds or fails."""
+    backfill_article_content() call" invariant: a migration-tier or
+    Medium-platform-tier SUCCESS logs its own single success row
+    (source='migration' or source='medium-search' respectively) and returns
+    immediately without ever calling _finish_backfill_via_wayback; a miss
+    from either tier (no match, or the candidate failed its own sanity
+    check) logs NOTHING here and simply falls through — to the Medium tier,
+    then to Wayback — each of which does its own single log, so there's
+    never a double-log, whichever tier ultimately succeeds or all fail.
+    Deliberately Medium-platform-tier-before-Wayback, not the reverse: the
+    Wayback fallback is currently unreliable due to archive.org-side
+    rate-limiting (see linklib.wayback's module docstring), while the
+    Medium tier's hit rate on real diagnostic data was strong enough to try
+    first (see linklib/medium_platform.py's module docstring)."""
     article_id = article["id"]
     url = article["url"]
 
@@ -302,6 +372,17 @@ def _finish_backfill_after_direct_failure(lib: Library, article: dict,
             lib.set_article_content_html(article_id, structured)
             lib.log_content_refetch_attempt(article_id, "success",
                                             source="migration", detail=migrated_url)
+            return True, ""
+
+    from . import medium_platform
+    if medium_platform.is_medium_platform_host(url):
+        title = article.get("title") or ""
+        author = article.get("author") or ""
+        ok, structured, candidate_url = _try_medium_platform(lib, title, author, url)
+        if ok:
+            lib.set_article_content_html(article_id, structured)
+            lib.log_content_refetch_attempt(article_id, "success",
+                                            source="medium-search", detail=candidate_url)
             return True, ""
 
     return _finish_backfill_via_wayback(lib, article_id, url, direct_reason, direct_detail)
@@ -330,18 +411,21 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
     On a direct-fetch failure of any OTHER kind above, first tries the
     known-domain-migration tier (Phase 5b follow-up #2 — see
     _DOMAIN_MIGRATIONS' comment and linklib.domain_migration) if the URL's
-    host is a confirmed migrated domain, then the Wayback Machine as a last
-    resort before giving up (see linklib.wayback's module docstring —
-    deliberately not scoped to 404 only, since a stubborn bot-block a direct
-    fetch can't get past may still have a usable archived snapshot). Both
-    fallbacks funnel through _finish_backfill_after_direct_failure, which
-    guarantees exactly one content_refetch_log row is written no matter
-    which tier (direct, migration, or wayback) ultimately succeeds or all
-    three fail. A migration-sourced success is logged with source='migration',
-    a Wayback-sourced success with source='wayback' — both distinguishable
-    from a normal direct fetch (linklib.wayback's docstring covers why the
-    Wayback fallback's real-world reliability is unverified at the time it
-    was built).
+    host is a confirmed migrated domain, then the Medium-platform tier (see
+    linklib/medium_platform.py) if the URL's host is a recognized
+    Medium-platform domain, then the Wayback Machine as a last resort before
+    giving up (see linklib.wayback's module docstring — deliberately not
+    scoped to 404 only, since a stubborn bot-block a direct fetch can't get
+    past may still have a usable archived snapshot). All three fallbacks
+    funnel through _finish_backfill_after_direct_failure, which guarantees
+    exactly one content_refetch_log row is written no matter which tier
+    (direct, migration, medium-search, or wayback) ultimately succeeds or
+    all four fail. A migration-sourced success is logged with
+    source='migration', a Medium-platform-sourced success with
+    source='medium-search', a Wayback-sourced success with source='wayback'
+    — all distinguishable from a normal direct fetch (linklib.wayback's
+    docstring covers why the Wayback fallback's real-world reliability is
+    unverified at the time it was built).
 
     Never destructive: a failure — even after the Wayback fallback is also
     exhausted — never touches articles.content or articles.content_html, so
