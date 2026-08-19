@@ -2244,6 +2244,64 @@ appends a new `'failure'` row rather than deleting the `'accepted'` one, so the 
 article was accepted and later reversed stays visible in the log, same non-destructive
 precedent as everywhere else in this table.
 
+### Article purge flow (durability follow-up, 2026-08)
+
+A permanent-deletion escape hatch for the narrow set of articles with genuinely nothing
+useful saved — `Library.articles_eligible_for_purge()` returns articles whose plain-text
+`content` is under `extract._MIN_CONTENT_WORDS` AND whose `content_html` was never
+backfilled either, tagged with `content_check_reason` (durability audit item 1) when set.
+**Deliberately not the same set as the Remaining tile** on `/admin/library/backfill-content`
+— Remaining is every article without `content_html` yet, the vast majority of which have
+perfectly good plain-text content just waiting on a structure-backfill pass; purge
+candidates are the much narrower "nothing was ever really saved for this URL" set.
+
+Mirrors the manual-review corrected-URL CSV round trip exactly (`linklib/purge_csv.py`,
+same shape/discipline as `linklib/manual_review_csv.py`): `GET .../purge/export.csv`
+exports every current candidate with a blank `confirm_purge` column;
+`POST .../purge/import/preview` re-validates each `article_id` against a FRESH read of
+`articles_eligible_for_purge()` (never the CSV's own stale columns — same
+"whatever's in the database now is authoritative" rule) and renders a preview table
+(title/URL/word count) with nothing written yet; `POST .../purge/import/commit` executes
+it. Recognized `confirm_purge` markers: `yes`/`y`/`1`/`x`/`purge`/`confirm`; blank or
+`no`/`n`/`0` is a normal skip; anything else unrecognized is an ERROR (typo protection —
+never silently skipped, same "no silent caps" standard as everywhere else in this file).
+
+**Two independent guards before anything is deleted**, on top of the preview-then-confirm
+step itself: (1) `purge_csv.MAX_PURGE_PER_RUN` (50) fails the WHOLE import if the confirmed
+count exceeds it — enforced again, defense-in-depth, on the raw POST at commit time, so a
+hand-crafted request can't bypass the CSV-parsing check; (2) the preview screen renders a
+required "type N to confirm" text field, and the commit route rejects the request outright
+if the typed value doesn't exactly match the number of `article_id` rows posted — a second,
+independent check that the admin actually looked at how many rows they were about to delete,
+not just that the file happened to parse.
+
+**The nightly/weekly backup is the ultimate net, but deliberately not the first one**: the
+commit route calls `backup.backup_now()` (a real, unconditional snapshot — NOT the
+debounced `maybe_backup()` every other bulk-delete flow in this codebase uses) immediately
+before the delete loop, when backups are configured at all; if that snapshot attempt fails,
+**the entire purge is aborted** rather than proceeding without a fresh net. Every article is
+then re-validated against a fresh candidate set immediately before its own delete (TOCTOU
+guard — an article backfilled with real content between preview and commit is skipped, not
+deleted) and removed via the new `Library.purge_article()`, which snapshots title/url/word
+count immediately before calling `delete_article()`, then reads the row back and raises if
+it's somehow still present — write-then-read-back, per CLAUDE.md's one-off-admin-fix
+discipline, applied here as a standing check since every call is genuinely destructive.
+Each deletion is logged to `archive_audit_log` (`action='delete'`, `detail='purge: N words,
+<url>'`) via the existing `_log_archive_audit` helper, same as every other admin delete path.
+
+**`Library.delete_article()` itself was extended** (a general fix benefiting all four
+existing callers — dedupe removal, review-removals, the member Reader's own delete, and now
+purge — not something purge-specific) to also remove `content_refetch_log` and
+`url_correction_log` rows for the deleted article; those have no meaning once the article
+is gone. **Deliberately NOT deleted**: `enrichment_cost` (a real-money spend ledger — the
+Claude API call cost actual dollars whether or not the article survives) and
+`archive_audit_log` itself (the historical "what happened" record, which gets a new row
+for the delete FIRST, via the caller, before `delete_article()` even runs — same
+non-destructive precedent as `tool_audit_log`/`community_audit_log` outliving a deleted
+tool/community elsewhere in this codebase). `FTS` rows are removed automatically by the
+existing `articles_ad` trigger; the embedding/vector rows (`article_embeddings`,
+`articles_vec`) were already cleaned up by the pre-existing `delete_article()`.
+
 ### Medium-platform Exa fetch tier (2026-08)
 
 A third fetch tier for the same backfill pipeline, following three read-only

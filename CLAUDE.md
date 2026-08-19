@@ -1198,6 +1198,39 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   exactly what a crash mid-run looks like, and the banner says so
   explicitly rather than rendering it as ordinary live progress. See
   ARCHITECTURE.md's `job_run_log` table row for the full write-up.
+- **Article purge flow (durability follow-up) — a permanent-deletion escape
+  hatch for the narrow "genuinely nothing was ever saved" set, mirroring
+  the manual-review corrected-URL CSV round trip exactly.**
+  `Library.articles_eligible_for_purge()` (plain-text `content` under
+  `extract._MIN_CONTENT_WORDS` AND no `content_html` ever backfilled) is
+  deliberately NOT the same set as the Remaining tile — that's the vast
+  backlog of articles with perfectly good text just waiting on structure
+  backfill; this is only the much narrower real-purge candidates.
+  Export/preview/commit CSV round trip
+  (`linklib/purge_csv.py`), never deleting anything before an explicit
+  confirm. Two independent guards on top of preview-then-confirm:
+  `MAX_PURGE_PER_RUN` (50, enforced both at CSV-parse time and again on
+  the raw commit POST) and a required "type N to confirm" field the
+  commit route validates against the actual posted row count. The commit
+  route also runs a real, unconditional `backup.backup_now()` immediately
+  before the delete loop (not the debounced `maybe_backup()` every other
+  bulk-delete flow uses) and aborts the whole purge if that snapshot
+  fails — the nightly backup is the ultimate net, but shouldn't be the
+  first one for something this irreversible. Each delete goes through a
+  TOCTOU re-check (an article backfilled with real content between
+  preview and commit is skipped) and `Library.purge_article()`, which
+  write-then-read-back verifies the delete actually took, per CLAUDE.md's
+  one-off-admin-fix discipline, applied here as a standing check.
+  `Library.delete_article()` itself was extended to also clean up
+  `content_refetch_log`/`url_correction_log` — a general fix benefiting
+  all four existing callers (dedupe removal, review-removals, the member
+  Reader's own delete, and now purge), not something purge-specific.
+  Deliberately NOT deleted: `enrichment_cost` (a real-money spend ledger)
+  and `archive_audit_log` (the historical record, which gets a new
+  `'delete'` row for the purge FIRST, before the delete itself runs) —
+  same non-destructive precedent as `tool_audit_log`/`community_audit_log`
+  outliving a deleted tool/community. See ARCHITECTURE.md's "Article
+  purge flow" section for the full write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found

@@ -55,6 +55,8 @@ from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.manual_review_csv import parse_manual_review_corrections_csv
+from linklib.purge_csv import parse_purge_confirmations_csv, MAX_PURGE_PER_RUN
+from linklib.extract import _MIN_CONTENT_WORDS
 from linklib.pipeline import ingest_url
 from linklib import backup
 # webapp/thought_leadership_data.py is no longer imported here — the four
@@ -23280,6 +23282,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         needs_review_rows = lib.list_articles_needing_manual_review(limit=500)
         accepted_count = lib.count_content_accepted()
         accepted_rows = lib.list_accepted_content(limit=500)
+        purge_candidate_count = lib.count_purge_candidates()
         failure_counts = lib.content_refetch_failure_counts()
         failure_domains = lib.content_refetch_failure_domains(limit=15)
         wayback_count = lib.count_wayback_content()
@@ -23497,6 +23500,26 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   </div>
 </div>"""
 
+    purge_html = f"""
+<div id="purge-articles" style="background:var(--surface);border:1px solid var(--coral);border-radius:14px;overflow:hidden;margin:20px 0;">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div style="font-weight:600;font-size:14px;">Purge articles ({purge_candidate_count:,} candidate{"s" if purge_candidate_count != 1 else ""})</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Articles with essentially nothing saved&mdash;under {_esc(str(_MIN_CONTENT_WORDS))} words of plain text AND no structured content ever backfilled. Not the same as Remaining above, which is mostly articles with perfectly good text just waiting on a backfill pass. Permanent&mdash;review carefully before confirming.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <a href="/admin/library/backfill-content/purge/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>
+    </div>
+  </div>
+  <form method="post" action="/admin/library/backfill-content/purge/import/preview" enctype="multipart/form-data"
+        style="padding:14px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg);">
+    <input type="file" name="file" accept=".csv,text/csv" required
+      style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:#fff;">
+    <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Preview purge</button>
+    <span style="font-size:12px;color:var(--muted);">Re-upload the exported CSV with <code>confirm_purge</code> filled in (yes/y/1/x) for rows to delete. Nothing is deleted until you confirm on the preview screen. Capped at {MAX_PURGE_PER_RUN} per run.</span>
+  </form>
+</div>"""
+
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Reader content backfill</h1>
@@ -23574,6 +23597,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 
 {manual_review_html}
 {accepted_html}
+{purge_html}
 {failures_html}
 {domains_html}
 {log_html}
@@ -23886,6 +23910,272 @@ async def admin_backfill_content_manual_review_import_commit(request: Request):
     if failures:
         shown = "; ".join(failures[:5]) + (" …" if len(failures) > 5 else "")
         msg += f' {len(failures)} row(s) failed: {shown}'
+    return RedirectResponse(f"/admin/library/backfill-content?msg={quote(msg)}", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Article purge (durability follow-up, 2026-08) — same export/preview/commit
+# CSV round trip as the manual-review corrections above, applied to a
+# different, narrower candidate set (see Library.articles_eligible_for_purge).
+# Deliberately destructive: nothing here is a soft delete or an "accepted"
+# override like the manual-review escape hatch — a confirmed row is
+# permanently gone. See linklib.purge_csv's module docstring for the
+# confirm-marker vocabulary and the MAX_PURGE_PER_RUN cap.
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/library/backfill-content/purge/export.csv")
+def admin_backfill_content_purge_export(request: Request):
+    """CSV of every current purge candidate, article_id-keyed, with a blank
+    confirm_purge column for the admin to fill in (yes/y/1/x to mark a row
+    for deletion) and re-upload via the Preview import form."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    import csv
+    import io
+
+    lib = _lib()
+    try:
+        rows = lib.articles_eligible_for_purge(limit=100000)
+    finally:
+        lib.close()
+
+    def _csv_safe(val) -> str:
+        # Same formula-injection guard as the manual-review export above.
+        s = str(val)
+        return "'" + s if s and s[0] in ("=", "+", "-", "@", "\t", "\r") else s
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["article_id", "title", "current_url", "word_count", "reason", "confirm_purge"])
+    for r in rows:
+        writer.writerow([
+            r["id"], _csv_safe(r.get("title") or ""), r.get("url") or "",
+            r.get("word_count", 0), r.get("content_check_reason") or "",
+            "",  # confirm_purge — blank for the admin to fill in
+        ])
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="purge-candidates-{stamp}.csv"'},
+    )
+
+
+@app.post("/admin/library/backfill-content/purge/import/preview")
+async def admin_backfill_content_purge_import_preview(request: Request, file: UploadFile = File(...)):
+    """Parses the uploaded confirmation CSV and shows exactly what would be
+    permanently deleted — nothing is written here. Re-validates every
+    article_id against a FRESH read of articles_eligible_for_purge() (never
+    trusting the uploaded file's own title/url/word_count columns), same
+    "whatever's in the database now is authoritative" rule as the
+    manual-review import. Confirmed rows round-trip as hidden fields into
+    the commit form below, plus a required typed-count field — a second,
+    independent guard on top of purge_csv.MAX_PURGE_PER_RUN so a fat-
+    fingered CSV (or an admin who didn't actually read the preview) can't
+    delete more than they meant to."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    data = await file.read()
+
+    lib = _lib()
+    try:
+        candidate_rows = lib.articles_eligible_for_purge(limit=100000)
+    finally:
+        lib.close()
+    current_candidates = {
+        r["id"]: {"title": r.get("title") or "", "url": r.get("url") or "",
+                  "word_count": r.get("word_count", 0)}
+        for r in candidate_rows
+    }
+
+    try:
+        confirmed, skipped, errors = parse_purge_confirmations_csv(data, current_candidates)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/library/backfill-content?error={quote(str(e))}", status_code=303)
+
+    if not confirmed and not skipped and not errors:
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error={quote('The file had no data rows to import.')}", status_code=303)
+
+    hidden_fields = "".join(
+        f'<input type="hidden" name="article_id" value="{c["article_id"]}">'
+        for c in confirmed
+    )
+
+    confirmed_table_rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;">#{c['article_id']} {_esc(c['title']) or '<em>untitled</em>'}</td>
+  <td style="padding:8px 10px;font-size:12px;color:var(--muted);word-break:break-all;">{_esc(c['url'])}</td>
+  <td style="padding:8px 10px;font-size:13px;text-align:center;">{c['word_count']}</td>
+</tr>""" for c in confirmed) or (
+        '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--muted);">No rows confirmed for purge.</td></tr>')
+
+    skipped_section = ""
+    if skipped:
+        skipped_rows_html = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{r['line']}</td>
+  <td style="padding:8px 10px;font-size:13px;">#{r['article_id']}</td>
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{_esc(r['reason'])}</td>
+</tr>""" for r in skipped)
+        skipped_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or marked no&mdash;not an error, nothing to do.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:400px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why</th>
+    </tr></thead>
+    <tbody>{skipped_rows_html}</tbody>
+  </table>
+</div>"""
+
+    errors_section = ""
+    if errors:
+        errors_rows_html = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{r['line']}</td>
+  <td style="padding:8px 10px;font-size:13px;font-family:monospace;">{_esc(r['raw'])}</td>
+  <td style="padding:8px 10px;font-size:13px;color:#b91c1c;">{_esc(r['reason'])}</td>
+</tr>""" for r in errors)
+        errors_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be purged&mdash;fix them in your CSV and re-upload if needed.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:480px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Raw row</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why it was skipped</th>
+    </tr></thead>
+    <tbody>{errors_rows_html}</tbody>
+  </table>
+</div>"""
+
+    n = len(confirmed)
+    confirm_button = (
+        f'<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;background:#b91c1c;border-color:#b91c1c;">'
+        f'Permanently delete {n} article{"s" if n != 1 else ""}</button>'
+        if confirmed else
+        '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to delete</button>'
+    )
+    count_confirm_field = (
+        f'<label style="display:flex;flex-direction:column;gap:4px;font-size:13px;">'
+        f'Type <strong>{n}</strong> to confirm'
+        f'<input type="text" name="confirm_count" required autocomplete="off"'
+        f' style="width:100px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;">'
+        f'</label>' if confirmed else ""
+    )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/library/backfill-content" style="font-size:13px;color:var(--muted);">&larr; Reader content backfill</a></p>
+<h1>Preview article purge</h1>
+<p style="color:var(--muted);margin:0 0 6px;">Nothing has been deleted yet. Review the rows below carefully&mdash;this is permanent.</p>
+<p style="color:var(--muted);margin:0 0 18px;">A fresh off-site backup is taken automatically right before the delete runs, in addition to the regular nightly one.</p>
+
+<h3 style="font-size:14px;margin:0 0 10px;">Confirmed for deletion ({n})</h3>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+  <table style="width:100%;border-collapse:collapse;min-width:560px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">URL</th>
+      <th style="padding:8px 10px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Words</th>
+    </tr></thead>
+    <tbody>{confirmed_table_rows}</tbody>
+  </table>
+</div>
+
+<form method="post" action="/admin/library/backfill-content/purge/import/commit" style="margin:14px 0 8px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+  {hidden_fields}
+  {count_confirm_field}
+  {confirm_button}
+  <a href="/admin/library/backfill-content" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+</form>
+{skipped_section}
+{errors_section}
+</div>"""
+    return HTMLResponse(_page("Preview article purge—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/library/backfill-content/purge/import/commit")
+async def admin_backfill_content_purge_import_commit(request: Request):
+    """Executes the purge the preview step showed. Two independent guards
+    before anything is deleted: (1) the typed confirm_count must equal the
+    number of article_id rows actually posted — protects against a form
+    submitted without really reading the preview; (2) every article_id is
+    re-validated against a fresh articles_eligible_for_purge() read (a row
+    that was backfilled with real content between preview and commit is
+    skipped, not deleted, same TOCTOU discipline as the manual-review
+    commit route). A real off-site backup snapshot (backup.backup_now, NOT
+    the debounced maybe_backup — see this route's "Decisions for review" in
+    the PR description for why) is taken immediately before the delete
+    loop runs, when backups are configured at all; if that snapshot attempt
+    fails, the whole purge is aborted rather than proceeding without a
+    fresh net. Every deleted article is logged to archive_audit_log
+    (action='delete', detail='purge') via Library.purge_article, which also
+    write-then-read-back verifies each delete actually took."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    article_ids_raw = form.getlist("article_id")
+    confirm_count_raw = (form.get("confirm_count") or "").strip()
+
+    if not article_ids_raw:
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error={quote('No articles to purge—upload a CSV first.')}",
+            status_code=303)
+
+    try:
+        article_ids = [int(x) for x in article_ids_raw]
+    except ValueError:
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error={quote('Malformed purge request.')}", status_code=303)
+
+    if confirm_count_raw != str(len(article_ids)):
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error="
+            f"{quote(f'Typed count ({confirm_count_raw!r}) did not match the {len(article_ids)} confirmed article(s)—nothing was deleted. Re-upload and try again.')}",
+            status_code=303)
+
+    if len(article_ids) > MAX_PURGE_PER_RUN:
+        # Defense in depth — parse_purge_confirmations_csv already enforces
+        # this at preview time, but a hand-crafted POST shouldn't be able
+        # to bypass it.
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error="
+            f"{quote(f'{len(article_ids)} articles exceeds the {MAX_PURGE_PER_RUN}-per-run cap—nothing was deleted.')}",
+            status_code=303)
+
+    if backup.is_configured():
+        try:
+            backup.backup_now(DB_PATH)
+        except Exception as exc:
+            return RedirectResponse(
+                f"/admin/library/backfill-content?error="
+                f"{quote(f'Pre-purge backup failed, so nothing was deleted: {exc}')}",
+                status_code=303)
+
+    lib = _lib()
+    deleted = 0
+    skipped_ids: list[int] = []
+    try:
+        current_candidate_ids = {r["id"] for r in lib.articles_eligible_for_purge(limit=100000)}
+        for article_id in article_ids:
+            if article_id not in current_candidate_ids:
+                skipped_ids.append(article_id)
+                continue
+            snapshot = lib.purge_article(article_id)
+            if snapshot is None:
+                skipped_ids.append(article_id)
+                continue
+            _log_archive_audit(lib, request, "delete", article_id,
+                               detail=f"purge: {snapshot['word_count']} words, {snapshot['url']}")
+            deleted += 1
+    finally:
+        lib.close()
+
+    msg = f'Purged {deleted} article{"s" if deleted != 1 else ""}.'
+    if skipped_ids:
+        msg += (f' {len(skipped_ids)} row(s) skipped (no longer a purge candidate, or already gone): '
+                f'{", ".join(f"#{i}" for i in skipped_ids[:10])}{" …" if len(skipped_ids) > 10 else ""}')
     return RedirectResponse(f"/admin/library/backfill-content?msg={quote(msg)}", status_code=303)
 
 

@@ -2234,12 +2234,105 @@ class Library:
         trigger; the vector index and embedding ledger row are cleaned up
         here instead — a trigger can't load the sqlite-vec extension or make
         a network call, so embeddings never get trigger-based sync (see
-        _init_vector_search)."""
+        _init_vector_search).
+
+        Also removes content_refetch_log and url_correction_log rows for
+        this article (article-purge-flow follow-up, 2026-08) — a re-fetch
+        attempt history or URL-correction trace has no meaning once the
+        article itself is gone, and leaving them orphaned would let a
+        future article reusing the same id (SQLite recycles AUTOINCREMENT
+        ids once a table is VACUUMed, though not otherwise) inherit a
+        stranger's history. This is a general fix to every existing caller
+        of delete_article (dedupe removal, review-removals, the member
+        Reader's own delete), not something new only the purge flow needed.
+
+        Deliberately NOT deleted: enrichment_cost (a real-money spend
+        ledger — the API call cost actual dollars regardless of whether the
+        article survives; see that table's CREATE TABLE comment) and
+        archive_audit_log (the historical 'what happened' record — every
+        caller of delete_article already writes a 'delete' row there via
+        _log_archive_audit BEFORE calling this, and that row's whole job is
+        to outlive the article, same as tool_audit_log/community_audit_log
+        surviving a deleted tool/community elsewhere in this codebase)."""
         self.conn.execute("DELETE FROM articles WHERE id=?", (article_id,))
         self.conn.execute("DELETE FROM article_embeddings WHERE article_id=?", (article_id,))
+        self.conn.execute("DELETE FROM content_refetch_log WHERE article_id=?", (article_id,))
+        self.conn.execute("DELETE FROM url_correction_log WHERE article_id=?", (article_id,))
         if self._vec_available:
             self.conn.execute("DELETE FROM articles_vec WHERE rowid=?", (article_id,))
         self.conn.commit()
+
+    # -- article purge (durability follow-up, 2026-08) -----------------------
+
+    def articles_eligible_for_purge(self, limit: int = 5000) -> list[dict]:
+        """Candidates for the article-purge flow: articles with essentially
+        nothing saved — the plain-text `content` field under
+        extract._MIN_CONTENT_WORDS (the same floor assess_extraction_quality()
+        uses for its 'too-thin' verdict) AND no structured content_html ever
+        backfilled either. Each row carries `word_count` (computed here,
+        not stored) and `reason` (content_check_reason — durability audit
+        item 1 — when set, else '' for an article saved before that flag
+        existed) — the same reason vocabulary already shown elsewhere on
+        /admin/library/backfill-content, not a new one invented for this
+        list.
+
+        Deliberately NOT the same set as articles_needing_content_backfill()'s
+        Remaining tile: that's every article without content_html yet,
+        the vast majority of which have perfectly good plain-text content
+        and are just waiting for a structure-backfill pass. This is the
+        much narrower 'genuinely nothing useful was ever saved for this
+        URL' set — real purge candidates, not ordinary backfill backlog."""
+        from .extract import _MIN_CONTENT_WORDS
+        rows = self.conn.execute(
+            "SELECT * FROM articles WHERE url!='' AND content_html='' ORDER BY id"
+        ).fetchall()
+        out: list[dict] = []
+        for r in rows:
+            content = r["content"] or ""
+            word_count = len(content.split())
+            if word_count >= _MIN_CONTENT_WORDS:
+                continue
+            d = self._row_to_dict(r)
+            d["word_count"] = word_count
+            out.append(d)
+            if len(out) >= limit:
+                break
+        return out
+
+    def count_purge_candidates(self) -> int:
+        return len(self.articles_eligible_for_purge(limit=100000))
+
+    def purge_article(self, article_id: int) -> Optional[dict]:
+        """Hard-deletes one article via delete_article (which now also
+        cleans up content_refetch_log/url_correction_log — see its
+        docstring), then reads back to verify the delete actually took —
+        write-then-read-back, per CLAUDE.md's one-off-admin-fix discipline,
+        applied here as a standing check rather than a one-time script
+        since every call through this method is genuinely destructive and
+        irreversible outside a DB restore.
+
+        Returns a snapshot dict (id/title/url/word_count) captured
+        IMMEDIATELY BEFORE the delete — for the caller to log to
+        archive_audit_log and show in a confirmation summary — or None if
+        the article doesn't exist (a no-op, not an error; matches
+        apply_article_url_correction's convention for an unknown id).
+
+        Raises RuntimeError if the article is somehow still present after
+        the delete — this should never happen for a plain DELETE, and
+        silently continuing past that would be exactly the kind of
+        unverified destructive write CLAUDE.md's admin-fix discipline
+        exists to catch."""
+        row = self.get_article(article_id)
+        if row is None:
+            return None
+        snapshot = {"id": row["id"], "title": row.get("title") or "",
+                    "url": row.get("url") or "",
+                    "word_count": len((row.get("content") or "").split())}
+        self.delete_article(article_id)
+        if self.get_article(article_id) is not None:
+            raise RuntimeError(
+                f"purge_article: article {article_id} is still present after delete_article() ran")
+        return snapshot
 
     def rename_tag(self, old: str, new: str) -> int:
         """Rename a tag across the whole library. If `new` already exists on an
