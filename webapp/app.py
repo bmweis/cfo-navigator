@@ -18489,22 +18489,22 @@ def _job_run_banner(job_name: str) -> str:
     elif last["status"] == "running" and not last.get("finished_at"):
         bg, border, color = amber_wash, amber_border, amber_text
         ago = _relative_age(last["started_at"])
-        html = f'Last run started {ago or "recently"} never finished&mdash;likely interrupted by a deploy or crash. Safe to start again; earlier progress isn&rsquo;t lost (see the job&rsquo;s own resumability notes above).'
+        html = f'Last run started {ago or "recently"}, never finished&mdash;likely interrupted by a deploy or crash. Safe to start again; earlier progress isn&rsquo;t lost (see the job&rsquo;s own resumability notes above).'
     elif last["status"] == "success":
         bg, border, color = seafoam_wash, seafoam, "inherit"
         ago = _relative_age(last["finished_at"] or last["started_at"])
         summary = _esc(last.get("summary") or "")
-        html = f'Last run: <strong>succeeded</strong>, {ago}{f" &mdash; {summary}" if summary else ""}.'
+        html = f'Last run: <strong>succeeded</strong>, {ago}{f"&mdash;{summary}" if summary else ""}.'
     elif last["status"] == "stopped":
         bg, border, color = amber_wash, amber_border, amber_text
         ago = _relative_age(last["finished_at"] or last["started_at"])
         summary = _esc(last.get("summary") or "")
-        html = f'Last run: <strong>stopped</strong> by an admin, {ago}{f" &mdash; {summary}" if summary else ""}.'
+        html = f'Last run: <strong>stopped</strong> by an admin, {ago}{f"&mdash;{summary}" if summary else ""}.'
     else:
         bg, border, color = coral_wash, coral, "inherit"
         ago = _relative_age(last["finished_at"] or last["started_at"])
         err = _esc(last.get("error") or "no error message recorded")
-        html = f'Last run: <strong>failed</strong>, {ago} &mdash; {err}.'
+        html = f'Last run: <strong>failed</strong>, {ago}&mdash;{err}.'
     return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
             f'padding:10px 16px;margin:0 0 16px;font-size:13px;line-height:1.5;">{html}</div>')
 

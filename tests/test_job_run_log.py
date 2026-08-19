@@ -221,6 +221,7 @@ def test_enrich_page_shows_success_banner(env):
     assert r.status_code == 200
     assert "succeeded" in r.text
     assert "7/7 enriched" in r.text
+    assert " &mdash; " not in r.text, "em dash must be unspaced per the em-dash policy"
 
 
 def test_content_backfill_page_shows_failure_banner(env):
