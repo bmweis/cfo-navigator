@@ -131,7 +131,7 @@ Every table in the file, grouped by feature area:
 | Accounts | `users`, `password_reset_requests` |
 | CFO Toolbox | `tools`, `tool_categories`, `tool_audit_log`, `benchmarks`, `tool_leads`, `communities`, `community_categories`, `community_audit_log`, `community_profiles`, `community_gap_submissions`, `community_profile_views`, `field_reviews`, `narrative_review_log` |
 | Thought Leadership | `thought_leadership` |
-| Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log`, `backup_log` |
+| Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log`, `backup_log`, `integrity_check_log`, `job_run_log` |
 | "Sail, Don't Row" (`/play`) | `game_rank_settings`, `game_runs` |
 
 `linklib/db.py` defines and migrates all of it — the `Library` class is the
@@ -274,7 +274,7 @@ used manual check rather than a per-turn or overhead cost.
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
-| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). Also backs the "needs manual review" capped-retry tier (Phase 5b follow-up #2, see the write-up below) — `Library._manual_review_article_ids()` counts attempts per article *since its last `url_correction_log` row* (or ever, if never corrected). | `article_id` (no FK), `status` (`success` \| `failure`), `reason` (failure only: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error` \| `defunct-service`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback or migration success, the URL actually used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` \| `'migration'` \| `'medium-search'` \| `'save'` — distinguishes a Wayback-archived-snapshot, known-domain-migration, Medium-platform-search, or save-time (durability audit item 1 — `ingest_url` itself, not a backfill re-fetch) success/failure from a normal live-fetch success; see the "fetch reliability", "retry backoff", and "Medium-platform Exa fetch tier" notes in §3 below) |
+| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). Also backs the "needs manual review" capped-retry tier (Phase 5b follow-up #2, see the write-up below) — `Library._manual_review_article_ids()` counts attempts per article *since its last `url_correction_log` row* (or ever, if never corrected). A THIRD `status` value, `'accepted'` (durability audit item 4), is the "accept as final" override — see the write-up below — and composes with `_manual_review_article_ids()` for free: that query already only looks at the most recent attempt and requires `status='failure'`, so an `'accepted'` row as the latest attempt drops the article out of the manual-review list without any change to that query; `articles_needing_content_backfill()`'s default scope and `count_content_backfill_remaining()` separately exclude the same latest-row-`'accepted'` set (`Library._accepted_content_ids()`) so the override also sticks against future automatic retries, not just the one list. | `article_id` (no FK), `status` (`success` \| `failure` \| `accepted`), `reason` (failure only, or copied from the prior failure onto an `accepted` row for display/undo: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error` \| `defunct-service`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback or migration success, the URL actually used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` \| `'migration'` \| `'medium-search'` \| `'save'` — distinguishes a Wayback-archived-snapshot, known-domain-migration, Medium-platform-search, or save-time (durability audit item 1 — `ingest_url` itself, not a backfill re-fetch) success/failure from a normal live-fetch success; see the "fetch reliability", "retry backoff", and "Medium-platform Exa fetch tier" notes in §3 below) |
 | `url_correction_log` | Durable trace of every manual URL correction applied via the manual-review CSV import (Phase 5b follow-up #2) — per CLAUDE.md's "every production data change leaves a trace" rule. Written by `Library.apply_article_url_correction()`, one row per correction, `old_url` snapshotted immediately before the `UPDATE` (same precedent as `tool_audit_log`/`community_audit_log`). No SQL-level FK to `articles`. `admin_id` is nullable and always `NULL` today — this app has no per-admin accounts (a single shared secret), so the column is forward-looking only. | `article_id` (no FK), `old_url`, `new_url`, `source` (default `'csv-import'`), `admin_id` (nullable, unused today) |
 
 ### FP&A Buddy (Ask)
@@ -1138,7 +1138,9 @@ from the public page. Not editable via the admin CRUD.
 | `email_failures` | Durable record of failed outbound-email attempts, so "best-effort" email never means "silent". | `context` (which send path), `resolved_at` |
 | `archive_audit_log` | Who did what to the archive: one row per admin add/edit/delete. | `admin_id` (nullable — the break-glass login has no `users` row), `item_id` (an `articles.id`; `NULL` = bulk operation with a summary in `detail`) |
 | `contact_audit_log` | Same shape for contact deletions — kept separate so `item_id` is never ambiguous about which table it references. | as above, `item_id` → `contacts.id` |
-| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily GitHub Action, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled Action run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
+| `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily GitHub Action, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled Action run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. A backup skipped because the pre-backup integrity check failed (durability audit item 2, see `integrity_check_log` below) also logs a `'failure'` row here, `error` prefixed `"Backup skipped — integrity check failed: ..."`, so the existing status banner surfaces it without a second banner-reading code path. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
+| `integrity_check_log` | Durability audit item 2 (elevated, 2026-08) — one row per `linklib.backup.check_integrity()` run, shape mirrors `backup_log` exactly. Nothing previously ran `PRAGMA integrity_check` against the live DB; corruption would only ever have surfaced at restore time, by which point it would already be baked into every retained snapshot. `check_integrity()` runs `PRAGMA integrity_check` plus the FTS5 self-check (`INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')` — the exact command RUNBOOK.md §4's restore rehearsal already runs by hand) against the live DB, on the same cadence as the backup itself, immediately before every snapshot. **A failure blocks that night's backup upload** (see `backup_now()`'s docstring for the full "block vs. upload-and-flag" reasoning) rather than uploading a possibly-corrupt snapshot anyway. Read by the "Pre-backup integrity check" status banner on `/admin/library/backup`, which sits above the existing backup-status banner — deliberately a separate banner, since "the backup succeeded" and "the DB is structurally sound" are two different facts a single banner would conflate. | `status` (`'ok'`\|`'failure'`), `detail` (the failing `PRAGMA integrity_check` row text, or the FTS5 self-check's exception text; `'ok'` on success) |
+| `job_run_log` | Durability audit item 3 (2026-08) — durable start/finish record for each of the three `_JOB_STATE`-backed background jobs (re-enrich, Historical sweep, Reader content backfill), shape mirrors `backup_log`/`integrity_check_log`. `_JOB_STATE` (`webapp/app.py`, an in-process dict) is unchanged and still owns LIVE in-request progress — this table is written only twice per run (`Library.start_job_run` at the top of each job function, `Library.finish_job_run` at every exit path, including a deliberate stop) and exists purely so a Railway redeploy or crash doesn't erase whether a job last succeeded, failed, or ever ran. Read by `_job_run_banner()`, a shared "last run: outcome, N ago" banner rendered on each of the three jobs' own admin-page section (`/admin/library/enrich`, the Historical sweep panel on `/admin/library/queue`, `/admin/library/backfill-content`) — same green/amber/coral posture as the backup/integrity banners. A row stuck at `status='running'` with an empty `finished_at` is exactly what a crash mid-run looks like, and is called out as such rather than shown as live progress. | `job_name` (`'enrich'`\|`'backfill'`\|`'content_backfill'`), `status` (`'running'`\|`'success'`\|`'failure'`\|`'stopped'`), `summary` (short human-readable counts, e.g. `'42/50 succeeded'`), `error` (failure only), `started_at`, `finished_at` (`''` while running) |
 
 ### Feed subscriptions
 
@@ -2221,6 +2223,84 @@ aggregates — so a new counting query was needed.
   a separate future decision. `defunct-service` logic and its permanent exclusion are
   completely untouched by this change — regression-covered by the pre-existing
   `tests/test_fetch_reliability.py` suite passing unmodified.
+
+### "Accept as final" manual-review override (durability audit item 4)
+
+The needs-manual-review tier had a false-positive dead end: an article with real-but-short
+content (under `extract._MIN_CONTENT_WORDS`) fails `assess_extraction_quality()` identically
+forever, and a URL correction can't help since the URL is already correct — the only escape
+was a direct DB edit. `Library.accept_article_content(article_id)` writes a new
+`content_refetch_log` row with a third `status` value, `'accepted'` (see the table row
+above for how it composes with `_manual_review_article_ids()` and the backfill-scope
+exclusions for free, via the same latest-attempt-per-article idiom every other query in
+this table already uses). The prior failure `reason` is copied onto the accepted row for
+display and so `unaccept_article_content()` can restore it without a second query.
+`POST /admin/library/backfill-content/{article_id}/accept` and `.../unaccept` are the two
+routes, both **per-article only — deliberately no bulk/select-all form**, since this is a
+one-at-a-time override for a specific false positive, not a backfill mechanism. The admin
+page gained a new "Accepted as final" section (mirrors "Needs manual review") with an Undo
+button per row, and a new stats tile. Reversal is fully additive — `unaccept_article_content`
+appends a new `'failure'` row rather than deleting the `'accepted'` one, so the fact that an
+article was accepted and later reversed stays visible in the log, same non-destructive
+precedent as everywhere else in this table.
+
+### Article purge flow (durability follow-up, 2026-08)
+
+A permanent-deletion escape hatch for the narrow set of articles with genuinely nothing
+useful saved — `Library.articles_eligible_for_purge()` returns articles whose plain-text
+`content` is under `extract._MIN_CONTENT_WORDS` AND whose `content_html` was never
+backfilled either, tagged with `content_check_reason` (durability audit item 1) when set.
+**Deliberately not the same set as the Remaining tile** on `/admin/library/backfill-content`
+— Remaining is every article without `content_html` yet, the vast majority of which have
+perfectly good plain-text content just waiting on a structure-backfill pass; purge
+candidates are the much narrower "nothing was ever really saved for this URL" set.
+
+Mirrors the manual-review corrected-URL CSV round trip exactly (`linklib/purge_csv.py`,
+same shape/discipline as `linklib/manual_review_csv.py`): `GET .../purge/export.csv`
+exports every current candidate with a blank `confirm_purge` column;
+`POST .../purge/import/preview` re-validates each `article_id` against a FRESH read of
+`articles_eligible_for_purge()` (never the CSV's own stale columns — same
+"whatever's in the database now is authoritative" rule) and renders a preview table
+(title/URL/word count) with nothing written yet; `POST .../purge/import/commit` executes
+it. Recognized `confirm_purge` markers: `yes`/`y`/`1`/`x`/`purge`/`confirm`; blank or
+`no`/`n`/`0` is a normal skip; anything else unrecognized is an ERROR (typo protection —
+never silently skipped, same "no silent caps" standard as everywhere else in this file).
+
+**Two independent guards before anything is deleted**, on top of the preview-then-confirm
+step itself: (1) `purge_csv.MAX_PURGE_PER_RUN` (50) fails the WHOLE import if the confirmed
+count exceeds it — enforced again, defense-in-depth, on the raw POST at commit time, so a
+hand-crafted request can't bypass the CSV-parsing check; (2) the preview screen renders a
+required "type N to confirm" text field, and the commit route rejects the request outright
+if the typed value doesn't exactly match the number of `article_id` rows posted — a second,
+independent check that the admin actually looked at how many rows they were about to delete,
+not just that the file happened to parse.
+
+**The nightly/weekly backup is the ultimate net, but deliberately not the first one**: the
+commit route calls `backup.backup_now()` (a real, unconditional snapshot — NOT the
+debounced `maybe_backup()` every other bulk-delete flow in this codebase uses) immediately
+before the delete loop, when backups are configured at all; if that snapshot attempt fails,
+**the entire purge is aborted** rather than proceeding without a fresh net. Every article is
+then re-validated against a fresh candidate set immediately before its own delete (TOCTOU
+guard — an article backfilled with real content between preview and commit is skipped, not
+deleted) and removed via the new `Library.purge_article()`, which snapshots title/url/word
+count immediately before calling `delete_article()`, then reads the row back and raises if
+it's somehow still present — write-then-read-back, per CLAUDE.md's one-off-admin-fix
+discipline, applied here as a standing check since every call is genuinely destructive.
+Each deletion is logged to `archive_audit_log` (`action='delete'`, `detail='purge: N words,
+<url>'`) via the existing `_log_archive_audit` helper, same as every other admin delete path.
+
+**`Library.delete_article()` itself was extended** (a general fix benefiting all four
+existing callers — dedupe removal, review-removals, the member Reader's own delete, and now
+purge — not something purge-specific) to also remove `content_refetch_log` and
+`url_correction_log` rows for the deleted article; those have no meaning once the article
+is gone. **Deliberately NOT deleted**: `enrichment_cost` (a real-money spend ledger — the
+Claude API call cost actual dollars whether or not the article survives) and
+`archive_audit_log` itself (the historical "what happened" record, which gets a new row
+for the delete FIRST, via the caller, before `delete_article()` even runs — same
+non-destructive precedent as `tool_audit_log`/`community_audit_log` outliving a deleted
+tool/community elsewhere in this codebase). `FTS` rows are removed automatically by the
+existing `articles_ad` trigger; the embedding/vector rows (`article_embeddings`,
+`articles_vec`) were already cleaned up by the pre-existing `delete_article()`.
 
 ### Medium-platform Exa fetch tier (2026-08)
 

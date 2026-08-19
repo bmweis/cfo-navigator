@@ -287,6 +287,60 @@ def prune_old_backups(db_path: str, keep_daily: int = 14, keep_weekly: int = 8) 
         return {"deleted": 0, "kept": 0, "error": str(e)}
 
 
+def check_integrity(db_path: str) -> dict:
+    """Durability audit item 2 (elevated) — nothing in this app ever ran
+    `PRAGMA integrity_check` against the live database, meaning corruption
+    would only ever surface at restore time, by which point it had already
+    been propagated into every retained daily/weekly snapshot. Runs against
+    `db_path` directly (the LIVE database, not a snapshot) — the whole point
+    is to catch corruption before it's ever captured into a backup, not
+    after.
+
+    Two checks, in order: `PRAGMA integrity_check` (SQLite's own structural
+    check — must return exactly one row reading 'ok'), then, only if that
+    passes, the FTS5 self-check RUNBOOK.md §4's restore rehearsal already
+    runs by hand — `INSERT INTO articles_fts(articles_fts) VALUES
+    ('integrity-check')`, which raises if the FTS index and the `articles`
+    content table have drifted apart. Skipping the FTS check when the
+    pragma already failed avoids a second, redundant failure signal for the
+    same underlying corruption.
+
+    Never raises — always returns {"ok": bool, "detail": str}, so a caller
+    (backup_now) can treat this as a plain data check rather than exception
+    handling."""
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            rows = conn.execute("PRAGMA integrity_check").fetchall()
+            pragma_ok = len(rows) == 1 and rows[0][0] == "ok"
+            if not pragma_ok:
+                detail = "; ".join(str(r[0]) for r in rows) if rows else "integrity_check returned no rows"
+                return {"ok": False, "detail": detail}
+            try:
+                conn.execute("INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')")
+            except sqlite3.DatabaseError as fts_exc:
+                return {"ok": False, "detail": f"FTS5 self-check failed: {fts_exc}"}
+            return {"ok": True, "detail": "ok"}
+        finally:
+            conn.close()
+    except Exception as e:  # pragma: no cover - defensive, matches maybe_backup's contract
+        return {"ok": False, "detail": f"integrity check itself failed to run: {e}"}
+
+
+def _log_integrity_attempt(db_path: str, result: dict) -> None:
+    """Best-effort — same non-masking contract as _log_attempt below."""
+    try:
+        from linklib.db import Library
+        lib = Library(db_path)
+        try:
+            lib.record_integrity_check(status="ok" if result["ok"] else "failure",
+                                       detail=result.get("detail", ""))
+        finally:
+            lib.close()
+    except Exception as log_err:  # pragma: no cover - logging must never break backup itself
+        print(f"[backup] failed to write integrity_check_log row: {log_err}")
+
+
 def _log_attempt(db_path: str, *, status: str, filename: str = "", drive_file_id: str = "",
                   size_bytes: int = 0, row_count: int = 0, error: str = "") -> None:
     """Write one backup_log row. Best-effort — a logging failure must never
@@ -327,13 +381,38 @@ def backup_now(db_path: str) -> dict:
     """Take a snapshot and upload it to Google Drive.
     Returns {name, bytes, drive_file_id, row_count}.
 
-    Raises if Drive isn't configured or the upload fails. Every attempt —
-    success or failure — is logged to backup_log (see _log_attempt) before
-    returning or re-raising, so the admin UI has a persistent record even
-    when this raises.
-    """
+    Raises if Drive isn't configured, the integrity check fails, or the
+    upload fails. Every attempt — success or failure — is logged to
+    backup_log (see _log_attempt) before returning or re-raising, so the
+    admin UI has a persistent record even when this raises.
+
+    Durability audit item 2: runs check_integrity() against the live DB
+    first, on every call (same cadence as the backup itself), and logs the
+    result to integrity_check_log regardless of outcome. **A failed
+    integrity check BLOCKS that night's upload** rather than uploading
+    anyway — see check_integrity's docstring for why this check exists at
+    all. Blocking, not upload-and-flag, was the deliberate choice: the
+    entire point of running this before the snapshot is to stop corruption
+    from being captured into Drive in the first place. Uploading it anyway
+    would still overwrite/age out the retained good snapshots via
+    prune_old_backups on the very next healthy run, so "upload anyway" buys
+    nothing a human couldn't get from the loud integrity_check_log/
+    backup_log failure alone, and it actively risks a corrupt file
+    eventually becoming what section 1's restore procedure reaches for.
+    Skipping the upload leaves every already-retained good snapshot
+    untouched (prune only ever runs after a SUCCESSFUL upload), which is
+    exactly the safe failure mode here — see CLAUDE.md's "Decisions for
+    review" note on this PR for the full reasoning, flagged for Brian's
+    sign-off rather than decided silently."""
     if not is_configured():
         raise RuntimeError("Google Drive backup is not configured")
+
+    integrity = check_integrity(db_path)
+    _log_integrity_attempt(db_path, integrity)
+    if not integrity["ok"]:
+        _log_attempt(db_path, status="failure",
+                     error=f"Backup skipped — integrity check failed: {integrity['detail']}")
+        raise RuntimeError(f"integrity check failed, backup skipped: {integrity['detail']}")
 
     try:
         tmp = snapshot_to_file(db_path)
