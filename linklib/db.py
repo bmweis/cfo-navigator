@@ -620,6 +620,52 @@ CREATE TABLE IF NOT EXISTS backup_log (
 
 CREATE INDEX IF NOT EXISTS idx_backup_log_created ON backup_log(created_at);
 
+-- Durability audit item 2 (2026-08, elevated): nothing in this app ever ran
+-- PRAGMA integrity_check against the live database — corruption would only
+-- ever surface at restore time, by which point it had already been
+-- propagated into every retained daily/weekly snapshot. linklib.backup.
+-- check_integrity() now runs PRAGMA integrity_check plus the FTS5
+-- self-check (`INSERT INTO articles_fts(articles_fts) VALUES
+-- ('integrity-check')` — the same command RUNBOOK.md §4's restore rehearsal
+-- already runs by hand) against the live DB, on the same cadence as the
+-- backup itself, immediately before every snapshot — see backup_now()'s
+-- docstring for why a failure blocks that night's upload rather than
+-- uploading anyway. Shape mirrors backup_log exactly (one row per attempt,
+-- 'ok'|'failure', append-only) — same convention, not a new one.
+CREATE TABLE IF NOT EXISTS integrity_check_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    status        TEXT NOT NULL,              -- 'ok' | 'failure'
+    detail        TEXT NOT NULL DEFAULT '',    -- integrity_check's own output, or the FTS self-check's error
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_integrity_check_log_created ON integrity_check_log(created_at);
+
+-- Durability audit item 3 (2026-08): _JOB_STATE (webapp/app.py) is an
+-- in-process dict — the only record of whether the re-enrich job,
+-- Historical sweep, or the Reader content backfill last succeeded, failed,
+-- or ever ran at all, and a Railway redeploy (or crash) wipes it silently.
+-- This table is the durable record, written by all three _JOB_STATE-backed
+-- jobs at start (Library.start_job_run) and finish
+-- (Library.finish_job_run) — shape mirrors backup_log/integrity_check_log
+-- (one row per run, append-only), not a new convention. _JOB_STATE itself
+-- is UNCHANGED and still owns live in-request progress (poll-friendly,
+-- no DB round trip per tick) — this table is only ever written twice per
+-- run (start, finish), never polled during a run.
+CREATE TABLE IF NOT EXISTS job_run_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_name      TEXT NOT NULL,              -- 'enrich' | 'backfill' | 'content_backfill'
+    status        TEXT NOT NULL,              -- 'running' | 'success' | 'failure' | 'stopped'
+    summary       TEXT NOT NULL DEFAULT '',    -- short human-readable counts, e.g. '42/50 enriched'
+    error         TEXT NOT NULL DEFAULT '',    -- failure only
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT NOT NULL DEFAULT ''     -- '' while status='running' (a crash mid-run leaves this
+                                                -- empty forever, which is itself informative — see
+                                                -- Library.latest_job_run)
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_run_log_job_started ON job_run_log(job_name, started_at);
+
 -- Per-article attempt log for the Reader content-structure backfill (Phase
 -- 5b): PR #322's extract_reader_html() only ever ran against a live fetch
 -- (an unsaved Feed item, or a saved article whose cached content was too
@@ -2188,12 +2234,105 @@ class Library:
         trigger; the vector index and embedding ledger row are cleaned up
         here instead — a trigger can't load the sqlite-vec extension or make
         a network call, so embeddings never get trigger-based sync (see
-        _init_vector_search)."""
+        _init_vector_search).
+
+        Also removes content_refetch_log and url_correction_log rows for
+        this article (article-purge-flow follow-up, 2026-08) — a re-fetch
+        attempt history or URL-correction trace has no meaning once the
+        article itself is gone, and leaving them orphaned would let a
+        future article reusing the same id (SQLite recycles AUTOINCREMENT
+        ids once a table is VACUUMed, though not otherwise) inherit a
+        stranger's history. This is a general fix to every existing caller
+        of delete_article (dedupe removal, review-removals, the member
+        Reader's own delete), not something new only the purge flow needed.
+
+        Deliberately NOT deleted: enrichment_cost (a real-money spend
+        ledger — the API call cost actual dollars regardless of whether the
+        article survives; see that table's CREATE TABLE comment) and
+        archive_audit_log (the historical 'what happened' record — every
+        caller of delete_article already writes a 'delete' row there via
+        _log_archive_audit BEFORE calling this, and that row's whole job is
+        to outlive the article, same as tool_audit_log/community_audit_log
+        surviving a deleted tool/community elsewhere in this codebase)."""
         self.conn.execute("DELETE FROM articles WHERE id=?", (article_id,))
         self.conn.execute("DELETE FROM article_embeddings WHERE article_id=?", (article_id,))
+        self.conn.execute("DELETE FROM content_refetch_log WHERE article_id=?", (article_id,))
+        self.conn.execute("DELETE FROM url_correction_log WHERE article_id=?", (article_id,))
         if self._vec_available:
             self.conn.execute("DELETE FROM articles_vec WHERE rowid=?", (article_id,))
         self.conn.commit()
+
+    # -- article purge (durability follow-up, 2026-08) -----------------------
+
+    def articles_eligible_for_purge(self, limit: int = 5000) -> list[dict]:
+        """Candidates for the article-purge flow: articles with essentially
+        nothing saved — the plain-text `content` field under
+        extract._MIN_CONTENT_WORDS (the same floor assess_extraction_quality()
+        uses for its 'too-thin' verdict) AND no structured content_html ever
+        backfilled either. Each row carries `word_count` (computed here,
+        not stored) and `reason` (content_check_reason — durability audit
+        item 1 — when set, else '' for an article saved before that flag
+        existed) — the same reason vocabulary already shown elsewhere on
+        /admin/library/backfill-content, not a new one invented for this
+        list.
+
+        Deliberately NOT the same set as articles_needing_content_backfill()'s
+        Remaining tile: that's every article without content_html yet,
+        the vast majority of which have perfectly good plain-text content
+        and are just waiting for a structure-backfill pass. This is the
+        much narrower 'genuinely nothing useful was ever saved for this
+        URL' set — real purge candidates, not ordinary backfill backlog."""
+        from .extract import _MIN_CONTENT_WORDS
+        rows = self.conn.execute(
+            "SELECT * FROM articles WHERE url!='' AND content_html='' ORDER BY id"
+        ).fetchall()
+        out: list[dict] = []
+        for r in rows:
+            content = r["content"] or ""
+            word_count = len(content.split())
+            if word_count >= _MIN_CONTENT_WORDS:
+                continue
+            d = self._row_to_dict(r)
+            d["word_count"] = word_count
+            out.append(d)
+            if len(out) >= limit:
+                break
+        return out
+
+    def count_purge_candidates(self) -> int:
+        return len(self.articles_eligible_for_purge(limit=100000))
+
+    def purge_article(self, article_id: int) -> Optional[dict]:
+        """Hard-deletes one article via delete_article (which now also
+        cleans up content_refetch_log/url_correction_log — see its
+        docstring), then reads back to verify the delete actually took —
+        write-then-read-back, per CLAUDE.md's one-off-admin-fix discipline,
+        applied here as a standing check rather than a one-time script
+        since every call through this method is genuinely destructive and
+        irreversible outside a DB restore.
+
+        Returns a snapshot dict (id/title/url/word_count) captured
+        IMMEDIATELY BEFORE the delete — for the caller to log to
+        archive_audit_log and show in a confirmation summary — or None if
+        the article doesn't exist (a no-op, not an error; matches
+        apply_article_url_correction's convention for an unknown id).
+
+        Raises RuntimeError if the article is somehow still present after
+        the delete — this should never happen for a plain DELETE, and
+        silently continuing past that would be exactly the kind of
+        unverified destructive write CLAUDE.md's admin-fix discipline
+        exists to catch."""
+        row = self.get_article(article_id)
+        if row is None:
+            return None
+        snapshot = {"id": row["id"], "title": row.get("title") or "",
+                    "url": row.get("url") or "",
+                    "word_count": len((row.get("content") or "").split())}
+        self.delete_article(article_id)
+        if self.get_article(article_id) is not None:
+            raise RuntimeError(
+                f"purge_article: article {article_id} is still present after delete_article() ran")
+        return snapshot
 
     def rename_tag(self, old: str, new: str) -> int:
         """Rename a tag across the whole library. If `new` already exists on an
@@ -2907,6 +3046,11 @@ class Library:
           (a Cloudflare block can lift, a 404 can be relinked), so it's
           reachable again the moment a correction resets its attempt count,
           not just via force=True.
+        - (durability audit item 4) any article accept_article_content() has
+          marked accepted-as-final (_accepted_content_ids) — the admin's
+          explicit "this is fine as-is" call has to actually stick, not just
+          hide the article from one list while the next backfill run
+          silently re-fails and re-flags it.
         `force=True` re-runs every row with a saved URL, defunct-service and
         needs-manual-review both included — for standardizing the whole
         library after an extraction-logic change, or re-checking a domain
@@ -2954,6 +3098,8 @@ class Library:
                          )
                        ORDER BY a.id"""
                 ).fetchall()
+                accepted_ids = self._accepted_content_ids()
+                rows = [r for r in rows if r["id"] not in accepted_ids]
             matched = [r for r in rows if _host_matches(r["url"])][:limit]
             return [self._row_to_dict(r) for r in matched]
 
@@ -2976,7 +3122,9 @@ class Library:
                  )
                ORDER BY a.id"""
         ).fetchall()
-        rows = [r for r in rows if r["id"] not in manual_review_ids][:limit]
+        accepted_ids = self._accepted_content_ids()
+        rows = [r for r in rows if r["id"] not in manual_review_ids
+                and r["id"] not in accepted_ids][:limit]
         return [self._row_to_dict(r) for r in rows]
 
     def count_structured_content(self) -> int:
@@ -2992,11 +3140,13 @@ class Library:
 
     def count_content_backfill_remaining(self) -> int:
         """Matches articles_needing_content_backfill()'s default (non-force)
-        scope exactly, including both the defunct-service AND (Phase 5b
-        follow-up #2) needs-manual-review exclusions — so this stat reads as
-        "how many articles the next default-scope run will actually
-        attempt," not an inflated count that includes articles already
-        known permanently unrecoverable or parked for a human to correct."""
+        scope exactly, including the defunct-service, needs-manual-review
+        (Phase 5b follow-up #2), and accepted-as-final (durability audit
+        item 4) exclusions — so this stat reads as "how many articles the
+        next default-scope run will actually attempt," not an inflated
+        count that includes articles already known permanently
+        unrecoverable, parked for a human to correct, or explicitly
+        accepted as-is."""
         base_ids = {
             r[0] for r in self.conn.execute(
                 """SELECT a.id FROM articles a
@@ -3010,7 +3160,7 @@ class Library:
                      )"""
             ).fetchall()
         }
-        return len(base_ids - self._manual_review_article_ids())
+        return len(base_ids - self._manual_review_article_ids() - self._accepted_content_ids())
 
     def count_permanently_excluded_content(self) -> int:
         """How many articles have been marked defunct-service on their most
@@ -3360,6 +3510,70 @@ class Library:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    # -- integrity checks (durability audit item 2) --------------------------
+
+    def record_integrity_check(self, status: str, detail: str = "") -> int:
+        """Log one linklib.backup.check_integrity() run, ok or failure. See
+        the integrity_check_log CREATE TABLE comment for why this exists and
+        who calls it."""
+        cur = self.conn.execute(
+            "INSERT INTO integrity_check_log (status, detail, created_at) VALUES (?,?,?)",
+            (status, detail, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_integrity_check_log(self, limit: int = 100) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM integrity_check_log ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -- background-job run history (durability audit item 3) ----------------
+
+    def start_job_run(self, job_name: str) -> int:
+        """Log the start of one background-job run (re-enrich, Historical
+        sweep, or the Reader content backfill) — see job_run_log's CREATE
+        TABLE comment. Returns the row id, passed back to finish_job_run
+        when the job exits (success, failure, or a deliberate stop)."""
+        cur = self.conn.execute(
+            "INSERT INTO job_run_log (job_name, status, started_at) VALUES (?,?,?)",
+            (job_name, "running", _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def finish_job_run(self, run_id: int, status: str, summary: str = "", error: str = "") -> None:
+        """Close out a job_run_log row started by start_job_run. `status` is
+        'success' | 'failure' | 'stopped' — never 'running' again (a run
+        that never reaches this call, e.g. a crash, is exactly what leaves
+        finished_at='' forever, which latest_job_run surfaces as-is rather
+        than guessing)."""
+        self.conn.execute(
+            "UPDATE job_run_log SET status=?, summary=?, error=?, finished_at=? WHERE id=?",
+            (status, summary, error, _now(), run_id),
+        )
+        self.conn.commit()
+
+    def latest_job_run(self, job_name: str) -> Optional[dict]:
+        """Most recent job_run_log row for one job, or None if it's never
+        run. Backs each job's admin-page "last run: outcome, N ago" line —
+        the durable fallback for exactly the case _JOB_STATE can't cover: a
+        redeploy or crash since the last run, when in-process state is
+        gone."""
+        row = self.conn.execute(
+            "SELECT * FROM job_run_log WHERE job_name=? ORDER BY started_at DESC LIMIT 1",
+            (job_name,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_job_run_log(self, job_name: str, limit: int = 20) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM job_run_log WHERE job_name=? ORDER BY started_at DESC LIMIT ?",
+            (job_name, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # -- Reader content-structure backfill (Phase 5b) ------------------------
 
     def log_content_refetch_attempt(self, article_id: int, status: str,
@@ -3386,6 +3600,122 @@ class Library:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- manual-review "accept as final" override (durability audit item 4) -
+
+    def accept_article_content(self, article_id: int) -> bool:
+        """Escape hatch for a false positive in the manual-review tier: an
+        article with real-but-short content (under
+        extract._MIN_CONTENT_WORDS) fails assess_extraction_quality()
+        identically forever, with no way out short of a DB edit — a URL
+        correction can't help, since the URL is already correct.
+
+        Composes with _manual_review_article_ids() by writing a new
+        content_refetch_log row with a THIRD status value, 'accepted' —
+        distinct from 'success'/'failure' — rather than a new column or a
+        special-cased reason string. That query already only looks at each
+        article's MOST RECENT attempt and requires status='failure', so an
+        'accepted' row as the latest attempt removes the article from the
+        manual-review list for free, with no change needed there. The same
+        latest-row idiom is reused in articles_needing_content_backfill()'s
+        default scope and count_content_backfill_remaining() to also pull an
+        accepted article OUT of automatic retry — durable, not just hidden
+        from one list — so a future backfill run can't silently overwrite an
+        admin's "this is fine as-is" call with a fresh failure row.
+
+        The prior failure reason (if any) is copied onto the accepted row
+        itself, purely for display (see list_accepted_content) and so
+        unaccept_article_content can restore it without a second query.
+        Per-article only — no bulk/select-all variant exists on purpose,
+        this is a deliberate one-at-a-time override, not a backfill
+        mechanism. Returns False if the article doesn't exist."""
+        row = self.conn.execute("SELECT id FROM articles WHERE id=?", (article_id,)).fetchone()
+        if row is None:
+            return False
+        last = self.conn.execute(
+            "SELECT reason FROM content_refetch_log WHERE article_id=? "
+            "ORDER BY attempted_at DESC LIMIT 1", (article_id,)
+        ).fetchone()
+        prior_reason = (last["reason"] if last else "") or ""
+        self.conn.execute(
+            "INSERT INTO content_refetch_log (article_id, status, reason, detail, source, attempted_at) "
+            "VALUES (?,'accepted',?,?,?,?)",
+            (article_id, prior_reason, "accepted as final by admin override", "accept", _now()),
+        )
+        self.conn.commit()
+        return True
+
+    def unaccept_article_content(self, article_id: int) -> bool:
+        """Undo accept_article_content — restores the article to whatever
+        state it would be in had it never been accepted, by writing a new
+        'failure' row carrying the same reason the accepted row had
+        recorded. Deliberately additive (content_refetch_log's full history
+        is never mutated or deleted, same non-destructive precedent as
+        everywhere else in this codebase) rather than deleting the
+        'accepted' row — the fact that it WAS accepted, and later reversed,
+        stays visible in the log. Returns False if the article was never
+        accepted (or the accepted state has already been superseded by a
+        later log row of any kind)."""
+        latest = self.conn.execute(
+            "SELECT status, reason FROM content_refetch_log WHERE article_id=? "
+            "ORDER BY attempted_at DESC LIMIT 1", (article_id,)
+        ).fetchone()
+        if latest is None or latest["status"] != "accepted":
+            return False
+        self.conn.execute(
+            "INSERT INTO content_refetch_log (article_id, status, reason, detail, source, attempted_at) "
+            "VALUES (?,'failure',?,?,?,?)",
+            (article_id, latest["reason"] or "too-thin",
+             "un-accepted by admin — resumes normal retry/manual-review scoring", "accept", _now()),
+        )
+        self.conn.commit()
+        return True
+
+    def list_accepted_content(self, limit: int = 500) -> list[dict]:
+        """Every article currently accepted-as-final (latest content_refetch_log
+        row has status='accepted') — backs the admin page's "Accepted as
+        final" section, the mirror of list_articles_needing_manual_review
+        for the escape hatch this composes with."""
+        rows = self.conn.execute(
+            """WITH latest AS (
+                 SELECT l.article_id, l.status, l.reason, l.attempted_at,
+                        ROW_NUMBER() OVER (PARTITION BY l.article_id ORDER BY l.attempted_at DESC) AS rn
+                 FROM content_refetch_log l
+               )
+               SELECT lt.article_id AS article_id, art.title AS title, art.url AS current_url,
+                      lt.reason AS reason, lt.attempted_at AS accepted_at
+               FROM latest lt
+               JOIN articles art ON art.id = lt.article_id
+               WHERE lt.rn=1 AND lt.status='accepted'
+               ORDER BY lt.attempted_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_content_accepted(self) -> int:
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM (
+                 SELECT article_id, status,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               ) WHERE rn=1 AND status='accepted'"""
+        ).fetchone()[0]
+
+    def _accepted_content_ids(self) -> set[int]:
+        """Article ids whose most recent content_refetch_log attempt is
+        status='accepted' — the exclusion set articles_needing_content_backfill()
+        and count_content_backfill_remaining() both subtract out, so an
+        accepted article is durably out of automatic retry, not just hidden
+        from the manual-review list."""
+        return {
+            r[0] for r in self.conn.execute(
+                """SELECT article_id FROM (
+                     SELECT article_id, status,
+                            ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                     FROM content_refetch_log
+                   ) WHERE rn=1 AND status='accepted'"""
+            ).fetchall()
+        }
 
     def content_refetch_failure_counts(self) -> dict[str, int]:
         """Failure count by reason, most-recent-attempt-per-article only —
