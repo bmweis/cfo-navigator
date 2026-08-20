@@ -240,59 +240,62 @@ exists, confirmed by code inspection, not a to-do list.
 
 ---
 
-## Phase 8 — Feature normalization + Compare
+## Phase 8 — Feature Taxonomy + Compare
 
-Two separate tables (Software features, Community features), not shared. Compare and normalization are built together, since a comparison matrix only aligns cleanly once features are canonical rows rather than free text worded differently per vendor.
+**Superseded 2026-08 — this phase no longer describes what got built.** The
+Feature Family model below (Phase 8.1-8.5, as originally planned) was
+replaced before any of it was built: docs/FEATURE_TAXONOMY.md is now the
+canonical rules document, and the real model is **Category → curated
+feature list (~10-15 per category) → tool-feature link**, with designations
+(availability, AI-enabled, verified date, note) living on the LINK, never on
+the feature. **There are no Feature Families** — no grouping layer above the
+per-category flat list; like features sit together via curated `sort_order`
+within a category, a display concern, not a schema layer. See CLAUDE.md's
+"Feature Taxonomy" notes (Phase 0/1 investigation and build) for the full
+history, including why the pilot's three category names didn't map onto the
+existing 15-tag `tool_categories` vocabulary and how that got resolved
+(reuse ERP/FP&A, add Close Management as a genuine new pill).
 
-### Decided (do not re-litigate)
+### What's actually built (Phase 1, this repo)
 
-- **Feature Families are a pure organizing label** — never themselves a checkable feature. Structural grouping (e.g. Planning, Reporting, Data, Integrations).
-- **Single-parent:** each feature belongs to exactly one Feature Family.
-- **AI enablement** is a boolean per feature — checkmark on the profile page's Feature/AI table, navy checkmark-with-asterisk in Compare.
-- **New-feature research flow:** shortlist candidates via category + embeddings similarity, admin triggers a targeted rescan or self-tags per candidate. No blanket re-crawling.
-- **Compare view is a single `<table>`** — vendor screenshot + name + category shown once, in the header. Rows grouped under Feature Family headers. Footer row reuses each vendor's hand-written "how this differs" field, kept separate from the matrix to stay factual.
-- **Verification tags don't appear in Compare** — admin-only, profile page only.
-- **Communities' feature list starts from scratch, not a migration** — Phase 0 confirmed there's no existing free-text Communities feature data to clean up. Curating the canonical Communities feature list (Phase 8.3) should apply the same filter as Phase 3b.0: does this feature genuinely help someone evaluate or compare communities, not just "is this something a community could technically be tagged with."
+- `category_features` / `tool_feature_links` / `feature_review_queue`
+  (schema in `linklib/db.py`, admin CRUD in `webapp/app.py`) — see
+  ARCHITECTURE.md's Feature Taxonomy section for the full table shapes and
+  admin routes.
+- Seeded from a nine-vendor pilot (Rillet/Campfire/NetSuite → ERP,
+  Runway/Abacum/Aleph → FP&A, FloQast/Numeric/Ledge → Close Management) via
+  the idempotent `scripts/seed_feature_taxonomy.py`, reading
+  `scripts/seed_data/*.csv`.
+- Admin-only: Manage Features (per category, `/admin/tools/features`),
+  Manage Tool Features (a checklist on each tool's own edit page), and the
+  Feature Review Queue (`/admin/tools/feature-review-queue`) — approve,
+  edit-then-approve, or deny any proposal (admin/scan/public source) before
+  it reaches the live tables (rules doc §9).
+- `tools.suite_note` — free-text suite-membership notation (rules doc §5's
+  "beyond the office of the CFO" case), independent of the feature tables.
 
-### Phase 8.0 — Investigate, report back before coding
+### Still not built — later phases, unchanged in spirit from the original plan
 
-1. Inventory current Features data for both types: population, messiness, actual near-duplicate examples found (not hypothetical).
-2. Confirm current "needs verification" storage and whether it carries forward cleanly into a join-table model.
-3. Confirm the existing "Manage categories" admin page implementation to mirror.
-4. Confirm reusability of the existing embeddings infrastructure for candidate-suggestion.
-5. **Produce a written cleanup mapping proposal — then stop.** Table: original free-text entry → proposed canonical feature → proposed Feature Family → AI-enabled (Y/N) → confidence note for anything ambiguous. Flag ambiguity as a question, don't guess past what the data supports.
-
-**Hard gate: do not proceed to 8.1 or 8.2 until Brian has explicitly reviewed and approved the mapping.** Expect at least one feedback round.
-
-### Phase 8.1 — Schema
-
-- Naming: the concept is called "Feature Family" (not "Family") to avoid collision with tool categories — table/column names use `feature_family` (e.g. `feature_families`, `feature_family_id`), per below.
-- `feature_families`: id, name, type, sort_order.
-- `features`: id, name, feature_family_id (FK, required), ai_enabled (boolean), type.
-- `software_feature_links` / `community_feature_links`: entry_id, feature_id, verified (boolean).
-- Update ARCHITECTURE.md.
-
-### Phase 8.2 — Migration
-
-- Execute the approved plan from 8.0. Don't silently auto-merge ambiguous near-duplicates.
-- Highest Brian-time-cost phase — budget for a review pass.
-
-### Phase 8.3 — Admin: Manage Feature Families + Manage Features
-
-- Mirrors "Manage categories."
-- Manage Feature Families: per type, single-parent.
-- Manage Features: assign one Feature Family, toggle AI-enabled.
-- New-feature candidate-suggestion flow lives here.
-
-### Phase 8.4 — Update profile pages to read normalized data
-
-- Software/Community Features cards (Phase 3/3b) switch from free text to querying the new join tables. Visual spec unchanged.
-
-### Phase 8.5 — Build the Compare view
-
-- Build against `compare-view-mockup-v4.html` exactly, including the sub-640px screenshot drop.
-- Support 2-4 selected entries (confirm exact cap before building — mockup implies 3-5 range).
-- Wire up the Compare button stub from Phase 3/3b.
+- **Public profile-page rendering** of the governed model (still reads the
+  legacy free-text `tool_features` for every tool today — the read-time
+  branch on `category_has_features()` is written and ready, but nothing
+  calls it from the public Features card yet). Needs real brand/visual
+  spec work, not just a data-source swap.
+- **The recurring AI scan tool** (rules doc §10 — origination mode for a
+  brand-new category, freshness mode for re-checking an existing one).
+  `feature_review_queue.source='scan'` and the CSV-seeded pilot proposals
+  already exercise the queue's scan path end to end; the actual recurring
+  scan job that populates it going forward doesn't exist yet.
+- **The public feedback/suggestion UI** (rules doc §9's "public suggestion
+  channel requirements" — `feature_review_queue.submitter_name`/
+  `submitter_email` are already nullable columns waiting for this). The
+  investigation into reusable contact-form infrastructure (rate limiting,
+  honeypot, spam keyword filter) is done; no UI or route exists yet.
+- **A real Compare view for the governed model.** The existing
+  `/tools/compare` route still reads the legacy `tool_features` union-of-
+  names approach; rebuilding it against category_features/
+  tool_feature_links (grouped by category rather than a Feature Family
+  header, per the model above) is unscheduled.
 
 ---
 
