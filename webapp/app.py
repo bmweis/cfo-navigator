@@ -55,6 +55,8 @@ from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.manual_review_csv import parse_manual_review_corrections_csv
+from linklib.purge_csv import parse_purge_confirmations_csv, MAX_PURGE_PER_RUN
+from linklib.extract import _MIN_CONTENT_WORDS
 from linklib.pipeline import ingest_url
 from linklib import backup
 # webapp/thought_leadership_data.py is no longer imported here — the four
@@ -18413,8 +18415,9 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                             "content_refetch_log", "url_correction_log",
                             "feed_sections", "feeds"]),
     ("Site utilities & system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
-                                  "email_failures", "backup_log", "enrichment_cost", "manual_overhead",
-                                  "field_reviews", "narrative_review_log", "matchmaker_questions"]),
+                                  "email_failures", "backup_log", "integrity_check_log", "job_run_log",
+                                  "enrichment_cost", "manual_overhead", "field_reviews",
+                                  "narrative_review_log", "matchmaker_questions"]),
 ]
 
 
@@ -19019,6 +19022,52 @@ def _relative_age(iso: str) -> str:
     if secs < 86400:
         return f"{int(secs // 3600)}h ago"
     return f"{int(secs // 86400)}d ago"
+
+
+def _job_run_banner(job_name: str) -> str:
+    """Durability audit item 3 — "last run: outcome, N ago" for one
+    _JOB_STATE-backed background job, read from the durable job_run_log
+    table rather than the in-process _JOB_STATE dict (which a redeploy or
+    crash wipes with no trace). Same banner pattern as
+    _backup_status_banner/_integrity_status_banner: green on success, amber
+    on a deliberate stop or "never run", coral on failure — loud, not
+    routine. A row stuck at status='running' with no finished_at is what a
+    crash mid-run looks like, called out explicitly rather than shown as a
+    normal in-progress state (this banner never reflects LIVE progress —
+    that's still _JOB_STATE/the poll endpoint each page already has)."""
+    lib = _lib()
+    try:
+        last = lib.latest_job_run(job_name)
+    finally:
+        lib.close()
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    coral_wash, coral = "var(--coral-wash)", "var(--coral)"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+
+    if not last:
+        bg, border, color = amber_wash, amber_border, amber_text
+        html = "No run recorded yet."
+    elif last["status"] == "running" and not last.get("finished_at"):
+        bg, border, color = amber_wash, amber_border, amber_text
+        ago = _relative_age(last["started_at"])
+        html = f'Last run started {ago or "recently"}, never finished&mdash;likely interrupted by a deploy or crash. Safe to start again; earlier progress isn&rsquo;t lost (see the job&rsquo;s own resumability notes above).'
+    elif last["status"] == "success":
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        ago = _relative_age(last["finished_at"] or last["started_at"])
+        summary = _esc(last.get("summary") or "")
+        html = f'Last run: <strong>succeeded</strong>, {ago}{f"&mdash;{summary}" if summary else ""}.'
+    elif last["status"] == "stopped":
+        bg, border, color = amber_wash, amber_border, amber_text
+        ago = _relative_age(last["finished_at"] or last["started_at"])
+        summary = _esc(last.get("summary") or "")
+        html = f'Last run: <strong>stopped</strong> by an admin, {ago}{f"&mdash;{summary}" if summary else ""}.'
+    else:
+        bg, border, color = coral_wash, coral, "inherit"
+        ago = _relative_age(last["finished_at"] or last["started_at"])
+        err = _esc(last.get("error") or "no error message recorded")
+        html = f'Last run: <strong>failed</strong>, {ago}&mdash;{err}.'
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:10px 16px;margin:0 0 16px;font-size:13px;line-height:1.5;">{html}</div>')
 
 
 # True stoplight colours, a sanctioned narrow exception to the palette — see
@@ -20507,6 +20556,7 @@ def admin_queue(request: Request, scanning: int = 0, redating: int = 0, suggesti
   <div style="padding:0 20px 20px;">
     <p style="color:var(--muted);margin:0 0 6px;font-size:13.5px;">Walks a source&rsquo;s sitemap and queues anything you haven&rsquo;t saved yet&mdash;a one-time back-catalog catch-up, typically run once right after you add a new source, not something to reach for routinely. It doesn&rsquo;t save anything by itself, it just adds to the queue below for you to review. <strong>Different from Reader content backfill</strong> (elsewhere on the Library page), which re-processes articles you&rsquo;ve <em>already</em> saved for better structure&mdash;this only ever finds articles you haven&rsquo;t saved yet.</p>
     <p style="color:var(--muted);margin:0 0 16px;font-size:13.5px;">Once a source&rsquo;s back catalog is swept, &ldquo;Scan feed&rdquo; below is what keeps you current going forward&mdash;you shouldn&rsquo;t need to run this again for that source.</p>
+    {_job_run_banner("backfill")}
     <div id="sweep-poll-container">{sweep_status_html}</div>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
       <form id="backfill-form" method="post" action="/admin/library/backfill/start" style="display:grid;gap:18px;">
@@ -23406,9 +23456,16 @@ async def admin_review_remove(request: Request, background_tasks: BackgroundTask
 # ---------------------------------------------------------------------------
 
 def _enrich_job(force: bool, model: str, limit: int) -> None:
-    """Background thread: run enrich_library, updating _JOB_STATE["enrich"]."""
+    """Background thread: run enrich_library, updating _JOB_STATE["enrich"].
+
+    Durability audit item 3: also writes a durable job_run_log row (start,
+    then finish) — _JOB_STATE itself stays exactly as it was, for live
+    in-request progress, but it's wiped by every redeploy/crash with no
+    record left behind; job_run_log is what survives that and backs the
+    "last run" line on /admin/library/enrich."""
     _job_set("enrich", running=True, done=0, total=0, error="", model=model)
     lib = _lib()
+    run_id = lib.start_job_run("enrich")
     try:
         from linklib import pipeline as _pl
 
@@ -23423,8 +23480,10 @@ def _enrich_job(force: bool, model: str, limit: int) -> None:
                            model=model, progress=_progress)
         backup.maybe_backup(DB_PATH)
         _job_set("enrich", running=False, done=total)
+        lib.finish_job_run(run_id, "success", summary=f"{total:,} article(s) enriched")
     except Exception as exc:
         _job_set("enrich", running=False, error=str(exc))
+        lib.finish_job_run(run_id, "failure", error=str(exc))
     finally:
         lib.close()
 
@@ -23490,6 +23549,7 @@ def admin_enrich(request: Request):
 <h1>Re-enrich archive</h1>
 <p style="color:var(--muted);margin:-6px 0 22px;">Generate Claude summaries and tags across your saved articles, server-side. The summary is what FP&A Buddy reasons from, so depth here pays off there.</p>
 
+{_job_run_banner("enrich")}
 <div id="poll-container">{status_html}</div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
@@ -23611,9 +23671,13 @@ def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool,
     `only_sources_raw` (comma/newline separated) restricts the sweep to matching
     sources — case-insensitive substring match against the OPML name, so
     "Stratechery" matches "Ben Thompson (Stratechery)". Empty = all sources.
-    """
+
+    Durability audit item 3: also writes a durable job_run_log row (start,
+    then finish) — see _enrich_job's docstring for why this doesn't touch
+    _JOB_STATE itself."""
     _job_set("backfill", running=True, report=[], error="", done=0, total=0)
     lib = _lib()
+    run_id = lib.start_job_run("backfill")
     try:
         from linklib.feed import parse_opml
         from linklib.queue import scan_sitemaps_into_queue
@@ -23641,8 +23705,14 @@ def _backfill_job(since_str: str, per_source: int, model: str, dry_run: bool,
         _job_set("backfill", running=False, report=report, done=total)
         if not dry_run:
             backup.maybe_backup(DB_PATH)
+        added = sum(r.get("added", 0) for r in report)
+        summary = f"{added:,} article(s) added across {total:,} source(s)"
+        if dry_run:
+            summary = f"dry run — {sum(r.get('candidates', 0) for r in report):,} candidate(s) across {total:,} source(s)"
+        lib.finish_job_run(run_id, "success", summary=summary)
     except Exception as exc:
         _job_set("backfill", running=False, error=str(exc))
+        lib.finish_job_run(run_id, "failure", error=str(exc))
     finally:
         lib.close()
 
@@ -23712,10 +23782,15 @@ def _content_backfill_job(limit: int, force: bool, host_suffixes: list[str] | No
     skipped, same as a crash-recovery restart would see). `host_suffixes`
     scopes the run to matching hosts and, for those hosts only, reaches
     articles otherwise parked in "needs manual review" — see
-    Library.articles_needing_content_backfill's docstring."""
+    Library.articles_needing_content_backfill's docstring.
+
+    Durability audit item 3: also writes a durable job_run_log row (start,
+    then finish, including on a deliberate stop) — see _enrich_job's
+    docstring for why this doesn't touch _JOB_STATE itself."""
     _job_set("content_backfill", running=True, stop_requested=False,
              done=0, total=0, ok=0, failed=0, error="", stopped=False)
     lib = _lib()
+    run_id = lib.start_job_run("content_backfill")
     try:
         from linklib import pipeline as _pl
 
@@ -23729,6 +23804,8 @@ def _content_backfill_job(limit: int, force: bool, host_suffixes: list[str] | No
             if _job_get("content_backfill").get("stop_requested"):
                 _job_set("content_backfill", running=False, stopped=True,
                          done=i, ok=ok_count, failed=failed_count)
+                lib.finish_job_run(run_id, "stopped",
+                                   summary=f"stopped after {i}/{total} — {ok_count} succeeded, {failed_count} failed")
                 return
             ok, _reason = _pl.backfill_article_content(lib, row)
             if ok:
@@ -23740,8 +23817,11 @@ def _content_backfill_job(limit: int, force: bool, host_suffixes: list[str] | No
                 time.sleep(_CONTENT_BACKFILL_DELAY_SEC)
         backup.maybe_backup(DB_PATH)
         _job_set("content_backfill", running=False, done=total, ok=ok_count, failed=failed_count)
+        lib.finish_job_run(run_id, "success",
+                           summary=f"{ok_count}/{total} succeeded, {failed_count} failed")
     except Exception as exc:
         _job_set("content_backfill", running=False, error=str(exc))
+        lib.finish_job_run(run_id, "failure", error=str(exc))
     finally:
         lib.close()
 
@@ -23759,6 +23839,9 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         needs_check_count = lib.count_needs_content_check()
         needs_review_count = lib.count_articles_needing_manual_review()
         needs_review_rows = lib.list_articles_needing_manual_review(limit=500)
+        accepted_count = lib.count_content_accepted()
+        accepted_rows = lib.list_accepted_content(limit=500)
+        purge_candidate_count = lib.count_purge_candidates()
         failure_counts = lib.content_refetch_failure_counts()
         failure_domains = lib.content_refetch_failure_domains(limit=15)
         wayback_count = lib.count_wayback_content()
@@ -23891,11 +23974,33 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
                       if url else title)
         last = _esc((r.get("last_attempted_at") or "")[:19].replace("T", " "))
+        accept_form = (f'<form method="post" action="/admin/library/backfill-content/{r["article_id"]}/accept" '
+                       f'onsubmit="return confirm(\'Accept this article\\u2019s current content as final? '
+                       f'It will stop showing up here and stop being auto-retried.\');">'
+                       f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;white-space:nowrap;">Accept as final</button></form>')
         return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}'
                 f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-all;">{_esc(url)}</div></td>'
                 f'<td style="padding:7px 12px;font-size:13px;">{reason_html}</td>'
                 f'<td style="padding:7px 12px;font-size:13px;text-align:center;">{r.get("attempt_count", 0)}</td>'
-                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{last}</td></tr>')
+                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{last}</td>'
+                f'<td style="padding:7px 12px;">{accept_form}</td></tr>')
+
+    def _accepted_row(r):
+        labels = {"paywall": "Paywall", "bot-challenge": "Bot challenge",
+                  "too-thin": "Too thin", "fetch-error": "Fetch error"}
+        reason_label = _esc(labels.get(r.get("reason") or "", r.get("reason") or "unknown"))
+        title = _esc(r.get("title") or f'article #{r["article_id"]}')
+        url = r.get("current_url") or ""
+        title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
+                      if url else title)
+        when = _esc((r.get("accepted_at") or "")[:19].replace("T", " "))
+        undo_form = (f'<form method="post" action="/admin/library/backfill-content/{r["article_id"]}/unaccept">'
+                     f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;white-space:nowrap;">Undo</button></form>')
+        return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}'
+                f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-all;">{_esc(url)}</div></td>'
+                f'<td style="padding:7px 12px;font-size:13px;">{reason_label}</td>'
+                f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{when}</td>'
+                f'<td style="padding:7px 12px;">{undo_form}</td></tr>')
 
     manual_review_html = ""
     if needs_review_rows:
@@ -23905,7 +24010,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
     <div>
       <div style="font-weight:600;font-size:14px;">Needs manual review ({needs_review_count:,})</div>
-      <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Failed {Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD}+ times in a row&mdash;excluded from automatic retry, but NOT considered permanently dead (unlike Defunct service below). Export, fill in a corrected URL for any you can find, and re-import to fix and requeue them.</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Failed {Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD}+ times in a row&mdash;excluded from automatic retry, but NOT considered permanently dead (unlike Defunct service below). Export, fill in a corrected URL for any you can find, and re-import to fix and requeue them. If the content that's already saved is actually fine as-is (a real but short article, say), use &ldquo;Accept as final&rdquo; on that row instead&mdash;per-article only, no bulk option.</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <a href="/admin/library/backfill-content/manual-review/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>
@@ -23925,10 +24030,53 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
       <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last failure</th>
       <th style="padding:7px 12px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Attempts</th>
       <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Last attempt</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"></th>
     </tr></thead>
     <tbody>{review_rows_html}</tbody>
   </table>
   </div>
+</div>"""
+
+    accepted_html = ""
+    if accepted_rows:
+        accepted_rows_html = "".join(_accepted_row(r) for r in accepted_rows)
+        accepted_html = f"""
+<div id="accepted-content" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:20px 0;">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--line);">
+    <div style="font-weight:600;font-size:14px;">Accepted as final ({accepted_count:,})</div>
+    <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Marked &ldquo;good enough as-is&rdquo; by an admin&mdash;permanently out of automatic retry and out of Needs manual review above, until undone here.</div>
+  </div>
+  <div style="overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Reason it was flagged</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Accepted</th>
+      <th style="padding:7px 12px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;"></th>
+    </tr></thead>
+    <tbody>{accepted_rows_html}</tbody>
+  </table>
+  </div>
+</div>"""
+
+    purge_html = f"""
+<div id="purge-articles" style="background:var(--surface);border:1px solid var(--coral);border-radius:14px;overflow:hidden;margin:20px 0;">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div style="font-weight:600;font-size:14px;">Purge articles ({purge_candidate_count:,} candidate{"s" if purge_candidate_count != 1 else ""})</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Articles with essentially nothing saved&mdash;under {_esc(str(_MIN_CONTENT_WORDS))} words of plain text AND no structured content ever backfilled. Not the same as Remaining above, which is mostly articles with perfectly good text just waiting on a backfill pass. Permanent&mdash;review carefully before confirming.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <a href="/admin/library/backfill-content/purge/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>
+    </div>
+  </div>
+  <form method="post" action="/admin/library/backfill-content/purge/import/preview" enctype="multipart/form-data"
+        style="padding:14px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg);">
+    <input type="file" name="file" accept=".csv,text/csv" required
+      style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:#fff;">
+    <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Preview purge</button>
+    <span style="font-size:12px;color:var(--muted);">Re-upload the exported CSV with <code>confirm_purge</code> filled in (yes/y/1/x) for rows to delete. Nothing is deleted until you confirm on the preview screen. Capped at {MAX_PURGE_PER_RUN} per run.</span>
+  </form>
 </div>"""
 
     body = f"""<div class="page page-admin">
@@ -23963,6 +24111,10 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{needs_check_count:,}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Flagged at save</div>
   </div>
+  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
+    <div style="font-size:26px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{accepted_count:,}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Accepted as final</div>
+  </div>
 </div>
 
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{needs_check_count:,} article{"s" if needs_check_count != 1 else ""} above were flagged the moment they were saved. The fetch looked like a paywall preview, a bot-challenge page, a fetch failure, or real content under the length floor&mdash;the save itself was never blocked, just marked with a reason instead of looking healthy. Clears automatically once a later backfill or resave succeeds.</p>' if needs_check_count else ''}
@@ -23971,6 +24123,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_search_count:,} of the structured articles above came from a <strong>Medium-platform search match</strong> (medium.com and similar hosts block direct fetches, so a matching article found elsewhere or via Exa&rsquo;s own text is used instead)&mdash;look for the &ldquo;via Medium search&rdquo; badge in the attempts log below.</p>' if medium_search_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service (e.g. Google&rsquo;s retired FeedBurner proxy), so re-fetching can never succeed. Not counted in Remaining above. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry them anyway.</p>' if excluded_count else ''}
 
+{_job_run_banner("content_backfill")}
 <div id="poll-container">{status_html}</div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;">
@@ -24002,6 +24155,8 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 </div>
 
 {manual_review_html}
+{accepted_html}
+{purge_html}
 {failures_html}
 {domains_html}
 {log_html}
@@ -24073,6 +24228,41 @@ def admin_backfill_content_status(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401)
     return JSONResponse(_job_get("content_backfill"))
+
+
+@app.post("/admin/library/backfill-content/{article_id}/accept")
+def admin_backfill_content_accept(request: Request, article_id: int):
+    """Durability audit item 4 — mark one needs-manual-review article's
+    current content accepted as final. Per-article only, no bulk/select-all
+    form exists on purpose (this is a deliberate one-at-a-time override, not
+    a backfill mechanism) — see Library.accept_article_content."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        ok = lib.accept_article_content(article_id)
+    finally:
+        lib.close()
+    msg = "Accepted as final." if ok else "Article not found."
+    key = "msg" if ok else "error"
+    return RedirectResponse(f"/admin/library/backfill-content?{key}={quote(msg)}#accepted-content",
+                            status_code=303)
+
+
+@app.post("/admin/library/backfill-content/{article_id}/unaccept")
+def admin_backfill_content_unaccept(request: Request, article_id: int):
+    """Reverses accept_article_content — see its docstring. Also
+    per-article, same page."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        ok = lib.unaccept_article_content(article_id)
+    finally:
+        lib.close()
+    msg = "Un-accepted—back in normal scope." if ok else "That article isn't currently accepted."
+    key = "msg" if ok else "error"
+    return RedirectResponse(f"/admin/library/backfill-content?{key}={quote(msg)}", status_code=303)
 
 
 @app.get("/admin/library/backfill-content/manual-review/export.csv")
@@ -24282,6 +24472,272 @@ async def admin_backfill_content_manual_review_import_commit(request: Request):
     return RedirectResponse(f"/admin/library/backfill-content?msg={quote(msg)}", status_code=303)
 
 
+# ---------------------------------------------------------------------------
+# Article purge (durability follow-up, 2026-08) — same export/preview/commit
+# CSV round trip as the manual-review corrections above, applied to a
+# different, narrower candidate set (see Library.articles_eligible_for_purge).
+# Deliberately destructive: nothing here is a soft delete or an "accepted"
+# override like the manual-review escape hatch — a confirmed row is
+# permanently gone. See linklib.purge_csv's module docstring for the
+# confirm-marker vocabulary and the MAX_PURGE_PER_RUN cap.
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/library/backfill-content/purge/export.csv")
+def admin_backfill_content_purge_export(request: Request):
+    """CSV of every current purge candidate, article_id-keyed, with a blank
+    confirm_purge column for the admin to fill in (yes/y/1/x to mark a row
+    for deletion) and re-upload via the Preview import form."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    import csv
+    import io
+
+    lib = _lib()
+    try:
+        rows = lib.articles_eligible_for_purge(limit=100000)
+    finally:
+        lib.close()
+
+    def _csv_safe(val) -> str:
+        # Same formula-injection guard as the manual-review export above.
+        s = str(val)
+        return "'" + s if s and s[0] in ("=", "+", "-", "@", "\t", "\r") else s
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["article_id", "title", "current_url", "word_count", "reason", "confirm_purge"])
+    for r in rows:
+        writer.writerow([
+            r["id"], _csv_safe(r.get("title") or ""), r.get("url") or "",
+            r.get("word_count", 0), r.get("content_check_reason") or "",
+            "",  # confirm_purge — blank for the admin to fill in
+        ])
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="purge-candidates-{stamp}.csv"'},
+    )
+
+
+@app.post("/admin/library/backfill-content/purge/import/preview")
+async def admin_backfill_content_purge_import_preview(request: Request, file: UploadFile = File(...)):
+    """Parses the uploaded confirmation CSV and shows exactly what would be
+    permanently deleted — nothing is written here. Re-validates every
+    article_id against a FRESH read of articles_eligible_for_purge() (never
+    trusting the uploaded file's own title/url/word_count columns), same
+    "whatever's in the database now is authoritative" rule as the
+    manual-review import. Confirmed rows round-trip as hidden fields into
+    the commit form below, plus a required typed-count field — a second,
+    independent guard on top of purge_csv.MAX_PURGE_PER_RUN so a fat-
+    fingered CSV (or an admin who didn't actually read the preview) can't
+    delete more than they meant to."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    data = await file.read()
+
+    lib = _lib()
+    try:
+        candidate_rows = lib.articles_eligible_for_purge(limit=100000)
+    finally:
+        lib.close()
+    current_candidates = {
+        r["id"]: {"title": r.get("title") or "", "url": r.get("url") or "",
+                  "word_count": r.get("word_count", 0)}
+        for r in candidate_rows
+    }
+
+    try:
+        confirmed, skipped, errors = parse_purge_confirmations_csv(data, current_candidates)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/library/backfill-content?error={quote(str(e))}", status_code=303)
+
+    if not confirmed and not skipped and not errors:
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error={quote('The file had no data rows to import.')}", status_code=303)
+
+    hidden_fields = "".join(
+        f'<input type="hidden" name="article_id" value="{c["article_id"]}">'
+        for c in confirmed
+    )
+
+    confirmed_table_rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;">#{c['article_id']} {_esc(c['title']) or '<em>untitled</em>'}</td>
+  <td style="padding:8px 10px;font-size:12px;color:var(--muted);word-break:break-all;">{_esc(c['url'])}</td>
+  <td style="padding:8px 10px;font-size:13px;text-align:center;">{c['word_count']}</td>
+</tr>""" for c in confirmed) or (
+        '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--muted);">No rows confirmed for purge.</td></tr>')
+
+    skipped_section = ""
+    if skipped:
+        skipped_rows_html = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{r['line']}</td>
+  <td style="padding:8px 10px;font-size:13px;">#{r['article_id']}</td>
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{_esc(r['reason'])}</td>
+</tr>""" for r in skipped)
+        skipped_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Skipped ({len(skipped)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Left blank or marked no&mdash;not an error, nothing to do.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:400px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why</th>
+    </tr></thead>
+    <tbody>{skipped_rows_html}</tbody>
+  </table>
+</div>"""
+
+    errors_section = ""
+    if errors:
+        errors_rows_html = "".join(f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:8px 10px;font-size:13px;color:var(--muted);">{r['line']}</td>
+  <td style="padding:8px 10px;font-size:13px;font-family:monospace;">{_esc(r['raw'])}</td>
+  <td style="padding:8px 10px;font-size:13px;color:#b91c1c;">{_esc(r['reason'])}</td>
+</tr>""" for r in errors)
+        errors_section = f"""
+<h3 style="font-size:14px;margin:24px 0 10px;">Errors ({len(errors)})</h3>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">These rows won&rsquo;t be purged&mdash;fix them in your CSV and re-upload if needed.</p>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;min-width:480px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Line</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Raw row</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Why it was skipped</th>
+    </tr></thead>
+    <tbody>{errors_rows_html}</tbody>
+  </table>
+</div>"""
+
+    n = len(confirmed)
+    confirm_button = (
+        f'<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;background:#b91c1c;border-color:#b91c1c;">'
+        f'Permanently delete {n} article{"s" if n != 1 else ""}</button>'
+        if confirmed else
+        '<button type="submit" class="btn" style="font-size:14px;padding:9px 20px;" disabled>Nothing to delete</button>'
+    )
+    count_confirm_field = (
+        f'<label style="display:flex;flex-direction:column;gap:4px;font-size:13px;">'
+        f'Type <strong>{n}</strong> to confirm'
+        f'<input type="text" name="confirm_count" required autocomplete="off"'
+        f' style="width:100px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;">'
+        f'</label>' if confirmed else ""
+    )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/library/backfill-content" style="font-size:13px;color:var(--muted);">&larr; Reader content backfill</a></p>
+<h1>Preview article purge</h1>
+<p style="color:var(--muted);margin:0 0 6px;">Nothing has been deleted yet. Review the rows below carefully&mdash;this is permanent.</p>
+<p style="color:var(--muted);margin:0 0 18px;">A fresh off-site backup is taken automatically right before the delete runs, in addition to the regular nightly one.</p>
+
+<h3 style="font-size:14px;margin:0 0 10px;">Confirmed for deletion ({n})</h3>
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-bottom:8px;">
+  <table style="width:100%;border-collapse:collapse;min-width:560px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Article</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">URL</th>
+      <th style="padding:8px 10px;text-align:center;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Words</th>
+    </tr></thead>
+    <tbody>{confirmed_table_rows}</tbody>
+  </table>
+</div>
+
+<form method="post" action="/admin/library/backfill-content/purge/import/commit" style="margin:14px 0 8px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+  {hidden_fields}
+  {count_confirm_field}
+  {confirm_button}
+  <a href="/admin/library/backfill-content" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+</form>
+{skipped_section}
+{errors_section}
+</div>"""
+    return HTMLResponse(_page("Preview article purge—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/library/backfill-content/purge/import/commit")
+async def admin_backfill_content_purge_import_commit(request: Request):
+    """Executes the purge the preview step showed. Two independent guards
+    before anything is deleted: (1) the typed confirm_count must equal the
+    number of article_id rows actually posted — protects against a form
+    submitted without really reading the preview; (2) every article_id is
+    re-validated against a fresh articles_eligible_for_purge() read (a row
+    that was backfilled with real content between preview and commit is
+    skipped, not deleted, same TOCTOU discipline as the manual-review
+    commit route). A real off-site backup snapshot (backup.backup_now, NOT
+    the debounced maybe_backup — see this route's "Decisions for review" in
+    the PR description for why) is taken immediately before the delete
+    loop runs, when backups are configured at all; if that snapshot attempt
+    fails, the whole purge is aborted rather than proceeding without a
+    fresh net. Every deleted article is logged to archive_audit_log
+    (action='delete', detail='purge') via Library.purge_article, which also
+    write-then-read-back verifies each delete actually took."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    article_ids_raw = form.getlist("article_id")
+    confirm_count_raw = (form.get("confirm_count") or "").strip()
+
+    if not article_ids_raw:
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error={quote('No articles to purge—upload a CSV first.')}",
+            status_code=303)
+
+    try:
+        article_ids = [int(x) for x in article_ids_raw]
+    except ValueError:
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error={quote('Malformed purge request.')}", status_code=303)
+
+    if confirm_count_raw != str(len(article_ids)):
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error="
+            f"{quote(f'Typed count ({confirm_count_raw!r}) did not match the {len(article_ids)} confirmed article(s)—nothing was deleted. Re-upload and try again.')}",
+            status_code=303)
+
+    if len(article_ids) > MAX_PURGE_PER_RUN:
+        # Defense in depth — parse_purge_confirmations_csv already enforces
+        # this at preview time, but a hand-crafted POST shouldn't be able
+        # to bypass it.
+        return RedirectResponse(
+            f"/admin/library/backfill-content?error="
+            f"{quote(f'{len(article_ids)} articles exceeds the {MAX_PURGE_PER_RUN}-per-run cap—nothing was deleted.')}",
+            status_code=303)
+
+    if backup.is_configured():
+        try:
+            backup.backup_now(DB_PATH)
+        except Exception as exc:
+            return RedirectResponse(
+                f"/admin/library/backfill-content?error="
+                f"{quote(f'Pre-purge backup failed, so nothing was deleted: {exc}')}",
+                status_code=303)
+
+    lib = _lib()
+    deleted = 0
+    skipped_ids: list[int] = []
+    try:
+        current_candidate_ids = {r["id"] for r in lib.articles_eligible_for_purge(limit=100000)}
+        for article_id in article_ids:
+            if article_id not in current_candidate_ids:
+                skipped_ids.append(article_id)
+                continue
+            snapshot = lib.purge_article(article_id)
+            if snapshot is None:
+                skipped_ids.append(article_id)
+                continue
+            _log_archive_audit(lib, request, "delete", article_id,
+                               detail=f"purge: {snapshot['word_count']} words, {snapshot['url']}")
+            deleted += 1
+    finally:
+        lib.close()
+
+    msg = f'Purged {deleted} article{"s" if deleted != 1 else ""}.'
+    if skipped_ids:
+        msg += (f' {len(skipped_ids)} row(s) skipped (no longer a purge candidate, or already gone): '
+                f'{", ".join(f"#{i}" for i in skipped_ids[:10])}{" …" if len(skipped_ids) > 10 else ""}')
+    return RedirectResponse(f"/admin/library/backfill-content?msg={quote(msg)}", status_code=303)
+
+
 def _backup_status_banner(backup_rows: list[dict]) -> str:
     """Green/amber/red status for the off-site Drive backup, deliberately
     distinguishing "never configured" from "configured but failing" — see
@@ -24317,6 +24773,37 @@ def _backup_status_banner(backup_rows: list[dict]) -> str:
             f'padding:14px 18px;margin:16px 0;font-size:14px;line-height:1.5;">{html}</div>')
 
 
+def _integrity_status_banner(integrity_rows: list[dict]) -> str:
+    """Color-coded status for the pre-backup integrity check (durability
+    audit item 2), next to the existing backup banner above — same
+    green/amber-ish/red posture, but distinctly its own banner since "the
+    backup succeeded" and "the DB is structurally sound" are two different
+    facts. A failed check must be loud here: coral, not amber, since
+    backup.py already blocks the upload on a failure (see backup_now's
+    docstring) — this is not a routine/expected state the way "no backups
+    configured yet" is."""
+    last = integrity_rows[0] if integrity_rows else None
+    coral_wash, coral = "var(--coral-wash)", "var(--coral)"
+    amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
+    seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+
+    if not last:
+        bg, border, color = amber_wash, amber_border, amber_text
+        html = "No integrity check has run yet&mdash;runs automatically right before the next backup attempt."
+    elif last["status"] == "failure":
+        bg, border, color = coral_wash, coral, "inherit"
+        when = _esc(last["created_at"][:16].replace("T", " "))
+        detail = _esc(last["detail"]) or "no detail recorded"
+        html = (f'Integrity check <strong>failed</strong> ({when} UTC)&mdash;that night&rsquo;s backup upload was '
+                f'skipped to avoid capturing corruption into Drive: {detail}. See RUNBOOK.md for restore-from-snapshot steps.')
+    else:
+        bg, border, color = seafoam_wash, seafoam, "inherit"
+        when = _esc(last["created_at"][:16].replace("T", " "))
+        html = f'Last integrity check ({when} UTC): <strong>ok</strong>&mdash;structural check and FTS5 self-check both passed.'
+    return (f'<div style="background:{bg};border:1px solid {border};color:{color};border-radius:10px;'
+            f'padding:14px 18px;margin:0 0 16px;font-size:14px;line-height:1.5;">{html}</div>')
+
+
 @app.get("/admin/library/backup", response_class=HTMLResponse)
 def admin_backup(request: Request, uploaded: str = ""):
     if not _is_authed(request):
@@ -24325,6 +24812,7 @@ def admin_backup(request: Request, uploaded: str = ""):
     try:
         count = lib.count()
         backup_rows = lib.list_backup_log(limit=100)
+        integrity_rows = lib.list_integrity_check_log(limit=100)
     finally:
         lib.close()
     folder_id = backup.known_folder_id(DB_PATH)
@@ -24388,6 +24876,9 @@ def admin_backup(request: Request, uploaded: str = ""):
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">{folder_line}</p>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Setting <code>GOOGLE_DRIVE_FOLDER_ID</code> in Railway overrides this and points backups at that folder instead, starting with the next attempt&mdash;no redeploy needed. Leave it unset to keep using the folder above.</p>
 {_backup_status_banner(backup_rows)}
+<h2 style="font-size:16px;margin:24px 0 4px;">Pre-backup integrity check</h2>
+<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Runs automatically against the live database right before every backup attempt&mdash;<code>PRAGMA integrity_check</code> plus an FTS5 self-check. A failure blocks that night&rsquo;s upload so corruption is never captured into a retained snapshot.</p>
+{_integrity_status_banner(integrity_rows)}
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:8px 12px;text-align:left;font-size:13px;">When</th>

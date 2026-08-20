@@ -1235,6 +1235,106 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   distinct from the existing Remaining tile (which is every row without
   `content_html` yet — true of the entire corpus by default, and says
   nothing about whether the original save itself looked suspect).
+- **Durability audit item 4 — a per-article "Accept as final" override for
+  the manual-review tier's one real false-positive.** An article with
+  real-but-short content fails `assess_extraction_quality()` identically
+  forever (no URL correction can fix it — the URL is already correct), with
+  no exit short of a direct DB edit. `Library.accept_article_content()`
+  writes a `content_refetch_log` row with a third `status` value,
+  `'accepted'` — chosen specifically because it composes for free with
+  `_manual_review_article_ids()`'s existing latest-attempt-is-`'failure'`
+  check, no query changes needed there. `articles_needing_content_backfill()`
+  and `count_content_backfill_remaining()` separately exclude the same
+  latest-row-`'accepted'` set, so the override is durable against future
+  automatic retries too, not just hidden from one admin list.
+  `POST /admin/library/backfill-content/{id}/accept` and `.../unaccept` are
+  per-article only — **no bulk/select-all form exists on purpose**, this is
+  a one-at-a-time escape hatch, not a backfill mechanism. Undo is fully
+  additive (a new `'failure'` row, never deleting the `'accepted'` one), so
+  an accept-then-reverse stays visible in the log. New admin-page section
+  ("Accepted as final", with Undo per row) and stats tile. See
+  ARCHITECTURE.md's "'Accept as final' manual-review override" section for
+  the full write-up.
+- **Durability audit item 2 (elevated) — a pre-backup integrity check,
+  because the daily Drive backup is now the ONLY recovery path.**
+  Railway-native volume snapshots turned out unavailable on Brian's plan
+  (see the Phase O bullet above), and nothing in this app had ever
+  run `PRAGMA integrity_check` against the live database — corruption
+  would only ever have surfaced at restore time, by which point it would
+  already be baked into every retained snapshot (14 daily + 8 weekly).
+  `linklib.backup.check_integrity()` runs `PRAGMA integrity_check` plus the
+  FTS5 self-check RUNBOOK.md §4's restore rehearsal already runs by hand
+  (`INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')`)
+  against the live DB, wired into `backup_now()` immediately before every
+  snapshot — same cadence as the backup itself, whichever trigger fired it.
+  Every result (ok or failure) is logged to a new `integrity_check_log`
+  table, shape mirrors `backup_log`. **Decision, flagged rather than
+  decided silently: a failed check BLOCKS that night's upload**, logging a
+  `backup_log` failure row too (so the existing status banner picks it up
+  with no second code path) rather than uploading a possibly-corrupt
+  snapshot anyway. Reasoning: the whole point of checking first is to keep
+  corruption out of Drive; uploading it anyway would let it get pruned into
+  the "kept" set on a later run and, eventually, become what the restore
+  procedure reaches for — the exact failure mode this item exists to close.
+  Skipping the upload leaves every already-retained good snapshot untouched
+  (`prune_old_backups` only ever runs after a successful upload). A new
+  "Pre-backup integrity check" banner on `/admin/library/backup` — coral on
+  failure (not amber; a blocked backup isn't a routine/expected state),
+  seafoam on ok — sits above the existing backup-status banner rather than
+  merging into it, since "the backup succeeded" and "the DB is structurally
+  sound" are two different facts. See ARCHITECTURE.md's `integrity_check_log`
+  table row and `backup_now()`'s docstring for the full write-up.
+- **Durability audit item 3 — a durable start/finish record for the three
+  `_JOB_STATE`-backed background jobs, so a redeploy or crash doesn't erase
+  whether re-enrich, Historical sweep, or the Reader content backfill last
+  succeeded, failed, or ever ran.** `_JOB_STATE` (`webapp/app.py`) is an
+  in-process dict — correct and unchanged for LIVE progress polling, but
+  wiped silently on every Railway redeploy with no trace left behind. New
+  `job_run_log` table (shape mirrors `backup_log`/`integrity_check_log`),
+  written twice per run — `Library.start_job_run()` at the top of each of
+  the three job functions, `Library.finish_job_run()` at every exit path
+  (success, failure, and — for the content backfill, the one job with a
+  stop control — a deliberate stop too). A shared `_job_run_banner()`
+  helper renders "last run: outcome, N ago" on each job's own admin-page
+  section, reusing the already-shipped `_relative_age()` helper for the
+  "N ago" text — same green/amber/coral posture as the backup/integrity
+  banners above. A row stuck at `status='running'` with no `finished_at` is
+  exactly what a crash mid-run looks like, and the banner says so
+  explicitly rather than rendering it as ordinary live progress. See
+  ARCHITECTURE.md's `job_run_log` table row for the full write-up.
+- **Article purge flow (durability follow-up) — a permanent-deletion escape
+  hatch for the narrow "genuinely nothing was ever saved" set, mirroring
+  the manual-review corrected-URL CSV round trip exactly.**
+  `Library.articles_eligible_for_purge()` (plain-text `content` under
+  `extract._MIN_CONTENT_WORDS` AND no `content_html` ever backfilled) is
+  deliberately NOT the same set as the Remaining tile — that's the vast
+  backlog of articles with perfectly good text just waiting on structure
+  backfill; this is only the much narrower real-purge candidates.
+  Export/preview/commit CSV round trip
+  (`linklib/purge_csv.py`), never deleting anything before an explicit
+  confirm. Two independent guards on top of preview-then-confirm:
+  `MAX_PURGE_PER_RUN` (50, enforced both at CSV-parse time and again on
+  the raw commit POST) and a required "type N to confirm" field the
+  commit route validates against the actual posted row count. The commit
+  route also runs a real, unconditional `backup.backup_now()` immediately
+  before the delete loop (not the debounced `maybe_backup()` every other
+  bulk-delete flow uses) and aborts the whole purge if that snapshot
+  fails — the nightly backup is the ultimate net, but shouldn't be the
+  first one for something this irreversible. Each delete goes through a
+  TOCTOU re-check (an article backfilled with real content between
+  preview and commit is skipped) and `Library.purge_article()`, which
+  write-then-read-back verifies the delete actually took, per CLAUDE.md's
+  one-off-admin-fix discipline, applied here as a standing check.
+  `Library.delete_article()` itself was extended to also clean up
+  `content_refetch_log`/`url_correction_log` — a general fix benefiting
+  all four existing callers (dedupe removal, review-removals, the member
+  Reader's own delete, and now purge), not something purge-specific.
+  Deliberately NOT deleted: `enrichment_cost` (a real-money spend ledger)
+  and `archive_audit_log` (the historical record, which gets a new
+  `'delete'` row for the purge FIRST, before the delete itself runs) —
+  same non-destructive precedent as `tool_audit_log`/`community_audit_log`
+  outliving a deleted tool/community. See ARCHITECTURE.md's "Article
+  purge flow" section for the full write-up.
 - **Reader tag editing (Phase 5c) — a deliberate, tags-only exception to
   Phase 5's "no inline management in the Reader" rule; delete/archive stay
   admin-only and unchanged.** The investigation that opened the phase found
