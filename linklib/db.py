@@ -332,6 +332,96 @@ CREATE TABLE IF NOT EXISTS tool_features (
 
 CREATE INDEX IF NOT EXISTS idx_tool_features_tool ON tool_features(tool_id);
 
+-- Feature Taxonomy (docs/FEATURE_TAXONOMY.md is canon): governed replacement for
+-- tool_features' flat free text, category by category as each is curated — see
+-- CLAUDE.md's Feature Taxonomy note for the legacy-coexistence read-time branch.
+-- category_id FKs to tool_categories (the existing /tools/software filter-pill
+-- vocabulary), NOT a separate feature-only taxonomy — a 2026-08 investigation found
+-- the pilot's three category names ("ERP & Accounting", "FP&A Planning", "Close
+-- Management") didn't match any live pill, and Brian's resolution was to reuse the
+-- real pills (ERP, FP&A) for the first two and add "Close Management" as a genuine
+-- new pill for the third, rather than invent a parallel vocabulary. retired_at
+-- (nullable) means features are retired, never deleted — a retirement drops a
+-- feature from the curated list and its comparison rendering without destroying the
+-- historical tool_feature_links rows pointing at it. Name is unique per category
+-- (not globally) since the same capability name deliberately recurs across
+-- categories by design (§2 of the rules doc) — e.g. "Anomaly Detection" is a
+-- legitimate separate row in both ERP and Close Management.
+CREATE TABLE IF NOT EXISTS category_features (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id  INTEGER NOT NULL,
+    name         TEXT NOT NULL,
+    definition   TEXT NOT NULL DEFAULT '',
+    pointer_note TEXT NOT NULL DEFAULT '',
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL,
+    retired_at   TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_category_features_category ON category_features(category_id);
+
+-- One row per (tool, feature) — the vendor-specific designations the rules doc
+-- (§6) is explicit must live on the LINK, never on the feature itself, since the
+-- same feature is native/rules-based at one vendor and an add-on/AI-driven at
+-- another. availability is a CHECK constraint, not free text, matching §6's
+-- "exactly one of native | add_on" rule (absence of a row IS the third state —
+-- "not available" — never a stored value). verified_as_of is required per link
+-- (§6: "claims decay fast"); source_url is separate from tool_features' own
+-- source_url column, both nullable free text for now, not a source-tier enum —
+-- §8's sourcing hierarchy is a scan-tool/reviewer judgment call, not yet schema.
+CREATE TABLE IF NOT EXISTS tool_feature_links (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_id        INTEGER NOT NULL,
+    feature_id     INTEGER NOT NULL,
+    availability   TEXT NOT NULL DEFAULT 'native' CHECK (availability IN ('native', 'add_on')),
+    ai_enabled     INTEGER NOT NULL DEFAULT 0,
+    verified_as_of TEXT NOT NULL DEFAULT '',
+    note           TEXT NOT NULL DEFAULT '',
+    source_url     TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL DEFAULT '',
+    UNIQUE(tool_id, feature_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_feature_links_tool ON tool_feature_links(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_feature_links_feature ON tool_feature_links(feature_id);
+
+-- The review gate (rules doc §9): no proposed change reaches category_features or
+-- tool_feature_links without a human approving it here first, regardless of who or
+-- what proposed it — an admin's own edit, the (later, Phase 3) recurring AI scan, or
+-- a (later, Phase 4) public visitor suggestion. source distinguishes the three;
+-- category_id/tool_id are nullable because a brand-new-category origination
+-- proposal (Phase 3's "origination mode") has no existing category to point at yet.
+-- payload is the proposed change as JSON (shape varies by proposal_type — new
+-- feature, new link, designation change, flag/question) since the three sources
+-- produce structurally different proposals and a fixed column set can't cover all
+-- of them without a wall of nullable columns. articulation is the rules-doc-required
+-- "why this belongs" writeup (§9) — required at the UI layer for a public addition
+-- proposal, optional for a flag/question, and nullable here since the schema can't
+-- enforce a per-proposal-type requirement on its own. submitter_name/submitter_email
+-- are nullable now (no public channel exists yet — Phase 4) but present so that
+-- phase doesn't need a migration to add them. Approving a queue entry applies its
+-- payload through the exact same Library methods a manual admin edit would use
+-- (§9: "AI and the public draft; Brian decides"), never a direct table write from
+-- the queue-approval code path itself.
+CREATE TABLE IF NOT EXISTS feature_review_queue (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    source           TEXT NOT NULL CHECK (source IN ('admin', 'scan', 'public')),
+    status           TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'edited', 'denied')),
+    category_id      INTEGER,
+    tool_id          INTEGER,
+    proposal_type    TEXT NOT NULL DEFAULT '',
+    payload          TEXT NOT NULL DEFAULT '{}',
+    articulation     TEXT NOT NULL DEFAULT '',
+    submitter_name   TEXT NOT NULL DEFAULT '',
+    submitter_email  TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL,
+    resolved_at      TEXT NOT NULL DEFAULT '',
+    resolution_note  TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_feature_review_queue_status ON feature_review_queue(status);
+
 -- Self-service "forgot password" requests, filed from /login. When the account
 -- has an email on file, token_hash (sha256 of the emailed token — never the
 -- raw token, so a DB leak alone can't be used to reset a password) +
@@ -1855,6 +1945,15 @@ class Library:
             # article — see that method's docstring.
             "ALTER TABLE articles ADD COLUMN needs_content_check INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN content_check_reason TEXT NOT NULL DEFAULT ''",
+            # Feature Taxonomy Phase 1: free-text suite-membership notation (rules
+            # doc §5's "beyond the office of the CFO" case — CRM, HRIS, and similar
+            # adjacent-but-out-of-Toolbox-scope capabilities a vendor bundles in).
+            # Deliberately generic, reused verbatim across any tool that's part of a
+            # broader operational suite (NetSuite first; Workday or a future vendor
+            # later), not a structured field — same free-text precedent as
+            # competitive_differentiation/agent_taxonomy_note. Nullable/empty means
+            # "no suite to note," not "not yet researched."
+            "ALTER TABLE tools ADD COLUMN suite_note TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -3985,6 +4084,17 @@ class Library:
         row = self.conn.execute("SELECT * FROM tools WHERE id=?", (tool_id,)).fetchone()
         return self._tool_to_dict(row) if row else None
 
+    def get_tool_by_name(self, name: str) -> dict | None:
+        """Exact (case-insensitive) name lookup — used by the Feature Taxonomy
+        seed script (scripts/seed_feature_taxonomy.py), which must resolve a
+        CSV's tool name against a real row or abort with a clear report,
+        never guess. Unlike find_tool_name_duplicate this is not a fuzzy
+        collision check; it returns None on anything but an exact match."""
+        row = self.conn.execute(
+            "SELECT * FROM tools WHERE name = ? COLLATE NOCASE", (name.strip(),)
+        ).fetchone()
+        return self._tool_to_dict(row) if row else None
+
     def get_tool_by_slug(self, slug: str) -> dict | None:
         """Used by the public profile page (/tools/software/<slug>). Only
         returns approved rows — an unapproved/pending tool has no live
@@ -4134,6 +4244,21 @@ class Library:
             "UPDATE tools SET competitive_differentiation=?, competitive_differentiation_needs_verification=?, "
             "updated_at=? WHERE id=?",
             (competitive_differentiation.strip(), needs_verification, _now(), tool_id),
+        )
+        self.conn.commit()
+
+    def set_tool_suite_note(self, tool_id: int, suite_note: str) -> None:
+        """Narrow update for tools.suite_note (Feature Taxonomy rules doc §5's
+        "beyond the office of the CFO" case — a standard, reusable notation
+        that a vendor offers a broader suite of operational solutions, e.g.
+        NetSuite's CRM/HRIS). Same narrow-single-column-update pattern as
+        update_tool_agent_taxonomy/update_tool_screenshot_url — deliberately
+        NOT part of the general update_tool path, so the Software bulk-edit
+        panel (which resaves every field it knows about on every call) can
+        never blank it out on an unrelated save."""
+        self.conn.execute(
+            "UPDATE tools SET suite_note=?, updated_at=? WHERE id=?",
+            (suite_note.strip(), _now(), tool_id),
         )
         self.conn.commit()
 
@@ -4407,6 +4532,258 @@ class Library:
         self.conn.execute("DELETE FROM tool_features WHERE id=?", (feature_id,))
         self.conn.commit()
 
+    # -- Feature Taxonomy: category_features / tool_feature_links -----------
+    # Governed replacement for tool_features above, built category by category
+    # (docs/FEATURE_TAXONOMY.md is canon). See the category_features/
+    # tool_feature_links CREATE TABLE comments for the model. Everything here
+    # is the shared code path both a manual admin edit AND an approved
+    # feature_review_queue entry go through (rules doc §9) — the queue's
+    # approve_feature_review_queue_item below calls straight into these, never
+    # writing to category_features/tool_feature_links directly.
+
+    def list_category_features(self, category_id: int, include_retired: bool = False) -> list[dict]:
+        sql = "SELECT * FROM category_features WHERE category_id=?"
+        if not include_retired:
+            sql += " AND retired_at=''"
+        sql += " ORDER BY sort_order, name COLLATE NOCASE"
+        return [dict(r) for r in self.conn.execute(sql, (category_id,)).fetchall()]
+
+    def get_category_feature(self, feature_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM category_features WHERE id=?", (feature_id,)).fetchone()
+        return dict(row) if row else None
+
+    def add_category_feature(self, category_id: int, name: str, definition: str = "",
+                              pointer_note: str = "", sort_order: int | None = None) -> int:
+        name = name.strip()
+        if not name:
+            raise ValueError("Feature name is required.")
+        existing = self.conn.execute(
+            "SELECT 1 FROM category_features WHERE category_id=? AND name=? COLLATE NOCASE AND retired_at=''",
+            (category_id, name),
+        ).fetchone()
+        if existing:
+            raise ValueError(f'"{name}" already exists in this category.')
+        if sort_order is None:
+            sort_order = self.conn.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) + 10 FROM category_features WHERE category_id=?",
+                (category_id,),
+            ).fetchone()[0]
+        cur = self.conn.execute(
+            """INSERT INTO category_features (category_id, name, definition, pointer_note,
+               sort_order, created_at) VALUES (?,?,?,?,?,?)""",
+            (category_id, name, definition.strip(), pointer_note.strip(), sort_order, _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_category_feature(self, feature_id: int, name: str, definition: str,
+                                 pointer_note: str, sort_order: int) -> None:
+        name = name.strip()
+        if not name:
+            raise ValueError("Feature name is required.")
+        row = self.conn.execute("SELECT category_id FROM category_features WHERE id=?", (feature_id,)).fetchone()
+        if row is None:
+            raise ValueError("Feature not found.")
+        dup = self.conn.execute(
+            "SELECT 1 FROM category_features WHERE category_id=? AND name=? COLLATE NOCASE AND id!=? AND retired_at=''",
+            (row[0], name, feature_id),
+        ).fetchone()
+        if dup:
+            raise ValueError(f'"{name}" already exists in this category.')
+        self.conn.execute(
+            "UPDATE category_features SET name=?, definition=?, pointer_note=?, sort_order=? WHERE id=?",
+            (name, definition.strip(), pointer_note.strip(), sort_order, feature_id),
+        )
+        self.conn.commit()
+
+    def retire_category_feature(self, feature_id: int) -> None:
+        """Soft-retire only — rules doc: 'features are retired, never
+        deleted.' Existing tool_feature_links rows survive untouched (a
+        retired feature just stops rendering/being offered going forward);
+        no cascade delete."""
+        self.conn.execute(
+            "UPDATE category_features SET retired_at=? WHERE id=? AND retired_at=''",
+            (_now(), feature_id),
+        )
+        self.conn.commit()
+
+    def list_tool_feature_links(self, tool_id: int) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM tool_feature_links WHERE tool_id=?", (tool_id,)
+        ).fetchall()]
+
+    def get_tool_feature_link(self, tool_id: int, feature_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM tool_feature_links WHERE tool_id=? AND feature_id=?", (tool_id, feature_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_tool_feature_link(self, tool_id: int, feature_id: int, availability: str,
+                                  ai_enabled: int, verified_as_of: str, note: str = "",
+                                  source_url: str = "") -> int:
+        """Insert or update the one link row for this (tool, feature) pair —
+        the admin checklist toggles a feature on by calling this, and re-calls
+        it on every designation edit. availability must be 'native'|'add_on'
+        (the CHECK constraint backs this up at the DB layer too)."""
+        if availability not in ("native", "add_on"):
+            raise ValueError('availability must be "native" or "add_on".')
+        now = _now()
+        existing = self.get_tool_feature_link(tool_id, feature_id)
+        if existing:
+            self.conn.execute(
+                """UPDATE tool_feature_links SET availability=?, ai_enabled=?, verified_as_of=?,
+                   note=?, source_url=?, updated_at=? WHERE id=?""",
+                (availability, int(ai_enabled), verified_as_of.strip(), note.strip(),
+                 source_url.strip(), now, existing["id"]),
+            )
+            self.conn.commit()
+            return existing["id"]
+        cur = self.conn.execute(
+            """INSERT INTO tool_feature_links (tool_id, feature_id, availability, ai_enabled,
+               verified_as_of, note, source_url, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (tool_id, feature_id, availability, int(ai_enabled), verified_as_of.strip(),
+             note.strip(), source_url.strip(), now, now),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def delete_tool_feature_link(self, tool_id: int, feature_id: int) -> None:
+        """Un-toggling a feature in the admin checklist — removes the link
+        row entirely (not a soft delete; the designations themselves aren't
+        historical record the way a retired feature's past existence is)."""
+        self.conn.execute(
+            "DELETE FROM tool_feature_links WHERE tool_id=? AND feature_id=?", (tool_id, feature_id)
+        )
+        self.conn.commit()
+
+    def category_has_features(self, category_id: int) -> bool:
+        """Drives the legacy-coexistence read-time branch (CLAUDE.md /
+        ARCHITECTURE.md): a tool's profile page renders the new governed
+        model only once its category actually has a curated feature list;
+        otherwise it falls back to the free-text tool_features Features
+        card untouched."""
+        row = self.conn.execute(
+            "SELECT 1 FROM category_features WHERE category_id=? AND retired_at='' LIMIT 1",
+            (category_id,),
+        ).fetchone()
+        return row is not None
+
+    # -- Feature Taxonomy review queue (rules doc §9) ------------------------
+    # No proposed change reaches category_features/tool_feature_links without
+    # landing here first and being approved by a human — an admin's own edit
+    # may fast-path through add_feature_review_queue_item + an immediate
+    # approve, but it's still logged through the queue, never a bypass.
+
+    def add_feature_review_queue_item(self, source: str, proposal_type: str, payload: dict,
+                                       category_id: int | None = None, tool_id: int | None = None,
+                                       articulation: str = "", submitter_name: str = "",
+                                       submitter_email: str = "") -> int:
+        if source not in ("admin", "scan", "public"):
+            raise ValueError('source must be "admin", "scan", or "public".')
+        cur = self.conn.execute(
+            """INSERT INTO feature_review_queue (source, status, category_id, tool_id,
+               proposal_type, payload, articulation, submitter_name, submitter_email,
+               created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (source, "pending", category_id, tool_id, proposal_type.strip(),
+             json.dumps(payload), articulation.strip(), submitter_name.strip(),
+             submitter_email.strip(), _now()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_feature_review_queue(self, status: str | None = "pending") -> list[dict]:
+        if status:
+            rows = self.conn.execute(
+                "SELECT * FROM feature_review_queue WHERE status=? ORDER BY created_at", (status,)
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM feature_review_queue ORDER BY created_at DESC"
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["payload"] = json.loads(d["payload"] or "{}")
+            result.append(d)
+        return result
+
+    def get_feature_review_queue_item(self, item_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM feature_review_queue WHERE id=?", (item_id,)).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["payload"] = json.loads(d["payload"] or "{}")
+        return d
+
+    def approve_feature_review_queue_item(self, item_id: int, override_payload: dict | None = None,
+                                           resolution_note: str = "") -> dict:
+        """Applies a pending queue entry's payload through the exact same
+        methods a manual admin edit would call — never a direct table write.
+        Payload shape: {"category_id": int, "feature_id": int (existing) OR
+        "feature": {"name","definition","pointer_note"} (new),
+        "links": [{"tool_id","availability","ai_enabled","verified_as_of",
+        "note","source_url"}, ...]}. override_payload lets the admin edit the
+        proposal before approving (rules doc: "edit-then-approve") — when
+        given, status lands as 'edited' rather than 'approved' so the queue
+        history shows a proposal wasn't taken verbatim. Returns the resolved
+        feature_id/link ids so the caller can build a confirmation message."""
+        item = self.get_feature_review_queue_item(item_id)
+        if item is None:
+            raise ValueError("Review queue item not found.")
+        if item["status"] != "pending":
+            raise ValueError(f'This item is already {item["status"]}, not pending.')
+        payload = override_payload if override_payload is not None else item["payload"]
+        category_id = payload.get("category_id") or item["category_id"]
+        if not category_id:
+            raise ValueError("payload is missing category_id.")
+
+        feature_id = payload.get("feature_id")
+        if not feature_id:
+            draft = payload.get("feature") or {}
+            feature_name = (draft.get("name") or "").strip()
+            if not feature_name:
+                raise ValueError("payload has neither an existing feature_id nor a new feature name.")
+            existing = next(
+                (f for f in self.list_category_features(category_id, include_retired=True)
+                 if f["name"].strip().lower() == feature_name.lower()),
+                None,
+            )
+            if existing:
+                feature_id = existing["id"]
+            else:
+                feature_id = self.add_category_feature(
+                    category_id, feature_name, draft.get("definition", ""), draft.get("pointer_note", ""),
+                )
+
+        link_ids = []
+        for link in payload.get("links", []):
+            link_ids.append(self.upsert_tool_feature_link(
+                link["tool_id"], feature_id, link.get("availability", "native"),
+                int(link.get("ai_enabled", 0)), link.get("verified_as_of", ""),
+                link.get("note", ""), link.get("source_url", ""),
+            ))
+
+        status = "edited" if override_payload is not None else "approved"
+        self.conn.execute(
+            "UPDATE feature_review_queue SET status=?, resolved_at=?, resolution_note=? WHERE id=?",
+            (status, _now(), resolution_note.strip(), item_id),
+        )
+        self.conn.commit()
+        return {"feature_id": feature_id, "link_ids": link_ids}
+
+    def deny_feature_review_queue_item(self, item_id: int, resolution_note: str = "") -> None:
+        item = self.get_feature_review_queue_item(item_id)
+        if item is None:
+            raise ValueError("Review queue item not found.")
+        if item["status"] != "pending":
+            raise ValueError(f'This item is already {item["status"]}, not pending.')
+        self.conn.execute(
+            "UPDATE feature_review_queue SET status='denied', resolved_at=?, resolution_note=? WHERE id=?",
+            (_now(), resolution_note.strip(), item_id),
+        )
+        self.conn.commit()
+
     @staticmethod
     def _tool_to_dict(r: sqlite3.Row) -> dict:
         d = dict(r)
@@ -4422,9 +4799,40 @@ class Library:
     # Unlike article tags, this is a curated vocabulary independent of usage —
     # a category can exist with zero tools tagged to it, ready to assign.
 
+    def get_tool_category_id(self, name: str) -> int | None:
+        """Exact (case-insensitive) name -> id lookup. Used by the Feature
+        Taxonomy seed script to resolve category_features.category_id
+        against a real tool_categories row — never guessed, never fuzzy."""
+        row = self.conn.execute(
+            "SELECT id FROM tool_categories WHERE name = ? COLLATE NOCASE", (name.strip(),)
+        ).fetchone()
+        return row[0] if row else None
+
+    def add_category_to_tool(self, tool_id: int, category_name: str) -> bool:
+        """Additive-only: adds category_name to a tool's existing tags if not
+        already present, never removes any. Built for the Feature Taxonomy
+        seed script's Close Management tagging (Brian's explicit call: FloQast/
+        Numeric/Ledge keep every existing tag, Close Management is added
+        alongside them, not swapped in). Returns True if the tag was actually
+        added, False if the tool already had it (so the seed script's printed
+        report can distinguish "already tagged" from "just tagged")."""
+        row = self.conn.execute("SELECT categories_json FROM tools WHERE id=?", (tool_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"No tool with id={tool_id}.")
+        cats = json.loads(row[0] or "[]")
+        if category_name in cats:
+            return False
+        cats.append(category_name)
+        self.conn.execute(
+            "UPDATE tools SET categories_json=?, updated_at=? WHERE id=?",
+            (json.dumps(sorted(cats)), _now(), tool_id),
+        )
+        self.conn.commit()
+        return True
+
     def list_tool_categories(self) -> list[dict]:
         # Always alphabetical by name, not sort_order (insertion order)—so the
-        # filter pills on /tools/software and the rows on /admin/tools/categories
+        # filter pills on /tools/software and the rows on /admin/tools/software/categories
         # self-correct on any future add/rename/delete without a persisted
         # display-order field to keep in sync.
         rows = self.conn.execute(

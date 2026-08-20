@@ -106,7 +106,7 @@ def main():
     print(
         "Read the updated_at column, most-recent first: if any orphaned row's\n"
         "updated_at is very recent (especially at or after when a category was\n"
-        "last deleted at /admin/tools/categories or /admin/tools/communities),\n"
+        "last deleted at /admin/tools/software/categories or /admin/tools/communities),\n"
         "that's a strong signal something is still actively writing bad data —\n"
         "find and close that write path before running any strip-and-clean\n"
         "script. If every orphaned row's updated_at is old and predates the\n"

@@ -526,6 +526,110 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   width while everything else extended past it — confirmed by the fix
   eliminating both symptoms together.
 
+- **Feature Taxonomy (2026-08, Phase 0 + 1) — replaces `tool_features`' flat
+  free text with a governed Category → curated feature list → tool-feature
+  link model, starting with three seeded categories.**
+  `docs/FEATURE_TAXONOMY.md` (committed verbatim from Brian's draft rules
+  doc) is canon for naming, curation, designations, sourcing, and the
+  review gate — read it before touching any of this, rather than
+  re-deriving the rules from the schema. **Phase 0 investigation surfaced
+  one real blocker before any code was written**: the pilot's three
+  category names (`ERP & Accounting`, `FP&A Planning`, `Close Management`)
+  matched none of the live 15-tag `tool_categories` vocabulary — live has
+  separate `ERP`/`Accounting`/`FP&A` pills and no Close Management pill at
+  all (confirmed by code archaeology against `scripts/seed_tools.py` and
+  the `tool_categories` table's own `ARCHITECTURE.md` enumeration; this
+  session had no access to the production `library.db` itself, which lives
+  only on the Railway volume). Flagged rather than guessed past — Brian's
+  resolution: `category_features.category_id` FKs to the real
+  `tool_categories` (not a parallel feature-only taxonomy), reusing `ERP`
+  and `FP&A` as-is, and adding `Close Management` as a genuine new pill —
+  created by the seed script if missing, tagged additively onto exactly the
+  three tools the seed CSV data itself names (FloQast, Numeric, Ledge; no
+  existing tags removed, and no other tool was hunted down or retagged).
+  Also found: NetSuite's live `tools.name` is `"NetSuite (acquired by
+  Oracle)"`, not the pilot's plain `"NetSuite"` — the replacement seed CSVs
+  Brian supplied use the live name directly, so no alias/fuzzy-match logic
+  was needed. **Schema** (`linklib/db.py`): `category_features`
+  (category_id FK, name unique per category — not globally, since the same
+  capability legitimately recurs across categories per rules-doc §2 —
+  definition, pointer_note, sort_order, retired_at for soft-retirement);
+  `tool_feature_links` (one row per tool×feature, UNIQUE(tool_id,
+  feature_id), availability CHECK'd to `native`/`add_on`, ai_enabled,
+  verified_as_of required, note, source_url — every vendor-specific
+  designation lives on the link per rules-doc §6, never on the feature);
+  `feature_review_queue` (source CHECK'd to `admin`/`scan`/`public`, status
+  `pending`/`approved`/`edited`/`denied`, payload as JSON, submitter fields
+  nullable now for the not-yet-built public channel). `tools.suite_note`
+  (nullable free text) is the rules-doc §5 "beyond the office of the CFO"
+  suite-membership notation — independent of the feature tables, no home
+  existed for it among the tool's other narrow-update text fields.
+  **Seeding**: `scripts/seed_feature_taxonomy.py` reads three CSVs in
+  `scripts/seed_data/` (derived from a real nine-vendor pilot — Rillet/
+  Campfire/NetSuite → ERP, Runway/Abacum/Aleph → FP&A, FloQast/Numeric/
+  Ledge → Close Management), aborts loudly on any category/tool/feature
+  name it can't resolve rather than guessing, and is fully idempotent
+  (re-running skips already-seeded `category_features` rows, upserts
+  `tool_feature_links`, skips already-queued `feature_review_queue`
+  entries) — verified locally by seeding a fresh DB twice and confirming
+  the second run added zero new rows. **The queue launches populated, not
+  empty**: `scripts/seed_data/seed_review_queue.csv`'s 15 verified-but-
+  unapproved proposals (`source='scan'` — one is a 3-tool "Headcount &
+  Workforce Planning" proposal that expands into 3 links, per its own
+  `payload.links`) seed straight into `feature_review_queue` alongside the
+  category/link tables, a deliberate part of the design so the Feature
+  Review Queue admin page isn't a blank state on day one. Also seeds
+  NetSuite's placeholder `suite_note` (`Library.set_tool_suite_note`,
+  Brian's own wording from the build brief) — write-once, not
+  re-clobbering: skipped on any re-run once the column is non-empty, so a
+  later hand-edit through the admin edit form survives a re-seed. Prints
+  resolved category ids and a write-then-read-back row count per table
+  (`category_features`/`tool_feature_links`/`feature_review_queue`, plus
+  the Close Management tag count and NetSuite's `suite_note` value), per
+  the standing production-fix rule. **Admin** (all under
+  `/admin/tools/software/*` — see the admin URL convention note below —
+  admin-only, no public
+  rendering changes this phase): Manage Features
+  (`/admin/tools/software/features`, per-category list/add/edit/retire, same
+  inline-editable-row pattern as `/admin/tools/software/categories`); Manage Tool
+  Features (a checklist section on each tool's own
+  `/tools/software/{slug}/edit` page, one sub-section per category the tool
+  belongs to that actually has a curated list yet — checking a box
+  upserts a link, unchecking deletes it, a direct admin edit that bypasses
+  the review queue on purpose, the same way editing any other tool field
+  on that page does); Feature Review Queue
+  (`/admin/tools/software/feature-review-queue`, grouped by source, Approve/Deny —
+  the approve form doubles as the edit form, every proposed value a real
+  editable input pre-filled from the payload, so "edit-then-approve" is the
+  same action as a verbatim approval rather than a second mechanism).
+  **Legacy coexistence**: `Library.category_has_features(category_id)`
+  is the read-time branch the public Software profile page's Features card
+  will use once rendering is wired up (Phase 2, out of scope this phase,
+  needs real brand/visual spec work) — a tool's category with a curated
+  list renders the governed model, everything else keeps rendering the
+  untouched legacy free-text `tool_features` Features card exactly as
+  before. `docs/BUILD_PLAN.md`'s Phase 8 (previously "Feature Families",
+  never built) is rewritten to describe this actual model — **there are no
+  Feature Families**: a flat curated list per category, ordered by
+  `sort_order`, is the whole grouping mechanism. Out of scope this phase,
+  unchanged from the original plan's intent: public profile-page
+  rendering, the recurring AI scan tool, the public feedback/suggestion UI,
+  and a governed-model Compare view. **Admin URL convention, decided in
+  this PR**: software-directory admin lives under
+  `/admin/tools/software/*` (communities admin will follow the same
+  `/admin/tools/communities/*` convention later, in Phase 1b). The two
+  brand-new Feature Taxonomy routes (Manage Features, Feature Review
+  Queue) launched directly under that prefix — they never existed on
+  `main` before this PR, so there was nothing to redirect. The
+  pre-existing `/admin/tools/categories` page moved to
+  `/admin/tools/software/categories` in this same PR to match, WITH a
+  301 redirect kept at the old URL (same precedent as
+  `/admin/library/backfill`'s own redirect stub) since it was a real
+  bookmarked admin tool, not a brand-new route. Finishing this convention
+  across the rest of the Toolbox admin (communities admin routes, the
+  per-tool edit pages, and any other stragglers) is Phase 1b — a
+  separate, investigate-first PR.
+
 - **Sail, Don't Row — water reflections, re-added (reverses an earlier decision).**
   The original build removed reflections outright: "unrealistic inverted-building
   duplicate, not worth fading," and a test (`test_play_no_skyline_reflection`)
