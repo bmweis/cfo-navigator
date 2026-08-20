@@ -3917,6 +3917,21 @@ class Library:
         )
         self.conn.commit()
 
+    def set_tool_suite_note(self, tool_id: int, suite_note: str) -> None:
+        """Narrow update for tools.suite_note (Feature Taxonomy rules doc §5's
+        "beyond the office of the CFO" case — a standard, reusable notation
+        that a vendor offers a broader suite of operational solutions, e.g.
+        NetSuite's CRM/HRIS). Same narrow-single-column-update pattern as
+        update_tool_agent_taxonomy/update_tool_screenshot_url — deliberately
+        NOT part of the general update_tool path, so the Software bulk-edit
+        panel (which resaves every field it knows about on every call) can
+        never blank it out on an unrelated save."""
+        self.conn.execute(
+            "UPDATE tools SET suite_note=?, updated_at=? WHERE id=?",
+            (suite_note.strip(), _now(), tool_id),
+        )
+        self.conn.commit()
+
     def update_tool_agent_taxonomy(self, tool_id: int, agent_taxonomy_note: str) -> None:
         """Narrow update for the admin full-edit form's agent-taxonomy field
         (Phase 5) — same bulk-edit-safety reasoning as update_tool_differentiation.
@@ -4487,7 +4502,7 @@ class Library:
 
     def list_tool_categories(self) -> list[dict]:
         # Always alphabetical by name, not sort_order (insertion order)—so the
-        # filter pills on /tools/software and the rows on /admin/tools/categories
+        # filter pills on /tools/software and the rows on /admin/tools/software/categories
         # self-correct on any future add/rename/delete without a persisted
         # display-order field to keep in sync.
         rows = self.conn.execute(

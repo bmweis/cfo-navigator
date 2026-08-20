@@ -243,10 +243,29 @@ def test_approve_reuses_existing_feature_by_name_instead_of_duplicating(lib):
 
 def test_manage_features_admin_pages_require_auth(env):
     client = _client(env)
-    r = client.get("/admin/tools/features", follow_redirects=False)
+    r = client.get("/admin/tools/software/features", follow_redirects=False)
     assert r.status_code in (302, 303)
-    r = client.get("/admin/tools/feature-review-queue", follow_redirects=False)
+    r = client.get("/admin/tools/software/feature-review-queue", follow_redirects=False)
     assert r.status_code in (302, 303)
+
+
+def test_old_categories_url_redirects_to_software_convention(env):
+    """The admin URL convention decided in this PR (software-directory admin
+    lives under /admin/tools/software/*) moved /admin/tools/categories to
+    /admin/tools/software/categories — unlike the two brand-new Feature
+    Taxonomy routes (which never existed on main, so no redirect is needed),
+    this one was a real pre-existing bookmarked admin tool, so the old URL
+    301-redirects rather than 404ing, same precedent as
+    /admin/library/backfill's own redirect stub."""
+    client = _client(env)
+    r = client.get("/admin/tools/categories", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/admin/tools/software/categories"
+    # msg/error query params carry through, in case anything is still
+    # mid-flight against the old URL.
+    r = client.get("/admin/tools/categories?msg=Saved", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/admin/tools/software/categories?msg=Saved"
 
 
 def test_manage_features_add_edit_retire_flow(env):
@@ -259,14 +278,14 @@ def test_manage_features_add_edit_retire_flow(env):
     finally:
         lib.close()
 
-    r = client.get("/admin/tools/features", follow_redirects=False)
+    r = client.get("/admin/tools/software/features", follow_redirects=False)
     assert r.status_code == 200
     assert "ERP" in r.text
 
-    r = client.get(f"/admin/tools/features/{cat_id}", follow_redirects=False)
+    r = client.get(f"/admin/tools/software/features/{cat_id}", follow_redirects=False)
     assert r.status_code == 200
 
-    r = client.post(f"/admin/tools/features/{cat_id}/new",
+    r = client.post(f"/admin/tools/software/features/{cat_id}/new",
                      data={"name": "Real-Time Ledger", "definition": "", "pointer_note": ""},
                      follow_redirects=False)
     assert r.status_code == 303
@@ -279,13 +298,13 @@ def test_manage_features_add_edit_retire_flow(env):
     finally:
         lib.close()
 
-    r = client.post(f"/admin/tools/features/{fid}/edit",
+    r = client.post(f"/admin/tools/software/features/{fid}/edit",
                      data={"return_to": str(cat_id), "name": "Real-Time Ledger", "definition": "d",
                            "pointer_note": "", "sort_order": "5"},
                      follow_redirects=False)
     assert r.status_code == 303
 
-    r = client.post(f"/admin/tools/features/{fid}/retire",
+    r = client.post(f"/admin/tools/software/features/{fid}/retire",
                      data={"return_to": str(cat_id)}, follow_redirects=False)
     assert r.status_code == 303
 
@@ -379,12 +398,12 @@ def test_feature_review_queue_page_approve_and_deny(env):
     finally:
         lib.close()
 
-    r = client.get("/admin/tools/feature-review-queue")
+    r = client.get("/admin/tools/software/feature-review-queue")
     assert r.status_code == 200
     assert "AI Bill Capture" in r.text
     assert "Junk Proposal" in r.text
 
-    r = client.post(f"/admin/tools/feature-review-queue/{qid}/approve", data={
+    r = client.post(f"/admin/tools/software/feature-review-queue/{qid}/approve", data={
         "n_links": "1", "feature_name": "AI Bill Capture", "pointer_note": "",
         "link_0_tool_id": str(tool_id), "link_0_availability": "native",
         "link_0_ai_enabled": "1", "link_0_verified_as_of": "2026-08-19",
@@ -392,7 +411,7 @@ def test_feature_review_queue_page_approve_and_deny(env):
     }, follow_redirects=False)
     assert r.status_code == 303
 
-    r = client.post(f"/admin/tools/feature-review-queue/{qid2}/deny",
+    r = client.post(f"/admin/tools/software/feature-review-queue/{qid2}/deny",
                      data={"resolution_note": "Not curated-worthy."}, follow_redirects=False)
     assert r.status_code == 303
 
@@ -466,13 +485,34 @@ def test_seed_feature_taxonomy_idempotent_and_resolves_close_management(lib):
         assert "Close Management" in cats
         assert "Accounting" in cats  # additive — existing tag kept
 
+    # suite_note: NetSuite gets the placeholder; every other pilot tool is untouched.
+    suite_note_set = seed_mod.seed_suite_notes(lib)
+    assert suite_note_set is True
+    assert lib.get_tool_by_name("NetSuite (acquired by Oracle)")["suite_note"] == seed_mod._NETSUITE_SUITE_NOTE
+    for name in pilot_tools:
+        if name != "NetSuite (acquired by Oracle)":
+            assert lib.get_tool_by_name(name)["suite_note"] == ""
+
     # Re-run: fully idempotent, nothing new.
     cf_added2, cf_skipped2 = seed_mod.seed_category_features(lib, categories)
     tfl_added2, tfl_updated2, tagged2 = seed_mod.seed_tool_feature_links(lib, categories)
     rq_added2, rq_skipped2 = seed_mod.seed_review_queue(lib, categories, tools_by_category)
+    suite_note_set2 = seed_mod.seed_suite_notes(lib)
     assert cf_added2 == 0 and cf_skipped2 == expected_cf
     assert tfl_added2 == 0 and tagged2 == 0
     assert rq_added2 == 0 and rq_skipped2 == expected_rq
+    assert suite_note_set2 is False  # already set — never clobbers a since-edited note
+
+
+def test_seed_suite_notes_never_clobbers_a_manually_edited_note(lib):
+    """A re-run after Brian finalizes real copy through the admin edit form
+    (set_tool_suite_note) must never stomp it back to the seed placeholder."""
+    import scripts.seed_feature_taxonomy as seed_mod
+    tool_id = lib.add_tool("NetSuite (acquired by Oracle)", "desc", "https://netsuite.example.com",
+                            ["ERP"], approved=1, summary="s")
+    lib.set_tool_suite_note(tool_id, "Brian's real, hand-edited copy.")
+    assert seed_mod.seed_suite_notes(lib) is False
+    assert lib.get_tool(tool_id)["suite_note"] == "Brian's real, hand-edited copy."
 
 
 def test_seed_feature_taxonomy_aborts_on_unresolved_category(lib):

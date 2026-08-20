@@ -572,19 +572,33 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   (re-running skips already-seeded `category_features` rows, upserts
   `tool_feature_links`, skips already-queued `feature_review_queue`
   entries) — verified locally by seeding a fresh DB twice and confirming
-  the second run added zero new rows. Prints resolved category ids and a
-  write-then-read-back row count per table, per the standing production-fix
-  rule. **Admin** (all under `/admin/tools/*`, admin-only — no public
+  the second run added zero new rows. **The queue launches populated, not
+  empty**: `scripts/seed_data/seed_review_queue.csv`'s 15 verified-but-
+  unapproved proposals (`source='scan'` — one is a 3-tool "Headcount &
+  Workforce Planning" proposal that expands into 3 links, per its own
+  `payload.links`) seed straight into `feature_review_queue` alongside the
+  category/link tables, a deliberate part of the design so the Feature
+  Review Queue admin page isn't a blank state on day one. Also seeds
+  NetSuite's placeholder `suite_note` (`Library.set_tool_suite_note`,
+  Brian's own wording from the build brief) — write-once, not
+  re-clobbering: skipped on any re-run once the column is non-empty, so a
+  later hand-edit through the admin edit form survives a re-seed. Prints
+  resolved category ids and a write-then-read-back row count per table
+  (`category_features`/`tool_feature_links`/`feature_review_queue`, plus
+  the Close Management tag count and NetSuite's `suite_note` value), per
+  the standing production-fix rule. **Admin** (all under
+  `/admin/tools/software/*` — see the admin URL convention note below —
+  admin-only, no public
   rendering changes this phase): Manage Features
-  (`/admin/tools/features`, per-category list/add/edit/retire, same
-  inline-editable-row pattern as `/admin/tools/categories`); Manage Tool
+  (`/admin/tools/software/features`, per-category list/add/edit/retire, same
+  inline-editable-row pattern as `/admin/tools/software/categories`); Manage Tool
   Features (a checklist section on each tool's own
   `/tools/software/{slug}/edit` page, one sub-section per category the tool
   belongs to that actually has a curated list yet — checking a box
   upserts a link, unchecking deletes it, a direct admin edit that bypasses
   the review queue on purpose, the same way editing any other tool field
   on that page does); Feature Review Queue
-  (`/admin/tools/feature-review-queue`, grouped by source, Approve/Deny —
+  (`/admin/tools/software/feature-review-queue`, grouped by source, Approve/Deny —
   the approve form doubles as the edit form, every proposed value a real
   editable input pre-filled from the payload, so "edit-then-approve" is the
   same action as a verbatim approval rather than a second mechanism).
@@ -600,7 +614,21 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `sort_order`, is the whole grouping mechanism. Out of scope this phase,
   unchanged from the original plan's intent: public profile-page
   rendering, the recurring AI scan tool, the public feedback/suggestion UI,
-  and a governed-model Compare view.
+  and a governed-model Compare view. **Admin URL convention, decided in
+  this PR**: software-directory admin lives under
+  `/admin/tools/software/*` (communities admin will follow the same
+  `/admin/tools/communities/*` convention later, in Phase 1b). The two
+  brand-new Feature Taxonomy routes (Manage Features, Feature Review
+  Queue) launched directly under that prefix — they never existed on
+  `main` before this PR, so there was nothing to redirect. The
+  pre-existing `/admin/tools/categories` page moved to
+  `/admin/tools/software/categories` in this same PR to match, WITH a
+  301 redirect kept at the old URL (same precedent as
+  `/admin/library/backfill`'s own redirect stub) since it was a real
+  bookmarked admin tool, not a brand-new route. Finishing this convention
+  across the rest of the Toolbox admin (communities admin routes, the
+  per-tool edit pages, and any other stragglers) is Phase 1b — a
+  separate, investigate-first PR.
 
 - **Sail, Don't Row — water reflections, re-added (reverses an earlier decision).**
   The original build removed reflections outright: "unrealistic inverted-building

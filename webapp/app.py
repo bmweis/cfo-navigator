@@ -101,7 +101,7 @@ CONTACT_TIME_TRAP_SECONDS = float(os.environ.get("LINKLIB_CONTACT_TIME_TRAP_SECO
 
 # One-time seed data for the `tool_categories` table (see _seed_toolbox).
 # Not read directly anywhere else — once seeded, the DB is the source of
-# truth and categories are managed at /admin/tools/categories. Consolidated
+# truth and categories are managed at /admin/tools/software/categories. Consolidated
 # from a 21-tag ad hoc list to this fixed 15-tag taxonomy (#Software search
 # overhaul Phase 1) — scripts/archive/migrate_software_tags.py carries the mapping
 # and remaps every existing tool's categories_json on a one-off run against
@@ -305,7 +305,7 @@ def _seed_toolbox():
     name/description (benchmarks) in sync with their seed lists on every
     restart/deploy. categories_json is NOT re-synced from the seed list for
     tools/communities that already exist — once seeded, categories are
-    owned by the DB and edited at /admin/tools/categories or
+    owned by the DB and edited at /admin/tools/software/categories or
     /admin/tools/communities, so this must not clobber changes made there.
     Same for promoted/vendor/warm-intro fields (tools) and coverage/pricing
     (benchmarks), which are admin-site-only and never touched here.
@@ -6038,7 +6038,7 @@ Not sure which tool's for you? {(
   </div>
 </details>
 
-{'<p style="color:var(--muted);margin:0 0 16px;"><a href="/admin/tools/categories" style="font-weight:500;">Manage categories &rarr;</a></p>' if authed else ''}
+{'<p style="color:var(--muted);margin:0 0 16px;"><a href="/admin/tools/software/categories" style="font-weight:500;">Manage categories &rarr;</a></p>' if authed else ''}
 
 <div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
@@ -9034,7 +9034,7 @@ def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None
         f'{" checked" if c["name"] in selected else ""}> {_esc(c["name"])}</label>'
         for c in categories
     ) or '<p style="grid-column:1/-1;font-size:13px;color:var(--muted);margin:0;">' \
-         'No categories yet—<a href="/admin/tools/categories">add one</a> first.</p>'
+         'No categories yet—<a href="/admin/tools/software/categories">add one</a> first.</p>'
 
 
 # Shared by /admin/tools/new, /admin/tools/{id}/edit, and the Quick Edit panel
@@ -10512,7 +10512,26 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
     return HTMLResponse(_page("Toolbox intros—Admin", "Admin", body, authed=True))
 
 
-@app.get("/admin/tools/categories", response_class=HTMLResponse)
+@app.get("/admin/tools/categories")
+def admin_tools_categories_old_url_redirect(msg: str = "", error: str = ""):
+    """Retired at this URL (admin URL convention: software-directory admin
+    lives under /admin/tools/software/*, see CLAUDE.md) in favor of
+    /admin/tools/software/categories. Redirects rather than removed outright
+    — this was a real bookmarked admin tool, same precedent as
+    /admin/library/backfill's own redirect stub above. Preserves msg/error
+    query params so a form action still mid-flight against the old path
+    (there shouldn't be any live ones, but cheap to keep) doesn't lose its
+    banner."""
+    params = []
+    if msg:
+        params.append(f"msg={quote(msg)}")
+    if error:
+        params.append(f"error={quote(error)}")
+    qs = f"?{'&'.join(params)}" if params else ""
+    return RedirectResponse(f"/admin/tools/software/categories{qs}", status_code=301)
+
+
+@app.get("/admin/tools/software/categories", response_class=HTMLResponse)
 def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10538,7 +10557,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
         # button stacked underneath them.
         rows += f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:9px 12px;">
-    <form id="{edit_form_id}" method="post" action="/admin/tools/categories/{cid}/edit" style="display:grid;gap:6px;margin:0;">
+    <form id="{edit_form_id}" method="post" action="/admin/tools/software/categories/{cid}/edit" style="display:grid;gap:6px;margin:0;">
       <input type="text" name="name" value="{_esc(c['name'])}" required maxlength="80"
         style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:14px;font-weight:500;background:var(--bg);">
       <input type="text" name="description" value="{_esc(c['description'])}" maxlength="300" placeholder="Tooltip shown on the pill (optional)"
@@ -10549,7 +10568,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <span style="font-size:13px;color:var(--muted);white-space:nowrap;">{c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}</span>
       <button type="submit" form="{edit_form_id}" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
-      <form method="post" action="/admin/tools/categories/{cid}/delete" style="margin:0;"
+      <form method="post" action="/admin/tools/software/categories/{cid}/delete" style="margin:0;"
             onsubmit="return confirm('Delete the category &quot;{_esc(c['name'])}&quot;? It will be removed from {c['tool_count']} tool{'s' if c['tool_count'] != 1 else ''}—they stay in the directory under All, just untagged for this category.');">
         <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
       </form>
@@ -10580,7 +10599,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:460px;">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 14px;">Add a category</h2>
-  <form method="post" action="/admin/tools/categories/new" style="display:grid;gap:12px;">
+  <form method="post" action="/admin/tools/software/categories/new" style="display:grid;gap:12px;">
     <div>
       <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
       <input type="text" name="name" required maxlength="80" placeholder="e.g. Payroll"
@@ -10599,7 +10618,7 @@ def admin_tools_categories(request: Request, msg: str = "", error: str = ""):
     return HTMLResponse(_page("Toolbox categories—CFO Toolbox Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/tools/categories/new")
+@app.post("/admin/tools/software/categories/new")
 async def admin_tools_categories_new(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -10610,14 +10629,14 @@ async def admin_tools_categories_new(request: Request):
     try:
         lib.add_tool_category(name, description)
     except ValueError as e:
-        return RedirectResponse(f"/admin/tools/categories?error={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"/admin/tools/software/categories?error={quote(str(e))}", status_code=303)
     finally:
         lib.close()
     msg = f'Added "{name}".'
-    return RedirectResponse(f"/admin/tools/categories?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/tools/software/categories?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/tools/categories/{category_id}/edit")
+@app.post("/admin/tools/software/categories/{category_id}/edit")
 async def admin_tools_categories_edit(request: Request, category_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -10628,14 +10647,14 @@ async def admin_tools_categories_edit(request: Request, category_id: int):
     try:
         n = lib.rename_tool_category(category_id, name, description)
     except ValueError as e:
-        return RedirectResponse(f"/admin/tools/categories?error={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"/admin/tools/software/categories?error={quote(str(e))}", status_code=303)
     finally:
         lib.close()
     msg = f'Saved "{name}"' + (f'—updated on {n} tool{"s" if n != 1 else ""}.' if n else '.')
-    return RedirectResponse(f"/admin/tools/categories?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/tools/software/categories?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/tools/categories/{category_id}/delete")
+@app.post("/admin/tools/software/categories/{category_id}/delete")
 def admin_tools_categories_delete(request: Request, category_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -10645,16 +10664,16 @@ def admin_tools_categories_delete(request: Request, category_id: int):
     finally:
         lib.close()
     msg = f'Deleted—removed from {n} tool{"s" if n != 1 else ""}.' if n else 'Deleted.'
-    return RedirectResponse(f"/admin/tools/categories?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/tools/software/categories?msg={quote(msg)}", status_code=303)
 
 
 # -- Feature Taxonomy: Manage Features (per category) -----------------------
 # docs/FEATURE_TAXONOMY.md is canon. Same visual/structural pattern as
-# /admin/tools/categories immediately above — inline-editable table rows +
+# /admin/tools/software/categories immediately above — inline-editable table rows +
 # an "Add" card below — reused deliberately (Phase 0's admin-pattern
 # investigation) rather than inventing a new layout.
 
-@app.get("/admin/tools/features", response_class=HTMLResponse)
+@app.get("/admin/tools/software/features", response_class=HTMLResponse)
 def admin_tools_features(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10670,7 +10689,7 @@ def admin_tools_features(request: Request):
 
     rows = "".join(
         f'''<tr style="border-top:1px solid var(--line);">
-  <td style="padding:9px 12px;"><a href="/admin/tools/features/{c['id']}" style="font-weight:500;color:var(--navy);">{_esc(c['name'])}</a></td>
+  <td style="padding:9px 12px;"><a href="/admin/tools/software/features/{c['id']}" style="font-weight:500;color:var(--navy);">{_esc(c['name'])}</a></td>
   <td style="padding:9px 12px;color:var(--muted);font-size:13px;">{counts[c['id']]} feature{'s' if counts[c['id']] != 1 else ''}</td>
 </tr>'''
         for c in categories
@@ -10693,7 +10712,7 @@ controlled vocabulary tools get mapped against. See <a href="https://github.com/
     return HTMLResponse(_page("Manage Features—CFO Toolbox Admin", "Admin", body, authed=True))
 
 
-@app.get("/admin/tools/features/{category_id}", response_class=HTMLResponse)
+@app.get("/admin/tools/software/features/{category_id}", response_class=HTMLResponse)
 def admin_tools_features_category(request: Request, category_id: int, msg: str = "", error: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10718,7 +10737,7 @@ def admin_tools_features_category(request: Request, category_id: int, msg: str =
         edit_form_id = f"feat-edit-{fid}"
         rows += f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:9px 12px;">
-    <form id="{edit_form_id}" method="post" action="/admin/tools/features/{fid}/edit" style="display:grid;gap:6px;margin:0;">
+    <form id="{edit_form_id}" method="post" action="/admin/tools/software/features/{fid}/edit" style="display:grid;gap:6px;margin:0;">
       <input type="hidden" name="return_to" value="{category_id}">
       <input type="text" name="name" value="{_esc(f['name'])}" required maxlength="150"
         style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:14px;font-weight:500;background:var(--bg);">
@@ -10735,7 +10754,7 @@ def admin_tools_features_category(request: Request, category_id: int, msg: str =
   <td style="padding:9px 12px;vertical-align:top;">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <button type="submit" form="{edit_form_id}" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;">Save</button>
-      <form method="post" action="/admin/tools/features/{fid}/retire" style="margin:0;"
+      <form method="post" action="/admin/tools/software/features/{fid}/retire" style="margin:0;"
             onsubmit="return confirm('Retire &quot;{_esc(f['name'])}&quot;? It stops appearing in the curated list and comparison rendering&mdash;existing tool-feature links are kept, not deleted.');">
         <input type="hidden" name="return_to" value="{category_id}">
         <button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;">Retire</button>
@@ -10747,7 +10766,7 @@ def admin_tools_features_category(request: Request, category_id: int, msg: str =
         rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--muted);">No features yet&mdash;add one below.</td></tr>'
 
     body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin/tools/features" style="font-size:13px;color:var(--muted);">&larr; Manage Features</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/tools/software/features" style="font-size:13px;color:var(--muted);">&larr; Manage Features</a></p>
 <h1>{_esc(category['name'])} features</h1>
 <p style="color:var(--muted);margin:-6px 0 18px;">Shown in <code>sort_order</code>, then alphabetically. ~10-15 features per category is the target&mdash;curated, not comprehensive (FEATURE_TAXONOMY.md &sect;4).</p>
 {banner}{error_banner}
@@ -10764,7 +10783,7 @@ def admin_tools_features_category(request: Request, category_id: int, msg: str =
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;max-width:520px;">
   <h2 style="font-size:16px;font-weight:600;margin:0 0 14px;">Add a feature</h2>
-  <form method="post" action="/admin/tools/features/{category_id}/new" style="display:grid;gap:12px;">
+  <form method="post" action="/admin/tools/software/features/{category_id}/new" style="display:grid;gap:12px;">
     <div>
       <label style="display:block;font-size:13px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
       <input type="text" name="name" required maxlength="150" placeholder="e.g. Automated Journal Entry Creation"
@@ -10787,7 +10806,7 @@ def admin_tools_features_category(request: Request, category_id: int, msg: str =
     return HTMLResponse(_page(f"{_esc(category['name'])} features—CFO Toolbox Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/tools/features/{category_id}/new")
+@app.post("/admin/tools/software/features/{category_id}/new")
 async def admin_tools_features_new(request: Request, category_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -10799,14 +10818,14 @@ async def admin_tools_features_new(request: Request, category_id: int):
     try:
         lib.add_category_feature(category_id, name, definition, pointer_note)
     except ValueError as e:
-        return RedirectResponse(f"/admin/tools/features/{category_id}?error={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"/admin/tools/software/features/{category_id}?error={quote(str(e))}", status_code=303)
     finally:
         lib.close()
     msg = f'Added "{name}".'
-    return RedirectResponse(f"/admin/tools/features/{category_id}?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/tools/software/features/{category_id}?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/tools/features/{feature_id}/edit")
+@app.post("/admin/tools/software/features/{feature_id}/edit")
 async def admin_category_features_edit(request: Request, feature_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -10823,14 +10842,14 @@ async def admin_category_features_edit(request: Request, feature_id: int):
     try:
         lib.update_category_feature(feature_id, name, definition, pointer_note, sort_order)
     except ValueError as e:
-        return RedirectResponse(f"/admin/tools/features/{return_to}?error={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"/admin/tools/software/features/{return_to}?error={quote(str(e))}", status_code=303)
     finally:
         lib.close()
     msg = f'Saved "{name}".'
-    return RedirectResponse(f"/admin/tools/features/{return_to}?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/tools/software/features/{return_to}?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/tools/features/{feature_id}/retire")
+@app.post("/admin/tools/software/features/{feature_id}/retire")
 async def admin_tools_features_retire(request: Request, feature_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -10841,7 +10860,7 @@ async def admin_tools_features_retire(request: Request, feature_id: int):
         lib.retire_category_feature(feature_id)
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/tools/features/{return_to}?msg={quote('Retired.')}", status_code=303)
+    return RedirectResponse(f"/admin/tools/software/features/{return_to}?msg={quote('Retired.')}", status_code=303)
 
 
 # -- Feature Taxonomy: Review Queue (rules doc §9) ---------------------------
@@ -10901,7 +10920,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
     )
 
     return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:16px;">
-  <form method="post" action="/admin/tools/feature-review-queue/{item['id']}/approve">
+  <form method="post" action="/admin/tools/software/feature-review-queue/{item['id']}/approve">
   <input type="hidden" name="n_links" value="{n_links}">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
     <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:{source_badge_bg};color:{source_badge_fg};border-radius:5px;padding:2px 9px;">{_esc(item['source'])}</span>
@@ -10916,7 +10935,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
     <button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Approve</button>
   </div>
   </form>
-  <form method="post" action="/admin/tools/feature-review-queue/{item['id']}/deny" style="margin:10px 0 0;display:flex;gap:6px;align-items:center;"
+  <form method="post" action="/admin/tools/software/feature-review-queue/{item['id']}/deny" style="margin:10px 0 0;display:flex;gap:6px;align-items:center;"
         onsubmit="return confirm('Deny this proposal?');">
     <input type="text" name="resolution_note" placeholder="Reason (optional, shown if denied)" maxlength="500"
       style="flex:1;min-width:180px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;">
@@ -10925,7 +10944,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
 </div>"""
 
 
-@app.get("/admin/tools/feature-review-queue", response_class=HTMLResponse)
+@app.get("/admin/tools/software/feature-review-queue", response_class=HTMLResponse)
 def admin_feature_review_queue(request: Request, msg: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10966,7 +10985,7 @@ def admin_feature_review_queue(request: Request, msg: str = ""):
     return HTMLResponse(_page("Feature Review Queue—CFO Toolbox Admin", "Admin", body, authed=True))
 
 
-@app.post("/admin/tools/feature-review-queue/{item_id}/approve")
+@app.post("/admin/tools/software/feature-review-queue/{item_id}/approve")
 async def admin_feature_review_queue_approve(request: Request, item_id: int):
     """The approve form doubles as the edit form (see
     _feature_review_queue_item_card) — every field it submits is rebuilt
@@ -10981,7 +11000,7 @@ async def admin_feature_review_queue_approve(request: Request, item_id: int):
     try:
         item = lib.get_feature_review_queue_item(item_id)
         if item is None:
-            return RedirectResponse("/admin/tools/feature-review-queue?msg=Not+found.", status_code=303)
+            return RedirectResponse("/admin/tools/software/feature-review-queue?msg=Not+found.", status_code=303)
         stored_payload = item["payload"]
         override = {"category_id": item["category_id"]}
         if "feature_id" in form:
@@ -11025,14 +11044,14 @@ async def admin_feature_review_queue_approve(request: Request, item_id: int):
             item_id, override_payload=(override if was_edited else None),
         )
     except ValueError as e:
-        return RedirectResponse(f"/admin/tools/feature-review-queue?msg={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"/admin/tools/software/feature-review-queue?msg={quote(str(e))}", status_code=303)
     finally:
         lib.close()
     msg = "Approved (edited)." if was_edited else "Approved."
-    return RedirectResponse(f"/admin/tools/feature-review-queue?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/tools/software/feature-review-queue?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/tools/feature-review-queue/{item_id}/deny")
+@app.post("/admin/tools/software/feature-review-queue/{item_id}/deny")
 async def admin_feature_review_queue_deny(request: Request, item_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -11042,10 +11061,10 @@ async def admin_feature_review_queue_deny(request: Request, item_id: int):
     try:
         lib.deny_feature_review_queue_item(item_id, resolution_note)
     except ValueError as e:
-        return RedirectResponse(f"/admin/tools/feature-review-queue?msg={quote(str(e))}", status_code=303)
+        return RedirectResponse(f"/admin/tools/software/feature-review-queue?msg={quote(str(e))}", status_code=303)
     finally:
         lib.close()
-    return RedirectResponse("/admin/tools/feature-review-queue?msg=Denied.", status_code=303)
+    return RedirectResponse("/admin/tools/software/feature-review-queue?msg=Denied.", status_code=303)
 
 
 def _benchmark_form_fields(b: dict | None = None) -> str:
@@ -13553,7 +13572,7 @@ def admin_tools_new(request: Request):
       placeholder="2-3 sentences—shown on the directory card and in search results. Filled in by Generate above, or write your own."></textarea>
   </div>
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
       {_tool_category_checkboxes(categories)}
     </div>
@@ -13881,7 +13900,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     <span class="disclosure-caret">&#9654;</span>
   </summary>
   <p style="font-size:13px;color:var(--muted);margin:12px 0 0;">The governed replacement for Features above, one curated list per category this tool belongs to&mdash;see
-  <a href="/admin/tools/features" target="_blank" rel="noopener">Manage Features</a>. Check a box to link this tool to that feature; availability/AI/verified date only matter once checked.</p>
+  <a href="/admin/tools/software/features" target="_blank" rel="noopener">Manage Features</a>. Check a box to link this tool to that feature; availability/AI/verified date only matter once checked.</p>
   <form method="post" action="/admin/tools/{tool_id}/feature-links/save">
     {feature_ids_input}
     {section_blocks}
@@ -14025,7 +14044,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </div>
 
   <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/categories">manage categories</a>)</span></label>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
       {_tool_category_checkboxes(categories, tool['categories'])}
     </div>
@@ -17572,9 +17591,9 @@ _LIBRARY_TOOLS = [
 # flagged in the Phase 6 PR for Brian to decide whether it's worth adjusting.
 _TOOLBOX_TOOLS = [
     ("/admin/tools/software",   "Software",             "Add, edit, or delete any tool in the directory, and approve or reject reader submissions before they go live."),
-    ("/admin/tools/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
-    ("/admin/tools/features",   "Manage Features",      "The curated \"key features\" list per category—the governed vocabulary tools get mapped against (docs/FEATURE_TAXONOMY.md)."),
-    ("/admin/tools/feature-review-queue", "Feature Review Queue", "Proposed feature-taxonomy changes—from admin edits, the AI scan, or public suggestions—awaiting approval before they reach the live tables."),
+    ("/admin/tools/software/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
+    ("/admin/tools/software/features",   "Manage Features",      "The curated \"key features\" list per category—the governed vocabulary tools get mapped against (docs/FEATURE_TAXONOMY.md)."),
+    ("/admin/tools/software/feature-review-queue", "Feature Review Queue", "Proposed feature-taxonomy changes—from admin edits, the AI scan, or public suggestions—awaiting approval before they reach the live tables."),
     ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
     ("/admin/game-settings",    "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
@@ -19631,7 +19650,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     # -- manage sections: a table matching the feed table above --------------
     # The rename form lives in the Section cell while its submit button sits in
     # Actions, associated by the `form` attribute rather than nesting a form
-    # across cells (invalid HTML). Same plain-HTML trick /admin/tools/categories
+    # across cells (invalid HTML). Same plain-HTML trick /admin/tools/software/categories
     # already uses for exactly this two-column split — no JS.
     section_rows = ""
     for s in sections:

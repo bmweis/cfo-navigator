@@ -50,6 +50,34 @@ _REVIEW_QUEUE_CSV = os.path.join(_SEED_DIR, "seed_review_queue.csv")
 # aborts the run rather than silently guessing (house rule).
 _NEW_CATEGORY = "Close Management"
 
+# Placeholder suite notation for NetSuite (rules-doc §5's "beyond the office
+# of the CFO" case) — Brian's own wording from the build brief, seeded as a
+# placeholder for him to finalize later. Only NetSuite among the nine pilot
+# tools has a broader operational suite in this sense.
+_NETSUITE_TOOL_NAME = "NetSuite (acquired by Oracle)"
+_NETSUITE_SUITE_NOTE = (
+    "Part of a broader vendor suite including operational solutions beyond "
+    "the office of the CFO (e.g., CRM, HRIS)."
+)
+
+
+def seed_suite_notes(lib: Library) -> bool:
+    """Sets NetSuite's placeholder suite_note if it isn't already set.
+    Idempotent by design (not just by accident of re-running the same
+    write): once Brian finalizes real copy through the admin edit form
+    (set_tool_suite_note), a re-run of this script must never clobber it
+    back to the placeholder — so this only ever writes when the column is
+    still empty."""
+    tool = lib.get_tool_by_name(_NETSUITE_TOOL_NAME)
+    if tool is None:
+        sys.exit(f"Aborting — could not resolve the NetSuite tool by name {_NETSUITE_TOOL_NAME!r}.")
+    if (tool.get("suite_note") or "").strip():
+        print(f'  SKIP  suite_note for "{_NETSUITE_TOOL_NAME}" (already set)')
+        return False
+    lib.set_tool_suite_note(tool["id"], _NETSUITE_SUITE_NOTE)
+    print(f'  SET   suite_note for "{_NETSUITE_TOOL_NAME}"')
+    return True
+
 
 def _read_csv(path: str) -> list[dict]:
     with open(path, newline="", encoding="utf-8") as f:
@@ -84,7 +112,7 @@ def _resolve_categories(lib: Library, category_names: set[str]) -> dict[str, int
             f"allowed to create ({_NEW_CATEGORY!r}):\n"
             + "\n".join(f"  - {n}" for n in unresolved)
             + "\nResolve the name mismatch (or add the category by hand at "
-              "/admin/tools/categories) before re-running."
+              "/admin/tools/software/categories) before re-running."
         )
     return resolved
 
@@ -280,6 +308,9 @@ def main():
         print("\nSeeding feature_review_queue...")
         rq_added, rq_skipped = seed_review_queue(lib, categories, tools_by_category)
 
+        print("\nSeeding suite_note (NetSuite placeholder)...")
+        suite_note_set = seed_suite_notes(lib)
+
         # Write-then-read-back verification, per house rules — print live
         # row counts straight from the DB, not from the counters above.
         print("\n--- Write-then-read-back verification ---")
@@ -290,11 +321,16 @@ def main():
             "SELECT COUNT(*) FROM tools WHERE categories_json LIKE ?", (f'%"{_NEW_CATEGORY}"%',)
         ).fetchone()[0]
         print(f'  tools tagged "{_NEW_CATEGORY}": {n_close_mgmt_tools}')
+        netsuite_note = lib.conn.execute(
+            "SELECT suite_note FROM tools WHERE name=?", (_NETSUITE_TOOL_NAME,)
+        ).fetchone()[0]
+        print(f'  NetSuite suite_note: {netsuite_note!r}')
 
         print(
             f"\ncategory_features: {cf_added} added, {cf_skipped} skipped (already existed)\n"
             f"tool_feature_links: {tfl_added} added, {tfl_updated} updated, {tagged} tools newly tagged\n"
-            f"feature_review_queue: {rq_added} added, {rq_skipped} skipped (already queued)"
+            f"feature_review_queue: {rq_added} added, {rq_skipped} skipped (already queued)\n"
+            f"suite_note: {'set' if suite_note_set else 'skipped (already set)'}"
         )
     finally:
         lib.close()

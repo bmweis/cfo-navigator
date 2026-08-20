@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from linklib.db import Library, resolve_db_path
 
 # Old category name -> new taxonomy name. Every category ever seeded via
-# scripts/seed_tools.py or added by hand at /admin/tools/categories should
+# scripts/seed_tools.py or added by hand at /admin/tools/software/categories should
 # appear here; anything encountered that isn't in this map is left as-is
 # and flagged loudly (rather than silently dropped) so it can be triaged.
 CATEGORY_MAP = {
