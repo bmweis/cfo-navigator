@@ -34,8 +34,12 @@ Running --apply against the real database is reserved for Brian, via
 `railway ssh`.
 
 Usage:
-    python -m scripts.archive.recase_feature_names --db library.db            # preview
-    python -m scripts.archive.recase_feature_names --db library.db --apply    # write for real
+    python -m scripts.recase_feature_names --db library.db            # preview
+    python -m scripts.recase_feature_names --db library.db --apply    # write for real
+
+Lives in scripts/, not scripts/archive/, until it's actually been run against
+production — same convention as drop_legacy_tool_features.py: a one-time
+script moves to scripts/archive/ once its job is done (git mv), not before.
 """
 from __future__ import annotations
 

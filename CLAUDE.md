@@ -802,15 +802,19 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   - **Feature-name recasing** — `docs/FEATURE_TAXONOMY.md` §3 gained three
     naming rules (no "AI" in any form in a feature name; prefer short names
     with qualifiers in `definition` instead; sentence case). A new
-    `scripts/archive/recase_feature_names.py` (preview-by-default,
-    `--apply` to write, write-then-read-back verified — same convention as
+    `scripts/recase_feature_names.py` (preview-by-default, `--apply` to
+    write, write-then-read-back verified — same convention as
     `scripts/archive/rename_differentiation_columns.py`) recases every live
     `category_features.name` to sentence case, preserving already-uppercase
     tokens (acronyms: ASC, SOX, GRC, IFRS, GAAP, AI, ...) and any token
     containing a digit (ASC 606, 1099). **Not run against production as
     part of this PR** — per the standing human-run discipline, Brian runs
     it by hand via `railway ssh` once this PR is deployed, after reviewing
-    the printed before/after diff.
+    the printed before/after diff. **Lives in `scripts/`, not
+    `scripts/archive/`, until that run happens** — same convention as
+    `scripts/drop_legacy_tool_features.py`/`scripts/seed_book_recommendations.py`:
+    a one-time script only moves to `scripts/archive/` (via `git mv`) once
+    it's actually been run, never before.
   - **BRAND.md's coral "never for status" section gained a documented
     exception for pending-count badges** — `.task-badge`/`.task-badge-dot`/
     `.task-dot` have used `var(--coral)` since the admin hub's original
