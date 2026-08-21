@@ -1334,8 +1334,16 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   "N ago" text — same green/amber/coral posture as the backup/integrity
   banners above. A row stuck at `status='running'` with no `finished_at` is
   exactly what a crash mid-run looks like, and the banner says so
-  explicitly rather than rendering it as ordinary live progress. See
-  ARCHITECTURE.md's `job_run_log` table row for the full write-up.
+  explicitly rather than rendering it as ordinary live progress. **Fixed
+  (2026-08 wrap-up sprint item 3): that interpretation only holds when
+  nothing live actually corresponds to the open row** — confirmed in
+  production twice, the banner was rendering "never finished — likely
+  interrupted by a deploy or crash" directly above the same page's own
+  genuinely-in-progress status panel, because it never checked
+  `_JOB_STATE` before assuming an open row meant a crash. Fixed by checking
+  `_job_get(job_name)["running"]` first; when the job is actually live, the
+  banner renders a plain in-progress line instead. See ARCHITECTURE.md's
+  `job_run_log` table row for the full write-up.
 - **Article purge flow (durability follow-up) — a permanent-deletion escape
   hatch for the narrow "genuinely nothing was ever saved" set, mirroring
   the manual-review corrected-URL CSV round trip exactly.**
