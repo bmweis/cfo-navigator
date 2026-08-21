@@ -1649,24 +1649,32 @@ _FEATURES_SOURCING_DISCLAIMER = (
 )
 
 
+_PRESERVED_FEATURE_WORDS = {"Slack"}  # mixed-case brand names that would otherwise
+# get lowercased by the isupper()/digit heuristic below — add here as more turn up.
+
+
 def _sentence_case_feature_name(name: str) -> str:
     """Converts a category_features.name (Title Case, e.g. "Real-Time
     Ledger", "Role Based Access Control (RBAC)", "ASC 606 Revenue
     Recognition") to sentence case for the public Key features card, without
     mangling real acronyms/codes: a word is left exactly as stored if it's
     already all-uppercase (RBAC, ASC, AI, KPI, SOX, GAAP, IFRS, AWS, MCP,
-    ...) or contains a digit (606) — every other word is lowercased. Only
-    the very first character of the whole name is forced uppercase, per
-    sentence-case convention. Known, accepted limitation: this also
-    lowercases a genuine brand name used mid-name (e.g. "Slack" in "Slack /
-    Email Collaboration Triggers" reads as "Slack / email collaboration
-    triggers") — proper-noun detection is out of scope for this pass; see
-    CLAUDE.md's Feature Taxonomy Phase 2 note."""
+    ...), contains a digit (606), or matches _PRESERVED_FEATURE_WORDS (a
+    small hand-curated list of mixed-case brand names, e.g. "Slack", that
+    the isupper()/digit heuristic alone can't catch) — every other word is
+    lowercased. Only the very first character of the whole name is forced
+    uppercase, per sentence-case convention. Known, accepted limitation:
+    this still lowercases any other genuine brand name used mid-name that
+    hasn't been added to _PRESERVED_FEATURE_WORDS — proper-noun detection
+    is out of scope for this pass; see CLAUDE.md's Feature Taxonomy Phase 2
+    note."""
     words = name.split(" ")
     out_words = []
     for w in words:
         core = w.strip("()")
-        if (core.isupper() and len(core) > 1) or any(ch.isdigit() for ch in w):
+        if core in _PRESERVED_FEATURE_WORDS:
+            out_words.append(w)
+        elif (core.isupper() and len(core) > 1) or any(ch.isdigit() for ch in w):
             out_words.append(w)
         else:
             out_words.append(w.lower())
