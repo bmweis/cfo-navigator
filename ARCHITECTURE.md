@@ -2486,6 +2486,38 @@ at all even when the correct URL was already known.
   exactly what it always meant — nothing that reads "is this really Medium"
   had its meaning altered.
 
+**Live-proof follow-up — the logged detail couldn't distinguish "the tier ran
+and missed" from "the tier was never reached."** A pre-merge live-proof round
+(two production articles, both recognized blocked hosts) came back with
+`content_refetch_log` rows that looked byte-for-byte like the pre-fetch-by-URL
+flow: `source='direct'`, the original `direct_reason`, and a `detail` only
+ever showing what Wayback itself did (`"HTTP 403 (wayback: no snapshot
+archived)"`) — there was no way to confirm from the log alone whether
+`_try_medium_platform()` had actually executed, since a genuine miss and a
+skipped tier produce an identical row. Code-tracing confirmed both articles'
+hosts do match `is_recognized_blocked_host()` (a plain `medium.com` netloc,
+and `shockwaveinnovations.com` after the `www.` strip), so the tier was in
+fact reached both times — but that was an inference from reading the code,
+not something the log itself could show. Fixed before merge, not deferred:
+`_try_medium_platform()` now returns a 5th element, `note` — a short,
+ALWAYS-populated diagnostic trace of exactly what it attempted and why
+(`"fetch-by-url: too-thin (12 words); search-by-title: no candidate"`, etc.),
+success or failure. `_finish_backfill_after_direct_failure()` accumulates a
+`tier_notes` list from every tier it actually reaches (migration too, same
+gap, same fix — not Medium-specific plumbing) and passes it to
+`_finish_backfill_via_wayback()` as `tier_trace`, which appends it to the
+final logged `detail` in square brackets regardless of Wayback's own
+outcome. An article whose host isn't recognized by any tier logs identically
+to before this fix — the trace is additive, appearing only when a tier
+genuinely ran. `scripts/trace_medium_tier.py` (new, "Reusable diagnostic" in
+the scripts registry) gives a second, independent confirmation path: it
+calls `_try_medium_platform()` directly (never the write path) against a
+specific stuck article ID, printing its existing log history alongside a
+live re-trace, plus a Wayback-snapshot content inspector (raw HTML length,
+extracted word count, `assess_extraction_quality()`'s verdict, a text
+preview) for the "is the stored snapshot an empty client-side-rendered
+shell" hypothesis raised during the same live-proof round.
+
 ### Admin nav restructure, Library page cleanup, and page-width fixes (Phase 6)
 
 Three related but distinct pieces, shipped as one PR because the second and

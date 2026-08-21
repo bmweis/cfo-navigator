@@ -317,7 +317,7 @@ def _try_domain_migration(lib: Library, new_domain: str, title: str,
 
 
 def _try_medium_platform(lib: Library, title: str, author: str,
-                          original_url: str) -> tuple[bool, str, str, str]:
+                          original_url: str) -> tuple[bool, str, str, str, str]:
     """Attempts the Medium-platform tier for one article.
 
     Tries, in order:
@@ -357,12 +357,21 @@ def _try_medium_platform(lib: Library, title: str, author: str,
          other source (see extract.py's module comment on that function
          for the "consistent house reading experience" principle).
 
-    Returns (ok, structured_html, candidate_url, source) — source is
+    Returns (ok, structured_html, candidate_url, source, note) — source is
     'medium-fetch' for a fetch-by-URL success, 'medium-search' for a
     search-by-title success (distinguishable in content_refetch_log — see
-    _finish_backfill_after_direct_failure), or '' on failure. Never raises —
-    any failure at any stage resolves to (False, "", "", ""), same
-    best-effort contract as _try_domain_migration."""
+    _finish_backfill_after_direct_failure), or '' on failure. `note` is a
+    short diagnostic trace of what this call actually attempted and why it
+    didn't return a hit — ALWAYS populated, success or failure, so a caller
+    (and, via _finish_backfill_after_direct_failure, the eventual
+    content_refetch_log row) can tell "this tier ran and missed" apart from
+    "this tier was never reached" (2026-08 wrap-up sprint follow-up: two
+    live production traces came back with a log signature indistinguishable
+    from the pre-fetch-by-URL flow, and there was no way to confirm from the
+    log alone whether the new code path had actually executed). Never
+    raises — any failure at any stage resolves to
+    (False, "", "", "", note), same best-effort contract as
+    _try_domain_migration."""
     from .extract import (fetch_page, extract_reader_html, assess_extraction_quality,
                            paragraphs_html_from_text, _MIN_CONTENT_WORDS)
     from . import medium_platform
@@ -370,43 +379,49 @@ def _try_medium_platform(lib: Library, title: str, author: str,
     direct_text = medium_platform.fetch_content_by_url(lib, original_url)
     if direct_text:
         text = direct_text.strip()
-        if len(text.split()) >= _MIN_CONTENT_WORDS:
+        word_count = len(text.split())
+        if word_count >= _MIN_CONTENT_WORDS:
             structured = paragraphs_html_from_text(text)
             if structured:
-                return True, structured, original_url, "medium-fetch"
+                return True, structured, original_url, "medium-fetch", "fetch-by-url: hit"
+            fetch_note = f"fetch-by-url: got {word_count} words but no extractable structure after chrome-strip"
+        else:
+            fetch_note = f"fetch-by-url: too-thin ({word_count} words)"
         # Thin or unusable direct-fetch result — fall through to
         # search-by-title rather than giving up outright.
+    else:
+        fetch_note = "fetch-by-url: no result from Exa"
 
     if not title.strip():
-        return False, "", "", ""
+        return False, "", "", "", f"{fetch_note}; search-by-title: skipped (no title)"
     candidate_url, candidate_text = medium_platform.find_medium_candidate(lib, title, author)
     if not candidate_url:
-        return False, "", "", ""
+        return False, "", "", "", f"{fetch_note}; search-by-title: no candidate"
 
     if medium_platform.is_recognized_blocked_host(candidate_url):
         text = (candidate_text or "").strip()
         if len(text.split()) < _MIN_CONTENT_WORDS:
-            return False, "", "", ""
+            return False, "", "", "", f"{fetch_note}; search-by-title: candidate too-thin (exa-text, {candidate_url})"
         structured = paragraphs_html_from_text(text)
         if not structured:
-            return False, "", "", ""
-        return True, structured, candidate_url, "medium-search"
+            return False, "", "", "", f"{fetch_note}; search-by-title: candidate had no extractable structure (exa-text, {candidate_url})"
+        return True, structured, candidate_url, "medium-search", f"{fetch_note}; search-by-title: hit (exa-text, {candidate_url})"
 
     try:
         page = fetch_page(candidate_url)
-    except Exception:
-        return False, "", "", ""
+    except Exception as exc:
+        return False, "", "", "", f"{fetch_note}; search-by-title: candidate fetch raised {type(exc).__name__} ({candidate_url})"
     if not page.raw_html:
-        return False, "", "", ""
+        return False, "", "", "", f"{fetch_note}; search-by-title: candidate fetch returned no content ({candidate_url})"
 
-    ok, _reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
+    ok, reason = assess_extraction_quality(page.raw_html, page.content, page.blocked)
     if not ok:
-        return False, "", "", ""
+        return False, "", "", "", f"{fetch_note}; search-by-title: candidate failed quality check ({reason}, {candidate_url})"
 
     structured = extract_reader_html(page.raw_html, candidate_url)
     if not structured:
-        return False, "", "", ""
-    return True, structured, candidate_url, "medium-search"
+        return False, "", "", "", f"{fetch_note}; search-by-title: candidate had no extractable structure ({candidate_url})"
+    return True, structured, candidate_url, "medium-search", f"{fetch_note}; search-by-title: hit (live-refetch, {candidate_url})"
 
 
 def _finish_backfill_after_direct_failure(lib: Library, article: dict,
@@ -436,9 +451,26 @@ def _finish_backfill_after_direct_failure(lib: Library, article: dict,
     unreliable due to archive.org-side rate-limiting (see linklib.wayback's
     module docstring), while the Medium tier's hit rate on real diagnostic
     data was strong enough to try first (see linklib/medium_platform.py's
-    module docstring)."""
+    module docstring).
+
+    **Tier-attempt trace (2026-08 wrap-up sprint follow-up):** a miss from
+    every tier used to fall through to Wayback with NO record that any tier
+    other than Wayback itself was ever tried — a live production trace could
+    not tell "the Medium tier ran and missed" apart from "the Medium tier
+    was never reached" just from the logged content_refetch_log row, since
+    both look identical (source='direct', the original direct_reason, only
+    Wayback's own outcome appended to detail). Fixed by accumulating a
+    `tier_notes` list of what each attempted-and-missed tier actually did
+    (never populated for a tier that wasn't reached at all — host not
+    recognized, no migration match, etc.) and passing it through to
+    _finish_backfill_via_wayback, which appends it to the final logged
+    detail regardless of the Wayback outcome. An article whose host isn't
+    recognized by any tier logs identically to before this fix (empty
+    trace, no detail change) — this only adds information when a tier
+    genuinely ran."""
     article_id = article["id"]
     url = article["url"]
+    tier_notes: list[str] = []
 
     migration_domain = _domain_migration_target(url)
     if migration_domain:
@@ -449,19 +481,22 @@ def _finish_backfill_after_direct_failure(lib: Library, article: dict,
             lib.log_content_refetch_attempt(article_id, "success",
                                             source="migration", detail=migrated_url)
             return True, ""
+        tier_notes.append(f"migration({migration_domain}): no usable candidate")
 
     from . import medium_platform
     if medium_platform.is_recognized_blocked_host(url):
         title = article.get("title") or ""
         author = article.get("author") or ""
-        ok, structured, candidate_url, source = _try_medium_platform(lib, title, author, url)
+        ok, structured, candidate_url, source, tier_note = _try_medium_platform(lib, title, author, url)
         if ok:
             lib.set_article_content_html(article_id, structured)
             lib.log_content_refetch_attempt(article_id, "success",
                                             source=source, detail=candidate_url)
             return True, ""
+        tier_notes.append(f"medium[{tier_note}]")
 
-    return _finish_backfill_via_wayback(lib, article_id, url, direct_reason, direct_detail)
+    tier_trace = "; ".join(tier_notes)
+    return _finish_backfill_via_wayback(lib, article_id, url, direct_reason, direct_detail, tier_trace)
 
 
 def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
@@ -556,7 +591,8 @@ def backfill_article_content(lib: Library, article: dict) -> tuple[bool, str]:
 
 
 def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
-                                  direct_reason: str, direct_detail: str) -> tuple[bool, str]:
+                                  direct_reason: str, direct_detail: str,
+                                  tier_trace: str = "") -> tuple[bool, str]:
     """Called only once a direct fetch has already failed for
     `direct_reason` — tries a Wayback Machine snapshot as a last resort
     (linklib.wayback), reusing the exact same sanity-check/structured-
@@ -575,6 +611,16 @@ def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
     production batch needed a `railway ssh` round-trip to answer "was
     Wayback even attempted, and what happened" before this existed; now
     that's answered by the log directly. Never destructive at any stage.
+
+    `tier_trace` (2026-08 wrap-up sprint follow-up) is whatever
+    _finish_backfill_after_direct_failure accumulated about the
+    migration/Medium tiers it tried before falling through here — appended
+    to `detail` in square brackets, regardless of what Wayback itself does,
+    so the final logged row answers "which tiers actually ran" directly
+    instead of looking identical to a run where they were never reached.
+    Empty (the default) when no other tier applies to this URL at all —
+    that case's logged detail is byte-for-byte unchanged from before this
+    parameter existed.
     """
     from .extract import extract_reader_html, assess_extraction_quality, _page_data_from_html
     from . import wayback
@@ -599,6 +645,8 @@ def _finish_backfill_via_wayback(lib: Library, article_id: int, url: str,
             wb_note = f"snapshot found but fetch failed: {fetch_note}" if fetch_note else "snapshot found but fetch failed"
 
     combined_detail = f"{direct_detail} (wayback: {wb_note})" if direct_detail else f"wayback: {wb_note}"
+    if tier_trace:
+        combined_detail = f"{combined_detail} [{tier_trace}]"
     lib.log_content_refetch_attempt(article_id, "failure", reason=direct_reason,
                                     detail=combined_detail, source="direct")
     return False, direct_reason

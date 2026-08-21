@@ -1234,8 +1234,21 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `_MEDIUM_CUSTOM_DOMAINS`; the tier's actual gate is now
   `is_recognized_blocked_host()` (the union of both sets), while
   `is_medium_platform_host()` keeps its original, narrower meaning
-  unchanged. See ARCHITECTURE.md's "Medium-platform tier follow-up"
-  section for the full write-up.
+  unchanged. **Pre-merge live-proof follow-up:** two production traces came
+  back with a `content_refetch_log` row indistinguishable from the
+  pre-fetch-by-URL flow — no way to tell "the tier ran and missed" from
+  "the tier was never reached" just from the log. Fixed before merge:
+  `_try_medium_platform()` now always returns a 5th `note` element (a short
+  trace of what it actually attempted), and `_finish_backfill_after_direct_failure`
+  appends a `tier_notes` trace (migration and Medium both) to the final
+  logged `detail` whenever a tier is genuinely reached — an unrecognized
+  host still logs identically to before. `scripts/trace_medium_tier.py` is
+  a new manual-QA script (registered in `/admin/system/scripts`) for a
+  second, independent live confirmation path, plus a Wayback-snapshot
+  content inspector for the "is the stored snapshot an empty
+  client-side-rendered shell" question the same live-proof round raised.
+  See ARCHITECTURE.md's "Medium-platform tier follow-up" section for the
+  full write-up.
 - **Durability audit item 1 — `ingest_url()` now runs the same content
   sanity check the Reader backfill uses, at save time.** Previously a bad
   fetch (paywall preview, bot-challenge interstitial, a fetch failure, real

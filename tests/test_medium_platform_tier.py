@@ -403,6 +403,101 @@ def test_backfill_non_medium_host_skips_tier_entirely(lib, monkeypatch):
     assert called == []
 
 
+# ---------------------------------------------------------------------------
+# Tier-attempt trace in the logged detail (2026-08 wrap-up sprint follow-up)
+#
+# Two live production traces came back with a log signature indistinguishable
+# from the pre-fetch-by-URL flow — no way to tell "the Medium tier ran and
+# missed" apart from "the Medium tier was never reached." Fixed by appending
+# a trace of what each attempted-and-missed tier actually did to the final
+# logged `detail`, whenever a tier was reached at all.
+# ---------------------------------------------------------------------------
+
+def test_wayback_fallthrough_detail_traces_medium_tier_miss(lib, monkeypatch):
+    """A recognized-blocked-host article where the Medium tier ran and
+    missed entirely (no fetch-by-URL result, no search candidate) must have
+    that fact visible in the final logged detail — not indistinguishable
+    from an article whose host was never recognized at all."""
+    article_id = _seed(lib, url="https://medium.com/@vc/no-match-post", title="No Match Post")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "")
+    monkeypatch.setattr(mp_mod, "find_medium_candidate", lambda lib_, title, author="": ("", ""))
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is False
+    log = lib.list_content_refetch_log()
+    assert len(log) == 1
+    detail = log[0]["detail"]
+    assert "medium[" in detail
+    assert "fetch-by-url: no result from Exa" in detail
+    assert "search-by-title: no candidate" in detail
+
+
+def test_wayback_fallthrough_detail_no_trace_for_unrecognized_host(lib, monkeypatch):
+    """An article whose host isn't recognized by any tier must log
+    IDENTICALLY to before this fix — no stray trace text, no behavior
+    change for the vast majority of articles this doesn't apply to."""
+    article_id = _seed(lib, url="https://example.com/normal-post", title="Normal")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 500"))
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is False
+    log = lib.list_content_refetch_log()
+    assert len(log) == 1
+    assert log[0]["detail"] == "HTTP 500 (wayback: no snapshot archived)"
+    assert "[" not in log[0]["detail"]
+
+
+def test_wayback_fallthrough_detail_traces_fetch_by_url_too_thin(lib, monkeypatch):
+    """A fetch-by-URL attempt that came back too-thin (not just empty) must
+    say so specifically in the trace, distinguishing it from 'no result at
+    all' — this is exactly the kind of detail a live trace needs to
+    diagnose which stage actually failed."""
+    article_id = _seed(lib, url="https://medium.com/@vc/thin-fetch-post", title="Thin Fetch Post")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "Too short to count.")
+    monkeypatch.setattr(mp_mod, "find_medium_candidate", lambda lib_, title, author="": ("", ""))
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is False
+    log = lib.list_content_refetch_log()
+    detail = log[0]["detail"]
+    assert "fetch-by-url: too-thin (4 words)" in detail
+
+
+def test_wayback_fallthrough_detail_traces_migration_tier_miss(lib, monkeypatch):
+    """The domain-migration tier's own miss must be traceable too, same
+    reasoning as the Medium tier — this isn't Medium-specific plumbing."""
+    article_id = _seed(lib, url="https://pointsandfigures.com/x/", title="A Post")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
+    monkeypatch.setattr(dm_mod, "find_migrated_url", lambda lib_, domain, title: None)
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is False
+    log = lib.list_content_refetch_log()
+    detail = log[0]["detail"]
+    assert "migration(jeffreycarter.substack.com): no usable candidate" in detail
+
+
+def test_try_medium_platform_returns_five_tuple_with_note_on_success(lib, monkeypatch):
+    """The note is always populated, even on a hit — not just on failure."""
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url",
+                        lambda lib_, url: "Real opening paragraph with plenty of words. " * 15)
+    ok, structured, candidate_url, source, note = pl._try_medium_platform(
+        lib, "Some Title", "", "https://medium.com/@a/one")
+    assert ok is True
+    assert source == "medium-fetch"
+    assert note == "fetch-by-url: hit"
+
+
 def test_backfill_medium_host_no_title_skips_tier(lib, monkeypatch):
     """No title to search Exa with -> Medium tier is skipped outright,
     straight to Wayback, without ever calling find_medium_candidate."""

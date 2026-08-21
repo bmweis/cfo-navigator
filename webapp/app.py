@@ -17977,6 +17977,22 @@ _SCRIPT_REGISTRY = [
      ["EXA_API_KEY (only for the Exa spike — omit or pass --skip-exa to run the scale check alone)"],
      ["python -m scripts.medium_platform_scale_check --db library.db --skip-exa   # scale check only",
       "railway run python -m scripts.medium_platform_scale_check --db /data/library.db   # full report against prod"]),
+    ("trace_medium_tier.py", "scripts.trace_medium_tier", "Reusable diagnostic",
+     "Built for a live-proof round on the fetch-by-URL tier follow-up (2026-08 wrap-up sprint "
+     "item 1): calls linklib.pipeline._try_medium_platform() directly (never the full "
+     "backfill_article_content() write path) so you can watch its actual live behavior for a "
+     "specific stuck article, alongside its existing content_refetch_log history — answers "
+     "'did the Medium tier actually run for this one, and what did it do' definitively, since the "
+     "logged detail alone can look identical whether a tier ran-and-missed or was never reached. "
+     "Also inspects a stored Wayback snapshot's real content (word count, assess_extraction_quality "
+     "verdict, a text preview) for the 'is this an empty JS shell' question.",
+     "Recurring-manual — run whenever a specific stuck article's fetch-tier behavior needs a direct, "
+     "live answer rather than an inference from the log.",
+     ["EXA_API_KEY (for the live _try_medium_platform re-trace; omit to see the same 'no result' "
+      "behavior the tier itself falls back to)"],
+     ["python -m scripts.trace_medium_tier --db /data/library.db --ids 437 142",
+      "python -m scripts.trace_medium_tier --db /data/library.db --ids 437 142 --auto 3",
+      "python -m scripts.trace_medium_tier --db /data/library.db --inspect-wayback --url \"https://example.com/x\""]),
 ]
 
 
