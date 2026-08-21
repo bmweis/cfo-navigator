@@ -236,6 +236,54 @@ def test_content_backfill_page_shows_failure_banner(env):
     assert "timeout" in r.text
 
 
+def test_content_backfill_page_shows_crashed_banner_when_not_live(env):
+    """No live _JOB_STATE run behind the open row -> genuinely read as a
+    crash (the pre-existing behavior, still correct in this case)."""
+    lib = env._lib()
+    lib.start_job_run("content_backfill")
+    lib.close()
+    assert env._job_get("content_backfill").get("running") is not True
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    assert "never finished" in r.text
+    assert "likely interrupted" in r.text
+
+
+def test_content_backfill_page_suppresses_crash_banner_when_job_is_live(env):
+    """2026-08 wrap-up sprint item 3 — the actual bug: an open job_run_log
+    row for a job _JOB_STATE says is CURRENTLY running must never read as
+    'never finished/likely interrupted by a deploy or crash', since the
+    open row IS that live run, not evidence of a crash."""
+    lib = env._lib()
+    lib.start_job_run("content_backfill")
+    lib.close()
+    env._job_set("content_backfill", running=True, done=3, total=10, ok=3, failed=0)
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    assert "never finished" not in r.text
+    assert "likely interrupted" not in r.text
+    assert "still in progress" in r.text
+
+
+def test_enrich_page_suppresses_crash_banner_when_job_is_live(env):
+    """Same fix, exercised on a second job (_job_run_banner is shared across
+    all three _JOB_STATE-backed jobs — this isn't content-backfill-specific)."""
+    lib = env._lib()
+    lib.start_job_run("enrich")
+    lib.close()
+    env._job_set("enrich", running=True, done=1, total=5)
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/enrich")
+    assert r.status_code == 200
+    assert "never finished" not in r.text
+    assert "still in progress" in r.text
+
+
 def test_queue_page_shows_backfill_banner(env):
     lib = env._lib()
     lib.finish_job_run(lib.start_job_run("backfill"), "success", summary="3 article(s) added across 5 source(s)")
