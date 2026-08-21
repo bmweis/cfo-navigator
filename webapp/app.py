@@ -23847,6 +23847,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         wayback_count = lib.count_wayback_content()
         migration_count = lib.count_migration_content()
         medium_search_count = lib.count_medium_search_content()
+        medium_fetch_count = lib.count_medium_fetch_content()
         log_rows = lib.list_content_refetch_log(limit=50)
     finally:
         lib.close()
@@ -23933,6 +23934,9 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         elif r["status"] == "success" and (r.get("source") or "direct") == "medium-search":
             label += (' <span style="background:var(--seafoam-wash);color:var(--seafoam-deep);'
                       'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Medium search</span>')
+        elif r["status"] == "success" and (r.get("source") or "direct") == "medium-fetch":
+            label += (' <span style="background:var(--seafoam-wash);color:var(--seafoam-deep);'
+                      'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Medium fetch</span>')
         title = _esc(r.get("article_title") or r.get("article_url") or f'#{r["article_id"]}')
         url = r.get("article_url") or ""
         title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
@@ -24120,7 +24124,8 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{needs_check_count:,} article{"s" if needs_check_count != 1 else ""} above were flagged the moment they were saved. The fetch looked like a paywall preview, a bot-challenge page, a fetch failure, or real content under the length floor&mdash;the save itself was never blocked, just marked with a reason instead of looking healthy. Clears automatically once a later backfill or resave succeeds.</p>' if needs_check_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch&mdash;the live page couldn&rsquo;t be reached for those. A snapshot can be stale or differ from what the current page shows; look for the &ldquo;via Wayback&rdquo; badge in the attempts log below to spot which ones.</p>' if wayback_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{migration_count:,} of the structured articles above came from a <strong>known domain migration</strong> (e.g. a blog that relocated to a new host), not the article&rsquo;s originally saved URL&mdash;look for the &ldquo;via Migration&rdquo; badge in the attempts log below.</p>' if migration_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_search_count:,} of the structured articles above came from a <strong>Medium-platform search match</strong> (medium.com and similar hosts block direct fetches, so a matching article found elsewhere or via Exa&rsquo;s own text is used instead)&mdash;look for the &ldquo;via Medium search&rdquo; badge in the attempts log below.</p>' if medium_search_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_fetch_count:,} of the structured articles above came from a <strong>direct fetch of the article&rsquo;s own URL</strong> via Exa (medium.com and similar hosts block direct fetches, so Exa fetched that exact URL instead)&mdash;look for the &ldquo;via Medium fetch&rdquo; badge in the attempts log below.</p>' if medium_fetch_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_search_count:,} of the structured articles above came from a <strong>Medium-platform search match</strong> (a title search found the article elsewhere, or via Exa&rsquo;s own text, once the direct URL fetch above didn&rsquo;t work out)&mdash;look for the &ldquo;via Medium search&rdquo; badge in the attempts log below.</p>' if medium_search_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service (e.g. Google&rsquo;s retired FeedBurner proxy), so re-fetching can never succeed. Not counted in Remaining above. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry them anyway.</p>' if excluded_count else ''}
 
 {_job_run_banner("content_backfill")}

@@ -450,6 +450,234 @@ def test_migration_tier_tried_before_medium_tier_when_both_could_apply(lib, monk
     assert medium_called == [], "migration tier success must short-circuit before the Medium tier is ever tried"
 
 
+# ---------------------------------------------------------------------------
+# Fetch-by-URL tier (2026-08 wrap-up sprint item 1) — tried before search
+# ---------------------------------------------------------------------------
+
+def test_is_recognized_blocked_host_covers_medium_and_other_hosts():
+    assert mp_mod.is_recognized_blocked_host("https://medium.com/@a/post")
+    assert mp_mod.is_recognized_blocked_host("https://www.shockwaveinnovations.com/blog/x")
+    assert not mp_mod.is_recognized_blocked_host("https://example.com/post")
+    assert not mp_mod.is_recognized_blocked_host("")
+
+
+def test_fetch_content_by_url_no_api_key(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    assert mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post") == ""
+
+
+def test_fetch_content_by_url_no_url(monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "fake-key")
+    assert mp_mod.fetch_content_by_url(None, "") == ""
+
+
+def test_fetch_content_by_url_returns_text_and_hits_contents_endpoint(monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "fake-key")
+    captured = {}
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"results": [{"url": "https://medium.com/@a/post", "text": "Real article text."}]}
+
+    def _post(url, headers=None, json=None, timeout=None):
+        captured["url"] = url
+        captured["json"] = json
+        return _Resp()
+
+    monkeypatch.setattr(mp_mod.requests, "post", _post)
+    text = mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post")
+    assert text == "Real article text."
+    assert captured["url"] == mp_mod._EXA_CONTENTS_URL
+    assert captured["json"]["urls"] == ["https://medium.com/@a/post"]
+
+
+def test_fetch_content_by_url_no_text_returns_empty(monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "fake-key")
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"results": [{"url": "https://medium.com/@a/post", "text": ""}]}
+
+    monkeypatch.setattr(mp_mod.requests, "post", lambda *a, **kw: _Resp())
+    assert mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post") == ""
+
+
+def test_fetch_content_by_url_network_error_returns_empty(monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "fake-key")
+
+    def _raise(*a, **kw):
+        raise ConnectionError("boom")
+
+    monkeypatch.setattr(mp_mod.requests, "post", _raise)
+    assert mp_mod.fetch_content_by_url(None, "https://medium.com/@a/post") == ""
+
+
+def test_backfill_fetch_by_url_success_skips_search_and_wayback(lib, monkeypatch):
+    """A recognized blocked-host article whose current URL Exa can fetch
+    directly must be accepted on the word-count floor alone — no title
+    search, no Wayback, exactly one log row, source='medium-fetch'."""
+    article_id = _seed(lib, url="https://medium.com/both-sides-of-the-table/some-post-abc123",
+                       title="Some Post", author="Mark Suster")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
+
+    fetch_text = ("Real opening paragraph with plenty of words to clear the minimum "
+                  "content threshold comfortably. " * 10)
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: fetch_text)
+
+    search_called = []
+    monkeypatch.setattr(mp_mod, "find_medium_candidate",
+                        lambda lib_, title, author="": search_called.append(1) or ("", ""))
+    wayback_called = []
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose",
+                        lambda url: wayback_called.append(url) or (None, "unreached"))
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is True
+    assert search_called == [], "must not fall through to search-by-title once fetch-by-URL succeeded"
+    assert wayback_called == []
+
+    log = lib.list_content_refetch_log()
+    assert len(log) == 1
+    assert log[0]["status"] == "success"
+    assert log[0]["source"] == "medium-fetch"
+    assert "both-sides-of-the-table" in log[0]["detail"]
+
+    row = lib.get_article(article_id)
+    assert "Real opening paragraph" in row["content_html"]
+
+
+def test_backfill_fetch_by_url_thin_result_falls_through_to_search(lib, monkeypatch):
+    """A fetch-by-URL result that's too short to clear the word-count floor
+    must fall through to search-by-title, not be accepted or treated as a
+    final miss."""
+    article_id = _seed(lib, url="https://medium.com/@vc/some-post", title="Some Post")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "Too short.")
+    monkeypatch.setattr(mp_mod, "find_medium_candidate",
+                        lambda lib_, title, author="": ("https://techcrunch.com/some-post", ""))
+
+    candidate_html = ("<html><body><article>" +
+                      "<p>Candidate content, definitely long enough to pass the sanity check.</p>" * 15 +
+                      "</article></body></html>")
+    candidate_page = PageData(title="Some Post",
+                              content="Candidate content, plenty of real words here. " * 20,
+                              blocked=False, raw_html=candidate_html)
+
+    def _fetch_page(url):
+        if "techcrunch.com" in url:
+            return candidate_page
+        return PageData(title="", content="", fetch_error="HTTP 403")
+    monkeypatch.setattr(extract_mod, "fetch_page", _fetch_page)
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is True
+    log = lib.list_content_refetch_log()
+    assert len(log) == 1
+    assert log[0]["source"] == "medium-search"
+
+
+def test_backfill_fetch_by_url_miss_falls_through_to_search(lib, monkeypatch):
+    """No result at all from fetch-by-URL falls through to search-by-title,
+    same as a thin result."""
+    article_id = _seed(lib, url="https://medium.com/@vc/some-post", title="Some Post")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: "")
+    monkeypatch.setattr(mp_mod, "find_medium_candidate",
+                        lambda lib_, title, author="": ("https://medium.com/@other/some-post-xyz", ""))
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is False  # too-thin exa-text candidate, same as the pre-existing test above
+
+
+def test_backfill_fetch_by_url_tried_even_with_no_title(lib, monkeypatch):
+    """Fetch-by-URL needs no title (there's no candidate to search for) —
+    a title-less article must still get the fetch-by-URL attempt."""
+    article_id = _seed(lib, url="https://medium.com/@vc/no-title-post", title="")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
+
+    fetch_calls = []
+    fetch_text = "Real opening paragraph with plenty of words. " * 15
+
+    def _fetch_by_url(lib_, url):
+        fetch_calls.append(url)
+        return fetch_text
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", _fetch_by_url)
+    search_called = []
+    monkeypatch.setattr(mp_mod, "find_medium_candidate",
+                        lambda lib_, title, author="": search_called.append(1) or ("", ""))
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is True
+    assert fetch_calls == ["https://medium.com/@vc/no-title-post"]
+    assert search_called == [], "fetch-by-URL succeeded, no need to fall through to search"
+
+
+def test_backfill_non_medium_host_skips_fetch_by_url_too(lib, monkeypatch):
+    """A host outside is_recognized_blocked_host must never even call
+    fetch_content_by_url, same as it already never calls
+    find_medium_candidate."""
+    article_id = _seed(lib, url="https://example.com/normal-post", title="Normal")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 500"))
+    fetch_called = []
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url",
+                        lambda lib_, url: fetch_called.append(1) or "")
+    monkeypatch.setattr(wayback_mod, "find_snapshot_verbose", lambda url: (None, "no snapshot archived"))
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is False
+    assert fetch_called == []
+
+
+def test_backfill_shockwave_host_uses_fetch_by_url_tier(lib, monkeypatch):
+    """shockwaveinnovations.com is not Medium, but IS a recognized blocked
+    host — it must reach the same fetch-by-URL tier."""
+    article_id = _seed(lib, url="https://www.shockwaveinnovations.com/blog/some-post",
+                       title="Some Post")
+    monkeypatch.setattr(extract_mod, "fetch_page",
+                        lambda url: PageData(title="", content="", fetch_error="HTTP 403"))
+    fetch_text = "Real opening paragraph with plenty of words to clear the floor. " * 10
+    monkeypatch.setattr(mp_mod, "fetch_content_by_url", lambda lib_, url: fetch_text)
+
+    ok, reason = pl.backfill_article_content(lib, lib.get_article(article_id))
+    assert ok is True
+    log = lib.list_content_refetch_log()
+    assert log[0]["source"] == "medium-fetch"
+
+
+def test_count_medium_fetch_content_latest_attempt_only(lib):
+    a1 = _seed(lib, url="https://medium.com/@a/one", title="One")
+    a2 = _seed(lib, url="https://medium.com/@a/two", title="Two")
+    lib.log_content_refetch_attempt(a1, "success", source="medium-fetch")
+    lib.log_content_refetch_attempt(a2, "success", source="medium-search")
+    assert lib.count_medium_fetch_content() == 1
+
+    lib.log_content_refetch_attempt(a1, "success", source="direct")
+    assert lib.count_medium_fetch_content() == 0
+
+
+def test_admin_page_shows_via_medium_fetch_badge(env):
+    lib = env._lib()
+    a = _seed(lib, url="https://medium.com/@a/one", title="Medium One")
+    lib.log_content_refetch_attempt(a, "success", source="medium-fetch", detail="https://medium.com/@a/one")
+    lib.close()
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert "via Medium fetch" in r.text
+
+
 def test_count_medium_search_content_latest_attempt_only(lib):
     a1 = _seed(lib, url="https://medium.com/@a/one", title="One")
     a2 = _seed(lib, url="https://medium.com/@a/two", title="Two")

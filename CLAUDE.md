@@ -1215,6 +1215,27 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   last tried), while the defunct-service exclusion still applies regardless
   of scope. See ARCHITECTURE.md's "Medium-platform Exa fetch tier" section
   for the full write-up.
+- **Medium-platform tier follow-up (2026-08 wrap-up sprint) — fetch-by-URL
+  tried before search-by-title, plus a non-Medium recognized blocked
+  host.** ~20 manual-review articles now have an exact, human-confirmed
+  URL (via the corrected-URL CSV import above) that the tier never used —
+  search-by-title was the only mode, so a generic title could miss or
+  mismatch even when the real URL was already known.
+  `linklib.medium_platform.fetch_content_by_url()` calls Exa's `/contents`
+  endpoint (not `/search`) for the article's own current URL first — no
+  title-match needed, since there's no candidate to disambiguate, just the
+  one true URL; a miss or too-thin result falls through to search-by-title
+  unchanged. Logged `source='medium-fetch'`, distinguishable from a
+  search-by-title success (`source='medium-search'`) in
+  `content_refetch_log` and the admin badge/count. Also added
+  `shockwaveinnovations.com` — Cloudflare-blocked the same way, but not
+  actually Medium underneath, so it lives in a separate
+  `_OTHER_BLOCKED_HOSTS` set rather than being mislabeled into
+  `_MEDIUM_CUSTOM_DOMAINS`; the tier's actual gate is now
+  `is_recognized_blocked_host()` (the union of both sets), while
+  `is_medium_platform_host()` keeps its original, narrower meaning
+  unchanged. See ARCHITECTURE.md's "Medium-platform tier follow-up"
+  section for the full write-up.
 - **Durability audit item 1 — `ingest_url()` now runs the same content
   sanity check the Reader backfill uses, at save time.** Previously a bad
   fetch (paywall preview, bot-challenge interstitial, a fetch failure, real
