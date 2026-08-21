@@ -1888,6 +1888,90 @@ phase is that re-fetch, run as a resumable, rate-limited, observable admin batch
     plus a failure-reason breakdown (`Library.content_refetch_failure_counts()`, latest
     attempt per article only, so a since-fixed failure doesn't keep inflating the tally)
     and a recent-attempts log table.
+
+### Dashboard clarity pass (`/admin/library/backfill-content`, 2026-08)
+
+`/admin/library/backfill-content`'s seven summary tiles accumulated across six PRs
+(the original backfill feature, the Medium fetch tier, and PRs #351-354's durability
+sprint) with no single place stating how they actually relate. Brian correctly
+inferred six of seven relationships by reading the copy, but one real question
+surfaced — where do "Accepted as final" articles get counted once that count is
+nonzero — and a separate rendering bug (the crash-banner reading above the live
+in-progress box instead of below it) went unnoticed because both counts involved
+were zero at the time.
+
+**Phase 0 finding: the partition is real, not a bug — the page just never said so.**
+Tracing every query behind the tiles (`Library.count_structured_content`,
+`count_content_backfill_remaining`, `count_articles_needing_manual_review`,
+`count_permanently_excluded_content`, `count_content_accepted`) confirms that for
+articles with a saved URL (`url!=''`), these five buckets are a true,
+mutually-exclusive partition: **Structured + Remaining + Needs review + Defunct
+service + Accepted as final = every article with a URL.** Each non-Structured
+bucket is keyed off a single fact — `content_html=''` AND the article's *latest*
+`content_refetch_log` row is either absent (Remaining, never attempted), a failure
+under `Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD` in a row (also Remaining),
+a failure at/over that threshold (Needs review), `reason='defunct-service'`
+(Defunct service), or `status='accepted'` (Accepted as final) — and a row's latest
+attempt can only be one of those at a time, so no article can land in two buckets
+at once. `accept_article_content()` never sets `content_html`; it only marks the
+article's existing (short but real) plain-text `content` as good enough, which is
+the direct answer to Brian's question: an accepted article is correctly excluded
+from **both** Structured and Remaining, because it's its own fifth bucket — visible
+in its own tile and its own "Accepted as final" table, never silently folded into
+either. `Total articles` is a different, wider count (`Library.count()`, no URL
+filter) that also includes articles with no saved URL at all, which never enter
+this pipeline — the page now shows that split explicitly rather than leaving
+"Total" looking like it should equal the sum of the other six.
+
+**"Flagged at save" is deliberately not a sixth partition member.**
+`articles.needs_content_check` is an orthogonal tag set by `ingest_url` at save
+time (see the durability-audit-item-1 bullet above) and cleared only by
+`set_article_content_html` — so it can sit on top of an article in Remaining,
+Needs review, Defunct service, or Accepted as final at the same time as one of
+those, but never on a Structured one. Adding it as a sixth bar segment would
+double-count the same article past 100%; it's rendered as a separate "not one of
+the five buckets above" overlay callout instead, with its own count and its own
+short explanation of why it's excluded from the partition total.
+
+**New: `Library.remaining_content_backfill_breakdown()`** (Phase 0 item 3, "how many
+of Remaining were never attempted vs. attempted-and-failed"). Reuses the exact same
+id set `count_content_backfill_remaining()` counts (factored out as
+`_content_backfill_remaining_ids()`, so the count and the breakdown can never
+disagree) and groups the attempted-and-failed subset by each article's latest
+failure reason. Surfaced in the Remaining tile's tooltip.
+
+**Tile layout**: a lone "Total articles" tile at the top, a proportional
+segmented bar (plain HTML/CSS divs, no charting library — the live distribution is
+heavily skewed toward Structured, and a pie chart makes the small categories
+illegible) directly below showing the five-bucket split, the five tiles themselves
+underneath (color-matched to their bar segment), and the Flagged-at-save overlay
+box last, visually set apart with a dashed border. Every tile gets a short
+`<details>`/`<summary>` tap-to-reveal tooltip (the sitewide disclosure convention,
+BRAND.md's own choice for exactly this — see the FP&A Buddy Depth-tier note
+above about why a positioned/absolutely-anchored tooltip was rejected there for
+mobile-overflow risk; the same reasoning applies here, so this reuses `<details>`
+instead of a custom popover) rather than a `title` attribute, since `title` doesn't
+reliably tap-reveal on mobile. `Needs review` and `Accepted as final` link (via
+their value, wrapped in an anchor) to their own detail table further down the page
+— but only when that table actually has rows to show, since an anchor to an
+absent/empty section would jump nowhere useful. `Flagged at save` and `Defunct
+service` have no existing per-article list view anywhere in the admin (confirmed
+by inventory before building), so neither tile links anywhere this pass — building
+those list views was deliberately left out of scope (see the PR description) rather
+than added as new list views in a display-only PR.
+
+**Banner order bug, fixed**: `_job_run_banner`'s own docstring already says a
+currently-running job should read "see the live status above" — but the route
+rendered `_job_run_banner(...)` (which can show either the live "still in
+progress" summary or the historical "started X ago, never finished" crash
+message) **above** `<div id="poll-container">` (the actual live progress box with
+its percentage bar), backwards from what that text assumes. A concurrently running
+job showed its own "see live status above" line pointing at nothing above it — the
+live box was below. Fixed by a plain reorder (`poll-container` first, then
+`_job_run_banner`) — no logic change; `_job_run_banner`'s own conditions (checking
+`_job_get(job_name)["running"]` before rendering the crash interpretation, per the
+2026-08 wrap-up sprint item 3 fix already in place) are untouched.
+
 ### Reader tag editing (Phase 5c)
 
 A deliberate, **tags-only** exception to the merge's "no inline management"

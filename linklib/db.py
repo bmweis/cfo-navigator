@@ -3222,15 +3222,12 @@ class Library:
             "SELECT COUNT(*) FROM articles WHERE url!='' AND content_html!=''"
         ).fetchone()[0]
 
-    def count_content_backfill_remaining(self) -> int:
-        """Matches articles_needing_content_backfill()'s default (non-force)
-        scope exactly, including the defunct-service, needs-manual-review
-        (Phase 5b follow-up #2), and accepted-as-final (durability audit
-        item 4) exclusions — so this stat reads as "how many articles the
-        next default-scope run will actually attempt," not an inflated
-        count that includes articles already known permanently
-        unrecoverable, parked for a human to correct, or explicitly
-        accepted as-is."""
+    def _content_backfill_remaining_ids(self) -> set[int]:
+        """The id set behind count_content_backfill_remaining() / the
+        "Remaining" tile — factored out so the count and the
+        never-attempted-vs-attempted-and-failed breakdown below can't drift
+        apart the way `done_count = total - remaining` once did (see
+        count_structured_content's docstring)."""
         base_ids = {
             r[0] for r in self.conn.execute(
                 """SELECT a.id FROM articles a
@@ -3244,7 +3241,66 @@ class Library:
                      )"""
             ).fetchall()
         }
-        return len(base_ids - self._manual_review_article_ids() - self._accepted_content_ids())
+        return base_ids - self._manual_review_article_ids() - self._accepted_content_ids()
+
+    def count_content_backfill_remaining(self) -> int:
+        """Matches articles_needing_content_backfill()'s default (non-force)
+        scope exactly, including the defunct-service, needs-manual-review
+        (Phase 5b follow-up #2), and accepted-as-final (durability audit
+        item 4) exclusions — so this stat reads as "how many articles the
+        next default-scope run will actually attempt," not an inflated
+        count that includes articles already known permanently
+        unrecoverable, parked for a human to correct, or explicitly
+        accepted as-is."""
+        return len(self._content_backfill_remaining_ids())
+
+    def remaining_content_backfill_breakdown(self) -> dict:
+        """Splits the Remaining tile's own id set (never-attempted vs.
+        attempted-and-failed, grouped by the failed attempt's latest
+        reason) — built for the dashboard-clarity pass so "Remaining" isn't
+        just one opaque number. Reuses
+        _content_backfill_remaining_ids() rather than re-deriving the scope,
+        so this can never disagree with the tile's own count.
+
+        Every id in this set either has zero content_refetch_log rows
+        (never attempted — a fresh save, or one still waiting for its first
+        backfill pass) or has a latest-attempt status of 'failure' with a
+        reason other than 'defunct-service' (excluded from this set
+        entirely) and an attempt count under
+        _MANUAL_REVIEW_ATTEMPT_THRESHOLD (at or over that, it's in "Needs
+        review" instead, not here) — 'success'/'accepted' latest attempts
+        can't appear here either, since those already imply content_html is
+        populated (Structured) or the article is durably excluded
+        (Accepted as final). So "reason" here is always a real failure
+        reason, never a placeholder.
+
+        Returns {"never_attempted": int, "attempted_failed": int,
+        "by_reason": {reason: count}} — by_reason counts only the
+        attempted-failed subset, one entry per article (latest attempt
+        only, same de-dupe as content_refetch_failure_counts)."""
+        remaining_ids = self._content_backfill_remaining_ids()
+        if not remaining_ids:
+            return {"never_attempted": 0, "attempted_failed": 0, "by_reason": {}}
+        placeholders = ",".join("?" * len(remaining_ids))
+        rows = self.conn.execute(
+            f"""SELECT article_id, reason FROM (
+                  SELECT article_id, reason,
+                         ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                  FROM content_refetch_log
+                  WHERE article_id IN ({placeholders})
+                ) WHERE rn=1""",
+            tuple(remaining_ids),
+        ).fetchall()
+        attempted_ids = {r[0] for r in rows}
+        by_reason: dict[str, int] = {}
+        for _article_id, reason in rows:
+            key = reason or "unknown"
+            by_reason[key] = by_reason.get(key, 0) + 1
+        return {
+            "never_attempted": len(remaining_ids) - len(attempted_ids),
+            "attempted_failed": len(attempted_ids),
+            "by_reason": by_reason,
+        }
 
     def count_permanently_excluded_content(self) -> int:
         """How many articles have been marked defunct-service on their most
