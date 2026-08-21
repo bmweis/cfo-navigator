@@ -148,9 +148,13 @@ _DEFAULT_CATEGORY_DESCRIPTIONS = {
 
 # coverage: "Private" | "Public" | "Both"
 # pricing:  "free" (default) | "paid" | "freemium"  -> shows a $ badge
-# One-time seed data for the `benchmarks` table (see _seed_toolbox). Not read
-# directly anywhere else — the DB is the source of truth once seeded, managed
-# at /admin/tools/resources.
+# One-time seed data for the "benchmarking" section of the `benchmarks` table
+# (see _seed_toolbox). Not read directly anywhere else — the DB is the source
+# of truth once seeded, managed at /admin/tools/resources. The "books"
+# section (Book recommendations) is NOT seeded from a list here — it's a
+# one-off insert via scripts/seed_book_recommendations.py (run by hand, not
+# this boot hook), since the sync-only _seed_toolbox pattern below only ever
+# updates an existing row by URL match, never inserts one.
 _DEFAULT_BENCHMARKS = [
     {
         "name": "ICONIQ Growth",
@@ -5726,8 +5730,18 @@ visible at a glance, side by side.</p>
     return HTMLResponse(_page("Leaderboard—Sail, Don't Row", "Sail, Don't Row", body, role=_role(request)))
 
 
+# Query-param values for /contact's `context` param — each maps to a
+# distinguishing prefix prepended to the prefilled message, so the saved
+# `contacts.message` text itself carries which surface a submission came
+# from (visible in the admin inbox preview) without a schema change. Add
+# an entry here, never invent a raw string at a call site.
+_CONTACT_CONTEXT_PREFIXES = {
+    "resource-suggestion": "Resource suggestion: ",
+}
+
+
 @app.get("/contact", response_class=HTMLResponse)
-def contact_page(request: Request, submitted: str = "", message: str = ""):
+def contact_page(request: Request, submitted: str = "", message: str = "", context: str = ""):
     if submitted == "1":
         body = """<div class="page page-form">
 <h1>Thanks for reaching out.</h1>
@@ -5735,6 +5749,9 @@ def contact_page(request: Request, submitted: str = "", message: str = ""):
 <a href="/" class="btn btn-ghost" style="margin-top:8px;">Back to home</a>
 </div>"""
         return HTMLResponse(_page("Contact—Brian Weisberg", "Contact", body, role=_role(request)))
+
+    if not message and context in _CONTACT_CONTEXT_PREFIXES:
+        message = _CONTACT_CONTEXT_PREFIXES[context]
 
     body = f"""<div class="page page-form">
 <h1>Get in Touch</h1>
@@ -7510,34 +7527,30 @@ def tools_benchmarks_redirect(request: Request):
     return RedirectResponse(target, status_code=301)
 
 
-@app.get("/tools/resources", response_class=HTMLResponse)
-def tools_resources(request: Request):
-    authed = _is_authed(request)
-    lib = _lib()
-    try:
-        benchmarks = lib.list_benchmarks()
-    finally:
-        lib.close()
+def _bench_badge_style(cov: str) -> str:
+    return {
+        "Private": "background:#dbeafe;color:#1d4ed8",
+        "Public":  "background:#dcfce7;color:#16a34a",
+        "Both":    "background:#ede9fe;color:#7c3aed",
+    }.get(cov, "background:var(--accent-light);color:var(--accent)")
 
-    def _bench_badge_style(cov: str) -> str:
-        return {
-            "Private": "background:#dbeafe;color:#1d4ed8",
-            "Public":  "background:#dcfce7;color:#16a34a",
-            "Both":    "background:#ede9fe;color:#7c3aed",
-        }.get(cov, "background:var(--accent-light);color:var(--accent)")
 
-    def _bench_pricing_badge(b: dict) -> str:
-        p = (b.get("pricing") or "free").lower()
-        if p == "paid":
-            label = "$ Paid"
-        elif p == "freemium":
-            label = "$ Free + paid"
-        else:
-            return ""
-        return (f'<span class="bench-badge" title="Paid resource" '
-                f'style="background:#fef3c7;color:#92400e;">{label}</span>')
+def _bench_pricing_badge(b: dict) -> str:
+    p = (b.get("pricing") or "free").lower()
+    if p == "paid":
+        label = "$ Paid"
+    elif p == "freemium":
+        label = "$ Free + paid"
+    else:
+        return ""
+    return (f'<span class="bench-badge" title="Paid resource" '
+            f'style="background:#fef3c7;color:#92400e;">{label}</span>')
 
-    bench_cards = "".join(
+
+def _bench_card(b: dict) -> str:
+    """Card for a 'benchmarking' section row — name + pricing/coverage
+    badges + description. Unchanged from the pre-split single-list markup."""
+    return (
         f'<a class="bench-card" href="{_esc(b["url"])}" target="_blank" rel="noopener">'
         f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px;">'
         f'<span class="bench-name">{_esc(b["name"])}</span>'
@@ -7548,8 +7561,38 @@ def tools_resources(request: Request):
         f'</div>'
         f'<p class="bench-desc">{_esc(b["description"])}</p>'
         f'</a>'
-        for b in benchmarks
     )
+
+
+def _book_card(b: dict) -> str:
+    """Card for a 'books' section row — same layout as _bench_card minus
+    the pricing/coverage badges, which encode data-access tiers that don't
+    map onto a personal reading list."""
+    return (
+        f'<a class="bench-card" href="{_esc(b["url"])}" target="_blank" rel="noopener">'
+        f'<div style="margin-bottom:8px;"><span class="bench-name">{_esc(b["name"])}</span></div>'
+        f'<p class="bench-desc">{_esc(b["description"])}</p>'
+        f'</a>'
+    )
+
+
+@app.get("/tools/resources", response_class=HTMLResponse)
+def tools_resources(request: Request):
+    authed = _is_authed(request)
+    lib = _lib()
+    try:
+        benchmarks = lib.list_benchmarks(section="benchmarking")
+        books = lib.list_benchmarks(section="books")
+    finally:
+        lib.close()
+
+    bench_cards = "".join(_bench_card(b) for b in benchmarks)
+    book_cards = "".join(_book_card(b) for b in books)
+    books_section = f"""<h2 style="margin:32px 0 4px;">Book recommendations</h2>
+<p style="color:var(--muted);font-size:14px;margin:0 0 16px;">A personal reading list&mdash;not benchmarking data.</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
+  {book_cards or '<p style="color:var(--muted);font-size:14px;">Coming soon.</p>'}
+</div>"""
 
     body = f"""<div class="page page-grid">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
@@ -7557,11 +7600,14 @@ def tools_resources(request: Request):
   <h1 style="margin:0;">Resources</h1>
   {'<a href="/admin/tools/resources" style="font-size:14px;font-weight:500;">Manage →</a>' if authed else ''}
 </div>
-<p style="color:var(--muted);font-size:14px;margin:8px 0 12px;">The benchmarking sources I actually use.</p>
+<p style="font-size:13px;color:var(--muted);margin:8px 0 24px;"><a href="/contact?context=resource-suggestion" style="color:var(--accent);font-weight:500;">Suggest a resource &rarr;</a></p>
+<h2 style="margin:0 0 4px;">Benchmarking</h2>
+<p style="color:var(--muted);font-size:14px;margin:0 0 12px;">The benchmarking sources I actually use.</p>
 <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a>&mdash;it&rsquo;s not always what you think it is.</p>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
   {bench_cards}
 </div>
+{books_section}
 </div>
 
 <style>
@@ -11113,8 +11159,15 @@ async def admin_feature_review_queue_deny(request: Request, item_id: int):
     return RedirectResponse("/admin/tools/software/feature-review-queue?msg=Denied.", status_code=303)
 
 
+_RESOURCE_SECTIONS = (("benchmarking", "Benchmarking"), ("books", "Book recommendations"))
+
+
 def _benchmark_form_fields(b: dict | None = None) -> str:
     b = b or {}
+    section_opts = "".join(
+        f'<option value="{val}"{" selected" if b.get("section", "benchmarking") == val else ""}>{label}</option>'
+        for val, label in _RESOURCE_SECTIONS
+    )
     coverage_opts = "".join(
         f'<option value="{c}"{" selected" if b.get("coverage", "Private") == c else ""}>{c}</option>'
         for c in ("Private", "Public", "Both")
@@ -11124,6 +11177,12 @@ def _benchmark_form_fields(b: dict | None = None) -> str:
         for p, label in (("free", "Free"), ("paid", "Paid"), ("freemium", "Free + paid"))
     )
     return f"""  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Section *</label>
+    <select name="section" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      {section_opts}
+    </select>
+  </div>
+  <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Name *</label>
     <input name="name" required maxlength="200" value="{_esc(b.get('name', ''))}"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
@@ -11152,19 +11211,11 @@ def _benchmark_form_fields(b: dict | None = None) -> str:
         {pricing_opts}
       </select>
     </div>
-  </div>"""
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin:-8px 0 0;">Coverage and Pricing only render on the public page for Benchmarking resources&mdash;Book recommendations ignore them.</p>"""
 
 
-@app.get("/admin/tools/resources", response_class=HTMLResponse)
-def admin_resources(request: Request):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        benchmarks = lib.list_benchmarks()
-    finally:
-        lib.close()
-
+def _admin_resource_table(benchmarks: list[dict]) -> str:
     rows = "".join(f"""<tr style="border-top:1px solid var(--line);">
   <td style="padding:10px 12px;font-weight:600;">{_esc(b['name'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);"><a href="{_esc(b['url'])}" target="_blank" rel="noopener" style="word-break:break-all;">{_esc(b['url'][:50])}{'…' if len(b['url']) > 50 else ''}</a></td>
@@ -11177,16 +11228,8 @@ def admin_resources(request: Request):
       <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
     </form>
   </td>
-</tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No resources yet.</td></tr>'
-
-    body = f"""<div class="page page-admin">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Resources</h1>
-  <a href="/admin/tools/resources/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add resource</a>
-</div>
-<p style="margin:0 0 24px;"><a href="/tools/resources" style="font-size:13px;color:var(--muted);">View on public directory →</a></p>
-<div style="overflow-x:auto;">
+</tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">None yet.</td></tr>'
+    return f"""<div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
   <th style="padding:10px 12px;text-align:left;font-size:13px;">Name</th>
@@ -11197,10 +11240,36 @@ def admin_resources(request: Request):
 </tr></thead>
 <tbody>{rows}</tbody>
 </table>
+</div>"""
+
+
+@app.get("/admin/tools/resources", response_class=HTMLResponse)
+def admin_resources(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        benchmarks = lib.list_benchmarks(section="benchmarking")
+        books = lib.list_benchmarks(section="books")
+    finally:
+        lib.close()
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+  <h1>Resources</h1>
+  <a href="/admin/tools/resources/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add resource</a>
 </div>
+<p style="margin:0 0 24px;"><a href="/tools/resources" style="font-size:13px;color:var(--muted);">View on public directory →</a></p>
+
+<h2 style="font-size:16px;margin:0 0 10px;">Benchmarking</h2>
+{_admin_resource_table(benchmarks)}
+
+<h2 style="font-size:16px;margin:28px 0 10px;">Book recommendations</h2>
+{_admin_resource_table(books)}
 
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
-  Editing <code>_DEFAULT_BENCHMARKS</code> in <code>webapp/app.py</code> updates a resource&rsquo;s
+  Editing <code>_DEFAULT_BENCHMARKS</code> in <code>webapp/app.py</code> updates a Benchmarking resource&rsquo;s
   <strong>name</strong> and <strong>description</strong> here automatically on the next deploy.
   No manual re-seed needed. <strong>Coverage and Pricing are database-only</strong>: edit them here
   (Edit above), and this sync will never touch them.
@@ -11236,11 +11305,14 @@ async def admin_resources_new_submit(request: Request):
     description = (form.get("description") or "").strip()
     coverage = (form.get("coverage") or "Private").strip()
     pricing = (form.get("pricing") or "free").strip()
+    section = (form.get("section") or "benchmarking").strip()
+    if section not in dict(_RESOURCE_SECTIONS):
+        section = "benchmarking"
     if not (name and url and description):
         raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
     try:
-        lib.add_benchmark(name, url, description, coverage, pricing)
+        lib.add_benchmark(name, url, description, coverage, pricing, section)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/resources", status_code=303)
@@ -11280,11 +11352,14 @@ async def admin_resources_edit_submit(request: Request, benchmark_id: int):
     description = (form.get("description") or "").strip()
     coverage = (form.get("coverage") or "Private").strip()
     pricing = (form.get("pricing") or "free").strip()
+    section = (form.get("section") or "benchmarking").strip()
+    if section not in dict(_RESOURCE_SECTIONS):
+        section = "benchmarking"
     if not (name and url and description):
         raise HTTPException(status_code=400, detail="Name, URL, and description are required.")
     lib = _lib()
     try:
-        lib.update_benchmark(benchmark_id, name, url, description, coverage, pricing)
+        lib.update_benchmark(benchmark_id, name, url, description, coverage, pricing, section)
     finally:
         lib.close()
     return RedirectResponse("/admin/tools/resources", status_code=303)

@@ -176,7 +176,8 @@ CREATE TABLE IF NOT EXISTS benchmarks (
     description TEXT NOT NULL DEFAULT '',
     coverage    TEXT NOT NULL DEFAULT 'Private',
     pricing     TEXT NOT NULL DEFAULT 'free',
-    sort_order  INTEGER NOT NULL DEFAULT 0
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    section     TEXT NOT NULL DEFAULT 'benchmarking'
 );
 
 -- The /thought-leadership page's four editorial lists (Writing, Speaking &
@@ -1939,6 +1940,12 @@ class Library:
             # competitive_differentiation/agent_taxonomy_note. Nullable/empty means
             # "no suite to note," not "not yet researched."
             "ALTER TABLE tools ADD COLUMN suite_note TEXT NOT NULL DEFAULT ''",
+            # /tools/resources splits into two sections (Benchmarking, Book
+            # recommendations) — 'benchmarking' | 'books'. Every existing row
+            # defaults to 'benchmarking' with no backfill needed; the ten
+            # book rows are inserted by a one-off migration script, not by
+            # this column-add.
+            "ALTER TABLE benchmarks ADD COLUMN section TEXT NOT NULL DEFAULT 'benchmarking'",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4983,10 +4990,18 @@ class Library:
     # -- benchmarking resources (the /tools "Resources" section; table/methods --
     # keep their original "benchmark" naming, only the URLs and page copy renamed) --
 
-    def list_benchmarks(self) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM benchmarks ORDER BY sort_order, name"
-        ).fetchall()
+    def list_benchmarks(self, section: str | None = None) -> list[dict]:
+        """All rows, or just one section ('benchmarking' | 'books') when
+        `section` is given — the public/admin Resources pages both render
+        the two sections separately."""
+        if section is not None:
+            rows = self.conn.execute(
+                "SELECT * FROM benchmarks WHERE section=? ORDER BY sort_order, name", (section,)
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM benchmarks ORDER BY section, sort_order, name"
+            ).fetchall()
         return [dict(r) for r in rows]
 
     def get_benchmark(self, benchmark_id: int) -> dict | None:
@@ -4994,22 +5009,23 @@ class Library:
         return dict(row) if row else None
 
     def add_benchmark(self, name: str, url: str, description: str,
-                      coverage: str = "Private", pricing: str = "free") -> int:
+                      coverage: str = "Private", pricing: str = "free",
+                      section: str = "benchmarking") -> int:
         next_order = self.conn.execute(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM benchmarks"
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM benchmarks WHERE section=?", (section,)
         ).fetchone()[0]
         cur = self.conn.execute(
-            "INSERT INTO benchmarks (name, url, description, coverage, pricing, sort_order) VALUES (?,?,?,?,?,?)",
-            (name.strip(), url.strip(), description.strip(), coverage, pricing, next_order),
+            "INSERT INTO benchmarks (name, url, description, coverage, pricing, sort_order, section) VALUES (?,?,?,?,?,?,?)",
+            (name.strip(), url.strip(), description.strip(), coverage, pricing, next_order, section),
         )
         self.conn.commit()
         return cur.lastrowid
 
     def update_benchmark(self, benchmark_id: int, name: str, url: str, description: str,
-                         coverage: str, pricing: str) -> None:
+                         coverage: str, pricing: str, section: str = "benchmarking") -> None:
         self.conn.execute(
-            "UPDATE benchmarks SET name=?, url=?, description=?, coverage=?, pricing=? WHERE id=?",
-            (name.strip(), url.strip(), description.strip(), coverage, pricing, benchmark_id),
+            "UPDATE benchmarks SET name=?, url=?, description=?, coverage=?, pricing=?, section=? WHERE id=?",
+            (name.strip(), url.strip(), description.strip(), coverage, pricing, section, benchmark_id),
         )
         self.conn.commit()
 
