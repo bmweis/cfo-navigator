@@ -2281,6 +2281,23 @@ appends a new `'failure'` row rather than deleting the `'accepted'` one, so the 
 article was accepted and later reversed stays visible in the log, same non-destructive
 precedent as everywhere else in this table.
 
+### "Snapshot on Wayback" guidance link (2026-08 wrap-up sprint item 4)
+
+A link and a sentence, nothing more — no Save Page Now API integration, no
+automation, no tracking of whether a snapshot was ever taken. Brian proved out
+a manual workaround in production: for an article whose live page loads fine
+in a browser but is bot-blocked to this app's own fetcher, manually opening
+`https://web.archive.org/save/<url>` creates a fresh archive.org snapshot,
+since archive.org's own crawler isn't subject to the same Cloudflare
+fingerprint block that stops ours — the next Wayback-tier attempt (or a
+manual re-check) can then retrieve it. Each "Needs manual review" row with a
+known current URL now shows a "Snapshot on Wayback ↗" link pointing at that
+exact Save Page Now URL, opening in a new tab (`webapp/app.py`'s
+`_review_row`), plus one guidance sentence in the section's existing
+explainer text. Nothing else changed — this documents an existing manual
+trick in the UI so it isn't tribal knowledge, it doesn't make the trick
+smarter.
+
 ### Article purge flow (durability follow-up, 2026-08)
 
 A permanent-deletion escape hatch for the narrow set of articles with genuinely nothing
