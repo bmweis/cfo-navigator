@@ -19034,7 +19034,19 @@ def _job_run_banner(job_name: str) -> str:
     routine. A row stuck at status='running' with no finished_at is what a
     crash mid-run looks like, called out explicitly rather than shown as a
     normal in-progress state (this banner never reflects LIVE progress —
-    that's still _JOB_STATE/the poll endpoint each page already has)."""
+    that's still _JOB_STATE/the poll endpoint each page already has).
+
+    2026-08 wrap-up sprint item 3 fix: that "never finished — likely
+    interrupted by a deploy or crash" interpretation is only true when
+    nothing live actually corresponds to the open row — confirmed in
+    production twice, this banner rendered the crash interpretation
+    directly above the same page's own genuinely-in-progress status panel,
+    because it never checked _JOB_STATE at all before assuming an open row
+    meant a crash. A run should only read as "never finished" when there's
+    no live process behind it; when _JOB_STATE says this job is currently
+    running, the open row IS that live run, not evidence of a crash — so
+    this now checks `_job_get(job_name)["running"]` first and renders the
+    ordinary in-progress line instead."""
     lib = _lib()
     try:
         last = lib.latest_job_run(job_name)
@@ -19043,10 +19055,15 @@ def _job_run_banner(job_name: str) -> str:
     amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
     coral_wash, coral = "var(--coral-wash)", "var(--coral)"
     seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+    blue_wash, blue_border, blue_text = "#eff6ff", "#bfdbfe", "#1d4ed8"
 
     if not last:
         bg, border, color = amber_wash, amber_border, amber_text
         html = "No run recorded yet."
+    elif last["status"] == "running" and not last.get("finished_at") and _job_get(job_name).get("running"):
+        bg, border, color = blue_wash, blue_border, blue_text
+        ago = _relative_age(last["started_at"])
+        html = f'Last run started {ago or "recently"} and is still in progress&mdash;see the live status above.'
     elif last["status"] == "running" and not last.get("finished_at"):
         bg, border, color = amber_wash, amber_border, amber_text
         ago = _relative_age(last["started_at"])
