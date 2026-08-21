@@ -45,6 +45,17 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/checks": _failing_checks_count(),
         "/admin/users": lib.count_pending_password_resets(),
         "/admin/email-failures": lib.count_pending_email_failures(),
+        # Phase 1c badge scope-down: only these three of the un-badged queues
+        # Phase 0 inventoried got wired in — each already has a cheap count
+        # (an indexed COUNT, or a documented "fine to run live" full scan;
+        # see that PR's CLAUDE.md note). ask-feedback and the three
+        # tools.*_needs_verification flags are deliberately left out: none of
+        # them has a pending/reviewed concept at all yet, so badging them
+        # would be new-feature design work, not badge-wiring — logged for a
+        # future flow-harmonization decision instead.
+        "/admin/tools/software/feature-review-queue": lib.count_feature_review_queue(status="pending"),
+        "/admin/library/backfill-content": lib.count_needs_content_check() + lib.count_articles_needing_manual_review(),
+        "/admin/tools/software/name-duplicates": len(lib.find_tool_name_duplicate_candidates()),
     }
     return {href: n for href, n in counts.items() if n}
 

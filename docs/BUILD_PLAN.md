@@ -266,11 +266,13 @@ existing 15-tag `tool_categories` vocabulary and how that got resolved
   Runway/Abacum/Aleph → FP&A, FloQast/Numeric/Ledge → Close Management) via
   the idempotent `scripts/seed_feature_taxonomy.py`, reading
   `scripts/seed_data/*.csv`.
-- Admin-only: Manage Features (per category, `/admin/tools/software/features`),
-  Manage Tool Features (a checklist on each tool's own edit page), and the
-  Feature Review Queue (`/admin/tools/software/feature-review-queue`) — approve,
-  edit-then-approve, or deny any proposal (admin/scan/public source) before
-  it reaches the live tables (rules doc §9).
+- Admin-only: Software features (`/admin/tools/software/features`, a single
+  pivot table covering every category since Phase 1c), a Feature Taxonomy
+  table on each tool's own edit page, and the Feature review queue
+  (`/admin/tools/software/feature-review-queue`) — approve (with a merge
+  confirmation step when a name collides), edit-then-approve, or deny any
+  proposal (admin/scan/public source) before it reaches the live tables
+  (rules doc §9).
 - `tools.suite_note` — free-text suite-membership notation (rules doc §5's
   "beyond the office of the CFO" case), independent of the feature tables.
 

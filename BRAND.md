@@ -162,6 +162,23 @@ unchanged).
 **Rules of thumb:** headings are tight (negative tracking) and Outfit; eyebrows are uppercase DM Sans
 with wide tracking and `--muted` or `--navy`; the serif is *exclusively* for reading long articles.
 
+### 3.2 Copy casing
+
+**Sentence case for all page titles, headers, section labels, and buttons across the site** —
+capitalize only the first word (and anything that's always capitalized on its own). "Software
+features," not "Software Features"; "Add software," not "Add Software."
+
+Exceptions:
+- **Named products and features** — FP&A Buddy, CFO Toolbox, Sail Don't Row — keep their own
+  established capitalization wherever they appear.
+- **Proper nouns** — a company name, a person's name.
+- **Acronyms** — ERP, FP&A, ASC 606, RBAC, AI, and the like — keep their own casing.
+
+Established as part of the Manage Features pivot-table redesign (Phase 1c, 2026-08); applied there
+to the pages that PR touched (the admin dashboard's Software cards, the feature pivot table, the
+review-queue page) rather than swept across the whole site — a dedicated casing pass across every
+existing page is separate, later work.
+
 ---
 
 ## 4. The graffiti/street-art accent layer (restrained — accents only)
@@ -413,6 +430,17 @@ introduced under this exception in `brand_check.py`'s allowlist in the same PR, 
 fails as an off-palette leak rather than a sanctioned exception. Every other pass/warn/error
 use case — banners, callout text, inline copy — stays on the semantic tokens; this exception
 is scoped to glanceable indicator elements specifically, not status communication in general.
+
+**Sanctioned coral exception — pending-count badges:** the admin hub's `.task-badge`/
+`.task-badge-dot`/`.task-dot` notification badges (a numeric count, or a plain dot for an
+all-or-none source — see `webapp/tasks.py`) use `var(--coral)`, not a semantic token — "something
+here needs you" is attention/urgency, the same register coral's decorative "pop" use is already
+sanctioned for, not a pass/fail/warn status the glanceable-indicators exception above covers.
+Documented here (Phase 1c, 2026-08) rather than introduced: this usage already shipped with the
+admin hub's original notification-badge build and has been live since. No new hex — `--coral` is
+an existing token, so nothing to add to `brand_check.py`'s allowlist. Scoped narrowly to pending-
+count/unread badges specifically; this doesn't reopen coral for other status use ("keep status
+colors for status only," §6, still holds everywhere else).
 
 ---
 

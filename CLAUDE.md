@@ -724,6 +724,105 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   like: everything that once read or wrote the table is gone before the
   data itself is dropped, not the other way around.
 
+- **Feature Taxonomy, Phase 1c — Manage Features becomes a single pivot
+  table; admin dashboard "Software" sub-group; sentence-case copy standard;
+  pending-count badges scoped down; review-queue merge gets a real
+  confirmation step; feature names get recased.** Managing ~22 categories
+  across N per-category subpages meant constant page-hopping — Phase 0
+  investigation confirmed the redesign target (one collapsible group per
+  category, all on one page) and audited every "awaiting review" entity in
+  the database as a review-flow consistency pass (deferred to a future
+  harmonization decision, not acted on here). Ships as one PR:
+  - **`/admin/tools/software/features` pivot table** — see the
+    `category_features` row in ARCHITECTURE.md for the full mechanism
+    (collapsible groups, single add form with a category selector, filter +
+    expand/collapse-all, pending queue items as read-only in-group rows,
+    `category`/`open_ids` query-param state). Old per-category subpage URL
+    is gone outright, no redirect — Brian's explicit call: it was never
+    bookmarked/linked externally, so a hard cutover cost nothing. The two
+    internal links that pointed at Manage Features (the tool edit page, the
+    old category index itself) already targeted the base
+    `/admin/tools/software/features` URL, so nothing needed repointing.
+  - **Admin dashboard "Software" sub-group** — the four software-directory
+    cards (renamed "Software vendors"/"Software categories"/"Software
+    features"/"Feature review queue", sentence case) nest inside CFO
+    Toolbox as their own collapsible sub-group, `_SOFTWARE_TOOLS` +
+    `software_subgroup_html` in `webapp/app.py`, the exact same
+    `_group_html(..., nested=True)` mechanism `_FPA_BUDDY_TOOLS` already
+    used — no new plumbing needed, confirmed by Phase 0 before building.
+    The name-duplicates page (no dashboard card of its own) folds its
+    pending count into this sub-group's aggregate badge via `badge_hrefs`,
+    same as Library's aggregate badge already covers hrefs with no direct
+    card. Page H1s/titles on the underlying pages updated to match
+    ("Software vendors", "Software categories").
+  - **Sentence-case copy standard** (BRAND.md §3.2) — page titles, headers,
+    section labels, and buttons are sentence case, with named
+    products/features (FP&A Buddy, CFO Toolbox, Sail Don't Row), proper
+    nouns, and acronyms (ERP, FP&A, ASC 606, RBAC, AI) exempted. Applied
+    only to the surfaces this PR touched (dashboard cards, the pivot page,
+    the review-queue title) — a sitewide casing sweep is separate, later
+    work, stated explicitly in BRAND.md rather than implied.
+  - **Pending-count badges, scoped down from the full Phase 0 inventory of
+    ~20 review-queue-like mechanisms** — Brian's explicit scope-down after
+    reviewing that audit: badged now are Feature Review Queue
+    (`Library.count_feature_review_queue`, new — a cheap indexed COUNT),
+    and the Reader content backfill's `needs_content_check` +
+    manual-review counts (both already had `count_*` methods, just weren't
+    wired into `webapp/tasks.py`). The tool name-duplicates page was
+    initially held back pending a cheapness answer — its own docstring
+    already answered it ("O(n log n) grouping over ~190 rows — fine to run
+    live on every page load, no caching needed"), so it's included too,
+    folded into the Software sub-group's aggregate badge (no dashboard card
+    of its own to badge individually). **Deliberately left out**: FP&A
+    Buddy feedback ratings and the three `tools.*_needs_verification` flags
+    — none of them has a pending/reviewed concept at all yet (no `reviewed`
+    column, no aggregating list page), so badging them would be new-feature
+    design work, not badge-wiring; logged in the Phase 0 audit for a future
+    flow-harmonization decision, untouched here.
+  - **Review-queue merge confirmation** — the exact-name-match merge inside
+    `approve_feature_review_queue_item` (confirmed working in production,
+    the Abacum/Aleph merge, 8/20) previously executed the instant an admin
+    clicked Approve, with no visible signal a merge had even happened. The
+    underlying merge logic is unchanged (and now covered by
+    `test_approve_reuses_existing_feature_by_name_instead_of_duplicating`,
+    which already existed before this PR); what's new is a confirmation
+    step interposed in the *route*: a name collision now renders a "Confirm
+    merge" page naming the vendors already linked, with Merge (resubmits
+    the same approve request plus `confirm_merge=1`) and Change name (back
+    to the queue to edit the name first) actions — no silent merges. See
+    ARCHITECTURE.md's `feature_review_queue` row for the mechanism.
+  - **Tool edit page's Feature Taxonomy checklist becomes a table**, grouped
+    by category — same columns/fields, same single-save-all form action
+    (`POST .../feature-links/save`, unchanged), just restyled from stacked
+    checkbox rows into a table matching the pivot/Software-vendors visual
+    pattern. Save mechanics were left as single-save-all rather than
+    switched to per-row: the brief left that decision to this PR's
+    judgment, and per-row would have meant a materially bigger route
+    change with no corresponding ask.
+  - **Feature-name recasing** — `docs/FEATURE_TAXONOMY.md` §3 gained three
+    naming rules (no "AI" in any form in a feature name; prefer short names
+    with qualifiers in `definition` instead; sentence case). A new
+    `scripts/recase_feature_names.py` (preview-by-default, `--apply` to
+    write, write-then-read-back verified — same convention as
+    `scripts/archive/rename_differentiation_columns.py`) recases every live
+    `category_features.name` to sentence case, preserving already-uppercase
+    tokens (acronyms: ASC, SOX, GRC, IFRS, GAAP, AI, ...) and any token
+    containing a digit (ASC 606, 1099). **Not run against production as
+    part of this PR** — per the standing human-run discipline, Brian runs
+    it by hand via `railway ssh` once this PR is deployed, after reviewing
+    the printed before/after diff. **Lives in `scripts/`, not
+    `scripts/archive/`, until that run happens** — same convention as
+    `scripts/drop_legacy_tool_features.py`/`scripts/seed_book_recommendations.py`:
+    a one-time script only moves to `scripts/archive/` (via `git mv`) once
+    it's actually been run, never before.
+  - **BRAND.md's coral "never for status" section gained a documented
+    exception for pending-count badges** — `.task-badge`/`.task-badge-dot`/
+    `.task-dot` have used `var(--coral)` since the admin hub's original
+    notification-badge build; this PR documents that existing usage as
+    sanctioned (alongside the pre-existing glanceable-health-indicators
+    exception) rather than introducing anything new — no new hex, so
+    nothing to add to `brand_check.py`'s allowlist.
+
 - **Key features card follow-up — "Slack" no longer gets lowercased.**
   The card's `_sentence_case_feature_name` heuristic protects real
   acronyms/codes (RBAC, ASC, AI, KPI, SOX, GAAP, IFRS, AWS, MCP, ...)

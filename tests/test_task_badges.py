@@ -316,6 +316,49 @@ def test_pending_community_badge_clears_on_approval(admin_client):
     assert '<span class="task-badge">1</span>' not in r4.text
 
 
+# --- Phase 1c badge scope-down: feature review queue, content backfill,
+# name-duplicates --------------------------------------------------------
+
+def test_count_feature_review_queue(lib):
+    assert lib.count_feature_review_queue(status="pending") == 0
+    cat_id = lib.add_tool_category("ERP")
+    lib.add_feature_review_queue_item(
+        "scan", "new_feature", {"category_id": cat_id, "feature": {"name": "A"}, "links": []},
+        category_id=cat_id,
+    )
+    assert lib.count_feature_review_queue(status="pending") == 1
+    assert lib.count_feature_review_queue(status=None) == 1
+
+
+def test_open_task_counts_reflects_pending_feature_review_queue_item(lib):
+    from webapp import tasks
+    cat_id = lib.add_tool_category("ERP")
+    lib.add_feature_review_queue_item(
+        "scan", "new_feature", {"category_id": cat_id, "feature": {"name": "A"}, "links": []},
+        category_id=cat_id,
+    )
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/tools/software/feature-review-queue"] == 1
+
+
+def test_open_task_counts_reflects_content_backfill_needs(lib):
+    from webapp import tasks
+    from linklib.db import Article
+    art = Article(url="https://x.example/needs-check", title="t", source="s")
+    aid = lib.upsert(art)
+    lib.set_content_check_flag(aid, True, "too-thin")
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/library/backfill-content"] == 1
+
+
+def test_open_task_counts_reflects_name_duplicates(lib):
+    from webapp import tasks
+    lib.add_tool("Rillet", "d", "https://rillet.com", ["ERP"], approved=1, summary="s")
+    lib.add_tool("Rillet", "d", "https://rillet-dup.example", ["ERP"], approved=1, summary="s")
+    counts = tasks.open_task_counts(lib)
+    assert counts["/admin/tools/software/name-duplicates"] == 1
+
+
 def test_reject_community_deletes_pending_submission(admin_client):
     client, appmod, db = admin_client
     from linklib.db import Library
