@@ -1215,6 +1215,40 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   last tried), while the defunct-service exclusion still applies regardless
   of scope. See ARCHITECTURE.md's "Medium-platform Exa fetch tier" section
   for the full write-up.
+- **Medium-platform tier follow-up (2026-08 wrap-up sprint) — fetch-by-URL
+  tried before search-by-title, plus a non-Medium recognized blocked
+  host.** ~20 manual-review articles now have an exact, human-confirmed
+  URL (via the corrected-URL CSV import above) that the tier never used —
+  search-by-title was the only mode, so a generic title could miss or
+  mismatch even when the real URL was already known.
+  `linklib.medium_platform.fetch_content_by_url()` calls Exa's `/contents`
+  endpoint (not `/search`) for the article's own current URL first — no
+  title-match needed, since there's no candidate to disambiguate, just the
+  one true URL; a miss or too-thin result falls through to search-by-title
+  unchanged. Logged `source='medium-fetch'`, distinguishable from a
+  search-by-title success (`source='medium-search'`) in
+  `content_refetch_log` and the admin badge/count. Also added
+  `shockwaveinnovations.com` — Cloudflare-blocked the same way, but not
+  actually Medium underneath, so it lives in a separate
+  `_OTHER_BLOCKED_HOSTS` set rather than being mislabeled into
+  `_MEDIUM_CUSTOM_DOMAINS`; the tier's actual gate is now
+  `is_recognized_blocked_host()` (the union of both sets), while
+  `is_medium_platform_host()` keeps its original, narrower meaning
+  unchanged. **Pre-merge live-proof follow-up:** two production traces came
+  back with a `content_refetch_log` row indistinguishable from the
+  pre-fetch-by-URL flow — no way to tell "the tier ran and missed" from
+  "the tier was never reached" just from the log. Fixed before merge:
+  `_try_medium_platform()` now always returns a 5th `note` element (a short
+  trace of what it actually attempted), and `_finish_backfill_after_direct_failure`
+  appends a `tier_notes` trace (migration and Medium both) to the final
+  logged `detail` whenever a tier is genuinely reached — an unrecognized
+  host still logs identically to before. `scripts/trace_medium_tier.py` is
+  a new manual-QA script (registered in `/admin/system/scripts`) for a
+  second, independent live confirmation path, plus a Wayback-snapshot
+  content inspector for the "is the stored snapshot an empty
+  client-side-rendered shell" question the same live-proof round raised.
+  See ARCHITECTURE.md's "Medium-platform tier follow-up" section for the
+  full write-up.
 - **Durability audit item 1 — `ingest_url()` now runs the same content
   sanity check the Reader backfill uses, at save time.** Previously a bad
   fetch (paywall preview, bot-challenge interstitial, a fetch failure, real
@@ -1300,8 +1334,16 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   "N ago" text — same green/amber/coral posture as the backup/integrity
   banners above. A row stuck at `status='running'` with no `finished_at` is
   exactly what a crash mid-run looks like, and the banner says so
-  explicitly rather than rendering it as ordinary live progress. See
-  ARCHITECTURE.md's `job_run_log` table row for the full write-up.
+  explicitly rather than rendering it as ordinary live progress. **Fixed
+  (2026-08 wrap-up sprint item 3): that interpretation only holds when
+  nothing live actually corresponds to the open row** — confirmed in
+  production twice, the banner was rendering "never finished — likely
+  interrupted by a deploy or crash" directly above the same page's own
+  genuinely-in-progress status panel, because it never checked
+  `_JOB_STATE` before assuming an open row meant a crash. Fixed by checking
+  `_job_get(job_name)["running"]` first; when the job is actually live, the
+  banner renders a plain in-progress line instead. See ARCHITECTURE.md's
+  `job_run_log` table row for the full write-up.
 - **"Snapshot on Wayback" guidance link (2026-08 wrap-up sprint item 4) — a
   link and a sentence, nothing more.** Brian proved out a manual workaround
   in production: for an article whose live page loads fine in a browser
@@ -2017,7 +2059,15 @@ tables, no third-party dependency.
     `/library/{article_id}/tags` (the Reader's inline tag editor, Phase 5c —
     the route predates it but had no callers until then).
   - `/save` is **token-only** (`X-Save-Token` header or `?token=`) because the bookmarklet
-    calls it cross-origin, where the login cookie can't be sent.
+    calls it cross-origin, where the login cookie can't be sent. It also carries a
+    dedicated, `/save`-only CORS middleware (`_save_cors` in `webapp/app.py`, 2026-08
+    wrap-up sprint item 2) so that cross-origin call actually works — confirmed broken
+    in production before this shipped (a real third-party origin got `TypeError: Failed
+    to fetch`, the classic CORS-rejection signature); see ARCHITECTURE.md's
+    "Three middlewares wrap everything" bullet for the full write-up. A permissive
+    `Access-Control-Allow-Origin: *` is safe here specifically because `/save` already
+    requires a valid token to do anything — same trust model as any bearer-token API,
+    and it grants no cookie-authenticated access. No other route gets a CORS header.
 - **No secret in rendered HTML.** Internal links no longer carry `?token=`; the cookie
   authorizes navigation. Token comparison is constant-time (`hmac.compare_digest`).
 - **⚠️ Bookmarklet caveat (by design).** The `/bookmarklet` snippet embeds
@@ -2025,7 +2075,14 @@ tables, no third-party dependency.
   cross-origin where the cookie is unavailable. The `/bookmarklet` *page* is login-gated
   so only Brian can retrieve it, **but the snippet itself is a secret.** Don't paste it
   publicly, and **if you rotate `LINKLIB_SAVE_TOKEN`, re-grab the bookmarklet** (the old
-  one stops working).
+  one stops working) — the page itself always renders whatever `LINKLIB_SAVE_TOKEN` the
+  running process currently has (a live module-level global, re-populated from the env
+  var at each process start), so a stale copy means a stale COPY in someone's bookmarks
+  bar, not a stale server. **2026-08 wrap-up sprint item 2:** the snippet shipped with an
+  unbalanced closing brace (`body:JSON.stringify({url:u,tags:t})}}` closed the fetch
+  options object twice before `.then` ever ran) — a syntax error, so every copy was a
+  silent no-op that never threw anywhere visible; fixed, plus a `.catch` on the fetch
+  chain so a network/CORS failure now alerts visibly instead of doing nothing.
 - `/static/{filename}` resolves through `os.path.basename` to block path traversal.
 
 ## `library.db` is intentionally not in the repo

@@ -274,7 +274,7 @@ used manual check rather than a per-turn or overhead cost.
 | `library_queue` | Staging area for proposed additions (RSS scan, sitemap backfill, reader submissions). Candidates arrive enriched-but-unsaved for review; promoting moves the row into `articles`, preserving enrichment already paid for. | `url` (unique, same natural key), `origin` (`feed` \| `backfill:<source>` \| `submission:<who>`), `status` (`pending` \| `dismissed` — dismissed rows stay, so a rejected candidate is never re-proposed) |
 | `dedupe_decisions` | Curator verdicts on near-duplicate *pairs*, keyed by the sorted URL pair. Suppresses already-judged pairs from future scans and teaches the Claude verifier. | `pair_key` (unique), `verdict` (`dup` \| `distinct`) |
 | `read_later` | Per-user private bookmark list, never shared or mixed into the archive. | `user_id` + `url` (unique together — enforced by a post-migration index because the column arrived by migration) |
-| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). Also backs the "needs manual review" capped-retry tier (Phase 5b follow-up #2, see the write-up below) — `Library._manual_review_article_ids()` counts attempts per article *since its last `url_correction_log` row* (or ever, if never corrected). A THIRD `status` value, `'accepted'` (durability audit item 4), is the "accept as final" override — see the write-up below — and composes with `_manual_review_article_ids()` for free: that query already only looks at the most recent attempt and requires `status='failure'`, so an `'accepted'` row as the latest attempt drops the article out of the manual-review list without any change to that query; `articles_needing_content_backfill()`'s default scope and `count_content_backfill_remaining()` separately exclude the same latest-row-`'accepted'` set (`Library._accepted_content_ids()`) so the override also sticks against future automatic retries, not just the one list. | `article_id` (no FK), `status` (`success` \| `failure` \| `accepted`), `reason` (failure only, or copied from the prior failure onto an `accepted` row for display/undo: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error` \| `defunct-service`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback or migration success, the URL actually used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` \| `'migration'` \| `'medium-search'` \| `'save'` — distinguishes a Wayback-archived-snapshot, known-domain-migration, Medium-platform-search, or save-time (durability audit item 1 — `ingest_url` itself, not a backfill re-fetch) success/failure from a normal live-fetch success; see the "fetch reliability", "retry backoff", and "Medium-platform Exa fetch tier" notes in §3 below) |
+| `content_refetch_log` | Per-attempt audit trail for the Reader content-structure backfill (Phase 5b) — one row per `linklib.pipeline.backfill_article_content()` call, success or failure, shape mirrors `backup_log`. A re-run after a stop or crash adds new rows rather than overwriting old ones, so a flaky source's full history stays visible; `Library.content_refetch_failure_counts()` reads only the latest attempt per article so a since-fixed failure doesn't keep inflating the tally, and `Library.content_refetch_failure_domains()` groups the same latest-attempt set by URL host so a source-wide problem (one site blocking/throttling this tool) is visible as a cluster, not N identical-looking rows. No SQL-level FK to `articles` (same convention as `tool_audit_log`'s `item_id`). Also backs the "needs manual review" capped-retry tier (Phase 5b follow-up #2, see the write-up below) — `Library._manual_review_article_ids()` counts attempts per article *since its last `url_correction_log` row* (or ever, if never corrected). A THIRD `status` value, `'accepted'` (durability audit item 4), is the "accept as final" override — see the write-up below — and composes with `_manual_review_article_ids()` for free: that query already only looks at the most recent attempt and requires `status='failure'`, so an `'accepted'` row as the latest attempt drops the article out of the manual-review list without any change to that query; `articles_needing_content_backfill()`'s default scope and `count_content_backfill_remaining()` separately exclude the same latest-row-`'accepted'` set (`Library._accepted_content_ids()`) so the override also sticks against future automatic retries, not just the one list. | `article_id` (no FK), `status` (`success` \| `failure` \| `accepted`), `reason` (failure only, or copied from the prior failure onto an `accepted` row for display/undo: `paywall` \| `bot-challenge` \| `too-thin` \| `fetch-error` \| `defunct-service`), `detail` (for `fetch-error`: the specific `PageData.fetch_error` reason — an HTTP status, `timeout`, or a connection/SSL error string, from `extract._describe_fetch_error()`; for a Wayback or migration success, the URL actually used; empty otherwise), `source` (added via migration, default `'direct'`: `'direct'` \| `'wayback'` \| `'migration'` \| `'medium-fetch'` \| `'medium-search'` \| `'save'` — distinguishes a Wayback-archived-snapshot, known-domain-migration, Medium-platform-tier (`'medium-fetch'` for a direct Exa fetch of the article's own URL, `'medium-search'` for a search-by-title match — see the "Medium-platform tier follow-up" note in §3), or save-time (durability audit item 1 — `ingest_url` itself, not a backfill re-fetch) success/failure from a normal live-fetch success; see the "fetch reliability", "retry backoff", and "Medium-platform Exa fetch tier" notes in §3 below) |
 | `url_correction_log` | Durable trace of every manual URL correction applied via the manual-review CSV import (Phase 5b follow-up #2) — per CLAUDE.md's "every production data change leaves a trace" rule. Written by `Library.apply_article_url_correction()`, one row per correction, `old_url` snapshotted immediately before the `UPDATE` (same precedent as `tool_audit_log`/`community_audit_log`). No SQL-level FK to `articles`. `admin_id` is nullable and always `NULL` today — this app has no per-admin accounts (a single shared secret), so the column is forward-looking only. | `article_id` (no FK), `old_url`, `new_url`, `source` (default `'csv-import'`), `admin_id` (nullable, unused today) |
 
 ### FP&A Buddy (Ask)
@@ -1146,7 +1146,7 @@ from the public page. Not editable via the admin CRUD.
 | `contact_audit_log` | Same shape for contact deletions — kept separate so `item_id` is never ambiguous about which table it references. | as above, `item_id` → `contacts.id` |
 | `backup_log` | Off-site Drive backup audit trail (Phase O) — one row per `linklib.backup.backup_now()` attempt, success or failure, written from inside `backup.py` itself so it's one code path regardless of which trigger fired (the daily GitHub Action, a manual `/admin/backup-now` click, or one of the ~18 debounced `maybe_backup()` call sites in `webapp/app.py`). No `admin_id`/FK — a scheduled Action run isn't attributable to a person the way an admin edit is. Read by the status banner + history table on `/admin/library/backup`. A backup skipped because the pre-backup integrity check failed (durability audit item 2, see `integrity_check_log` below) also logs a `'failure'` row here, `error` prefixed `"Backup skipped — integrity check failed: ..."`, so the existing status banner surfaces it without a second banner-reading code path. | `status` (`'success'`\|`'failure'`), `drive_file_id` (success only — powers the "Open in Drive" link), `row_count` (`SELECT COUNT(*) FROM articles` on the snapshot at backup time — the sanity check the restore path already runs on upload), `error` (failure only) |
 | `integrity_check_log` | Durability audit item 2 (elevated, 2026-08) — one row per `linklib.backup.check_integrity()` run, shape mirrors `backup_log` exactly. Nothing previously ran `PRAGMA integrity_check` against the live DB; corruption would only ever have surfaced at restore time, by which point it would already be baked into every retained snapshot. `check_integrity()` runs `PRAGMA integrity_check` plus the FTS5 self-check (`INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')` — the exact command RUNBOOK.md §4's restore rehearsal already runs by hand) against the live DB, on the same cadence as the backup itself, immediately before every snapshot. **A failure blocks that night's backup upload** (see `backup_now()`'s docstring for the full "block vs. upload-and-flag" reasoning) rather than uploading a possibly-corrupt snapshot anyway. Read by the "Pre-backup integrity check" status banner on `/admin/library/backup`, which sits above the existing backup-status banner — deliberately a separate banner, since "the backup succeeded" and "the DB is structurally sound" are two different facts a single banner would conflate. | `status` (`'ok'`\|`'failure'`), `detail` (the failing `PRAGMA integrity_check` row text, or the FTS5 self-check's exception text; `'ok'` on success) |
-| `job_run_log` | Durability audit item 3 (2026-08) — durable start/finish record for each of the three `_JOB_STATE`-backed background jobs (re-enrich, Historical sweep, Reader content backfill), shape mirrors `backup_log`/`integrity_check_log`. `_JOB_STATE` (`webapp/app.py`, an in-process dict) is unchanged and still owns LIVE in-request progress — this table is written only twice per run (`Library.start_job_run` at the top of each job function, `Library.finish_job_run` at every exit path, including a deliberate stop) and exists purely so a Railway redeploy or crash doesn't erase whether a job last succeeded, failed, or ever ran. Read by `_job_run_banner()`, a shared "last run: outcome, N ago" banner rendered on each of the three jobs' own admin-page section (`/admin/library/enrich`, the Historical sweep panel on `/admin/library/queue`, `/admin/library/backfill-content`) — same green/amber/coral posture as the backup/integrity banners. A row stuck at `status='running'` with an empty `finished_at` is exactly what a crash mid-run looks like, and is called out as such rather than shown as live progress. | `job_name` (`'enrich'`\|`'backfill'`\|`'content_backfill'`), `status` (`'running'`\|`'success'`\|`'failure'`\|`'stopped'`), `summary` (short human-readable counts, e.g. `'42/50 succeeded'`), `error` (failure only), `started_at`, `finished_at` (`''` while running) |
+| `job_run_log` | Durability audit item 3 (2026-08) — durable start/finish record for each of the three `_JOB_STATE`-backed background jobs (re-enrich, Historical sweep, Reader content backfill), shape mirrors `backup_log`/`integrity_check_log`. `_JOB_STATE` (`webapp/app.py`, an in-process dict) is unchanged and still owns LIVE in-request progress — this table is written only twice per run (`Library.start_job_run` at the top of each job function, `Library.finish_job_run` at every exit path, including a deliberate stop) and exists purely so a Railway redeploy or crash doesn't erase whether a job last succeeded, failed, or ever ran. Read by `_job_run_banner()`, a shared "last run: outcome, N ago" banner rendered on each of the three jobs' own admin-page section (`/admin/library/enrich`, the Historical sweep panel on `/admin/library/queue`, `/admin/library/backfill-content`) — same green/amber/coral posture as the backup/integrity banners. A row stuck at `status='running'` with an empty `finished_at` is exactly what a crash mid-run looks like, and is called out as such rather than shown as live progress — **but only when nothing live actually corresponds to it** (2026-08 wrap-up sprint item 3 fix): `_job_run_banner()` originally rendered the crash interpretation for ANY open row, so it showed "never finished — likely interrupted by a deploy or crash" directly above the same page's own genuinely-in-progress status panel whenever a job happened to still be running, confirmed in production twice. Fixed by checking `_job_get(job_name)["running"]` before assuming an open row means a crash — when the job is actually live, the open row IS that live run, and the banner renders a plain in-progress line instead. | `job_name` (`'enrich'`\|`'backfill'`\|`'content_backfill'`), `status` (`'running'`\|`'success'`\|`'failure'`\|`'stopped'`), `summary` (short human-readable counts, e.g. `'42/50 succeeded'`), `error` (failure only), `started_at`, `finished_at` (`''` while running) |
 
 ### Feed subscriptions
 
@@ -2466,6 +2466,75 @@ bullets for that history.
   narrowing the run to it. Not Medium-specific — any host suffix works — but
   this is the change that motivated building it.
 
+### Medium-platform tier follow-up — fetch-by-URL before search-by-title, plus a non-Medium blocked host (2026-08 wrap-up sprint item 1)
+
+Production evidence from the manual-review corrected-URL workflow above
+surfaced a real gap in the Medium-platform tier as originally built: ~20
+stuck articles now have an exact, human-confirmed URL (imported via the
+`corrected_url` CSV round trip), and the tier never used it — search-by-title
+was the only mode, so a generic title could find the wrong candidate or none
+at all even when the correct URL was already known.
+
+- **`linklib.medium_platform.fetch_content_by_url()`** calls Exa's `/contents`
+  endpoint (not `/search`) for the article's own current (post-correction) URL.
+  There's no candidate to disambiguate the way a title search has, so a
+  substantive result is accepted on the word-count floor
+  (`extract._MIN_CONTENT_WORDS`) alone — no title-match check. Tried first in
+  `pipeline._try_medium_platform()`; a miss or a too-thin result falls through
+  to the pre-existing search-by-title flow unchanged. Logged with
+  `source='medium-fetch'`, distinguishable from a search-by-title success
+  (`source='medium-search'`) in `content_refetch_log`, the admin attempts-log
+  badge ("via Medium fetch" vs. "via Medium search"), and a matching
+  `Library.count_medium_fetch_content()` stat — see `content_refetch_log`'s
+  table row above for the updated `source` enum.
+- **Fetch-by-URL needs no title** — unlike search-by-title, which is skipped
+  outright for a title-less article, the fetch-by-URL attempt runs regardless
+  (there's nothing to search for, only a URL to fetch).
+- **`is_recognized_blocked_host()`, not `is_medium_platform_host()`, is the
+  actual gate** for this tier (both the fetch-by-URL/search-by-title entry
+  point and the same-domain carve-out inside search-by-title validation) —
+  the same production evidence surfaced `shockwaveinnovations.com`, a host
+  Cloudflare-blocked exactly like the Medium-platform hosts but **not**
+  actually Medium underneath. Rather than mislabel it into
+  `_MEDIUM_CUSTOM_DOMAINS` (a factual claim about being Medium's own
+  publishing platform), it lives in a separate, honestly-named
+  `_OTHER_BLOCKED_HOSTS` set; `is_recognized_blocked_host()` is the union of
+  the two. `is_medium_platform_host()` itself is unchanged and still means
+  exactly what it always meant — nothing that reads "is this really Medium"
+  had its meaning altered.
+
+**Live-proof follow-up — the logged detail couldn't distinguish "the tier ran
+and missed" from "the tier was never reached."** A pre-merge live-proof round
+(two production articles, both recognized blocked hosts) came back with
+`content_refetch_log` rows that looked byte-for-byte like the pre-fetch-by-URL
+flow: `source='direct'`, the original `direct_reason`, and a `detail` only
+ever showing what Wayback itself did (`"HTTP 403 (wayback: no snapshot
+archived)"`) — there was no way to confirm from the log alone whether
+`_try_medium_platform()` had actually executed, since a genuine miss and a
+skipped tier produce an identical row. Code-tracing confirmed both articles'
+hosts do match `is_recognized_blocked_host()` (a plain `medium.com` netloc,
+and `shockwaveinnovations.com` after the `www.` strip), so the tier was in
+fact reached both times — but that was an inference from reading the code,
+not something the log itself could show. Fixed before merge, not deferred:
+`_try_medium_platform()` now returns a 5th element, `note` — a short,
+ALWAYS-populated diagnostic trace of exactly what it attempted and why
+(`"fetch-by-url: too-thin (12 words); search-by-title: no candidate"`, etc.),
+success or failure. `_finish_backfill_after_direct_failure()` accumulates a
+`tier_notes` list from every tier it actually reaches (migration too, same
+gap, same fix — not Medium-specific plumbing) and passes it to
+`_finish_backfill_via_wayback()` as `tier_trace`, which appends it to the
+final logged `detail` in square brackets regardless of Wayback's own
+outcome. An article whose host isn't recognized by any tier logs identically
+to before this fix — the trace is additive, appearing only when a tier
+genuinely ran. `scripts/trace_medium_tier.py` (new, "Reusable diagnostic" in
+the scripts registry) gives a second, independent confirmation path: it
+calls `_try_medium_platform()` directly (never the write path) against a
+specific stuck article ID, printing its existing log history alongside a
+live re-trace, plus a Wayback-snapshot content inspector (raw HTML length,
+extracted word count, `assess_extraction_quality()`'s verdict, a text
+preview) for the "is the stored snapshot an empty client-side-rendered
+shell" hypothesis raised during the same live-proof round.
+
 ### Admin nav restructure, Library page cleanup, and page-width fixes (Phase 6)
 
 Three related but distinct pieces, shipped as one PR because the second and
@@ -2923,12 +2992,31 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   comparisons are constant-time (`hmac.compare_digest`).
 - If **no password is configured at all**, private routes are open — a
   local-development convenience, never the hosted configuration.
-- Two middlewares wrap everything: a canonical-host 301 (www + legacy Railway
+- Three middlewares wrap everything: a canonical-host 301 (www + legacy Railway
   hostname → apex, guarded so dev instances, `/health`, and `/admin/backup-now`
   never redirect — for proxied www traffic Cloudflare's edge Redirect Rule
   fires first, so this middleware is the backstop for the legacy hostname and
-  direct-origin hits) and `Cache-Control: no-store` on `/admin/*` (so task
-  badges are never served stale from the back-forward cache).
+  direct-origin hits), `Cache-Control: no-store` on `/admin/*` (so task
+  badges are never served stale from the back-forward cache), and (2026-08
+  wrap-up sprint item 2) a `/save`-only CORS middleware (`_save_cors`) —
+  confirmed broken in production, a syntax-corrected bookmarklet run from a
+  real third-party origin (bolster.com) failed with `TypeError: Failed to
+  fetch`, the classic CORS-rejection signature, since `/save` had never sent
+  any `Access-Control-*` headers. It answers the JSON POST's real preflight
+  `OPTIONS` request directly (204, `Access-Control-Allow-Origin: *`) and
+  stamps the same allow-origin header onto the actual `/save` response
+  (success or error), scoped to exactly this one path — no other route picks
+  up a CORS header, since everything else on the site is same-origin
+  cookie-authenticated. A permissive `*` origin is safe here specifically
+  because `/save` already requires a valid save token to do anything (see
+  `_check_token`) — same trust model as any other bearer-token API, and a
+  `*`-origin response can never carry credentials anyway. The `/bookmarklet`
+  snippet itself had an independent bug fixed in the same PR: one unbalanced
+  closing brace (`body:JSON.stringify({url:u,tags:t})}}` closed the fetch
+  options object twice before `.then` ever ran) made every copy of the
+  snippet a silent no-op — a syntax error, never thrown anywhere visible.
+  Fixed, plus a `.catch` added to the fetch chain so a network/CORS failure
+  now alerts visibly instead of silently doing nothing.
 - **`/admin/backup-now` is a deliberate, narrowly-scoped exception to the
   canonical-host redirect (Phase O).** The daily backup GitHub Action calls
   this one route directly on the legacy Railway hostname on purpose, to

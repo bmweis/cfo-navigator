@@ -300,6 +300,40 @@ async def _no_store_admin_pages(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def _save_cors(request: Request, call_next):
+    """CORS for /save only (2026-08 wrap-up sprint item 2) — the bookmarklet
+    runs on third-party pages (it POSTs cross-origin, where the login cookie
+    can't be sent — see /bookmarklet's own docstring), so the browser needs
+    real CORS headers on this one route or every request silently fails
+    with no server-side trace at all (Chrome's console shows "TypeError:
+    Failed to fetch", confirmed live from a real third-party origin — the
+    request never even reaches this app, so nothing here could have logged
+    it). A permissive `Access-Control-Allow-Origin: *` is safe specifically
+    for this route: /save already requires a valid save token to do
+    anything (see _check_token), so this is the same trust model as any
+    other bearer-token API, and it grants no cookie-authenticated access
+    (browsers never attach credentials to a `*`-origin CORS response).
+    Scoped to exactly this one path — no other route gets a CORS header,
+    since everything else on this site is same-origin cookie-authenticated
+    and has no reason to be called from a third-party page. A JSON POST body
+    (`Content-Type: application/json`) triggers a real preflight OPTIONS
+    request, so that has to be answered directly, not just the actual POST.
+    """
+    if request.url.path == "/save":
+        if request.method == "OPTIONS":
+            return Response(status_code=204, headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, X-Save-Token",
+                "Access-Control-Max-Age": "86400",
+            })
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+    return await call_next(request)
+
+
 @app.on_event("startup")
 def _seed_toolbox():
     """Seed the tool_categories/community_categories vocabulary on first run,
@@ -17977,6 +18011,22 @@ _SCRIPT_REGISTRY = [
      ["EXA_API_KEY (only for the Exa spike — omit or pass --skip-exa to run the scale check alone)"],
      ["python -m scripts.medium_platform_scale_check --db library.db --skip-exa   # scale check only",
       "railway run python -m scripts.medium_platform_scale_check --db /data/library.db   # full report against prod"]),
+    ("trace_medium_tier.py", "scripts.trace_medium_tier", "Reusable diagnostic",
+     "Built for a live-proof round on the fetch-by-URL tier follow-up (2026-08 wrap-up sprint "
+     "item 1): calls linklib.pipeline._try_medium_platform() directly (never the full "
+     "backfill_article_content() write path) so you can watch its actual live behavior for a "
+     "specific stuck article, alongside its existing content_refetch_log history — answers "
+     "'did the Medium tier actually run for this one, and what did it do' definitively, since the "
+     "logged detail alone can look identical whether a tier ran-and-missed or was never reached. "
+     "Also inspects a stored Wayback snapshot's real content (word count, assess_extraction_quality "
+     "verdict, a text preview) for the 'is this an empty JS shell' question.",
+     "Recurring-manual — run whenever a specific stuck article's fetch-tier behavior needs a direct, "
+     "live answer rather than an inference from the log.",
+     ["EXA_API_KEY (for the live _try_medium_platform re-trace; omit to see the same 'no result' "
+      "behavior the tier itself falls back to)"],
+     ["python -m scripts.trace_medium_tier --db /data/library.db --ids 437 142",
+      "python -m scripts.trace_medium_tier --db /data/library.db --ids 437 142 --auto 3",
+      "python -m scripts.trace_medium_tier --db /data/library.db --inspect-wayback --url \"https://example.com/x\""]),
 ]
 
 
@@ -19034,7 +19084,19 @@ def _job_run_banner(job_name: str) -> str:
     routine. A row stuck at status='running' with no finished_at is what a
     crash mid-run looks like, called out explicitly rather than shown as a
     normal in-progress state (this banner never reflects LIVE progress —
-    that's still _JOB_STATE/the poll endpoint each page already has)."""
+    that's still _JOB_STATE/the poll endpoint each page already has).
+
+    2026-08 wrap-up sprint item 3 fix: that "never finished — likely
+    interrupted by a deploy or crash" interpretation is only true when
+    nothing live actually corresponds to the open row — confirmed in
+    production twice, this banner rendered the crash interpretation
+    directly above the same page's own genuinely-in-progress status panel,
+    because it never checked _JOB_STATE at all before assuming an open row
+    meant a crash. A run should only read as "never finished" when there's
+    no live process behind it; when _JOB_STATE says this job is currently
+    running, the open row IS that live run, not evidence of a crash — so
+    this now checks `_job_get(job_name)["running"]` first and renders the
+    ordinary in-progress line instead."""
     lib = _lib()
     try:
         last = lib.latest_job_run(job_name)
@@ -19043,10 +19105,15 @@ def _job_run_banner(job_name: str) -> str:
     amber_wash, amber_border, amber_text = "#fef3c7", "#fde68a", "#92400e"
     coral_wash, coral = "var(--coral-wash)", "var(--coral)"
     seafoam_wash, seafoam = "var(--seafoam-wash)", "var(--seafoam)"
+    blue_wash, blue_border, blue_text = "#eff6ff", "#bfdbfe", "#1d4ed8"
 
     if not last:
         bg, border, color = amber_wash, amber_border, amber_text
         html = "No run recorded yet."
+    elif last["status"] == "running" and not last.get("finished_at") and _job_get(job_name).get("running"):
+        bg, border, color = blue_wash, blue_border, blue_text
+        ago = _relative_age(last["started_at"])
+        html = f'Last run started {ago or "recently"} and is still in progress&mdash;see the live status above.'
     elif last["status"] == "running" and not last.get("finished_at"):
         bg, border, color = amber_wash, amber_border, amber_text
         ago = _relative_age(last["started_at"])
@@ -23847,6 +23914,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         wayback_count = lib.count_wayback_content()
         migration_count = lib.count_migration_content()
         medium_search_count = lib.count_medium_search_content()
+        medium_fetch_count = lib.count_medium_fetch_content()
         log_rows = lib.list_content_refetch_log(limit=50)
     finally:
         lib.close()
@@ -23933,6 +24001,9 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         elif r["status"] == "success" and (r.get("source") or "direct") == "medium-search":
             label += (' <span style="background:var(--seafoam-wash);color:var(--seafoam-deep);'
                       'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Medium search</span>')
+        elif r["status"] == "success" and (r.get("source") or "direct") == "medium-fetch":
+            label += (' <span style="background:var(--seafoam-wash);color:var(--seafoam-deep);'
+                      'font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:999px;">via Medium fetch</span>')
         title = _esc(r.get("article_title") or r.get("article_url") or f'#{r["article_id"]}')
         url = r.get("article_url") or ""
         title_html = (f'<a href="{_esc(url)}" target="_blank" style="color:inherit;text-decoration:underline;text-underline-offset:2px;">{title}</a>'
@@ -24132,7 +24203,8 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{needs_check_count:,} article{"s" if needs_check_count != 1 else ""} above were flagged the moment they were saved. The fetch looked like a paywall preview, a bot-challenge page, a fetch failure, or real content under the length floor&mdash;the save itself was never blocked, just marked with a reason instead of looking healthy. Clears automatically once a later backfill or resave succeeds.</p>' if needs_check_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch&mdash;the live page couldn&rsquo;t be reached for those. A snapshot can be stale or differ from what the current page shows; look for the &ldquo;via Wayback&rdquo; badge in the attempts log below to spot which ones.</p>' if wayback_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{migration_count:,} of the structured articles above came from a <strong>known domain migration</strong> (e.g. a blog that relocated to a new host), not the article&rsquo;s originally saved URL&mdash;look for the &ldquo;via Migration&rdquo; badge in the attempts log below.</p>' if migration_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_search_count:,} of the structured articles above came from a <strong>Medium-platform search match</strong> (medium.com and similar hosts block direct fetches, so a matching article found elsewhere or via Exa&rsquo;s own text is used instead)&mdash;look for the &ldquo;via Medium search&rdquo; badge in the attempts log below.</p>' if medium_search_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_fetch_count:,} of the structured articles above came from a <strong>direct fetch of the article&rsquo;s own URL</strong> via Exa (medium.com and similar hosts block direct fetches, so Exa fetched that exact URL instead)&mdash;look for the &ldquo;via Medium fetch&rdquo; badge in the attempts log below.</p>' if medium_fetch_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_search_count:,} of the structured articles above came from a <strong>Medium-platform search match</strong> (a title search found the article elsewhere, or via Exa&rsquo;s own text, once the direct URL fetch above didn&rsquo;t work out)&mdash;look for the &ldquo;via Medium search&rdquo; badge in the attempts log below.</p>' if medium_search_count else ''}
 {f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service (e.g. Google&rsquo;s retired FeedBurner proxy), so re-fetching can never succeed. Not counted in Remaining above. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry them anyway.</p>' if excluded_count else ''}
 
 {_job_run_banner("content_backfill")}
@@ -25967,6 +26039,23 @@ def backup_now_route(request: Request, token: str | None = None):
 
 @app.get("/bookmarklet", response_class=PlainTextResponse)
 def bookmarklet(request: Request):
+    """A one-click saver bookmarklet. SAVE_TOKEN is read fresh from the
+    module-level global on every request — it's already re-populated from
+    LINKLIB_SAVE_TOKEN at process start, so a token rotation is already
+    reflected here as soon as the app restarts with the new env var (see
+    CLAUDE.md: "if you rotate LINKLIB_SAVE_TOKEN, re-grab the bookmarklet" —
+    what that note is guarding against is a stale COPY sitting in someone's
+    bookmarks bar, not this page serving a stale value).
+
+    2026-08 wrap-up sprint item 2 fix: the fetch-options object here used to
+    have one unbalanced closing brace (`body:JSON.stringify({url:u,tags:t})}}`
+    closed the options object twice, before `.then` ever ran) — a syntax
+    error, so every copy of this snippet was a silent no-op: it never threw
+    anywhere visible, it just never executed. Fixed, and a `.catch` was added
+    to the fetch chain so a network/CORS failure (see the _save_cors
+    middleware above — /save now actually answers a cross-origin POST, which
+    it previously couldn't) alerts visibly too — this bookmarklet should
+    never fail completely silently again."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     token_param = f"?token={SAVE_TOKEN}" if SAVE_TOKEN else ""
@@ -25976,7 +26065,8 @@ def bookmarklet(request: Request):
         "if(t===null)return;"
         "var u=location.href;"
         f"fetch('{PUBLIC_BASE}/save{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
-        "body:JSON.stringify({url:u,tags:t})}}).then(function(r){alert(r.ok?'Saved to archive':'Error saving');});"
+        "body:JSON.stringify({url:u,tags:t})}).then(function(r){alert(r.ok?'Saved to archive':'Error saving');})"
+        ".catch(function(e){alert('Error saving: '+e);});"
         "})();"
     )
     return js
