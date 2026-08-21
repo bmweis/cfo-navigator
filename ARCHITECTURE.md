@@ -304,7 +304,7 @@ Cost figures are computed from **real API token usage** at call time
 | `category_features` | **Feature Taxonomy (2026-08, Phase 1 — docs/FEATURE_TAXONOMY.md is canon).** The governed replacement for the retired `tool_features`' flat free text, built category by category as each is curated (see the Key architecture decisions bullet below for the full model; the legacy free-text table and every code path reading or writing it were retired outright in the Feature Taxonomy Phase 1b PR 2). `category_id` FKs to `tool_categories` — the *existing* `/tools/software` filter-pill vocabulary, not a separate feature-only taxonomy; a 2026-08 investigation found the pilot's three planned category names ("ERP & Accounting", "FP&A Planning", "Close Management") didn't match any live pill, resolved by reusing the real `ERP`/`FP&A` pills and adding `Close Management` as a genuine new one. `name` is unique per category, not globally — the same capability name (e.g. "Anomaly Detection") deliberately recurs across categories by design (rules doc §2), each a separate row. `retired_at` (nullable) — features are retired, never deleted; `retire_category_feature` soft-retires without cascading to existing `tool_feature_links` rows. Seeded via `scripts/seed_feature_taxonomy.py` (idempotent, `scripts/seed_data/*.csv`) from a nine-vendor pilot. Admin CRUD at `/admin/tools/software/features` (list/add/edit/retire per category), same visual/structural pattern as `/admin/tools/software/categories` — all three Feature Taxonomy admin routes and the `/admin/tools/software/categories` move follow the "software-directory admin lives under `/admin/tools/software/*`" convention decided in this same PR (see CLAUDE.md); the old `/admin/tools/categories` URL 301-redirected at the time — since removed outright in the Phase 1b admin URL convention PR below, which completed the cutover with no legacy admin URLs left at all. | `category_id`, `name` (unique per category among live rows), `sort_order` |
 | `tool_feature_links` | One row per (tool, feature) — the vendor-specific designations (rules doc §6) live here, never on the feature itself, since the same feature is native/rules-based at one vendor and an add-on/AI-driven at another. `availability` is a real `CHECK` constraint (`native`\|`add_on`) — absence of a row is the third state ("not available"), never a stored value. `verified_as_of` is required per link (claims decay fast). Toggled from a checklist on each tool's own `/tools/software/{slug}/edit` page (`Library.upsert_tool_feature_link`/`delete_tool_feature_link`, via `POST /admin/tools/{tool_id}/feature-links/save`) — a direct admin edit, not routed through the review queue below, since the queue exists for scan/public proposals and admin fast-path logging, and a manual checklist toggle on the tool's own page already *is* the admin editing directly. | `tool_id`, `feature_id` (composite unique) |
 | `feature_review_queue` | The review gate (rules doc §9) — no proposed change reaches `category_features`/`tool_feature_links` without landing here first and being approved by a human, regardless of who or what proposed it. `source` (`admin`\|`scan`\|`public`) distinguishes an admin's own fast-pathed edit, the (later, unscheduled) recurring AI scan, and the (later, unscheduled) public suggestion channel — `category_id`/`tool_id`/`submitter_name`/`submitter_email` are nullable now so those later phases don't need a migration to add them. `payload` is the proposed change as JSON (new feature, new link(s), or an existing-feature link) since the three sources produce structurally different proposals. Approving (`Library.approve_feature_review_queue_item`) applies `payload` through the exact same `add_category_feature`/`upsert_tool_feature_link` methods a manual edit would call — never a direct table write from the approval path itself; passing `override_payload` is "edit-then-approve" (status lands `edited` rather than `approved`) and is the same route/form as a verbatim approval, not a separate mechanism — the admin edit page's approve form doubles as the edit form, pre-filled from the stored payload. `/admin/tools/software/feature-review-queue` lists pending items grouped by source with Approve/Deny actions; seeded with 15 pilot proposals (`source='scan'`) via `scripts/seed_feature_taxonomy.py`. | `status` (`pending`\|`approved`\|`edited`\|`denied`), `source` (`admin`\|`scan`\|`public`) |
-| `benchmarks` | The Resources page at `/tools/resources` (renamed from `/tools/benchmarks`/"Benchmarking" in the admin URL convention PR — URL/copy only, table name unchanged), managed at `/admin/tools/resources`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: run by hand it adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync — but the `_seed_toolbox` startup hook's per-boot pass over `_DEFAULT_BENCHMARKS` only performs that sync, same insert-never fix and same reasoning as `tools` above (no soft-delete column here either). | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
+| `benchmarks` | The Resources page at `/tools/resources` (renamed from `/tools/benchmarks`/"Benchmarking" in the admin URL convention PR — URL/copy only, table name unchanged), managed at `/admin/tools/resources`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: run by hand it adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync — but the `_seed_toolbox` startup hook's per-boot pass over `_DEFAULT_BENCHMARKS` only performs that sync, same insert-never fix and same reasoning as `tools` above (no soft-delete column here either). `section` (`'benchmarking'`\|`'books'`, default `'benchmarking'`) splits the page into two headings — see "Resources — Book recommendations" below for the full write-up; `_DEFAULT_BENCHMARKS`/`_seed_toolbox` only ever cover the `'benchmarking'` rows, since a sync-only mechanism can't originate new `'books'` rows. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`), `section` (`benchmarking`\|`books`) |
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
 | `tool_audit_log` | Deletion audit trail for Software entries — one row per hard delete, since `tools` has no `deleted_at` column (unlike `contacts`) and a deleted row leaves nothing else behind. Same shape as `archive_audit_log`/`contact_audit_log` below, but written from inside `Library.delete_tool` itself rather than at each route (`_log_archive_audit`'s pattern) — every current delete path (the admin Delete button, bulk delete, a pending submission's Reject, a name-duplicate merge's "delete the loser" step) already calls `delete_tool`, so logging there guarantees a future new call site can't add a delete without also logging it. `detail` carries a name/url/categories snapshot taken immediately before the `DELETE`, since that's the only record of what was removed once the row is gone. | `admin_id` (nullable, same break-glass-login caveat as `archive_audit_log`), `action` (`'delete'`\|`'reject'`\|`'merge'`), `item_id` (a former `tools.id` — the row no longer exists), `detail` (name/url/categories snapshot) |
 | `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: run by hand it adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content`, plus `advisor` (a direct `UPDATE`, mirroring `tools.advisor` exactly — see below) — the identical name+description+advisor contract as `tools`. `_seed_toolbox`'s per-boot pass over `COMMUNITIES` carries the identical insert-never fix as `tools` above, for the identical reason (no soft-delete column, hook runs on every restart). Every other field (`reach`, `local_markets`, `featured`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `reach` (`Regional`\|`National`\|`Global` — a community's overall footprint), `local_markets` (free text, e.g. "Boston, New York, SF Bay Area" — cities/areas where it has a chapter, hub, or local focus; independent of `reach`, so a National community like FEI can still carry local markets; replaced a fixed 18-city checkbox grid — see "Metros -> free text migration" below), `featured` (pin-to-top + coral badge, same pattern as `tools.promoted`; independent of `reach`/`local_markets`/`advisor`), `advisor` (⭐ marker + "Advisor" filter chip, same pattern as `tools.advisor` — discloses a personal relationship, e.g. The F Suite; independent of `featured`), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `access` (`Open`\|`Application`\|`Invite-only`\|`Qualification-based` — a fixed `<select>`, converted from free text; see the auto-populate section below for how the option list was derived), `format` (`Hybrid`\|`In-person`\|`Slack`\|`Online`\|`LinkedIn group` — same conversion), `approved`, `screenshot_url`/`screenshot_captured_at`/`app_screenshot_source_url`/`app_screenshot_url`/`app_screenshot_captured_at` (Phase 3b — built from scratch for Communities, mirroring `tools`' homepage-screenshot columns of the same name exactly: `update_community_screenshot_url` for a manually pasted URL from the admin edit form (same `update_community_screenshot`-was-clobbering-`screenshot_is_product` incident and fix as the `tools` row), `set_community_screenshot_capture` for an automated homepage capture via the same `linklib/screenshots.py::capture_homepage`; served at `GET /tools/communities/screenshot/{filename}` from its own `_COMMUNITY_SCREENSHOT_DIR`, kept separate from Software's `_SCREENSHOT_DIR` since the two types' slugs can collide — Phase 0 found `airbase`/`datarails`/`rillet` shared across both. The `app_screenshot_*` trio and `screenshot_is_product`'s retirement (Phase E) mirror the `tools` row exactly — see there for the full design; the app slot's file is `{slug}-app.png`, same directory, same serving route), `logo_path` (Phase D — mirrors `tools.logo_path` exactly, written by `set_community_logo`; communities are the second and lower-priority half of the same three-batch `scripts/backfill_logos.py` backfill, processed only after every tool has one, saved under a separate `logos/communities/` subdirectory for the identical slug-collision reason as the screenshot columns above — see the `tools` row for the full backfill design) |
@@ -2950,6 +2950,86 @@ integrity check uses) and logs the result via `record_integrity_check`.
 Brian runs this by hand via `railway ssh` once this PR is deployed and
 verified live — never wired into a boot hook or deploy step, consistent
 with every other destructive one-off script in this codebase.
+
+### Resources — Book recommendations (2026-08)
+
+Splits the flat `/tools/resources` card list into two headed sections:
+"Benchmarking" (the existing cards, unchanged) and "Book recommendations"
+(a new, sparse-by-design personal reading list). `benchmarks.section`
+(`'benchmarking'` | `'books'`, default `'benchmarking'`) is the new
+discriminator — added via the standard idempotent `ALTER TABLE` migration,
+so all 20 existing rows land in `'benchmarking'` with no backfill needed.
+
+**Read/write path**: `Library.list_benchmarks(section=...)` takes an
+optional filter — `/tools/resources` and `/admin/tools/resources` both call
+it twice (once per section) rather than fetching everything and filtering
+in Python. `add_benchmark`/`update_benchmark` both grew a `section`
+parameter (default `'benchmarking'` for backward compatibility with every
+pre-existing caller). `add_benchmark`'s `next_order` computation is scoped
+to `WHERE section=?`, so the two sections order independently — adding a
+benchmarking card never shifts a book's `sort_order` and vice versa.
+
+**Public rendering** (`/tools/resources`): `_bench_card` (existing markup,
+unchanged) renders Benchmarking rows with their pricing/coverage badges;
+a new `_book_card` renders Book recommendations rows with the same
+`.bench-card` layout minus those badges — they encode data-access tiers
+("Private"/"Public"/"Both" coverage, "$ Paid" pricing) that don't map onto
+a personal reading list. The Book recommendations section always renders,
+even when empty ("Coming soon.") — sparse-by-design, per the build brief,
+not a state to hide.
+
+**Admin page** (`/admin/tools/resources`): the single table becomes two
+(`_admin_resource_table`, one shared helper called per section), plus a
+new "Section" `<select>` on the add/edit form (`_RESOURCE_SECTIONS`,
+`_benchmark_form_fields`) — an unrecognized/missing value on submit falls
+back to `'benchmarking'` rather than erroring, same defensive pattern as
+every other admin form field with a fixed vocabulary in this codebase. A
+form hint notes Coverage/Pricing are ignored on the public page for Book
+recommendations rows, since the fields stay on the form (unused, not
+hidden) rather than adding conditional JS to a form this small.
+
+**Seeding the ten initial book rows** — deliberately NOT via
+`_DEFAULT_BENCHMARKS`/`_seed_toolbox`: that pipeline only ever *syncs* an
+existing row by URL match (name/description), it never inserts one — the
+same "a missing row might be a deliberate admin delete" reasoning that
+governs every other `_seed_toolbox` sub-loop (`tools`, `communities`).
+Ten brand-new rows have nothing to sync against, so they need a genuine
+one-time insert: `scripts/seed_book_recommendations.py`, guarded the same
+way as every other production-data script in this codebase — preview by
+default, `--apply` to write, write-then-read-back verified, idempotent by
+URL match against the whole `benchmarks` table (any section) so a partial
+or repeated run never duplicates a row. Lives in `scripts/` (not
+`scripts/archive/`) until Brian actually runs it, per the standing "a
+script moves to archive/ once its job is done, never before" convention.
+
+**"Suggest a resource" — reuses `/contact`, no new route or spam-guard
+code.** Investigated first, per the build brief's explicit ask: two
+"suggest something" mechanisms already exist on the site.
+`/tools/communities/gap` (the Community gap-feedback flow) is public,
+structured, admin-triaged at `/admin/community-gaps` — but has **no rate
+limiting, honeypot, or spam filtering at all**, unlike `/contact`. `/contact`
+itself has the full stack (per-IP rate limit, honeypot, a time-trap, a
+keyword-based spam auto-reject) and — per `docs/BUILD_PLAN.md`'s own
+"public feedback/suggestion UI" note — was already investigated and
+confirmed reusable for exactly this kind of public suggestion surface, just
+never built against. `/tools/resources` gets a plain "Suggest a resource
+→" link straight to `/contact?context=resource-suggestion` — no dedicated
+form, no new database column. `_CONTACT_CONTEXT_PREFIXES` (a small dict,
+extensible to future contexts) maps `context=resource-suggestion` to a
+prefilled message prefix ("Resource suggestion: ") via `/contact`'s
+existing `message` query-param prefill mechanism (previously accepted by
+the route but never actually passed by any caller) — the prefix rides
+along into the saved `contacts.message` text itself, so it's visible in
+the admin inbox's message preview with **no schema change to `contacts`**
+and no new admin-page code. An explicit `?message=` still wins over
+`context` if both are somehow passed, so nothing already relying on
+`message` breaks.
+
+**Known follow-up, explicitly out of scope for this PR**: the Community
+gap-feedback flow's missing rate-limit/honeypot/spam-filter coverage
+(confirmed by this investigation, not new) is a real gap on a public,
+unauthenticated, no-login-required surface — flagged for its own PR, not
+fixed here.
 
 ### Feed management (`/admin/library/feeds`)
 
