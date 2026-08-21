@@ -260,7 +260,29 @@ def test_old_categories_url_is_gone_no_redirect(env):
     assert r.status_code == 404
 
 
-def test_manage_features_add_edit_retire_flow(env):
+def test_old_per_category_features_subpage_is_gone_no_redirect(env):
+    """Phase 1c replaced the category-index + per-category-subpage pattern
+    with one pivot table at the same base URL — the old
+    /admin/tools/software/features/{category_id} subpage URL was never
+    bookmarked/linked externally (Brian's explicit call), so this is a hard
+    cutover with no redirect, same precedent as the categories-URL removal
+    above."""
+    client = _client(env)
+    _login(client)
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        cat_id = lib.add_tool_category("ERP")
+    finally:
+        lib.close()
+    r = client.get(f"/admin/tools/software/features/{cat_id}", follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_manage_features_pivot_add_edit_retire_flow(env):
+    """The pivot page (Phase 1c): one table for every category, a single add
+    form with a category selector, per-row Save/Retire — replacing the old
+    category-index + per-category-subpage flow this test used to cover."""
     client = _client(env)
     _login(client)
     from linklib.db import Library
@@ -273,14 +295,16 @@ def test_manage_features_add_edit_retire_flow(env):
     r = client.get("/admin/tools/software/features", follow_redirects=False)
     assert r.status_code == 200
     assert "ERP" in r.text
+    assert "Add a feature" in r.text
 
-    r = client.get(f"/admin/tools/software/features/{cat_id}", follow_redirects=False)
-    assert r.status_code == 200
-
-    r = client.post(f"/admin/tools/software/features/{cat_id}/new",
-                     data={"name": "Real-Time Ledger", "definition": "", "pointer_note": ""},
+    r = client.post("/admin/tools/software/features/new",
+                     data={"category_id": str(cat_id), "name": "Real-Time Ledger",
+                           "definition": "", "pointer_note": ""},
                      follow_redirects=False)
     assert r.status_code == 303
+    # The redirect carries the new feature's category through open_ids so its
+    # group re-opens on the pivot page, and preserves any filter state.
+    assert f"open_ids={cat_id}" in r.headers["location"]
 
     lib = Library(env.DB_PATH)
     try:
@@ -291,13 +315,13 @@ def test_manage_features_add_edit_retire_flow(env):
         lib.close()
 
     r = client.post(f"/admin/tools/software/features/{fid}/edit",
-                     data={"return_to": str(cat_id), "name": "Real-Time Ledger", "definition": "d",
+                     data={"category_id": str(cat_id), "name": "Real-Time Ledger", "definition": "d",
                            "pointer_note": "", "sort_order": "5"},
                      follow_redirects=False)
     assert r.status_code == 303
 
     r = client.post(f"/admin/tools/software/features/{fid}/retire",
-                     data={"return_to": str(cat_id)}, follow_redirects=False)
+                     data={"category_id": str(cat_id)}, follow_redirects=False)
     assert r.status_code == 303
 
     lib = Library(env.DB_PATH)
@@ -305,6 +329,34 @@ def test_manage_features_add_edit_retire_flow(env):
         assert lib.list_category_features(cat_id) == []
     finally:
         lib.close()
+
+
+def test_manage_features_pivot_shows_pending_row_and_filter_controls(env):
+    """Pending review-queue items surface as read-only rows inside their
+    category's group (Phase 0 item 5c, approved as low-cost), and the page
+    ships the filter/expand-all/collapse-all controls."""
+    client = _client(env)
+    _login(client)
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        cat_id = lib.add_tool_category("ERP")
+        lib.add_feature_review_queue_item(
+            source="scan", proposal_type="new_feature+link",
+            payload={"category_id": cat_id, "feature": {"name": "Proposed Thing"}, "links": []},
+            category_id=cat_id,
+        )
+    finally:
+        lib.close()
+
+    r = client.get("/admin/tools/software/features", follow_redirects=False)
+    assert r.status_code == 200
+    assert "Proposed Thing" in r.text
+    assert "Pending" in r.text
+    assert "1 proposal" in r.text
+    assert 'id="feat-cat-filter"' in r.text
+    assert "featureTaxExpandAll" in r.text
+    assert "featureTaxCollapseAll" in r.text
 
 
 def test_tool_edit_page_shows_governed_checklist_only_for_seeded_categories(env):
@@ -414,6 +466,85 @@ def test_feature_review_queue_page_approve_and_deny(env):
         assert lib.list_category_features(cat_id)[0]["name"] == "AI Bill Capture"
     finally:
         lib.close()
+
+
+def test_feature_review_queue_approve_shows_merge_confirmation_before_executing(env):
+    """Phase 1c: approving a new_feature+link proposal whose name matches an
+    existing feature in the category no longer merges silently — it shows a
+    confirmation step first (no DB write yet), and only merges once that
+    confirmation is submitted back with confirm_merge=1."""
+    client = _client(env)
+    _login(client)
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        cat_id = lib.add_tool_category("ERP")
+        tool_a = lib.add_tool("Rillet", "d", "https://rillet.com", ["ERP"], approved=1, summary="s")
+        tool_b = lib.add_tool("Campfire", "d", "https://campfire.ai", ["ERP"], approved=1, summary="s")
+        existing_fid = lib.add_category_feature(cat_id, "Anomaly Detection")
+        lib.upsert_tool_feature_link(tool_a, existing_fid, "native", 1, "2026-08-19")
+        qid = lib.add_feature_review_queue_item(
+            "scan", "new_feature+link",
+            {"category_id": cat_id, "feature": {"name": "anomaly detection"},  # case-differs, same feature
+             "links": [{"tool_id": tool_b, "availability": "native", "ai_enabled": 1, "verified_as_of": "2026-08-20"}]},
+            category_id=cat_id,
+        )
+    finally:
+        lib.close()
+
+    approve_data = {
+        "n_links": "1", "feature_name": "anomaly detection", "pointer_note": "",
+        "link_0_tool_id": str(tool_b), "link_0_availability": "native",
+        "link_0_ai_enabled": "1", "link_0_verified_as_of": "2026-08-20",
+        "link_0_note": "", "link_0_source_url": "",
+    }
+
+    # First submit: no confirm_merge -> a confirmation page, not a merge.
+    r = client.post(f"/admin/tools/software/feature-review-queue/{qid}/approve",
+                     data=approve_data, follow_redirects=False)
+    assert r.status_code == 200
+    assert "Confirm merge" in r.text
+    assert "Rillet" in r.text  # the vendor list naming who's already linked
+    assert "confirm_merge" in r.text
+
+    lib = Library(env.DB_PATH)
+    try:
+        assert lib.get_feature_review_queue_item(qid)["status"] == "pending"  # nothing executed yet
+        assert len(lib.list_category_features(cat_id)) == 1  # no duplicate created either
+    finally:
+        lib.close()
+
+    # Resubmit with confirm_merge=1 (what the confirmation page's "Merge"
+    # button does) -> now it actually merges.
+    r = client.post(f"/admin/tools/software/feature-review-queue/{qid}/approve",
+                     data={**approve_data, "confirm_merge": "1"}, follow_redirects=False)
+    assert r.status_code == 303
+
+    lib = Library(env.DB_PATH)
+    try:
+        assert lib.get_feature_review_queue_item(qid)["status"] in ("approved", "edited")
+        assert len(lib.list_category_features(cat_id)) == 1  # still just one — merged, not duplicated
+        assert lib.get_tool_feature_link(tool_b, existing_fid) is not None
+    finally:
+        lib.close()
+
+
+def test_admin_dashboard_has_software_subgroup_with_renamed_cards(env):
+    """Phase 1c: the four software-directory cards nest as their own
+    collapsible "Software" sub-group inside CFO Toolbox (same mechanism as
+    the pre-existing FP&A Buddy sub-group), with sentence-case card titles."""
+    client = _client(env)
+    _login(client)
+    r = client.get("/admin")
+    assert r.status_code == 200
+    assert "Software vendors" in r.text
+    assert "Software categories" in r.text
+    assert "Software features" in r.text
+    assert "Feature review queue" in r.text
+    # Old Title Case names are gone.
+    assert "Toolbox categories" not in r.text
+    assert ">Manage Features<" not in r.text
+    assert ">Feature Review Queue<" not in r.text
 
 
 # -- scripts.seed_feature_taxonomy: idempotency against the real CSVs --------

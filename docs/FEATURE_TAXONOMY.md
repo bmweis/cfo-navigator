@@ -42,11 +42,21 @@ Naming rules:
   "Ambient Intelligence").
 - No "AI-powered" / "AI-driven" / "agentic" in feature names. AI-ness is a link-level flag (§6),
   not part of the name.
+- **Feature names never contain "AI" in any form** — not "AI-powered," "AI-driven," "agentic," nor
+  bare "AI" on its own. This supersedes the bullet above with the same reasoning, stated more
+  simply: the `ai_enabled` flag on the tool-feature link is the one place AI-ness lives (§6), never
+  the name itself.
+- **Prefer short names.** A qualifier, a comparison point, or a scope caveat belongs in the
+  `definition` field, not folded into the name — a feature name that needs a parenthetical to read
+  correctly is a sign the qualifier belongs there instead.
+- **Feature names use sentence case** — capitalize only the first word (plus any acronym or proper
+  noun that's always capitalized on its own): *Automated journal entry creation*, not *Automated
+  Journal Entry Creation*; *ASC 606 revenue recognition*, not *Asc 606 Revenue Recognition*.
 - Prefer noun phrases describing the capability or "Automated X" describing the job:
-  *Automated Journal Entry Creation*, *Multi-Entity Consolidation*, *Bank Reconciliation
-  Auto-Matching*, *Post-Close Folder Lockdown*.
+  *Automated journal entry creation*, *Multi-entity consolidation*, *Bank reconciliation
+  auto-matching*, *Post-close folder lockdown*.
 - Where vendors use divergent jargon for the same outcome, define the feature by the outcome and
-  verify against the outcome, not the term. Worked example: **Multi-Book Accounting** = "parallel
+  verify against the outcome, not the term. Worked example: **Multi-book accounting** = "parallel
   GAAP, tax, and IFRS ledgers natively on the same underlying data" — verifiable even when a
   vendor never says "multi-book."
 

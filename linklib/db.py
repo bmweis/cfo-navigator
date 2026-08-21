@@ -4675,6 +4675,44 @@ class Library:
         self.conn.commit()
         return cur.lastrowid
 
+    def count_feature_review_queue(self, status: str | None = "pending") -> int:
+        """Cheap indexed COUNT (idx_feature_review_queue_status) — powers the
+        /admin hub's pending badge, mirroring list_feature_review_queue's own
+        status handling."""
+        if status:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM feature_review_queue WHERE status=?", (status,)
+            ).fetchone()
+        else:
+            row = self.conn.execute("SELECT COUNT(*) FROM feature_review_queue").fetchone()
+        return row[0]
+
+    def find_category_feature_by_name(self, category_id: int, name: str,
+                                       include_retired: bool = True) -> dict | None:
+        """Case-insensitive exact-name lookup within one category — the same
+        merge check approve_feature_review_queue_item uses internally, pulled
+        out so the review-queue approve route can pre-check for a name
+        collision and show a confirmation step before merging (Phase 1c),
+        rather than merging silently."""
+        name = name.strip().lower()
+        return next(
+            (f for f in self.list_category_features(category_id, include_retired=include_retired)
+             if f["name"].strip().lower() == name),
+            None,
+        )
+
+    def list_tools_linked_to_feature(self, feature_id: int) -> list[dict]:
+        """Tool names/ids currently linked to a feature — used to show "this
+        feature already exists and is linked to [vendor list]" on the
+        review-queue merge confirmation step."""
+        rows = self.conn.execute(
+            """SELECT t.id, t.name FROM tool_feature_links l
+               JOIN tools t ON t.id = l.tool_id
+               WHERE l.feature_id=? ORDER BY t.name COLLATE NOCASE""",
+            (feature_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def list_feature_review_queue(self, status: str | None = "pending") -> list[dict]:
         if status:
             rows = self.conn.execute(
@@ -4727,11 +4765,7 @@ class Library:
             feature_name = (draft.get("name") or "").strip()
             if not feature_name:
                 raise ValueError("payload has neither an existing feature_id nor a new feature name.")
-            existing = next(
-                (f for f in self.list_category_features(category_id, include_retired=True)
-                 if f["name"].strip().lower() == feature_name.lower()),
-                None,
-            )
+            existing = self.find_category_feature_by_name(category_id, feature_name)
             if existing:
                 feature_id = existing["id"]
             else:
