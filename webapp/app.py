@@ -300,6 +300,40 @@ async def _no_store_admin_pages(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def _save_cors(request: Request, call_next):
+    """CORS for /save only (2026-08 wrap-up sprint item 2) — the bookmarklet
+    runs on third-party pages (it POSTs cross-origin, where the login cookie
+    can't be sent — see /bookmarklet's own docstring), so the browser needs
+    real CORS headers on this one route or every request silently fails
+    with no server-side trace at all (Chrome's console shows "TypeError:
+    Failed to fetch", confirmed live from a real third-party origin — the
+    request never even reaches this app, so nothing here could have logged
+    it). A permissive `Access-Control-Allow-Origin: *` is safe specifically
+    for this route: /save already requires a valid save token to do
+    anything (see _check_token), so this is the same trust model as any
+    other bearer-token API, and it grants no cookie-authenticated access
+    (browsers never attach credentials to a `*`-origin CORS response).
+    Scoped to exactly this one path — no other route gets a CORS header,
+    since everything else on this site is same-origin cookie-authenticated
+    and has no reason to be called from a third-party page. A JSON POST body
+    (`Content-Type: application/json`) triggers a real preflight OPTIONS
+    request, so that has to be answered directly, not just the actual POST.
+    """
+    if request.url.path == "/save":
+        if request.method == "OPTIONS":
+            return Response(status_code=204, headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, X-Save-Token",
+                "Access-Control-Max-Age": "86400",
+            })
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+    return await call_next(request)
+
+
 @app.on_event("startup")
 def _seed_toolbox():
     """Seed the tool_categories/community_categories vocabulary on first run,
@@ -25955,6 +25989,23 @@ def backup_now_route(request: Request, token: str | None = None):
 
 @app.get("/bookmarklet", response_class=PlainTextResponse)
 def bookmarklet(request: Request):
+    """A one-click saver bookmarklet. SAVE_TOKEN is read fresh from the
+    module-level global on every request — it's already re-populated from
+    LINKLIB_SAVE_TOKEN at process start, so a token rotation is already
+    reflected here as soon as the app restarts with the new env var (see
+    CLAUDE.md: "if you rotate LINKLIB_SAVE_TOKEN, re-grab the bookmarklet" —
+    what that note is guarding against is a stale COPY sitting in someone's
+    bookmarks bar, not this page serving a stale value).
+
+    2026-08 wrap-up sprint item 2 fix: the fetch-options object here used to
+    have one unbalanced closing brace (`body:JSON.stringify({url:u,tags:t})}}`
+    closed the options object twice, before `.then` ever ran) — a syntax
+    error, so every copy of this snippet was a silent no-op: it never threw
+    anywhere visible, it just never executed. Fixed, and a `.catch` was added
+    to the fetch chain so a network/CORS failure (see the _save_cors
+    middleware above — /save now actually answers a cross-origin POST, which
+    it previously couldn't) alerts visibly too — this bookmarklet should
+    never fail completely silently again."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     token_param = f"?token={SAVE_TOKEN}" if SAVE_TOKEN else ""
@@ -25964,7 +26015,8 @@ def bookmarklet(request: Request):
         "if(t===null)return;"
         "var u=location.href;"
         f"fetch('{PUBLIC_BASE}/save{token_param}',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
-        "body:JSON.stringify({url:u,tags:t})}}).then(function(r){alert(r.ok?'Saved to archive':'Error saving');});"
+        "body:JSON.stringify({url:u,tags:t})}).then(function(r){alert(r.ok?'Saved to archive':'Error saving');})"
+        ".catch(function(e){alert('Error saving: '+e);});"
         "})();"
     )
     return js

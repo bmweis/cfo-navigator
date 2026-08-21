@@ -2906,12 +2906,31 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   comparisons are constant-time (`hmac.compare_digest`).
 - If **no password is configured at all**, private routes are open — a
   local-development convenience, never the hosted configuration.
-- Two middlewares wrap everything: a canonical-host 301 (www + legacy Railway
+- Three middlewares wrap everything: a canonical-host 301 (www + legacy Railway
   hostname → apex, guarded so dev instances, `/health`, and `/admin/backup-now`
   never redirect — for proxied www traffic Cloudflare's edge Redirect Rule
   fires first, so this middleware is the backstop for the legacy hostname and
-  direct-origin hits) and `Cache-Control: no-store` on `/admin/*` (so task
-  badges are never served stale from the back-forward cache).
+  direct-origin hits), `Cache-Control: no-store` on `/admin/*` (so task
+  badges are never served stale from the back-forward cache), and (2026-08
+  wrap-up sprint item 2) a `/save`-only CORS middleware (`_save_cors`) —
+  confirmed broken in production, a syntax-corrected bookmarklet run from a
+  real third-party origin (bolster.com) failed with `TypeError: Failed to
+  fetch`, the classic CORS-rejection signature, since `/save` had never sent
+  any `Access-Control-*` headers. It answers the JSON POST's real preflight
+  `OPTIONS` request directly (204, `Access-Control-Allow-Origin: *`) and
+  stamps the same allow-origin header onto the actual `/save` response
+  (success or error), scoped to exactly this one path — no other route picks
+  up a CORS header, since everything else on the site is same-origin
+  cookie-authenticated. A permissive `*` origin is safe here specifically
+  because `/save` already requires a valid save token to do anything (see
+  `_check_token`) — same trust model as any other bearer-token API, and a
+  `*`-origin response can never carry credentials anyway. The `/bookmarklet`
+  snippet itself had an independent bug fixed in the same PR: one unbalanced
+  closing brace (`body:JSON.stringify({url:u,tags:t})}}` closed the fetch
+  options object twice before `.then` ever ran) made every copy of the
+  snippet a silent no-op — a syntax error, never thrown anywhere visible.
+  Fixed, plus a `.catch` added to the fetch chain so a network/CORS failure
+  now alerts visibly instead of silently doing nothing.
 - **`/admin/backup-now` is a deliberate, narrowly-scoped exception to the
   canonical-host redirect (Phase O).** The daily backup GitHub Action calls
   this one route directly on the legacy Railway hostname on purpose, to

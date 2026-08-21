@@ -2005,7 +2005,15 @@ tables, no third-party dependency.
     `/library/{article_id}/tags` (the Reader's inline tag editor, Phase 5c —
     the route predates it but had no callers until then).
   - `/save` is **token-only** (`X-Save-Token` header or `?token=`) because the bookmarklet
-    calls it cross-origin, where the login cookie can't be sent.
+    calls it cross-origin, where the login cookie can't be sent. It also carries a
+    dedicated, `/save`-only CORS middleware (`_save_cors` in `webapp/app.py`, 2026-08
+    wrap-up sprint item 2) so that cross-origin call actually works — confirmed broken
+    in production before this shipped (a real third-party origin got `TypeError: Failed
+    to fetch`, the classic CORS-rejection signature); see ARCHITECTURE.md's
+    "Three middlewares wrap everything" bullet for the full write-up. A permissive
+    `Access-Control-Allow-Origin: *` is safe here specifically because `/save` already
+    requires a valid token to do anything — same trust model as any bearer-token API,
+    and it grants no cookie-authenticated access. No other route gets a CORS header.
 - **No secret in rendered HTML.** Internal links no longer carry `?token=`; the cookie
   authorizes navigation. Token comparison is constant-time (`hmac.compare_digest`).
 - **⚠️ Bookmarklet caveat (by design).** The `/bookmarklet` snippet embeds
@@ -2013,7 +2021,14 @@ tables, no third-party dependency.
   cross-origin where the cookie is unavailable. The `/bookmarklet` *page* is login-gated
   so only Brian can retrieve it, **but the snippet itself is a secret.** Don't paste it
   publicly, and **if you rotate `LINKLIB_SAVE_TOKEN`, re-grab the bookmarklet** (the old
-  one stops working).
+  one stops working) — the page itself always renders whatever `LINKLIB_SAVE_TOKEN` the
+  running process currently has (a live module-level global, re-populated from the env
+  var at each process start), so a stale copy means a stale COPY in someone's bookmarks
+  bar, not a stale server. **2026-08 wrap-up sprint item 2:** the snippet shipped with an
+  unbalanced closing brace (`body:JSON.stringify({url:u,tags:t})}}` closed the fetch
+  options object twice before `.then` ever ran) — a syntax error, so every copy was a
+  silent no-op that never threw anywhere visible; fixed, plus a `.catch` on the fetch
+  chain so a network/CORS failure now alerts visibly instead of doing nothing.
 - `/static/{filename}` resolves through `os.path.basename` to block path traversal.
 
 ## `library.db` is intentionally not in the repo
