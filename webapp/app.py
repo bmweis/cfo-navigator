@@ -24046,6 +24046,25 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         )
     _remaining_breakdown_text += "."
 
+    # Plain lead-in sentence rather than a standalone "Total articles" card
+    # (2026-08 review round-trip: the card was full-width and visually
+    # competed with the segmented bar directly below it for attention).
+    # Still carries the same arithmetic the card's tooltip used to explain
+    # (no_url_count vs. partition_total), just as a sentence instead.
+    _total_word = "article" if total_articles == 1 else "articles"
+    _other_word = "article" if partition_total == 1 else "articles"
+    if no_url_count:
+        _lead_sentence_text = (
+            f'{total_articles:,} {_total_word} total, including {no_url_count:,} unreachable'
+            f'&mdash;here&rsquo;s how the other {partition_total:,} {_other_word} break down:'
+        )
+    else:
+        _lead_sentence_text = (
+            f'{total_articles:,} {_total_word} total&mdash;here&rsquo;s how '
+            f'{"it breaks" if partition_total == 1 else "they break"} down:'
+        )
+    _backfill_total_lead_sentence = f'<p style="color:var(--muted);margin:0 0 10px;">{_lead_sentence_text}</p>'
+
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Reader content backfill</h1>
@@ -24053,13 +24072,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 <p style="color:var(--muted);margin:-6px 0 6px;">Re-fetches already-saved articles so the Reader can show real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as.</p>
 <p style="color:var(--muted);margin:0 0 20px;">A failed re-fetch never touches an article&rsquo;s existing content&mdash;it&rsquo;s only logged. Rate-limited (~{_CONTENT_BACKFILL_DELAY_SEC}s between requests) and safe to stop and resume; a re-run only touches articles that still need it.</p>
 
-<div style="text-align:center;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:14px;">
-  <div style="font-size:26px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{total_articles:,}</div>
-  <div style="font-size:12px;color:var(--muted);margin-top:2px;">Total articles</div>
-  {_backfill_tip(f'Every article ever saved to the library, including {no_url_count:,} with no reachable URL, which never enter this pipeline at all. The remaining {partition_total:,} have a saved URL and fall into exactly one of the five buckets below&mdash;they always add back up to this number.')}
-</div>
-
-<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">How the {partition_total:,} articles with a saved URL break down</div>
+{_backfill_total_lead_sentence}
 {_backfill_segment_bar_html}
 
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px;margin-bottom:14px;">

@@ -198,7 +198,33 @@ def test_admin_page_renders_segmented_bar(env):
     c = _admin_client(env)
     r = c.get("/admin/library/backfill-content")
     assert r.status_code == 200
-    assert "How the" in r.text and "articles with a saved URL break down" in r.text
+    assert "here&rsquo;s how" in r.text
+    assert "break down" in r.text or "breaks down" in r.text
+
+
+def test_admin_page_no_standalone_total_articles_card(env):
+    """2026-08 review round-trip: the full-width 'Total articles' card was
+    replaced with a plain lead-in sentence above the bar — it must not
+    still render as its own bordered card."""
+    lib = env._lib()
+    no_url = lib.upsert(Article(url="", title="No URL", content="x"))
+    lib.close()
+    assert no_url
+
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    assert ">Total articles<" not in r.text
+    assert "1 unreachable" in r.text
+    assert "here&rsquo;s how the other" in r.text
+
+
+def test_admin_page_lead_sentence_omits_unreachable_clause_when_zero(env):
+    c = _admin_client(env)
+    r = c.get("/admin/library/backfill-content")
+    assert r.status_code == 200
+    assert "unreachable" not in r.text
+    assert "0 articles total" in r.text
 
 
 def test_admin_page_needs_review_tile_links_to_section_only_when_present(env):
