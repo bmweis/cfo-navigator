@@ -29,6 +29,34 @@ validated through linklib.domain_migration._titles_match() (reused, not
 reimplemented, 0.7 word-overlap threshold) before acceptance — the exact
 check that would have caught (and, once reused here, does catch) the first
 diagnostic spike's real false-positive match.
+
+Phase 2 (2026-08, "wrap-up sprint" item 1) — fetch-by-URL before
+search-by-title. Production evidence from the manual-review corrected-URL
+workflow (see CLAUDE.md's manual-review/URL-correction bullets) surfaced
+~20 stuck articles whose exact, human-confirmed URL is already known (the
+corrected URL itself lives on a recognized blocked host) — for those,
+searching Exa by title is strictly worse than just asking Exa to fetch that
+exact URL: a generic title can find the wrong candidate or no candidate at
+all, and there's no ambiguity to resolve when the URL is already exact.
+`fetch_content_by_url()` calls Exa's `/contents` endpoint (not `/search`) for
+the article's own current URL — tried first in
+`linklib.pipeline._try_medium_platform`, falling through to the existing
+search-by-title flow on a miss or a too-thin result. A URL-fetch success
+needs no title-match validation (there's no candidate to disambiguate
+between — see `_try_medium_platform`), unlike a search-by-title hit.
+
+That same production evidence also surfaced a host
+(`shockwaveinnovations.com`) that's Cloudflare-blocked exactly like the
+Medium-platform hosts but genuinely isn't Medium underneath — it doesn't
+belong in `_MEDIUM_CUSTOM_DOMAINS` (that set means "confirmed running on
+Medium's publishing platform," a factual claim this host doesn't meet), but
+it does belong in the same "Exa's /contents endpoint can bypass this host's
+block" bucket the whole fetch-by-URL path exists for. `_OTHER_BLOCKED_HOSTS`
+holds it, kept honestly separate from the Medium-specific set;
+`is_recognized_blocked_host()` is the union of the two and is what the
+fetch-by-URL path (and the same-domain carve-out below it) actually gates
+on — `is_medium_platform_host()` itself is unchanged and still means
+exactly what it always meant.
 """
 from __future__ import annotations
 
@@ -50,7 +78,23 @@ _MEDIUM_CUSTOM_DOMAINS = frozenset({
     "bothsidesofthetable.com",
 })
 
+# Hosts confirmed Cloudflare-blocked the same way the Medium-platform hosts
+# are, so they're worth the same Exa-based fetch-by-URL recovery path — but
+# NOT confirmed to actually be Medium underneath, so they're kept out of
+# _MEDIUM_CUSTOM_DOMAINS rather than mislabeled. Each entry requires a live
+# confirmation before being added, same discipline as _MEDIUM_CUSTOM_DOMAINS
+# and linklib.pipeline._DEFUNCT_SERVICE_DOMAINS/_DOMAIN_MIGRATIONS.
+#
+#   shockwaveinnovations.com — 5 articles with rich live content stuck as
+#     too-thin from bad Wayback snapshots; live page loads fine in a
+#     browser but 403s this tool's fetcher (Cloudflare fingerprint block,
+#     same as the Medium-platform hosts) — 2026-08 wrap-up sprint.
+_OTHER_BLOCKED_HOSTS = frozenset({
+    "shockwaveinnovations.com",
+})
+
 _EXA_SEARCH_URL = "https://api.exa.ai/search"
+_EXA_CONTENTS_URL = "https://api.exa.ai/contents"
 _TIMEOUT = 10.0
 
 # Same forgiving middle ground as linklib.domain_migration's own threshold
@@ -81,6 +125,56 @@ def is_medium_platform_host(url: str) -> bool:
     if host == "medium.com" or host.endswith(".medium.com"):
         return True
     return host in _MEDIUM_CUSTOM_DOMAINS
+
+
+def is_recognized_blocked_host(url: str) -> bool:
+    """True for a Medium-platform host (is_medium_platform_host) OR a
+    non-Medium host in _OTHER_BLOCKED_HOSTS — the actual gate for this
+    tier's fetch-by-URL/search-by-title recovery path and its same-domain
+    carve-out, honestly named for what it means ("Exa can plausibly recover
+    this blocked host"), distinct from is_medium_platform_host's narrower,
+    factual "this really is Medium underneath" claim."""
+    host = _host(url)
+    if not host:
+        return False
+    return is_medium_platform_host(url) or host in _OTHER_BLOCKED_HOSTS
+
+
+def fetch_content_by_url(lib, url: str) -> str:
+    """Direct Exa content fetch for a known, exact URL — Exa's `/contents`
+    endpoint, not `/search`. Used when the article's own current URL
+    (post manual-URL-correction, see CLAUDE.md's manual-review bullets) is
+    already on a recognized blocked host: there's no candidate to
+    disambiguate, so no title-match validation is needed the way
+    find_medium_candidate's search results need one. Returns the fetched
+    text, or "" on any miss/failure (no EXA_API_KEY, Exa disabled via the
+    admin toggle, a blank url, a network failure, a non-200/malformed
+    response, or a response with no usable text) — never raises, same
+    best-effort contract as find_medium_candidate/find_migrated_url. `lib`
+    may be None (falls back to "enabled"), matching agent._web_provider's
+    own convention."""
+    api_key = os.environ.get("EXA_API_KEY")
+    if not api_key or not url:
+        return ""
+    if lib is not None and not lib.get_exa_enabled():
+        return ""
+
+    try:
+        resp = requests.post(
+            _EXA_CONTENTS_URL,
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json={"urls": [url], "text": True},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return ""
+
+    for r in (data.get("results") or []):
+        if isinstance(r, dict) and (r.get("text") or "").strip():
+            return r.get("text") or ""
+    return ""
 
 
 def find_medium_candidate(lib, title: str, author: str = "") -> tuple[str, str]:

@@ -3891,15 +3891,33 @@ class Library:
 
     def count_medium_search_content(self) -> int:
         """How many articles currently have content_html sourced from the
-        Medium-platform Exa-search tier (linklib/medium_platform.py) rather
-        than a direct fetch, Wayback, or the domain-migration tier — same
-        shape/reasoning as count_wayback_content()/count_migration_content()."""
+        Medium-platform Exa search-by-title tier (linklib/medium_platform.py)
+        rather than a direct fetch, Wayback, the domain-migration tier, or
+        the fetch-by-URL variant of this same tier — same shape/reasoning as
+        count_wayback_content()/count_migration_content(). See
+        count_medium_fetch_content() for the fetch-by-URL sibling
+        (source='medium-fetch', 2026-08 wrap-up sprint)."""
         return self.conn.execute(
             """SELECT COUNT(*) FROM (
                  SELECT article_id, status, source,
                         ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
                  FROM content_refetch_log
                ) WHERE rn=1 AND status='success' AND source='medium-search'"""
+        ).fetchone()[0]
+
+    def count_medium_fetch_content(self) -> int:
+        """How many articles currently have content_html sourced from a
+        direct Exa fetch-by-URL of the article's own current URL
+        (linklib.medium_platform.fetch_content_by_url, tried before
+        search-by-title in the Medium-platform tier — 2026-08 wrap-up
+        sprint item 1) — same shape/reasoning as
+        count_medium_search_content()."""
+        return self.conn.execute(
+            """SELECT COUNT(*) FROM (
+                 SELECT article_id, status, source,
+                        ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY attempted_at DESC) AS rn
+                 FROM content_refetch_log
+               ) WHERE rn=1 AND status='success' AND source='medium-fetch'"""
         ).fetchone()[0]
 
     # -- tools directory ---------------------------------------------------
