@@ -837,6 +837,50 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   mixed-case brand name still gets lowercased) is unchanged and still
   flagged in the function's own docstring.
 
+- **Resources — Book recommendations (2026-08).** `/tools/resources` splits
+  from one flat card list into two headed sections: "Benchmarking" (the
+  existing cards, unchanged) and a new "Book recommendations" — a personal
+  reading list, sparse by design, not benchmarking data. `benchmarks`
+  gained a `section` column (`'benchmarking'`\|`'books'`, default
+  `'benchmarking'` — no backfill needed for the 20 existing rows) via the
+  standard idempotent migration. `Library.list_benchmarks(section=...)`
+  filters; `add_benchmark`/`update_benchmark` both take an optional
+  `section` (default `'benchmarking'`, backward compatible with every
+  pre-existing caller); `add_benchmark`'s sort-order auto-increment is
+  scoped per section, so the two lists order independently. Public
+  rendering: `_bench_card` (unchanged) keeps its pricing/coverage badges,
+  a new `_book_card` renders without them — those badges encode
+  data-access tiers that don't map onto a reading list. Book
+  recommendations always renders, even empty ("Coming soon.") — sparse is
+  the expected state, not a gap to hide. Admin page: one table becomes two
+  (`_admin_resource_table`), plus a Section dropdown on the add/edit form
+  (an unrecognized value falls back to `benchmarking`, same defensive
+  pattern as every other fixed-vocabulary admin field). **The ten initial
+  book rows shipped via a one-off script, not `_DEFAULT_BENCHMARKS`** — that
+  sync-only pipeline (`_seed_toolbox`) only ever updates an existing row by
+  URL match, it never inserts one (a missing row might be a deliberate
+  admin delete), so ten brand-new rows need a genuine insert:
+  `scripts/seed_book_recommendations.py`, guarded like every other
+  production-data script here (preview by default, `--apply` to write,
+  write-then-read-back verified, idempotent by URL match against the whole
+  table) — lives in `scripts/`, not `scripts/archive/`, until Brian
+  actually runs it. **"Suggest a resource" reuses `/contact` outright — no
+  new route, no new spam-guard code.** Investigated first: the Community
+  gap-feedback flow (`/tools/communities/gap`) is public and structured but
+  has **no rate limiting, honeypot, or spam filtering at all**; `/contact`
+  has the full stack (rate limit, honeypot, time-trap, keyword spam
+  filter) and was already flagged in `docs/BUILD_PLAN.md` as investigated
+  and reusable for exactly this, just never built against. The page links
+  straight to `/contact?context=resource-suggestion` —
+  `_CONTACT_CONTEXT_PREFIXES` prefills the message textarea with a
+  distinguishing prefix ("Resource suggestion: ") via `/contact`'s
+  existing (previously unused) `message` query-param mechanism, so the
+  admin inbox preview shows which surface a submission came from with
+  **no schema change to `contacts`**. **Explicit follow-up, not fixed
+  here:** the Community gap-feedback flow's missing rate-limit/honeypot/
+  spam-filter coverage — a real gap on a public, no-login surface,
+  confirmed by this investigation, flagged for its own PR.
+
 - **Sail, Don't Row — water reflections, re-added (reverses an earlier decision).**
   The original build removed reflections outright: "unrealistic inverted-building
   duplicate, not worth fading," and a test (`test_play_no_skyline_reflection`)
