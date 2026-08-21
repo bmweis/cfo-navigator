@@ -678,6 +678,52 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   cover. The convention itself is now stated as
   `/admin/tools/{software|communities|resources}/*`.
 
+- **Feature Taxonomy, Phase 1b PR 2 — the public "Key features" card ships,
+  and legacy `tool_features` is retired completely from code.** The
+  governed model (`category_features`/`tool_feature_links`) has been live
+  in the schema and admin-editable since Phase 1, but nothing public ever
+  rendered it — the Software profile page still showed the legacy flat
+  free-text `tool_features` card, or nothing at all for the ~90% of tools
+  with no legacy rows. Fixed with `_software_key_features_card`, which
+  ALWAYS renders now: real feature names (sentence-cased via
+  `_sentence_case_feature_name` — a known, accepted limitation of that
+  heuristic is that it also lowercases a genuine brand name landing
+  mid-name, e.g. "Slack" in "Slack / Email Collaboration Triggers"; proper-
+  noun detection was judged out of scope for this pass) grouped by category
+  only when a tool's links span more than one seeded category, with
+  Add-on/AI tags per link, for a tool that has links — a directional
+  coming-soon state ("Coming soon—we're mapping this tool against our
+  curated feature taxonomy.") for the rest, so "not mapped yet" reads as an
+  honest statement rather than an empty card. Same PR retires the legacy
+  table completely: the schema definition, all five CRUD methods, the five
+  admin CRUD routes (`/admin/tools/{tool_id}/features/*` — the one route
+  family Phase 1b PR 1 deliberately left unmoved specifically so it could
+  be deleted here instead), the edit page's legacy Features section, the
+  needs-verification banner's now-dead feature-count clause, and the
+  compare page's legacy Features comparison row (removed outright, not
+  migrated to the governed model — a governed-model Compare view is
+  already reserved as later/out-of-scope work in `docs/BUILD_PLAN.md`
+  Phase 8, and this PR's brief only specified the profile-page card).
+  `linklib.enrich.generate_tool_features` is narrowed to
+  `generate_tool_agent_taxonomy` — it keeps the real-crawl grounding
+  mechanism (still worth it for the agent-taxonomy summary alone) but no
+  longer drafts feature rows in the same call, since curated features are
+  now a hand-curated admin checklist, not an LLM-drafted first pass.
+  `scripts/enrich_tool_features.py` is renamed to
+  `scripts/enrich_agent_taxonomy.py` (`git mv`) and rewritten to match.
+  `scripts/drop_legacy_tool_features.py` is delivered (guarded per the
+  Article purge flow's own preview/typed-confirm/same-day-backup pattern,
+  ending in `PRAGMA integrity_check`) but deliberately not executed as part
+  of this PR — Brian runs it by hand via `railway ssh` once this PR is
+  deployed and verified live, per the standing "human-run, never a boot
+  hook" rule for destructive one-off scripts. See ARCHITECTURE.md's
+  "Feature Taxonomy, Phase 1b PR 2" section for the full enumeration of
+  every remaining `tool_features` code reference and its disposition — the
+  standing rule this phase established (see "No dead data" below) starts
+  here as the reference case for what a real, complete retirement looks
+  like: everything that once read or wrote the table is gone before the
+  data itself is dropped, not the other way around.
+
 - **Sail, Don't Row — water reflections, re-added (reverses an earlier decision).**
   The original build removed reflections outright: "unrealistic inverted-building
   duplicate, not worth fading," and a test (`test_play_no_skyline_reflection`)
@@ -2141,6 +2187,27 @@ fine. The entire cost was in not being able to tell that quickly — an untracea
 correct fix and a silent data-corruption bug look identical from the outside. Writing
 down "changed X's category from A to B, here's why" at the time is nearly free;
 reconstructing it after the fact from timestamps and git history is not.
+
+**No dead data.** Anything in the database with no live code path reading or writing
+it gets deleted — a table, a column, a whole row set. "Live code path" means the
+running app or an actively-run script actually touches it today, not "touched it once
+during a since-finished migration" and not "might be read by some future phase." The
+legacy `tool_features` table (retired outright in the Feature Taxonomy Phase 1b PR 2 —
+see the Key architecture decisions bullet above) is the reference case: once every
+route, admin section, and public rendering path that read or wrote it was removed in
+one PR, the table itself became dead weight with nothing left to justify keeping it,
+so a dedicated one-off script (`scripts/drop_legacy_tool_features.py`) drops it —
+human-run, never wired into a boot hook or deploy step. **Soft-retired rows are NOT
+dead data** — a `retired_at`-flagged `category_features` row, a `tool_audit_log`
+snapshot of a deleted tool, `field_reviews`' frozen history after the fields it tracked
+moved to a different mechanism (see that CLAUDE.md bullet) — these are all still read
+by something (an admin page's history view, an audit trail, a "why does this exist"
+investigation) or are the deliberate historical record the retirement itself was
+designed to preserve; the rule is about code paths, not about whether a row is still
+"active." **Destructive deletions are always human-executed, with a same-day backup and
+a typed confirmation** — same standing discipline as the Article purge flow (CLAUDE.md's
+Key architecture decisions bullet above) and this rule's own `tool_features` reference
+case: preview/confirm, never silent, never automatic.
 
 ## Script-block syntax validation
 

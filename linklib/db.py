@@ -301,39 +301,17 @@ CREATE TABLE IF NOT EXISTS tool_competitors (
 CREATE INDEX IF NOT EXISTS idx_tool_competitors_tool ON tool_competitors(tool_id);
 CREATE INDEX IF NOT EXISTS idx_tool_competitors_competitor ON tool_competitors(competitor_id);
 
--- Per-feature standalone-vs-bundled availability for a Software entry
--- (search overhaul Phase 4a) — the data the Phase 5 comparison matrix reads.
--- standalone_available/bundled_only are independent booleans, not mutually
--- exclusive: some vendors sell a feature both a la carte and folded into a
--- higher tier, so a row can legitimately be 1/1. needs_verification reuses
--- the exact confidence-flag shape from linklib.enrich's community-listing
--- autofill (NEEDS_VERIFICATION) rather than a new mechanism — here it's a
--- per-row bool (not per-field) since one row is already one semantic unit
--- (a feature name + its availability). Manually admin-entered rows default
--- needs_verification=0 (a human typed it); rows from the Phase 4b LLM
--- enrichment pass default it to 1 and get reviewed before Phase 5 treats
--- them as reliable. No DB-level uniqueness on (tool_id, feature_name) —
--- LLM-drafted names won't always match casing/phrasing exactly on a re-run,
--- so de-duplication is the batch script's job, not a constraint here.
--- Enrichment cost is recorded through the existing generic enrichment_cost
--- ledger (article_id=NULL), the same pattern generate_tool_description and
--- generate_community_profile already use — no new cost table needed.
-CREATE TABLE IF NOT EXISTS tool_features (
-    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    tool_id              INTEGER NOT NULL,
-    feature_name         TEXT NOT NULL,
-    standalone_available INTEGER NOT NULL DEFAULT 0,
-    bundled_only         INTEGER NOT NULL DEFAULT 0,
-    notes                TEXT NOT NULL DEFAULT '',
-    source_url           TEXT NOT NULL DEFAULT '',
-    needs_verification   INTEGER NOT NULL DEFAULT 0,
-    source               TEXT NOT NULL DEFAULT 'manual',
-    model                TEXT NOT NULL DEFAULT '',
-    created_at           TEXT NOT NULL,
-    updated_at           TEXT NOT NULL DEFAULT ''
-);
-
-CREATE INDEX IF NOT EXISTS idx_tool_features_tool ON tool_features(tool_id);
+-- The legacy tool_features table (search overhaul Phase 4a — per-feature
+-- standalone-vs-bundled availability for a Software entry) lived here until
+-- the Feature Taxonomy Phase 1b PR 2 retired it outright: every route,
+-- admin section, and public rendering path that read or wrote it was
+-- removed in that PR (see CLAUDE.md's "no dead data" note), so this CREATE
+-- TABLE is gone too — a fresh DB never creates it. Brian's production DB
+-- (which had real rows) drops the table for real via the human-run
+-- scripts/drop_legacy_tool_features.py once that PR is deployed and
+-- verified; this schema change just stops a brand-new database from ever
+-- creating dead weight it would have no code path to fill or read.
+-- category_features/tool_feature_links below are the governed replacement.
 
 -- Feature Taxonomy (docs/FEATURE_TAXONOMY.md is canon): governed replacement for
 -- tool_features' flat free text, category by category as each is curated — see
@@ -369,9 +347,9 @@ CREATE INDEX IF NOT EXISTS idx_category_features_category ON category_features(c
 -- another. availability is a CHECK constraint, not free text, matching §6's
 -- "exactly one of native | add_on" rule (absence of a row IS the third state —
 -- "not available" — never a stored value). verified_as_of is required per link
--- (§6: "claims decay fast"); source_url is separate from tool_features' own
--- source_url column, both nullable free text for now, not a source-tier enum —
--- §8's sourcing hierarchy is a scan-tool/reviewer judgment call, not yet schema.
+-- (§6: "claims decay fast"); source_url is nullable free text for now, not a
+-- source-tier enum — §8's sourcing hierarchy is a scan-tool/reviewer
+-- judgment call, not yet schema.
 CREATE TABLE IF NOT EXISTS tool_feature_links (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     tool_id        INTEGER NOT NULL,
@@ -1730,11 +1708,15 @@ class Library:
             "ALTER TABLE tools ADD COLUMN screenshot_is_product INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tools ADD COLUMN screenshot_captured_at TEXT NOT NULL DEFAULT ''",
             # Automated agent-taxonomy research follow-up: agent_taxonomy_note
-            # can now be LLM-drafted (generate_tool_features, extended to
-            # return an agent_taxonomy summary alongside feature rows) as well
-            # as hand-typed, so it needs the same needs_verification tracking
-            # tool_features rows already have. Defaults to 0 (verified) so
-            # existing hand-typed notes aren't retroactively flagged.
+            # can now be LLM-drafted (originally generate_tool_features,
+            # which also returned feature rows alongside the agent_taxonomy
+            # summary at the time this migration was added — that function
+            # is now generate_tool_agent_taxonomy, agent-taxonomy-only, since
+            # the Feature Taxonomy Phase 1b PR 2 retired the feature-row half
+            # along with the tool_features table it wrote to) as well as
+            # hand-typed, so it needs its own needs_verification tracking.
+            # Defaults to 0 (verified) so existing hand-typed notes aren't
+            # retroactively flagged.
             "ALTER TABLE tools ADD COLUMN agent_taxonomy_needs_verification INTEGER NOT NULL DEFAULT 0",
             # Description-length follow-up: `description` grows to a full
             # ~8-12 sentence profile-page write-up; `summary` is the short
@@ -4269,8 +4251,9 @@ class Library:
         """Narrow update for the admin full-edit form's agent-taxonomy field
         (Phase 5) — same bulk-edit-safety reasoning as update_tool_differentiation.
         A human editing/saving this field is itself a confirmation, so this
-        always clears agent_taxonomy_needs_verification — same convention as
-        editing a tool_features row implying review."""
+        always clears agent_taxonomy_needs_verification — same convention the
+        retired tool_features rows used to follow (editing a row implied
+        review)."""
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
             "updated_at=? WHERE id=?",
@@ -4296,8 +4279,9 @@ class Library:
         self.conn.commit()
 
     def mark_tool_agent_taxonomy_verified(self, tool_id: int) -> None:
-        """One-click "Mark verified" action, same as the equivalent
-        tool_features action — clears the flag without touching the text."""
+        """One-click "Mark verified" action — clears the flag without
+        touching the text. (The retired tool_features table had the
+        equivalent per-row action; this is the tools-table-level version.)"""
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_needs_verification=0, updated_at=? WHERE id=?",
             (_now(), tool_id),
@@ -4479,63 +4463,16 @@ class Library:
         candidates.sort(key=lambda d: (-d["_overlap"], d["name"]))
         return candidates[:limit]
 
-    # -- feature comparison data (Phase 4a) ----------------------------------
-    # See the tool_features CREATE TABLE comment for the confidence-flag and
-    # dedup reasoning. Rendered on the Phase 5 comparison matrix.
-
-    def add_tool_feature(self, tool_id: int, feature_name: str,
-                         standalone_available: int = 0, bundled_only: int = 0,
-                         notes: str = "", source_url: str = "",
-                         needs_verification: int = 0, source: str = "manual",
-                         model: str = "") -> int:
-        feature_name = feature_name.strip()
-        if not feature_name:
-            raise ValueError("Feature name is required.")
-        now = _now()
-        cur = self.conn.execute(
-            """INSERT INTO tool_features (tool_id, feature_name, standalone_available,
-               bundled_only, notes, source_url, needs_verification, source, model,
-               created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (tool_id, feature_name, standalone_available, bundled_only,
-             notes.strip(), source_url.strip(), needs_verification, source.strip(),
-             model.strip(), now, now),
-        )
-        self.conn.commit()
-        return cur.lastrowid
-
-    def list_tool_features(self, tool_id: int) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM tool_features WHERE tool_id=? ORDER BY feature_name", (tool_id,)
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-    def get_tool_feature(self, feature_id: int) -> dict | None:
-        row = self.conn.execute("SELECT * FROM tool_features WHERE id=?", (feature_id,)).fetchone()
-        return dict(row) if row else None
-
-    def update_tool_feature(self, feature_id: int, feature_name: str,
-                            standalone_available: int, bundled_only: int,
-                            notes: str, source_url: str, needs_verification: int) -> None:
-        """Full edit — used by the admin form, including the "mark verified"
-        checkbox that clears needs_verification once a human has confirmed
-        an LLM-drafted row (or edited it, which implies confirmation)."""
-        feature_name = feature_name.strip()
-        if not feature_name:
-            raise ValueError("Feature name is required.")
-        self.conn.execute(
-            """UPDATE tool_features SET feature_name=?, standalone_available=?, bundled_only=?,
-               notes=?, source_url=?, needs_verification=?, updated_at=? WHERE id=?""",
-            (feature_name, standalone_available, bundled_only, notes.strip(),
-             source_url.strip(), needs_verification, _now(), feature_id),
-        )
-        self.conn.commit()
-
-    def delete_tool_feature(self, feature_id: int) -> None:
-        self.conn.execute("DELETE FROM tool_features WHERE id=?", (feature_id,))
-        self.conn.commit()
-
     # -- Feature Taxonomy: category_features / tool_feature_links -----------
+    # The legacy per-tool free-text Feature comparison data (Phase 4a) that
+    # used to live here — add_tool_feature/list_tool_features/get_tool_feature/
+    # update_tool_feature/delete_tool_feature, reading/writing the tool_features
+    # table — was retired outright in the Feature Taxonomy Phase 1b PR 2 (see
+    # CLAUDE.md's "no dead data" note): every route, admin section, and public
+    # rendering path that touched it is gone, and the table itself is dropped
+    # by the human-run scripts/drop_legacy_tool_features.py once this PR is
+    # deployed and verified. list_tool_feature_links_with_details below is
+    # the governed model's equivalent read path.
     # Governed replacement for tool_features above, built category by category
     # (docs/FEATURE_TAXONOMY.md is canon). See the category_features/
     # tool_feature_links CREATE TABLE comments for the model. Everything here
@@ -4615,6 +4552,29 @@ class Library:
             "SELECT * FROM tool_feature_links WHERE tool_id=?", (tool_id,)
         ).fetchall()]
 
+    def list_tool_feature_links_with_details(self, tool_id: int) -> list[dict]:
+        """Phase 2 (public rendering) read path — joins tool_feature_links to
+        category_features (name, sort_order) and tool_categories (category
+        name), for every link whose feature is still live (soft-retired
+        features drop out here, same as the admin checklist's own
+        list_category_features(include_retired=False) default — a retired
+        feature just stops rendering going forward, no cascade needed since
+        the link row itself is untouched). Ordered by category name then the
+        feature's own sort_order, so a multi-category tool's card groups
+        predictably. Powers the public "Key features" card on
+        /tools/software/{slug} and the Software Matchmaker's context."""
+        rows = self.conn.execute(
+            """SELECT l.*, cf.name AS feature_name, cf.sort_order AS feature_sort_order,
+                      cf.category_id AS category_id, tc.name AS category_name
+               FROM tool_feature_links l
+               JOIN category_features cf ON cf.id = l.feature_id
+               JOIN tool_categories tc ON tc.id = cf.category_id
+               WHERE l.tool_id=? AND cf.retired_at=''
+               ORDER BY tc.name COLLATE NOCASE, cf.sort_order, cf.name COLLATE NOCASE""",
+            (tool_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_tool_feature_link(self, tool_id: int, feature_id: int) -> dict | None:
         row = self.conn.execute(
             "SELECT * FROM tool_feature_links WHERE tool_id=? AND feature_id=?", (tool_id, feature_id)
@@ -4661,11 +4621,13 @@ class Library:
         self.conn.commit()
 
     def category_has_features(self, category_id: int) -> bool:
-        """Drives the legacy-coexistence read-time branch (CLAUDE.md /
-        ARCHITECTURE.md): a tool's profile page renders the new governed
-        model only once its category actually has a curated feature list;
-        otherwise it falls back to the free-text tool_features Features
-        card untouched."""
+        """Filters which categories get a checklist section on the admin
+        edit page's "Manage Tool Features" — a tool's category with nothing
+        curated yet shouldn't render an empty section. (Originally also
+        drove the public profile page's legacy-vs-governed branch, before
+        the legacy tool_features Features card was retired outright in the
+        Feature Taxonomy Phase 1b PR 2 — the public page now always renders
+        the governed "Key features" card regardless of this flag.)"""
         row = self.conn.execute(
             "SELECT 1 FROM category_features WHERE category_id=? AND retired_at='' LIMIT 1",
             (category_id,),

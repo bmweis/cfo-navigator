@@ -274,13 +274,24 @@ existing 15-tag `tool_categories` vocabulary and how that got resolved
 - `tools.suite_note` — free-text suite-membership notation (rules doc §5's
   "beyond the office of the CFO" case), independent of the feature tables.
 
+### Shipped since — Phase 1b PR 2 (2026-08): public rendering + legacy retirement
+
+- **Public profile-page rendering** of the governed model shipped:
+  `_software_key_features_card` on `/tools/software/{slug}` always renders
+  a Key features card now — real feature names (grouped by category when a
+  tool's links span more than one seeded category) for a tool with
+  `tool_feature_links`, a directional coming-soon state for a tool with
+  none. `category_has_features()`'s read-time branch is no longer needed
+  for legacy coexistence, since the legacy card it used to gate is gone.
+- **Legacy `tool_features` retired completely** — the table, its CRUD
+  methods, the admin `/admin/tools/{tool_id}/features/*` routes, the edit
+  page's legacy Features section, and every public render path are all
+  deleted from code (CLAUDE.md's "No dead data" rule); a human-run
+  `scripts/drop_legacy_tool_features.py` drops the table itself once Brian
+  runs it. See ARCHITECTURE.md's "Feature Taxonomy, Phase 1b PR 2" section.
+
 ### Still not built — later phases, unchanged in spirit from the original plan
 
-- **Public profile-page rendering** of the governed model (still reads the
-  legacy free-text `tool_features` for every tool today — the read-time
-  branch on `category_has_features()` is written and ready, but nothing
-  calls it from the public Features card yet). Needs real brand/visual
-  spec work, not just a data-source swap.
 - **The recurring AI scan tool** (rules doc §10 — origination mode for a
   brand-new category, freshness mode for re-checking an existing one).
   `feature_review_queue.source='scan'` and the CSV-seeded pilot proposals
@@ -291,11 +302,13 @@ existing 15-tag `tool_categories` vocabulary and how that got resolved
   `submitter_email` are already nullable columns waiting for this). The
   investigation into reusable contact-form infrastructure (rate limiting,
   honeypot, spam keyword filter) is done; no UI or route exists yet.
-- **A real Compare view for the governed model.** The existing
-  `/tools/compare` route still reads the legacy `tool_features` union-of-
-  names approach; rebuilding it against category_features/
-  tool_feature_links (grouped by category rather than a Feature Family
-  header, per the model above) is unscheduled.
+- **A real Compare view for the governed model.** The `/tools/software/
+  compare` route's legacy Features comparison row (the `tool_features`
+  union-of-names approach) was removed outright in Phase 1b PR 2, not
+  migrated — rebuilding a governed-model Compare view against
+  category_features/tool_feature_links (grouped by category rather than a
+  Feature Family header, per the model above) is unscheduled, so the
+  compare page currently has no feature-comparison row at all.
 
 ---
 

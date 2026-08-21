@@ -54,7 +54,7 @@ def test_every_recurring_and_diagnostic_script_is_listed(env):
     body = c.get("/admin/system/scripts").text
     expected = [
         "backfill_logos.py", "capture_tool_screenshots.py", "seed_tools.py",
-        "seed_communities.py", "enrich_community_profiles.py", "enrich_tool_features.py",
+        "seed_communities.py", "enrich_community_profiles.py", "enrich_agent_taxonomy.py",
         "mcp_server.py", "generate_brand_docs.py", "report_orphaned_categories.py",
         "dump_communities.py", "diagnose_cookie_banner.py", "verify_screenshot_capture.py",
     ]

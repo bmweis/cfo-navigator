@@ -1,7 +1,10 @@
-"""Feature comparison data — LLM enrichment first pass (Software search
-overhaul Phase 4b). Covers linklib.enrich.generate_tool_features (unit,
-mocked Claude call + mocked page fetch) and scripts/enrich_tool_features.py's
-selection/dedup/dry-run logic (also mocked — no real API calls in tests).
+"""Agent-taxonomy research — LLM enrichment first pass (Software search
+overhaul Phase 4b; narrowed to agent-taxonomy only in the Feature Taxonomy
+Phase 1b PR 2 legacy retirement, which dropped the feature-drafting half of
+this pipeline along with the tool_features table). Covers
+linklib.enrich.generate_tool_agent_taxonomy (unit, mocked Claude call +
+mocked page fetch) and scripts/enrich_agent_taxonomy.py's selection/dry-run
+logic (also mocked — no real API calls in tests).
 """
 import os
 import pathlib
@@ -46,84 +49,52 @@ def _mock_fetch_page(monkeypatch, contents: dict):
     monkeypatch.setattr(enrich, "_discover_nav_pages", lambda base_url, max_pages=10: [])
 
 
-FEATURES_JSON = """{
-    "features": [
-        {"feature_name": "Scenario modeling", "standalone_available": true,
-         "bundled_only": false, "notes": "", "confident": true},
-        {"feature_name": "Headcount planning", "standalone_available": false,
-         "bundled_only": true, "notes": "Growth tier and above", "confident": true},
-        {"feature_name": "API access", "standalone_available": true,
-         "bundled_only": true, "notes": "", "confident": false}
-    ]
+TAXONOMY_JSON = """{
+    "summary": "Runway uses an AI-assisted scenario modeling feature; no named agent found.",
+    "confident": true
 }"""
 
 
-def test_generate_tool_features_parses_drafts(monkeypatch):
+def test_generate_tool_agent_taxonomy_parses_result(monkeypatch):
     _mock_fetch_page(monkeypatch, {
         "https://runway.com": "Homepage content about Runway.",
         "https://runway.com/pricing": "Pricing tiers: Starter, Growth, Enterprise.",
     })
-    _mock_anthropic(monkeypatch, FEATURES_JSON)
+    _mock_anthropic(monkeypatch, TAXONOMY_JSON)
 
-    result = enrich.generate_tool_features("Runway", "https://runway.com", "FP&A for high-growth teams.")
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com", "FP&A for high-growth teams.")
     assert result is not None
-    assert len(result.features) == 3
-    scenario = next(f for f in result.features if f.feature_name == "Scenario modeling")
-    assert scenario.standalone_available is True
-    assert scenario.bundled_only is False
-    assert scenario.needs_verification is False   # confident: true
-    api = next(f for f in result.features if f.feature_name == "API access")
-    assert api.standalone_available is True
-    assert api.bundled_only is True
-    assert api.needs_verification is True          # confident: false
+    assert "scenario modeling" in result.agent_taxonomy_note
+    assert result.agent_taxonomy_needs_verification is False   # confident: true
     assert result.cost_usd > 0
-    assert result.low_confidence is False           # pricing page fetched successfully
-    # Pricing page is preferred over Homepage for the batch source_url
-    assert scenario.source_url == "https://runway.com/pricing"
+    assert result.low_confidence is False   # pricing page fetched successfully
 
 
-def test_generate_tool_features_low_confidence_when_no_pages_fetch(monkeypatch):
+def test_generate_tool_agent_taxonomy_low_confidence_when_no_pages_fetch(monkeypatch):
     _mock_fetch_page(monkeypatch, {})   # every fetch returns empty content
-    _mock_anthropic(monkeypatch, FEATURES_JSON)
+    _mock_anthropic(monkeypatch, TAXONOMY_JSON)
 
-    result = enrich.generate_tool_features("Obscure Co", "https://obscure.example")
+    result = enrich.generate_tool_agent_taxonomy("Obscure Co", "https://obscure.example")
     assert result is not None
     assert result.low_confidence is True
-    assert result.features[0].source_url == ""
 
 
-def test_generate_tool_features_falls_back_to_homepage_source(monkeypatch):
+def test_generate_tool_agent_taxonomy_marks_unconfident_as_needing_verification(monkeypatch):
     _mock_fetch_page(monkeypatch, {"https://runway.com": "Homepage only, no pricing page."})
-    _mock_anthropic(monkeypatch, FEATURES_JSON)
+    _mock_anthropic(monkeypatch, """{"summary": "Some AI-powered marketing language, no specifics.",
+        "confident": false}""")
 
-    result = enrich.generate_tool_features("Runway", "https://runway.com")
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
     assert result is not None
-    assert result.features[0].source_url == "https://runway.com"
+    assert result.agent_taxonomy_needs_verification is True
 
 
-def test_generate_tool_features_skips_features_without_a_name(monkeypatch):
-    _mock_fetch_page(monkeypatch, {"https://runway.com": "content"})
-    _mock_anthropic(monkeypatch, """{"features": [
-        {"feature_name": "", "standalone_available": true, "bundled_only": false, "confident": true},
-        {"feature_name": "Real feature", "standalone_available": true, "bundled_only": false, "confident": true}
-    ]}""")
-    result = enrich.generate_tool_features("Runway", "https://runway.com")
-    assert [f.feature_name for f in result.features] == ["Real feature"]
-
-
-def test_generate_tool_features_returns_none_without_api_key(monkeypatch):
+def test_generate_tool_agent_taxonomy_returns_none_without_api_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert enrich.generate_tool_features("Runway", "https://runway.com") is None
+    assert enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com") is None
 
 
-# -- scripts/enrich_tool_features.py (dedup + dry-run + selection) ------------
-
-def _draft(name, standalone=True, bundled=False, confident=True):
-    return enrich.ToolFeatureDraft(
-        feature_name=name, standalone_available=standalone, bundled_only=bundled,
-        source_url="https://example.com/pricing", needs_verification=not confident,
-    )
-
+# -- scripts/enrich_agent_taxonomy.py (dry-run + selection) -------------------
 
 @pytest.fixture
 def db_path():
@@ -134,7 +105,7 @@ def db_path():
 
 
 def test_script_select_tools_by_name(db_path):
-    from scripts.enrich_tool_features import _select_tools
+    from scripts.enrich_agent_taxonomy import _select_tools
     lib = Library(db_path)
     lib.add_tool("Ramp", "Spend", "https://ramp.com", [], approved=1)
     lib.add_tool("Brex", "Spend", "https://brex.com", [], approved=1)
@@ -146,7 +117,7 @@ def test_script_select_tools_by_name(db_path):
 
 
 def test_script_select_tools_by_limit(db_path):
-    from scripts.enrich_tool_features import _select_tools
+    from scripts.enrich_agent_taxonomy import _select_tools
     lib = Library(db_path)
     for i in range(5):
         lib.add_tool(f"Tool {i}", "d", f"https://tool{i}.com", [], approved=1)
@@ -155,8 +126,8 @@ def test_script_select_tools_by_limit(db_path):
     lib.close()
 
 
-def test_script_writes_features_and_skips_dupes_on_rerun(monkeypatch, db_path):
-    import scripts.enrich_tool_features as script_mod
+def test_script_writes_taxonomy_and_skips_already_researched_on_rerun(monkeypatch, db_path):
+    import scripts.enrich_agent_taxonomy as script_mod
     lib = Library(db_path)
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
     lib.close()
@@ -165,91 +136,83 @@ def test_script_writes_features_and_skips_dupes_on_rerun(monkeypatch, db_path):
 
     def _fake_generate(name, url, description="", model=""):
         call_count["n"] += 1
-        return enrich.ToolFeaturesResult(
-            features=[_draft("Scenario modeling"), _draft("Headcount planning", confident=False)],
+        return enrich.AgentTaxonomyResult(
             agent_taxonomy_note="Uses AI-assisted scenario modeling; no named agent found.",
             agent_taxonomy_needs_verification=True,
             low_confidence=False, model="claude-haiku-4-5-20251001",
             input_tokens=100, output_tokens=80, cost_usd=0.001,
         )
 
-    monkeypatch.setattr(script_mod.enrich_mod, "generate_tool_features", _fake_generate)
+    monkeypatch.setattr(script_mod.enrich_mod, "generate_tool_agent_taxonomy", _fake_generate)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--tools", "Runway"])
     rc = script_mod.main()
     assert rc == 0
 
     lib = Library(db_path)
-    features = lib.list_tool_features(tool_id)
-    assert len(features) == 2
-    hc = next(f for f in features if f["feature_name"] == "Headcount planning")
-    assert hc["needs_verification"] == 1
-    assert hc["source"] == "llm_enrichment"
-    assert lib.get_tool(tool_id)["agent_taxonomy_note"]
+    tool = lib.get_tool(tool_id)
+    assert tool["agent_taxonomy_note"]
+    assert tool["agent_taxonomy_needs_verification"] == 1
     lib.close()
 
     # Re-running without --force should skip the tool entirely (already has an
-    # agent-taxonomy note — that's what marks it as already researched now)
+    # agent-taxonomy note)
     monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--tools", "Runway"])
     rc = script_mod.main()
     assert rc == 0
-    assert call_count["n"] == 1   # generate_tool_features not called again
+    assert call_count["n"] == 1   # generate_tool_agent_taxonomy not called again
 
 
 def test_script_dry_run_writes_nothing(monkeypatch, db_path):
-    import scripts.enrich_tool_features as script_mod
+    import scripts.enrich_agent_taxonomy as script_mod
     lib = Library(db_path)
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
     lib.close()
 
     def _fake_generate(name, url, description="", model=""):
-        return enrich.ToolFeaturesResult(
-            features=[_draft("Scenario modeling")], model="claude-haiku-4-5-20251001",
-            input_tokens=50, output_tokens=40, cost_usd=0.0005,
+        return enrich.AgentTaxonomyResult(
+            agent_taxonomy_note="Uses AI-assisted scenario modeling.",
+            agent_taxonomy_needs_verification=False,
+            model="claude-haiku-4-5-20251001", input_tokens=50, output_tokens=40, cost_usd=0.0005,
         )
 
-    monkeypatch.setattr(script_mod.enrich_mod, "generate_tool_features", _fake_generate)
+    monkeypatch.setattr(script_mod.enrich_mod, "generate_tool_agent_taxonomy", _fake_generate)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--tools", "Runway", "--dry-run"])
     rc = script_mod.main()
     assert rc == 0
 
     lib = Library(db_path)
-    assert lib.list_tool_features(tool_id) == []
+    assert not (lib.get_tool(tool_id)["agent_taxonomy_note"] or "").strip()
     lib.close()
 
 
-def test_script_dry_run_prints_feature_detail(monkeypatch, db_path, capsys):
-    import scripts.enrich_tool_features as script_mod
+def test_script_dry_run_prints_taxonomy_detail(monkeypatch, db_path, capsys):
+    import scripts.enrich_agent_taxonomy as script_mod
     lib = Library(db_path)
     lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
     lib.close()
 
     def _fake_generate(name, url, description="", model=""):
-        return enrich.ToolFeaturesResult(
-            features=[
-                _draft("Scenario modeling", standalone=True, bundled=False, confident=True),
-                _draft("Headcount planning", standalone=False, bundled=True, confident=False),
-            ],
+        return enrich.AgentTaxonomyResult(
+            agent_taxonomy_note="Uses AI-assisted scenario modeling; no named agent found.",
+            agent_taxonomy_needs_verification=True,
             model="claude-haiku-4-5-20251001", input_tokens=50, output_tokens=40, cost_usd=0.0005,
         )
 
-    monkeypatch.setattr(script_mod.enrich_mod, "generate_tool_features", _fake_generate)
+    monkeypatch.setattr(script_mod.enrich_mod, "generate_tool_agent_taxonomy", _fake_generate)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--tools", "Runway", "--dry-run"])
     rc = script_mod.main()
     assert rc == 0
 
     out = capsys.readouterr().out
-    assert "Scenario modeling: standalone" in out
-    assert "Headcount planning: bundled-only" in out
+    assert "Agent taxonomy: Uses AI-assisted scenario modeling" in out
     assert "[needs verification]" in out
-    # The confident one shouldn't be flagged
-    assert "Scenario modeling: standalone [needs verification]" not in out
 
 
 def test_script_warns_on_duplicate_tool_names(monkeypatch, db_path, capsys):
-    from scripts.enrich_tool_features import _select_tools
+    from scripts.enrich_agent_taxonomy import _select_tools
     lib = Library(db_path)
     lib.add_tool("Digits", "d1", "https://digits1.example", [], approved=1)
     lib.add_tool("Digits", "d2", "https://digits2.example", [], approved=1)
@@ -263,7 +226,7 @@ def test_script_warns_on_duplicate_tool_names(monkeypatch, db_path, capsys):
 
 
 def test_script_requires_scope_flag(monkeypatch, db_path):
-    import scripts.enrich_tool_features as script_mod
+    import scripts.enrich_agent_taxonomy as script_mod
     lib = Library(db_path)
     lib.add_tool("Runway", "FP&A", "https://runway.com", [], approved=1)
     lib.close()
@@ -274,7 +237,7 @@ def test_script_requires_scope_flag(monkeypatch, db_path):
 
 
 def test_script_requires_api_key(monkeypatch, db_path):
-    import scripts.enrich_tool_features as script_mod
+    import scripts.enrich_agent_taxonomy as script_mod
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     open(db_path, "a").close()  # resolve_db_path now requires the file to exist
     monkeypatch.setattr(sys, "argv", ["prog", "--db", db_path, "--tools", "Runway"])

@@ -1,31 +1,29 @@
 #!/usr/bin/env python3
-"""Feature comparison + agent-taxonomy research — LLM enrichment first pass
-(search overhaul Phase 4b, extended by the automated-research follow-up).
-For each Software entry, one Claude call (linklib.enrich.generate_tool_features)
-drafts both standalone-vs-bundled feature rows AND a whole-tool
+"""Agent-taxonomy research — LLM enrichment first pass (search overhaul Phase
+4b, extended by the automated-research follow-up; narrowed to agent-taxonomy
+only in the Feature Taxonomy Phase 1b PR 2 legacy retirement — this script
+used to also draft standalone-vs-bundled tool_features rows in the same call,
+before that table was retired). For each Software entry, one Claude call
+(linklib.enrich.generate_tool_agent_taxonomy) drafts a whole-tool
 agent-taxonomy summary — grounded in the tool's homepage plus its real
 Product/Solutions-type nav pages (not guessed URL paths), written with
 needs_verification=1 (or 0 for anything the model itself reported as
-confident and grounded) — reviewable drafts, never treated as confirmed.
-Nothing here changes what the public site renders; Phase 5's comparison
-matrix and the profile-page agent-taxonomy section are the first things
-that read this data, and only after a human review pass. This is also the
-exact same drafting logic the live app runs automatically when a new tool
-is added, or on-demand via the "Refresh AI research" admin button — this
-script is for bulk/backfill only.
+confident and grounded) — a reviewable draft, never treated as confirmed.
+This is also the exact same drafting logic the live app runs automatically
+when a new tool is added, or on-demand via the "Refresh AI research" admin
+button — this script is for bulk/backfill only.
 
 This makes real API calls under YOUR OWN Anthropic API credits — set
 ANTHROPIC_API_KEY first. Always dry-run a new tool list before writing:
 
-    python -m scripts.enrich_tool_features --db library.db --tools "Ramp,Brex" --dry-run
-    python -m scripts.enrich_tool_features --db library.db --tools "Ramp,Brex"
-    python -m scripts.enrich_tool_features --db library.db --limit 10
+    python -m scripts.enrich_agent_taxonomy --db library.db --tools "Ramp,Brex" --dry-run
+    python -m scripts.enrich_agent_taxonomy --db library.db --tools "Ramp,Brex"
+    python -m scripts.enrich_agent_taxonomy --db library.db --limit 10
 
 Re-running is safe: a tool with an existing agent_taxonomy_note is skipped
-by default (feature names dedupe by name within a tool regardless). Pass
---force to redraft everything anyway — e.g. re-running the whole catalog
-against the improved real-nav-page grounding, replacing earlier
-guessed-path drafts.
+by default. Pass --force to redraft everything anyway — e.g. re-running the
+whole catalog against improved real-nav-page grounding, replacing an earlier
+guessed-path draft.
 """
 from __future__ import annotations
 
@@ -53,7 +51,7 @@ def _select_tools(lib: Library, names: str, limit: int) -> list[dict]:
             print(f"WARNING: no approved tool found for: {', '.join(sorted(missing))}", file=sys.stderr)
         # A name matching more than one approved row means duplicate Software
         # entries exist for it — surface that loudly rather than silently
-        # drafting (and paying for) features twice. Not this script's job to
+        # drafting (and paying for) taxonomy twice. Not this script's job to
         # dedupe; that's the admin table's duplicate-blocking feature.
         name_counts: dict[str, int] = {}
         for t in selected:
@@ -77,7 +75,7 @@ def main() -> int:
     ap.add_argument("--model", default=DEFAULT_MODEL, help="Claude model to use")
     ap.add_argument("--dry-run", action="store_true", help="print what would be drafted, write nothing")
     ap.add_argument("--force", action="store_true",
-                    help="redraft even tools that already have feature rows")
+                    help="redraft even tools that already have an agent-taxonomy note")
     args = ap.parse_args()
     args.db = resolve_db_path(args.db)
 
@@ -97,59 +95,23 @@ def main() -> int:
             return 1
 
         total_cost = 0.0
-        total_features = 0
         total_skipped_dupe = 0
         total_failed = 0
         total_taxonomy = 0
 
         for t in tools:
-            # agent_taxonomy_note presence marks "already researched by this
-            # combined pipeline" — features alone don't gate a re-run, since
-            # a tool drafted before this follow-up may have features from the
-            # old guessed-path grounding but no taxonomy note at all.
             already_researched = bool((t.get("agent_taxonomy_note") or "").strip())
             if already_researched and not args.force:
                 print(f"[{t['name']}] already has agent-taxonomy research — skipping (use --force to redraft)")
+                total_skipped_dupe += 1
                 continue
 
-            existing = {f["feature_name"].strip().lower() for f in lib.list_tool_features(t["id"])}
             print(f"[{t['name']}] researching…", flush=True)
-            result = enrich_mod.generate_tool_features(t["name"], t["url"], t.get("description", ""), model=args.model)
+            result = enrich_mod.generate_tool_agent_taxonomy(t["name"], t["url"], t.get("description", ""), model=args.model)
             if result is None:
                 print("  FAILED (SDK/key unavailable or the call errored)")
                 total_failed += 1
                 continue
-
-            new_count = 0
-            dupe_count = 0
-            for draft in result.features:
-                if draft.feature_name.strip().lower() in existing:
-                    dupe_count += 1
-                    continue
-                existing.add(draft.feature_name.strip().lower())
-                new_count += 1
-                if args.dry_run:
-                    # Print each drafted feature so a dry-run is actually
-                    # reviewable for accuracy, not just an aggregate count —
-                    # that's the whole point of running it dry first.
-                    avail = []
-                    if draft.standalone_available:
-                        avail.append("standalone")
-                    if draft.bundled_only:
-                        avail.append("bundled-only")
-                    avail_label = "+".join(avail) or "availability unset"
-                    verify_note = "" if not draft.needs_verification else " [needs verification]"
-                    notes_note = f" — {draft.notes}" if draft.notes else ""
-                    print(f"    - {draft.feature_name}: {avail_label}{notes_note}{verify_note}")
-                else:
-                    lib.add_tool_feature(
-                        t["id"], draft.feature_name,
-                        standalone_available=int(draft.standalone_available),
-                        bundled_only=int(draft.bundled_only),
-                        notes=draft.notes, source_url=draft.source_url,
-                        needs_verification=int(draft.needs_verification),
-                        source="llm_enrichment", model=result.model,
-                    )
 
             drafted_taxonomy = bool(result.agent_taxonomy_note.strip())
             if drafted_taxonomy:
@@ -163,21 +125,17 @@ def main() -> int:
                     )
                 total_taxonomy += 1
 
-            if not args.dry_run and (new_count or drafted_taxonomy or result.cost_usd):
+            if not args.dry_run and (drafted_taxonomy or result.cost_usd):
                 lib.record_enrichment_cost(None, result.model, result.input_tokens,
                                            result.output_tokens, result.cost_usd)
 
             total_cost += result.cost_usd
-            total_features += new_count
-            total_skipped_dupe += dupe_count
             low_conf_note = " (low confidence — thin/no page content)" if result.low_confidence else ""
-            print(f"  {new_count} feature(s){low_conf_note}, ${result.cost_usd:.4f}"
-                  + (f", {dupe_count} dupe(s) skipped" if dupe_count else ""))
+            print(f"  taxonomy drafted={drafted_taxonomy}{low_conf_note}, ${result.cost_usd:.4f}")
             time.sleep(0.5)  # light rate-limit courtesy, this is a small interactive batch not a bulk job
 
-        print(f"\n{len(tools)} tool(s) processed: {total_features} feature(s) drafted, "
-              f"{total_taxonomy} agent-taxonomy note(s) drafted, "
-              f"{total_skipped_dupe} duplicate(s) skipped, {total_failed} failed.")
+        print(f"\n{len(tools)} tool(s) processed: {total_taxonomy} agent-taxonomy note(s) drafted, "
+              f"{total_skipped_dupe} already-researched skipped, {total_failed} failed.")
         print(f"Total cost: ${total_cost:.4f}" + (" (dry run — nothing written)" if args.dry_run else ""))
         if tools:
             per_tool = total_cost / max(len(tools) - total_failed, 1)

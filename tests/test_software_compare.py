@@ -146,9 +146,9 @@ def test_compare_gives_agent_involvement_its_own_section(env):
 
 
 def test_agent_taxonomy_verification_flag_shown_on_profile(env):
-    """A drafted (unconfirmed) agent_taxonomy_note gets the same "unverified"
-    flag tool_features rows already carry on the compare matrix — consistency
-    across every verification-flagged field."""
+    """A drafted (unconfirmed) agent_taxonomy_note gets an "unverified"
+    flag on the profile page, consistent with every other verification-
+    flagged narrative field (Description, Differentiation)."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -190,25 +190,6 @@ def test_compare_shows_agent_taxonomy_verification_flag(env):
     # The confirmed tool's note must not itself carry the flag.
     confirmed_idx = r.text.index("Confirmed agent note for Datarails.")
     assert "cc-verify" not in r.text[confirmed_idx:confirmed_idx + 80]
-
-
-def test_compare_shows_feature_availability_and_verification_flag(env):
-    from linklib.db import Library
-    lib = Library(os.environ["LINKLIB_DB"])
-    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
-    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
-    lib.add_tool_feature(a, "Scenario modeling", standalone_available=1, bundled_only=0)
-    lib.add_tool_feature(a, "Headcount planning", standalone_available=0, bundled_only=1,
-                         needs_verification=1, source="llm_enrichment")
-    # Datarails has no rows for either feature — should render as "Not tracked yet", not a false negative
-    lib.close()
-
-    r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
-    assert "Scenario modeling" in r.text
-    assert "Standalone" in r.text
-    assert "Bundled only" in r.text
-    assert "unverified" in r.text
-    assert "Not tracked yet" in r.text
 
 
 def test_compare_caps_at_four_tools(env):

@@ -109,26 +109,31 @@ def _build_software_context(lib: Library) -> str:
 
     blocks = []
     for t in tools:
-        features = lib.list_tool_features(t["id"])
+        # Governed Feature Taxonomy links (category_features/tool_feature_links)
+        # — replaces the legacy free-text tool_features read this used to do,
+        # retired in the Feature Taxonomy Phase 1b PR 2 (CLAUDE.md's "no dead
+        # data" note). Only covers tools in a seeded category (ERP/FP&A/Close
+        # Management as of this phase) — a tool in an unseeded category just
+        # gets no "Features" line, same as it did pre-retirement for any tool
+        # with no legacy rows.
+        links = lib.list_tool_feature_links_with_details(t["id"])
         lines = [f"### {t['name']} (slug: {t['slug']})"]
         lines.append(_line("URL", t.get("url")))
         lines.append(_line("Categories", ", ".join(t.get("categories") or [])))
         lines.append(_line("What it does", t.get("summary") or t.get("description")))
         lines.append(_line("How it differs from competitors", t.get("competitive_differentiation")))
         lines.append(_line("Agent/automation taxonomy", t.get("agent_taxonomy_note")))
-        if features:
+        if links:
             feature_bits = []
-            for f in features:
-                if f.get("needs_verification"):
-                    continue
-                avail = []
-                if f.get("standalone_available"):
-                    avail.append("standalone")
-                if f.get("bundled_only"):
-                    avail.append("bundled only")
-                feature_bits.append(f"{f['feature_name']} ({'/'.join(avail) or 'available'})")
-            if feature_bits:
-                lines.append(_line("Features", ", ".join(feature_bits)))
+            for link in links:
+                bits = []
+                if link["availability"] == "add_on":
+                    bits.append("add-on")
+                if link["ai_enabled"]:
+                    bits.append("AI")
+                suffix = f" ({'/'.join(bits)})" if bits else ""
+                feature_bits.append(f"{link['feature_name']}{suffix}")
+            lines.append(_line("Features", ", ".join(feature_bits)))
         blocks.append("".join(l for l in lines if l))
     return "\n".join(blocks)
 
