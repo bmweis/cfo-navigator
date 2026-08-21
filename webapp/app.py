@@ -24049,12 +24049,24 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
                        f'onsubmit="return confirm(\'Accept this article\\u2019s current content as final? '
                        f'It will stop showing up here and stop being auto-retried.\');">'
                        f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;white-space:nowrap;">Accept as final</button></form>')
+        # 2026-08 wrap-up sprint item 4 — a link only, no automation: Brian's
+        # own manual workaround (archive.org's crawler isn't subject to the
+        # Cloudflare fingerprint block that stops ours, so a fresh Save Page
+        # Now snapshot gives the next backfill run a copy our fetcher can
+        # retrieve) was proving out by hand today, one URL at a time. This
+        # just opens the same Save Page Now URL Brian was already typing —
+        # nothing here tracks whether it was clicked or whether a snapshot
+        # actually resulted; the next backfill run (or a manual re-check) is
+        # still what tells you that.
+        wayback_link = (f'<a href="https://web.archive.org/save/{_esc(url)}" target="_blank" '
+                        f'rel="noopener" style="font-size:12px;white-space:nowrap;">Snapshot on Wayback &#8599;</a>'
+                        if url else "")
         return (f'<tr><td style="padding:7px 12px;font-size:13px;">{title_html}'
                 f'<div style="font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-all;">{_esc(url)}</div></td>'
                 f'<td style="padding:7px 12px;font-size:13px;">{reason_html}</td>'
                 f'<td style="padding:7px 12px;font-size:13px;text-align:center;">{r.get("attempt_count", 0)}</td>'
                 f'<td style="padding:7px 12px;font-size:12px;color:var(--muted);">{last}</td>'
-                f'<td style="padding:7px 12px;">{accept_form}</td></tr>')
+                f'<td style="padding:7px 12px;"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">{accept_form}{wayback_link}</div></td></tr>')
 
     def _accepted_row(r):
         labels = {"paywall": "Paywall", "bot-challenge": "Bot challenge",
@@ -24081,7 +24093,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
     <div>
       <div style="font-weight:600;font-size:14px;">Needs manual review ({needs_review_count:,})</div>
-      <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Failed {Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD}+ times in a row&mdash;excluded from automatic retry, but NOT considered permanently dead (unlike Defunct service below). Export, fill in a corrected URL for any you can find, and re-import to fix and requeue them. If the content that's already saved is actually fine as-is (a real but short article, say), use &ldquo;Accept as final&rdquo; on that row instead&mdash;per-article only, no bulk option.</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Failed {Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD}+ times in a row&mdash;excluded from automatic retry, but NOT considered permanently dead (unlike Defunct service below). Export, fill in a corrected URL for any you can find, and re-import to fix and requeue them. If the content that's already saved is actually fine as-is (a real but short article, say), use &ldquo;Accept as final&rdquo; on that row instead&mdash;per-article only, no bulk option. If the live page loads fine in a browser but our fetcher can&rsquo;t reach it, use a row&rsquo;s &ldquo;Snapshot on Wayback&rdquo; link&mdash;archive.org&rsquo;s own crawler isn&rsquo;t subject to the same block ours is, so a fresh snapshot gives the next backfill run a copy it can reach.</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <a href="/admin/library/backfill-content/manual-review/export.csv" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;text-decoration:none;">Export CSV</a>

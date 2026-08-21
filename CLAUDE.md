@@ -1344,6 +1344,18 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   `_job_get(job_name)["running"]` first; when the job is actually live, the
   banner renders a plain in-progress line instead. See ARCHITECTURE.md's
   `job_run_log` table row for the full write-up.
+- **"Snapshot on Wayback" guidance link (2026-08 wrap-up sprint item 4) — a
+  link and a sentence, nothing more.** Brian proved out a manual workaround
+  in production: for an article whose live page loads fine in a browser
+  but is bot-blocked to this app's own fetcher, manually triggering
+  archive.org's Save Page Now creates a fresh snapshot the Wayback tier can
+  then retrieve, since archive.org's own crawler isn't subject to the same
+  Cloudflare fingerprint block. Each "Needs manual review" row with a known
+  URL now shows a "Snapshot on Wayback ↗" link to that exact Save Page Now
+  URL, plus one guidance sentence in the section's explainer text — no
+  automation, no tracking of whether a snapshot was taken. See
+  ARCHITECTURE.md's "'Snapshot on Wayback' guidance link" section for the
+  full write-up.
 - **Article purge flow (durability follow-up) — a permanent-deletion escape
   hatch for the narrow "genuinely nothing was ever saved" set, mirroring
   the manual-review corrected-URL CSV round trip exactly.**
