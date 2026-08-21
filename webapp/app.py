@@ -23705,6 +23705,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
         needs_check_count = lib.count_needs_content_check()
         needs_review_count = lib.count_articles_needing_manual_review()
         needs_review_rows = lib.list_articles_needing_manual_review(limit=500)
+        remaining_breakdown = lib.remaining_content_backfill_breakdown()
         accepted_count = lib.count_content_accepted()
         accepted_rows = lib.list_accepted_content(limit=500)
         purge_candidate_count = lib.count_purge_candidates()
@@ -23888,7 +23889,7 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
     if needs_review_rows:
         review_rows_html = "".join(_review_row(r) for r in needs_review_rows)
         manual_review_html = f"""
-<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:20px 0;">
+<div id="manual-review" style="background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:20px 0;">
   <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
     <div>
       <div style="font-weight:600;font-size:14px;">Needs manual review ({needs_review_count:,})</div>
@@ -23961,6 +23962,109 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
   </form>
 </div>"""
 
+    # -- Dashboard clarity pass (Phase 0 finding, see ARCHITECTURE.md's
+    # "Dashboard clarity pass" section for the full trace): for articles
+    # with a saved URL, these five buckets are a true, mutually-exclusive
+    # partition. Every content_html='' article's LATEST content_refetch_log
+    # row can only be one thing at a time (nothing, a failure under the
+    # manual-review threshold, a failure at/over it, defunct-service, or
+    # accepted), so no article can land in two of these five buckets at
+    # once, and Structured (content_html!='') is disjoint from all four by
+    # definition. "Flagged at save" is deliberately NOT a sixth
+    # segment&mdash;it's an orthogonal save-time tag that can sit on top of
+    # Remaining/Needs review/Defunct/Accepted at the same time (never on
+    # Structured&mdash;set_article_content_html always clears it the moment
+    # real structure lands), so folding it into this bar would double-count
+    # the same article past 100%. "Accepted as final" is its own bucket,
+    # not part of Structured: accept_article_content() never sets
+    # content_html, it only marks the article's existing (short but real)
+    # plain-text content as good enough&mdash;this is the answer to "where
+    # do accepted articles get counted": nowhere else, they're their own
+    # slice, correctly excluded from both Structured and Remaining.
+    partition_total = done_count + remaining + needs_review_count + excluded_count + accepted_count
+    no_url_count = max(total_articles - partition_total, 0)
+
+    def _backfill_tip(text: str) -> str:
+        return (f'<details style="margin-top:6px;">'
+                f'<summary style="cursor:pointer;display:inline-flex;width:16px;height:16px;'
+                f'align-items:center;justify-content:center;border-radius:50%;background:var(--bg);'
+                f'border:1px solid var(--line);font-size:11px;font-weight:700;color:var(--muted);">?'
+                f'<span style="position:absolute;width:1px;height:1px;overflow:hidden;">More info</span></summary>'
+                f'<p style="font-size:11.5px;color:var(--muted);text-align:left;margin:8px 0 0;line-height:1.45;">{text}</p>'
+                f'</details>')
+
+    def _backfill_tile(value: int, label: str, color: str, tooltip: str, anchor: str | None = None) -> str:
+        value_html = f'{value:,}'
+        if anchor:
+            value_html = f'<a href="#{anchor}" style="color:{color};text-decoration:none;">{value_html}</a>'
+        return (f'<div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">'
+                f'<div style="font-size:26px;font-weight:700;color:{color};font-family:var(--font-head);">{value_html}</div>'
+                f'<div style="font-size:12px;color:var(--muted);margin-top:2px;">{_esc(label)}</div>'
+                f'{_backfill_tip(tooltip)}'
+                f'</div>')
+
+    _bar_segments = [
+        ("Structured", done_count, "#16a34a"),
+        ("Remaining", remaining, "#d97706"),
+        ("Needs review", needs_review_count, "#ca8a04"),
+        ("Defunct service", excluded_count, "var(--muted)"),
+        ("Accepted as final", accepted_count, "var(--navy)"),
+    ]
+    _bar_denominator = partition_total or 1
+    _bar_fill = "".join(
+        f'<div style="background:{color};width:{(count / _bar_denominator * 100):.2f}%;height:100%;" '
+        f'title="{_esc(label)}: {count:,}"></div>'
+        for label, count, color in _bar_segments if count > 0
+    )
+    _bar_legend = "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);">'
+        f'<span style="width:9px;height:9px;border-radius:2px;background:{color};display:inline-block;flex-shrink:0;"></span>'
+        f'{_esc(label)} ({count:,})</span>'
+        for label, count, color in _bar_segments
+    )
+    _backfill_segment_bar_html = (
+        f'<div style="margin:2px 0 18px;">'
+        f'<div style="display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--bg);border:1px solid var(--line);">{_bar_fill}</div>'
+        f'<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;">{_bar_legend}</div>'
+        f'</div>'
+    )
+
+    # Remaining breakdown (Phase 0 item 3): never-attempted vs.
+    # attempted-and-failed-under-threshold, grouped by the latest failure
+    # reason where one is known.
+    _reason_labels = {"paywall": "paywall", "bot-challenge": "bot challenge",
+                       "too-thin": "too thin", "fetch-error": "fetch error"}
+    _reason_bits = ", ".join(
+        f'{count:,} {_reason_labels.get(reason, reason)}'
+        for reason, count in sorted(remaining_breakdown["by_reason"].items(), key=lambda kv: -kv[1])
+    )
+    _remaining_breakdown_text = f'{remaining_breakdown["never_attempted"]:,} never attempted yet'
+    if remaining_breakdown["attempted_failed"]:
+        _remaining_breakdown_text += (
+            f'; {remaining_breakdown["attempted_failed"]:,} attempted and failed fewer than '
+            f'{Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD} times in a row ({_reason_bits})'
+        )
+    _remaining_breakdown_text += "."
+
+    # Plain lead-in sentence rather than a standalone "Total articles" card
+    # (2026-08 review round-trip: the card was full-width and visually
+    # competed with the segmented bar directly below it for attention).
+    # Still carries the same arithmetic the card's tooltip used to explain
+    # (no_url_count vs. partition_total), just as a sentence instead.
+    _total_word = "article" if total_articles == 1 else "articles"
+    _other_word = "article" if partition_total == 1 else "articles"
+    if no_url_count:
+        _lead_sentence_text = (
+            f'{total_articles:,} {_total_word} total, including {no_url_count:,} unreachable'
+            f'&mdash;here&rsquo;s how the other {partition_total:,} {_other_word} break down:'
+        )
+    else:
+        _lead_sentence_text = (
+            f'{total_articles:,} {_total_word} total&mdash;here&rsquo;s how '
+            f'{"it breaks" if partition_total == 1 else "they break"} down:'
+        )
+    _backfill_total_lead_sentence = f'<p style="color:var(--muted);margin:0 0 10px;">{_lead_sentence_text}</p>'
+
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/library" style="font-size:13px;color:var(--muted);">&larr; Library</a></p>
 <h1>Reader content backfill</h1>
@@ -23968,46 +24072,41 @@ def admin_backfill_content(request: Request, msg: str = "", error: str = ""):
 <p style="color:var(--muted);margin:-6px 0 6px;">Re-fetches already-saved articles so the Reader can show real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as.</p>
 <p style="color:var(--muted);margin:0 0 20px;">A failed re-fetch never touches an article&rsquo;s existing content&mdash;it&rsquo;s only logged. Rate-limited (~{_CONTENT_BACKFILL_DELAY_SEC}s between requests) and safe to stop and resume; a re-run only touches articles that still need it.</p>
 
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px;margin-bottom:20px;">
-  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:26px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{total_articles:,}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Total articles</div>
-  </div>
-  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:26px;font-weight:700;color:#16a34a;font-family:var(--font-head);">{done_count:,}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Structured</div>
-  </div>
-  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{remaining:,}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Remaining</div>
-  </div>
-  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{needs_review_count:,}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Needs review</div>
-  </div>
-  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:26px;font-weight:700;color:var(--muted);font-family:var(--font-head);">{excluded_count:,}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Defunct service</div>
-  </div>
-  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:26px;font-weight:700;color:#d97706;font-family:var(--font-head);">{needs_check_count:,}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Flagged at save</div>
-  </div>
-  <div style="text-align:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:10px;">
-    <div style="font-size:26px;font-weight:700;color:var(--navy);font-family:var(--font-head);">{accepted_count:,}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:2px;">Accepted as final</div>
+{_backfill_total_lead_sentence}
+{_backfill_segment_bar_html}
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px;margin-bottom:14px;">
+  {_backfill_tile(done_count, "Structured", "#16a34a",
+      "Has real structured HTML&mdash;paragraphs, images, links&mdash;that the Reader can show. Set the moment a fetch or backfill succeeds; automatically clears any Flagged-at-save tag on that same article.")}
+  {_backfill_tile(remaining, "Remaining", "#d97706",
+      f'Still on flattened plain text and eligible for the next backfill run. {_remaining_breakdown_text}' if remaining
+      else "Still on flattened plain text and eligible for the next backfill run. Currently empty&mdash;nothing left to backfill.")}
+  {_backfill_tile(needs_review_count, "Needs review", "#ca8a04",
+      f'Failed {Library._MANUAL_REVIEW_ATTEMPT_THRESHOLD}+ times in a row&mdash;excluded from automatic retry until a human corrects the URL, accepts the current content as final, or a Wayback snapshot resolves it.{" See the table below." if needs_review_rows else ""}',
+      anchor="manual-review" if needs_review_rows else None)}
+  {_backfill_tile(excluded_count, "Defunct service", "var(--muted)",
+      "The host is a confirmed-discontinued service (e.g. Google&rsquo;s retired FeedBurner proxy)&mdash;permanently excluded from retry, since no future attempt can ever succeed.")}
+  {_backfill_tile(accepted_count, "Accepted as final", "var(--navy)",
+      f'An admin manually judged the current (short but real) content good enough as-is&mdash;permanently out of retry until undone.{" See the table below." if accepted_rows else ""} Note: this does not set structured HTML, so it is a separate bucket from Structured above, not folded into it.',
+      anchor="accepted-content" if accepted_rows else None)}
+</div>
+
+<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 16px;background:var(--bg);border:1px dashed var(--line);border-radius:10px;margin-bottom:20px;">
+  <div style="font-size:20px;font-weight:700;color:#7c3aed;font-family:var(--font-head);flex-shrink:0;">{needs_check_count:,}</div>
+  <div>
+    <div style="font-size:13px;font-weight:600;">Flagged at save<span style="font-weight:400;color:var(--muted);"> (not one of the five buckets above)</span></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">An orthogonal tag set the moment a save&rsquo;s fetch looked like a paywall preview, a bot-challenge page, a fetch failure, or too-thin content. Can sit on top of Remaining, Needs review, Defunct service, or Accepted as final at the same time as one of those&mdash;never on Structured, which always clears it. Not counted in the total above, to avoid double-counting the same article twice.</div>
   </div>
 </div>
 
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{needs_check_count:,} article{"s" if needs_check_count != 1 else ""} above were flagged the moment they were saved. The fetch looked like a paywall preview, a bot-challenge page, a fetch failure, or real content under the length floor&mdash;the save itself was never blocked, just marked with a reason instead of looking healthy. Clears automatically once a later backfill or resave succeeds.</p>' if needs_check_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch&mdash;the live page couldn&rsquo;t be reached for those. A snapshot can be stale or differ from what the current page shows; look for the &ldquo;via Wayback&rdquo; badge in the attempts log below to spot which ones.</p>' if wayback_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{migration_count:,} of the structured articles above came from a <strong>known domain migration</strong> (e.g. a blog that relocated to a new host), not the article&rsquo;s originally saved URL&mdash;look for the &ldquo;via Migration&rdquo; badge in the attempts log below.</p>' if migration_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_fetch_count:,} of the structured articles above came from a <strong>direct fetch of the article&rsquo;s own URL</strong> via Exa (medium.com and similar hosts block direct fetches, so Exa fetched that exact URL instead)&mdash;look for the &ldquo;via Medium fetch&rdquo; badge in the attempts log below.</p>' if medium_fetch_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_search_count:,} of the structured articles above came from a <strong>Medium-platform search match</strong> (a title search found the article elsewhere, or via Exa&rsquo;s own text, once the direct URL fetch above didn&rsquo;t work out)&mdash;look for the &ldquo;via Medium search&rdquo; badge in the attempts log below.</p>' if medium_search_count else ''}
-{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service (e.g. Google&rsquo;s retired FeedBurner proxy), so re-fetching can never succeed. Not counted in Remaining above. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry them anyway.</p>' if excluded_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-14px 0 8px;">{wayback_count:,} of the structured articles above came from a <strong>Wayback Machine</strong> snapshot, not a direct fetch. Look for the &ldquo;via Wayback&rdquo; badge in the attempts log below.</p>' if wayback_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{migration_count:,} came from a <strong>known domain migration</strong> (e.g. a blog that relocated to a new host)&mdash;look for &ldquo;via Migration&rdquo; below.</p>' if migration_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 8px;">{medium_fetch_count:,} came from a <strong>direct Exa fetch</strong> of the article&rsquo;s own URL (medium.com and similar hosts block direct fetches)&mdash;look for &ldquo;via Medium fetch&rdquo; below.</p>' if medium_fetch_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{medium_search_count:,} came from a <strong>Medium-platform search match</strong> once the direct fetch above didn&rsquo;t work out&mdash;look for &ldquo;via Medium search&rdquo; below.</p>' if medium_search_count else ''}
+{f'<p style="font-size:12.5px;color:var(--muted);margin:-8px 0 20px;">{excluded_count:,} article{"s" if excluded_count != 1 else ""} permanently excluded from future runs&mdash;the host is a known-discontinued service, so re-fetching can never succeed. Re-run with &ldquo;Re-run articles that already have structured content&rdquo; checked to retry anyway.</p>' if excluded_count else ''}
 
-{_job_run_banner("content_backfill")}
 <div id="poll-container">{status_html}</div>
+{_job_run_banner("content_backfill")}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;">
   <form id="content-backfill-form" method="post" action="/admin/library/backfill-content/start" style="display:grid;gap:18px;">
