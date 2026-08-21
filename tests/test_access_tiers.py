@@ -51,7 +51,7 @@ def _admin_client(appmod):
 PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           # CFO Toolbox browsing and everything linked from the thought-leadership
           # page are fully public; only the account tools below stay gated.
-          "/tools", "/tools/software", "/tools/benchmarks", "/tools/communities",
+          "/tools", "/tools/software", "/tools/resources", "/tools/communities",
           # /tools/communities/{slug} (the profile page), /tools/communities/gap
           # (redirects to /contact, not a 200), and /tools/communities/correct
           # (404s without a valid community_id) are all public but don't fit

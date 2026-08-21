@@ -629,6 +629,54 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   across the rest of the Toolbox admin (communities admin routes, the
   per-tool edit pages, and any other stragglers) is Phase 1b — a
   separate, investigate-first PR.
+- **Admin URL convention, Phase 1b PR 1 — the rest of the Software stragglers
+  moved, the categories redirect removed, Benchmarking renamed to
+  Resources.** The Phase 0 investigation for this PR inventoried every
+  admin-gated Toolbox route against the convention above and found
+  Communities already fully conformed (no changes needed there) — the real
+  gap was ~28 Software route definitions still living at bare
+  `/admin/tools/{tool_id}/*` and a handful of flat `/admin/tools/new`,
+  `/admin/tools/leads`, `/admin/tools/name-duplicates*`,
+  `/admin/tools/generate-description` pages. All of those moved to
+  `/admin/tools/software/*` in this PR — **full cutover, no redirects**,
+  unlike the categories move in the Feature Taxonomy PR: these are
+  POST-only, form/JS-driven action routes (approve, reject, delete,
+  quick-edit, screenshot/app-screenshot recapture+upload, research refresh,
+  agent-taxonomy/description/differentiation verify, competitors add/
+  remove/generate-matches/add-selected, feature-links save,
+  generate-differentiation) plus a few admin-nav-linked list/form pages —
+  not the kind of thing anyone bookmarks the way a page like
+  `/admin/tools/categories` plausibly was. The categories redirect itself
+  (`/admin/tools/categories` → `/admin/tools/software/categories`, shipped
+  in the Feature Taxonomy PR) was removed outright in this same PR, per
+  Brian's explicit call — no legacy `/admin/tools/*` URL survives at all
+  after this PR. **One deliberate exception, carried over unchanged**: the
+  legacy `tool_features` CRUD routes (`/admin/tools/{tool_id}/features/*`)
+  were NOT renamed — they're deleted outright in Phase 1b PR 2 (full legacy
+  retirement), so moving them first would just be churn on code about to be
+  deleted. `tool_feature_links`' own checklist-save route
+  (`/admin/tools/{tool_id}/feature-links/save` — a different mechanism,
+  the governed model, not the legacy one) DID move, since it isn't going
+  anywhere. **Benchmarking Resources renamed to Resources** — URL/copy only,
+  no schema change: `/tools/benchmarks` → `/tools/resources` (a real 301 kept
+  at the old URL, unlike the admin moves, since the public page is
+  indexable — same reasoning as the Feature Taxonomy PR's categories
+  redirect, just on the public side instead of admin), `/admin/tools/
+  benchmarks` → `/admin/tools/resources` (no redirect, same as every other
+  admin move in this PR), and every "Benchmarking"/"Benchmarking resources"
+  page title, h1, nav label, and admin-page copy relabeled to "Resources"
+  (sentence case). The `benchmarks` table, its columns, and every
+  `Library.*_benchmark*` method keep their original names — this is a
+  user-facing rename only, not a data-model one. **Two things investigated
+  and deliberately left alone**: the public `/tools/software/{slug}/edit`
+  and `/tools/communities/{slug}/edit` pages are a sanctioned
+  resource-adjacent URL pattern (same-resource "/edit" suffix, discoverable
+  right next to the public profile page it edits), not admin-tree
+  stragglers of the same kind as the routes above — moving them under
+  `/admin/*` was considered and rejected as a materially bigger, riskier UX
+  change than a mechanical rename, outside what the convention was meant to
+  cover. The convention itself is now stated as
+  `/admin/tools/{software|communities|resources}/*`.
 
 - **Sail, Don't Row — water reflections, re-added (reverses an earlier decision).**
   The original build removed reflections outright: "unrealistic inverted-building
@@ -1403,7 +1451,9 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   table comment and `ARCHITECTURE.md`'s Thought Leadership section for the
   schema) and a new admin section, `/admin/thought-leadership` — add/edit/
   delete across all four types from one filterable list, same CRUD pattern
-  as `/admin/tools/benchmarks`. `scripts/archive/migrate_thought_leadership.py`
+  as `/admin/tools/resources` (`/admin/tools/benchmarks` at the time this
+  phase shipped — renamed in the admin URL convention PR, see the Phase 1b
+  bullet below). `scripts/archive/migrate_thought_leadership.py`
   (dry-run by default, `--apply` to write, write-then-read-back verified —
   same convention as `scripts/backfill_logos.py`) is the one-time migration;
   it moved 32 of the 33 entries. Two decisions carried over unchanged from
@@ -1938,7 +1988,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   possibly affected, were already correctly centered — no fix needed there,
   confirmed rather than assumed. `/admin`'s right column now mirrors the
   public nav's order (Thought Leadership, then an expandable CFO Toolbox —
-  Software/Toolbox categories/Benchmarking resources/Communities/Sail Don't
+  Software/Toolbox categories/Resources/Communities/Sail Don't
   Row settings plus a nested FP&A Buddy sub-group and a Library link, then
   "Brand, voice, and content", then System unchanged). `/admin/library`
   dropped "Open Reader" from its tool list (now reachable via a dedicated

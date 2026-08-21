@@ -161,7 +161,7 @@ def test_open_task_counts_reflects_email_failure(lib):
 
 def test_dot_only_hrefs_are_all_or_none_sources():
     from webapp import tasks
-    assert tasks.DOT_ONLY_HREFS == {"/admin/contacts", "/admin/tools/leads"}
+    assert tasks.DOT_ONLY_HREFS == {"/admin/contacts", "/admin/tools/software/leads"}
 
 
 def test_badge_for_href_renders_dot_for_all_or_none(monkeypatch):
@@ -169,7 +169,7 @@ def test_badge_for_href_renders_dot_for_all_or_none(monkeypatch):
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     assert appmod._badge_for_href("/admin/contacts", 3) == '<span class="task-badge-dot" aria-label="Unread"></span>'
-    assert appmod._badge_for_href("/admin/tools/leads", 1) == '<span class="task-badge-dot" aria-label="Unread"></span>'
+    assert appmod._badge_for_href("/admin/tools/software/leads", 1) == '<span class="task-badge-dot" aria-label="Unread"></span>'
     assert appmod._badge_for_href("/admin/contacts", 0) == ""
 
 
@@ -186,8 +186,8 @@ def test_group_badge_dot_when_only_all_or_none_pending(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
-    counts = {"/admin/contacts": 2, "/admin/tools/leads": 1, "/admin/email-failures": 0}
-    hrefs = ["/admin/contacts", "/admin/tools/leads", "/admin/email-failures"]
+    counts = {"/admin/contacts": 2, "/admin/tools/software/leads": 1, "/admin/email-failures": 0}
+    hrefs = ["/admin/contacts", "/admin/tools/software/leads", "/admin/email-failures"]
     assert appmod._group_badge(counts, hrefs) == '<span class="task-badge-dot" aria-label="Unread"></span>'
 
 
@@ -267,7 +267,7 @@ def test_tool_leads_badge_clears_after_viewing(admin_client):
     r1 = client.get("/admin")
     assert '<span class="task-badge-dot" aria-label="Unread"></span>' in r1.text
 
-    client.get("/admin/tools/leads")   # unfiltered view clears it
+    client.get("/admin/tools/software/leads")   # unfiltered view clears it
 
     r2 = client.get("/admin")
     assert '<span class="task-dot"' not in r2.text

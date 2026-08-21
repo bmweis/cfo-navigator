@@ -150,7 +150,7 @@ _DEFAULT_CATEGORY_DESCRIPTIONS = {
 # pricing:  "free" (default) | "paid" | "freemium"  -> shows a $ badge
 # One-time seed data for the `benchmarks` table (see _seed_toolbox). Not read
 # directly anywhere else — the DB is the source of truth once seeded, managed
-# at /admin/tools/benchmarks.
+# at /admin/tools/resources.
 _DEFAULT_BENCHMARKS = [
     {
         "name": "ICONIQ Growth",
@@ -1407,7 +1407,7 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
     attribute to still submit with the rest of the page. The Community edit
     page still nests this section directly inside its own unnamed <form>,
     so it passes nothing and gets the original behavior unchanged."""
-    route_prefix = f"/admin/tools/{entity_id}" if kind == "tools" else f"/admin/tools/communities/{entity_id}"
+    route_prefix = f"/admin/tools/software/{entity_id}" if kind == "tools" else f"/admin/tools/communities/{entity_id}"
     source_url = (entity.get("app_screenshot_source_url") or "").strip()
     app_url = (entity.get("app_screenshot_url") or "").strip()
     idsfx = f"{kind}-{entity_id}"
@@ -5858,7 +5858,7 @@ _TOOLBOX_TILES = (
      "use&mdash;try the Software Matchmaker if you&rsquo;re not sure where to start, plus a Warm "
      "Intro button for the vendors I know well.",
      "The software high-growth finance teams actually use."),
-    ("/tools/benchmarks", "Benchmarking", _ICON_CHART,
+    ("/tools/resources", "Resources", _ICON_CHART,
      "The benchmarking sources I actually rely on&mdash;plus an honest take on where benchmarks "
      "help and where they mislead.",
      "The benchmarking sources I actually rely on."),
@@ -5918,7 +5918,7 @@ def _toolbox_mini_tile(index: int, title: str, one_liner: str, icon_svg: str) ->
 
 @app.get("/tools", response_class=HTMLResponse)
 def tools_landing(request: Request):
-    """CFO Toolbox landing page: 2x2 tile grid (Phase 3) — Software, Benchmarking,
+    """CFO Toolbox landing page: 2x2 tile grid (Phase 3) — Software, Resources,
     Communities, FP&A Buddy. Admins additionally see a 5th, seafoam-bordered tile
     linking to /admin/library — rendered only when _is_authed(request), so it's
     entirely absent from the HTML (not just CSS-hidden) for anyone else. That 5th
@@ -6018,7 +6018,7 @@ def tools_directory(request: Request, warn: str = ""):
 {warn_banner}
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
   <h1 style="margin:0;">Software</h1>
-  {'<a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
+  {'<a href="/admin/tools/software/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
 Not sure which tool's for you? {(
@@ -6359,7 +6359,7 @@ async function saveQuickEdit(id) {{
   }};
   status.textContent = 'Saving…';
   try {{
-    var r = await fetch('/admin/tools/' + id + '/quick-edit', {{
+    var r = await fetch('/admin/tools/software/' + id + '/quick-edit', {{
       method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify(payload)
     }});
     var d = await r.json();
@@ -7447,8 +7447,22 @@ function submitIntroForm() {{
     return HTMLResponse(_page(f"{tool['name']}—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
-@app.get("/tools/benchmarks", response_class=HTMLResponse)
-def tools_benchmarks(request: Request):
+@app.get("/tools/benchmarks")
+def tools_benchmarks_redirect(request: Request):
+    """Retired at this URL — renamed to /tools/resources (admin URL
+    convention PR, see CLAUDE.md/ARCHITECTURE.md; URL/copy rename only, the
+    underlying `benchmarks` table and Library methods are unchanged). Public
+    and indexable, unlike the admin routes in the same PR, so it keeps a
+    real 301 rather than dying outright — same precedent as
+    /growth-engine-ratio's own redirect stub above."""
+    target = "/tools/resources"
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=301)
+
+
+@app.get("/tools/resources", response_class=HTMLResponse)
+def tools_resources(request: Request):
     authed = _is_authed(request)
     lib = _lib()
     try:
@@ -7491,8 +7505,8 @@ def tools_benchmarks(request: Request):
     body = f"""<div class="page page-grid">
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-  <h1 style="margin:0;">Benchmarking</h1>
-  {'<a href="/admin/tools/benchmarks" style="font-size:14px;font-weight:500;">Manage →</a>' if authed else ''}
+  <h1 style="margin:0;">Resources</h1>
+  {'<a href="/admin/tools/resources" style="font-size:14px;font-weight:500;">Manage →</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);font-size:14px;margin:8px 0 12px;">The benchmarking sources I actually use.</p>
 <p style="font-size:13px;color:var(--muted);margin:0 0 24px;">Worth reading first: <a href="https://www.onlycfo.io/p/benchmarking-is-bad" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500;">Benchmarking is Bad</a>&mdash;it&rsquo;s not always what you think it is.</p>
@@ -7509,7 +7523,7 @@ def tools_benchmarks(request: Request):
 .bench-badge{{font-size:11px;font-weight:500;border-radius:6px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}}
 .bench-desc{{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}}
 </style>"""
-    return HTMLResponse(_page("Benchmarking—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Resources—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
 def _visitor_session_id(request: Request) -> str:
@@ -9118,7 +9132,7 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
   status.textContent = 'Generating…';
   if (hostId) startGenAnim(hostId);
   try {
-    var r = await fetch('/admin/tools/generate-description', {
+    var r = await fetch('/admin/tools/software/generate-description', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({name: name, url: url})
     });
@@ -10026,10 +10040,10 @@ def admin_software(request: Request):
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t['submitted_by'] or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
-            <form method="post" action="/admin/tools/{t['id']}/approve" style="display:inline;">
+            <form method="post" action="/admin/tools/software/{t['id']}/approve" style="display:inline;">
               <button class="btn" style="padding:6px 14px;font-size:13px;">Approve</button>
             </form>
-            <form method="post" action="/admin/tools/{t['id']}/reject" style="display:inline;margin-left:6px;"
+            <form method="post" action="/admin/tools/software/{t['id']}/reject" style="display:inline;margin-left:6px;"
                   onsubmit="return confirm('Reject and delete this submission?');">
               <button class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Reject</button>
             </form>
@@ -10039,7 +10053,7 @@ def admin_software(request: Request):
     def _approved_row(t: dict) -> str:
         cats = ", ".join(t["categories"]) or "—"
         n_leads = lead_counts.get(t["id"], 0)
-        lead_badge = (f'<a href="/admin/tools/leads?tool_id={t["id"]}" '
+        lead_badge = (f'<a href="/admin/tools/software/leads?tool_id={t["id"]}" '
                       f'style="display:inline-block;background:var(--coral);color:#fff;border-radius:5px;'
                       f'padding:2px 8px;font-size:11px;font-weight:700;text-decoration:none;white-space:nowrap;">'
                       f'{n_leads} intro{"s" if n_leads != 1 else ""}</a>') if n_leads else \
@@ -10070,7 +10084,7 @@ def admin_software(request: Request):
           <td class="admin-table-cell admin-table-actions" data-label="Actions" style="padding:10px 12px;border-bottom:1px solid var(--line);">
             <div class="admin-table-actions-grid" style="display:grid;grid-template-columns:repeat(2,auto);gap:6px;">
               <a href="/tools/software/{t['slug']}/edit" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;text-align:center;">Edit</a>
-              <form method="post" action="/admin/tools/{t['id']}/delete" style="margin:0;"
+              <form method="post" action="/admin/tools/software/{t['id']}/delete" style="margin:0;"
                     onsubmit="return confirm('Delete &quot;{_esc(t['name'])}&quot;? This removes it from the public directory.');">
                 <input type="hidden" name="redirect_to" value="/admin/tools/software">
                 <button type="submit" class="btn btn-ghost" style="width:100%;padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;">Delete</button>
@@ -10102,14 +10116,14 @@ def admin_software(request: Request):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
   <h1>Software</h1>
-  <a href="/admin/tools/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add software</a>
+  <a href="/admin/tools/software/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add software</a>
 </div>
 <p style="margin:0 0 24px;">
   <a href="/tools/software" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
-  <a href="/admin/tools/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
+  <a href="/admin/tools/software/leads" style="font-size:13px;color:var(--muted);">View all intros ({total_leads}) →</a>
   &nbsp;&middot;&nbsp;
-  <a href="/admin/tools/name-duplicates" style="font-size:13px;color:{'#92400e' if n_name_dupes else 'var(--muted)'};font-weight:{'700' if n_name_dupes else '400'};">Check for name duplicates{f' ({n_name_dupes})' if n_name_dupes else ''} →</a>
+  <a href="/admin/tools/software/name-duplicates" style="font-size:13px;color:{'#92400e' if n_name_dupes else 'var(--muted)'};font-weight:{'700' if n_name_dupes else '400'};">Check for name duplicates{f' ({n_name_dupes})' if n_name_dupes else ''} →</a>
 </p>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Pending submissions</h2>
@@ -10197,7 +10211,7 @@ applySortFilter('software');
 # spacing/hyphenation, or any fuzzy/distance-based matching).
 # ---------------------------------------------------------------------------
 
-@app.get("/admin/tools/name-duplicates", response_class=HTMLResponse)
+@app.get("/admin/tools/software/name-duplicates", response_class=HTMLResponse)
 def admin_tool_name_duplicates(request: Request, msg: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10231,17 +10245,17 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
           <td style="padding:12px;border-bottom:1px solid var(--line);">{_tool_cell(b)}</td>
           <td style="padding:12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(normalized_name)}</td>
           <td style="padding:12px;border-bottom:1px solid var(--line);white-space:nowrap;">
-            <form method="post" action="/admin/tools/name-duplicates/merge" style="display:inline;" onsubmit="{_confirm(a, b)}">
+            <form method="post" action="/admin/tools/software/name-duplicates/merge" style="display:inline;" onsubmit="{_confirm(a, b)}">
               <input type="hidden" name="keep_id" value="{a['id']}">
               <input type="hidden" name="delete_id" value="{b['id']}">
               <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Keep &quot;{_esc(a['name'])}&quot;</button>
             </form>
-            <form method="post" action="/admin/tools/name-duplicates/merge" style="display:inline;margin-left:6px;" onsubmit="{_confirm(b, a)}">
+            <form method="post" action="/admin/tools/software/name-duplicates/merge" style="display:inline;margin-left:6px;" onsubmit="{_confirm(b, a)}">
               <input type="hidden" name="keep_id" value="{b['id']}">
               <input type="hidden" name="delete_id" value="{a['id']}">
               <button type="submit" class="btn" style="padding:6px 14px;font-size:13px;">Keep &quot;{_esc(b['name'])}&quot;</button>
             </form>
-            <form method="post" action="/admin/tools/name-duplicates/resolve" style="display:inline;margin-left:6px;">
+            <form method="post" action="/admin/tools/software/name-duplicates/resolve" style="display:inline;margin-left:6px;">
               <input type="hidden" name="tool_id_a" value="{a['id']}">
               <input type="hidden" name="tool_id_b" value="{b['id']}">
               <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Not a duplicate, dismiss</button>
@@ -10307,7 +10321,7 @@ def admin_tool_name_duplicates(request: Request, msg: str = ""):
     return HTMLResponse(_page("Name-duplicate check—CFO Toolbox Admin", "", body, authed=True))
 
 
-@app.post("/admin/tools/name-duplicates/merge")
+@app.post("/admin/tools/software/name-duplicates/merge")
 async def admin_tool_name_duplicates_merge(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -10332,10 +10346,10 @@ async def admin_tool_name_duplicates_merge(request: Request):
         msg = f'Kept "{keep_tool["name"]}", deleted duplicate "{delete_tool_row["name"]}".'
     finally:
         lib.close()
-    return RedirectResponse(f"/admin/tools/name-duplicates?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/tools/software/name-duplicates?msg={quote(msg)}", status_code=303)
 
 
-@app.post("/admin/tools/name-duplicates/resolve")
+@app.post("/admin/tools/software/name-duplicates/resolve")
 async def admin_tool_name_duplicates_resolve(request: Request):
     """Only 'not a duplicate' runs through here now — confirming a duplicate
     goes straight to /merge above and deletes immediately, so this route no
@@ -10355,7 +10369,7 @@ async def admin_tool_name_duplicates_resolve(request: Request):
     finally:
         lib.close()
     msg = "Dismissed—won't resurface."
-    return RedirectResponse(f"/admin/tools/name-duplicates?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(f"/admin/tools/software/name-duplicates?msg={quote(msg)}", status_code=303)
 
 
 # Field allowlist for the Software bulk-edit panel — server-side gate so a
@@ -10464,7 +10478,7 @@ async def admin_software_bulk_delete(request: Request):
     return JSONResponse({"ok": True})
 
 
-@app.get("/admin/tools/leads", response_class=HTMLResponse)
+@app.get("/admin/tools/software/leads", response_class=HTMLResponse)
 def admin_tools_leads(request: Request, tool_id: int | None = None):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -10512,25 +10526,6 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
 </div>
 </div>"""
     return HTMLResponse(_page("Toolbox intros—Admin", "Admin", body, authed=True))
-
-
-@app.get("/admin/tools/categories")
-def admin_tools_categories_old_url_redirect(msg: str = "", error: str = ""):
-    """Retired at this URL (admin URL convention: software-directory admin
-    lives under /admin/tools/software/*, see CLAUDE.md) in favor of
-    /admin/tools/software/categories. Redirects rather than removed outright
-    — this was a real bookmarked admin tool, same precedent as
-    /admin/library/backfill's own redirect stub above. Preserves msg/error
-    query params so a form action still mid-flight against the old path
-    (there shouldn't be any live ones, but cheap to keep) doesn't lose its
-    banner."""
-    params = []
-    if msg:
-        params.append(f"msg={quote(msg)}")
-    if error:
-        params.append(f"error={quote(error)}")
-    qs = f"?{'&'.join(params)}" if params else ""
-    return RedirectResponse(f"/admin/tools/software/categories{qs}", status_code=301)
 
 
 @app.get("/admin/tools/software/categories", response_class=HTMLResponse)
@@ -11111,8 +11106,8 @@ def _benchmark_form_fields(b: dict | None = None) -> str:
   </div>"""
 
 
-@app.get("/admin/tools/benchmarks", response_class=HTMLResponse)
-def admin_benchmarks(request: Request):
+@app.get("/admin/tools/resources", response_class=HTMLResponse)
+def admin_resources(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -11127,21 +11122,21 @@ def admin_benchmarks(request: Request):
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(b['coverage'])}</td>
   <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{_esc(b['pricing'])}</td>
   <td style="padding:10px 12px;white-space:nowrap;">
-    <a href="/admin/tools/benchmarks/{b['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
-    <form method="post" action="/admin/tools/benchmarks/{b['id']}/delete" style="display:inline;"
-          onsubmit="return confirm('Delete &quot;{_esc(b['name'])}&quot; from Benchmarking Resources?');">
+    <a href="/admin/tools/resources/{b['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <form method="post" action="/admin/tools/resources/{b['id']}/delete" style="display:inline;"
+          onsubmit="return confirm('Delete &quot;{_esc(b['name'])}&quot; from Resources?');">
       <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
     </form>
   </td>
-</tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No benchmarking resources yet.</td></tr>'
+</tr>""" for b in benchmarks) or '<tr><td colspan="5" style="padding:20px;color:var(--muted);">No resources yet.</td></tr>'
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Benchmarking resources</h1>
-  <a href="/admin/tools/benchmarks/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add resource</a>
+  <h1>Resources</h1>
+  <a href="/admin/tools/resources/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add resource</a>
 </div>
-<p style="margin:0 0 24px;"><a href="/tools/benchmarks" style="font-size:13px;color:var(--muted);">View on public directory →</a></p>
+<p style="margin:0 0 24px;"><a href="/tools/resources" style="font-size:13px;color:var(--muted);">View on public directory →</a></p>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -11162,28 +11157,28 @@ def admin_benchmarks(request: Request):
   (Edit above), and this sync will never touch them.
 </p>
 </div>"""
-    return HTMLResponse(_page("Benchmarking resources—CFO Toolbox Admin", "", body, authed=True))
+    return HTMLResponse(_page("Resources—CFO Toolbox Admin", "", body, authed=True))
 
 
-@app.get("/admin/tools/benchmarks/new", response_class=HTMLResponse)
-def admin_benchmarks_new(request: Request):
+@app.get("/admin/tools/resources/new", response_class=HTMLResponse)
+def admin_resources_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     body = f"""<div class="page page-form">
-<h1>Add a benchmarking resource</h1>
-<form method="post" action="/admin/tools/benchmarks/new" style="display:grid;gap:20px;">
+<h1>Add a resource</h1>
+<form method="post" action="/admin/tools/resources/new" style="display:grid;gap:20px;">
 {_benchmark_form_fields()}
   <div>
     <button type="submit" class="btn">Add resource</button>
-    <a href="/admin/tools/benchmarks" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/admin/tools/resources" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Add benchmarking resource—CFO Toolbox Admin", "", body, authed=True))
+    return HTMLResponse(_page("Add resource—CFO Toolbox Admin", "", body, authed=True))
 
 
-@app.post("/admin/tools/benchmarks/new")
-async def admin_benchmarks_new_submit(request: Request):
+@app.post("/admin/tools/resources/new")
+async def admin_resources_new_submit(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
@@ -11199,11 +11194,11 @@ async def admin_benchmarks_new_submit(request: Request):
         lib.add_benchmark(name, url, description, coverage, pricing)
     finally:
         lib.close()
-    return RedirectResponse("/admin/tools/benchmarks", status_code=303)
+    return RedirectResponse("/admin/tools/resources", status_code=303)
 
 
-@app.get("/admin/tools/benchmarks/{benchmark_id}/edit", response_class=HTMLResponse)
-def admin_benchmarks_edit(request: Request, benchmark_id: int):
+@app.get("/admin/tools/resources/{benchmark_id}/edit", response_class=HTMLResponse)
+def admin_resources_edit(request: Request, benchmark_id: int):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -11214,20 +11209,20 @@ def admin_benchmarks_edit(request: Request, benchmark_id: int):
     if not b:
         raise HTTPException(status_code=404, detail="Benchmark not found")
     body = f"""<div class="page page-form">
-<h1>Edit benchmarking resource</h1>
-<form method="post" action="/admin/tools/benchmarks/{benchmark_id}/edit" style="display:grid;gap:20px;">
+<h1>Edit resource</h1>
+<form method="post" action="/admin/tools/resources/{benchmark_id}/edit" style="display:grid;gap:20px;">
 {_benchmark_form_fields(b)}
   <div>
     <button type="submit" class="btn">Save changes</button>
-    <a href="/admin/tools/benchmarks" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    <a href="/admin/tools/resources" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
   </div>
 </form>
 </div>"""
     return HTMLResponse(_page(f"Edit {_esc(b['name'])}—CFO Toolbox Admin", "", body, authed=True))
 
 
-@app.post("/admin/tools/benchmarks/{benchmark_id}/edit")
-async def admin_benchmarks_edit_submit(request: Request, benchmark_id: int):
+@app.post("/admin/tools/resources/{benchmark_id}/edit")
+async def admin_resources_edit_submit(request: Request, benchmark_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     form = await request.form()
@@ -11243,11 +11238,11 @@ async def admin_benchmarks_edit_submit(request: Request, benchmark_id: int):
         lib.update_benchmark(benchmark_id, name, url, description, coverage, pricing)
     finally:
         lib.close()
-    return RedirectResponse("/admin/tools/benchmarks", status_code=303)
+    return RedirectResponse("/admin/tools/resources", status_code=303)
 
 
-@app.post("/admin/tools/benchmarks/{benchmark_id}/delete")
-def admin_benchmarks_delete(request: Request, benchmark_id: int):
+@app.post("/admin/tools/resources/{benchmark_id}/delete")
+def admin_resources_delete(request: Request, benchmark_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     lib = _lib()
@@ -11255,7 +11250,7 @@ def admin_benchmarks_delete(request: Request, benchmark_id: int):
         lib.delete_benchmark(benchmark_id)
     finally:
         lib.close()
-    return RedirectResponse("/admin/tools/benchmarks", status_code=303)
+    return RedirectResponse("/admin/tools/resources", status_code=303)
 
 
 # -- Thought Leadership admin (Phase 1 — see CLAUDE.md) ----------------------
@@ -13497,7 +13492,7 @@ async def admin_communities_generate_listing(request: Request):
     })
 
 
-@app.get("/admin/tools/new", response_class=HTMLResponse)
+@app.get("/admin/tools/software/new", response_class=HTMLResponse)
 def admin_tools_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
@@ -13509,7 +13504,7 @@ def admin_tools_new(request: Request):
     body = f"""<div class="page page-grid">
 <h1>Add software</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
-<form method="post" action="/admin/tools/new" style="display:grid;gap:20px;">
+<form method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
       <h2 style="font-size:16px;font-weight:600;margin:0;">Company Details</h2>
@@ -13643,7 +13638,7 @@ def _run_tool_research(tool_id: int) -> bool:
         lib.close()
 
 
-@app.post("/admin/tools/new")
+@app.post("/admin/tools/software/new")
 async def admin_tools_new_submit(request: Request, background_tasks: BackgroundTasks):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -13678,7 +13673,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     return RedirectResponse(redirect_url, status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/approve")
+@app.post("/admin/tools/software/{tool_id}/approve")
 def admin_tools_approve(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -13690,7 +13685,7 @@ def admin_tools_approve(request: Request, tool_id: int):
     return RedirectResponse("/admin/tools/software", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/reject")
+@app.post("/admin/tools/software/{tool_id}/reject")
 def admin_tools_reject(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -13766,7 +13761,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         return (f'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;'
                 f'border-top:1px solid var(--line);">'
                 f'<a href="/tools/software/{c["slug"]}/edit" style="font-size:14px;font-weight:500;color:var(--ink);">{_esc(c["name"])}</a>'
-                f'<form method="post" action="/admin/tools/{tool_id}/competitors/{c["id"]}/remove" style="margin:0;">'
+                f'<form method="post" action="/admin/tools/software/{tool_id}/competitors/{c["id"]}/remove" style="margin:0;">'
                 f'<button type="submit" class="tool-admin-btn tool-admin-del">Remove</button></form></div>')
 
     def _suggestion_row(s: dict) -> str:
@@ -13788,7 +13783,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             '</div>'
             '<p id="competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
             '<p id="competitor-gen-err" style="display:none;"></p>'
-            f'<form method="post" action="/admin/tools/{tool_id}/competitors/add-selected">'
+            f'<form method="post" action="/admin/tools/software/{tool_id}/competitors/add-selected">'
             '<input type="hidden" id="competitor-ai-drafted-fields" name="ai_drafted_fields" value="">'
             + "".join(_suggestion_row(s) for s in suggestions) +
             '<button type="submit" class="tool-admin-btn" style="margin-top:8px;">+ Add selected</button>'
@@ -13903,7 +13898,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   </summary>
   <p style="font-size:13px;color:var(--muted);margin:12px 0 0;">The governed replacement for Features above, one curated list per category this tool belongs to&mdash;see
   <a href="/admin/tools/software/features" target="_blank" rel="noopener">Manage Features</a>. Check a box to link this tool to that feature; availability/AI/verified date only matter once checked.</p>
-  <form method="post" action="/admin/tools/{tool_id}/feature-links/save">
+  <form method="post" action="/admin/tools/software/{tool_id}/feature-links/save">
     {feature_ids_input}
     {section_blocks}
     <div style="margin-top:16px;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Save Feature Taxonomy</button></div>
@@ -13954,21 +13949,21 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     _taxonomy_verify_badge, _taxonomy_verify_action, _taxonomy_verify_form_html, _taxonomy_review_line_html = (
         _narrative_verify_widget(
             bool(tool.get("agent_taxonomy_needs_verification")),
-            "agent-taxonomy-verify-form", f"/admin/tools/{tool_id}/agent-taxonomy/verify",
+            "agent-taxonomy-verify-form", f"/admin/tools/software/{tool_id}/agent-taxonomy/verify",
             latest_taxonomy_review,
         )
     )
     _description_verify_badge, _description_verify_action, _description_verify_form_html, _description_review_line_html = (
         _narrative_verify_widget(
             bool(tool.get("description_needs_verification")),
-            "description-verify-form", f"/admin/tools/{tool_id}/description/verify",
+            "description-verify-form", f"/admin/tools/software/{tool_id}/description/verify",
             latest_description_review,
         )
     )
     _differentiation_verify_badge, _differentiation_verify_action, _differentiation_verify_form_html, _differentiation_review_line_html = (
         _narrative_verify_widget(
             bool(tool.get("competitive_differentiation_needs_verification")),
-            "differentiation-verify-form", f"/admin/tools/{tool_id}/differentiation/verify",
+            "differentiation-verify-form", f"/admin/tools/software/{tool_id}/differentiation/verify",
             latest_differentiation_review,
         )
     )
@@ -14098,8 +14093,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     </div>
   </div>
 </form>
-<form id="research-refresh-form" method="post" action="/admin/tools/{tool_id}/research/refresh" style="display:none;"></form>
-<form id="screenshot-recapture-form" method="post" action="/admin/tools/{tool_id}/screenshot/recapture" style="display:none;"></form>
+<form id="research-refresh-form" method="post" action="/admin/tools/software/{tool_id}/research/refresh" style="display:none;"></form>
+<form id="screenshot-recapture-form" method="post" action="/admin/tools/software/{tool_id}/screenshot/recapture" style="display:none;"></form>
 {_app_screenshot_after_form_html}
 {_taxonomy_verify_form_html}
 {_description_verify_form_html}
@@ -14117,7 +14112,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     {_suggestions_block_html}
 
     <div style="margin-top:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <form method="post" action="/admin/tools/{tool_id}/competitors/add" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <form method="post" action="/admin/tools/software/{tool_id}/competitors/add" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <select name="competitor_id" style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;min-width:220px;">
           <option value="">Add a competitor by name&hellip;</option>
           {_other_tools_options_html}
@@ -14249,7 +14244,7 @@ async function generateDifferentiation(toolId, textareaId, statusId, errBoxId, h
   status.textContent = 'Generating…';
   if (hostId) startGenAnim(hostId);
   try {{
-    var r = await fetch('/admin/tools/' + toolId + '/generate-differentiation', {{method: 'POST'}});
+    var r = await fetch('/admin/tools/software/' + toolId + '/generate-differentiation', {{method: 'POST'}});
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
     document.getElementById(textareaId).value = d.competitive_differentiation;
@@ -14270,7 +14265,7 @@ async function generateCompetitorMatches(toolId, statusId, errBoxId, hostId) {{
   status.textContent = 'Generating…';
   if (hostId) startGenAnim(hostId);
   try {{
-    var r = await fetch('/admin/tools/' + toolId + '/competitors/generate-matches', {{method: 'POST'}});
+    var r = await fetch('/admin/tools/software/' + toolId + '/competitors/generate-matches', {{method: 'POST'}});
     var d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
     var matched = d.competitor_ids || [];
@@ -14366,7 +14361,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     return RedirectResponse(redirect_url, status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/screenshot/recapture")
+@app.post("/admin/tools/software/{tool_id}/screenshot/recapture")
 def admin_tools_screenshot_recapture(request: Request, tool_id: int):
     """Live homepage recapture — runs Playwright synchronously in this
     request (a manual, occasional admin action, not a bulk job; the bulk
@@ -14395,7 +14390,7 @@ def admin_tools_screenshot_recapture(request: Request, tool_id: int):
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/app-screenshot/recapture")
+@app.post("/admin/tools/software/{tool_id}/app-screenshot/recapture")
 def admin_tools_app_screenshot_recapture(request: Request, tool_id: int):
     """App-screenshot equivalent of admin_tools_screenshot_recapture (Phase
     E) — same synchronous-Playwright-in-request pattern and the same
@@ -14427,7 +14422,7 @@ def admin_tools_app_screenshot_recapture(request: Request, tool_id: int):
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/app-screenshot/upload")
+@app.post("/admin/tools/software/{tool_id}/app-screenshot/upload")
 async def admin_tools_app_screenshot_upload(request: Request, tool_id: int, file: UploadFile = File(...)):
     """Manual app-screenshot upload (Phase E) — the alternative to
     auto-capture for a tool with no publicly-reachable app URL. The uploaded
@@ -14458,7 +14453,7 @@ async def admin_tools_app_screenshot_upload(request: Request, tool_id: int, file
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/research/refresh")
+@app.post("/admin/tools/software/{tool_id}/research/refresh")
 def admin_tools_research_refresh(request: Request, tool_id: int):
     """On-demand re-run of _run_tool_research — same drafting logic as the
     automatic on-add trigger, run synchronously here (a manual, occasional
@@ -14475,7 +14470,7 @@ def admin_tools_research_refresh(request: Request, tool_id: int):
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit?{msg}", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/agent-taxonomy/verify")
+@app.post("/admin/tools/software/{tool_id}/agent-taxonomy/verify")
 def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
     """One-click "Mark verified" for the agent-taxonomy note, mirroring the
     equivalent tool_features action — clears the needs_verification flag
@@ -14500,7 +14495,7 @@ def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/description/verify")
+@app.post("/admin/tools/software/{tool_id}/description/verify")
 def admin_tools_description_verify(request: Request, tool_id: int):
     """One-click "Mark verified" for the Description field (Phase G PR 2) —
     same shape as admin_tools_agent_taxonomy_verify. Covers `summary` too
@@ -14523,7 +14518,7 @@ def admin_tools_description_verify(request: Request, tool_id: int):
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/differentiation/verify")
+@app.post("/admin/tools/software/{tool_id}/differentiation/verify")
 def admin_tools_differentiation_verify(request: Request, tool_id: int):
     """One-click "Mark verified" for the Differentiation/Bottom-line field
     (Phase G PR 2) — same shape as admin_tools_agent_taxonomy_verify."""
@@ -14544,7 +14539,7 @@ def admin_tools_differentiation_verify(request: Request, tool_id: int):
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/competitors/add")
+@app.post("/admin/tools/software/{tool_id}/competitors/add")
 async def admin_tools_competitors_add(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14568,7 +14563,7 @@ async def admin_tools_competitors_add(request: Request, tool_id: int):
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/competitors/{competitor_id}/remove")
+@app.post("/admin/tools/software/{tool_id}/competitors/{competitor_id}/remove")
 def admin_tools_competitors_remove(request: Request, tool_id: int, competitor_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14723,7 +14718,7 @@ def admin_tools_features_delete(request: Request, tool_id: int, feature_id: int)
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/feature-links/save")
+@app.post("/admin/tools/software/{tool_id}/feature-links/save")
 async def admin_tools_feature_links_save(request: Request, tool_id: int):
     """Saves the Feature Taxonomy checklist from the tool edit page in one
     pass: every feature_id the form rendered a row for gets a checked box ->
@@ -14760,7 +14755,7 @@ async def admin_tools_feature_links_save(request: Request, tool_id: int):
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/delete")
+@app.post("/admin/tools/software/{tool_id}/delete")
 async def admin_tools_delete(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14779,7 +14774,7 @@ async def admin_tools_delete(request: Request, tool_id: int):
     return RedirectResponse(redirect_to, status_code=303)
 
 
-@app.post("/admin/tools/{tool_id}/quick-edit")
+@app.post("/admin/tools/software/{tool_id}/quick-edit")
 async def admin_tools_quick_edit(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14811,7 +14806,7 @@ async def admin_tools_quick_edit(request: Request, tool_id: int):
     }})
 
 
-@app.post("/admin/tools/generate-description")
+@app.post("/admin/tools/software/generate-description")
 async def admin_tools_generate_description(request: Request):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -14841,7 +14836,7 @@ async def admin_tools_generate_description(request: Request):
                          "low_confidence": draft.low_confidence})
 
 
-@app.post("/admin/tools/{tool_id}/generate-differentiation")
+@app.post("/admin/tools/software/{tool_id}/generate-differentiation")
 def admin_tools_generate_differentiation(request: Request, tool_id: int):
     """Drafts the "Bottom line" callout into the edit form — never
     auto-saved, standing AI-first-pass-then-human-review principle. Grounded
@@ -14875,7 +14870,7 @@ def admin_tools_generate_differentiation(request: Request, tool_id: int):
                          "low_confidence": draft.low_confidence})
 
 
-@app.post("/admin/tools/{tool_id}/competitors/generate-matches")
+@app.post("/admin/tools/software/{tool_id}/competitors/generate-matches")
 def admin_tools_generate_competitor_matches(request: Request, tool_id: int):
     """AI first pass over the tag-overlap suggestion shortlist (see
     suggest_tool_competitors) — judges which candidates are genuine
@@ -14912,7 +14907,7 @@ def admin_tools_generate_competitor_matches(request: Request, tool_id: int):
     return JSONResponse({"ok": True, "competitor_ids": result.competitor_ids})
 
 
-@app.post("/admin/tools/{tool_id}/competitors/add-selected")
+@app.post("/admin/tools/software/{tool_id}/competitors/add-selected")
 async def admin_tools_competitors_add_selected(request: Request, tool_id: int):
     """Batch-add version of /competitors/add — accepts multiple competitor_id
     values from the suggestions checkbox list in one submit, so the AI-drafted
@@ -17596,7 +17591,7 @@ _TOOLBOX_TOOLS = [
     ("/admin/tools/software/categories", "Toolbox categories",   "Add, rename, or remove the category pills tools are tagged with on /tools."),
     ("/admin/tools/software/features",   "Manage Features",      "The curated \"key features\" list per category—the governed vocabulary tools get mapped against (docs/FEATURE_TAXONOMY.md)."),
     ("/admin/tools/software/feature-review-queue", "Feature Review Queue", "Proposed feature-taxonomy changes—from admin edits, the AI scan, or public suggestions—awaiting approval before they reach the live tables."),
-    ("/admin/tools/benchmarks", "Benchmarking resources", "Add, edit, or remove the sources listed in the Benchmarking Resources section—name, URL, description, coverage, and pricing."),
+    ("/admin/tools/resources", "Resources", "Add, edit, or remove the sources listed in the Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
     ("/admin/game-settings",    "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
 ]
@@ -17626,7 +17621,7 @@ _FPA_BUDDY_TOOLS = [
 # assembled dynamically (see the CFO Toolbox special-case in admin_page())
 # because that nesting needs access to admin_page()'s own task_counts/
 # _group_html closures. The entry here still carries _TOOLBOX_TOOLS as its
-# base items (Software, Toolbox categories, Benchmarking, Communities, Sail
+# base items (Software, Toolbox categories, Resources, Communities, Sail
 # Don't Row settings) — every one of those is KEPT as a direct child rather
 # than dropped to match the brief's shorter "Software/Benchmarking/
 # Communities" prose list, since dropping "Toolbox categories" or "Sail,
@@ -17637,7 +17632,7 @@ _FPA_BUDDY_TOOLS = [
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
-        ("/admin/tools/leads",  "Toolbox intros",          "Warm Intro requests from readers—name, email, company, and which tool they want an intro to."),
+        ("/admin/tools/software/leads",  "Toolbox intros",          "Warm Intro requests from readers—name, email, company, and which tool they want an intro to."),
         ("/admin/community-gaps", "Community gaps",        "Where visitors say finance communities fall short—what they're missing, and which community came closest."),
         ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
@@ -18386,9 +18381,11 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 # Placement notes for the tables that don't obviously belong to one bucket:
 #   - read_later lives under Users & auth, not Library/Archive — it's a
 #     per-user list (user_id FK), not archive content itself.
-#   - benchmarks sits under Toolbox — Software: it's the Benchmarking
-#     Resources list managed at /admin/tools/benchmarks, part of the
-#     software side of CFO Toolbox, not a Communities concept.
+#   - benchmarks sits under Toolbox — Software: it's the Resources list
+#     (table name unchanged; public/admin URLs and copy renamed from
+#     "Benchmarking" in the URL-convention PR) managed at
+#     /admin/tools/resources, part of the software side of CFO Toolbox,
+#     not a Communities concept.
 #   - tool_name_dedupe_decisions is Toolbox — Software's duplicate-merge
 #     log; dedupe_decisions (no "tool_name_" prefix) is the unrelated
 #     Library archive-dedupe log and stays under Library/Archive.
@@ -19328,7 +19325,7 @@ def admin_library(request: Request):
         )
 
     # Open Reader — a header-adjacent page action beside the H1, reusing the
-    # flex + `.btn` pattern /admin/tools/software and /admin/tools/benchmarks
+    # flex + `.btn` pattern /admin/tools/software and /admin/tools/resources
     # already use for their "+ Add" links, rather than the seafoam callout box
     # that used to sit beside the flow diagram.
     #
@@ -25593,7 +25590,7 @@ def _email_template_registry() -> list[dict]:
             "id": "warm-intro", "prefix": "warm_intro", "title": "Warm Intro email",
             "recipient": "Vendor contact (requester cc&rsquo;d)",
             "trigger": "A member requests an intro on /tools",
-            "blurb": "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/leads). The requester is cc&rsquo;d automatically.",
+            "blurb": "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/software/leads). The requester is cc&rsquo;d automatically.",
             "placeholders": eu.WARM_INTRO_PLACEHOLDERS,
             "subject_default": eu.WARM_INTRO_SUBJECT_DEFAULT,
             "body_default": eu.WARM_INTRO_BODY_DEFAULT,

@@ -272,7 +272,7 @@ def test_admin_app_screenshot_recapture_success(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/app-screenshot/recapture", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{a}/app-screenshot/recapture", follow_redirects=False)
     assert r.status_code == 303
     assert "app_screenshot_captured=1" in r.headers["location"]
 
@@ -295,7 +295,7 @@ def test_admin_app_screenshot_recapture_without_source_url_noops(env, monkeypatc
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/app-screenshot/recapture", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{a}/app-screenshot/recapture", follow_redirects=False)
     assert r.status_code == 303
     assert "app_screenshot_captured=0" in r.headers["location"]
     assert "url" not in written
@@ -310,12 +310,12 @@ def test_admin_app_screenshot_recapture_failure(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/app-screenshot/recapture", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{a}/app-screenshot/recapture", follow_redirects=False)
     assert "app_screenshot_captured=0" in r.headers["location"]
 
 
 def test_admin_app_screenshot_recapture_requires_auth(env):
-    r = _client(env).post("/admin/tools/1/app-screenshot/recapture")
+    r = _client(env).post("/admin/tools/software/1/app-screenshot/recapture")
     assert r.status_code == 401
 
 
@@ -343,7 +343,7 @@ def test_admin_app_screenshot_upload_success(env):
     client = _client(env)
     _login(client)
     r = client.post(
-        f"/admin/tools/{a}/app-screenshot/upload",
+        f"/admin/tools/software/{a}/app-screenshot/upload",
         files={"file": ("app-screenshot.png", io.BytesIO(_FAKE_PNG), "image/png")},
         follow_redirects=False,
     )
@@ -372,7 +372,7 @@ def test_admin_app_screenshot_upload_rejects_bad_mime(env):
     client = _client(env)
     _login(client)
     r = client.post(
-        f"/admin/tools/{a}/app-screenshot/upload",
+        f"/admin/tools/software/{a}/app-screenshot/upload",
         files={"file": ("not-an-image.txt", io.BytesIO(b"hello world"), "text/plain")},
         follow_redirects=False,
     )
@@ -394,7 +394,7 @@ def test_admin_app_screenshot_upload_rejects_oversized_file(env):
     client = _client(env)
     _login(client)
     r = client.post(
-        f"/admin/tools/{a}/app-screenshot/upload",
+        f"/admin/tools/software/{a}/app-screenshot/upload",
         files={"file": ("big.png", io.BytesIO(oversized), "image/png")},
         follow_redirects=False,
     )
@@ -403,7 +403,7 @@ def test_admin_app_screenshot_upload_rejects_oversized_file(env):
 
 def test_admin_app_screenshot_upload_requires_auth(env):
     r = _client(env).post(
-        "/admin/tools/1/app-screenshot/upload",
+        "/admin/tools/software/1/app-screenshot/upload",
         files={"file": ("app-screenshot.png", io.BytesIO(_FAKE_PNG), "image/png")},
     )
     assert r.status_code == 401

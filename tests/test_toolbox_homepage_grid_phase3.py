@@ -1,4 +1,4 @@
-"""Phase 3: CFO Toolbox 2x2 tile grid (Software, Benchmarking, Communities,
+"""Phase 3: CFO Toolbox 2x2 tile grid (Software, Resources, Communities,
 FP&A Buddy) on both /tools and a new homepage teaser section, plus a 5th,
 admin-only, seafoam-bordered tile on /tools linking to /admin/library.
 
@@ -55,7 +55,7 @@ def test_tools_landing_has_4_tile_grid_with_fpa_buddy(env):
     html = _client(env).get("/tools").text
     assert "toolbox-grid" in html
     assert 'href="/tools/software"' in html
-    assert 'href="/tools/benchmarks"' in html
+    assert 'href="/tools/resources"' in html
     assert 'href="/tools/communities"' in html
     assert 'href="/tools/fpa-buddy"' in html
     assert ">FP&amp;A Buddy<" in html

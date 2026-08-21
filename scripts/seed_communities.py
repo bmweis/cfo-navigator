@@ -504,7 +504,7 @@ def main():
             if existing:
                 # name/notes/advisor re-sync — cost_band/access/categories/
                 # featured/etc. are admin-owned once seeded (edited at
-                # /admin/tools/communities), same contract as tools/benchmarks'
+                # /admin/tools/communities), same contract as the benchmarks/
                 # name+description re-sync (advisor mirrors tools.advisor: only
                 # bumped True here, never demoted, same as seed_tools.py's main()).
                 if c.get("advisor") and not existing["advisor"]:

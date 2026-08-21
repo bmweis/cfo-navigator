@@ -164,7 +164,10 @@ CREATE TABLE IF NOT EXISTS tool_categories (
     sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
--- Benchmarking Resources section on /tools. coverage: 'Private'|'Public'|'Both'.
+-- Resources section on /tools (table name kept as `benchmarks`; the public/admin
+-- URLs and page copy were renamed from "Benchmarking" to "Resources" in the
+-- admin URL convention PR — URL/copy rename only, no schema change).
+-- coverage: 'Private'|'Public'|'Both'.
 -- pricing: 'free'|'paid'|'freemium' (only 'paid'/'freemium' render a $ badge).
 CREATE TABLE IF NOT EXISTS benchmarks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1175,7 +1178,7 @@ CREATE INDEX IF NOT EXISTS idx_matchmaker_questions_conversation ON matchmaker_q
 -- table just says which of those candidate pairs to stop surfacing. Both
 -- verdicts suppress future resurfacing; 'duplicate' doesn't itself merge or
 -- delete anything, it only flags the pair as "an admin already saw this and
--- is on it" so /admin/tools/name-duplicates stops nagging about it. Deleting
+-- is on it" so /admin/tools/software/name-duplicates stops nagging about it. Deleting
 -- one of the two tools (the actual resolution of a 'duplicate' verdict) would
 -- otherwise leave its row here permanently orphaned, so delete_tool cascades
 -- a cleanup here too — same pattern as its existing tool_competitors delete.
@@ -3983,7 +3986,7 @@ class Library:
         """Legacy 'duplicate'-verdict rows where both tools are still live —
         i.e. an admin confirmed a pair as duplicates before the merge-on-confirm
         UI existed, so nothing was actually deleted. Surfaced in
-        /admin/tools/name-duplicates as an actionable "pick which to keep" row,
+        /admin/tools/software/name-duplicates as an actionable "pick which to keep" row,
         same shape as a fresh candidate. Drains to empty naturally: once one
         side is deleted, delete_tool's cascade removes the row here too."""
         rows = self.conn.execute(
@@ -4005,7 +4008,7 @@ class Library:
         """Scan every current tool (approved or not) for normalize_tool_name()
         exact matches, grouped, then every pairwise combination within a group
         minus any pair the admin already resolved (see resolved_tool_name_pairs).
-        Powers the /admin/tools/name-duplicates review view. O(n log n) grouping
+        Powers the /admin/tools/software/name-duplicates review view. O(n log n) grouping
         over ~190 rows — fine to run live on every page load, no caching needed."""
         from itertools import combinations
         rows = self.conn.execute("SELECT id, name, slug, url, approved FROM tools").fetchall()
@@ -4941,7 +4944,8 @@ class Library:
         self.conn.commit()
         return changed
 
-    # -- benchmarking resources (the /tools "Benchmarking Resources" section) --
+    # -- benchmarking resources (the /tools "Resources" section; table/methods --
+    # keep their original "benchmark" naming, only the URLs and page copy renamed) --
 
     def list_benchmarks(self) -> list[dict]:
         rows = self.conn.execute(
@@ -4976,7 +4980,7 @@ class Library:
     def update_benchmark_content(self, benchmark_id: int, name: str, description: str) -> None:
         """Narrow update for the startup seed-sync pass: touches only name and
         description, leaving coverage/pricing untouched so an admin edit made
-        directly on /admin/tools/benchmarks survives a re-sync."""
+        directly on /admin/tools/resources survives a re-sync."""
         self.conn.execute(
             "UPDATE benchmarks SET name=?, description=? WHERE id=?",
             (name.strip(), description.strip(), benchmark_id),
