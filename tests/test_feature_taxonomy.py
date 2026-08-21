@@ -249,23 +249,15 @@ def test_manage_features_admin_pages_require_auth(env):
     assert r.status_code in (302, 303)
 
 
-def test_old_categories_url_redirects_to_software_convention(env):
-    """The admin URL convention decided in this PR (software-directory admin
-    lives under /admin/tools/software/*) moved /admin/tools/categories to
-    /admin/tools/software/categories — unlike the two brand-new Feature
-    Taxonomy routes (which never existed on main, so no redirect is needed),
-    this one was a real pre-existing bookmarked admin tool, so the old URL
-    301-redirects rather than 404ing, same precedent as
-    /admin/library/backfill's own redirect stub."""
+def test_old_categories_url_is_gone_no_redirect(env):
+    """The admin URL convention's Phase 1b PR 1 removed the interim
+    /admin/tools/categories redirect (shipped in the Feature Taxonomy PR)
+    outright, per Brian's explicit call — no legacy /admin/tools/* admin
+    URL survives after that PR. The old URL is now a plain 404, not a
+    redirect."""
     client = _client(env)
     r = client.get("/admin/tools/categories", follow_redirects=False)
-    assert r.status_code == 301
-    assert r.headers["location"] == "/admin/tools/software/categories"
-    # msg/error query params carry through, in case anything is still
-    # mid-flight against the old URL.
-    r = client.get("/admin/tools/categories?msg=Saved", follow_redirects=False)
-    assert r.status_code == 301
-    assert r.headers["location"] == "/admin/tools/software/categories?msg=Saved"
+    assert r.status_code == 404
 
 
 def test_manage_features_add_edit_retire_flow(env):
@@ -349,7 +341,7 @@ def test_tool_edit_page_save_feature_links_toggles_link(env):
     finally:
         lib.close()
 
-    r = client.post(f"/admin/tools/{tool_id}/feature-links/save", data={
+    r = client.post(f"/admin/tools/software/{tool_id}/feature-links/save", data={
         "feature_ids": [str(fid)],
         f"feature_{fid}_enabled": "1",
         f"feature_{fid}_availability": "native",
@@ -366,7 +358,7 @@ def test_tool_edit_page_save_feature_links_toggles_link(env):
         lib.close()
 
     # Un-checking removes the link.
-    r = client.post(f"/admin/tools/{tool_id}/feature-links/save", data={
+    r = client.post(f"/admin/tools/software/{tool_id}/feature-links/save", data={
         "feature_ids": [str(fid)],
     }, follow_redirects=False)
     assert r.status_code == 303

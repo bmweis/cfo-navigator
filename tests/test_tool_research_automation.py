@@ -129,7 +129,7 @@ def test_admin_add_tool_triggers_background_research(env, monkeypatch):
     calls = _mock_generate_tool_features(monkeypatch)
     client = _client(env)
     _login(client)
-    r = client.post("/admin/tools/new", data={
+    r = client.post("/admin/tools/software/new", data={
         "name": "Runway", "url": "https://runway.com", "description": "FP&A platform",
         "summary": "FP&A platform for scenario modeling.",
     }, follow_redirects=False)
@@ -171,7 +171,7 @@ def test_research_refresh_success(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{tool_id}/research/refresh", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{tool_id}/research/refresh", follow_redirects=False)
     assert r.status_code == 303
     assert "research_refreshed=1" in r.headers["location"]
     assert calls
@@ -190,7 +190,7 @@ def test_research_refresh_failure_banner(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{tool_id}/research/refresh", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{tool_id}/research/refresh", follow_redirects=False)
     assert r.status_code == 303
     assert "research_refreshed=0" in r.headers["location"]
 
@@ -199,14 +199,14 @@ def test_research_refresh_failure_banner(env, monkeypatch):
 
 
 def test_research_refresh_requires_auth(env):
-    r = _client(env).post("/admin/tools/1/research/refresh")
+    r = _client(env).post("/admin/tools/software/1/research/refresh")
     assert r.status_code == 401
 
 
 def test_research_refresh_404_for_missing_tool(env):
     client = _client(env)
     _login(client)
-    r = client.post("/admin/tools/999999/research/refresh")
+    r = client.post("/admin/tools/software/999999/research/refresh")
     assert r.status_code == 404
 
 
@@ -220,7 +220,7 @@ def test_agent_taxonomy_verify_clears_flag(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
     assert r.status_code == 303
 
     lib = Library(os.environ["LINKLIB_DB"])
@@ -231,7 +231,7 @@ def test_agent_taxonomy_verify_clears_flag(env):
 
 
 def test_agent_taxonomy_verify_requires_auth(env):
-    r = _client(env).post("/admin/tools/1/agent-taxonomy/verify")
+    r = _client(env).post("/admin/tools/software/1/agent-taxonomy/verify")
     assert r.status_code == 401
 
 
@@ -288,7 +288,7 @@ def test_research_refresh_banner_drops_verify_clause_when_confident(env, monkeyp
 
     client = _client(env)
     _login(client)
-    client.post(f"/admin/tools/{tool_id}/research/refresh", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/research/refresh", follow_redirects=False)
 
     r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
     assert "AI research refreshed" in r.text
@@ -313,7 +313,7 @@ def test_research_refresh_banner_keeps_verify_clause_when_unconfident(env, monke
 
     client = _client(env)
     _login(client)
-    client.post(f"/admin/tools/{tool_id}/research/refresh", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/research/refresh", follow_redirects=False)
 
     r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
     assert "before marking them verified" in r.text
@@ -334,7 +334,7 @@ def test_research_refresh_banner_keeps_clause_when_only_feature_row_unconfident(
 
     client = _client(env)
     _login(client)
-    client.post(f"/admin/tools/{tool_id}/research/refresh", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/research/refresh", follow_redirects=False)
 
     r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
     assert "before marking them verified" in r.text
@@ -350,7 +350,7 @@ def test_agent_taxonomy_verify_writes_narrative_review_log(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
     review = lib.get_latest_narrative_review("tool", "agent_taxonomy", tool_id)
@@ -373,7 +373,7 @@ def test_agent_taxonomy_verify_logs_reviewer_username(env):
 
     client = _client(env)
     client.post("/login", data={"username": "brian", "password": "pw"}, follow_redirects=False)
-    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
     review = lib.get_latest_narrative_review("tool", "agent_taxonomy", tool_id)
@@ -389,13 +389,13 @@ def test_agent_taxonomy_verify_reverify_appends_not_overwrites(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
     lib.set_tool_agent_taxonomy_draft(tool_id, "Refreshed draft.", needs_verification=1)
     lib.close()
 
-    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
 
     lib = Library(os.environ["LINKLIB_DB"])
     log = lib.list_narrative_review_log()
@@ -415,7 +415,7 @@ def test_edit_page_shows_verified_by_line_after_verify(env):
 
     client = _client(env)
     client.post("/login", data={"username": "brian", "password": "pw"}, follow_redirects=False)
-    client.post(f"/admin/tools/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/agent-taxonomy/verify", follow_redirects=False)
 
     r = client.get(f"/tools/software/{tool_slug}/edit")
     assert "Verified by brian on" in r.text

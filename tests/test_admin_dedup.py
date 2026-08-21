@@ -142,7 +142,7 @@ def test_software_create_blocked_on_duplicate_url(admin_client):
     tool_slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
-    r = client.post("/admin/tools/new", data={
+    r = client.post("/admin/tools/software/new", data={
         "name": "New Tool", "url": "https://vendor.example", "description": "desc", "summary": "desc",
     })
     assert r.status_code == 400

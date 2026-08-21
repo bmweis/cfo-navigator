@@ -197,7 +197,7 @@ def test_description_verify_route_clears_flag_and_logs(env):
 
     client = _client(env)
     _login(client, "brian", "pw")
-    r = client.post(f"/admin/tools/{tool_id}/description/verify", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{tool_id}/description/verify", follow_redirects=False)
     assert r.status_code == 303
 
     lib = Library(os.environ["LINKLIB_DB"])
@@ -219,7 +219,7 @@ def test_differentiation_verify_route_clears_flag_and_logs(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{tool_id}/differentiation/verify", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{tool_id}/differentiation/verify", follow_redirects=False)
     assert r.status_code == 303
 
     lib = Library(os.environ["LINKLIB_DB"])
@@ -232,15 +232,15 @@ def test_differentiation_verify_route_clears_flag_and_logs(env):
 
 def test_verify_routes_require_auth(env):
     client = _client(env)
-    assert client.post("/admin/tools/1/description/verify").status_code == 401
-    assert client.post("/admin/tools/1/differentiation/verify").status_code == 401
+    assert client.post("/admin/tools/software/1/description/verify").status_code == 401
+    assert client.post("/admin/tools/software/1/differentiation/verify").status_code == 401
 
 
 def test_verify_routes_404_for_missing_tool(env):
     client = _client(env)
     _login(client)
-    assert client.post("/admin/tools/999999/description/verify").status_code == 404
-    assert client.post("/admin/tools/999999/differentiation/verify").status_code == 404
+    assert client.post("/admin/tools/software/999999/description/verify").status_code == 404
+    assert client.post("/admin/tools/software/999999/differentiation/verify").status_code == 404
 
 
 # -- Edit page rendering: badges/buttons/review lines --------------------------
@@ -257,7 +257,7 @@ def test_edit_page_shows_description_badge_and_button_when_needs_verification(en
     client = _client(env)
     _login(client)
     r = client.get(f"/tools/software/{slug}/edit")
-    assert 'action="/admin/tools/{}/description/verify"'.format(tool_id) in r.text
+    assert 'action="/admin/tools/software/{}/description/verify"'.format(tool_id) in r.text
     assert "Needs verification" in r.text
 
 
@@ -286,7 +286,7 @@ def test_edit_page_shows_verified_by_line_for_description(env):
 
     client = _client(env)
     _login(client, "brian", "pw")
-    client.post(f"/admin/tools/{tool_id}/description/verify", follow_redirects=False)
+    client.post(f"/admin/tools/software/{tool_id}/description/verify", follow_redirects=False)
 
     r = client.get(f"/tools/software/{slug}/edit")
     assert "Verified by brian on" in r.text

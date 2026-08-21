@@ -1,7 +1,7 @@
 """Name-based duplicate detection for the Software directory: exact-match
 normalize_tool_name() (case, parentheticals, entity suffixes only — no
 fuzzy/spelling/spacing matching), the non-blocking warn on save, and the
-/admin/tools/name-duplicates review+resolve mechanism (tool_name_dedupe_decisions,
+/admin/tools/software/name-duplicates review+resolve mechanism (tool_name_dedupe_decisions,
 keyed on the sorted tool id pair so a later rename can't re-open a resolved pair)."""
 import os
 import tempfile
@@ -176,7 +176,7 @@ def test_admin_new_tool_warns_on_name_duplicate_but_saves(admin_client):
     lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/new", data={
+    r = client.post("/admin/tools/software/new", data={
         "name": "Dealhub Inc", "url": "https://dealhub-other.example",
         "description": "desc", "summary": "desc",
     }, follow_redirects=False)
@@ -195,7 +195,7 @@ def test_admin_new_tool_no_warn_for_distinct_name(admin_client):
     lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/new", data={
+    r = client.post("/admin/tools/software/new", data={
         "name": "Coefficient", "url": "https://coefficient.io",
         "description": "desc", "summary": "desc",
     }, follow_redirects=False)
@@ -272,7 +272,7 @@ def test_name_duplicates_page_lists_candidate(admin_client):
     lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
     lib.close()
 
-    r = client.get("/admin/tools/name-duplicates")
+    r = client.get("/admin/tools/software/name-duplicates")
     assert r.status_code == 200
     assert "Dealhub" in r.text
     assert 'Keep &quot;Dealhub&quot;' in r.text
@@ -288,7 +288,7 @@ def test_name_duplicates_page_shows_pending_merges_section(admin_client):
     lib.record_tool_name_dedupe_decision(a, b, "duplicate")
     lib.close()
 
-    r = client.get("/admin/tools/name-duplicates")
+    r = client.get("/admin/tools/software/name-duplicates")
     assert r.status_code == 200
     assert "Confirmed duplicates awaiting cleanup" in r.text
 
@@ -302,7 +302,7 @@ def test_name_duplicates_page_requires_auth(monkeypatch):
     importlib.reload(appmod)
     from fastapi.testclient import TestClient
     client = TestClient(appmod.app, raise_server_exceptions=True)
-    r = client.get("/admin/tools/name-duplicates", follow_redirects=False)
+    r = client.get("/admin/tools/software/name-duplicates", follow_redirects=False)
     assert r.status_code == 303
     if os.path.exists(db):
         os.remove(db)
@@ -315,7 +315,7 @@ def test_resolve_dismiss_removes_candidate_from_list(admin_client):
     b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/name-duplicates/resolve", data={
+    r = client.post("/admin/tools/software/name-duplicates/resolve", data={
         "tool_id_a": a, "tool_id_b": b,
     }, follow_redirects=False)
     assert r.status_code == 303
@@ -329,7 +329,7 @@ def test_resolve_dismiss_removes_candidate_from_list(admin_client):
 
 def test_resolve_rejects_invalid_tool_ids(admin_client):
     client, appmod, db = admin_client
-    r = client.post("/admin/tools/name-duplicates/resolve", data={
+    r = client.post("/admin/tools/software/name-duplicates/resolve", data={
         "tool_id_a": "not-a-number", "tool_id_b": "1",
     })
     assert r.status_code == 400
@@ -344,7 +344,7 @@ def test_resolve_requires_auth(monkeypatch):
     importlib.reload(appmod)
     from fastapi.testclient import TestClient
     client = TestClient(appmod.app, raise_server_exceptions=True)
-    r = client.post("/admin/tools/name-duplicates/resolve", data={"tool_id_a": 1, "tool_id_b": 2})
+    r = client.post("/admin/tools/software/name-duplicates/resolve", data={"tool_id_a": 1, "tool_id_b": 2})
     assert r.status_code == 401
     if os.path.exists(db):
         os.remove(db)
@@ -359,7 +359,7 @@ def test_merge_keeps_one_and_deletes_the_other(admin_client):
     b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/name-duplicates/merge", data={
+    r = client.post("/admin/tools/software/name-duplicates/merge", data={
         "keep_id": a, "delete_id": b,
     }, follow_redirects=False)
     assert r.status_code == 303
@@ -378,7 +378,7 @@ def test_merge_removes_the_pair_from_candidates(admin_client):
     b = lib.add_tool("Dealhub Inc", "desc", "https://dealhub-other.example", [], approved=1)
     lib.close()
 
-    client.post("/admin/tools/name-duplicates/merge", data={"keep_id": a, "delete_id": b})
+    client.post("/admin/tools/software/name-duplicates/merge", data={"keep_id": a, "delete_id": b})
 
     lib = Library(db)
     assert lib.find_tool_name_duplicate_candidates() == []
@@ -396,7 +396,7 @@ def test_merge_resolves_a_pending_legacy_merge(admin_client):
     lib.record_tool_name_dedupe_decision(a, b, "duplicate")
     lib.close()
 
-    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": a, "delete_id": b}, follow_redirects=False)
+    r = client.post("/admin/tools/software/name-duplicates/merge", data={"keep_id": a, "delete_id": b}, follow_redirects=False)
     assert r.status_code == 303
 
     lib = Library(db)
@@ -412,7 +412,7 @@ def test_merge_rejects_same_keep_and_delete_id(admin_client):
     a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": a, "delete_id": a})
+    r = client.post("/admin/tools/software/name-duplicates/merge", data={"keep_id": a, "delete_id": a})
     assert r.status_code == 400
 
 
@@ -422,13 +422,13 @@ def test_merge_rejects_nonexistent_tool(admin_client):
     a = lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": a, "delete_id": 999999})
+    r = client.post("/admin/tools/software/name-duplicates/merge", data={"keep_id": a, "delete_id": 999999})
     assert r.status_code == 404
 
 
 def test_merge_rejects_invalid_ids(admin_client):
     client, appmod, db = admin_client
-    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": "x", "delete_id": "1"})
+    r = client.post("/admin/tools/software/name-duplicates/merge", data={"keep_id": "x", "delete_id": "1"})
     assert r.status_code == 400
 
 
@@ -441,7 +441,7 @@ def test_merge_requires_auth(monkeypatch):
     importlib.reload(appmod)
     from fastapi.testclient import TestClient
     client = TestClient(appmod.app, raise_server_exceptions=True)
-    r = client.post("/admin/tools/name-duplicates/merge", data={"keep_id": 1, "delete_id": 2})
+    r = client.post("/admin/tools/software/name-duplicates/merge", data={"keep_id": 1, "delete_id": 2})
     assert r.status_code == 401
     if os.path.exists(db):
         os.remove(db)

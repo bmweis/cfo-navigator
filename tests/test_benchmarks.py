@@ -1,6 +1,6 @@
 """Benchmarking Resources section (linklib.db list/add/update/delete_benchmark).
 
-Backs the /admin/tools/benchmarks CRUD page, which lets Brian wordsmith text,
+Backs the /admin/tools/resources CRUD page, which lets Brian wordsmith text,
 add/remove resources, and change URLs/coverage/pricing without touching code.
 """
 import pathlib

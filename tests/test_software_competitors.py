@@ -126,14 +126,14 @@ def test_admin_can_add_and_remove_competitor(env):
     client = _client(env)
     _login(client)
 
-    r = client.post(f"/admin/tools/{a}/competitors/add", data={"competitor_id": str(b)},
+    r = client.post(f"/admin/tools/software/{a}/competitors/add", data={"competitor_id": str(b)},
                      follow_redirects=False)
     assert r.status_code == 303
 
     r = client.get(f"/tools/software/{a_slug}/edit")
     assert "Datarails" in r.text
 
-    r = client.post(f"/admin/tools/{a}/competitors/{b}/remove", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{a}/competitors/{b}/remove", follow_redirects=False)
     assert r.status_code == 303
     r = client.get(f"/tools/software/{a_slug}/edit")
     assert "No competitors curated yet." in r.text
@@ -151,7 +151,7 @@ def test_admin_can_add_selected_competitors_in_bulk(env):
     client = _client(env)
     _login(client)
 
-    r = client.post(f"/admin/tools/{a}/competitors/add-selected",
+    r = client.post(f"/admin/tools/software/{a}/competitors/add-selected",
                      data={"competitor_id": [str(b), str(c)], "ai_drafted_fields": "competitors"},
                      follow_redirects=False)
     assert r.status_code == 303
@@ -174,7 +174,7 @@ def test_generate_matches_unavailable_without_api_key(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/competitors/generate-matches")
+    r = client.post(f"/admin/tools/software/{a}/competitors/generate-matches")
     assert r.status_code == 503
     assert r.json()["ok"] is False
 
@@ -196,7 +196,7 @@ def test_generate_matches_returns_matched_ids(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/competitors/generate-matches")
+    r = client.post(f"/admin/tools/software/{a}/competitors/generate-matches")
     assert r.status_code == 200
     assert r.json() == {"ok": True, "competitor_ids": [b]}
 
@@ -222,7 +222,7 @@ def test_admin_edit_saves_competitive_differentiation(env):
 
 
 def test_admin_edit_unauthenticated_rejected(env):
-    r = _client(env).post("/admin/tools/1/competitors/add", data={"competitor_id": "2"})
+    r = _client(env).post("/admin/tools/software/1/competitors/add", data={"competitor_id": "2"})
     assert r.status_code == 401
 
 

@@ -25,7 +25,7 @@ from __future__ import annotations
 from linklib.db import Library
 from webapp import checks as _checks
 
-DOT_ONLY_HREFS = frozenset({"/admin/contacts", "/admin/tools/leads"})
+DOT_ONLY_HREFS = frozenset({"/admin/contacts", "/admin/tools/software/leads"})
 
 
 def _failing_checks_count() -> int:
@@ -39,7 +39,7 @@ def open_task_counts(lib: Library) -> dict[str, int]:
         "/admin/library/review-removals": lib.flagged_count(),
         "/admin/contacts": lib.count_contacts_since(lib.get_setting("admin_viewed_contacts")),
         "/admin/tools/software": lib.count_pending_tools(),
-        "/admin/tools/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
+        "/admin/tools/software/leads": lib.count_tool_leads_since(lib.get_setting("admin_viewed_tool_leads")),
         "/admin/tools/communities": lib.count_pending_communities() + lib.count_communities_needing_review(),
         "/admin/community-gaps": lib.community_gap_counts()["unreviewed"],
         "/admin/checks": _failing_checks_count(),

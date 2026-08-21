@@ -259,7 +259,7 @@ def test_admin_recapture_success(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/screenshot/recapture", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{a}/screenshot/recapture", follow_redirects=False)
     assert r.status_code == 303
     assert "screenshot_captured=1" in r.headers["location"]
 
@@ -284,7 +284,7 @@ def test_admin_recapture_failure_leaves_existing_screenshot(env, monkeypatch):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{a}/screenshot/recapture", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{a}/screenshot/recapture", follow_redirects=False)
     assert r.status_code == 303
     assert "screenshot_captured=0" in r.headers["location"]
 
@@ -297,7 +297,7 @@ def test_admin_recapture_failure_leaves_existing_screenshot(env, monkeypatch):
 
 
 def test_admin_recapture_requires_auth(env):
-    r = _client(env).post("/admin/tools/1/screenshot/recapture")
+    r = _client(env).post("/admin/tools/software/1/screenshot/recapture")
     assert r.status_code == 401
 
 

@@ -169,7 +169,7 @@ def _login(client):
 def test_admin_add_tool_requires_summary(env):
     client = _client(env)
     _login(client)
-    r = client.post("/admin/tools/new", data={
+    r = client.post("/admin/tools/software/new", data={
         "name": "Runway", "url": "https://runway.com", "description": "Long description.",
     })
     assert r.status_code == 400
@@ -179,7 +179,7 @@ def test_admin_add_tool_requires_summary(env):
 def test_admin_add_tool_saves_summary(env):
     client = _client(env)
     _login(client)
-    r = client.post("/admin/tools/new", data={
+    r = client.post("/admin/tools/software/new", data={
         "name": "Runway", "url": "https://runway.com", "description": "Long description.",
         "summary": "Short summary.",
     }, follow_redirects=False)
@@ -234,7 +234,7 @@ def test_quick_edit_route_saves_summary(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/admin/tools/{tool_id}/quick-edit", json={
+    r = client.post(f"/admin/tools/software/{tool_id}/quick-edit", json={
         "description": "Updated long description.", "summary": "Updated summary.",
     })
     assert r.status_code == 200
@@ -252,7 +252,7 @@ def test_generate_description_route_returns_summary(env, monkeypatch):
     _mock_anthropic(monkeypatch, '{"description": "A long description.", "summary": "A short summary."}')
     client = _client(env)
     _login(client)
-    r = client.post("/admin/tools/generate-description", json={
+    r = client.post("/admin/tools/software/generate-description", json={
         "name": "Runway", "url": "https://runway.com",
     })
     assert r.status_code == 200

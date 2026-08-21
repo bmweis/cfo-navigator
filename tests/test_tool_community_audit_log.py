@@ -108,7 +108,7 @@ def test_admin_single_delete_route_logs_audit(admin_client):
     tool_id = lib.add_tool("Route Co", "desc", "https://route.example", [], approved=1)
     lib.close()
 
-    r = client.post(f"/admin/tools/{tool_id}/delete", data={"redirect_to": "/admin/tools/software"},
+    r = client.post(f"/admin/tools/software/{tool_id}/delete", data={"redirect_to": "/admin/tools/software"},
                      follow_redirects=False)
     assert r.status_code == 303
 
@@ -142,7 +142,7 @@ def test_admin_tools_reject_route_logs_reject_action(admin_client):
     tool_id = lib.add_tool("Pending Co", "desc", "https://pending.example", [], approved=0)
     lib.close()
 
-    r = client.post(f"/admin/tools/{tool_id}/reject", follow_redirects=False)
+    r = client.post(f"/admin/tools/software/{tool_id}/reject", follow_redirects=False)
     assert r.status_code == 303
 
     lib = Library(db)
@@ -161,7 +161,7 @@ def test_admin_name_duplicate_merge_logs_merge_action(admin_client):
                               "https://deletemerge.example", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/name-duplicates/merge",
+    r = client.post("/admin/tools/software/name-duplicates/merge",
                      data={"keep_id": keep_id, "delete_id": delete_id}, follow_redirects=False)
     assert r.status_code == 303
 
