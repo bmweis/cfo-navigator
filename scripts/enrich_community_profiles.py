@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Bulk/backfill Community Profile drafting — the Communities equivalent of
-scripts/enrich_tool_features.py. For each Community, one Claude call
+scripts/enrich_agent_taxonomy.py. For each Community, one Claude call
 (linklib.enrich.generate_community_profile) drafts the sixteen qualitative
 profile fields (ideal_member, anti_fit, value_prop, ... — see
 enrich.COMMUNITY_PROFILE_FIELDS) from the community's name + URL, the same

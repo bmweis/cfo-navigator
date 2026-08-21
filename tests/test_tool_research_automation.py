@@ -1,10 +1,12 @@
 """Automated Software-vendor research pipeline (search overhaul automation
-follow-up): _run_tool_research (shared drafting logic — real feature rows +
-an agent-taxonomy draft in one Claude call), the two auto-trigger points
-(admin add-form, public /tools/submit form — both via BackgroundTasks so a
-slow/failed research call never blocks the tool from going live), the
-on-demand "Generate summary" admin route, and the "Mark verified"
-one-click action for the agent-taxonomy note.
+follow-up; narrowed to agent-taxonomy-only in the Feature Taxonomy Phase 1b
+PR 2 legacy retirement, which dropped the feature-drafting half of
+_run_tool_research along with the tool_features table): _run_tool_research
+(shared drafting logic — an agent-taxonomy draft via one Claude call), the
+two auto-trigger points (admin add-form, public /tools/submit form — both
+via BackgroundTasks so a slow/failed research call never blocks the tool
+from going live), the on-demand "Generate summary" admin route, and the
+"Mark verified" one-click action for the agent-taxonomy note.
 """
 import os
 import pathlib
@@ -42,19 +44,15 @@ def _login(client):
     assert r.status_code in (302, 303)
 
 
-def _mock_generate_tool_features(monkeypatch, *, taxonomy="Uses an agent called Aura.",
-                                  taxonomy_confident=True, features=None, result=None):
+def _mock_generate_tool_agent_taxonomy(monkeypatch, *, taxonomy="Uses an agent called Aura.",
+                                        taxonomy_confident=True, result=None):
     calls = []
 
     def _fake(name, url, description="", model=""):
         calls.append((name, url, description))
         if result is not None:
             return result
-        return enrich.ToolFeaturesResult(
-            features=features or [enrich.ToolFeatureDraft(
-                feature_name="Scenario modeling", standalone_available=True,
-                bundled_only=False, notes="", source_url=url, needs_verification=False,
-            )],
+        return enrich.AgentTaxonomyResult(
             agent_taxonomy_note=taxonomy,
             agent_taxonomy_needs_verification=not taxonomy_confident,
             low_confidence=False, model="claude-opus-4-8",
@@ -62,14 +60,14 @@ def _mock_generate_tool_features(monkeypatch, *, taxonomy="Uses an agent called 
         )
 
     import linklib.enrich as enrich_mod
-    monkeypatch.setattr(enrich_mod, "generate_tool_features", _fake)
+    monkeypatch.setattr(enrich_mod, "generate_tool_agent_taxonomy", _fake)
     return calls
 
 
 # -- _run_tool_research (direct) ------------------------------------------------
 
-def test_run_tool_research_writes_features_and_taxonomy_draft(env, monkeypatch):
-    calls = _mock_generate_tool_features(monkeypatch)
+def test_run_tool_research_writes_taxonomy_draft(env, monkeypatch):
+    calls = _mock_generate_tool_agent_taxonomy(monkeypatch)
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.close()
@@ -82,33 +80,12 @@ def test_run_tool_research_writes_features_and_taxonomy_draft(env, monkeypatch):
     tool = lib.get_tool(tool_id)
     assert tool["agent_taxonomy_note"] == "Uses an agent called Aura."
     assert tool["agent_taxonomy_needs_verification"] == 0
-    features = lib.list_tool_features(tool_id)
-    assert len(features) == 1
-    assert features[0]["feature_name"] == "Scenario modeling"
-    assert features[0]["source"] == "llm_enrichment"
-    lib.close()
-
-
-def test_run_tool_research_dedupes_existing_features(env, monkeypatch):
-    _mock_generate_tool_features(monkeypatch, features=[
-        enrich.ToolFeatureDraft(feature_name="Scenario modeling", standalone_available=True),
-    ])
-    lib = Library(os.environ["LINKLIB_DB"])
-    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
-    lib.add_tool_feature(tool_id, "Scenario modeling", standalone_available=1, source="manual")
-    lib.close()
-
-    ok = env._run_tool_research(tool_id)
-    assert ok is True
-
-    lib = Library(os.environ["LINKLIB_DB"])
-    assert len(lib.list_tool_features(tool_id)) == 1   # no duplicate row written
     lib.close()
 
 
 def test_run_tool_research_returns_false_when_generate_fails(env, monkeypatch):
     import linklib.enrich as enrich_mod
-    monkeypatch.setattr(enrich_mod, "generate_tool_features", lambda *a, **k: None)
+    monkeypatch.setattr(enrich_mod, "generate_tool_agent_taxonomy", lambda *a, **k: None)
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     lib.close()
@@ -118,7 +95,7 @@ def test_run_tool_research_returns_false_when_generate_fails(env, monkeypatch):
 
 def test_run_tool_research_returns_false_for_missing_tool(env, monkeypatch):
     import linklib.enrich as enrich_mod
-    monkeypatch.setattr(enrich_mod, "generate_tool_features",
+    monkeypatch.setattr(enrich_mod, "generate_tool_agent_taxonomy",
                          lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not be called")))
     assert env._run_tool_research(999999) is False
 
@@ -126,7 +103,7 @@ def test_run_tool_research_returns_false_for_missing_tool(env, monkeypatch):
 # -- auto-trigger on tool creation ----------------------------------------------
 
 def test_admin_add_tool_triggers_background_research(env, monkeypatch):
-    calls = _mock_generate_tool_features(monkeypatch)
+    calls = _mock_generate_tool_agent_taxonomy(monkeypatch)
     client = _client(env)
     _login(client)
     r = client.post("/admin/tools/software/new", data={
@@ -143,7 +120,7 @@ def test_admin_add_tool_triggers_background_research(env, monkeypatch):
 
 
 def test_tools_submit_triggers_background_research(env, monkeypatch):
-    calls = _mock_generate_tool_features(monkeypatch)
+    calls = _mock_generate_tool_agent_taxonomy(monkeypatch)
     client = _client(env)
     _login(client)
     r = client.post("/tools/submit", data={
@@ -163,7 +140,7 @@ def test_tools_submit_triggers_background_research(env, monkeypatch):
 # -- on-demand refresh route -----------------------------------------------------
 
 def test_research_refresh_success(env, monkeypatch):
-    calls = _mock_generate_tool_features(monkeypatch)
+    calls = _mock_generate_tool_agent_taxonomy(monkeypatch)
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     tool_slug = lib.get_tool(tool_id)["slug"]
@@ -182,7 +159,7 @@ def test_research_refresh_success(env, monkeypatch):
 
 def test_research_refresh_failure_banner(env, monkeypatch):
     import linklib.enrich as enrich_mod
-    monkeypatch.setattr(enrich_mod, "generate_tool_features", lambda *a, **k: None)
+    monkeypatch.setattr(enrich_mod, "generate_tool_agent_taxonomy", lambda *a, **k: None)
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     tool_slug = lib.get_tool(tool_id)["slug"]
@@ -270,17 +247,13 @@ def test_edit_page_hides_badge_once_verified(env):
 # The banner used to say "before marking them verified" on every successful
 # refresh regardless of whether anything actually ended up flagged
 # needs_verification — so a confident LLM run left admins staring at a
-# promise with no button anywhere on the page to fulfill it. The clause must
-# now track the real flag(s), the same way _features_badge_html's own
-# "N needs verification" clause already does.
+# promise with no button anywhere on the page to fulfill it. The clause now
+# tracks the real agent_taxonomy_needs_verification flag directly (the only
+# flag left in play since the legacy per-feature needs_verification flag was
+# retired along with tool_features).
 
 def test_research_refresh_banner_drops_verify_clause_when_confident(env, monkeypatch):
-    # Both the taxonomy note and the one feature row come back confident —
-    # nothing on the page ends up needing verification.
-    _mock_generate_tool_features(monkeypatch, taxonomy_confident=True, features=[
-        enrich.ToolFeatureDraft(feature_name="Scenario modeling",
-                                 standalone_available=True, needs_verification=False),
-    ])
+    _mock_generate_tool_agent_taxonomy(monkeypatch, taxonomy_confident=True)
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     tool_slug = lib.get_tool(tool_id)["slug"]
@@ -292,20 +265,14 @@ def test_research_refresh_banner_drops_verify_clause_when_confident(env, monkeyp
 
     r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
     assert "AI research refreshed" in r.text
-    assert "before marking them verified" not in r.text
-    # And, matching that: no verify button/badge should be on the page either
-    # (the static helper copy below the Features list always says "flagged
-    # 'Needs verification'..." regardless of state, so check for the actual
-    # badge/button instead of that static string).
+    assert "before marking it verified" not in r.text
+    # And, matching that: no verify button/badge should be on the page either.
     assert "Mark verified" not in r.text
     assert 'background:#fef3c7' not in r.text   # the needs-verification badge's styling
 
 
 def test_research_refresh_banner_keeps_verify_clause_when_unconfident(env, monkeypatch):
-    _mock_generate_tool_features(monkeypatch, taxonomy_confident=False, features=[
-        enrich.ToolFeatureDraft(feature_name="Scenario modeling",
-                                 standalone_available=True, needs_verification=True),
-    ])
+    _mock_generate_tool_agent_taxonomy(monkeypatch, taxonomy_confident=False)
     lib = Library(os.environ["LINKLIB_DB"])
     tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
     tool_slug = lib.get_tool(tool_id)["slug"]
@@ -316,28 +283,8 @@ def test_research_refresh_banner_keeps_verify_clause_when_unconfident(env, monke
     client.post(f"/admin/tools/software/{tool_id}/research/refresh", follow_redirects=False)
 
     r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
-    assert "before marking them verified" in r.text
+    assert "before marking it verified" in r.text
     assert "Mark verified" in r.text
-
-
-def test_research_refresh_banner_keeps_clause_when_only_feature_row_unconfident(env, monkeypatch):
-    # Taxonomy itself is confident, but a feature row isn't — the sentence
-    # covers both, so the clause must stay.
-    _mock_generate_tool_features(monkeypatch, taxonomy_confident=True, features=[
-        enrich.ToolFeatureDraft(feature_name="Scenario modeling",
-                                 standalone_available=True, needs_verification=True),
-    ])
-    lib = Library(os.environ["LINKLIB_DB"])
-    tool_id = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
-    tool_slug = lib.get_tool(tool_id)["slug"]
-    lib.close()
-
-    client = _client(env)
-    _login(client)
-    client.post(f"/admin/tools/software/{tool_id}/research/refresh", follow_redirects=False)
-
-    r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
-    assert "before marking them verified" in r.text
 
 
 # -- Phase G: narrative_review_log audit trail --------------------------------

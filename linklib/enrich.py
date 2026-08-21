@@ -458,16 +458,19 @@ def generate_competitor_matches(name: str, description: str, candidates: list[di
         return None
 
 
-# Feature comparison data (search overhaul Phase 4b, extended in the
-# automated-research follow-up to also draft agent_taxonomy_note in the same
-# call) — drafts standalone-vs-bundled availability rows for tool_features
-# plus a whole-tool agent-taxonomy summary. Unlike the sentinel-per-field
-# NEEDS_VERIFICATION used elsewhere, confidence here is a boolean in the JSON
-# response ("confident"): a feature row (or the agent-taxonomy verdict) is
-# already one semantic unit, so there's no need for a string sentinel
-# embedded in a value — see the tool_features table comment in linklib/db.py
-# for the same reasoning.
-_TOOL_FEATURES_PAGE_GUESSES = ("pricing", "solutions", "product", "products", "platform", "features", "ai", "agents")
+# Agent-taxonomy drafting (search overhaul Phase 4b, extended in the
+# automated-research follow-up; narrowed to agent-taxonomy-only in the
+# Feature Taxonomy Phase 1b PR 2 legacy tool_features retirement — this used
+# to also draft standalone-vs-bundled tool_features rows in the same call,
+# before that table was retired; see CLAUDE.md's "no dead data" note and
+# ARCHITECTURE.md's automated-research section for the full history). The
+# grounding mechanism (real nav-page crawl, not guessed paths) is unchanged
+# and still worth the real fetch, since a real per-vendor summary needs real
+# page content regardless of what else used to ride along with it in the
+# same call. Confidence is a boolean in the JSON response ("confident")
+# rather than the sentinel-per-field NEEDS_VERIFICATION used elsewhere,
+# since the agent-taxonomy verdict is already one semantic unit.
+_AGENT_TAXONOMY_PAGE_GUESSES = ("pricing", "solutions", "product", "products", "platform", "features", "ai", "agents")
 _NAV_LINK_KEYWORDS = ("product", "solution", "platform", "feature", "agent", "ai", "how it works", "use case")
 
 
@@ -511,7 +514,7 @@ def _discover_nav_pages(base_url: str, max_pages: int = 10) -> list[tuple[str, s
     return found
 
 
-def _fetch_feature_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]]:
+def _fetch_taxonomy_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]]:
     """Fetches the tool's homepage plus its real Product/Solutions-type nav
     pages (_discover_nav_pages) — falling back to guessed paths (pricing,
     solutions, product) only if nav discovery finds nothing, e.g. a blocked
@@ -527,7 +530,7 @@ def _fetch_feature_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]]
         candidates = [("Homepage", url)] + nav_pages
     else:
         candidates = [("Homepage", url)] + [
-            (label.capitalize(), f"{base}/{label}") for label in _TOOL_FEATURES_PAGE_GUESSES
+            (label.capitalize(), f"{base}/{label}") for label in _AGENT_TAXONOMY_PAGE_GUESSES
         ]
     fetched = []
     for label, page_url in candidates:
@@ -543,48 +546,29 @@ def _fetch_feature_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]]
     return content_block, fetched
 
 
-_TOOL_FEATURES_PROMPT = """You are researching a vendor listed in the CFO Toolbox's Software
-directory, to power a side-by-side comparison matrix against other tools. Budget
-and depth are not a constraint here — read the full page content provided below
-carefully and be as thorough and specific as the material supports.
+_AGENT_TAXONOMY_PROMPT = """You are researching a vendor listed in the CFO Toolbox's Software
+directory. Budget and depth are not a constraint here — read the full page
+content provided below carefully and be as thorough and specific as the
+material supports.
 
-PART 1 — Agent taxonomy. Write a thorough summary (aim for 3-6 sentences, more
-if there's real material to cover) of whether and how AI agents are involved in
-this product. Ground this strictly in the page content below. If the vendor
+Write a thorough summary (aim for 3-6 sentences, more if there's real
+material to cover) of whether and how AI agents are involved in this
+product. Ground this strictly in the page content below. If the vendor
 names ANY specific agents anywhere in the content (e.g. "Aura," "Ember," a
-"Contract Review Agent," a "flux agent") — find and name ALL of them, not just
-the first one you notice; a reader comparing tools needs the complete roster
-of named agents, not a sample. For each named agent, note what it actually
-does if the content says so. Distinguish: a fully independent agent that runs
-a workflow end-to-end, an agent-assisted feature where AI helps but a human
-stays in the loop, or no real agent framing at all (generic "AI-powered"
-marketing language without actual agent behavior described doesn't count as
-agentic — say so plainly rather than overstating it). If the content gives no
-genuine signal either way, say that rather than guessing, and set
-"agent_taxonomy_confident" to false.
-
-PART 2 — Features. Identify 8 to 15 of the product's most notable features or
-capabilities — cast a wide net across everything the fetched pages describe
-rather than stopping at the first handful. For each one, classify whether it's
-available as a standalone purchase/add-on, only bundled into a broader plan or
-tier, or both — grounded strictly in the page content provided below (or your
-own reliable knowledge of the product, if the fetch came back thin). Write a
-substantive note for each feature (what it does, not just its name) whenever
-the content supports it. Never invent a specific pricing tier or feature you
-can't support. Set "confident" to true only if the standalone/bundled
-classification is clearly supported by the content provided or your own solid
-knowledge — false if you're inferring or guessing. Leave out a feature
-entirely if you're not even confident it exists.
+"Contract Review Agent," a "flux agent") — find and name ALL of them, not
+just the first one you notice; a reader comparing tools needs the complete
+roster of named agents, not a sample. For each named agent, note what it
+actually does if the content says so. Distinguish: a fully independent
+agent that runs a workflow end-to-end, an agent-assisted feature where AI
+helps but a human stays in the loop, or no real agent framing at all
+(generic "AI-powered" marketing language without actual agent behavior
+described doesn't count as agentic — say so plainly rather than
+overstating it). If the content gives no genuine signal either way, say
+that rather than guessing, and set "confident" to false.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly this
 shape:
-{{"agent_taxonomy": {{"summary": "...", "confident": true|false}},
-  "features": [
-    {{"feature_name": "...", "standalone_available": true|false,
-      "bundled_only": true|false,
-      "notes": "short note, e.g. which tier it's on, or an empty string",
-      "confident": true|false}}
-]}}
+{{"summary": "...", "confident": true|false}}
 
 Product name: {name}
 Product URL: {url}
@@ -595,18 +579,7 @@ Existing directory description: {description}
 
 
 @dataclass
-class ToolFeatureDraft:
-    feature_name: str
-    standalone_available: bool = False
-    bundled_only: bool = False
-    notes: str = ""
-    source_url: str = ""
-    needs_verification: bool = True
-
-
-@dataclass
-class ToolFeaturesResult:
-    features: list[ToolFeatureDraft] = field(default_factory=list)
+class AgentTaxonomyResult:
     agent_taxonomy_note: str = ""
     agent_taxonomy_needs_verification: bool = True
     low_confidence: bool = False   # no page content could be fetched at all
@@ -616,17 +589,22 @@ class ToolFeaturesResult:
     cost_usd: float = 0.0
 
 
-def generate_tool_features(name: str, url: str, description: str = "",
-                           model: str = DEFAULT_MODEL) -> ToolFeaturesResult | None:
-    """Draft standalone-vs-bundled feature rows plus an agent-taxonomy
-    summary for a Software entry, in one Claude call. Grounds on the
+def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
+                                 model: str = DEFAULT_MODEL) -> AgentTaxonomyResult | None:
+    """Draft an agent-taxonomy summary for a Software entry. Grounds on the
     homepage plus its real Product/Solutions-type nav pages
-    (_fetch_feature_grounding — falls back to guessed paths only if nav
-    discovery finds nothing). Every returned field is a first-pass draft:
-    the caller is expected to write it with needs_verification set from the
-    "confident" flags and source='llm_enrichment', never auto-confirmed.
+    (_fetch_taxonomy_grounding — falls back to guessed paths only if nav
+    discovery finds nothing). The returned note is a first-pass draft: the
+    caller is expected to write it with needs_verification set from the
+    "confident" flag and source='llm_enrichment', never auto-confirmed.
     Returns None if the SDK/key is unavailable or the call fails — same
-    contract as generate_tool_description."""
+    contract as generate_tool_description.
+
+    Used to also draft standalone-vs-bundled tool_features rows in the same
+    call, before that table was retired (Feature Taxonomy Phase 1b PR 2 —
+    see CLAUDE.md's "no dead data" note); this function keeps the real-crawl
+    grounding mechanism, which is still worth it for the agent-taxonomy
+    summary alone."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -634,19 +612,15 @@ def generate_tool_features(name: str, url: str, description: str = "",
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
 
-    content_block, fetched = _fetch_feature_grounding(url)
+    content_block, fetched = _fetch_taxonomy_grounding(url)
     low_confidence = not fetched
     if not fetched:
         content_block = (
             f"(Could not fetch any page content for {url} — draft from your own "
             f"knowledge of {name} if you have it, keeping to the rules above.)"
         )
-    # Batch-level source_url: prefer whichever fetched page is most likely to
-    # actually carry tier/bundling info, pricing first.
-    priority = {"Pricing": 0, "Solutions": 1, "Product": 2, "Homepage": 3}
-    source_url = min(fetched, key=lambda t: priority.get(t[0], 9))[1] if fetched else ""
 
-    prompt = _TOOL_FEATURES_PROMPT.format(
+    prompt = _AGENT_TAXONOMY_PROMPT.format(
         name=name, url=url, description=description.strip() or "(none provided)",
         content_block=content_block,
     )
@@ -655,7 +629,7 @@ def generate_tool_features(name: str, url: str, description: str = "",
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=_checked_max_tokens(6000),  # headroom for Opus 5's on-by-default adaptive thinking
+            max_tokens=_checked_max_tokens(2000),  # headroom for Opus 5's on-by-default adaptive thinking
             messages=[{"role": "user", "content": prompt}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
@@ -670,36 +644,16 @@ def generate_tool_features(name: str, url: str, description: str = "",
         cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        features = []
-        raw_features = data.get("features") if isinstance(data, dict) else None
-        if isinstance(raw_features, list):
-            for item in raw_features:
-                if not isinstance(item, dict):
-                    continue
-                feature_name = str(item.get("feature_name", "")).strip()
-                if not feature_name:
-                    continue
-                features.append(ToolFeatureDraft(
-                    feature_name=feature_name,
-                    standalone_available=bool(item.get("standalone_available")),
-                    bundled_only=bool(item.get("bundled_only")),
-                    notes=str(item.get("notes") or "").strip(),
-                    source_url=source_url,
-                    needs_verification=not bool(item.get("confident")),
-                ))
+        data = data if isinstance(data, dict) else {}
 
-        agent_taxonomy = data.get("agent_taxonomy") if isinstance(data, dict) else None
-        agent_taxonomy = agent_taxonomy if isinstance(agent_taxonomy, dict) else {}
-
-        return ToolFeaturesResult(
-            features=features,
-            agent_taxonomy_note=str(agent_taxonomy.get("summary") or "").strip(),
-            agent_taxonomy_needs_verification=not bool(agent_taxonomy.get("confident")),
+        return AgentTaxonomyResult(
+            agent_taxonomy_note=str(data.get("summary") or "").strip(),
+            agent_taxonomy_needs_verification=not bool(data.get("confident")),
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:
-        _logger.warning("generate_tool_features() failed: %s: %s", type(e).__name__, e)
+        _logger.warning("generate_tool_agent_taxonomy() failed: %s: %s", type(e).__name__, e)
         return None
 
 

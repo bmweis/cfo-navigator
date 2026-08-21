@@ -1638,19 +1638,90 @@ def _logo_box(name: str, logo_url: str, size: int, radius: int = 10) -> str:
             f'align-items:center;justify-content:center;">{icon}</div>')
 
 
-# Claims-accuracy disclaimer for the Features card, distinct from the
-# per-feature `needs_verification` flag: that flag means "the feature text
-# matches what the source site said" (extraction accuracy). This disclaimer
-# means "the underlying claim itself hasn't been independently tested"
-# (claims accuracy) — one level above. Software profile pages only for now;
-# extend to Communities automatically once Phase 8.4 ships a Features card
-# there.
+# Claims-accuracy disclaimer for the Key features card — the underlying
+# claim itself hasn't been independently tested, distinct from whatever
+# sourcing/verification discipline went into curating the feature taxonomy
+# itself (docs/FEATURE_TAXONOMY.md §8). Software profile pages only for now;
+# extend to Communities automatically once a Communities Features card exists.
 _FEATURES_SOURCING_DISCLAIMER = (
     'Features and capabilities are sourced from public company websites and marketing materials, '
-    'not independently tested or confirmed by Brian. The &ldquo;verify&rdquo; tag on individual features '
-    'confirms only that the text matches what the vendor&rsquo;s site says&mdash;not that the underlying '
-    'capability actually works as described.'
+    'not independently tested or confirmed by Brian.'
 )
+
+
+def _sentence_case_feature_name(name: str) -> str:
+    """Converts a category_features.name (Title Case, e.g. "Real-Time
+    Ledger", "Role Based Access Control (RBAC)", "ASC 606 Revenue
+    Recognition") to sentence case for the public Key features card, without
+    mangling real acronyms/codes: a word is left exactly as stored if it's
+    already all-uppercase (RBAC, ASC, AI, KPI, SOX, GAAP, IFRS, AWS, MCP,
+    ...) or contains a digit (606) — every other word is lowercased. Only
+    the very first character of the whole name is forced uppercase, per
+    sentence-case convention. Known, accepted limitation: this also
+    lowercases a genuine brand name used mid-name (e.g. "Slack" in "Slack /
+    Email Collaboration Triggers" reads as "Slack / email collaboration
+    triggers") — proper-noun detection is out of scope for this pass; see
+    CLAUDE.md's Feature Taxonomy Phase 2 note."""
+    words = name.split(" ")
+    out_words = []
+    for w in words:
+        core = w.strip("()")
+        if (core.isupper() and len(core) > 1) or any(ch.isdigit() for ch in w):
+            out_words.append(w)
+        else:
+            out_words.append(w.lower())
+    result = " ".join(out_words)
+    return result[:1].upper() + result[1:] if result else result
+
+
+def _software_key_features_card(feature_links: list[dict]) -> str:
+    """Public "Key features" card (Feature Taxonomy Phase 2) — ALWAYS
+    renders, for every tool. Links are grouped by category only when they
+    span more than one seeded category; a single-category tool gets a flat
+    list with no redundant sub-heading. Availability/AI indicators are tags
+    next to each feature name, not a separate table column — plain-language
+    feature names in a compact list read better than a table when there's
+    no standalone/bundled distinction to carry per §6 of the rules doc (the
+    governed model only ever has native/add-on, never "unset")."""
+    if not feature_links:
+        return """<div class="tp-card">
+  <h2 class="tp-card-h">Key features</h2>
+  <p style="margin:0;color:var(--muted);">Coming soon&mdash;we&rsquo;re mapping this tool against our curated feature taxonomy.</p>
+</div>"""
+
+    def _tag(label: str, cls: str) -> str:
+        return f'<span class="tp-feature-tag {cls}">{_esc(label)}</span>'
+
+    def _feature_li(link: dict) -> str:
+        tags = "".join([
+            _tag("Add-on", "tp-feature-tag-addon") if link["availability"] == "add_on" else "",
+            _tag("AI", "tp-feature-tag-ai") if link["ai_enabled"] else "",
+        ])
+        return f'<li>{_esc(_sentence_case_feature_name(link["feature_name"]))}{tags}</li>'
+
+    categories: list[str] = []
+    for link in feature_links:
+        if link["category_name"] not in categories:
+            categories.append(link["category_name"])
+
+    if len(categories) > 1:
+        sections_html = "".join(
+            f'<div class="tp-feature-group"><h3 class="tp-feature-group-h">{_esc(cat)}</h3>'
+            f'<ul class="tp-feature-list">'
+            + "".join(_feature_li(l) for l in feature_links if l["category_name"] == cat)
+            + '</ul></div>'
+            for cat in categories
+        )
+    else:
+        sections_html = '<ul class="tp-feature-list">' + "".join(_feature_li(l) for l in feature_links) + '</ul>'
+
+    return f"""<div class="tp-card">
+  <h2 class="tp-card-h">Key features</h2>
+  {sections_html}
+</div>
+<div class="tp-footnote" style="margin-top:8px;">
+  <span>{_FEATURES_SOURCING_DISCLAIMER}</span>
+</div>"""
 
 
 def _marker_underline(stroke: float = 4.0, color: str = "var(--seafoam-deep)") -> str:
@@ -6646,7 +6717,6 @@ def tools_software_compare(request: Request, ids: str = ""):
             t = lib.get_tool(tid)
             if t and t.get("approved"):
                 tools.append(t)
-        features_by_tool = {t["id"]: lib.list_tool_features(t["id"]) for t in tools}
     finally:
         lib.close()
 
@@ -6721,53 +6791,20 @@ to compare them side by side. Check the box on any card, then use the compare ba
         + _row("How this differs", [t.get("competitive_differentiation", "") for t in tools])
     )
 
-    # Features: union of every feature name across the selected tools (sorted
-    # by how many of the selected tools have it, most-shared first, then
-    # alphabetically), one row per name. A tool with no row for that feature
-    # gets "Not tracked yet" rather than assuming it lacks the feature —
-    # tool_features is a first-pass, sparse dataset (see Phase 4), so absence
-    # of a row is not the same as a confirmed "no."
-    feature_names: dict[str, int] = {}
-    features_by_tool_and_name: dict[int, dict[str, dict]] = {}
-    for t in tools:
-        by_name = {f["feature_name"]: f for f in features_by_tool.get(t["id"], [])}
-        features_by_tool_and_name[t["id"]] = by_name
-        for name in by_name:
-            feature_names[name] = feature_names.get(name, 0) + 1
-    sorted_feature_names = sorted(feature_names, key=lambda n: (-feature_names[n], n.lower()))
-
-    def _feature_cell(feat: dict | None) -> str:
-        if not feat:
-            return '<td class="cc-cell cc-empty">Not tracked yet</td>'
-        bits = []
-        if feat["standalone_available"]:
-            bits.append("Standalone")
-        if feat["bundled_only"]:
-            bits.append("Bundled only")
-        label = " + ".join(bits) or "Availability unset"
-        verify = ' <span class="cc-verify">unverified</span>' if feat["needs_verification"] else ""
-        return f'<td class="cc-cell">{_esc(label)}{verify}</td>'
-
-    feature_rows = "".join(
-        f'<tr><td class="cc-cell cc-label">{_esc(name)}</td>'
-        + "".join(_feature_cell(features_by_tool_and_name[t["id"]].get(name)) for t in tools)
-        + "</tr>"
-        for name in sorted_feature_names
-    )
-    features_section = ""
-    if feature_rows:
-        features_section = f"""<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">Features</td></tr>
-{feature_rows}"""
-    else:
-        features_section = f"""<tr><td class="cc-cell cc-section" colspan="{len(tools) + 1}">Features</td></tr>
-<tr><td class="cc-cell cc-label"></td>{"".join('<td class="cc-cell cc-empty">No feature data yet</td>' for _ in tools)}</tr>"""
+    # Legacy tool_features-driven Features comparison row was removed here
+    # (Feature Taxonomy Phase 1b PR 2 legacy retirement) rather than migrated
+    # to the governed tool_feature_links model — a governed-model Compare
+    # view is deliberately later/out-of-scope work (docs/BUILD_PLAN.md Phase
+    # 8), not something this retirement PR builds. The public profile page's
+    # "Key features" card (_software_key_features_card) is the only public
+    # rendering surface for tool_feature_links today.
 
     body = f"""<div class="page page-grid">
 {back_link}
 <h1 style="margin:0;">Compare software</h1>
 <p style="color:var(--muted);margin:8px 0 24px;line-height:1.6;">Side by side, the same fields you'd see on each
 tool's own profile page, including how (and whether) AI agents are actually involved—not just a tagline, since
-that's increasingly a deciding factor—plus feature availability where it's been reviewed. Rows still marked
+that's increasingly a deciding factor. Rows still marked
 <span class="cc-verify">unverified</span> came from an LLM first pass and haven't been confirmed yet.</p>
 
 <div style="overflow-x:auto;">
@@ -6777,7 +6814,6 @@ that's increasingly a deciding factor—plus feature availability where it's bee
 {tags_row}
 {agent_section}
 {other_rows}
-{features_section}
 </tbody>
 </table>
 </div>
@@ -7079,7 +7115,7 @@ def tools_software_profile(request: Request, slug: str):
     try:
         tool = lib.get_tool_by_slug(slug)
         competitors = lib.list_tool_competitors(tool["id"]) if tool else []
-        features = lib.list_tool_features(tool["id"]) if tool else []
+        feature_links = lib.list_tool_feature_links_with_details(tool["id"]) if tool else []
     finally:
         lib.close()
     if not tool:
@@ -7140,49 +7176,19 @@ def tools_software_profile(request: Request, slug: str):
     elif authed:
         agent_taxonomy_block = _profile_admin_nudge("Agent taxonomy not yet generated.")
 
-    # Features card: two-column Feature/AI table, reading tool_features free
-    # text directly (Phase 3). Feature Taxonomy (Phase 1, docs/
-    # FEATURE_TAXONOMY.md) built the governed replacement — category_features
-    # + tool_feature_links, admin-only for now — but rendering it here is
-    # Phase 2's job, not this one's: this card still reads the legacy
-    # free-text tool_features for every tool until then, regardless of
-    # whether the tool's category has been seeded into the new tables. AI
-    # enablement is a display-layer heuristic on the legacy path only: a
-    # feature_name with a leading "AI " is shown with that prefix stripped
-    # and a checkmark in the AI column, same as the mockup's dev note — the
-    # governed model carries a real ai_enabled flag per link instead.
-    features_card = ""
-    if not features and authed:
-        features_card = _profile_admin_nudge("Features not yet generated.")
-    if features:
-        n_needs_verify = sum(1 for f in features if f["needs_verification"])
-
-        def _feature_row(f: dict) -> str:
-            name = f["feature_name"]
-            is_ai = name[:3].lower() == "ai "
-            display_name = name[3:].lstrip() if is_ai else name
-            ai_check = '<span class="tp-ai-check">&#10003;</span>' if is_ai else ""
-            verify_tag = '<span class="tp-needs-verify">verify</span>' if f["needs_verification"] else ""
-            return f'<tr><td>{_esc(display_name)}{verify_tag}</td><td>{ai_check}</td></tr>'
-
-        feature_rows = "".join(_feature_row(f) for f in features)
-        verify_line = ""
-        if authed:
-            verify_line = (
-                f'<div style="margin-top:8px;text-align:right;font-weight:500;font-size:11.5px;color:var(--muted);">'
-                f'{n_needs_verify} of {len(features)} need verification</div>'
-            )
-        features_card = f"""<div class="tp-card">
-  <h2 class="tp-card-h">Features</h2>
-  <table class="tp-feature-table">
-    <thead><tr><th>Feature</th><th>AI</th></tr></thead>
-    <tbody>{feature_rows}</tbody>
-  </table>
-  {verify_line}
-</div>
-<div class="tp-footnote" style="margin-top:8px;">
-  <span>{_FEATURES_SOURCING_DISCLAIMER}</span>
-</div>"""
+    # Key features card (Feature Taxonomy Phase 2) — replaces the legacy
+    # free-text tool_features card (retired outright in Phase 1b PR 2, see
+    # CLAUDE.md's "no dead data" note) with the governed model:
+    # category_features + tool_feature_links. Unlike the legacy card, this
+    # ALWAYS renders, for every tool — a tool with no links yet (most of
+    # them, until more categories are seeded) gets a coming-soon state
+    # instead of an admin-only nudge, since "we haven't mapped this tool
+    # yet" is a real, publicly-honest statement, not a gap to hide from
+    # visitors. Grouped by category only when the links span more than one
+    # seeded category (a tool tagged into both ERP and Close Management, for
+    # instance) — a single-category tool's card stays a flat list, no
+    # redundant sub-heading repeating what the tool already is.
+    features_card = _software_key_features_card(feature_links)
 
     # Category tags (Phase F4): moved from their own right-column card down
     # next to the Visit/Compare/Edit button group instead — the card by
@@ -7439,16 +7445,17 @@ function submitIntroForm() {{
   .tp-shot-card.has-app .tp-shot-slide.tp-shot-active{{display:block;}}
   .tp-shot-card.has-app .tp-shot-toggle{{display:inline-block;}}
 }}
-.tp-feature-table{{width:100%;border-collapse:collapse;font-size:13px;}}
-.tp-feature-table th{{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
-  font-weight:600;padding-bottom:7px;border-bottom:1px solid var(--line);}}
-.tp-feature-table th:last-child{{text-align:center;width:34px;}}
-.tp-feature-table td{{padding:8px 0;border-bottom:1px solid var(--line);color:var(--ink-soft);vertical-align:middle;}}
-.tp-feature-table tr:last-child td{{border-bottom:none;}}
-.tp-feature-table td:last-child{{text-align:center;}}
-.tp-ai-check{{color:var(--seafoam-deep);font-weight:700;font-size:14px;}}
-.tp-needs-verify{{background:var(--coral-wash);color:var(--coral-deep);font-size:9px;font-weight:600;padding:1px 5px;
-  border-radius:4px;margin-left:6px;white-space:nowrap;}}
+.tp-feature-list{{list-style:none;margin:0;padding:0;font-size:14px;}}
+.tp-feature-list li{{padding:8px 0;border-bottom:1px solid var(--line);color:var(--ink-soft);
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;}}
+.tp-feature-list li:last-child{{border-bottom:none;}}
+.tp-feature-group+.tp-feature-group{{margin-top:18px;}}
+.tp-feature-group-h{{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--seafoam-deep);margin:0 0 4px;}}
+.tp-feature-tag{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  border-radius:5px;padding:1px 6px;white-space:nowrap;}}
+.tp-feature-tag-addon{{background:var(--seafoam-wash);color:var(--seafoam-deep);}}
+.tp-feature-tag-ai{{background:#fef3c7;color:#92400e;}}
 .tp-verify{{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92400e;
   background:#fef3c7;border-radius:5px;padding:1px 6px;white-space:nowrap;}}
 .tp-competitor-table{{width:100%;border-collapse:collapse;}}
@@ -13619,8 +13626,8 @@ def admin_tools_new(request: Request):
 
 
 def _run_tool_research(tool_id: int) -> bool:
-    """Automated feature + agent-taxonomy research for one Software entry —
-    the shared drafting logic behind both trigger points confirmed for the
+    """Automated agent-taxonomy research for one Software entry — the shared
+    drafting logic behind both trigger points confirmed for the
     search-overhaul automation follow-up: fired off-request via
     BackgroundTasks right after a tool is added (admin add-form and the
     public /tools/submit form), and re-run synchronously from the "Refresh AI
@@ -13628,33 +13635,22 @@ def _run_tool_research(tool_id: int) -> bool:
     failure banner; BackgroundTasks callers just ignore it). Mirrors the
     other _*_background jobs here (off-request, best-effort, DB-open-per-call)
     — a slow or failed research call never blocks the tool from going live.
-    Every field it writes lands via the needs_verification-flagged draft
-    paths (add_tool_feature, set_tool_agent_taxonomy_draft), never auto-
-    confirmed."""
+    The field it writes lands via the needs_verification-flagged draft path
+    (set_tool_agent_taxonomy_draft), never auto-confirmed.
+
+    Used to also draft standalone-vs-bundled tool_features rows in the same
+    call — dropped in the Feature Taxonomy Phase 1b PR 2 legacy retirement
+    (CLAUDE.md's "no dead data" note) along with the table itself."""
     lib = _lib()
     try:
         tool = lib.get_tool(tool_id)
         if not tool:
             return False
         from linklib import enrich as enrich_mod
-        result = enrich_mod.generate_tool_features(tool["name"], tool["url"], tool.get("description", ""))
+        result = enrich_mod.generate_tool_agent_taxonomy(tool["name"], tool["url"], tool.get("description", ""))
         if result is None:
             return False
-        existing = {f["feature_name"].strip().lower() for f in lib.list_tool_features(tool_id)}
         wrote_anything = False
-        for draft in result.features:
-            if draft.feature_name.strip().lower() in existing:
-                continue
-            existing.add(draft.feature_name.strip().lower())
-            lib.add_tool_feature(
-                tool_id, draft.feature_name,
-                standalone_available=int(draft.standalone_available),
-                bundled_only=int(draft.bundled_only),
-                notes=draft.notes, source_url=draft.source_url,
-                needs_verification=int(draft.needs_verification),
-                source="llm_enrichment", model=result.model,
-            )
-            wrote_anything = True
         if result.agent_taxonomy_note.strip():
             lib.set_tool_agent_taxonomy_draft(
                 tool_id, result.agent_taxonomy_note,
@@ -13747,15 +13743,13 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             t for t in lib.list_tools(approved_only=True)
             if t["id"] != tool_id and t["id"] not in {c["id"] for c in competitors}
         ] if tool else []
-        features = lib.list_tool_features(tool_id) if tool else []
         # Feature Taxonomy (governed model): one section per category this
         # tool belongs to that actually has a curated feature list yet —
-        # same category_has_features check the public profile page's
-        # legacy-coexistence branch uses (Phase 2), so what an admin edits
-        # here is exactly what will render there once that phase wires up
-        # rendering. A tool in an unseeded category (most of them, today)
-        # simply shows no governed section — the legacy Features block above
-        # is still the only editor for those.
+        # category_has_features gates it (see that method's docstring). A
+        # tool in an unseeded category (most of them, today) simply shows no
+        # governed section — there's no other editor for it, since the
+        # legacy free-text Features section this used to sit alongside was
+        # retired outright in the Feature Taxonomy Phase 1b PR 2.
         governed_sections = []
         if tool:
             links_by_feature_id = {l["feature_id"]: l for l in lib.list_tool_feature_links(tool_id)}
@@ -13827,45 +13821,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         f'<option value="{t["id"]}">{_esc(t["name"])}</option>' for t in other_tools
     )
 
-    def _feature_row(feat: dict) -> str:
-        avail_bits = []
-        if feat["standalone_available"]:
-            avail_bits.append("Standalone")
-        if feat["bundled_only"]:
-            avail_bits.append("Bundled only")
-        avail_label = " + ".join(avail_bits) or "Availability unset"
-        verify_badge = (
-            '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
-            'background:#fef3c7;color:#92400e;border-radius:5px;padding:2px 7px;">Needs verification</span>'
-            if feat["needs_verification"] else ""
-        )
-        notes_line = f'<div style="font-size:12px;color:var(--muted);margin-top:2px;">{_esc(feat["notes"])}</div>' if feat["notes"] else ""
-        verify_action = ""
-        if feat["needs_verification"]:
-            verify_action = (
-                f'<form method="post" action="/admin/tools/{tool_id}/features/{feat["id"]}/verify" style="margin:0;">'
-                f'<button type="submit" class="tool-admin-btn">Mark verified</button></form>'
-            )
-        return (f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 0;'
-                f'border-top:1px solid var(--line);">'
-                f'<div style="min-width:0;">'
-                f'<div style="font-size:14px;font-weight:500;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
-                f'{_esc(feat["feature_name"])} {verify_badge}</div>'
-                f'<div style="font-size:12px;color:var(--muted);">{avail_label}</div>{notes_line}</div>'
-                f'<div style="display:flex;gap:6px;flex-shrink:0;">{verify_action}'
-                f'<a href="/admin/tools/{tool_id}/features/{feat["id"]}/edit" class="tool-admin-btn">Edit</a>'
-                f'<form method="post" action="/admin/tools/{tool_id}/features/{feat["id"]}/delete" style="margin:0;">'
-                f'<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button></form></div></div>')
-
-    _features_list_html = "".join(_feature_row(f) for f in features)
-    _n_features = len(features)
-    _n_features_needs_verify = sum(1 for f in features if f["needs_verification"])
-    _features_badge_html = (
-        f'<span style="font-size:12px;color:var(--muted);">{_n_features} feature{"s" if _n_features != 1 else ""}'
-        + (f'&nbsp;&middot;&nbsp;<span style="color:#92400e;">{_n_features_needs_verify} need'
-           f'{"s" if _n_features_needs_verify == 1 else ""} verification</span>' if _n_features_needs_verify else '')
-        + '</span>'
-    )
+    # (The legacy per-tool free-text Features section — _feature_row,
+    # _features_list_html, the "N features / N need verification" badge —
+    # was removed outright in the Feature Taxonomy Phase 1b PR 2. The
+    # governed Feature Taxonomy checklist below, _governed_feature_row, is
+    # the only tool-feature editor now.)
 
     # Feature Taxonomy (governed model): a checklist per category this tool
     # is in that has a curated feature list. Toggling a checkbox on/off adds
@@ -13950,20 +13910,20 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
     _research_banner_html = ""
     if research_refreshed == "1":
-        # The "before marking them verified" clause only makes sense when
-        # there's actually something to mark: a feature row still flagged
-        # needs_verification, or the taxonomy note itself. When the LLM
-        # reported high confidence on every part of this run, needs_verify
-        # is false for all of it and no "Mark verified" control renders
-        # anywhere on the page — so the banner shouldn't promise one either
-        # (this is the Phase G banner-bug fix; see _features_badge_html just
-        # above for the same true/false conditional-clause pattern reused here).
-        _research_needs_review = bool(tool.get("agent_taxonomy_needs_verification")) or _n_features_needs_verify > 0
+        # The "before marking it verified" clause only makes sense when
+        # there's actually something to mark: the taxonomy note flagged
+        # needs_verification. When the LLM reported high confidence, the
+        # flag is false and no "Mark verified" control renders anywhere on
+        # the page — so the banner shouldn't promise one either (this is the
+        # Phase G banner-bug fix; the legacy per-feature half of this
+        # conditional was removed along with the feature-drafting half of
+        # _run_tool_research in the Feature Taxonomy Phase 1b PR 2).
+        _research_needs_review = bool(tool.get("agent_taxonomy_needs_verification"))
         _research_banner_html = (
             '<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
             'padding:10px 16px;font-size:14px;margin:0 0 16px;">AI research refreshed—review the '
-            'drafted feature rows and agent taxonomy below'
-            + (' before marking them verified.</p>' if _research_needs_review else '.</p>')
+            'agent taxonomy below'
+            + (' before marking it verified.</p>' if _research_needs_review else '.</p>')
         )
     elif research_refreshed == "0":
         _research_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
@@ -14199,35 +14159,6 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
   {_app_screenshot_in_form_html}
 </div>
-
-<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);">
-  <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-    <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Features</h2>
-      {_features_badge_html}
-    </span>
-    <span class="disclosure-caret">&#9654;</span>
-  </summary>
-  <p style="font-size:13px;color:var(--muted);margin:12px 0 16px;">Standalone-vs-bundled availability per feature—feeds the Phase 5 comparison matrix. Rows flagged "Needs verification" came from the LLM enrichment pass and haven't been confirmed yet.</p>
-
-  {_features_list_html or '<p style="font-size:13px;color:var(--muted);margin:0 0 16px;">No features added yet.</p>'}
-
-  <form method="post" action="/admin/tools/{tool_id}/features/add" style="margin-top:20px;display:grid;gap:10px;max-width:480px;">
-    <input name="feature_name" required maxlength="200" placeholder="Feature name"
-      style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;">
-    <div style="display:flex;gap:16px;flex-wrap:wrap;">
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
-        <input type="checkbox" name="standalone_available" value="1"> Standalone available
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
-        <input type="checkbox" name="bundled_only" value="1"> Bundled only
-      </label>
-    </div>
-    <input name="notes" maxlength="300" placeholder="Notes (e.g. tier it's on)"
-      style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:14px;background:#fff;">
-    <div><button type="submit" class="tool-admin-btn">+ Add feature</button></div>
-  </form>
-</details>
 
 {_governed_features_html}
 
@@ -14506,9 +14437,8 @@ def admin_tools_research_refresh(request: Request, tool_id: int):
 
 @app.post("/admin/tools/software/{tool_id}/agent-taxonomy/verify")
 def admin_tools_agent_taxonomy_verify(request: Request, tool_id: int):
-    """One-click "Mark verified" for the agent-taxonomy note, mirroring the
-    equivalent tool_features action — clears the needs_verification flag
-    without touching the text itself. Also logs the click to
+    """One-click "Mark verified" for the agent-taxonomy note — clears the
+    needs_verification flag without touching the text itself. Also logs the click to
     narrative_review_log (Phase G) so the edit page can show who verified it
     and when — a snapshot of the note text as of this click, not a live
     pointer, so the log stays meaningful even if the note is edited later."""
@@ -14611,145 +14541,6 @@ def admin_tools_competitors_remove(request: Request, tool_id: int, competitor_id
         lib.close()
     return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
-
-@app.post("/admin/tools/{tool_id}/features/add")
-async def admin_tools_features_add(request: Request, tool_id: int):
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    form = await request.form()
-    feature_name = (form.get("feature_name") or "").strip()
-    standalone_available = 1 if form.get("standalone_available") == "1" else 0
-    bundled_only = 1 if form.get("bundled_only") == "1" else 0
-    notes = (form.get("notes") or "").strip()
-    lib = _lib()
-    try:
-        tool = lib.get_tool(tool_id)
-        if not tool:
-            raise HTTPException(status_code=404, detail="Tool not found")
-        if feature_name:
-            lib.add_tool_feature(tool_id, feature_name, standalone_available, bundled_only, notes)
-    finally:
-        lib.close()
-    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
-
-
-@app.get("/admin/tools/{tool_id}/features/{feature_id}/edit", response_class=HTMLResponse)
-def admin_tools_features_edit(request: Request, tool_id: int, feature_id: int):
-    if not _is_authed(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        tool = lib.get_tool(tool_id)
-        feature = lib.get_tool_feature(feature_id)
-    finally:
-        lib.close()
-    if not tool or not feature or feature["tool_id"] != tool_id:
-        raise HTTPException(status_code=404, detail="Feature not found")
-
-    body = f"""<div class="page page-form">
-<h1>Edit feature</h1>
-<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;"><a href="/tools/software/{tool['slug']}/edit">&larr; {_esc(tool['name'])}</a></p>
-<form method="post" action="/admin/tools/{tool_id}/features/{feature_id}/edit" style="display:grid;gap:20px;">
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Feature name *</label>
-    <input name="feature_name" required maxlength="200" value="{_esc(feature['feature_name'])}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>
-  <div style="display:flex;gap:20px;flex-wrap:wrap;">
-    <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="standalone_available" value="1"{'checked' if feature['standalone_available'] else ''}> Standalone available
-    </label>
-    <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="bundled_only" value="1"{'checked' if feature['bundled_only'] else ''}> Bundled only
-    </label>
-  </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Notes</label>
-    <input name="notes" maxlength="300" value="{_esc(feature['notes'])}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Source URL</label>
-    <input name="source_url" type="url" maxlength="500" value="{_esc(feature['source_url'])}"
-      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>
-  <div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
-      <input type="checkbox" name="needs_verification" value="1"{'checked' if feature['needs_verification'] else ''}> Still needs verification
-    </label>
-    {f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Drafted by {_esc(feature["model"])} ({_esc(feature["source"])}).</p>' if feature.get('source') == 'llm_enrichment' else ''}
-  </div>
-  <div>
-    <button type="submit" class="btn">Save changes</button>
-    <a href="/tools/software/{tool['slug']}/edit" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
-  </div>
-</form>
-</div>"""
-    return HTMLResponse(_page(f"Edit feature—{_esc(tool['name'])}", "", body, authed=True))
-
-
-@app.post("/admin/tools/{tool_id}/features/{feature_id}/edit")
-async def admin_tools_features_edit_submit(request: Request, tool_id: int, feature_id: int):
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    form = await request.form()
-    feature_name = (form.get("feature_name") or "").strip()
-    standalone_available = 1 if form.get("standalone_available") == "1" else 0
-    bundled_only = 1 if form.get("bundled_only") == "1" else 0
-    notes = (form.get("notes") or "").strip()
-    source_url = (form.get("source_url") or "").strip()
-    needs_verification = 1 if form.get("needs_verification") == "1" else 0
-    if not feature_name:
-        raise HTTPException(status_code=400, detail="Feature name is required.")
-    lib = _lib()
-    try:
-        tool = lib.get_tool(tool_id)
-        if not tool:
-            raise HTTPException(status_code=404, detail="Tool not found")
-        feature = lib.get_tool_feature(feature_id)
-        if not feature or feature["tool_id"] != tool_id:
-            raise HTTPException(status_code=404, detail="Feature not found")
-        lib.update_tool_feature(feature_id, feature_name, standalone_available, bundled_only,
-                                notes, source_url, needs_verification)
-    finally:
-        lib.close()
-    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
-
-
-@app.post("/admin/tools/{tool_id}/features/{feature_id}/verify")
-def admin_tools_features_verify(request: Request, tool_id: int, feature_id: int):
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    lib = _lib()
-    try:
-        tool = lib.get_tool(tool_id)
-        if not tool:
-            raise HTTPException(status_code=404, detail="Tool not found")
-        feature = lib.get_tool_feature(feature_id)
-        if feature and feature["tool_id"] == tool_id:
-            lib.update_tool_feature(feature_id, feature["feature_name"], feature["standalone_available"],
-                                    feature["bundled_only"], feature["notes"], feature["source_url"],
-                                    needs_verification=0)
-    finally:
-        lib.close()
-    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
-
-
-@app.post("/admin/tools/{tool_id}/features/{feature_id}/delete")
-def admin_tools_features_delete(request: Request, tool_id: int, feature_id: int):
-    if not _is_authed(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    lib = _lib()
-    try:
-        tool = lib.get_tool(tool_id)
-        if not tool:
-            raise HTTPException(status_code=404, detail="Tool not found")
-        feature = lib.get_tool_feature(feature_id)
-        if feature and feature["tool_id"] == tool_id:
-            lib.delete_tool_feature(feature_id)
-    finally:
-        lib.close()
-    return RedirectResponse(f"/tools/software/{tool['slug']}/edit", status_code=303)
 
 
 @app.post("/admin/tools/software/{tool_id}/feature-links/save")
@@ -17930,21 +17721,24 @@ _SCRIPT_REGISTRY = [
      ["python -m scripts.seed_communities --db library.db"]),
     ("enrich_community_profiles.py", "scripts.enrich_community_profiles", "Recurring & actively useful",
      "Bulk/backfill Community Profile drafting — the Communities equivalent of "
-     "enrich_tool_features.py. One Claude call per community drafts the sixteen "
+     "enrich_agent_taxonomy.py. One Claude call per community drafts the sixteen "
      "qualitative profile fields; every draft is saved needs_review=1, same review "
      "contract as the live \"Auto-fill from URL\" admin button.",
      "Recurring-manual — whenever a batch of communities needs profile drafts.",
      ["ANTHROPIC_API_KEY", "LINKLIB_DB (or pass --db)"],
      ["python -m scripts.enrich_community_profiles --db library.db --communities \"Chief,Rho Community\" --dry-run",
       "python -m scripts.enrich_community_profiles --db library.db --limit 10"]),
-    ("enrich_tool_features.py", "scripts.enrich_tool_features", "Recurring & actively useful",
-     "Feature-comparison + agent-taxonomy research for Software tools — the exact same "
-     "drafting logic the live app runs automatically on a new tool, or on-demand via the "
-     "\"Refresh AI research\" admin button; this script is the bulk/backfill path.",
-     "Recurring-manual — whenever a batch of tools needs feature/taxonomy research.",
+    ("enrich_agent_taxonomy.py", "scripts.enrich_agent_taxonomy", "Recurring & actively useful",
+     "Agent-taxonomy research for Software tools (renamed from enrich_tool_features.py in "
+     "the Feature Taxonomy Phase 1b PR 2 legacy retirement, which dropped the feature-drafting "
+     "half — curated features are now managed directly on the tool edit page's governed "
+     "checklist, not LLM-drafted) — the exact same drafting logic the live app runs "
+     "automatically on a new tool, or on-demand via the \"Refresh AI research\" admin button; "
+     "this script is the bulk/backfill path.",
+     "Recurring-manual — whenever a batch of tools needs agent-taxonomy research.",
      ["ANTHROPIC_API_KEY", "LINKLIB_DB (or pass --db)"],
-     ["python -m scripts.enrich_tool_features --db library.db --tools \"Ramp,Brex\" --dry-run",
-      "python -m scripts.enrich_tool_features --db library.db --limit 10"]),
+     ["python -m scripts.enrich_agent_taxonomy --db library.db --tools \"Ramp,Brex\" --dry-run",
+      "python -m scripts.enrich_agent_taxonomy --db library.db --limit 10"]),
     ("mcp_server.py", "scripts.mcp_server", "Recurring & actively useful",
      "Stdio MCP server wrapping the hosted CFO Library search (GET /api/search) — lets "
      "Claude Desktop/Code search the archive directly, without going through the "
@@ -18450,7 +18244,7 @@ def _diagram_lightbox_html(frame_id: str, diagram_markup: str, label: str = "Dia
 _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Users & auth", ["users", "password_reset_requests", "read_later"]),
     ("Toolbox — Software", ["tools", "tool_categories", "tool_leads", "tool_audit_log",
-                             "tool_competitors", "tool_features", "tool_name_dedupe_decisions",
+                             "tool_competitors", "tool_name_dedupe_decisions",
                              "benchmarks", "category_features", "tool_feature_links",
                              "feature_review_queue"]),
     ("Toolbox — Communities", ["communities", "community_audit_log", "community_categories",

@@ -298,11 +298,10 @@ Cost figures are computed from **real API token usage** at call time
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `tools` | The vendor directory on `/tools/software`. `scripts/seed_tools.py` is re-runnable, not one-shot: run by hand against a database, it adds any tool missing by URL and syncs `name`/`description` on existing rows when the script's copy changes (#113), via `Library.update_tool_content` — a narrow update that never touches `categories`/`advisor`/`promoted`/vendor/warm-intro fields, so admin edits made directly on the live site survive a re-run. `webapp/app.py`'s `@app.on_event("startup")` hook (`_seed_toolbox`) runs the *sync* half of that same logic — advisor/name/description on a row already matching by URL — on every process boot, but (after the deleted-tools-reappearing fix below) never the *insert* half: a seed entry with no matching row is skipped, not added, since this hook fires on every restart/crash-recovery, not just a first boot, and `tools` has no soft-delete column, so "missing by URL" can't be told apart from "an admin deleted this on purpose." A tool manually deleted at `/admin/tools/software` before this fix would silently reappear on the very next restart because the startup hook still treated a missing row as unseeded; first-time seeding of a brand-new DB is `scripts/seed_tools.py`'s job alone now, not something the startup hook duplicates. Rendered publicly, one entry at a time, at `/tools/software/{slug}` (Software search overhaul Phase 2) via `get_tool_by_slug` — same only-approved-rows rule as `get_community_by_slug`. | `slug` (unique), `approved` (reader submissions wait for approval), `advisor`, `promoted`, `warm_intro_enabled` + `vendor_name`/`vendor_email` (the intro button needs both), `competitive_differentiation` (Phase 3 — free-text "how this differs from the competition," rendered on the profile page when non-empty; hand-written by Brian via a narrow `update_tool_differentiation`, deliberately kept off the general `update_tool` path so the Software bulk-edit panel — which resaves every field it knows about on every call — can never blank it out), `agent_taxonomy_note` (a Phase 0 decision — standalone feature vs. agent-assisted vs. fully independent agent, deliberately free text rather than a structured/enum field — that went unimplemented through Phases 1-4 and was added in Phase 5 since the comparison matrix is the first thing that needed it rendered; same narrow-update-method pattern as `competitive_differentiation` via `update_tool_agent_taxonomy`, and additionally folded into the public directory's client-side search string on `/tools/software` since Phase 0 required it be searchable, not just decorative), `agent_taxonomy_needs_verification` (added by the automated-research follow-up below — a per-tool confidence flag, same shape as `tool_features.needs_verification`, cleared automatically whenever a human saves the field through the admin edit form's `update_tool_agent_taxonomy`, and set fresh by an LLM-drafted note via `set_tool_agent_taxonomy_draft`; a dedicated `mark_tool_agent_taxonomy_verified` clears it without touching the text, mirroring the equivalent `tool_features` action), `screenshot_url`/`screenshot_captured_at` (Phase 5 follow-up, rendered in a bordered sidebar box on the profile page — two write paths land on the same fields: `update_tool_screenshot_url` for a manually pasted external URL from the admin edit form, which clears `screenshot_captured_at` since a hand-pasted image has no known capture time (a 2026-08 incident found the admin edit-form submit route originally called the older `update_tool_screenshot` — which also writes `screenshot_is_product` — with that parameter hardcoded to 0 on every save, silently clearing a legacy `screenshot_is_product=1` flag on any unrelated resave, before `scripts/archive/migrate_app_screenshot_from_product_flag.py` ever got a chance to see it; `update_tool_screenshot` itself is kept only for pre-Phase-E callers/tests, never called from the live app anymore); `set_tool_screenshot_capture` for an automated homepage capture, used by both `scripts/capture_tool_screenshots.py` (bulk backfill, run from the terminal) and the live "Generate homepage screenshot" button on the admin edit page — both go through `linklib/screenshots.py::capture_homepage` (Playwright + Chromium, fixed 1280×800 viewport) so a bulk backfill and a one-off recapture stay visually consistent. Captured images are stored on the persistent volume alongside `library.db` (`_SCREENSHOT_DIR`, not the Docker image's static/ dir) and served via `GET /tools/software/screenshot/{filename}` — same basename-only traversal guard as `/static/{filename}`), `app_screenshot_source_url`/`app_screenshot_url`/`app_screenshot_captured_at` (Phase E — a second, independent screenshot slot for the actual product/app UI, stacked below the homepage screenshot on the profile page rather than replacing it. There's no single reliable URL for "the app" the way there's a homepage URL, so this is deliberately manual/curated per record, not something a backfill script can source: `app_screenshot_source_url` holds whatever login/demo/product-tour page Brian supplies, and either `set_tool_app_screenshot` write path — an auto-capture against that source URL via the same `capture_homepage()`, triggered by the "Generate app screenshot" admin button, or a manual crop-and-upload via a client-side Cropper.js modal (CDN, no server-side image-processing dependency — the browser produces the final fixed-size PNG) — writes the resulting served path to `app_screenshot_url`, with no provenance tracking between the two paths. Saved as `{slug}-app.png` in the same `_SCREENSHOT_DIR` and served by the same `GET /tools/software/screenshot/{filename}` route as the homepage slot — no new serving route needed, just a filename suffix. `screenshot_is_product` (the pre-Phase-E flag that let a manually pasted screenshot stand in as "the product shot," in the single slot that existed then) is retired by this phase — the admin checkbox is gone, and the actual data move (`Library.migrate_app_screenshot_from_product_flag`, moving any pre-existing `screenshot_is_product=1` row's `screenshot_url`/`screenshot_captured_at` into the new `app_screenshot_url`/`app_screenshot_captured_at` slot and clearing the homepage slot, since that's what the row actually had) is deliberately NOT wired into an automatic boot hook — it's a production data write, not a schema backfill, so the standing "human review before a production write" rule (CLAUDE.md) applies: Brian runs `scripts/archive/migrate_app_screenshot_from_product_flag.py` by hand (preview by default, `--apply` to write, write-then-read-back verified — same convention as `scripts/backfill_logos.py`) once he's reviewed the affected-row list it prints. The column itself is left in place, non-destructively (same precedent as the retired `community_profiles` `*_tags` columns below), as a frozen historical marker of which rows the migration touched. Profile-page captions are now per-slot, not provenance-flag-driven: "Homepage screenshot, captured {date}" / "Homepage screenshot (not yet captured)" for the homepage slot, "App screenshot, captured {date}" for the app slot, rendered only when that slot is populated — the old "(no product screenshot available yet)" hedge is gone, since an app screenshot is now a real, separate thing rather than a hoped-for override. Mobile (`<=800px`, the existing `.tp-band` collapse breakpoint) shows one screenshot at a time with a tap-to-toggle button (`.tp-shot-toggle`, the Phase J1 expand/collapse convention) when both slots are populated; a record with only a homepage screenshot renders with no `has-app` class and no toggle, identically to pre-Phase-E), `summary` (description-length follow-up — `description` grew from a short 1-3 sentence blurb into a full ~8-12 sentence profile-page write-up, so `summary` is a new short 2-3 sentence field for the directory card and the client-side search string on `/tools/software`, drafted alongside `description` in one `generate_tool_description` call rather than derived from it, since a proper condensed rewrite reads better than a truncated long-form opening. Every write path that touches `description` also carries `summary` (`add_tool`, `update_tool`, `quick_update_tool`) — including the bulk-edit route, which must echo the row's existing `summary` back on every call the same way it already does for `description`, or the "resaves every field it knows about" hazard would blank it on an unrelated advisor/promoted toggle. A boot-time backfill (`summary=description` for any row where `summary` is still empty) covers every pre-existing row's already-short description, so cards keep showing sensible text until a tool is re-enriched; the compare matrix and card/search surfaces fall back to `description` if `summary` is somehow still empty, the profile page always renders the full `description`), `logo_path` (Phase D — a relative path to a downloaded-and-stored logo asset, e.g. `logos/tools/abacum.svg`, never an external URL; written only by `scripts/backfill_logos.py` via `set_tool_logo`, which fetches Brandfetch's **Brand API** (`api.brandfetch.io/v2/brands/domain/{domain}`, Bearer-token auth) — not the free CDN Logo API a first investigation pass assumed, which turned out to be browser-embed-only and blocked all 216 programmatic requests uniformly (see that script's docstring for the full story). Files are saved next to `library.db` on the persistent volume (`logos/tools/` and `logos/communities/` subdirectories, mirroring `_SCREENSHOT_DIR`'s reasoning exactly, including the same slug-collision risk across the two types), not under `webapp/static/` as originally specified, since that directory ships inside the Docker image and doesn't survive a deploy. The Brand API's free tier is 100 requests/month, well under the 216-record catalog, so the backfill is deliberately split across three ~90-record monthly batches (`--limit`, default 90) rather than a single pass; the script's selection query only ever targets rows where `logo_path` is still empty, so a future manual-upload admin flow can never be silently overwritten by a re-run. Rendered near the name on the profile page and small on each directory card via `GET /tools/software/logo/{filename}` (Phase F — see the Auth/routing table below), with a shared initial-monogram fallback for any record still missing one), `description_needs_verification`/`competitive_differentiation_needs_verification` (Phase G PR 2 — the same `narrative_review_log`-backed "Mark verified" gate `agent_taxonomy_needs_verification` established, extended to the other two tool-only narrative fields. Unlike Agent taxonomy, neither field has a separate Refresh route — Generate is AJAX-only and the main edit-submit route (`/tools/software/{slug}/edit`) is the only place a draft is ever persisted — so that one route sets the flag directly: `1` when this save's submitted `ai_drafted_fields` names the field (a fresh, unconfirmed AI draft), `0` otherwise (a hand-edited or untouched save is itself a confirmation, same convention `update_tool_agent_taxonomy` already used). `summary` shares `description_needs_verification` rather than getting its own column, since `generateDescription()` drafts and marks both in one click. `update_tool`'s new `description_needs_verification` parameter defaults to `None` — meaning "leave the column alone" via `COALESCE` in the `UPDATE` — since `update_tool` is also the bulk-edit panel's and `scripts/archive/fix_corpay_category.py`'s write path, neither of which should guess at this flag on a save they didn't originate. `mark_tool_description_verified`/`mark_tool_differentiation_verified` clear each without touching its text, mirroring `mark_tool_agent_taxonomy_verified` exactly) |
+| `tools` | The vendor directory on `/tools/software`. `scripts/seed_tools.py` is re-runnable, not one-shot: run by hand against a database, it adds any tool missing by URL and syncs `name`/`description` on existing rows when the script's copy changes (#113), via `Library.update_tool_content` — a narrow update that never touches `categories`/`advisor`/`promoted`/vendor/warm-intro fields, so admin edits made directly on the live site survive a re-run. `webapp/app.py`'s `@app.on_event("startup")` hook (`_seed_toolbox`) runs the *sync* half of that same logic — advisor/name/description on a row already matching by URL — on every process boot, but (after the deleted-tools-reappearing fix below) never the *insert* half: a seed entry with no matching row is skipped, not added, since this hook fires on every restart/crash-recovery, not just a first boot, and `tools` has no soft-delete column, so "missing by URL" can't be told apart from "an admin deleted this on purpose." A tool manually deleted at `/admin/tools/software` before this fix would silently reappear on the very next restart because the startup hook still treated a missing row as unseeded; first-time seeding of a brand-new DB is `scripts/seed_tools.py`'s job alone now, not something the startup hook duplicates. Rendered publicly, one entry at a time, at `/tools/software/{slug}` (Software search overhaul Phase 2) via `get_tool_by_slug` — same only-approved-rows rule as `get_community_by_slug`. | `slug` (unique), `approved` (reader submissions wait for approval), `advisor`, `promoted`, `warm_intro_enabled` + `vendor_name`/`vendor_email` (the intro button needs both), `competitive_differentiation` (Phase 3 — free-text "how this differs from the competition," rendered on the profile page when non-empty; hand-written by Brian via a narrow `update_tool_differentiation`, deliberately kept off the general `update_tool` path so the Software bulk-edit panel — which resaves every field it knows about on every call — can never blank it out), `agent_taxonomy_note` (a Phase 0 decision — standalone feature vs. agent-assisted vs. fully independent agent, deliberately free text rather than a structured/enum field — that went unimplemented through Phases 1-4 and was added in Phase 5 since the comparison matrix is the first thing that needed it rendered; same narrow-update-method pattern as `competitive_differentiation` via `update_tool_agent_taxonomy`, and additionally folded into the public directory's client-side search string on `/tools/software` since Phase 0 required it be searchable, not just decorative), `agent_taxonomy_needs_verification` (added by the automated-research follow-up below — a per-tool confidence flag, cleared automatically whenever a human saves the field through the admin edit form's `update_tool_agent_taxonomy`, and set fresh by an LLM-drafted note via `set_tool_agent_taxonomy_draft`; a dedicated `mark_tool_agent_taxonomy_verified` clears it without touching the text), `screenshot_url`/`screenshot_captured_at` (Phase 5 follow-up, rendered in a bordered sidebar box on the profile page — two write paths land on the same fields: `update_tool_screenshot_url` for a manually pasted external URL from the admin edit form, which clears `screenshot_captured_at` since a hand-pasted image has no known capture time (a 2026-08 incident found the admin edit-form submit route originally called the older `update_tool_screenshot` — which also writes `screenshot_is_product` — with that parameter hardcoded to 0 on every save, silently clearing a legacy `screenshot_is_product=1` flag on any unrelated resave, before `scripts/archive/migrate_app_screenshot_from_product_flag.py` ever got a chance to see it; `update_tool_screenshot` itself is kept only for pre-Phase-E callers/tests, never called from the live app anymore); `set_tool_screenshot_capture` for an automated homepage capture, used by both `scripts/capture_tool_screenshots.py` (bulk backfill, run from the terminal) and the live "Generate homepage screenshot" button on the admin edit page — both go through `linklib/screenshots.py::capture_homepage` (Playwright + Chromium, fixed 1280×800 viewport) so a bulk backfill and a one-off recapture stay visually consistent. Captured images are stored on the persistent volume alongside `library.db` (`_SCREENSHOT_DIR`, not the Docker image's static/ dir) and served via `GET /tools/software/screenshot/{filename}` — same basename-only traversal guard as `/static/{filename}`), `app_screenshot_source_url`/`app_screenshot_url`/`app_screenshot_captured_at` (Phase E — a second, independent screenshot slot for the actual product/app UI, stacked below the homepage screenshot on the profile page rather than replacing it. There's no single reliable URL for "the app" the way there's a homepage URL, so this is deliberately manual/curated per record, not something a backfill script can source: `app_screenshot_source_url` holds whatever login/demo/product-tour page Brian supplies, and either `set_tool_app_screenshot` write path — an auto-capture against that source URL via the same `capture_homepage()`, triggered by the "Generate app screenshot" admin button, or a manual crop-and-upload via a client-side Cropper.js modal (CDN, no server-side image-processing dependency — the browser produces the final fixed-size PNG) — writes the resulting served path to `app_screenshot_url`, with no provenance tracking between the two paths. Saved as `{slug}-app.png` in the same `_SCREENSHOT_DIR` and served by the same `GET /tools/software/screenshot/{filename}` route as the homepage slot — no new serving route needed, just a filename suffix. `screenshot_is_product` (the pre-Phase-E flag that let a manually pasted screenshot stand in as "the product shot," in the single slot that existed then) is retired by this phase — the admin checkbox is gone, and the actual data move (`Library.migrate_app_screenshot_from_product_flag`, moving any pre-existing `screenshot_is_product=1` row's `screenshot_url`/`screenshot_captured_at` into the new `app_screenshot_url`/`app_screenshot_captured_at` slot and clearing the homepage slot, since that's what the row actually had) is deliberately NOT wired into an automatic boot hook — it's a production data write, not a schema backfill, so the standing "human review before a production write" rule (CLAUDE.md) applies: Brian runs `scripts/archive/migrate_app_screenshot_from_product_flag.py` by hand (preview by default, `--apply` to write, write-then-read-back verified — same convention as `scripts/backfill_logos.py`) once he's reviewed the affected-row list it prints. The column itself is left in place, non-destructively (same precedent as the retired `community_profiles` `*_tags` columns below), as a frozen historical marker of which rows the migration touched. Profile-page captions are now per-slot, not provenance-flag-driven: "Homepage screenshot, captured {date}" / "Homepage screenshot (not yet captured)" for the homepage slot, "App screenshot, captured {date}" for the app slot, rendered only when that slot is populated — the old "(no product screenshot available yet)" hedge is gone, since an app screenshot is now a real, separate thing rather than a hoped-for override. Mobile (`<=800px`, the existing `.tp-band` collapse breakpoint) shows one screenshot at a time with a tap-to-toggle button (`.tp-shot-toggle`, the Phase J1 expand/collapse convention) when both slots are populated; a record with only a homepage screenshot renders with no `has-app` class and no toggle, identically to pre-Phase-E), `summary` (description-length follow-up — `description` grew from a short 1-3 sentence blurb into a full ~8-12 sentence profile-page write-up, so `summary` is a new short 2-3 sentence field for the directory card and the client-side search string on `/tools/software`, drafted alongside `description` in one `generate_tool_description` call rather than derived from it, since a proper condensed rewrite reads better than a truncated long-form opening. Every write path that touches `description` also carries `summary` (`add_tool`, `update_tool`, `quick_update_tool`) — including the bulk-edit route, which must echo the row's existing `summary` back on every call the same way it already does for `description`, or the "resaves every field it knows about" hazard would blank it on an unrelated advisor/promoted toggle. A boot-time backfill (`summary=description` for any row where `summary` is still empty) covers every pre-existing row's already-short description, so cards keep showing sensible text until a tool is re-enriched; the compare matrix and card/search surfaces fall back to `description` if `summary` is somehow still empty, the profile page always renders the full `description`), `logo_path` (Phase D — a relative path to a downloaded-and-stored logo asset, e.g. `logos/tools/abacum.svg`, never an external URL; written only by `scripts/backfill_logos.py` via `set_tool_logo`, which fetches Brandfetch's **Brand API** (`api.brandfetch.io/v2/brands/domain/{domain}`, Bearer-token auth) — not the free CDN Logo API a first investigation pass assumed, which turned out to be browser-embed-only and blocked all 216 programmatic requests uniformly (see that script's docstring for the full story). Files are saved next to `library.db` on the persistent volume (`logos/tools/` and `logos/communities/` subdirectories, mirroring `_SCREENSHOT_DIR`'s reasoning exactly, including the same slug-collision risk across the two types), not under `webapp/static/` as originally specified, since that directory ships inside the Docker image and doesn't survive a deploy. The Brand API's free tier is 100 requests/month, well under the 216-record catalog, so the backfill is deliberately split across three ~90-record monthly batches (`--limit`, default 90) rather than a single pass; the script's selection query only ever targets rows where `logo_path` is still empty, so a future manual-upload admin flow can never be silently overwritten by a re-run. Rendered near the name on the profile page and small on each directory card via `GET /tools/software/logo/{filename}` (Phase F — see the Auth/routing table below), with a shared initial-monogram fallback for any record still missing one), `description_needs_verification`/`competitive_differentiation_needs_verification` (Phase G PR 2 — the same `narrative_review_log`-backed "Mark verified" gate `agent_taxonomy_needs_verification` established, extended to the other two tool-only narrative fields. Unlike Agent taxonomy, neither field has a separate Refresh route — Generate is AJAX-only and the main edit-submit route (`/tools/software/{slug}/edit`) is the only place a draft is ever persisted — so that one route sets the flag directly: `1` when this save's submitted `ai_drafted_fields` names the field (a fresh, unconfirmed AI draft), `0` otherwise (a hand-edited or untouched save is itself a confirmation, same convention `update_tool_agent_taxonomy` already used). `summary` shares `description_needs_verification` rather than getting its own column, since `generateDescription()` drafts and marks both in one click. `update_tool`'s new `description_needs_verification` parameter defaults to `None` — meaning "leave the column alone" via `COALESCE` in the `UPDATE` — since `update_tool` is also the bulk-edit panel's and `scripts/archive/fix_corpay_category.py`'s write path, neither of which should guess at this flag on a save they didn't originate. `mark_tool_description_verified`/`mark_tool_differentiation_verified` clear each without touching its text, mirroring `mark_tool_agent_taxonomy_verified` exactly) |
 | `tool_categories` | Controlled vocabulary of filter pills — can exist empty, unlike article tags which are purely usage-derived. Consolidated (Software search overhaul Phase 1) from a 21-tag ad hoc list, grown organically as tools were added, to a fixed, deliberately-designed 15-tag taxonomy — always shown alphabetized in the UI (`ORDER BY sort_order, name`, seeded with `sort_order` already alphabetical): `Accounting`, `BI/Analytics`, `Cloud/IT Spend`, `Equity Management`, `ERP`, `FP&A`, `Headcount Planning`, `Legal and Contracting`, `Neobanking`, `Procurement/Spend`, `Revenue`, `Revenue Operations`, `Tax Management`, `Travel Management`, `Treasury/Cash Management`. `scripts/archive/migrate_software_tags.py` is the one-off, re-runnable migration that remapped every existing tool's `categories_json` from the old vocabulary and rebuilt this table — see its module docstring for the full old-to-new mapping. `_DEFAULT_TOOL_CATEGORIES`/`_DEFAULT_CATEGORY_DESCRIPTIONS` in `webapp/app.py` only matter for a fresh DB's first-time seed now that the migration has run. A tool's own assigned categories (as opposed to this vocabulary table) are sorted alphabetically at read time in `Library._tool_to_dict` — the one choke point every read path (`get_tool`, `list_tools`, `get_tool_by_slug`) goes through — rather than relying on every write path (`add_tool`/`update_tool`/the bulk-edit route) to sort before saving; `Library._community_to_dict` does the same for `communities.categories`. This surfaced as a real gap after a production tag-consolidation dry-run: two straggler category names (`CPQ`, `Finance Agents`) that Brian fixed by hand via the admin UI weren't guaranteed to come back out sorted the same way a migration-touched row would. | `name` (unique), `sort_order` |
 | `tool_competitors` | Manually curated competitor cross-links between Software entries (Phase 3), rendered as "Competitors" on `/tools/software/{slug}`. One undirected edge per pair, normalized so `tool_id` is always the smaller id (`Library.add_tool_competitor` sorts before insert) — `UNIQUE(tool_id, competitor_id)` dedupes against that normalized form, and curating from either tool's `/tools/software/{slug}/edit` page links both directions. This table is the source of truth; `Library.suggest_tool_competitors` (shared-category count, most overlap first) is a separate read-only helper that only powers an admin-UI suggestion list — deliberately not a live auto-computed "competitors" feature, since the 15-tag taxonomy is broad enough that pure tag overlap surfaces plenty of non-competitors (see Phase 0's investigation). The AI-first-pass upgrade (Competitors/Similar-communities) added `POST /admin/tools/{tool_id}/competitors/generate-matches`, which runs `linklib.enrich.generate_competitor_matches` over that same suggestion shortlist to judge which candidates are genuine competitors — never written to this table directly; the admin edit page's suggestions section renders as a checkbox list that Generate pre-checks, and only a human clicking "+ Add selected" (`POST /admin/tools/{tool_id}/competitors/add-selected`, batch version of the older single-`competitor_id` `/add`) actually inserts rows, same generate-then-review contract as every other AI-drafted field (see `field_reviews`). | `tool_id`, `competitor_id` (composite unique, normalized pair) |
-| `tool_features` | Per-feature standalone-vs-bundled availability for a Software entry (Phase 4a) — the data the Phase 5 comparison matrix reads. `standalone_available`/`bundled_only` are independent booleans (a feature can be sold both a la carte and folded into a tier, so both can be `1`). `needs_verification` reuses the exact confidence-flag shape from `linklib.enrich`'s community-listing autofill (`NEEDS_VERIFICATION`) rather than a new mechanism, but as a per-row bool rather than per-field, since one row is already one semantic unit. Manually admin-added rows default `needs_verification=0`; rows from the Phase 4b LLM enrichment pass default it to `1` (`source='llm_enrichment'`, `model` set) and stay flagged until an admin edits or explicitly marks them verified at `/admin/tools/{id}/features/{id}/edit` (or the one-click "Mark verified" action). No DB-level uniqueness on `(tool_id, feature_name)` — de-duplication across enrichment re-runs is the batch script's job, not a constraint. Enrichment cost is recorded through the existing generic `enrichment_cost` ledger (`article_id=NULL`), the same pattern `generate_tool_description`/`generate_community_profile` already use. | `tool_id`, `feature_name`, `needs_verification`, `source` (`'manual'`\|`'llm_enrichment'`) |
-| `category_features` | **Feature Taxonomy (2026-08, Phase 1 — docs/FEATURE_TAXONOMY.md is canon).** The governed replacement for `tool_features`' flat free text, built category by category as each is curated (see the Key architecture decisions bullet below for the full model and legacy-coexistence plan). `category_id` FKs to `tool_categories` — the *existing* `/tools/software` filter-pill vocabulary, not a separate feature-only taxonomy; a 2026-08 investigation found the pilot's three planned category names ("ERP & Accounting", "FP&A Planning", "Close Management") didn't match any live pill, resolved by reusing the real `ERP`/`FP&A` pills and adding `Close Management` as a genuine new one. `name` is unique per category, not globally — the same capability name (e.g. "Anomaly Detection") deliberately recurs across categories by design (rules doc §2), each a separate row. `retired_at` (nullable) — features are retired, never deleted; `retire_category_feature` soft-retires without cascading to existing `tool_feature_links` rows. Seeded via `scripts/seed_feature_taxonomy.py` (idempotent, `scripts/seed_data/*.csv`) from a nine-vendor pilot. Admin CRUD at `/admin/tools/software/features` (list/add/edit/retire per category), same visual/structural pattern as `/admin/tools/software/categories` — all three Feature Taxonomy admin routes and the `/admin/tools/software/categories` move follow the "software-directory admin lives under `/admin/tools/software/*`" convention decided in this same PR (see CLAUDE.md); the old `/admin/tools/categories` URL 301-redirected at the time — since removed outright in the Phase 1b admin URL convention PR below, which completed the cutover with no legacy admin URLs left at all. | `category_id`, `name` (unique per category among live rows), `sort_order` |
+| `category_features` | **Feature Taxonomy (2026-08, Phase 1 — docs/FEATURE_TAXONOMY.md is canon).** The governed replacement for the retired `tool_features`' flat free text, built category by category as each is curated (see the Key architecture decisions bullet below for the full model; the legacy free-text table and every code path reading or writing it were retired outright in the Feature Taxonomy Phase 1b PR 2). `category_id` FKs to `tool_categories` — the *existing* `/tools/software` filter-pill vocabulary, not a separate feature-only taxonomy; a 2026-08 investigation found the pilot's three planned category names ("ERP & Accounting", "FP&A Planning", "Close Management") didn't match any live pill, resolved by reusing the real `ERP`/`FP&A` pills and adding `Close Management` as a genuine new one. `name` is unique per category, not globally — the same capability name (e.g. "Anomaly Detection") deliberately recurs across categories by design (rules doc §2), each a separate row. `retired_at` (nullable) — features are retired, never deleted; `retire_category_feature` soft-retires without cascading to existing `tool_feature_links` rows. Seeded via `scripts/seed_feature_taxonomy.py` (idempotent, `scripts/seed_data/*.csv`) from a nine-vendor pilot. Admin CRUD at `/admin/tools/software/features` (list/add/edit/retire per category), same visual/structural pattern as `/admin/tools/software/categories` — all three Feature Taxonomy admin routes and the `/admin/tools/software/categories` move follow the "software-directory admin lives under `/admin/tools/software/*`" convention decided in this same PR (see CLAUDE.md); the old `/admin/tools/categories` URL 301-redirected at the time — since removed outright in the Phase 1b admin URL convention PR below, which completed the cutover with no legacy admin URLs left at all. | `category_id`, `name` (unique per category among live rows), `sort_order` |
 | `tool_feature_links` | One row per (tool, feature) — the vendor-specific designations (rules doc §6) live here, never on the feature itself, since the same feature is native/rules-based at one vendor and an add-on/AI-driven at another. `availability` is a real `CHECK` constraint (`native`\|`add_on`) — absence of a row is the third state ("not available"), never a stored value. `verified_as_of` is required per link (claims decay fast). Toggled from a checklist on each tool's own `/tools/software/{slug}/edit` page (`Library.upsert_tool_feature_link`/`delete_tool_feature_link`, via `POST /admin/tools/{tool_id}/feature-links/save`) — a direct admin edit, not routed through the review queue below, since the queue exists for scan/public proposals and admin fast-path logging, and a manual checklist toggle on the tool's own page already *is* the admin editing directly. | `tool_id`, `feature_id` (composite unique) |
 | `feature_review_queue` | The review gate (rules doc §9) — no proposed change reaches `category_features`/`tool_feature_links` without landing here first and being approved by a human, regardless of who or what proposed it. `source` (`admin`\|`scan`\|`public`) distinguishes an admin's own fast-pathed edit, the (later, unscheduled) recurring AI scan, and the (later, unscheduled) public suggestion channel — `category_id`/`tool_id`/`submitter_name`/`submitter_email` are nullable now so those later phases don't need a migration to add them. `payload` is the proposed change as JSON (new feature, new link(s), or an existing-feature link) since the three sources produce structurally different proposals. Approving (`Library.approve_feature_review_queue_item`) applies `payload` through the exact same `add_category_feature`/`upsert_tool_feature_link` methods a manual edit would call — never a direct table write from the approval path itself; passing `override_payload` is "edit-then-approve" (status lands `edited` rather than `approved`) and is the same route/form as a verbatim approval, not a separate mechanism — the admin edit page's approve form doubles as the edit form, pre-filled from the stored payload. `/admin/tools/software/feature-review-queue` lists pending items grouped by source with Approve/Deny actions; seeded with 15 pilot proposals (`source='scan'`) via `scripts/seed_feature_taxonomy.py`. | `status` (`pending`\|`approved`\|`edited`\|`denied`), `source` (`admin`\|`scan`\|`public`) |
 | `benchmarks` | The Resources page at `/tools/resources` (renamed from `/tools/benchmarks`/"Benchmarking" in the admin URL convention PR — URL/copy only, table name unchanged), managed at `/admin/tools/resources`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: run by hand it adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync — but the `_seed_toolbox` startup hook's per-boot pass over `_DEFAULT_BENCHMARKS` only performs that sync, same insert-never fix and same reasoning as `tools` above (no soft-delete column here either). | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`) |
@@ -438,80 +437,79 @@ communities table today; the table isn't paginated, so the sentinel text
 is reachable with a browser find until/unless pagination is added later.
 Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
-**Automated Software research (search overhaul automation follow-up)**
-replaced Phase 4b's guessed-path grounding with a real crawl and folded
-agent-taxonomy drafting into the same call. `linklib/enrich.py::
-_discover_nav_pages` fetches a tool's homepage and parses its own `<a>` nav
-links for ones whose text matches product/solution/platform/feature/agent/AI
-keywords (same-domain only, deduped, capped at 10) — a vendor's real
-Product or Agents page can live at any slug, so parsing the site's own
-navigation finds it where guessing `/pricing`, `/solutions`, `/product`
-(still the fallback when nav discovery finds nothing, e.g. a blocked fetch)
-often missed it entirely. `_fetch_feature_grounding` fetches the homepage
-plus up to 10 discovered pages (up to 10k characters each, 60k total) and
-feeds all of it to one Claude call, `generate_tool_features`, which now
-returns two things in one response: a whole-tool `agent_taxonomy_note` (3-6
-sentences, instructed to name every specific agent the content mentions —
-not just the first one noticed — and to say plainly when "AI-powered"
-language doesn't actually describe agentic behavior) and 8-15
-`tool_features` rows (feature name, standalone-vs-bundled availability, a
-substantive note). Both carry independent `confident`/`agent_taxonomy_
-confident` flags that become `needs_verification`/`agent_taxonomy_needs_
-verification` on write. This call runs at up to 4000 output tokens — richer
-drafts cost more per call (bounded well under $1 even at these settings
-given Opus 4.8 pricing), a deliberate tradeoff since profile quality matters
-more than the per-tool cost here. Two trigger points, both confirmed
-deliberately rather than picking one: (1) automatically, via `BackgroundTasks`,
-right after a tool is added — `webapp/app.py::_run_tool_research`, fired
-from both `/admin/tools/new` and the public `/tools/submit` form, so a
-slow/failed research call never blocks the add from completing; and (2)
-on demand, from a "Generate summary" button (renamed from "Refresh AI
-research," moved next to the Agent taxonomy field in the Phase 4 edit-page
-button reorg, then standardized to the "Generate summary" label shared by
-every AI-draft-into-field button on both the Software and Communities edit
-forms) on `/tools/software/{slug}/edit`
-(`POST /admin/tools/{id}/research/refresh`), which runs the same
-`_run_tool_research` synchronously so the redirect can show a success/
-failure banner — for re-running after a vendor redesigns their site, or
-backfilling a tool added before this pipeline existed. Every field this
-writes lands via the needs-verification-flagged draft paths
-(`add_tool_feature`, `set_tool_agent_taxonomy_draft`) — never auto-
-confirmed; the Features section and a "Mark verified" action next to the
-Agent taxonomy field are how an admin reviews and clears the flag (or just
-edits the field directly, which clears it as a side effect via
-`update_tool_agent_taxonomy`). The flag isn't admin-only: both public render
-sites (`/tools/software/{slug}`'s "Agent taxonomy" block and the compare
-matrix's "How agents are involved" row) show the same muted `.cc-verify`
-"unverified" badge next to a drafted-but-unconfirmed note, mirroring how
-`tool_features` rows already render `needs_verification` there — a visitor
-sees the note itself rather than nothing while review is pending, same
-reasoning as the Community listing fields' "Needs verification" flag below.
-Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
+**Automated Software research (search overhaul automation follow-up;
+narrowed to agent-taxonomy-only in the Feature Taxonomy Phase 1b PR 2
+legacy retirement)** replaced Phase 4b's guessed-path grounding with a real
+crawl. `linklib/enrich.py::_discover_nav_pages` fetches a tool's homepage
+and parses its own `<a>` nav links for ones whose text matches
+product/solution/platform/feature/agent/AI keywords (same-domain only,
+deduped, capped at 10) — a vendor's real Product or Agents page can live at
+any slug, so parsing the site's own navigation finds it where guessing
+`/pricing`, `/solutions`, `/product` (still the fallback when nav discovery
+finds nothing, e.g. a blocked fetch) often missed it entirely.
+`_fetch_taxonomy_grounding` fetches the homepage plus up to 10 discovered
+pages (up to 10k characters each, 60k total) and feeds all of it to one
+Claude call, `generate_tool_agent_taxonomy`, which drafts a whole-tool
+`agent_taxonomy_note` (3-6 sentences, instructed to name every specific
+agent the content mentions — not just the first one noticed — and to say
+plainly when "AI-powered" language doesn't actually describe agentic
+behavior). It used to also draft 8-15 `tool_features` rows (feature name,
+standalone-vs-bundled availability, a substantive note) in the same call —
+dropped along with the `tool_features` table itself; curated features are
+now managed directly on the tool edit page's governed checklist
+(`category_features`/`tool_feature_links`), not LLM-drafted. The
+`confident` flag becomes `agent_taxonomy_needs_verification` on write. This
+call runs at up to 2000 output tokens (lowered from 4000 once the response
+narrowed to the taxonomy summary alone) — a deliberate tradeoff since
+profile quality matters more than the per-tool cost here. Two trigger
+points, both confirmed deliberately rather than picking one: (1)
+automatically, via `BackgroundTasks`, right after a tool is added —
+`webapp/app.py::_run_tool_research`, fired from both `/admin/tools/new` and
+the public `/tools/submit` form, so a slow/failed research call never
+blocks the add from completing; and (2) on demand, from a "Generate
+summary" button (renamed from "Refresh AI research," moved next to the
+Agent taxonomy field in the Phase 4 edit-page button reorg, then
+standardized to the "Generate summary" label shared by every AI-draft-into-
+field button on both the Software and Communities edit forms) on
+`/tools/software/{slug}/edit` (`POST /admin/tools/{id}/research/refresh`),
+which runs the same `_run_tool_research` synchronously so the redirect can
+show a success/failure banner — for re-running after a vendor redesigns
+their site, or backfilling a tool added before this pipeline existed. The
+field this writes lands via the needs-verification-flagged draft path
+(`set_tool_agent_taxonomy_draft`) — never auto-confirmed; a "Mark verified"
+action next to the Agent taxonomy field is how an admin reviews and clears
+the flag (or just edits the field directly, which clears it as a side
+effect via `update_tool_agent_taxonomy`). The flag isn't admin-only: both
+public render sites (`/tools/software/{slug}`'s "Agent taxonomy" block and
+the compare matrix's "How agents are involved" row) show the same muted
+`.cc-verify` "unverified" badge next to a drafted-but-unconfirmed note — a
+visitor sees the note itself rather than nothing while review is pending,
+same reasoning as the Community listing fields' "Needs verification" flag
+below. Cost lands in the same `enrichment_cost` ledger, `article_id=NULL`.
 
-**`scripts/enrich_tool_features.py`** (search overhaul Phase 4b, extended by
-the automation follow-up above) is a different shape from the `generate_*`
-web routes and the auto-trigger: a standalone CLI batch job, not an
-admin-page button or a per-add trigger, since it's meant to run against many
-tools at once under Brian's own API credits rather than one row at a time —
-this is what re-enriched the ~240-tool existing catalog once the real-crawl
-grounding replaced the original guessed-path approach. It calls the exact
-same `generate_tool_features` described above, so it drafts both feature
-rows and the agent-taxonomy note in one pass per tool. Re-running is safe: a
-tool that already has an `agent_taxonomy_note` is skipped (not re-drafted)
-unless `--force` — that's what marks a tool "already researched" by this
-pipeline now, not feature-row presence, since a tool drafted before this
-follow-up may carry old guessed-path features but no taxonomy note at all —
-and within a single run a feature name matching one already present for
-that tool (case-insensitive) is skipped as a duplicate rather than
-double-written. Requires explicit scope (`--tools` or `--limit`) —
+**`scripts/enrich_agent_taxonomy.py`** (renamed from
+`enrich_tool_features.py` in the Feature Taxonomy Phase 1b PR 2 legacy
+retirement, which dropped this script's feature-drafting half; search
+overhaul Phase 4b, extended by the automation follow-up above) is a
+different shape from the `generate_*` web routes and the auto-trigger: a
+standalone CLI batch job, not an admin-page button or a per-add trigger,
+since it's meant to run against many tools at once under Brian's own API
+credits rather than one row at a time — this is what re-enriched the
+~240-tool existing catalog once the real-crawl grounding replaced the
+original guessed-path approach. It calls the exact same
+`generate_tool_agent_taxonomy` described above. Re-running is safe: a tool
+that already has an `agent_taxonomy_note` is skipped (not re-drafted)
+unless `--force`. Requires explicit scope (`--tools` or `--limit`) —
 deliberately has no "run against everything" default, and `--dry-run`
-reports what would be drafted per feature and the agent-taxonomy note (and
-a projected full-catalog cost) without writing. Nothing written by this
-script is treated as reliable until the same admin review each row needs
-anyway (`/tools/software/{slug}/edit`'s Features section and Agent taxonomy
-field, or the fuller `/admin/tools/{id}/features/{id}/edit` page) — the
-Phase 5 comparison matrix is what actually starts reading this data, and
-only once reviewed.
+reports what would be drafted for the agent-taxonomy note (and a projected
+full-catalog cost) without writing. Nothing written by this script is
+treated as reliable until the same admin review each row needs anyway
+(`/tools/software/{slug}/edit`'s Agent taxonomy field) — the Phase 5
+comparison matrix's "How agents are involved" row is what actually reads
+this data, and only once reviewed. Curated feature data (Feature Taxonomy
+Phase 1) is a separate, hand-curated admin workflow with no bulk-LLM-draft
+script of its own — see the `category_features`/`tool_feature_links` schema
+row above and the Feature Taxonomy section below.
 
 **`scripts/enrich_community_profiles.py`** is the Communities equivalent of
 the script above — a standalone CLI batch job wrapping the exact same
@@ -894,7 +892,7 @@ existing quiz to replace, so this is a new build rather than a route swap).
 Communities matchmaker exactly (same chat UI, same server-rebuilds-history
 contract), with `linklib/matchmaker.py::_build_software_context` sending
 every approved Software entry's directory fields (summary,
-competitive_differentiation, agent_taxonomy_note) plus its `tool_features` rows as
+competitive_differentiation, agent_taxonomy_note) plus its governed key-feature links (`tool_feature_links`) as
 system-prompt context instead of the Communities dataset — the ~150-tool
 dataset is still small enough to send as full context rather than retrieve a
 subset. `_build_system(lib, kind)` shares the conversation-shape instructions
@@ -1192,7 +1190,6 @@ erDiagram
     contacts ||--o{ contact_audit_log : "item_id (nullable)"
     tools ||--o{ tool_leads : "tool_id"
     tools }o--o{ tools : "tool_competitors, normalized pair"
-    tools ||--o{ tool_features : "tool_id"
     tools ||--o{ tool_audit_log : "item_id (nullable — row deleted by the time this is read)"
     tools ||--o{ narrative_review_log : "item_id, entity_type='tool'"
     tool_categories }o--o{ tools : "by name in categories_json"
@@ -2835,6 +2832,124 @@ public profile page they edit (`/tools/software/{slug}` →
 `/tools/software/{slug}/edit`) — not admin-tree stragglers of the same kind
 as the routes above. Investigated and explicitly kept outside `/admin/*`;
 not a gap, a documented exception.
+
+### Feature Taxonomy, Phase 1b PR 2 (2026-08) — public rendering + full legacy `tool_features` retirement
+
+Two things in one PR, stacked on Phase 1b PR 1's route moves: the public
+Software profile page finally renders the governed feature model
+(`category_features`/`tool_feature_links`, live in the schema since Phase 1
+but never rendered publicly until now), and the legacy `tool_features` table
+— along with every route, admin section, and public-render path that read
+or wrote it — is retired outright, per CLAUDE.md's "no dead data" rule.
+
+**Public "Key features" card** (`webapp/app.py::_software_key_features_card`,
+called from the `/tools/software/{slug}` profile route) **always renders**,
+for every tool, unlike the legacy `tool_features` card it replaces (which
+rendered nothing for a tool with no rows). A tool with `tool_feature_links`
+shows real feature names — sentence-cased from the curated Title-Case
+`category_features.name` via `_sentence_case_feature_name` (known, accepted
+limitation: this also lowercases a genuine brand name that happens to
+appear mid-name, e.g. "Slack" in "Slack / Email Collaboration Triggers" —
+proper-noun detection is out of scope for this pass) — grouped by category
+only when the tool's links span more than one seeded category (a single
+list otherwise, since a heading for one group reads as noise). Each feature
+row carries an "Add-on" tag when `availability='add_on'` and an "AI" tag
+when `ai_enabled`. A tool with zero links renders a coming-soon state
+instead ("Coming soon—we're mapping this tool against our curated feature
+taxonomy.") rather than an empty card or no card at all — an honest "not
+mapped yet" statement, not a gap to hide from visitors. The read path is
+`Library.list_tool_feature_links_with_details`, a new join
+(`tool_feature_links` → `category_features` → `tool_categories`) that drops
+a soft-retired feature (`category_features.retired_at != ''`) from the
+result — the same `retired_at`-filtering convention
+`list_category_features(include_retired=False)`'s admin default already
+uses, so a retired feature disappears from public rendering the moment it's
+retired, with no separate cleanup step.
+
+**Legacy `tool_features` retirement — every code path enumerated and
+disposed of, nothing orphaned:**
+- **Schema** (`linklib/db.py`): the `CREATE TABLE tool_features` and its
+  index are removed from the schema string (replaced with an explanatory
+  comment) — a fresh DB never creates the table again. The five CRUD
+  methods (`add_tool_feature`/`list_tool_features`/`get_tool_feature`/
+  `update_tool_feature`/`delete_tool_feature`) are deleted outright.
+- **Admin CRUD routes** (`webapp/app.py`): `POST /admin/tools/{tool_id}/
+  features/add`, `GET`+`POST /admin/tools/{tool_id}/features/{feature_id}/
+  edit`, `POST .../verify`, `POST .../delete` are all deleted — this is the
+  one route family Phase 1b PR 1 deliberately left at its legacy
+  `/admin/tools/{tool_id}/*` path specifically so it could be deleted here
+  rather than moved and then deleted.
+- **Tool edit page**: the legacy `<details class="features-group">` section
+  (the free-text feature list + "+ Add feature" form) is removed from
+  `/tools/software/{slug}/edit` entirely — `_governed_feature_row`'s
+  category-checklist section (Phase 1) is now the only feature editor on
+  the page. The now-dead `_feature_row`/`_features_list_html`/`_n_features`/
+  `_n_features_needs_verify`/`_features_badge_html` helpers are deleted with
+  it.
+- **Needs-verification banner fix**: `_research_banner_html`'s
+  `_research_needs_review` flag used to OR in `_n_features_needs_verify >
+  0` — with that source gone, it now tracks
+  `tool.agent_taxonomy_needs_verification` alone, and the banner copy
+  dropped its now-inaccurate plural ("drafted feature rows and agent
+  taxonomy below" → "agent taxonomy below").
+- **`/tools/software/compare`**: the legacy Features comparison row
+  (`list_tool_features` per tool, `_feature_cell`, a union-of-feature-names
+  row build) is removed, not migrated to the governed model — a real
+  design decision, not an oversight: `docs/BUILD_PLAN.md` Phase 8 already
+  reserves "a governed-model Compare view" as later, separate work, and
+  this PR's brief only specified the profile page's card. The compare
+  page's AI/Agent-involvement and Description/Differentiation rows are
+  untouched.
+- **`linklib/enrich.py`**: `generate_tool_features` is narrowed to
+  `generate_tool_agent_taxonomy` — it keeps the real-crawl grounding
+  mechanism (`_discover_nav_pages`/`_fetch_taxonomy_grounding`, now under
+  those names) since that's still worth it for the agent-taxonomy summary
+  alone, but the prompt/response/dataclass no longer draft feature rows at
+  all (`ToolFeatureDraft` is deleted; `ToolFeaturesResult` is replaced by a
+  narrower `AgentTaxonomyResult` with no `features` field). `max_tokens`
+  dropped from 6000 to 2000 to match the smaller response.
+  `webapp/app.py::_run_tool_research` (the shared background-task drafting
+  function used by both add-tool auto-trigger points and the on-demand
+  "Generate summary" button) calls the renamed function and only writes
+  `set_tool_agent_taxonomy_draft` — the feature-row-writing loop is gone.
+- **`scripts/enrich_tool_features.py` → `scripts/enrich_agent_taxonomy.py`**:
+  renamed (`git mv`), rewritten to drop all feature-drafting/dedup logic —
+  the bulk/backfill CLI now only drafts agent-taxonomy notes, calling
+  `generate_tool_agent_taxonomy`. `scripts/enrich_community_profiles.py`'s
+  docstring cross-reference to the old filename is updated.
+- **`linklib/matchmaker.py`**: `_build_software_context` reads
+  `list_tool_feature_links_with_details` instead of `list_tool_features`,
+  formatting each link as `"{feature name}{ (add-on/AI suffix)}"` for the
+  Software Chat Matchmaker's system-prompt context.
+- **`/admin/system/database`**: `"tool_features"` is removed from
+  `_TABLE_GROUPS`'s "Toolbox — Software" list. `_grouped_table_sections`
+  degrades gracefully for a listed-but-absent table (`present = [n for n in
+  names if n in schema]`), so removing it here is enough — no crash risk
+  either way, but a live production DB still carrying the table until the
+  drop script runs would otherwise show it in the wrong group.
+- **`_SCRIPT_REGISTRY`** (`/admin/system/scripts`): the `enrich_tool_
+  features.py` entry is renamed/rewritten to describe the narrowed
+  `enrich_agent_taxonomy.py`.
+- **Docs**: this ARCHITECTURE.md section, the `tool_features` schema-table
+  row (removed), the "Automated Software research" prose section (rewritten
+  for the agent-taxonomy-only pipeline), the Software Chat Matchmaker
+  section (rewritten to cite `tool_feature_links`), and the Mermaid ER
+  diagram's `tools ||--o{ tool_features` edge (removed — the
+  `tool_feature_links` edges were already present from Phase 1) are all
+  updated in this same PR, per the standing schema-change documentation
+  rule.
+
+**Human-run drop script, delivered but not executed**:
+`scripts/drop_legacy_tool_features.py` follows the same guarded pattern as
+the Article purge flow — prints the live row count, requires typing that
+exact count to confirm, prompts to confirm a same-day backup exists (reads
+`backup_log`'s most recent entry as a hint, doesn't verify it itself), then
+drops the table and its index, runs `PRAGMA integrity_check`
+(`linklib.backup.check_integrity`, the same mechanism the pre-backup
+integrity check uses) and logs the result via `record_integrity_check`.
+Brian runs this by hand via `railway ssh` once this PR is deployed and
+verified live — never wired into a boot hook or deploy step, consistent
+with every other destructive one-off script in this codebase.
 
 ### Feed management (`/admin/library/feeds`)
 

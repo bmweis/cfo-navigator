@@ -1,5 +1,5 @@
 """scripts/enrich_community_profiles.py — the Communities equivalent of
-scripts/enrich_tool_features.py: bulk-drafts the Community Profile fields
+scripts/enrich_agent_taxonomy.py: bulk-drafts the Community Profile fields
 instead of clicking "Auto-fill from URL" once per community. Covers
 selection (--communities/--limit), dry-run vs. write, the skip-unless-force
 already-researched guard, and the critical echo-back safety property:
