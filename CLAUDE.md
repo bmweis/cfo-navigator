@@ -724,6 +724,20 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   like: everything that once read or wrote the table is gone before the
   data itself is dropped, not the other way around.
 
+- **Key features card follow-up — "Slack" no longer gets lowercased.**
+  The card's `_sentence_case_feature_name` heuristic protects real
+  acronyms/codes (RBAC, ASC, AI, KPI, SOX, GAAP, IFRS, AWS, MCP, ...)
+  algorithmically, by checking whether a word is stored all-uppercase or
+  contains a digit — not via a literal list, so a mixed-case brand name
+  like "Slack" (in "Slack / Email Collaboration Triggers," live on FP&A
+  and Close Management) fell straight through it and rendered as lowercase
+  "slack." Fixed with a small hand-curated `_PRESERVED_FEATURE_WORDS` set,
+  checked before the algorithmic heuristic — `{"Slack"}` today, extended
+  as more mixed-case brand names turn up. The broader known limitation
+  (proper-noun detection is still out of scope; any *other* unlisted
+  mixed-case brand name still gets lowercased) is unchanged and still
+  flagged in the function's own docstring.
+
 - **Sail, Don't Row — water reflections, re-added (reverses an earlier decision).**
   The original build removed reflections outright: "unrealistic inverted-building
   duplicate, not worth fading," and a test (`test_play_no_skyline_reflection`)

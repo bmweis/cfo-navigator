@@ -60,6 +60,13 @@ def test_renders_feature_names_sentence_case_single_category(env):
     assert "Coming soon" not in r.text
 
 
+def test_sentence_case_preserves_slack_and_acronyms(env):
+    f = env._sentence_case_feature_name
+    assert f("Slack / Email Collaboration Triggers") == "Slack / email collaboration triggers"
+    assert f("Role Based Access Control (RBAC)") == "Role based access control (RBAC)"
+    assert f("ASC 606 Revenue Recognition") == "ASC 606 revenue recognition"
+
+
 def test_add_on_and_ai_indicators_rendered(env):
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
