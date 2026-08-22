@@ -1273,7 +1273,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
         role = "admin" if authed else "guest"
     # "Sail, Don't Row" (/play) is deliberately not in the nav — it's an
     # easter egg linked only from the bottom of /thought-leadership/ai-hackathon-playbook.
-    public = [("/about", "About"), ("/thought-leadership", "Thought Leadership"),
+    public = [("/about", "About"), ("/thought-leadership", "Thought leadership"),
               ("/tools", "CFO Toolbox"), ("/contact", "Contact")]
     # Archive and Feed moved admin-only and the Library hub was removed
     # (Phase 1) — there's no longer a member-facing nav entry to show here.
@@ -2389,7 +2389,7 @@ def homepage(request: Request):
   </div>
 
   <div class="home-tl-section" style="min-width:0;">
-    <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:14px;">Thought Leadership</div>
+    <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:14px;">Thought leadership</div>
     <h2 style="margin:0 0 16px;font-family:var(--font-head);font-weight:700;font-size:30px;">What I write about</h2>
     <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0 0 22px;max-width:640px;">Frameworks, playbooks, and real opinions on building finance functions that scale&mdash;collected across writing, speaking, podcasts, and press.</p>
 
@@ -2407,7 +2407,7 @@ def homepage(request: Request):
       <div class="home-tl-highlights">{recent_highlights}</div>
     </div>
 
-    <a href="/thought-leadership" style="display:inline-block;margin-top:32px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all Thought Leadership &rarr;</a>
+    <a href="/thought-leadership" style="display:inline-block;margin-top:32px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all thought leadership &rarr;</a>
   </div>
 
   <div class="home-sidebar-rest">
@@ -2455,8 +2455,8 @@ def about_page(request: Request):
 <p style="font-size:12px;color:var(--muted);margin:8px 0 24px;font-style:italic;">Abacum AI Summit &middot; New York &middot; April 2026</p>
 
 <div style="display:flex;gap:12px;flex-wrap:wrap;">
-  <a href="/thought-leadership" class="btn">Thought Leadership</a>
-  <a href="/contact" class="btn btn-ghost">Get in Touch</a>
+  <a href="/thought-leadership" class="btn">Thought leadership</a>
+  <a href="/contact" class="btn btn-ghost">Get in touch</a>
   <a href="https://linkedin.com/in/bmw-cfo" target="_blank" rel="noopener" class="btn btn-ghost">LinkedIn</a>
 </div>
 </div>
@@ -2572,7 +2572,7 @@ def thought_leadership(request: Request):
         '<style>'
         + _TL_SHARED_CSS + _TL_COLUMN_CSS +
         '</style>'
-        '<h1>Thought Leadership</h1>'
+        '<h1>Thought leadership</h1>'
         '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
         + _tl_featured_cards_html(_TL_FEATURED_CARDS)
     )
@@ -2614,7 +2614,7 @@ function toggleTLDesc(btn, descId) {
 }
 </script>"""
     body += "</div>"
-    return HTMLResponse(_page("Thought Leadership—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Thought leadership—Brian Weisberg", "Thought leadership", body, role=_role(request)))
 
 
 @app.get("/growth-engine-ratio")
@@ -2629,7 +2629,7 @@ def growth_engine_ratio_redirect(request: Request):
 def growth_engine_ratio(request: Request):
     body = """<div class="page page-full article-atlantic">
 <div class="tool-inner">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
+<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
@@ -3379,7 +3379,7 @@ function loadTimelineExample() {
 // Build the timeline table up front so its rows exist before the user switches tabs.
 renderTL();
 </script>"""
-    return HTMLResponse(_page("The Growth Engine Ratio—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
+    return HTMLResponse(_page("The Growth Engine Ratio—Brian Weisberg", "Thought leadership", body, role=_role(request)))
 
 
 @app.get("/finops-ai-hackathon")
@@ -3393,7 +3393,7 @@ def finops_ai_hackathon_redirect(request: Request):
 @app.get("/thought-leadership/ai-hackathon-playbook", response_class=HTMLResponse)
 def finops_ai_hackathon(request: Request):
     body = """<div class="page page-full article-atlantic">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
+<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
 <style>
   /* Base pull-quote/callout/warning styling lives in the shared .article-*
      classes (Phase 6b) — these are just this page's few pre-existing spacing
@@ -3788,7 +3788,7 @@ def finops_ai_hackathon(request: Request):
 </div>
 
 </div>"""
-    return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Sail, Don't Row: AI Hackathon Playbook—Brian Weisberg", "Thought leadership", body, role=_role(request)))
 
 
 @app.get("/netsuite-mcp")
@@ -3802,7 +3802,7 @@ def netsuite_mcp_redirect(request: Request):
 @app.get("/thought-leadership/netsuite-mcp", response_class=HTMLResponse)
 def netsuite_mcp(request: Request):
     body = """<div class="page page-full article-atlantic">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
+<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
 <style>
   /* Base pull-quote/callout/warning styling lives in the shared .article-*
      classes (Phase 6b) — these are just this page's few pre-existing spacing
@@ -4106,7 +4106,7 @@ def netsuite_mcp(request: Request):
 </div>
 
 </div>"""
-    return HTMLResponse(_page("Connecting Claude to NetSuite—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Connecting Claude to NetSuite—Brian Weisberg", "Thought leadership", body, role=_role(request)))
 
 
 # ---------------------------------------------------------------------------
@@ -5586,7 +5586,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
   <p class="sdr-pregame-label">Choose your rank</p>
   <div class="sdr-rank-row" id="sdrRankRow">""" + pills_html + """</div>
   <p style="font-size:13px;color:var(--muted);margin:0 0 16px;">Best this session (selected rank): <strong id="sdrPreHi">0</strong></p>
-  <button type="button" id="sdrStartBtn" class="btn">Cast Off</button>
+  <button type="button" id="sdrStartBtn" class="btn">Cast off</button>
 </div>
 
 <div id="sdrPortraitNote" class="sdr-portrait-note">Playable in portrait, but landscape gives more reaction time.</div>
@@ -5645,8 +5645,8 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
     <div class="sdr-outcome-furthest" id="sdrOutcomeFurthest">Furthest checkpoint: <strong id="sdrStatFurthest"></strong></div>
     """ + leaderboard_note + """
     <div>
-      <button type="button" id="sdrRetryBtn" class="btn" style="margin-top:16px;">Try Again</button>
-      <button type="button" id="sdrChangeRankBtn" class="btn btn-ghost" style="margin-top:16px;margin-left:8px;">Change Boat/Rank</button>
+      <button type="button" id="sdrRetryBtn" class="btn" style="margin-top:16px;">Try again</button>
+      <button type="button" id="sdrChangeRankBtn" class="btn btn-ghost" style="margin-top:16px;margin-left:8px;">Change boat/rank</button>
     </div>
   </div>
 </div>
@@ -5818,7 +5818,7 @@ def contact_page(request: Request, submitted: str = "", message: str = "", conte
         message = _CONTACT_CONTEXT_PREFIXES[context]
 
     body = f"""<div class="page page-form">
-<h1>Get in Touch</h1>
+<h1>Get in touch</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">I'm always happy to connect with finance leaders, founders, and operators.</p>
 <form method="post" action="/contact" style="display:grid;gap:16px;">
   <div>
@@ -6486,8 +6486,8 @@ function renderTools(tools) {{
     var introBtn = '';
     if (t.has_warm_intro) {{
       introBtn = MEMBER
-        ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ')">&#128232; Warm Intro</button>'
-        : '<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">&#128232; Warm Intro</button>';
+        ? '<button class="tool-intro-btn" onclick="openIntroModal(' + t.id + ')">&#128232; Warm intro</button>'
+        : '<button class="tool-intro-btn" disabled title="Sign in to request a warm intro">&#128232; Warm intro</button>';
     }}
     var fullProfileLink = '<a class="tool-full-link" href="/tools/software/' + esc(t.slug)
       + '" target="_blank" rel="noopener">Full profile &rarr;</a>';
@@ -6686,7 +6686,7 @@ renderTools(ALL_TOOLS);
 <div class="intro-overlay" id="intro-overlay" onclick="if(event.target===this)closeIntroModal()">
   <div class="intro-modal">
     <button class="intro-close" onclick="closeIntroModal()" aria-label="Close">&times;</button>
-    <h2>Request a Warm Intro</h2>
+    <h2>Request a warm intro</h2>
     <p>I&rsquo;ll personally connect you with the team at <strong id="intro-tool-name"></strong>.</p>
     <div id="intro-form-body" style="display:grid;gap:16px;margin-top:4px;">
       <div class="intro-field">
@@ -7328,12 +7328,12 @@ def tools_software_profile(request: Request, slug: str):
     intro_modal_block = ""
     if has_warm_intro:
         if is_member:
-            intro_btn = '<button class="btn btn-ghost" onclick="openIntroModal()">&#128232; Warm Intro</button>'
+            intro_btn = '<button class="btn btn-ghost" onclick="openIntroModal()">&#128232; Warm intro</button>'
             intro_modal_block = f"""
 <div class="intro-overlay" id="intro-overlay" onclick="if(event.target===this)closeIntroModal()">
   <div class="intro-modal">
     <button class="intro-close" onclick="closeIntroModal()" aria-label="Close">&times;</button>
-    <h2>Request a Warm Intro</h2>
+    <h2>Request a warm intro</h2>
     <p>I&rsquo;ll personally connect you with the team at <strong>{_esc(tool['name'])}</strong>.</p>
     <div id="intro-form-body" style="display:grid;gap:16px;margin-top:4px;">
       <div class="intro-field">
@@ -7428,7 +7428,7 @@ function submitIntroForm() {{
 </script>"""
         else:
             intro_btn = ('<button class="btn btn-ghost" disabled title="Sign in to request a warm intro">'
-                         '&#128232; Warm Intro</button>')
+                         '&#128232; Warm intro</button>')
 
     meta_parts = []
     if authed:
@@ -8443,7 +8443,7 @@ def tools_communities_submit_page(request: Request, submitted: str = ""):
         return HTMLResponse(_page("Submission received: CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
     body = """<div class="page page-form">
-<h1>Suggest a Community</h1>
+<h1>Suggest a community</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Know a CFO or finance community that belongs in the directory? Submit it for review.</p>
 <form method="post" action="/tools/communities/submit" style="display:grid;gap:20px;">
   <div>
@@ -8469,7 +8469,7 @@ def tools_communities_submit_page(request: Request, submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Suggest a Community: CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Suggest a community: CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
 @app.post("/tools/communities/submit")
@@ -9495,7 +9495,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
         lib.close()
 
     body = f"""<div class="page page-form">
-<h1>Submit a Tool</h1>
+<h1>Submit a tool</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Know a tool that belongs in the CFO Toolbox? Submit it for review.</p>
 <form method="post" action="/tools/submit" style="display:grid;gap:20px;">
   <div>
@@ -9533,7 +9533,7 @@ def tools_submit_page(request: Request, submitted: str = ""):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Submit a Tool—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
+    return HTMLResponse(_page("Submit a tool—CFO Toolbox", "CFO Toolbox", body, role=_role(request)))
 
 
 @app.post("/tools/submit")
@@ -17905,7 +17905,7 @@ def ask_history(request: Request):
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
-<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/tools/fpa-buddy#past-questions">Past Questions section</a> for other members to browse.</p>
+<p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Some of your questions may also appear on the <a href="/tools/fpa-buddy#past-questions">Search past questions section</a> for other members to browse.</p>
 <div style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:22px;font-size:14px;">
   <strong>${spent:.2f}</strong> of <strong>${cap:.2f}</strong> used this month &middot; <span style="color:var(--muted);">${all_time:.2f} all time</span>
 </div>

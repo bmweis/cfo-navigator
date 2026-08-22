@@ -169,15 +169,31 @@ capitalize only the first word (and anything that's always capitalized on its ow
 features," not "Software Features"; "Add software," not "Add Software."
 
 Exceptions:
-- **Named products and features** — FP&A Buddy, CFO Toolbox, Sail Don't Row — keep their own
-  established capitalization wherever they appear.
+- **Named products and features** — FP&A Buddy, CFO Toolbox, Sail Don't Row, Software Matchmaker,
+  Community Matchmaker, Reader, Archive Queue, Feed, Saved, Read Later — keep their own established
+  capitalization wherever they appear. The last five (Reader/Archive Queue/Feed/Saved/Read Later)
+  only ever appear on admin-only surfaces (`/read*`, `/admin/*`) as of the 2026-08 casing audit —
+  none is public-facing today, so the exception's actual footprint is admin-internal only; if any
+  of them ever surfaces on a public page, re-confirm the exception still makes sense there.
 - **Proper nouns** — a company name, a person's name.
 - **Acronyms** — ERP, FP&A, ASC 606, RBAC, AI, and the like — keep their own casing.
+- **A published article's own title (its `<h1>` / page title)** — e.g. "The Growth Engine Ratio,"
+  "Connecting Claude to NetSuite" — is exempt entirely, out of scope for the casing standard.
+  Subheadings *within* an article are a separate, genuine editorial call (not mechanical) and are
+  handled case-by-case, not swept automatically.
+
+Not exempt, despite reading like a named concept at first glance: **"Thought Leadership"**
+sentence-cases to "Thought leadership" (nav link, page headers, admin group/card name) — it never
+made the named-product list above. **"Warm Intro"** (the recurring CTA/button text) sentence-cases
+to "Warm intro" the same way.
 
 Established as part of the Manage Features pivot-table redesign (Phase 1c, 2026-08); applied there
 to the pages that PR touched (the admin dashboard's Software cards, the feature pivot table, the
-review-queue page) rather than swept across the whole site — a dedicated casing pass across every
-existing page is separate, later work.
+review-queue page) rather than swept across the whole site. A dedicated, phased casing pass across
+every existing page (Phase 0 investigation logged 2026-08: ~150–250 instances across ~50–60 routes,
+concentrated in public directory/product chrome, admin chrome, `<title>` tab strings, and — out of
+scope per the article-title exception above — a handful of in-article subheadings) is in progress,
+phase by phase, as its own multi-PR body of work.
 
 ---
 

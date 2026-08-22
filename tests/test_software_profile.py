@@ -92,7 +92,7 @@ def test_profile_page_shows_disabled_intro_button_when_not_signed_in(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
-    assert "Warm Intro" in r.text
+    assert "Warm intro" in r.text
     assert "disabled" in r.text
     assert "Sign in to request a warm intro" in r.text
 
@@ -107,7 +107,7 @@ def test_profile_page_hides_intro_button_without_warm_intro(env):
 
     r = _client(env).get(f"/tools/software/{a_slug}")
     assert r.status_code == 200
-    assert "Warm Intro" not in r.text
+    assert "Warm intro" not in r.text
 
 
 def test_directory_card_includes_slug_and_full_profile_link(env):

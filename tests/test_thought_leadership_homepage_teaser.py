@@ -47,7 +47,7 @@ def test_homepage_has_one_consolidated_thought_leadership_section(env):
     # "What I write about" — the section's own unique heading — is the
     # reliable one-section signal here.)
     assert html.count("What I write about") == 1
-    assert "See all Thought Leadership" in html
+    assert "See all thought leadership" in html
     assert 'href="/thought-leadership"' in html
     # The 3 flagship pieces, using the shared _tl_fcard/.tl-card treatment.
     assert "The Growth Engine Ratio" in html
@@ -247,7 +247,7 @@ def test_homepage_type_breakdown_renders_representative_and_handles_empty_type(e
 def test_homepage_type_breakdown_empty_db_does_not_break_page(env):
     resp = _client(env).get("/")
     assert resp.status_code == 200
-    assert ">Thought Leadership<" in resp.text
+    assert ">Thought leadership<" in resp.text
 
 
 def test_hero_polish_avatar_size(env):
