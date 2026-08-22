@@ -19337,6 +19337,7 @@ def admin_system_model(request: Request):
 {option_html}
 </select>
 <span id="model-select-status" style="font-size:13px;color:var(--muted);margin-top:8px;display:inline-block;"></span>
+<p style="font-size:12px;color:var(--muted);margin:12px 0 0;">Curated from a fixed list (`linklib/models.py`), not auto-surfaced&mdash;check Anthropic's own current model lineup and recommendations before assuming this list is up to date: <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic model overview &#8599;</a></p>
 </div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;">

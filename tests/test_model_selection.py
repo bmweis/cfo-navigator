@@ -43,12 +43,16 @@ def test_set_enrich_model_strips_whitespace(lib):
 
 
 def test_enrich_default_model_is_a_valid_current_registry_id():
-    """Regression guard for the invalid claude-opus-5 fallback this feature's
-    build found and fixed — the hardcoded default must be a real id in the
-    curated registry, not something that merely looks plausible."""
+    """Regression guard: the hardcoded default must be a real id in the
+    curated registry, not something that merely looks plausible. (This
+    build briefly "fixed" a real, current model id — claude-opus-5, per
+    Anthropic's own docs — into an older one on a mistaken assumption;
+    corrected back. The point of this test stands either way: whatever the
+    default is, it must actually be in the registry.)"""
     from linklib.enrich import DEFAULT_MODEL
     from linklib.models import _REGISTRY
     assert DEFAULT_MODEL in {m["id"] for m in _REGISTRY}
+    assert DEFAULT_MODEL == "claude-opus-5"
 
 
 # -- admin page + routes -----------------------------------------------------

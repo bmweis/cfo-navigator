@@ -2394,7 +2394,7 @@ for 8 further weeks, deleting the rest, so the folder doesn't grow without limit
 | `LINKLIB_SAVE_TOKEN` | (none) | Token for `POST /save` + bookmarklet; also the default login password. Set when hosted. |
 | `LINKLIB_PASSWORD` | = `LINKLIB_SAVE_TOKEN` | Login password for the private section. Set to decouple the login password from the save token. |
 | `LINKLIB_SECRET_KEY` | = password | HMAC key for signing session cookies. Set on the host so logins survive restarts/deploys. |
-| `LINKLIB_ENRICH_MODEL` | `claude-opus-4-8` | Claude model for enrichment. This table entry previously read `claude-haiku-4-5-20251001`, which never matched the actual code default — the code has always defaulted to Opus for depth (see `linklib/enrich.py`'s module docstring). Separately, the code's own literal fallback was briefly `claude-opus-5` (not a valid current model id) before being corrected to `claude-opus-4-8`, the curated registry's current "Best quality" entry (`linklib/models.py`). As of the model-selection settings feature below, this env var is only the fallback used when no DB-stored selection exists — see "AI model selection" in Key architecture decisions. |
+| `LINKLIB_ENRICH_MODEL` | `claude-opus-5` | Claude model for enrichment. This table entry previously read `claude-haiku-4-5-20251001`, which never matched the actual code default — the code has always defaulted to Opus for depth (see `linklib/enrich.py`'s module docstring). Separately, the code's own literal fallback was briefly changed to `claude-opus-4-8` on a mistaken belief that `claude-opus-5` wasn't a valid current model id — corrected back: `claude-opus-5` is real, current, and Anthropic's own top recommendation for complex/enterprise work (confirmed against Anthropic's docs, `platform.claude.com/docs/en/about-claude/models/overview` — also linked from `/admin/system/model`), so it's the curated registry's "Best quality" entry (`linklib/models.py`), not `claude-opus-4-8`. As of the model-selection settings feature below, this env var is only the fallback used when no DB-stored selection exists — see "AI model selection" in Key architecture decisions. |
 | `LINKLIB_CHAT_MODEL` | `claude-sonnet-4-6` | Claude model for Q&A and post drafting |
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
 | `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/read`'s Feed-view source list |
@@ -2806,7 +2806,7 @@ the em-dash form would otherwise be fine.
 
 - Enrichment (article summaries and every AI-drafted directory field — Description,
   Agent taxonomy, Competitive differentiation, Community profile fields, and so on):
-  `claude-opus-4-8` by default, quality over cost — see "AI model selection" below for
+  `claude-opus-5` by default, quality over cost — see "AI model selection" below for
   how this is now chosen and where it's overridable.
 - Q&A and post drafting: `claude-sonnet-4-6` (better synthesis quality)
 - Embeddings (hybrid retrieval, `linklib/embeddings.py`): OpenAI `text-embedding-3-small`
@@ -2838,15 +2838,25 @@ no new column) lets Brian pick any model from the same curated-registry-
 reconciled-with-the-live-Models-API list every other picker already uses
 (`linklib.models.models_for`), with a "Test connection" action mirroring
 Exa's own (`linklib.enrich.test_model_connection`, one real minimal Claude
-call). **Immediate correctness fix that motivated this, done independently
-of the feature itself:** the code's hardcoded fallback had drifted to
-`"claude-opus-5"` — not a valid current model id — while `linklib/enrich.py`'s
-own module docstring and every git revision confirm the *intent* was always
-Opus-tier ("Defaults to Opus for depth… quality matters more than the
-per-article cost"). Fixed to `"claude-opus-4-8"`, the curated registry's
-actual "Best quality"/"Deepest summaries" entry — this table's env-var row
-above was also independently stale (said Haiku, code always said Opus) and
-is corrected to match. Every `linklib.enrich` generation call site invoked
+call, with a link to Anthropic's live model docs
+(`platform.claude.com/docs/en/about-claude/models/overview`) right on the
+page for whenever the options need re-checking against what Anthropic
+currently ships). **Immediate correctness fix that motivated this, done
+independently of the feature itself — and its own correction, in the same
+PR:** the code's hardcoded fallback was actually `"claude-opus-5"` all
+along, matching `linklib/enrich.py`'s own module docstring and every git
+revision's stated intent ("Defaults to Opus for depth… quality matters more
+than the per-article cost"). A first pass this build mistakenly "fixed" it
+to `"claude-opus-4-8"` on the assumption `claude-opus-5` wasn't a valid
+current model id — it is: confirmed directly against Anthropic's docs,
+`claude-opus-5` is real, current, and Anthropic's own top recommendation for
+complex/enterprise work, with a newer knowledge cutoff than Opus 4.8's.
+Reverted back to `"claude-opus-5"`, the curated registry's actual "Best
+quality"/"Deepest summaries" entry — flagging the reversal explicitly here
+rather than silently, same precedent as the homepage "🚧 building" sticker
+mix-up elsewhere in this doc. This table's env-var row above was also
+independently stale (said Haiku, code always said Opus) and is corrected to
+match. Every `linklib.enrich` generation call site invoked
 from the live app (`webapp/app.py` — tool Description, Agent taxonomy,
 Competitive differentiation, competitor-match judging for both Software and
 Communities, Community profile fields, the Community basic-listing auto-fill,
@@ -2861,7 +2871,7 @@ mechanism for a whole-archive pass) and every `scripts/*.py` CLI tool's own
 `--model` flag/default — both already let the operator choose per-run, so
 routing them through this new global default would just be a second,
 redundant selection layer. **Defaults to the deepest/highest-quality curated
-model** (`Library._DEFAULT_ENRICH_MODEL`, `"claude-opus-4-8"`) until an admin
+model** (`Library._DEFAULT_ENRICH_MODEL`, `"claude-opus-5"`) until an admin
 picks something else — quality over cost for this use case, same reasoning
 `linklib.models._REGISTRY`'s own "Best quality" blurb already states.
 `/admin/overhead-spend`'s "Toolbox usage" section now names the active

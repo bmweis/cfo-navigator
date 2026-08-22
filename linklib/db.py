@@ -6213,7 +6213,7 @@ class Library:
     # own "Best quality" entry — the default for the AI model selection toggle
     # below, quality over cost, same reasoning LINKLIB_ENRICH_MODEL's own
     # fallback uses (see linklib/enrich.py's DEFAULT_MODEL).
-    _DEFAULT_ENRICH_MODEL = "claude-opus-4-8"
+    _DEFAULT_ENRICH_MODEL = "claude-opus-5"
 
     def get_enrich_model(self) -> str:
         """The live, DB-stored model id enrichment (Description, Agent
