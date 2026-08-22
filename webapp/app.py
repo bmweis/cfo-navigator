@@ -18343,6 +18343,15 @@ _SCRIPT_REGISTRY = [
      "Recurring-manual — run as needed if orphaned-category drift is suspected.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.report_orphaned_categories --db library.db"]),
+    ("report_feature_taxonomy_coverage.py", "scripts.report_feature_taxonomy_coverage", "Recurring & actively useful",
+     "Read-only: per tool_categories row, reports tool count, live/retired category_features "
+     "counts, and pending feature_review_queue counts by source. Built for the Feature Taxonomy "
+     "scan tool's Phase 0/1 (docs/FEATURE_TAXONOMY.md §10) to confirm which categories are "
+     "origination-mode candidates against real numbers instead of an estimate.",
+     "Recurring-manual — run before scoping/running an origination scan against a new category, "
+     "to see current coverage and avoid duplicating proposals already in the queue.",
+     ["LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.report_feature_taxonomy_coverage --db library.db"]),
     ("dump_communities.py", "scripts.dump_communities", "Recurring & actively useful",
      "Read-only plain listing of every community's name, URL, and slug — no filtering or "
      "formatting. A quick ad hoc lookup tool.",
