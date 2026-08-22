@@ -808,23 +808,25 @@ def _narrative_verify_widget(needs_verification: bool, verify_form_id: str, veri
     return badge_html, action_html, form_html, review_line_html
 
 
-def _confidence_indicator_html(needs_verification: bool, confident: object) -> str:
+def _confidence_indicator_html(confident: object) -> str:
     """"Confidence: Yes/No" text, a distinct fact from the Needs verification
     badge above (added 2026-08, after the Abacum fabrication finding — see
     CLAUDE.md's "Agent taxonomy publish gate" bullet): the model's own
     self-reported certainty at generation time, not a human review status.
     The two combine — an unverified AND low-confidence field is the
-    highest-risk state a reader can see — which is exactly why this is a
-    separate line, not folded into the verification pill.
+    highest-risk state a reader can see — which is why this is a separate
+    line, not folded into the verification pill.
 
-    Shown only while the field is still unconfirmed (needs_verification):
-    once a human has reviewed and verified it, the model's original
-    self-report stops being the operative fact, so the line disappears
-    the same way the verification badge itself does. `confident` is the
-    raw `description_ai_confident`/`competitive_differentiation_ai_confident`
-    column value — None means no generation has reported a signal yet
-    (a pre-existing row, or a field that's never been through Generate),
-    which renders nothing rather than a misleading default.
+    Displays PERMANENTLY (2026-08 policy revision — originally gated on the
+    field/profile still being unverified; Brian's explicit call: verification
+    status and confidence are independent facts and should both be visible
+    at all times, side by side, regardless of review state) — the only
+    condition that hides it is `confident is None`, meaning no generation
+    has ever reported a signal for this field (a pre-existing row, or a
+    field that's never been through Generate), which renders nothing rather
+    than a misleading default. `confident` is the raw
+    `description_ai_confident`/`competitive_differentiation_ai_confident`/
+    `{community_field}_ai_confident` column value.
 
     Named "Claude confidence," not just "AI confidence" or a specific model
     id — every AI-generation call site in linklib/enrich.py is confirmed to
@@ -832,7 +834,7 @@ def _confidence_indicator_html(needs_verification: bool, confident: object) -> s
     "Claude" is accurate sitewide, but the specific model is admin-selectable
     (see /admin/system/model) and shouldn't be hardcoded into copy that
     would silently go stale the next time the selection changes."""
-    if not needs_verification or confident is None:
+    if confident is None:
         return ""
     value = "Yes" if bool(int(confident)) else "No"
     # Sanctioned pairs only (brand_check.py's AUX_COLORS) — the same success
@@ -12483,15 +12485,12 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     )
 
     # Confidence indicator (2026-08) — a genuine self-report from the model,
-    # distinct from needs_review (human review status): gated on the same
-    # whole-profile needs_review flag used everywhere else on this page,
-    # since the Community profile draft has no per-field verification
-    # column the way tool Description/Differentiation do (reuses one shared
-    # flag by design — see CLAUDE.md's Phase G note). Covers only the 12
-    # fields in COMMUNITY_CONFIDENCE_FIELDS; every other field on this page
-    # passes no confidence_key and renders exactly as before.
-    _needs_review = bool(p.get("needs_review"))
-
+    # distinct from needs_review (human review status). Displays permanently
+    # (2026-08 policy revision — not gated on needs_review at all anymore;
+    # Brian's explicit call: verification and confidence are independent
+    # facts, both always visible). Covers only the 12 fields in
+    # COMMUNITY_CONFIDENCE_FIELDS; every other field on this page passes no
+    # confidence_key and renders exactly as before.
     def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2,
                confidence_key: str | None = None) -> str:
         req_mark = " *" if required else ""
@@ -12499,7 +12498,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
         ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
         confidence_html = ""
         if confidence_key:
-            confidence_html = _confidence_indicator_html(_needs_review, p.get(f"{confidence_key}_ai_confident"))
+            confidence_html = _confidence_indicator_html(p.get(f"{confidence_key}_ai_confident"))
         return f"""  <div>
     <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}{req_mark}</label>
     <textarea id="cp-{key}" name="{key}" rows="{rows}"{req_attr}{ph}
@@ -14420,10 +14419,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             latest_differentiation_review,
         )
     )
-    _description_confidence_html = _confidence_indicator_html(
-        bool(tool.get("description_needs_verification")), tool.get("description_ai_confident"))
-    _differentiation_confidence_html = _confidence_indicator_html(
-        bool(tool.get("competitive_differentiation_needs_verification")), tool.get("competitive_differentiation_ai_confident"))
+    _description_confidence_html = _confidence_indicator_html(tool.get("description_ai_confident"))
+    _differentiation_confidence_html = _confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():

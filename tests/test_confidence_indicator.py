@@ -184,6 +184,9 @@ def test_edit_submit_ignores_confidence_for_hand_edited_field(env):
 
 
 # -- Display: "Confidence: Yes/No" line --------------------------------------
+# 2026-08 policy revision: the line is permanent — verification status and
+# confidence are independent facts, both always visible, regardless of
+# needs_verification state. No more gating on review status.
 
 def test_confidence_line_shown_while_unverified(env):
     from linklib.db import Library
@@ -199,14 +202,30 @@ def test_confidence_line_shown_while_unverified(env):
     assert "Claude confidence: No" in r.text
 
 
-def test_confidence_line_hidden_once_verified(env):
-    """Once a human has verified the field, the model's original self-report
-    stops being the operative fact — the line disappears with the badge."""
+def test_confidence_line_still_shown_once_verified(env):
+    """Verification and confidence are independent facts — the line stays
+    visible even after a human has verified the field, distinct from the
+    badge/button, which do disappear once verified."""
     from linklib.db import Library
     lib_ = Library(os.environ["LINKLIB_DB"])
     tid = lib_.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
     lib_.update_tool(tid, "Runway", "A tool.", "https://runway.com", ["FP&A"],
                      description_needs_verification=0, description_ai_confident=0)
+    lib_.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get("/tools/software/runway/edit")
+    assert "Claude confidence: No" in r.text
+
+
+def test_confidence_line_hidden_when_no_signal_ever_reported(env):
+    """The one condition that still hides the line: no generation has ever
+    reported a confidence value for this field (a pre-existing row, or a
+    field never run through Generate) — confident is None, not False."""
+    from linklib.db import Library
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    lib_.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
     lib_.close()
 
     client = _client(env)

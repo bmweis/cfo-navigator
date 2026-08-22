@@ -522,9 +522,13 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   written only alongside a fresh Generate this save — a new
   `ai_drafted_confidence` hidden input, parsed by
   `_ai_drafted_field_confidence`, mirrors `ai_drafted_fields`'s existing
-  "field:1,field2:0" shape). Displayed only while `needs_verification=1` —
-  once a human confirms a field, the model's original self-report stops
-  being the operative fact, so no need to clear it on an unrelated resave.
+  "field:1,field2:0" shape). **Displays permanently (2026-08 policy
+  revision)** — originally shown only while `needs_verification=1`; Brian's
+  explicit call reversed that: verification status and confidence are
+  independent facts and both stay visible at all times, side by side,
+  regardless of review state. The one condition that still hides the line
+  is a raw `None` column value (no generation has ever reported a signal
+  for that field) — never cleared on an unrelated resave, same as before.
   **Community profile draft — Phase 0 inventory + Brian's approval**
   identified 12 of the 23 fields as genuinely long-form/narrative and
   fabrication-risky (`linklib.enrich.COMMUNITY_CONFIDENCE_FIELDS`:
@@ -549,11 +553,16 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   field's own previous value read back via `get_community_profile` first
   and carried forward unchanged, never silently cleared just because a
   *different* field on the same profile was regenerated. **Display is
-  gated on the shared whole-profile `needs_review` flag**, not a per-field
-  column — the Community profile draft has never had per-field
-  verification (see the `field_reviews`/Phase G reconciliation above), so
-  the confidence line follows the same reduced pattern
-  `_narrative_verify_widget` already uses there.
+  permanent, same 2026-08 policy revision as the tool side** — not gated
+  on the shared whole-profile `needs_review` flag at all anymore (an
+  earlier version of this feature gated it there, since the Community
+  profile draft has never had per-field verification — see the
+  `field_reviews`/Phase G reconciliation above — but confidence turned out
+  not to need that gate either way: it's independent of review status).
+  Since confidence is no longer tied to the whole-profile review flag,
+  there's no all-or-nothing flattening to worry about — each field always
+  shows its own real confidence value independent of the profile's review
+  status.
 - **Phase P — edit-page layout reorg, and why `tool_competitors`/
   `community_competitors` did NOT get renamed alongside `differentiation_note`.**
   Both Software's and Communities' edit pages were reorganized into labeled

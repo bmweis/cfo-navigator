@@ -205,6 +205,59 @@ def test_profile_submit_carries_forward_confidence_for_untouched_field(env):
     assert p["verdict_summary_ai_confident"] == 0
 
 
+def test_regenerate_single_field_preserves_all_others_byte_for_byte(env):
+    """The exact scenario the carry-forward logic exists for: regenerate ONE
+    field on an existing profile and save. (a) That field's confidence must
+    come from the fresh submission, not the stale carried-forward value.
+    (b) Every one of the other 11 tracked fields' confidence must be
+    unchanged from before the regeneration — not just the one or two fields
+    the lighter test above happens to check, all eleven, and not merely
+    "still non-null" but the exact prior value, alternating 0/1 so a bug
+    that clobbers everything to a single constant would be caught too."""
+    from linklib.db import Library
+
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    cid = lib_.add_community(name="Acme Circle", url="https://acme.example",
+                             demographic="CFOs", cost_band="Free", categories=[], approved=1)
+    # Seed all 12 fields with a distinct, alternating 0/1 pattern so a bug
+    # that overwrites everything with one constant is also caught.
+    initial = {f: i % 2 for i, f in enumerate(enrich.COMMUNITY_CONFIDENCE_FIELDS)}
+    field_text = {f: f"Original {f} text." for f in enrich.COMMUNITY_CONFIDENCE_FIELDS}
+    lib_.upsert_community_profile(cid, confidence=initial, **field_text)
+    lib_.close()
+
+    regenerated_field = "cost_value_verdict"
+    assert initial[regenerated_field] == 0   # sanity: fresh value below actually flips it
+    fresh_value = 1
+
+    client = _client(env)
+    _login(client)
+    form_data = dict(field_text)
+    form_data[regenerated_field] = "Freshly regenerated text."
+    form_data["ai_drafted_fields"] = regenerated_field
+    form_data["ai_drafted_confidence"] = f"{regenerated_field}:{fresh_value}"
+    r = client.post(f"/admin/tools/communities/{cid}/profile", data=form_data, follow_redirects=False)
+    assert r.status_code == 303
+
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    p = lib_.get_community_profile(cid)
+    lib_.close()
+
+    # (a) The regenerated field reflects the fresh submitted value, not the
+    # stale carried-forward one.
+    assert p[f"{regenerated_field}_ai_confident"] == fresh_value
+
+    # (b) Every other tracked field's confidence is byte-for-byte identical
+    # to what it was before this save.
+    for f in enrich.COMMUNITY_CONFIDENCE_FIELDS:
+        if f == regenerated_field:
+            continue
+        assert p[f"{f}_ai_confident"] == initial[f], (
+            f"{f}_ai_confident changed from {initial[f]} to {p[f'{f}_ai_confident']} "
+            f"on a save that only regenerated {regenerated_field}"
+        )
+
+
 def test_profile_submit_ignores_stray_confidence_for_hand_edited_field(env):
     from linklib.db import Library
     lib_ = Library(os.environ["LINKLIB_DB"])
@@ -227,9 +280,13 @@ def test_profile_submit_ignores_stray_confidence_for_hand_edited_field(env):
     assert p["ideal_member_ai_confident"] is None
 
 
-# -- Display: gated on the shared needs_review flag --------------------------
+# -- Display: permanent (2026-08 policy revision — no longer gated on the
+# shared needs_review flag; Brian's explicit call: confidence is independent
+# of review status and always visible). This also drops the earlier
+# all-or-nothing flattening concern entirely — each field always shows its
+# own real confidence value regardless of the profile's review status.
 
-def test_confidence_line_shown_on_profile_page_while_needs_review(env):
+def test_confidence_line_shown_on_profile_page_regardless_of_needs_review(env):
     from linklib.db import Library
     lib_ = Library(os.environ["LINKLIB_DB"])
     cid = lib_.add_community(name="Acme Circle", url="https://acme.example",
@@ -244,13 +301,29 @@ def test_confidence_line_shown_on_profile_page_while_needs_review(env):
     assert "Claude confidence: No" in r.text
 
 
-def test_confidence_line_hidden_once_reviewed(env):
+def test_confidence_line_still_shown_once_reviewed(env):
+    """Distinct from the shared "Mark reviewed" button/checkbox, which do
+    reflect needs_review — the confidence line itself stays visible either
+    way, since it's an independent fact."""
     from linklib.db import Library
     lib_ = Library(os.environ["LINKLIB_DB"])
     cid = lib_.add_community(name="Acme Circle", url="https://acme.example",
                              demographic="CFOs", cost_band="Free", categories=[], approved=1)
     lib_.upsert_community_profile(cid, ideal_member="Drafted.", needs_review=0,
                                   confidence={"ideal_member": 0})
+    lib_.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/admin/tools/communities/{cid}/profile")
+    assert "Claude confidence: No" in r.text
+
+
+def test_confidence_line_hidden_when_no_signal_ever_reported(env):
+    from linklib.db import Library
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    cid = lib_.add_community(name="Acme Circle", url="https://acme.example",
+                             demographic="CFOs", cost_band="Free", categories=[], approved=1)
     lib_.close()
 
     client = _client(env)
