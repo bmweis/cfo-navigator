@@ -474,6 +474,95 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Differentiation, and in reduced form (button + review line only, no
   badge, since the existing checkbox already shows state) for the Community
   profile draft.
+- **Agent taxonomy publish gate (2026-08) — `agent_taxonomy_needs_verification`
+  now gates public visibility, not just a badge.** A tool-edit-consistency
+  investigation found Abacum's live agent-taxonomy note referenced "the
+  retail page" and quoted specific-sounding invented language ("Abacum
+  Intelligence flags the anomaly, drafts the...") attributed to it — no such
+  page exists in the site's real crawled content. A follow-up audit of
+  `generate_tool_agent_taxonomy` (`linklib/enrich.py`) confirmed this is a
+  systemic grounding gap, not an isolated bad output: the generation prompt
+  is well-worded against fabrication ("ground this strictly in the page
+  content below," told to set `"confident": false` rather than guess), but
+  has no mechanical grounding/citation enforcement the way `linklib/agent.py`'s
+  FP&A Buddy does (real Citations-API document blocks with verified source
+  attribution) — a prompt instruction alone is not a backstop against
+  invented specificity. Worse, the model's own `confident` boolean — the one
+  signal meant to catch exactly this — never gated anything: even a
+  correctly self-flagged `confident: false` draft still saved and rendered
+  publicly, with only a small "unverified" badge as the visible difference.
+  Since this is the same shared prompt/pipeline for every tool in the
+  directory (~150+ vendors), triggered automatically on tool creation with
+  no required human review before publish, Abacum was simply the instance
+  where the gap became visible — not a one-off. Fixed as an immediate
+  publish gate, shipped ahead of (and independent from) the citation/
+  grounding mechanism itself, which stays separately scoped: on both the
+  Software profile page's Agent taxonomy card and the software-compare
+  matrix's "How agents are involved" row, a note with
+  `agent_taxonomy_needs_verification=1` is now shown only to a signed-in
+  admin, explicitly labeled "unverified—hidden from visitors until
+  reviewed"/"hidden from visitors" — never to a public visitor, however
+  plausible it reads. A verified note renders exactly as before, with no
+  badge at all now (a note visible to the public is itself the verified
+  signal). The real structural fix — a citation/grounding mechanism for
+  `generate_tool_agent_taxonomy` (and, per the same audit, `generate_tool_description`
+  and `generate_tool_differentiation`, which share the no-citation
+  architecture and the confidence-flag-not-gate pattern) — remains future,
+  separately-scoped work.
+- **Confidence indicator (2026-08) — genuine self-reported "Claude
+  confidence: Yes/No" fields, tool Description/Competitive differentiation
+  first, then extended to 12 of the Community profile draft's 23 fields.**
+  A distinct fact from `*_needs_verification` (human review status) —
+  the two combine (an unverified AND low-confidence field is the
+  highest-risk state a reader can see, Abacum's case exactly). Tool side:
+  `generate_tool_description`/`generate_tool_differentiation` gained a real
+  `"confident": true|false` JSON key (matching `generate_tool_agent_taxonomy`'s
+  existing pattern), stored in new `tools.description_ai_confident`/
+  `competitive_differentiation_ai_confident` columns (NULL = no signal,
+  written only alongside a fresh Generate this save — a new
+  `ai_drafted_confidence` hidden input, parsed by
+  `_ai_drafted_field_confidence`, mirrors `ai_drafted_fields`'s existing
+  "field:1,field2:0" shape). **Displays permanently (2026-08 policy
+  revision)** — originally shown only while `needs_verification=1`; Brian's
+  explicit call reversed that: verification status and confidence are
+  independent facts and both stay visible at all times, side by side,
+  regardless of review state. The one condition that still hides the line
+  is a raw `None` column value (no generation has ever reported a signal
+  for that field) — never cleared on an unrelated resave, same as before.
+  **Community profile draft — Phase 0 inventory + Brian's approval**
+  identified 12 of the 23 fields as genuinely long-form/narrative and
+  fabrication-risky (`linklib.enrich.COMMUNITY_CONFIDENCE_FIELDS`:
+  ideal_member, anti_fit, value_prop, business_model, format_reality,
+  engagement_level, sponsor_relationship_note, application_friction,
+  cost_value_verdict, notable_members, public_criticism, verdict_summary),
+  explicitly excluding `founded_year` and the 7 short factual/categorical
+  fields (not prose) — and, per Brian's explicit call, also excluding
+  `stage_focus`/`jobs_program`/`team_or_individual` despite their being in
+  `VOICE_REWRITE_FIELDS`: matching that pass's existing narrative boundary
+  wasn't the goal, matching actual fabrication risk was, and those three
+  read as categorical. `generate_community_profile`'s single Claude call
+  (all 23 fields drafted together) now also returns one `"confidence"`
+  object with exactly those 12 boolean keys, judged independently per
+  field rather than one blanket verdict. 12 new `community_profiles`
+  columns (`{field}_ai_confident`), same NULL-means-no-signal convention.
+  **One real structural difference from the tool side, driven by
+  `upsert_community_profile` being a full replace on every save (not a
+  narrow COALESCE-based update)**: the submit route itself must decide
+  every tracked field's confidence value on every save — the fresh
+  model-reported value for a field (re)drafted this save, else that
+  field's own previous value read back via `get_community_profile` first
+  and carried forward unchanged, never silently cleared just because a
+  *different* field on the same profile was regenerated. **Display is
+  permanent, same 2026-08 policy revision as the tool side** — not gated
+  on the shared whole-profile `needs_review` flag at all anymore (an
+  earlier version of this feature gated it there, since the Community
+  profile draft has never had per-field verification — see the
+  `field_reviews`/Phase G reconciliation above — but confidence turned out
+  not to need that gate either way: it's independent of review status).
+  Since confidence is no longer tied to the whole-profile review flag,
+  there's no all-or-nothing flattening to worry about — each field always
+  shows its own real confidence value independent of the profile's review
+  status.
 - **Phase P — edit-page layout reorg, and why `tool_competitors`/
   `community_competitors` did NOT get renamed alongside `differentiation_note`.**
   Both Software's and Communities' edit pages were reorganized into labeled
@@ -802,19 +891,15 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   - **Feature-name recasing** — `docs/FEATURE_TAXONOMY.md` §3 gained three
     naming rules (no "AI" in any form in a feature name; prefer short names
     with qualifiers in `definition` instead; sentence case). A new
-    `scripts/recase_feature_names.py` (preview-by-default, `--apply` to
-    write, write-then-read-back verified — same convention as
-    `scripts/archive/rename_differentiation_columns.py`) recases every live
+    `scripts/archive/recase_feature_names.py` (preview-by-default, `--apply`
+    to write, write-then-read-back verified — same convention as
+    `scripts/archive/rename_differentiation_columns.py`) recased every live
     `category_features.name` to sentence case, preserving already-uppercase
     tokens (acronyms: ASC, SOX, GRC, IFRS, GAAP, AI, ...) and any token
-    containing a digit (ASC 606, 1099). **Not run against production as
-    part of this PR** — per the standing human-run discipline, Brian runs
-    it by hand via `railway ssh` once this PR is deployed, after reviewing
-    the printed before/after diff. **Lives in `scripts/`, not
-    `scripts/archive/`, until that run happens** — same convention as
-    `scripts/drop_legacy_tool_features.py`/`scripts/seed_book_recommendations.py`:
-    a one-time script only moves to `scripts/archive/` (via `git mv`) once
-    it's actually been run, never before.
+    containing a digit (ASC 606, 1099). Run against production by Brian via
+    `railway ssh` and confirmed complete — moved into `scripts/archive/` (via
+    `git mv`) the same session the run was confirmed, per the "Archive a
+    one-time script as soon as its run is confirmed" standing rule above.
   - **BRAND.md's coral "never for status" section gained a documented
     exception for pending-count badges** — `.task-badge`/`.task-badge-dot`/
     `.task-dot` have used `var(--coral)` since the admin hub's original
@@ -2415,7 +2500,7 @@ for 8 further weeks, deleting the rest, so the folder doesn't grow without limit
 | `LINKLIB_SAVE_TOKEN` | (none) | Token for `POST /save` + bookmarklet; also the default login password. Set when hosted. |
 | `LINKLIB_PASSWORD` | = `LINKLIB_SAVE_TOKEN` | Login password for the private section. Set to decouple the login password from the save token. |
 | `LINKLIB_SECRET_KEY` | = password | HMAC key for signing session cookies. Set on the host so logins survive restarts/deploys. |
-| `LINKLIB_ENRICH_MODEL` | `claude-haiku-4-5-20251001` | Claude model for enrichment |
+| `LINKLIB_ENRICH_MODEL` | `claude-opus-5` | Claude model for enrichment. This table entry previously read `claude-haiku-4-5-20251001`, which never matched the actual code default — the code has always defaulted to Opus for depth (see `linklib/enrich.py`'s module docstring). Separately, the code's own literal fallback was briefly changed to `claude-opus-4-8` on a mistaken belief that `claude-opus-5` wasn't a valid current model id — corrected back: `claude-opus-5` is real, current, and Anthropic's own top recommendation for complex/enterprise work (confirmed against Anthropic's docs, `platform.claude.com/docs/en/about-claude/models/overview` — also linked from `/admin/system/model`), so it's the curated registry's "Best quality" entry (`linklib/models.py`), not `claude-opus-4-8`. As of the model-selection settings feature below, this env var is only the fallback used when no DB-stored selection exists — see "AI model selection" in Key architecture decisions. |
 | `LINKLIB_CHAT_MODEL` | `claude-sonnet-4-6` | Claude model for Q&A and post drafting |
 | `LINKLIB_PUBLIC_BASE` | `http://localhost:8000` | Base URL embedded in the bookmarklet |
 | `LINKLIB_SITES_OPML` | `preferred_sites.opml` | OPML path — web-search allowlist AND `/read`'s Feed-view source list |
@@ -2465,6 +2550,19 @@ fine. The entire cost was in not being able to tell that quickly — an untracea
 correct fix and a silent data-corruption bug look identical from the outside. Writing
 down "changed X's category from A to B, here's why" at the time is nearly free;
 reconstructing it after the fact from timestamps and git history is not.
+
+**Archive a one-time script as soon as its run is confirmed.** After a one-time
+data-fix script (`--apply` run, or any script whose whole job is a single
+correction) is confirmed to have run successfully — verified via its own
+write-then-read-back output, per the rule above — `git mv` it into
+`scripts/archive/` in that same session, not as a later cleanup pass. If the
+outcome is unambiguous (the printed before/after diff and read-back match what
+was intended), archive it immediately. If there's real doubt about whether the
+run actually did what was intended, ask first rather than archiving a script
+that might need a second pass. This mirrors the Documentation section's rule 5
+for a *recurring* script's registry entry once its job is done — this rule
+covers the more common case of a single preview/apply/verify script finishing
+its one job.
 
 **No dead data.** Anything in the database with no live code path reading or writing
 it gets deleted — a table, a column, a whole row set. "Live code path" means the
@@ -2812,11 +2910,15 @@ the em-dash form would otherwise be fine.
 
 ## Models in use
 
-- Enrichment: `claude-haiku-4-5-20251001` (cheap, processes thousands of articles)
+- Enrichment (article summaries and every AI-drafted directory field — Description,
+  Agent taxonomy, Competitive differentiation, Community profile fields, and so on):
+  `claude-opus-5` by default, quality over cost — see "AI model selection" below for
+  how this is now chosen and where it's overridable.
 - Q&A and post drafting: `claude-sonnet-4-6` (better synthesis quality)
 - Embeddings (hybrid retrieval, `linklib/embeddings.py`): OpenAI `text-embedding-3-small`
 
-All three are overridable via environment variables.
+All three are overridable via environment variables; enrichment is also overridable
+live from `/admin/system/model` without a redeploy — see "AI model selection" below.
 
 **The model pickers are dynamic** (`linklib/models.py`): a single curated registry
 feeds every picker (re-enrich, backfill), and `models_for` reconciles it
@@ -2832,6 +2934,55 @@ API/key is unavailable, every picker falls back to the static registry.
 Quick/Standard/Deep effort choice; each tier maps internally to a model, an
 archive/web-search count, and a token budget (`EFFORT_SETTINGS` in
 `linklib/agent.py`). The model is an implementation detail, not a user-facing choice.
+
+**AI model selection (2026-08) — enrichment's model is a live, DB-backed
+setting, not just `LINKLIB_ENRICH_MODEL`.** Same reasoning and same page
+pattern as `/admin/exa-settings`' Phase 7 kill switch: an env var needs a
+redeploy to take effect, a DB-stored setting doesn't. `/admin/system/model`
+(`Library.get_enrich_model`/`set_enrich_model`, a `settings` table row —
+no new column) lets Brian pick any model from the same curated-registry-
+reconciled-with-the-live-Models-API list every other picker already uses
+(`linklib.models.models_for`), with a "Test connection" action mirroring
+Exa's own (`linklib.enrich.test_model_connection`, one real minimal Claude
+call, with a link to Anthropic's live model docs
+(`platform.claude.com/docs/en/about-claude/models/overview`) right on the
+page for whenever the options need re-checking against what Anthropic
+currently ships). **Immediate correctness fix that motivated this, done
+independently of the feature itself — and its own correction, in the same
+PR:** the code's hardcoded fallback was actually `"claude-opus-5"` all
+along, matching `linklib/enrich.py`'s own module docstring and every git
+revision's stated intent ("Defaults to Opus for depth… quality matters more
+than the per-article cost"). A first pass this build mistakenly "fixed" it
+to `"claude-opus-4-8"` on the assumption `claude-opus-5` wasn't a valid
+current model id — it is: confirmed directly against Anthropic's docs,
+`claude-opus-5` is real, current, and Anthropic's own top recommendation for
+complex/enterprise work, with a newer knowledge cutoff than Opus 4.8's.
+Reverted back to `"claude-opus-5"`, the curated registry's actual "Best
+quality"/"Deepest summaries" entry — flagging the reversal explicitly here
+rather than silently, same precedent as the homepage "🚧 building" sticker
+mix-up elsewhere in this doc. This table's env-var row above was also
+independently stale (said Haiku, code always said Opus) and is corrected to
+match. Every `linklib.enrich` generation call site invoked
+from the live app (`webapp/app.py` — tool Description, Agent taxonomy,
+Competitive differentiation, competitor-match judging for both Software and
+Communities, Community profile fields, the Community basic-listing auto-fill,
+and article-save enrichment in `linklib/pipeline.py`) now resolves
+`lib.get_enrich_model()` explicitly at call time rather than relying on each
+function's own `model: str = DEFAULT_MODEL` parameter default — a plain
+Python default is baked in at import time, so a live DB-backed setting has
+to be passed in explicitly on every call for the "no redeploy" promise to
+actually hold. **Not touched**: the re-enrich/backfill admin pickers
+(`linklib/models.py`'s own per-run model choice — a different, already-live
+mechanism for a whole-archive pass) and every `scripts/*.py` CLI tool's own
+`--model` flag/default — both already let the operator choose per-run, so
+routing them through this new global default would just be a second,
+redundant selection layer. **Defaults to the deepest/highest-quality curated
+model** (`Library._DEFAULT_ENRICH_MODEL`, `"claude-opus-5"`) until an admin
+picks something else — quality over cost for this use case, same reasoning
+`linklib.models._REGISTRY`'s own "Best quality" blurb already states.
+`/admin/overhead-spend`'s "Toolbox usage" section now names the active
+enrichment model next to its existing AI-cost estimate, since model choice
+directly affects that number.
 
 ## Billing note
 

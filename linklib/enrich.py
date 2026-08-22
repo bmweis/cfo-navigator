@@ -192,9 +192,14 @@ Fields:
      for the directory card and search results — a proper condensed
      rewrite someone could read on its own and understand what the tool is
      and does, not just the description's opening sentences copy-pasted.
+  "confident": true if the page content below gave you a solid, specific
+     basis for both fields; false if you had to draft from thin/ambiguous
+     page content or from your own general knowledge rather than the page
+     itself. Say so honestly rather than defaulting to true — a reader
+     relies on this to know whether the write-up is well-grounded.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly these
-keys: "description", "summary".
+keys: "description", "summary", "confident".
 
 Tool name: {name}
 Tool URL: {url}
@@ -208,6 +213,7 @@ class ToolDescriptionDraft:
     description: str
     summary: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    confident: bool = False   # the model's own self-reported certainty (see prompt above)
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -263,7 +269,8 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         return ToolDescriptionDraft(
             description=str(data.get("description", "")).strip(),
             summary=str(data.get("summary", "")).strip(),
-            low_confidence=low_confidence, model=model,
+            low_confidence=low_confidence, confident=bool(data.get("confident")),
+            model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:
@@ -290,13 +297,19 @@ Vendor: {name} ({url})
 Description: {description}
 {competitors_block}
 
-Respond with JSON only: {{"competitive_differentiation": "..."}}"""
+Also report "confident": true if the description and competitor context above
+gave you a real basis for a specific, defensible comparison; false if you had
+to draft a generic-sounding callout with little to actually differentiate
+against. Say so honestly rather than defaulting to true.
+
+Respond with JSON only: {{"competitive_differentiation": "...", "confident": true|false}}"""
 
 
 @dataclass
 class ToolDifferentiationDraft:
     competitive_differentiation: str
     low_confidence: bool = False
+    confident: bool = False   # the model's own self-reported certainty (see prompt above)
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -356,7 +369,8 @@ def generate_tool_differentiation(name: str, url: str, description: str,
 
         return ToolDifferentiationDraft(
             competitive_differentiation=str(data.get("competitive_differentiation", "")).strip(),
-            low_confidence=low_confidence, model=model,
+            low_confidence=low_confidence, confident=bool(data.get("confident")),
+            model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:
@@ -675,6 +689,21 @@ COMMUNITY_PROFILE_FIELDS = [
     "platform_type", "meeting_format", "event_style", "cpe_eligible",
 ]
 
+# The 12 long-form/narrative Community profile fields judged to carry real
+# fabrication risk (Phase 0 investigation + Brian's approval, 2026-08) —
+# deliberately a SUBSET of COMMUNITY_PROFILE_FIELDS above, not all 23:
+# excludes founded_year (a bare int, not prose) and the eleven short
+# factual/categorical fields (stage_focus/jobs_program/team_or_individual
+# included — judged categorical-not-narrative-risk despite being in
+# VOICE_REWRITE_FIELDS below, since matching that boundary wasn't the goal;
+# matching actual fabrication risk was). Shared with webapp/app.py so the
+# confidence hidden-input wiring and the JSON schema above stay in lockstep.
+COMMUNITY_CONFIDENCE_FIELDS = [
+    "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
+    "engagement_level", "sponsor_relationship_note", "application_friction",
+    "cost_value_verdict", "notable_members", "public_criticism", "verdict_summary",
+]
+
 _COMMUNITY_PROFILE_PROMPT = """You are drafting a deep, opinionated profile of a peer community for the
 CFO Toolbox's Communities directory, read by finance leaders deciding whether a
 community is worth their time and money. This is not directory metadata (cost,
@@ -704,6 +733,13 @@ Write about the community named below. Follow these rules exactly:
 9. `cpe_eligible` must be one of "Yes", "No", or "Unclear", optionally with a
    short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)") —
    never guess "Yes" without a specific reason to believe it.
+10. For the "confidence" object below: for EACH of its twelve keys, report
+    true only if the page content (or your own knowledge) gave you a real,
+    specific basis for that field's answer; false if you had to draft it
+    thin, generic, or largely inferred. Judge each key independently — a
+    community's `value_prop` can be well-grounded while its `notable_members`
+    is a guess, and the confidence for each should reflect that, not a single
+    blanket judgment repeated twelve times.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
 
@@ -748,6 +784,13 @@ Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
   "event_style": the feel of its events, e.g. "large-format conferences,"
      "intimate small-group," "forum-only, no events" — or null if unclear.
   "cpe_eligible": "Yes"/"No"/"Unclear", per rule 9 above.
+  "confidence": an object with exactly these twelve boolean keys, one per
+     the long-form/narrative fields above that carry real fabrication risk
+     (the short factual/categorical fields above are not included — see
+     rule 10): "ideal_member", "anti_fit", "value_prop", "business_model",
+     "format_reality", "engagement_level", "sponsor_relationship_note",
+     "application_friction", "cost_value_verdict", "notable_members",
+     "public_criticism", "verdict_summary".
 
 Community name: {name}
 Community URL: {url}
@@ -782,6 +825,7 @@ class CommunityProfileDraft:
     event_style: str = ""
     cpe_eligible: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    confidence: dict = field(default_factory=dict)   # {field_name: bool}, COMMUNITY_CONFIDENCE_FIELDS keys only
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -876,12 +920,23 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             meeting_format=str(data.get("meeting_format") or "").strip(),
             event_style=str(data.get("event_style") or "").strip(),
             cpe_eligible=str(data.get("cpe_eligible") or "").strip(),
-            low_confidence=low_confidence, model=model,
+            low_confidence=low_confidence,
+            confidence=_parse_community_confidence(data.get("confidence")),
+            model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:
         _logger.warning("generate_community_profile() failed: %s: %s", type(e).__name__, e)
         return None
+
+
+def _parse_community_confidence(raw) -> dict:
+    """Coerce the model's "confidence" object into {field: bool}, defaulting
+    a missing/malformed key to False (needs review) rather than guessing
+    true — same safe-default convention as generate_tool_agent_taxonomy's
+    `not bool(data.get("confident"))`."""
+    raw = raw if isinstance(raw, dict) else {}
+    return {f: bool(raw.get(f)) for f in COMMUNITY_CONFIDENCE_FIELDS}
 
 
 # Sentinel drafted into a listing field the model isn't confident about,
@@ -1159,3 +1214,42 @@ def voice_rewrite_community_fields(name: str, fields: dict, voice_core: str,
     except Exception as e:
         _logger.warning("voice_rewrite_community_fields() failed: %s: %s", type(e).__name__, e)
         return None
+
+
+def test_model_connection(model_id: str) -> dict:
+    """Fire one minimal, real Claude call against `model_id` to verify it
+    actually works — manual/on-demand only from /admin/system/model's "Test
+    connection" action, same shape and same "manual, never a background job"
+    contract as linklib.agent.test_exa_connection. Returns
+    {"ok", "error", "cost_usd"}: cost_usd is 0.0 on any failure (an
+    auth/rate-limit/invalid-model error means nothing billed), and the real
+    compute_cost() figure on a genuine success."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return {"ok": False, "error": "ANTHROPIC_API_KEY is not set.", "cost_usd": 0.0}
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return {"ok": False, "error": "The anthropic SDK isn't installed.", "cost_usd": 0.0}
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model_id,
+            max_tokens=64,   # a trivial one-word reply, not a generate_*() JSON call — the
+                             # MIN_GENERATE_MAX_TOKENS floor above doesn't apply here
+            messages=[{"role": "user", "content": "Reply with only the word: ok"}],
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "cost_usd": 0.0}
+
+    from .pricing import compute_cost
+    usage = getattr(resp, "usage", None)
+    in_tok = getattr(usage, "input_tokens", 0) or 0
+    out_tok = getattr(usage, "output_tokens", 0) or 0
+    cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+    try:
+        cost = compute_cost(model_id, in_tok, out_tok, cache_w, cache_r)
+    except Exception:
+        cost = 0.0
+    return {"ok": True, "error": "", "cost_usd": cost}

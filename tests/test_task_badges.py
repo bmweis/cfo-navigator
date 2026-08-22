@@ -376,3 +376,38 @@ def test_reject_community_deletes_pending_submission(admin_client):
         assert lib.get_community(community_id) is None
     finally:
         lib.close()
+
+
+# --- badge-visibility fix: a nonzero badge auto-expands its group ----------
+# (2026-08 — LiveFlow/Liveflow and a Runway name-duplicate pair sat correctly
+# detected and correctly badge-counted, but nobody noticed because the
+# Software sub-group carrying that badge was collapsed by default, two
+# disclosure levels deep. See CLAUDE.md.)
+
+def test_group_with_nonzero_badge_starts_expanded(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    lib.add_tool("LiveFlow", "desc", "https://liveflow.example", ["ERP"], approved=1)
+    lib.add_tool("Liveflow", "desc", "https://liveflow2.example", ["Financial Reporting"], approved=1)
+    lib.close()
+
+    r = client.get("/admin")
+    # The Software sub-group's own <details> tag must carry `open` now that
+    # it has a real pending name-duplicate to show, not just a badge number.
+    idx = r.text.index(">Software<")
+    details_start = r.text.rfind("<details", 0, idx)
+    tag_end = r.text.index(">", details_start)
+    assert " open" in r.text[details_start:tag_end]
+
+
+def test_group_with_zero_badge_stays_collapsed(admin_client):
+    """Unchanged control case — a group with nothing pending still starts
+    collapsed, same as before this fix (only Inbox was ever open by
+    default)."""
+    client, appmod, db = admin_client
+    r = client.get("/admin")
+    idx = r.text.index(">Software<")
+    details_start = r.text.rfind("<details", 0, idx)
+    tag_end = r.text.index(">", details_start)
+    assert " open" not in r.text[details_start:tag_end]

@@ -23,6 +23,15 @@ name: QA
 # history doesn't change between runs, so re-scanning all of it every time
 # was pure waste in a repo this size. See secret-scan-weekly.yml for the
 # full-history backstop that keeps that coverage.
+#
+# CI cost optimization round 2 (2026-08-22): pytest was 97-98% of run time
+# and ran single-threaded with no parallelization config anywhere in the
+# repo — the single biggest remaining lever, per a follow-up investigation
+# into recurring/accelerating Actions quota exhaustion. `pytest-xdist`
+# (`requirements-dev.txt`) + `-n auto` parallelizes the suite across the
+# runner's available CPUs. This is a new dependency, added with Brian's
+# explicit sign-off per the standing "flag a new CI dependency before
+# adding it" rule that deferred it in the round-1 pass above.
 on:
   pull_request:
 
@@ -45,7 +54,7 @@ jobs:
       - name: Lint — unused imports / dead code (pyflakes)
         run: python -m pyflakes linklib webapp scripts
       - name: Run the test suite (brand, voice, open-source sync, app, …)
-        run: pytest -q
+        run: pytest -q -n auto
 
   secret-scan:
     runs-on: ubuntu-latest

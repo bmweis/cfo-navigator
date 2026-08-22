@@ -4,5 +4,6 @@
 -r requirements.txt
 
 pytest>=8
+pytest-xdist>=3   # `pytest -n auto` parallelizes the suite across CPUs in CI
 httpx>=0.27   # required by the FastAPI/Starlette TestClient used in tests
 pyflakes>=3   # catches unused imports / dead code in CI

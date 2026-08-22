@@ -53,6 +53,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
+from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.manual_review_csv import parse_manual_review_corrections_csv
 from linklib.purge_csv import parse_purge_confirmations_csv, MAX_PURGE_PER_RUN
@@ -807,6 +808,44 @@ def _narrative_verify_widget(needs_verification: bool, verify_form_id: str, veri
     return badge_html, action_html, form_html, review_line_html
 
 
+def _confidence_indicator_html(confident: object) -> str:
+    """"Confidence: Yes/No" text, a distinct fact from the Needs verification
+    badge above (added 2026-08, after the Abacum fabrication finding — see
+    CLAUDE.md's "Agent taxonomy publish gate" bullet): the model's own
+    self-reported certainty at generation time, not a human review status.
+    The two combine — an unverified AND low-confidence field is the
+    highest-risk state a reader can see — which is why this is a separate
+    line, not folded into the verification pill.
+
+    Displays PERMANENTLY (2026-08 policy revision — originally gated on the
+    field/profile still being unverified; Brian's explicit call: verification
+    status and confidence are independent facts and should both be visible
+    at all times, side by side, regardless of review state) — the only
+    condition that hides it is `confident is None`, meaning no generation
+    has ever reported a signal for this field (a pre-existing row, or a
+    field that's never been through Generate), which renders nothing rather
+    than a misleading default. `confident` is the raw
+    `description_ai_confident`/`competitive_differentiation_ai_confident`/
+    `{community_field}_ai_confident` column value.
+
+    Named "Claude confidence," not just "AI confidence" or a specific model
+    id — every AI-generation call site in linklib/enrich.py is confirmed to
+    go through the Anthropic SDK exclusively (no other provider), so
+    "Claude" is accurate sitewide, but the specific model is admin-selectable
+    (see /admin/system/model) and shouldn't be hardcoded into copy that
+    would silently go stale the next time the selection changes."""
+    if confident is None:
+        return ""
+    value = "Yes" if bool(int(confident)) else "No"
+    # Sanctioned pairs only (brand_check.py's AUX_COLORS) — the same success
+    # green and advisory amber already used elsewhere on this exact page
+    # (the screenshot-capture banner, the "Needs verification" pill), not a
+    # new off-palette color.
+    color = "#065f46" if value == "Yes" else "#92400e"
+    return (f'<p style="font-size:12px;color:{color};margin:4px 0 0;font-weight:500;">'
+            f'Claude confidence: {value}</p>')
+
+
 def _ai_drafted_field_names(form) -> set[str]:
     """The submitted ai_drafted_fields hidden input (see markAiDrafted in the
     edit-form JS), parsed into a set of field names — shared by
@@ -816,6 +855,24 @@ def _ai_drafted_field_names(form) -> set[str]:
     the Community profile draft's needs-verification flags, Phase G PR 2)."""
     raw = (form.get("ai_drafted_fields") or "").strip()
     return {f.strip() for f in raw.split(",") if f.strip()}
+
+
+def _ai_drafted_field_confidence(form) -> dict[str, bool]:
+    """The submitted ai_drafted_confidence hidden input (see markAiConfidence
+    in the edit-form JS), parsed into {field_name: confident}. A field only
+    appears here if a Generate call actually ran for it this session — a
+    hand-edited or untouched field has no entry, so callers should only
+    consult this for fields also present in _ai_drafted_field_names(form)."""
+    raw = (form.get("ai_drafted_confidence") or "").strip()
+    out: dict[str, bool] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        name, _, val = pair.partition(":")
+        if name.strip():
+            out[name.strip()] = val.strip() == "1"
+    return out
 
 
 def _record_ai_drafted_reviews(lib: Library, request: Request, entity_type: str, entity_id: int, form) -> None:
@@ -6789,11 +6846,18 @@ to compare them side by side. Check the box on any card, then use the compare ba
     # "not documented yet," never treated as "this vendor has no agent
     # capability" — the same sparse-data honesty rule as Features' "Not
     # tracked yet."
+    _compare_authed = _is_authed(request)
+
     def _agent_cell(t: dict) -> str:
         note = (t.get("agent_taxonomy_note") or "").strip()
-        if not note:
+        unverified = bool(t.get("agent_taxonomy_needs_verification"))
+        # Publish gate (Abacum fabrication finding): a self-reported
+        # low-confidence/unverified agent-taxonomy note is never shown to a
+        # public visitor, same as the profile page below — only an admin
+        # sees the drafted-but-unconfirmed text, clearly labeled as hidden.
+        if not note or (unverified and not _compare_authed):
             return '<td class="cc-cell cc-empty">Not documented yet</td>'
-        verify = ' <span class="cc-verify">unverified</span>' if t.get("agent_taxonomy_needs_verification") else ""
+        verify = ' <span class="cc-verify">unverified&mdash;hidden from visitors</span>' if unverified else ""
         return f'<td class="cc-cell">{_esc(note)}{verify}</td>'
 
     agent_row = ""
@@ -7191,14 +7255,29 @@ def tools_software_profile(request: Request, slug: str):
         differentiation_block = (f'<div style="margin-bottom:22px;">'
                                   f'{_profile_admin_nudge("Bottom line not yet written (hand-written, not auto-drafted).")}</div>')
 
+    # Publish gate (added after a confirmed fabrication on Abacum's record —
+    # invented, quoted-sounding language attributed to a page that never
+    # existed, sitting in an unverified field): agent_taxonomy_needs_verification
+    # now GATES public visibility, not just a badge. A note the model itself
+    # flagged low-confidence (or that simply hasn't been human-reviewed yet)
+    # is shown only to a signed-in admin, clearly labeled as hidden from
+    # visitors — never to a public profile visitor, however plausible it
+    # reads. Verified notes render exactly as before, with no badge at all
+    # (a visible note is now itself the verified signal).
     agent_taxonomy_block = ""
-    if (tool.get("agent_taxonomy_note") or "").strip():
-        agent_verify = ' <span class="tp-verify">unverified</span>' if tool.get("agent_taxonomy_needs_verification") else ""
+    _at_note = (tool.get("agent_taxonomy_note") or "").strip()
+    _at_unverified = bool(tool.get("agent_taxonomy_needs_verification"))
+    if _at_note and not _at_unverified:
         agent_taxonomy_block = f"""<div class="tp-card">
-  <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy{agent_verify}</h2>
+  <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy</h2>
   <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
 </div>"""
-    elif authed:
+    elif _at_note and _at_unverified and authed:
+        agent_taxonomy_block = f"""<div class="tp-card">
+  <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy <span class="tp-verify">unverified&mdash;hidden from visitors until reviewed</span></h2>
+  <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
+</div>"""
+    elif authed and not _at_note:
         agent_taxonomy_block = _profile_admin_nudge("Agent taxonomy not yet generated.")
 
     # Key features card (Feature Taxonomy Phase 2) — replaces the legacy
@@ -9166,6 +9245,22 @@ function markAiDrafted(fieldName) {
   if (fields.indexOf(fieldName) === -1) fields.push(fieldName);
   el.value = fields.join(',');
 }
+// Confidence indicator (2026-08) — the model's own self-reported "confident"
+// flag from a generation call (Description/Competitive differentiation so
+// far), recorded alongside markAiDrafted's field-name list but as its own
+// hidden input since it's a distinct fact (see CLAUDE.md): needs-verification
+// is human-review status, confidence is the model's certainty at generation
+// time. Stored as "field:1,field2:0" pairs, parsed server-side by
+// _ai_drafted_field_confidence. A no-op where the hidden input doesn't exist.
+function markAiConfidence(fieldName, confident) {
+  var el = document.getElementById('ai-drafted-confidence');
+  if (!el) return;
+  var pairs = el.value ? el.value.split(',').filter(function(p) { return p; }) : [];
+  var prefix = fieldName + ':';
+  pairs = pairs.filter(function(p) { return p.indexOf(prefix) !== 0; });
+  pairs.push(fieldName + ':' + (confident ? '1' : '0'));
+  el.value = pairs.join(',');
+}
 // Shared error-box treatment for every Generate-button failure (Phase M):
 // a coral callout in the same spot the box occupies when shown, styled to
 // match the existing green AI-taxonomy-refresh banner (background/text
@@ -9235,9 +9330,10 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
     document.getElementById(descId).value = d.description;
     markAiDrafted('description');
+    markAiConfidence('description', d.confident);
     if (summaryId) {
       var summaryEl = document.getElementById(summaryId);
-      if (summaryEl) { summaryEl.value = d.summary || ''; markAiDrafted('summary'); }
+      if (summaryEl) { summaryEl.value = d.summary || ''; markAiDrafted('summary'); markAiConfidence('summary', d.confident); }
     }
     status.textContent = d.low_confidence
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
@@ -9283,6 +9379,7 @@ _RETIRED_FIELD_REVIEW_FIELDS = (
 
 _GENERATE_PROFILE_JS = _MARK_AI_DRAFTED_JS + """
 var COMMUNITY_PROFILE_FIELDS = """ + json.dumps(_COMMUNITY_PROFILE_FIELD_IDS) + """;
+var COMMUNITY_CONFIDENCE_FIELDS = """ + json.dumps(COMMUNITY_CONFIDENCE_FIELDS) + """;
 async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
   name = (name || '').trim();
   url = (url || '').trim();
@@ -9308,6 +9405,10 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
       if (!el) return;
       el.value = (d[k] === null || d[k] === undefined) ? '' : d[k];
       if (el.value) markAiDrafted(k);
+    });
+    var conf = d.confidence || {};
+    COMMUNITY_CONFIDENCE_FIELDS.forEach(function(k) {
+      markAiConfidence(k, conf[k]);
     });
     var lowConf = document.getElementById('cp-low_confidence');
     if (lowConf) lowConf.checked = !!d.low_confidence;
@@ -12383,14 +12484,26 @@ def _community_profile_form_fields(p: dict | None, community: dict,
         )
     )
 
-    def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2) -> str:
+    # Confidence indicator (2026-08) — a genuine self-report from the model,
+    # distinct from needs_review (human review status). Displays permanently
+    # (2026-08 policy revision — not gated on needs_review at all anymore;
+    # Brian's explicit call: verification and confidence are independent
+    # facts, both always visible). Covers only the 12 fields in
+    # COMMUNITY_CONFIDENCE_FIELDS; every other field on this page passes no
+    # confidence_key and renders exactly as before.
+    def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2,
+               confidence_key: str | None = None) -> str:
         req_mark = " *" if required else ""
         req_attr = " required" if required else ""
         ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
+        confidence_html = ""
+        if confidence_key:
+            confidence_html = _confidence_indicator_html(p.get(f"{confidence_key}_ai_confident"))
         return f"""  <div>
     <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}{req_mark}</label>
     <textarea id="cp-{key}" name="{key}" rows="{rows}"{req_attr}{ph}
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(p.get(key, ''))}</textarea>
+{confidence_html}
   </div>"""
 
     def _short_field(key: str, label: str, placeholder: str = "") -> str:
@@ -12417,24 +12530,24 @@ def _community_profile_form_fields(p: dict | None, community: dict,
   </div>
   <p id="cp-gen-err" style="display:none;"></p>
   <div id="gen-host-community-profile" style="display:grid;gap:20px;">
-{_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True)}
-{_field('anti_fit', 'Anti-fit', 'Who should probably skip it')}
-{_field('value_prop', 'Value proposition', 'The primary thing members get out of it')}
-{_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual')}
-{_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards')}
-{_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.")}
-{_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.")}
-{_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label')}
-{_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting')}
-{_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.')}
+{_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True, confidence_key='ideal_member')}
+{_field('anti_fit', 'Anti-fit', 'Who should probably skip it', confidence_key='anti_fit')}
+{_field('value_prop', 'Value proposition', 'The primary thing members get out of it', confidence_key='value_prop')}
+{_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual', confidence_key='format_reality')}
+{_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards', confidence_key='engagement_level')}
+{_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.", confidence_key='sponsor_relationship_note')}
+{_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.", confidence_key='business_model')}
+{_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label', confidence_key='application_friction')}
+{_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
+{_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.', confidence_key='notable_members')}
   <div>
     <label for="cp-founded_year" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Founded year</label>
     <input id="cp-founded_year" name="founded_year" type="number" min="1800" max="2100"
       value="{p.get('founded_year') or ''}"
       style="width:160px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
-{_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.')}
-{_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True)}
+{_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.', confidence_key='public_criticism')}
+{_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
 {_short_field('primary_purpose', 'Primary purpose', 'e.g. networking, learning, both')}
 {_short_field('cpe_eligible', 'CPE', 'Yes / No / Unclear, with any qualifier')}
@@ -13453,6 +13566,7 @@ def admin_communities_generate_competitor_matches(request: Request, community_id
         if not community:
             raise HTTPException(status_code=404, detail="Community not found")
         candidates = lib.suggest_community_competitors(community_id, limit=8)
+        model = lib.get_enrich_model()
     finally:
         lib.close()
 
@@ -13460,6 +13574,7 @@ def admin_communities_generate_competitor_matches(request: Request, community_id
     result = generate_competitor_matches(
         community["name"], community.get("notes", ""),
         [{"id": x["id"], "name": x["name"], "description": x.get("notes", "")} for x in candidates],
+        model=model,
     )
     if result is None:
         return JSONResponse({"ok": False, "error": "Generation is unavailable right now "
@@ -13648,6 +13763,7 @@ def admin_community_profile_edit(request: Request, community_id: int):
 <h1>Profile: {_esc(c['name'])}</h1>
 <form method="post" action="/admin/tools/communities/{community_id}/profile" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
+  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
 {_profile_fields_html}
   <div>
     <button type="submit" class="btn">Save profile</button>
@@ -13668,6 +13784,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
     try:
         if not lib.get_community(community_id):
             raise HTTPException(status_code=404, detail="Community not found")
+        existing_profile = lib.get_community_profile(community_id) or {}
         form = await request.form()
         founded_year_raw = (form.get("founded_year") or "").strip()
         founded_year = int(founded_year_raw) if founded_year_raw.isdigit() else None
@@ -13679,8 +13796,22 @@ async def admin_community_profile_submit(request: Request, community_id: int):
         # manual one Brian set for an unrelated reason (e.g. flagged from a
         # bulk import); the checkbox itself, unchecked and saved, is still
         # the "I reviewed it" action, same as before this phase.
-        profile_ai_drafted = bool(_ai_drafted_field_names(form) & set(_COMMUNITY_PROFILE_FIELD_IDS))
+        ai_drafted = _ai_drafted_field_names(form)
+        profile_ai_drafted = bool(ai_drafted & set(_COMMUNITY_PROFILE_FIELD_IDS))
         needs_review = 1 if (form.get("needs_review") == "1" or profile_ai_drafted) else 0
+        # Confidence indicator (2026-08): upsert_community_profile is a full
+        # replace on every save (see its own docstring), so this route
+        # decides each of the 12 tracked fields' value explicitly — the
+        # fresh model-reported value for a field just (re)drafted this save,
+        # else its own previous stored value carried forward unchanged (not
+        # cleared just because an unrelated field was regenerated).
+        ai_confidence_submitted = _ai_drafted_field_confidence(form)
+        confidence = {}
+        for f in COMMUNITY_CONFIDENCE_FIELDS:
+            if f in ai_drafted and f in ai_confidence_submitted:
+                confidence[f] = int(ai_confidence_submitted[f])
+            else:
+                confidence[f] = existing_profile.get(f"{f}_ai_confident")
         lib.upsert_community_profile(
             community_id,
             ideal_member=(form.get("ideal_member") or "").strip(),
@@ -13708,6 +13839,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             stage_focus=(form.get("stage_focus") or "").strip(),
             jobs_program=(form.get("jobs_program") or "").strip(),
             team_or_individual=(form.get("team_or_individual") or "").strip(),
+            confidence=confidence,
         )
         _record_ai_drafted_reviews(lib, request, "community", community_id, form)
     finally:
@@ -13731,8 +13863,13 @@ async def admin_communities_generate_profile(request: Request):
     if not (name and url):
         return JSONResponse({"ok": False, "error": "Name and URL are required."}, status_code=400)
 
+    lib = _lib()
+    try:
+        model = lib.get_enrich_model()
+    finally:
+        lib.close()
     from linklib.enrich import generate_community_profile
-    draft = generate_community_profile(name, url, existing=existing)
+    draft = generate_community_profile(name, url, existing=existing, model=model)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Profile generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -13770,6 +13907,7 @@ async def admin_communities_generate_profile(request: Request):
         "meeting_format": draft.meeting_format,
         "event_style": draft.event_style,
         "cpe_eligible": draft.cpe_eligible,
+        "confidence": draft.confidence,
     })
 
 
@@ -13789,6 +13927,7 @@ async def admin_communities_generate_listing(request: Request):
     lib = _lib()
     try:
         category_names = [cat["name"] for cat in lib.list_community_categories()]
+        model = lib.get_enrich_model()
     finally:
         lib.close()
 
@@ -13799,6 +13938,7 @@ async def admin_communities_generate_listing(request: Request):
         sponsorship_options=_COMMUNITY_SPONSORSHIP_TYPES,
         access_options=_COMMUNITY_ACCESS, format_options=_COMMUNITY_FORMAT,
         category_options=category_names,
+        model=model,
     )
     if draft is None:
         return JSONResponse({"ok": False, "error": "Listing generation is unavailable right now "
@@ -13941,7 +14081,8 @@ def _run_tool_research(tool_id: int) -> bool:
         if not tool:
             return False
         from linklib import enrich as enrich_mod
-        result = enrich_mod.generate_tool_agent_taxonomy(tool["name"], tool["url"], tool.get("description", ""))
+        result = enrich_mod.generate_tool_agent_taxonomy(
+            tool["name"], tool["url"], tool.get("description", ""), model=lib.get_enrich_model())
         if result is None:
             return False
         wrote_anything = False
@@ -14220,18 +14361,25 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
     _research_banner_html = ""
     if research_refreshed == "1":
-        # The "before marking it verified" clause only makes sense when
-        # there's actually something to mark: the taxonomy note flagged
-        # needs_verification. When the LLM reported high confidence, the
-        # flag is false and no "Mark verified" control renders anywhere on
-        # the page — so the banner shouldn't promise one either (this is the
-        # Phase G banner-bug fix; the legacy per-feature half of this
-        # conditional was removed along with the feature-drafting half of
-        # _run_tool_research in the Feature Taxonomy Phase 1b PR 2).
+        # Shrunk from a persistent green banner box to a small transient-
+        # looking status line (2026-08 design-consistency fix — see CLAUDE.md's
+        # "Agent taxonomy publish gate"/design-standard notes): the banner
+        # used to be the one field of the three (Description/Agent taxonomy/
+        # Competitive differentiation) with an extra, redundant instructional
+        # layer above its field — the other two only ever show a small
+        # "Drafted. Review before saving." status line next to their Generate
+        # button. This can't literally reuse that JS-driven qe-status span
+        # (it's a server-rendered post-redirect banner, not a live AJAX
+        # response), but it now matches that same small/unobtrusive visual
+        # weight instead of a persistent colored box — the actual
+        # badge/button/review-line right on the field is the real signal.
+        # The "before marking it verified" clause still only appears when
+        # there's actually something to mark (Phase G banner-bug fix,
+        # unchanged): needs_verification false means high LLM confidence and
+        # no "Mark verified" control anywhere on the page.
         _research_needs_review = bool(tool.get("agent_taxonomy_needs_verification"))
         _research_banner_html = (
-            '<p style="background:#d1fae5;color:#065f46;border-radius:10px;'
-            'padding:10px 16px;font-size:14px;margin:0 0 16px;">AI research refreshed—review the '
+            '<p style="color:var(--muted);font-size:13px;margin:0 0 10px;">Drafted. Review the '
             'agent taxonomy below'
             + (' before marking it verified.</p>' if _research_needs_review else '.</p>')
         )
@@ -14271,6 +14419,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             latest_differentiation_review,
         )
     )
+    _description_confidence_html = _confidence_indicator_html(tool.get("description_ai_confident"))
+    _differentiation_confidence_html = _confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -14300,6 +14450,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 {f'<p style="font-size:13px;color:var(--muted);margin:-4px 0 24px;">{meta_line}</p>' if meta_line else ''}
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
+  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
 
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
@@ -14375,6 +14526,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
           {_description_verify_action}
+          {_description_confidence_html}
           {_description_review_line_html}
         </div>
       </div>
@@ -14388,7 +14540,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         </div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Crawls the vendor's site to draft this note and the Feature rows below—runs automatically when a tool is added; use this button to re-run it after a vendor redesign.</p>
         {_research_banner_html}
-        <textarea name="agent_taxonomy_note" maxlength="1200" rows="4"
+        <textarea name="agent_taxonomy_note" maxlength="1200" rows="8"
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
           placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
         {_taxonomy_verify_action}
@@ -14435,10 +14587,11 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       </span>
     </div>
     <p id="diff-gen-err" style="display:none;"></p>
-    <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" maxlength="600" rows="3"
+    <textarea id="tool-differentiation" name="competitive_differentiation" form="tool-edit-form" maxlength="600" rows="5"
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="e.g. &quot;Best for finance teams that want an AI-native build from day one&mdash;trade-off is a smaller ecosystem than the incumbents.&quot;">{_esc(tool.get('competitive_differentiation') or '')}</textarea>
     {_differentiation_verify_action}
+    {_differentiation_confidence_html}
     {_differentiation_review_line_html}
   </div>
 </div>
@@ -14524,6 +14677,7 @@ async function generateDifferentiation(toolId, textareaId, statusId, errBoxId, h
     if (!r.ok || !d.ok) throw new Error(d.error || 'Generation failed');
     document.getElementById(textareaId).value = d.competitive_differentiation;
     markAiDrafted('competitive_differentiation');
+    markAiConfidence('competitive_differentiation', d.confident);
     status.textContent = d.low_confidence
       ? 'Drafted. No competitors curated yet, so this is weaker than it could be—review carefully.'
       : 'Drafted. Review before saving.';
@@ -14603,8 +14757,23 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     # itself a confirmation, same convention update_tool_agent_taxonomy
     # already uses.
     ai_drafted = _ai_drafted_field_names(form)
+    ai_confidence = _ai_drafted_field_confidence(form)
     description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
     competitive_differentiation_needs_verification = 1 if "competitive_differentiation" in ai_drafted else 0
+    # Confidence indicator (2026-08): only a real value when the field is
+    # actually a fresh draft this save — same "field also in ai_drafted"
+    # guard the comment on _ai_drafted_field_confidence calls out, so a
+    # stray/stale confidence pair from a since-abandoned Generate click on a
+    # field the admin then hand-edited instead never gets written.
+    description_confident = (
+        int(ai_confidence["description"]) if "description" in ai_drafted and "description" in ai_confidence
+        else None
+    )
+    differentiation_confident = (
+        int(ai_confidence["competitive_differentiation"])
+        if "competitive_differentiation" in ai_drafted and "competitive_differentiation" in ai_confidence
+        else None
+    )
     lib = _lib()
     try:
         name_dup = lib.find_tool_name_duplicate(name, exclude_id=tool_id)
@@ -14612,9 +14781,11 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         promoted=promoted, vendor_email=vendor_email,
                         warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
                         summary=summary,
-                        description_needs_verification=description_needs_verification)
+                        description_needs_verification=description_needs_verification,
+                        description_ai_confident=description_confident)
         lib.update_tool_differentiation(tool_id, competitive_differentiation,
-                                        needs_verification=competitive_differentiation_needs_verification)
+                                        needs_verification=competitive_differentiation_needs_verification,
+                                        ai_confident=differentiation_confident)
         lib.update_tool_agent_taxonomy(tool_id, agent_taxonomy_note)
         lib.update_tool_screenshot_url(tool_id, screenshot_url)
         lib.update_tool_app_screenshot_source(tool_id, app_screenshot_source_url)
@@ -14954,8 +15125,13 @@ async def admin_tools_generate_description(request: Request):
     if not (name and url):
         return JSONResponse({"ok": False, "error": "Name and URL are required."}, status_code=400)
 
+    lib = _lib()
+    try:
+        model = lib.get_enrich_model()
+    finally:
+        lib.close()
     from linklib.enrich import generate_tool_description
-    draft = generate_tool_description(name, url)
+    draft = generate_tool_description(name, url, model=model)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Description generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -14968,7 +15144,7 @@ async def admin_tools_generate_description(request: Request):
         lib.close()
 
     return JSONResponse({"ok": True, "description": draft.description, "summary": draft.summary,
-                         "low_confidence": draft.low_confidence})
+                         "low_confidence": draft.low_confidence, "confident": draft.confident})
 
 
 @app.post("/admin/tools/software/{tool_id}/generate-differentiation")
@@ -14985,11 +15161,12 @@ def admin_tools_generate_differentiation(request: Request, tool_id: int):
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         competitor_names = [c["name"] for c in lib.list_tool_competitors(tool_id)]
+        model = lib.get_enrich_model()
     finally:
         lib.close()
 
     from linklib.enrich import generate_tool_differentiation
-    draft = generate_tool_differentiation(tool["name"], tool["url"], tool.get("description", ""), competitor_names)
+    draft = generate_tool_differentiation(tool["name"], tool["url"], tool.get("description", ""), competitor_names, model=model)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -15002,7 +15179,7 @@ def admin_tools_generate_differentiation(request: Request, tool_id: int):
         lib.close()
 
     return JSONResponse({"ok": True, "competitive_differentiation": draft.competitive_differentiation,
-                         "low_confidence": draft.low_confidence})
+                         "low_confidence": draft.low_confidence, "confident": draft.confident})
 
 
 @app.post("/admin/tools/software/{tool_id}/competitors/generate-matches")
@@ -15020,6 +15197,7 @@ def admin_tools_generate_competitor_matches(request: Request, tool_id: int):
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         candidates = lib.suggest_tool_competitors(tool_id, limit=8)
+        model = lib.get_enrich_model()
     finally:
         lib.close()
 
@@ -15027,6 +15205,7 @@ def admin_tools_generate_competitor_matches(request: Request, tool_id: int):
     result = generate_competitor_matches(
         tool["name"], tool.get("description", ""),
         [{"id": c["id"], "name": c["name"], "description": c.get("description", "")} for c in candidates],
+        model=model,
     )
     if result is None:
         return JSONResponse({"ok": False, "error": "Generation is unavailable right now "
@@ -17815,6 +17994,7 @@ _ADMIN_GROUPS = [
     ("System", "Accounts, health, and plumbing—no public-nav counterpart, so this stays its own catch-all rather than folding into one of the three above.", [
         ("/admin/users",           "Users",               "Create and manage member accounts for the gated sections."),
         ("/admin/checks",          "Checks",              "Live status of the automated checks that guard the site."),
+        ("/admin/system/model",    "AI model",            "Which Claude model powers enrichment&mdash;Description, Agent taxonomy, Competitive differentiation, Community profiles, and article summaries&mdash;switchable live, no redeploy."),
         ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
@@ -17913,6 +18093,8 @@ _OPEN_SOURCE = [
     ("Built & kept tidy", "The tools that make and maintain the site—including a couple we leaned on right here.", [
         ("pytest", "pytest", "MIT", "https://pytest.org",
          "Runs the test suite that guards every change."),
+        ("pytest-xdist", "pytest-xdist", "MIT", "https://github.com/pytest-dev/pytest-xdist",
+         "Spreads the test suite across CPUs in CI so it doesn't run single-threaded."),
         ("pyflakes", "pyflakes", "MIT", "https://github.com/PyCQA/pyflakes",
          "Keeps the wire clean—catches unused imports and dead code on every push (just wired into CI)."),
         ("Pillow", "pillow", "HPND", "https://python-pillow.org",
@@ -19168,6 +19350,164 @@ def admin_exa_settings_test_connection(request: Request):
     return JSONResponse(test_exa_connection())
 
 
+def _enrich_model_label(model_id: str) -> str:
+    """Friendly label for a model id, from the same curated registry every
+    picker uses — falls back to the raw id for a model that's retired from
+    the registry or was set via the LINKLIB_ENRICH_MODEL env var fallback
+    rather than picked from the dropdown."""
+    from linklib.models import models_for
+    for m in models_for(blurb="short", allow_new=False):
+        if m["id"] == model_id:
+            return m["label"]
+    return model_id
+
+
+@app.get("/admin/system/model", response_class=HTMLResponse)
+def admin_system_model(request: Request):
+    """AI model selection (2026-08) — a live, DB-backed choice of which
+    Claude model powers linklib.enrich's generation calls (Description,
+    Agent taxonomy, Competitive differentiation, Community profile fields,
+    the basic community listing auto-fill, article enrichment), same
+    reasoning and same page pattern as /admin/exa-settings' kill switch:
+    an env var (LINKLIB_ENRICH_MODEL) needs a redeploy to change, a
+    DB-stored setting doesn't. Options come from linklib.models.models_for
+    — the same curated-registry-reconciled-with-the-live-Models-API list
+    every other model picker on the site already uses, so a model that's
+    retired there drops off here too with no separate list to keep in sync.
+    Defaults to the deepest/highest-quality curated model (quality over
+    cost for this use case — see Library._DEFAULT_ENRICH_MODEL) until an
+    admin picks something else."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+
+    from linklib.models import models_for
+    lib = _lib()
+    try:
+        current = lib.get_enrich_model()
+    finally:
+        lib.close()
+    options = models_for(blurb="enrich", allow_new=False)
+    known_ids = {m["id"] for m in options}
+    if current not in known_ids:
+        # A previously-selected model retired from the live registry (or a
+        # stale LINKLIB_ENRICH_MODEL env-var fallback) — surface it anyway,
+        # labeled plainly, so the dropdown reflects what's actually running
+        # rather than silently defaulting the select to the first option.
+        options = options + [{"id": current, "label": current, "blurb": "Currently selected—no longer in the curated list"}]
+
+    option_html = "".join(
+        f'<option value="{_esc(m["id"])}"{" selected" if m["id"] == current else ""}>{_esc(m["label"])} &mdash; {_esc(m["blurb"])}</option>'
+        for m in options
+    )
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>AI model</h1>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Which Claude model runs every enrichment call site&mdash;tool Description/Short summary, Agent taxonomy, Competitive differentiation, Community profile fields, the basic community-listing auto-fill, and article-save enrichment. This is a live setting, not an environment variable&mdash;changing it takes effect immediately, no redeploy. Defaults to the deepest/highest-quality curated model (quality over cost for this use case). FP&amp;A Buddy's own Q&amp;A model is separate and unaffected&mdash;see <a href="/admin/system/how-fpa-buddy-works" style="color:var(--accent);">How FP&amp;A Buddy works</a>.</p>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrichment model</div>
+<select id="model-select" onchange="saveModel()" style="width:100%;max-width:520px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+{option_html}
+</select>
+<span id="model-select-status" style="font-size:13px;color:var(--muted);margin-top:8px;display:inline-block;"></span>
+<p style="font-size:12px;color:var(--muted);margin:12px 0 0;">Curated from a fixed list (`linklib/models.py`), not auto-surfaced&mdash;check Anthropic's own current model lineup and recommendations before assuming this list is up to date: <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noopener" style="color:var(--accent);">Anthropic model overview &#8599;</a></p>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;">
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Test connection</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Fires one real, minimal call against the currently selected model to confirm it actually works. Manual and on-demand only&mdash;never runs automatically.</p>
+<div style="display:flex;gap:10px;align-items:center;">
+<button id="model-test-btn" onclick="testModelConnection()" class="btn" style="font-size:14px;padding:9px 22px;">Test connection</button>
+<span id="model-test-status" style="font-size:13px;color:var(--muted);"></span>
+</div>
+<div id="model-test-result" style="display:none;margin-top:14px;font-size:14px;"></div>
+</div>
+
+<script>
+async function saveModel() {{
+  var sel = document.getElementById('model-select');
+  var status = document.getElementById('model-select-status');
+  var model = sel.value;
+  sel.disabled = true;
+  status.textContent = 'Saving…';
+  try {{
+    var r = await fetch('/admin/system/model/save', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{model: model}})}});
+    if (!r.ok) throw new Error();
+    status.textContent = 'Saved.';
+    status.style.color = '#065f46';
+  }} catch(e) {{
+    status.textContent = 'Save failed—try again.';
+    status.style.color = '#b91c1c';
+  }} finally {{
+    sel.disabled = false;
+  }}
+}}
+
+async function testModelConnection() {{
+  var btn = document.getElementById('model-test-btn');
+  var status = document.getElementById('model-test-status');
+  var box = document.getElementById('model-test-result');
+  btn.disabled = true; btn.textContent = 'Testing…';
+  status.textContent = '';
+  box.style.display = 'none';
+  try {{
+    var model = document.getElementById('model-select').value;
+    var r = await fetch('/admin/system/model/test-connection', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{model: model}})}});
+    var d = await r.json();
+    box.style.display = 'block';
+    if (d.ok) {{
+      box.innerHTML = '<span style="color:#065f46;">&#10003; Connected.</span> Cost of this test: $' + d.cost_usd.toFixed(4);
+    }} else {{
+      box.innerHTML = '<span style="color:#b91c1c;">&#10007; Failed:</span> ' + (d.error || 'Unknown error');
+    }}
+  }} catch(e) {{
+    box.style.display = 'block';
+    box.innerHTML = '<span style="color:#b91c1c;">&#10007; Request failed — try again.</span>';
+  }} finally {{
+    btn.disabled = false; btn.textContent = 'Test connection';
+  }}
+}}
+</script>
+</div>"""
+    return HTMLResponse(_page("AI model—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/system/model/save")
+async def admin_system_model_save(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    model = (payload.get("model") or "").strip()
+    if not model:
+        return JSONResponse({"ok": False, "error": "No model given."}, status_code=400)
+    lib = _lib()
+    try:
+        lib.set_enrich_model(model)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "model": model})
+
+
+@app.post("/admin/system/model/test-connection")
+async def admin_system_model_test_connection(request: Request):
+    """Fire one real, minimal Claude call to verify the given model id
+    actually works — manual/on-demand only, never a background job."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    lib = _lib()
+    try:
+        model = (payload.get("model") or "").strip() or lib.get_enrich_model()
+    finally:
+        lib.close()
+    from linklib.enrich import test_model_connection
+    return JSONResponse(test_model_connection(model))
+
+
 @app.get("/admin/checks", response_class=HTMLResponse)
 def admin_checks(request: Request):
     if not _is_authed(request):
@@ -19475,14 +19815,21 @@ def admin_page(request: Request):
         )
         flat_hrefs = badge_hrefs if badge_hrefs is not None else [item[0] for item in items if not isinstance(item, str)]
         group_badge_html = _group_badge(task_counts, flat_hrefs)
-        # Inbox starts expanded — everything else is click-to-expand.
+        # Inbox starts expanded, same as always. Any other group/sub-group
+        # carrying a nonzero badge also starts expanded — a real, unresolved
+        # item (e.g. a name-duplicate pair) sitting inside a collapsed
+        # sub-group, with only a small aggregate number on a parent group's
+        # summary to hint at it, is exactly how LiveFlow/Liveflow and the
+        # Runway pair went unnoticed even though detection and badge counting
+        # were both correct the whole time — see CLAUDE.md. A nonzero badge
+        # is a call to action, not just a count to glance at.
         return _disclosure_group(
             gname,
             f'<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted);">{gdesc}</p>'
             f'<div style="display:grid;gap:14px;">{cards}</div>',
             count_label=f'{len(items)} {"tool" if len(items) == 1 else "tools"}',
             badge_html=group_badge_html,
-            open=(gname == "Inbox"),
+            open=(gname == "Inbox" or bool(group_badge_html)),
             nested=nested,
         )
 
@@ -22271,6 +22618,7 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
         by_month = lib.overhead_cost_by_month()
         usage_total = sum(s["total_cost"] for s in breakdown)
         usage_month_cost = sum(s["this_month_cost"] for s in breakdown)
+        active_enrich_model = lib.get_enrich_model()
     finally:
         lib.close()
 
@@ -22382,7 +22730,8 @@ def admin_overhead_spend(request: Request, category: str = "", msg: str = "", er
 
 <h2 style="font-size:16px;margin:0 0 4px;">Toolbox usage</h2>
 <p style="color:var(--muted);margin:0 0 4px;">Internal cost attribution for enrichment, embeddings, and FP&amp;A Buddy queries&mdash;computed from token counts and model pricing, not billed amounts.</p>
-<p style="color:var(--muted);margin:0 0 18px;font-style:italic;">Estimate only, for understanding usage patterns&mdash;this won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
+<p style="color:var(--muted);margin:0 0 8px;font-style:italic;">Estimate only, for understanding usage patterns&mdash;this won&rsquo;t tie out precisely to the Anthropic/OpenAI rows above (different calculation basis: computed token cost vs. actual billed amount, which includes tax and whatever else the vendor's bill includes). Never summed into Vendor totals.</p>
+<p style="color:var(--muted);margin:0 0 18px;">Active enrichment model: <strong style="color:var(--navy);">{_esc(_enrich_model_label(active_enrich_model))}</strong> &mdash; model choice directly affects the Enrichment row below. <a href="/admin/system/model" style="color:var(--accent);">Change it &rarr;</a></p>
 
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
   <div style="flex:1 1 460px;display:flex;flex-direction:column;gap:16px;">
