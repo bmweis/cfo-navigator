@@ -820,14 +820,19 @@ def _confidence_indicator_html(confident: object) -> str:
     Displays PERMANENTLY (2026-08 policy revision — originally gated on the
     field/profile still being unverified; Brian's explicit call: verification
     status and confidence are independent facts and should both be visible
-    at all times, side by side, regardless of review state) — the only
-    condition that hides it is `confident is None`, meaning no generation
-    has ever reported a signal for this field (a pre-existing row, or a
-    field that's never been through Generate), which renders nothing rather
-    than a misleading default. `confident` is the raw
-    `description_ai_confident`/`competitive_differentiation_ai_confident`/
-    `agent_taxonomy_ai_confident`/`{community_field}_ai_confident` column
-    value.
+    at all times, side by side, regardless of review state) and unconditionally
+    — a field with the capability always renders SOME state, never nothing.
+    `confident` is the raw `description_ai_confident`/
+    `competitive_differentiation_ai_confident`/`agent_taxonomy_ai_confident`/
+    `{community_field}_ai_confident` column value, and there are three
+    possible states, not two: `True` -> "Yes", `False` -> "No", and
+    `None` -> "Not yet assessed" (2026-08 follow-up — `confident is None`
+    used to render nothing at all, on the theory that "no signal ever
+    reported" wasn't worth a line; a live check on a pre-confidence-feature
+    record found that silence reads as "broken," the exact ambiguity the
+    confidence line itself was built to remove for verification status, so
+    NULL now gets its own distinct, neutral-colored state instead of being
+    hidden).
 
     Named "Claude confidence," not just "AI confidence" or a specific model
     id — every AI-generation call site in linklib/enrich.py is confirmed to
@@ -836,7 +841,8 @@ def _confidence_indicator_html(confident: object) -> str:
     (see /admin/system/model) and shouldn't be hardcoded into copy that
     would silently go stale the next time the selection changes."""
     if confident is None:
-        return ""
+        return ('<p style="font-size:12px;color:var(--muted);margin:4px 0 0;font-weight:500;">'
+                'Claude confidence: Not yet assessed</p>')
     value = "Yes" if bool(int(confident)) else "No"
     # Sanctioned pairs only (brand_check.py's AUX_COLORS) — the same success
     # green and advisory amber already used elsewhere on this exact page
@@ -14531,6 +14537,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           {_description_verify_action}
           {_description_confidence_html}
           {_description_review_line_html}
+          <button type="submit" form="tool-edit-form" name="save_action" value="continue"
+            class="tool-admin-btn" style="margin-top:8px;">Save and continue</button>
         </div>
       </div>
       <div id="gen-host-tool-taxonomy">

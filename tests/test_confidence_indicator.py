@@ -250,10 +250,13 @@ def test_confidence_line_still_shown_once_verified(env):
     assert "Claude confidence: No" in r.text
 
 
-def test_confidence_line_hidden_when_no_signal_ever_reported(env):
-    """The one condition that still hides the line: no generation has ever
-    reported a confidence value for this field (a pre-existing row, or a
-    field never run through Generate) — confident is None, not False."""
+def test_confidence_line_shows_not_yet_assessed_when_no_signal_ever_reported(env):
+    """2026-08 follow-up (a live check on Abacum's Description, which
+    predates this column by three days, found the field silently showing
+    nothing — indistinguishable from broken): confident is None (no
+    generation has ever reported a value — a pre-existing row, or a field
+    never run through Generate) still renders a line, a third distinct
+    state rather than being hidden."""
     from linklib.db import Library
     lib_ = Library(os.environ["LINKLIB_DB"])
     lib_.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
@@ -262,7 +265,7 @@ def test_confidence_line_hidden_when_no_signal_ever_reported(env):
     client = _client(env)
     _login(client)
     r = client.get("/tools/software/runway/edit")
-    assert "Claude confidence" not in r.text
+    assert "Claude confidence: Not yet assessed" in r.text
 
 
 # -- Agent taxonomy confidence line (2026-08 follow-up) ----------------------
@@ -295,7 +298,7 @@ def test_agent_taxonomy_confidence_line_shown_on_edit_page_regardless_of_verific
     assert "Claude confidence: No" in r.text
 
 
-def test_agent_taxonomy_confidence_line_hidden_when_no_signal_ever_reported(env):
+def test_agent_taxonomy_confidence_line_shows_not_yet_assessed_when_no_signal_ever_reported(env):
     from linklib.db import Library
     lib_ = Library(os.environ["LINKLIB_DB"])
     tid = lib_.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
@@ -305,7 +308,7 @@ def test_agent_taxonomy_confidence_line_hidden_when_no_signal_ever_reported(env)
     client = _client(env)
     _login(client)
     r = client.get("/tools/software/runway/edit")
-    assert "Claude confidence" not in r.text
+    assert "Claude confidence: Not yet assessed" in r.text
 
 
 def test_agent_taxonomy_publish_gate_unaffected_by_confidence_display_change(env):

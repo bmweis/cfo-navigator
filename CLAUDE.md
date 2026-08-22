@@ -592,6 +592,43 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   investigation produced — that gate is a different mechanism from the
   admin-edit-page confidence-display gate the other two fields had, and only
   the latter was ever in scope for the permanent-display policy change.
+- **Confidence indicator — a third "Not yet assessed" state for NULL
+  (2026-08 follow-up).** Live testing on Abacum's own edit page (its
+  Description predates the confidence column by three days, so
+  `description_ai_confident` is genuinely `NULL`) found the confidence line
+  rendering nothing at all for a NULL value — confirmed as the intended
+  original behavior (`confident is None` returned `""`), but wrong on the
+  same reasoning the confidence-indicator feature itself was built on:
+  silence is indistinguishable from broken. `_confidence_indicator_html`
+  now renders three states, not two — `True` → "Yes", `False` → "No",
+  `None` → "Not yet assessed" (a neutral `var(--muted)` color, no sanctioned
+  green/amber pair fits "no signal") — so every field with the capability
+  always shows some state. This is a superset change to the shared helper,
+  so it applies uniformly to all three surfaces (tool Description/
+  Differentiation/Agent taxonomy, all 12 Community profile fields) with no
+  per-field code — every "hidden when no signal" test across
+  `test_confidence_indicator.py`/`test_community_confidence_indicator.py`
+  was renamed and rewritten to assert the new text instead of absence.
+- **"Save and continue" near Description (tool-edit-consistency item #7,
+  2026-08 follow-up) — the mechanism existed, the second button didn't.**
+  `save_action=continue` (redirect back to the same tool's edit page with
+  fresh data, instead of the admin list) was already wired up and already
+  had a button — but only in the page-bottom action row alongside "Save
+  changes," on a Software edit page that's long enough (Business summary,
+  Agent taxonomy, Screenshots, Key features, Competitors) that reaching it
+  means scrolling past everything else. A live check on Abacum's edit page
+  found no second button near Description and no PR summary mentioning one
+  shipped there — approved item #7 was specifically a second button placed
+  right after Description, not a relocation of the existing one. Added:
+  a second `<button form="tool-edit-form" name="save_action"
+  value="continue">`, same form/name/value as the bottom one, right after
+  Description's verify action/confidence line/review line. No route change
+  — `admin_tools_edit_submit` already branches on `save_action=="continue"`
+  regardless of which button posted it. Scoped to the Software edit page
+  only, matching what was actually reported (Abacum); the Community profile
+  edit page's own "Save and continue" (a from-scratch, separate mechanism —
+  see `admin_community_profile_submit`) already existed at the bottom of
+  that page too and wasn't part of this report, so it's untouched.
 - **Phase P — edit-page layout reorg, and why `tool_competitors`/
   `community_competitors` did NOT get renamed alongside `differentiation_note`.**
   Both Software's and Communities' edit pages were reorganized into labeled
