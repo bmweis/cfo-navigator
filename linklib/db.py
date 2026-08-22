@@ -1986,6 +1986,24 @@ class Library:
             "ALTER TABLE community_profiles ADD COLUMN notable_members_ai_confident INTEGER",
             "ALTER TABLE community_profiles ADD COLUMN public_criticism_ai_confident INTEGER",
             "ALTER TABLE community_profiles ADD COLUMN verdict_summary_ai_confident INTEGER",
+            # Confidence indicator, Agent taxonomy (2026-08 follow-up) — the
+            # same genuine self-reported signal as the two tools columns
+            # above, extended to Agent taxonomy, the field this whole effort
+            # started from (the Abacum fabrication finding). Until now
+            # generate_tool_agent_taxonomy's own "confident" JSON key only
+            # ever drove agent_taxonomy_needs_verification
+            # (needs_verification = not confident) — a real signal, but never
+            # stored on its own, so it couldn't get the same permanent
+            # "Claude confidence: Yes/No" display line Description/
+            # Differentiation have. NULL means no signal yet, same convention
+            # as every other *_ai_confident column. Deliberately NOT wired
+            # into the public publish gate (agent_taxonomy_needs_verification
+            # still gates visitor visibility — see CLAUDE.md's "Agent
+            # taxonomy publish gate" bullet, unchanged by this column) or the
+            # "Mark verified" badge/button (_narrative_verify_widget, also
+            # unchanged) — this is a second, independent admin-facing fact,
+            # not a replacement for either existing mechanism.
+            "ALTER TABLE tools ADD COLUMN agent_taxonomy_ai_confident INTEGER",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4349,13 +4367,13 @@ class Library:
         taxonomy, Differentiation has no separate Refresh route — Generate
         is AJAX-only and this Save is the only place a draft ever gets
         persisted. ai_confident (2026-08, confidence indicator) mirrors
-        needs_verification's own contract exactly — a real value only from
+        needs_verification's own write contract — a real value only from
         the edit-submit route on a fresh draft this session, None everywhere
-        else — but it's read by the UI only while needs_verification=1
-        (see CLAUDE.md): once a human confirms the field, the model's
-        original self-report stops mattering, so there's no need to clear
-        a stale value on every unrelated resave the way needs_verification
-        itself must be."""
+        else — but is a DIFFERENT, independent fact from needs_verification:
+        the UI displays it permanently regardless of needs_verification's
+        value (2026-08 policy revision — see CLAUDE.md's "Confidence
+        indicator" bullet), so there's no need to clear a stale value on
+        every unrelated resave the way needs_verification itself must be."""
         self.conn.execute(
             "UPDATE tools SET competitive_differentiation=?, competitive_differentiation_needs_verification=?, "
             "competitive_differentiation_ai_confident=COALESCE(?, competitive_differentiation_ai_confident), "
@@ -4394,7 +4412,8 @@ class Library:
         self.conn.commit()
 
     def set_tool_agent_taxonomy_draft(self, tool_id: int, agent_taxonomy_note: str,
-                                      needs_verification: int = 1) -> None:
+                                      needs_verification: int = 1,
+                                      ai_confident: Optional[int] = None) -> None:
         """Records an LLM-drafted agent-taxonomy summary (automated research —
         either the auto-run-on-add background task or the on-demand refresh)
         as unconfirmed by default. Only writes when the tool doesn't already
@@ -4402,11 +4421,18 @@ class Library:
         on-demand "Refresh" action passes needs_verification the same way but
         the caller decides whether to call this at all — see the refresh
         route, which always overwrites; the auto-on-add path only calls this
-        for a brand-new tool that has nothing yet)."""
+        for a brand-new tool that has nothing yet).
+
+        ai_confident (2026-08 follow-up, confidence indicator) is the raw
+        "confident" self-report from the same generation call —
+        COALESCE-written so a caller that somehow omits it (there isn't one
+        today; both trigger points always have a real AgentTaxonomyResult)
+        can't accidentally blank out a previously-recorded signal."""
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=?, "
+            "agent_taxonomy_ai_confident=COALESCE(?, agent_taxonomy_ai_confident), "
             "updated_at=? WHERE id=?",
-            (agent_taxonomy_note.strip(), needs_verification, _now(), tool_id),
+            (agent_taxonomy_note.strip(), needs_verification, ai_confident, _now(), tool_id),
         )
         self.conn.commit()
 

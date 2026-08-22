@@ -66,8 +66,19 @@ def test_generate_tool_agent_taxonomy_parses_result(monkeypatch):
     assert result is not None
     assert "scenario modeling" in result.agent_taxonomy_note
     assert result.agent_taxonomy_needs_verification is False   # confident: true
+    assert result.confident is True   # (2026-08 follow-up) same signal, stored separately
     assert result.cost_usd > 0
     assert result.low_confidence is False   # pricing page fetched successfully
+
+
+def test_generate_tool_agent_taxonomy_parses_confident_false(monkeypatch):
+    _mock_fetch_page(monkeypatch, {"https://runway.com": "Homepage content about Runway."})
+    _mock_anthropic(monkeypatch, '{"summary": "Unclear agent framing.", "confident": false}')
+
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+    assert result is not None
+    assert result.confident is False
+    assert result.agent_taxonomy_needs_verification is True
 
 
 def test_generate_tool_agent_taxonomy_low_confidence_when_no_pages_fetch(monkeypatch):

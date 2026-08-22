@@ -596,6 +596,12 @@ Existing directory description: {description}
 class AgentTaxonomyResult:
     agent_taxonomy_note: str = ""
     agent_taxonomy_needs_verification: bool = True
+    confident: bool = False   # the model's own self-reported certainty (see prompt above) —
+                               # same raw signal agent_taxonomy_needs_verification is derived
+                               # from (not confident), stored separately as of the 2026-08
+                               # follow-up so the UI can show a genuine, permanent "Claude
+                               # confidence: Yes/No" line matching Description/Differentiation,
+                               # independent of needs_verification's own review-status meaning.
     low_confidence: bool = False   # no page content could be fetched at all
     model: str = ""
     input_tokens: int = 0
@@ -663,6 +669,7 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
         return AgentTaxonomyResult(
             agent_taxonomy_note=str(data.get("summary") or "").strip(),
             agent_taxonomy_needs_verification=not bool(data.get("confident")),
+            confident=bool(data.get("confident")),
             low_confidence=low_confidence, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )

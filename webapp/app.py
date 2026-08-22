@@ -826,7 +826,8 @@ def _confidence_indicator_html(confident: object) -> str:
     field that's never been through Generate), which renders nothing rather
     than a misleading default. `confident` is the raw
     `description_ai_confident`/`competitive_differentiation_ai_confident`/
-    `{community_field}_ai_confident` column value.
+    `agent_taxonomy_ai_confident`/`{community_field}_ai_confident` column
+    value.
 
     Named "Claude confidence," not just "AI confidence" or a specific model
     id — every AI-generation call site in linklib/enrich.py is confirmed to
@@ -14090,6 +14091,7 @@ def _run_tool_research(tool_id: int) -> bool:
             lib.set_tool_agent_taxonomy_draft(
                 tool_id, result.agent_taxonomy_note,
                 needs_verification=int(result.agent_taxonomy_needs_verification),
+                ai_confident=int(result.confident),
             )
             wrote_anything = True
         if wrote_anything or result.cost_usd:
@@ -14421,6 +14423,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
     )
     _description_confidence_html = _confidence_indicator_html(tool.get("description_ai_confident"))
     _differentiation_confidence_html = _confidence_indicator_html(tool.get("competitive_differentiation_ai_confident"))
+    _taxonomy_confidence_html = _confidence_indicator_html(tool.get("agent_taxonomy_ai_confident"))
 
     _screenshot_preview_html = '<p style="font-size:13px;color:var(--muted);margin:0;">No screenshot yet.</p>'
     if (tool.get("screenshot_url") or "").strip():
@@ -14544,6 +14547,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
           placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
         {_taxonomy_verify_action}
+        {_taxonomy_confidence_html}
         {_taxonomy_review_line_html}
       </div>
     </div>

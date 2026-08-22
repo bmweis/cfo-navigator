@@ -563,6 +563,35 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   there's no all-or-nothing flattening to worry about — each field always
   shows its own real confidence value independent of the profile's review
   status.
+- **Confidence indicator, Agent taxonomy follow-up (2026-08) — the same
+  permanent "Claude confidence: Yes/No" line, added to the field this whole
+  effort started from (the Abacum finding).** Agent taxonomy already had a
+  `"confident"` self-report in `generate_tool_agent_taxonomy`'s JSON
+  response, but it was never stored on its own — it only ever fed
+  `agent_taxonomy_needs_verification` (`needs_verification = not
+  confident`), a review-status flag, not a display fact. A new
+  `tools.agent_taxonomy_ai_confident` column (same NULL-means-no-signal,
+  COALESCE-write convention as `description_ai_confident`/
+  `competitive_differentiation_ai_confident`) now stores the raw signal
+  separately, written by `set_tool_agent_taxonomy_draft` alongside every
+  fresh research draft, and rendered via the same `_confidence_indicator_html`
+  helper — permanent, never gated on verification state, exactly like
+  Description/Differentiation. **Deliberately does NOT touch either of
+  Agent taxonomy's two pre-existing `needs_verification`-driven mechanisms**,
+  both of which stay exactly as they were: the `_narrative_verify_widget`
+  "Needs verification" badge/"Mark verified" button on the edit page (this
+  still disappears once verified, same as it always has — only Description/
+  Differentiation's confidence LINE is what became permanent, not every
+  verification-status UI element on every field), and — more importantly —
+  the public profile page's Abacum-fix publish gate, which still hides an
+  unverified/low-confidence note from visitors entirely and shows it to an
+  admin only, explicitly labeled "hidden from visitors." Flagging this
+  distinction explicitly rather than silently narrowing scope: an instruction
+  to "remove the gate" here could be misread as removing that publish gate
+  too, which would undo the actual anti-fabrication fix the Abacum
+  investigation produced — that gate is a different mechanism from the
+  admin-edit-page confidence-display gate the other two fields had, and only
+  the latter was ever in scope for the permanent-display policy change.
 - **Phase P — edit-page layout reorg, and why `tool_competitors`/
   `community_competitors` did NOT get renamed alongside `differentiation_note`.**
   Both Software's and Communities' edit pages were reorganized into labeled

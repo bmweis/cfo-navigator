@@ -107,6 +107,37 @@ def test_new_tool_has_no_confidence_signal_by_default(lib):
     tool = lib.get_tool(tid)
     assert tool["description_ai_confident"] is None
     assert tool["competitive_differentiation_ai_confident"] is None
+    assert tool["agent_taxonomy_ai_confident"] is None
+
+
+def test_set_tool_agent_taxonomy_draft_persists_ai_confident(lib):
+    """2026-08 follow-up — Agent taxonomy's own genuine self-reported
+    confidence, stored separately from agent_taxonomy_needs_verification
+    (which it used to only ever drive, never persist on its own)."""
+    tid = lib.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(tid, "Uses an AI agent for X.",
+                                       needs_verification=0, ai_confident=1)
+    assert lib.get_tool(tid)["agent_taxonomy_ai_confident"] == 1
+
+    # A caller that omits ai_confident (None) leaves the column alone —
+    # same COALESCE contract as every other *_ai_confident column.
+    lib.set_tool_agent_taxonomy_draft(tid, "Uses an AI agent for X, revised.",
+                                       needs_verification=1)
+    assert lib.get_tool(tid)["agent_taxonomy_ai_confident"] == 1
+
+
+def test_update_tool_agent_taxonomy_leaves_ai_confident_untouched(lib):
+    """A hand-edit/save through update_tool_agent_taxonomy (the "editing is
+    itself a confirmation" path) doesn't reference ai_confident at all —
+    the model's prior self-report about the pre-edit text stays on the
+    row, same as description_ai_confident surviving an unrelated resave."""
+    tid = lib.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(tid, "Original note.", needs_verification=1, ai_confident=0)
+    lib.update_tool_agent_taxonomy(tid, "Brian's hand-edited note.")
+    tool = lib.get_tool(tid)
+    assert tool["agent_taxonomy_note"] == "Brian's hand-edited note."
+    assert tool["agent_taxonomy_needs_verification"] == 0
+    assert tool["agent_taxonomy_ai_confident"] == 0
 
 
 # -- Admin edit-submit route: confidence only saved for a fresh draft -------
@@ -232,3 +263,72 @@ def test_confidence_line_hidden_when_no_signal_ever_reported(env):
     _login(client)
     r = client.get("/tools/software/runway/edit")
     assert "Claude confidence" not in r.text
+
+
+# -- Agent taxonomy confidence line (2026-08 follow-up) ----------------------
+# Same permanent-display treatment as Description/Differentiation, added to
+# the field this whole effort started from (the Abacum finding). Deliberately
+# does NOT touch agent_taxonomy_needs_verification's two existing mechanisms:
+# the "Mark verified" badge/button on this same edit page, and the public
+# profile page's publish gate (hides an unverified note from visitors
+# entirely) — both stay exactly as they were before this change. This is a
+# second, independent admin-facing fact, not a replacement for either.
+
+def test_agent_taxonomy_confidence_line_shown_on_edit_page_regardless_of_verification(env):
+    from linklib.db import Library
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    tid = lib_.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
+    lib_.set_tool_agent_taxonomy_draft(tid, "Uses an AI agent for X.",
+                                       needs_verification=1, ai_confident=0)
+    lib_.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get("/tools/software/runway/edit")
+    assert "Claude confidence: No" in r.text
+
+    # Mark verified — the badge/button disappear, the confidence line stays.
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    lib_.mark_tool_agent_taxonomy_verified(tid)
+    lib_.close()
+    r = client.get("/tools/software/runway/edit")
+    assert "Claude confidence: No" in r.text
+
+
+def test_agent_taxonomy_confidence_line_hidden_when_no_signal_ever_reported(env):
+    from linklib.db import Library
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    tid = lib_.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
+    lib_.update_tool_agent_taxonomy(tid, "Brian wrote this by hand, never generated.")
+    lib_.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get("/tools/software/runway/edit")
+    assert "Claude confidence" not in r.text
+
+
+def test_agent_taxonomy_publish_gate_unaffected_by_confidence_display_change(env):
+    """The confidence line is admin-edit-page-only. The public profile page's
+    Abacum-fix publish gate (agent_taxonomy_needs_verification hides the note
+    from visitors) must keep working exactly as before — a low-confidence,
+    unverified note still never reaches a signed-out visitor."""
+    from linklib.db import Library
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    tid = lib_.add_tool("Runway", "A tool.", "https://runway.com", ["FP&A"], approved=1)
+    lib_.set_tool_agent_taxonomy_draft(
+        tid, "Fabricated-sounding claim about a page that doesn't exist.",
+        needs_verification=1, ai_confident=0)
+    slug = lib_.get_tool(tid)["slug"]
+    lib_.close()
+
+    client = _client(env)
+    # Signed out — the unverified note must not appear at all.
+    r = client.get(f"/tools/software/{slug}")
+    assert "Fabricated-sounding claim" not in r.text
+
+    # Signed in — visible, explicitly labeled as hidden from visitors.
+    _login(client)
+    r = client.get(f"/tools/software/{slug}")
+    assert "Fabricated-sounding claim" in r.text
+    assert "hidden from visitors" in r.text
