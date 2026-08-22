@@ -18937,6 +18937,10 @@ mermaid.initialize({{
 <p style="margin:0;">Exa is the default, toggled at <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings</a>. Turn it off, or leave <code>EXA_API_KEY</code> unset, and Claude's own web-search tool steps in instead&mdash;web search itself is never unavailable, only which engine runs it changes. Exactly one of the two runs per question, never both. A result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</p>
 </div>
 <p style="margin:8px 0 0;font-size:16px;color:var(--ink-soft);line-height:1.65;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
+<div class="article-callout" style="margin:16px 0;">
+<div class="article-callout-title">Why the citations can be trusted</div>
+<p style="margin:0;">Every retrieved source&mdash;library, feed, or web&mdash;is handed to Claude as a document block with Anthropic's Citations API turned on, not as plain text pasted into the prompt. That API mechanically ties each cited span of the answer to an actual passage in one of those documents: the model can't produce a citation for something that isn't really in the source text, because the link between claim and passage is checked by the API itself, not self-reported by the model afterward. That's a different, stronger guarantee than an AI saying it read something and believes it's accurate. Every <code>[n]</code> in an answer traces back to a real, verifiable passage, not a plausible-sounding paraphrase.</p>
+</div>
 </section>
 
 <section class="tool-prose">
