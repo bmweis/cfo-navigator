@@ -102,7 +102,8 @@ def ingest_url(
         from . import tagstyle
         result = enrich_mod.enrich(art.title, content or art.title,
                                    known_tags=lib.known_tags(),
-                                   tag_guide=tagstyle.effective_tag_guidance(lib))
+                                   tag_guide=tagstyle.effective_tag_guidance(lib),
+                                   model=lib.get_enrich_model())
         if result:
             lib.apply_enrichment(article_id, result.summary, result.tags,
                                  model=result.model, rules=result.rules_version,

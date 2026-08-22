@@ -34,7 +34,7 @@ _REGISTRY: list[dict] = [
      "enrich": "Solid summaries at a lower cost."},
     {"id": "claude-sonnet-5", "label": "Sonnet 5", "short": "Balanced · newest",
      "enrich": "Newest balanced model — stronger summaries than Sonnet 4.6 at similar cost."},
-    {"id": "claude-opus-4-8", "label": "Opus 4.8", "short": "Best quality",
+    {"id": "claude-opus-5", "label": "Opus 5", "short": "Best quality",
      "enrich": "Deepest summaries. The one to standardize the archive on."},
 ]
 
