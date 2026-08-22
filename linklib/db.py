@@ -2004,6 +2004,20 @@ class Library:
             # unchanged) — this is a second, independent admin-facing fact,
             # not a replacement for either existing mechanism.
             "ALTER TABLE tools ADD COLUMN agent_taxonomy_ai_confident INTEGER",
+            # Agent taxonomy grounding fix (2026-08 Phase 1) — API-verified
+            # citations for the current agent_taxonomy_note draft, as a JSON
+            # array [{n, title, url, type: "page"}] (same shape/convention as
+            # ask_questions.citations_json). NOT self-reported: resolved from
+            # real Citations-API document blocks built from the vendor pages
+            # actually fetched (linklib.enrich.generate_tool_agent_taxonomy,
+            # linklib.citations) — a mechanically-checkable fact, independent
+            # of agent_taxonomy_ai_confident's self-report. Empty ('[]') for
+            # every existing row (no retroactive backfill, same convention as
+            # every other needs-verification-style column's own migration)
+            # and whenever a draft grounded on nothing (low_confidence=True)
+            # or was hand-written by an admin (update_tool_agent_taxonomy
+            # clears it — a human edit has no citation trace to keep).
+            "ALTER TABLE tools ADD COLUMN agent_taxonomy_citations TEXT NOT NULL DEFAULT '[]'",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4403,17 +4417,21 @@ class Library:
         A human editing/saving this field is itself a confirmation, so this
         always clears agent_taxonomy_needs_verification — same convention the
         retired tool_features rows used to follow (editing a row implied
-        review)."""
+        review). Also clears agent_taxonomy_citations (2026-08 grounding fix)
+        — a hand-typed note has no citation trace to keep, and leaving a
+        prior AI draft's citations attached to text a human just overwrote
+        would misattribute the human's own words as machine-grounded."""
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
-            "updated_at=? WHERE id=?",
+            "agent_taxonomy_citations='[]', updated_at=? WHERE id=?",
             (agent_taxonomy_note.strip(), _now(), tool_id),
         )
         self.conn.commit()
 
     def set_tool_agent_taxonomy_draft(self, tool_id: int, agent_taxonomy_note: str,
                                       needs_verification: int = 1,
-                                      ai_confident: Optional[int] = None) -> None:
+                                      ai_confident: Optional[int] = None,
+                                      citations: Optional[list] = None) -> None:
         """Records an LLM-drafted agent-taxonomy summary (automated research —
         either the auto-run-on-add background task or the on-demand refresh)
         as unconfirmed by default. Only writes when the tool doesn't already
@@ -4427,12 +4445,22 @@ class Library:
         "confident" self-report from the same generation call —
         COALESCE-written so a caller that somehow omits it (there isn't one
         today; both trigger points always have a real AgentTaxonomyResult)
-        can't accidentally blank out a previously-recorded signal."""
+        can't accidentally blank out a previously-recorded signal.
+
+        citations (2026-08 grounding fix, Phase 1) is the API-verified
+        citation list for THIS draft (AgentTaxonomyResult.citations) —
+        written directly (not COALESCE'd), unlike ai_confident: every fresh
+        draft either has real citations or genuinely has none (nothing was
+        grounded), and either fact should replace whatever a stale prior
+        draft's citations said, never blend with it. None (the default —
+        every pre-2026-08 caller, and any future one that doesn't pass it)
+        writes '[]', same as a draft that cited nothing."""
         self.conn.execute(
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=?, "
             "agent_taxonomy_ai_confident=COALESCE(?, agent_taxonomy_ai_confident), "
-            "updated_at=? WHERE id=?",
-            (agent_taxonomy_note.strip(), needs_verification, ai_confident, _now(), tool_id),
+            "agent_taxonomy_citations=?, updated_at=? WHERE id=?",
+            (agent_taxonomy_note.strip(), needs_verification, ai_confident,
+             json.dumps(citations or []), _now(), tool_id),
         )
         self.conn.commit()
 

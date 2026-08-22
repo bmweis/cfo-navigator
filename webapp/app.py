@@ -853,6 +853,49 @@ def _confidence_indicator_html(confident: object) -> str:
             f'Claude confidence: {value}</p>')
 
 
+def _citations_list_html(citations: list, empty_note: str = "") -> str:
+    """Render a field's API-verified citation list (2026-08 grounding fix —
+    see linklib.citations, linklib.enrich.generate_tool_agent_taxonomy) as a
+    compact "Sources" list of numbered links — one shared list per field
+    (Phase 1's own approved shape), not inline [n] markers spliced into the
+    field's own text, since these fields are drafted as strict JSON where a
+    marker would corrupt the parse (see extract_citations's
+    inject_markers=False mode).
+
+    `citations` is the parsed `*_citations` column value: [{n, title, url,
+    type}], already in first-use order. Renders nothing (not even the
+    "Sources" label) when empty and no `empty_note` is given — a field with
+    zero citations either wasn't grounded at all (low_confidence) or is
+    plain hand-written text (a human edit clears the sidecar — see
+    update_tool_agent_taxonomy), and both cases already have their own
+    separate signal (low_confidence / no verification badge) without this
+    list also claiming something went wrong. `empty_note`, when given, is
+    shown instead of nothing — a muted single line, for a context (e.g. the
+    admin edit page) where explicitly confirming "no citations recorded" is
+    more useful than silence.
+
+    Reused as-is by every future field this grounding fix extends to
+    (Description, Community profile) — not agent-taxonomy-specific despite
+    shipping alongside it first."""
+    if not citations:
+        if not empty_note:
+            return ""
+        return (f'<p style="font-size:12px;color:var(--muted);margin:6px 0 0;">'
+                f'{_esc(empty_note)}</p>')
+    items = "".join(
+        f'<li style="font-size:12px;"><a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener">'
+        f'[{c.get("n")}] {_esc(c.get("title") or c.get("url") or "source")}</a></li>'
+        for c in citations if c.get("url")
+    )
+    if not items:
+        return ""
+    return (f'<div style="margin-top:8px;">'
+            f'<div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;'
+            f'color:var(--muted);margin-bottom:3px;">Sources</div>'
+            f'<ul style="margin:0;padding-left:0;list-style:none;display:flex;flex-wrap:wrap;gap:6px;">'
+            f'{items}</ul></div>')
+
+
 def _ai_drafted_field_names(form) -> set[str]:
     """The submitted ai_drafted_fields hidden input (see markAiDrafted in the
     edit-form JS), parsed into a set of field names — shared by
@@ -7274,15 +7317,26 @@ def tools_software_profile(request: Request, slug: str):
     agent_taxonomy_block = ""
     _at_note = (tool.get("agent_taxonomy_note") or "").strip()
     _at_unverified = bool(tool.get("agent_taxonomy_needs_verification"))
+    # API-verified citations for the current note (2026-08 grounding fix) —
+    # a mechanically-checkable fact, independent of the self-reported
+    # confidence line elsewhere on this page. Rendered as a shared "Sources"
+    # list below the note (Phase 1's approved shape), not inline [n]
+    # markers — see _citations_list_html's docstring for why. Shown
+    # alongside the note in both visibility branches below (a signed-in
+    # admin deciding whether to verify an unverified note benefits from
+    # seeing its sources too, not just a public visitor).
+    _at_citations_html = _citations_list_html(json.loads(tool.get("agent_taxonomy_citations") or "[]"))
     if _at_note and not _at_unverified:
         agent_taxonomy_block = f"""<div class="tp-card">
   <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy</h2>
   <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
+  {_at_citations_html}
 </div>"""
     elif _at_note and _at_unverified and authed:
         agent_taxonomy_block = f"""<div class="tp-card">
   <h2 class="tp-card-h"><small>AI &amp; Agent Capabilities</small>Agent taxonomy <span class="tp-verify">unverified&mdash;hidden from visitors until reviewed</span></h2>
   <p style="margin:0;">{_esc(tool['agent_taxonomy_note'])}</p>
+  {_at_citations_html}
 </div>"""
     elif authed and not _at_note:
         agent_taxonomy_block = _profile_admin_nudge("Agent taxonomy not yet generated.")
@@ -14145,6 +14199,7 @@ def _run_tool_research(tool_id: int) -> bool:
                 tool_id, result.agent_taxonomy_note,
                 needs_verification=int(result.agent_taxonomy_needs_verification),
                 ai_confident=int(result.confident),
+                citations=result.citations,
             )
             wrote_anything = True
         if wrote_anything or result.cost_usd:
@@ -14603,6 +14658,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           placeholder="e.g. &quot;Fully independent AI agent—runs the whole workflow, not just a feature bolted onto a dashboard.&quot;">{_esc(tool.get('agent_taxonomy_note') or '')}</textarea>
         {_taxonomy_verify_action}
         {_taxonomy_confidence_html}
+        {_citations_list_html(json.loads(tool.get("agent_taxonomy_citations") or "[]"),
+                               empty_note="No citations recorded for this draft (hand-written, "
+                                          "or drafted with no page content to ground on).")}
         {_taxonomy_review_line_html}
       </div>
     </div>

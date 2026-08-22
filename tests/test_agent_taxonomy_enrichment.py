@@ -105,6 +105,107 @@ def test_generate_tool_agent_taxonomy_returns_none_without_api_key(monkeypatch):
     assert enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com") is None
 
 
+# -- 2026-08 grounding fix (Phase 1): real Citations-API document blocks -----
+
+def _mock_anthropic_citing(monkeypatch, payload_json, cited_document_indexes,
+                           input_tokens=200, output_tokens=150):
+    """Like _mock_anthropic, but the single text block carries a real
+    `citations` list (SDK-shaped) referencing document_index positions —
+    simulating the API having mechanically grounded the response in the
+    document blocks that were sent. Also captures the actual kwargs passed
+    to messages.create so a test can assert on the document blocks sent."""
+    captured = {}
+
+    def _create(**kw):
+        captured.update(kw)
+
+        class _Citation:
+            document_index = None
+            def __init__(self, idx):
+                self.document_index = idx
+
+        class _Block:
+            type = "text"
+            text = payload_json
+            citations = [_Citation(i) for i in cited_document_indexes]
+        usage = types.SimpleNamespace(
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            cache_creation_input_tokens=0, cache_read_input_tokens=0,
+        )
+        return types.SimpleNamespace(content=[_Block()], usage=usage)
+    fake = types.SimpleNamespace(Anthropic=lambda *a, **k: types.SimpleNamespace(
+        messages=types.SimpleNamespace(create=lambda **kw: _create(**kw))))
+    monkeypatch.setitem(sys.modules, "anthropic", fake)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    return captured
+
+
+def test_generate_tool_agent_taxonomy_sends_real_document_blocks(monkeypatch):
+    """Each fetched page rides as its own Citations-API `document` content
+    block (not flattened into the prompt string) — the actual mechanism
+    this fix is about, not just the returned citations shape."""
+    _mock_fetch_page(monkeypatch, {
+        "https://runway.com": "Homepage content about Runway.",
+        "https://runway.com/pricing": "Pricing tiers: Starter, Growth, Enterprise.",
+    })
+    captured = _mock_anthropic_citing(monkeypatch, TAXONOMY_JSON, cited_document_indexes=[])
+
+    enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+
+    content = captured["messages"][0]["content"]
+    assert isinstance(content, list)   # doc blocks + a trailing text block, not a bare string
+    doc_blocks = [b for b in content if b.get("type") == "document"]
+    assert len(doc_blocks) == 2
+    assert all(b["citations"] == {"enabled": True} for b in doc_blocks)
+    bodies = [b["source"]["data"] for b in doc_blocks]
+    assert "Homepage content about Runway." in bodies
+    assert "Pricing tiers: Starter, Growth, Enterprise." in bodies
+    assert content[-1]["type"] == "text"   # drafting instructions ride last
+
+
+def test_generate_tool_agent_taxonomy_returns_verified_citations(monkeypatch):
+    _mock_fetch_page(monkeypatch, {
+        "https://runway.com": "Homepage content about Runway.",
+        "https://runway.com/pricing": "Pricing tiers: Starter, Growth, Enterprise.",
+    })
+    _mock_anthropic_citing(monkeypatch, TAXONOMY_JSON, cited_document_indexes=[0, 1])
+
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+    assert result is not None
+    assert len(result.citations) == 2
+    assert {c["url"] for c in result.citations} == {"https://runway.com", "https://runway.com/pricing"}
+    assert all(c["type"] == "page" for c in result.citations)
+    # The stored note itself is untouched plain text — no [n] markers spliced
+    # into the JSON output (that would have corrupted the parse entirely).
+    assert "[1]" not in result.agent_taxonomy_note
+    assert "scenario modeling" in result.agent_taxonomy_note
+
+
+def test_generate_tool_agent_taxonomy_json_still_parses_when_citations_present(monkeypatch):
+    """The real risk this fix introduces: citations enabled on a
+    strict-JSON response. Confirms json.loads still succeeds and 'confident'
+    still comes through, even with a citation attached mid-response."""
+    _mock_fetch_page(monkeypatch, {"https://runway.com": "Homepage content."})
+    _mock_anthropic_citing(monkeypatch, TAXONOMY_JSON, cited_document_indexes=[0])
+
+    result = enrich.generate_tool_agent_taxonomy("Runway", "https://runway.com")
+    assert result is not None
+    assert result.confident is True
+    assert result.agent_taxonomy_needs_verification is False
+
+
+def test_generate_tool_agent_taxonomy_no_citations_when_low_confidence(monkeypatch):
+    """No page content fetched at all → no documents sent → nothing to cite,
+    regardless of what the (mocked) response claims."""
+    _mock_fetch_page(monkeypatch, {})
+    _mock_anthropic_citing(monkeypatch, TAXONOMY_JSON, cited_document_indexes=[0])
+
+    result = enrich.generate_tool_agent_taxonomy("Obscure Co", "https://obscure.example")
+    assert result is not None
+    assert result.low_confidence is True
+    assert result.citations == []
+
+
 # -- scripts/enrich_agent_taxonomy.py (dry-run + selection) -------------------
 
 @pytest.fixture
