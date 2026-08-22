@@ -2403,6 +2403,22 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   a live Playwright screenshot showing the narrower frame). Worth a quick
   look at the live PR preview to confirm the diagram reads well before
   merging.
+- **"How FP&A Buddy works" width-tier fix, follow-up to the above round.**
+  The page rendered noticeably narrower than the other `article-atlantic`
+  long-form pages (Growth Engine Ratio, AI Hackathon Playbook, Connecting
+  Claude to NetSuite) — all three pair `article-atlantic` with the
+  `.page-full` width tier (~1800-2000px per BRAND.md's five-tier layout
+  system), but this page still carried `.page-admin` (~1400-1600px)
+  verbatim from the `/admin/system/*` template it was originally built
+  under, and nobody updated it when the page went public in the prior
+  round. `article-atlantic` itself only sets paragraph line-height/spacing
+  — it carries no width of its own — so the mismatch was silent until
+  someone compared the two side by side. Fixed by switching the outer
+  class to `.page-full`, confirmed with a live measurement (not just a
+  screenshot glance, per the standing computed-value-over-screenshot
+  lesson): the `.tool-prose` reading column's bounding box is now
+  byte-identical between this page and `/thought-leadership/growth-engine-ratio`
+  at the same viewport width.
 
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.

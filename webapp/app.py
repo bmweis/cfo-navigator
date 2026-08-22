@@ -19105,7 +19105,7 @@ def fpa_buddy_how_it_works(request: Request):
         for tier, s in EFFORT_SETTINGS.items()
     )
 
-    body = f"""<div class="page page-admin article-atlantic">
+    body = f"""<div class="page page-full article-atlantic">
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>How FP&amp;A Buddy works</h1>
