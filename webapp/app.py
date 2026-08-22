@@ -12498,6 +12498,32 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     # facts, both always visible). Covers only the 12 fields in
     # COMMUNITY_CONFIDENCE_FIELDS; every other field on this page passes no
     # confidence_key and renders exactly as before.
+    #
+    # Layout pass (2026-08 follow-up): the confidence line moved from a
+    # block-level paragraph below the textarea to a compact inline badge
+    # beside the label — 12 stacked "Claude confidence: Not yet assessed"
+    # sentences read as noisy/repetitive once the page was grouped into
+    # labeled sections; a small trailing pill matches the "Needs
+    # verification" badge's own inline-next-to-label precedent
+    # (_narrative_verify_widget) rather than inventing a new position. Text
+    # is unchanged ("Claude confidence: Yes/No/Not yet assessed" — still
+    # naming Claude specifically, not generic "AI," same reasoning as
+    # _confidence_indicator_html) — only where and how it's styled changes.
+    # This is a Community-profile-only variant: the 3-field Software profile
+    # (Description/Differentiation/Agent taxonomy) keeps
+    # _confidence_indicator_html's block treatment, since crowding was never
+    # reported there and those pages weren't part of this layout pass.
+    def _confidence_badge_html(confident: object) -> str:
+        if confident is None:
+            value, bg, color = "Not yet assessed", "var(--surface-2)", "var(--muted)"
+        elif bool(int(confident)):
+            value, bg, color = "Yes", "#d1fae5", "#065f46"
+        else:
+            value, bg, color = "No", "#fef3c7", "#92400e"
+        return (f'<span style="font-size:10px;font-weight:600;white-space:nowrap;'
+                f'background:{bg};color:{color};border-radius:5px;padding:2px 7px;">'
+                f'Claude confidence: {value}</span>')
+
     def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2,
                confidence_key: str | None = None) -> str:
         req_mark = " *" if required else ""
@@ -12505,12 +12531,17 @@ def _community_profile_form_fields(p: dict | None, community: dict,
         ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
         confidence_html = ""
         if confidence_key:
-            confidence_html = _confidence_indicator_html(p.get(f"{confidence_key}_ai_confident"))
+            confidence_html = _confidence_badge_html(p.get(f"{confidence_key}_ai_confident"))
+        # flex-wrap so the confidence badge drops to its own line rather than
+        # crowding a required field's "*" on a narrow/mobile viewport, instead
+        # of forcing both onto one cramped row.
         return f"""  <div>
-    <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}{req_mark}</label>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 10px;margin-bottom:6px;">
+      <label for="cp-{key}" style="font-size:14px;font-weight:500;color:var(--navy);">{_esc(label)}{req_mark}</label>
+      {confidence_html}
+    </div>
     <textarea id="cp-{key}" name="{key}" rows="{rows}"{req_attr}{ph}
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(p.get(key, ''))}</textarea>
-{confidence_html}
   </div>"""
 
     def _short_field(key: str, label: str, placeholder: str = "") -> str:
@@ -12526,6 +12557,24 @@ def _community_profile_form_fields(p: dict | None, community: dict,
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>"""
 
+    def _num_field(key: str, label: str, min_val: int, max_val: int) -> str:
+        """Founded year's numeric counterpart to _short_field — same label/
+        sizing/grid fit as every other Quick facts field, so it can join the
+        paired 2-column grid instead of sitting alone outside it."""
+        return f"""  <div>
+    <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}</label>
+    <input id="cp-{key}" name="{key}" type="number" min="{min_val}" max="{max_val}"
+      value="{p.get(key) or ''}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>"""
+
+    def _section_header(title: str) -> str:
+        """Same h2/border-top pattern the Software edit page already uses
+        between "Business summary" and "Screenshots" — reused here, not a
+        new admin section-header style."""
+        return (f'  <h2 style="font-size:16px;font-weight:600;margin:32px 0 16px;'
+                f'padding-top:24px;border-top:1px solid var(--line);">{_esc(title)}</h2>')
+
     return f"""  <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;">
     <p style="color:var(--muted);margin:0;max-width:520px;">The deep, opinionated read behind the directory listing: who it's for, what it's actually like, and whether it's worth it. Empty is fine until this is written or generated.</p>
     <span style="white-space:nowrap;">
@@ -12537,34 +12586,32 @@ def _community_profile_form_fields(p: dict | None, community: dict,
   </div>
   <p id="cp-gen-err" style="display:none;"></p>
   <div id="gen-host-community-profile" style="display:grid;gap:20px;">
+{_section_header("Who it's for")}
 {_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True, confidence_key='ideal_member')}
 {_field('anti_fit', 'Anti-fit', 'Who should probably skip it', confidence_key='anti_fit')}
 {_field('value_prop', 'Value proposition', 'The primary thing members get out of it', confidence_key='value_prop')}
+{_section_header('The member experience')}
 {_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual', confidence_key='format_reality')}
 {_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards', confidence_key='engagement_level')}
-{_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.", confidence_key='sponsor_relationship_note')}
-{_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.", confidence_key='business_model')}
 {_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label', confidence_key='application_friction')}
+{_section_header('Business & sponsorship')}
+{_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.", confidence_key='business_model')}
+{_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.", confidence_key='sponsor_relationship_note')}
 {_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
+{_section_header('Reputation & verdict')}
 {_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.', confidence_key='notable_members')}
-  <div>
-    <label for="cp-founded_year" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Founded year</label>
-    <input id="cp-founded_year" name="founded_year" type="number" min="1800" max="2100"
-      value="{p.get('founded_year') or ''}"
-      style="width:160px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
-  </div>
 {_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.', confidence_key='public_criticism')}
 {_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
+{_section_header('Quick facts')}
+{_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc.—or "No".', rows=2)}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+{_num_field('founded_year', 'Founded year', 1800, 2100)}
 {_short_field('primary_purpose', 'Primary purpose', 'e.g. networking, learning, both')}
 {_short_field('cpe_eligible', 'CPE', 'Yes / No / Unclear, with any qualifier')}
 {_short_field('platform_type', 'Platform', 'Slack, proprietary app, in-person only, …')}
 {_short_field('meeting_format', 'Programming', 'In-person / virtual / hybrid')}
 {_short_field('event_style', 'Event style', 'Large-format, intimate/small-group, forum-only, …')}
 {_short_field('seniority_band', 'Level', 'Who it targets by seniority')}
-  </div>
-{_field('resources_included', 'Resources included', 'Templates, benchmarking, research, job boards, etc.—or "No".', rows=2)}
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
 {_short_field('stage_focus', 'Stage focus', 'Growth-stage, late-stage, public, or no particular focus. Placeholder, not yet researched or weighted.')}
 {_short_field('jobs_program', 'Jobs program', 'A FORMAL job-placement/transition program, if any. Placeholder, not yet researched or weighted.')}
 {_short_field('team_or_individual', 'Individual or Team', 'Individual-only, team/company-based, or both. Placeholder, not yet researched or weighted.')}

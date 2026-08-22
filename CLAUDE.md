@@ -609,6 +609,50 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   per-field code — every "hidden when no signal" test across
   `test_confidence_indicator.py`/`test_community_confidence_indicator.py`
   was renamed and rewritten to assert the new text instead of absence.
+- **Community profile edit page — grouped into 5 labeled sections, a
+  consistent width rule, and confidence badges moved inline (2026-08
+  follow-up).** Live testing found the page's 23 fields rendering as one
+  flat, ungrouped list, mixing full-width single-column textareas (the top
+  ~12) with a paired 2-column grid (the bottom ~9, plus Founded year
+  sitting alone outside any grid) with no visible logic distinguishing
+  which fields got which treatment. Restructured, proposed and approved
+  before building (not a mechanical fix):
+  - **5 section headers**, splitting cleanly along `COMMUNITY_CONFIDENCE_FIELDS`'
+    own boundary — "Who it's for" (Ideal member, Anti-fit, Value
+    proposition), "The member experience" (Format in practice, Engagement
+    level, Application friction), "Business & sponsorship" (Business model,
+    Sponsor relationship, Cost vs. value verdict), "Reputation & verdict"
+    (Notable members, Public criticism, Verdict), "Quick facts" (the 11
+    structured/miscellaneous fields — named "Quick facts" rather than
+    "Program details" since Founded year/CPE/etc. aren't thematically
+    "program" details, just the catch-all bucket of short factual fields).
+    Headers reuse the exact `<h2>`/border-top style the Software edit page
+    already uses between its own sections (`_section_header`), not a new
+    pattern.
+  - **One consistent width rule, applied to all 23 fields, not just the
+    bottom section**: narrative/qualitative fields (the 12 confidence-bearing
+    ones) stay full-width textareas; short factual/categorical fields become
+    one shared paired 2-column grid (`_short_field`/a new `_num_field` for
+    Founded year, which now joins the grid instead of sitting alone outside
+    it). Resources included stays full-width — it's a described list, not a
+    categorical value, so it's the "Quick facts" section's intro field
+    rather than being squeezed into the grid with the truly short fields.
+  - **Confidence badge moved from a block-level paragraph below the textarea
+    to a compact inline badge beside the label** (`_confidence_badge_html`,
+    Community-profile-only — the 3-field Software profile keeps
+    `_confidence_indicator_html`'s block treatment unchanged, since crowding
+    was never reported there). 12 stacked "Claude confidence: Not yet
+    assessed" sentences read as noisy once the page was grouped; the inline
+    badge matches the "Needs verification" badge's own existing
+    inline-next-to-label precedent (`_narrative_verify_widget`) rather than
+    inventing a new position. Text is unchanged, still naming "Claude"
+    specifically — only position/styling changed.
+  - **Verified, not just built**: the label/badge row uses `flex-wrap:wrap`
+    specifically so the badge can't crowd a required field's `*` (Ideal
+    member, Verdict) on a narrow viewport — confirmed with a real Playwright
+    render at 390px and 320px (the widest badge text, "Claude confidence:
+    Yes/No", on both required fields) showing zero overlap at either width,
+    not just asserted from the CSS.
 - **"Save and continue" near Description (tool-edit-consistency item #7,
   2026-08 follow-up) — the mechanism existed, the second button didn't.**
   `save_action=continue` (redirect back to the same tool's edit page with
