@@ -274,7 +274,17 @@ fans dotted edges into `Library`/`Feed`/`Web` (the same three tiers its
 label actually describes), landing it as a peer of the question node
 instead of an orphan; the diagram frame is also wrapped in a
 `max-width:680px` container so it no longer stretches to the full page
-column regardless of the SVG's actual rendered size.
+column regardless of the SVG's actual rendered size. **Width-tier fix
+(follow-up):** the page carried `.page-admin` (~1400-1600px per BRAND.md's
+layout system) verbatim from the `/admin/system/*` template it was
+originally built under, while every other `article-atlantic` long-form
+page (Growth Engine Ratio, AI Hackathon Playbook, Connecting Claude to
+NetSuite) pairs `article-atlantic` with `.page-full` (~1800-2000px) —
+`article-atlantic` itself carries no width of its own, so the mismatch
+went unnoticed until the page was compared side by side with those. Fixed
+by switching the outer class to `.page-full`, confirmed with a live
+bounding-box measurement showing the `.tool-prose` reading column is now
+identical in width and position to the reference page.
 
 **`/admin/exa-settings`** (Phase 7, FP&A Buddy nav group) is the Exa kill
 switch: an `exa_enabled` toggle (`settings` table, `Library.get_exa_enabled`/
