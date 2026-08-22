@@ -233,6 +233,67 @@ If the content above gives no genuine signal to propose ANY feature for
 this vendor, return {{"features": []}}."""
 
 
+# A vendor with a genuinely large feature surface (the "no cap on proposed
+# feature count" Phase 0 rule is deliberate — see the prompt below) can
+# produce a long JSON response; Opus 5's on-by-default adaptive thinking
+# shares this same budget with the response text, so a thin ceiling starves
+# the response before the model finishes the JSON. 8000 is sized well above
+# generate_community_profile's 6000 (23 fields drafted in one call) even
+# though this call drafts fewer named fields per feature, since an
+# uncapped-length array is the whole point here. _RETRY_MAX_TOKENS is the
+# one-shot retry ceiling used only when the first attempt still truncated —
+# see _salvage_feature_objects and the retry logic in
+# draft_tool_features_for_category below.
+_ORIGINATION_MAX_TOKENS = 8000
+_RETRY_MAX_TOKENS = 16000
+
+
+def _salvage_feature_objects(raw: str) -> tuple[list[dict], bool]:
+    """Best-effort recovery from a response that got cut off mid-generation
+    — a truncated tool-heavy vendor (Mercury, in the first real Neobanking
+    test) can exceed even a generous max_tokens ceiling by construction,
+    since Phase 0 deliberately put no cap on how many features the model
+    may propose. Rather than losing the whole tool's research to one
+    unterminated string at the tail of the response, this finds the
+    "features" array and decodes as many COMPLETE JSON objects from it as
+    possible using json.JSONDecoder.raw_decode's incremental parsing,
+    stopping cleanly at the first truncated/malformed element.
+
+    Returns (features, truncated). truncated is True whenever anything had
+    to be salvaged this way at all — even if every element up to the cutoff
+    parsed fine, the response as a whole was still incomplete. A hard
+    failure with zero recoverable objects still comes back as ([], True),
+    never raises — matching this module's "a bad response degrades, it
+    doesn't crash the run" convention elsewhere (research_vendor_domain's
+    per-tier best-effort degrade)."""
+    start = raw.find('"features"')
+    if start == -1:
+        return [], True
+    bracket = raw.find('[', start)
+    if bracket == -1:
+        return [], True
+
+    decoder = json.JSONDecoder()
+    idx = bracket + 1
+    length = len(raw)
+    features: list[dict] = []
+    truncated = False
+    while idx < length:
+        while idx < length and raw[idx] in " \t\n\r,":
+            idx += 1
+        if idx >= length or raw[idx] == "]":
+            break
+        try:
+            obj, end = decoder.raw_decode(raw, idx)
+        except json.JSONDecodeError:
+            truncated = True
+            break
+        if isinstance(obj, dict):
+            features.append(obj)
+        idx = end
+    return features, truncated
+
+
 @dataclass
 class ProposedFeature:
     name: str
@@ -253,6 +314,11 @@ class ToolOriginationDraft:
     features: list[ProposedFeature] = field(default_factory=list)
     grounding_sources: list[GroundingHit] = field(default_factory=list)
     low_confidence: bool = False   # no vendor-domain content could be found/fetched at all
+    truncated: bool = False        # the response was cut off mid-generation (even after the
+                                    # one retry) and features were recovered via
+                                    # _salvage_feature_objects rather than a clean full parse —
+                                    # the recovered list may be missing whatever the model
+                                    # would have proposed after the cutoff point
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -338,28 +404,73 @@ def draft_tool_features_for_category(
         tool_name=tool_name, tool_url=tool_url, content_block=content_block,
     )
 
-    try:
+    def _call(max_tokens: int):
+        """One Anthropic call. Returns (raw_text, in_tok, out_tok, cache_w,
+        cache_r). Lets any API/network exception propagate — the outer
+        try/except below is what turns that into a None return, same as
+        every other generate_*() function in this codebase."""
         client = Anthropic()
         resp = client.messages.create(
             model=model,
-            max_tokens=_checked_max_tokens(4000),  # room for a large candidate list plus
-                              # headroom for Opus 5's on-by-default adaptive thinking
+            max_tokens=_checked_max_tokens(max_tokens),
             messages=[{"role": "user", "content": prompt}],
         )
         raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        data = json.loads(raw)
-
         usage = getattr(resp, "usage", None)
-        in_tok = getattr(usage, "input_tokens", 0) or 0
-        out_tok = getattr(usage, "output_tokens", 0) or 0
-        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+        return (
+            raw,
+            getattr(usage, "input_tokens", 0) or 0,
+            getattr(usage, "output_tokens", 0) or 0,
+            getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            getattr(usage, "cache_read_input_tokens", 0) or 0,
+        )
+
+    def _parse(raw: str) -> tuple[list[dict], bool]:
+        """Full JSON parse first; a truncated/malformed response (the
+        Mercury/Neobanking case — a feature-rich vendor's uncapped-length
+        proposal list ran past max_tokens and got cut off mid-string) falls
+        back to _salvage_feature_objects rather than raising, so one bad
+        response never loses a whole tool's research."""
+        try:
+            return (json.loads(raw).get("features") or []), False
+        except json.JSONDecodeError:
+            return _salvage_feature_objects(raw)
+
+    try:
+        raw, in_tok, out_tok, cache_w, cache_r = _call(_ORIGINATION_MAX_TOKENS)
+        raw_features, truncated = _parse(raw)
+
+        # One retry at a higher ceiling if the FIRST attempt truncated — a
+        # generous but still-finite max_tokens can still not be enough for
+        # a genuinely large roster's worth of features on some vendors.
+        # Only one retry: if it truncates again too, use whatever it
+        # salvaged rather than looping (or silently doubling cost) forever.
+        # Token/cost accounting below sums BOTH calls when a retry happens,
+        # since both were real spend against this tool's research.
+        if truncated:
+            _logger.warning(
+                "draft_tool_features_for_category(): response for %s/%s truncated at "
+                "max_tokens=%d (salvaged %d feature(s)) — retrying once at max_tokens=%d.",
+                category_name, tool_name, _ORIGINATION_MAX_TOKENS, len(raw_features), _RETRY_MAX_TOKENS,
+            )
+            raw2, in_tok2, out_tok2, cache_w2, cache_r2 = _call(_RETRY_MAX_TOKENS)
+            raw_features2, truncated2 = _parse(raw2)
+            in_tok += in_tok2
+            out_tok += out_tok2
+            cache_w += cache_w2
+            cache_r += cache_r2
+            # Prefer the retry's result outright — even if it truncated
+            # again, a bigger ceiling almost always recovers strictly more
+            # complete features than the first attempt did, so there's no
+            # reason to merge the two rather than just taking the better one.
+            raw_features, truncated = raw_features2, truncated2
+
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
         url_to_tier = {h.url: h.tier for h in hits}
         features: list[ProposedFeature] = []
-        for f in data.get("features") or []:
+        for f in raw_features:
             if not isinstance(f, dict):
                 continue
             name = str(f.get("name", "")).strip()
@@ -380,7 +491,7 @@ def draft_tool_features_for_category(
         return ToolOriginationDraft(
             tool_name=tool_name, tool_url=tool_url, category_name=category_name,
             features=features, grounding_sources=hits, low_confidence=low_confidence,
-            model=model, input_tokens=in_tok, output_tokens=out_tok,
+            truncated=truncated, model=model, input_tokens=in_tok, output_tokens=out_tok,
             cost_usd=cost, exa_cost_usd=exa_cost, verified_as_of=date.today().isoformat(),
         )
     except Exception as e:

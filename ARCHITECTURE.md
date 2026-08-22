@@ -3140,18 +3140,55 @@ scoped). Two pieces:
   once Phase 3 builds the actual queue payload; still editable at
   edit-then-approve time like any other field.
 
-**Tested with mocked Exa/Anthropic calls** (`tests/test_feature_scan.py`,
-14 cases — dedup/tier-inference, the no-API-key degrade paths, malformed-
-payload defaults, and the thin-roster prompt language). No live run against
-real vendor content happened in this session — no `ANTHROPIC_API_KEY`/
-`EXA_API_KEY` were available, and using the app's own production keys from
-a Code building session is against the standing CLAUDE.md billing-note
-rule. `scripts/test_feature_scan_origination.py` (same "manual QA, makes
-real API calls, writes nothing" shape as `scripts/enrich_compare.py` —
-deliberately not in the scripts registry, matching that precedent) is
-built for Brian to run by hand against 1-2 real Neobanking tools (the
-agreed first test category) to judge output quality before Phase 3 is
-scoped.
+**Tested with mocked Exa/Anthropic calls** (`tests/test_feature_scan.py`).
+No live run against real vendor content happened in this session — no
+`ANTHROPIC_API_KEY`/`EXA_API_KEY` were available, and using the app's own
+production keys from a Code building session is against the standing
+CLAUDE.md billing-note rule. `scripts/test_feature_scan_origination.py`
+(same "manual QA, makes real API calls, writes nothing" shape as
+`scripts/enrich_compare.py` — deliberately not in the scripts registry,
+matching that precedent) is built for Brian to run by hand against 1-2
+real Neobanking tools (the agreed first test category) to judge output
+quality before Phase 3 is scoped.
+
+**Phase 2 follow-up (2026-08) — the first real run (Mercury/Neobanking)
+crashed on a truncated response, and the fix is structural, not a
+one-off patch.** `draft_tool_features_for_category` hard-crashed with a
+`JSONDecodeError` ("unterminated string") that fell into the generic
+`except Exception` handler and silently returned `None`, losing the
+tool's research entirely. Root cause: the response got cut off
+mid-generation before finishing the JSON — Opus 5's on-by-default
+adaptive thinking shares the same `max_tokens` budget as the response
+text (the same failure class `MIN_GENERATE_MAX_TOKENS` exists to guard
+the *floor* of in `linklib/enrich.py`), and Phase 0's own approved rule —
+no cap on how many features the scan may propose — put an uncapped-length
+response and a finite token ceiling on a collision course by
+construction. A feature-rich vendor like Mercury is exactly the case most
+likely to hit it, so this will recur on other vendors even after any
+single token-budget bump, not just this one call. Fixed two ways,
+per Brian's explicit ask that both land together, not either/or:
+1. `max_tokens` raised from 4000 to `_ORIGINATION_MAX_TOKENS = 8000` —
+   sized above `generate_community_profile`'s existing 6000 (23 fields in
+   one call), since an uncapped-length array is the whole point of this
+   call.
+2. `_salvage_feature_objects` recovers as many COMPLETE JSON objects as
+   `json.JSONDecoder.raw_decode`'s incremental parsing can pull from the
+   `"features"` array before the first truncated/malformed element,
+   rather than losing every earlier feature the model had already fully
+   described. `draft_tool_features_for_category` tries a full `json.loads`
+   first and only falls back to salvage on a parse failure — a clean
+   response never touches the salvage path at all (`ToolOriginationDraft.
+   truncated` stays `False`). When the first attempt DOES truncate, one
+   automatic retry runs at `_RETRY_MAX_TOKENS = 16000`; token/cost
+   accounting sums both calls, and the retry's result (parsed cleanly or
+   salvaged again) always wins over the first attempt's — no infinite
+   retry loop, no silently doubling cost on every call, only on the
+   failure path. `truncated=True` on the returned draft is a visible
+   signal to whatever consumes this (Phase 3, and the manual QA script's
+   own printed warning) that the feature list may be incomplete, rather
+   than that being indistinguishable from a vendor that genuinely has
+   few features. Covered by 6 new regression tests reproducing the exact
+   reported crash shape (`tests/test_feature_scan.py`).
 
 ### Resources — Book recommendations (2026-08)
 
