@@ -563,6 +563,116 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   there's no all-or-nothing flattening to worry about — each field always
   shows its own real confidence value independent of the profile's review
   status.
+- **Confidence indicator, Agent taxonomy follow-up (2026-08) — the same
+  permanent "Claude confidence: Yes/No" line, added to the field this whole
+  effort started from (the Abacum finding).** Agent taxonomy already had a
+  `"confident"` self-report in `generate_tool_agent_taxonomy`'s JSON
+  response, but it was never stored on its own — it only ever fed
+  `agent_taxonomy_needs_verification` (`needs_verification = not
+  confident`), a review-status flag, not a display fact. A new
+  `tools.agent_taxonomy_ai_confident` column (same NULL-means-no-signal,
+  COALESCE-write convention as `description_ai_confident`/
+  `competitive_differentiation_ai_confident`) now stores the raw signal
+  separately, written by `set_tool_agent_taxonomy_draft` alongside every
+  fresh research draft, and rendered via the same `_confidence_indicator_html`
+  helper — permanent, never gated on verification state, exactly like
+  Description/Differentiation. **Deliberately does NOT touch either of
+  Agent taxonomy's two pre-existing `needs_verification`-driven mechanisms**,
+  both of which stay exactly as they were: the `_narrative_verify_widget`
+  "Needs verification" badge/"Mark verified" button on the edit page (this
+  still disappears once verified, same as it always has — only Description/
+  Differentiation's confidence LINE is what became permanent, not every
+  verification-status UI element on every field), and — more importantly —
+  the public profile page's Abacum-fix publish gate, which still hides an
+  unverified/low-confidence note from visitors entirely and shows it to an
+  admin only, explicitly labeled "hidden from visitors." Flagging this
+  distinction explicitly rather than silently narrowing scope: an instruction
+  to "remove the gate" here could be misread as removing that publish gate
+  too, which would undo the actual anti-fabrication fix the Abacum
+  investigation produced — that gate is a different mechanism from the
+  admin-edit-page confidence-display gate the other two fields had, and only
+  the latter was ever in scope for the permanent-display policy change.
+- **Confidence indicator — a third "Not yet assessed" state for NULL
+  (2026-08 follow-up).** Live testing on Abacum's own edit page (its
+  Description predates the confidence column by three days, so
+  `description_ai_confident` is genuinely `NULL`) found the confidence line
+  rendering nothing at all for a NULL value — confirmed as the intended
+  original behavior (`confident is None` returned `""`), but wrong on the
+  same reasoning the confidence-indicator feature itself was built on:
+  silence is indistinguishable from broken. `_confidence_indicator_html`
+  now renders three states, not two — `True` → "Yes", `False` → "No",
+  `None` → "Not yet assessed" (a neutral `var(--muted)` color, no sanctioned
+  green/amber pair fits "no signal") — so every field with the capability
+  always shows some state. This is a superset change to the shared helper,
+  so it applies uniformly to all three surfaces (tool Description/
+  Differentiation/Agent taxonomy, all 12 Community profile fields) with no
+  per-field code — every "hidden when no signal" test across
+  `test_confidence_indicator.py`/`test_community_confidence_indicator.py`
+  was renamed and rewritten to assert the new text instead of absence.
+- **Community profile edit page — grouped into 5 labeled sections, a
+  consistent width rule, and confidence badges moved inline (2026-08
+  follow-up).** Live testing found the page's 23 fields rendering as one
+  flat, ungrouped list, mixing full-width single-column textareas (the top
+  ~12) with a paired 2-column grid (the bottom ~9, plus Founded year
+  sitting alone outside any grid) with no visible logic distinguishing
+  which fields got which treatment. Restructured, proposed and approved
+  before building (not a mechanical fix):
+  - **5 section headers**, splitting cleanly along `COMMUNITY_CONFIDENCE_FIELDS`'
+    own boundary — "Who it's for" (Ideal member, Anti-fit, Value
+    proposition), "The member experience" (Format in practice, Engagement
+    level, Application friction), "Business & sponsorship" (Business model,
+    Sponsor relationship, Cost vs. value verdict), "Reputation & verdict"
+    (Notable members, Public criticism, Verdict), "Quick facts" (the 11
+    structured/miscellaneous fields — named "Quick facts" rather than
+    "Program details" since Founded year/CPE/etc. aren't thematically
+    "program" details, just the catch-all bucket of short factual fields).
+    Headers reuse the exact `<h2>`/border-top style the Software edit page
+    already uses between its own sections (`_section_header`), not a new
+    pattern.
+  - **One consistent width rule, applied to all 23 fields, not just the
+    bottom section**: narrative/qualitative fields (the 12 confidence-bearing
+    ones) stay full-width textareas; short factual/categorical fields become
+    one shared paired 2-column grid (`_short_field`/a new `_num_field` for
+    Founded year, which now joins the grid instead of sitting alone outside
+    it). Resources included stays full-width — it's a described list, not a
+    categorical value, so it's the "Quick facts" section's intro field
+    rather than being squeezed into the grid with the truly short fields.
+  - **Confidence badge moved from a block-level paragraph below the textarea
+    to a compact inline badge beside the label** (`_confidence_badge_html`,
+    Community-profile-only — the 3-field Software profile keeps
+    `_confidence_indicator_html`'s block treatment unchanged, since crowding
+    was never reported there). 12 stacked "Claude confidence: Not yet
+    assessed" sentences read as noisy once the page was grouped; the inline
+    badge matches the "Needs verification" badge's own existing
+    inline-next-to-label precedent (`_narrative_verify_widget`) rather than
+    inventing a new position. Text is unchanged, still naming "Claude"
+    specifically — only position/styling changed.
+  - **Verified, not just built**: the label/badge row uses `flex-wrap:wrap`
+    specifically so the badge can't crowd a required field's `*` (Ideal
+    member, Verdict) on a narrow viewport — confirmed with a real Playwright
+    render at 390px and 320px (the widest badge text, "Claude confidence:
+    Yes/No", on both required fields) showing zero overlap at either width,
+    not just asserted from the CSS.
+- **"Save and continue" near Description (tool-edit-consistency item #7,
+  2026-08 follow-up) — the mechanism existed, the second button didn't.**
+  `save_action=continue` (redirect back to the same tool's edit page with
+  fresh data, instead of the admin list) was already wired up and already
+  had a button — but only in the page-bottom action row alongside "Save
+  changes," on a Software edit page that's long enough (Business summary,
+  Agent taxonomy, Screenshots, Key features, Competitors) that reaching it
+  means scrolling past everything else. A live check on Abacum's edit page
+  found no second button near Description and no PR summary mentioning one
+  shipped there — approved item #7 was specifically a second button placed
+  right after Description, not a relocation of the existing one. Added:
+  a second `<button form="tool-edit-form" name="save_action"
+  value="continue">`, same form/name/value as the bottom one, right after
+  Description's verify action/confidence line/review line. No route change
+  — `admin_tools_edit_submit` already branches on `save_action=="continue"`
+  regardless of which button posted it. Scoped to the Software edit page
+  only, matching what was actually reported (Abacum); the Community profile
+  edit page's own "Save and continue" (a from-scratch, separate mechanism —
+  see `admin_community_profile_submit`) already existed at the bottom of
+  that page too and wasn't part of this report, so it's untouched.
 - **Phase P — edit-page layout reorg, and why `tool_competitors`/
   `community_competitors` did NOT get renamed alongside `differentiation_note`.**
   Both Software's and Communities' edit pages were reorganized into labeled

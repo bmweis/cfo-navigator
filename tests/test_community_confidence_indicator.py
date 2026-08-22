@@ -319,7 +319,10 @@ def test_confidence_line_still_shown_once_reviewed(env):
     assert "Claude confidence: No" in r.text
 
 
-def test_confidence_line_hidden_when_no_signal_ever_reported(env):
+def test_confidence_line_shows_not_yet_assessed_when_no_signal_ever_reported(env):
+    """2026-08 follow-up — see the tool-side test of the same name for the
+    Abacum finding that motivated this: NULL now renders a third, distinct
+    state instead of being hidden."""
     from linklib.db import Library
     lib_ = Library(os.environ["LINKLIB_DB"])
     cid = lib_.add_community(name="Acme Circle", url="https://acme.example",
@@ -329,4 +332,4 @@ def test_confidence_line_hidden_when_no_signal_ever_reported(env):
     client = _client(env)
     _login(client)
     r = client.get(f"/admin/tools/communities/{cid}/profile")
-    assert "Claude confidence" not in r.text
+    assert "Claude confidence: Not yet assessed" in r.text
