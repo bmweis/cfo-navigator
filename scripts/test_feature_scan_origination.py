@@ -71,6 +71,10 @@ def main() -> int:
         return 1
 
     print(f"Grounding sources found: {len(draft.grounding_sources)} (low_confidence={draft.low_confidence})")
+    if draft.truncated:
+        print("WARNING: response was truncated mid-generation (even after the automatic retry) — "
+              "the feature list below may be missing whatever the model would have proposed after "
+              "the cutoff point.")
     for h in draft.grounding_sources:
         print(f"  [tier {h.tier}] {h.title}  ({h.url})")
     print()
