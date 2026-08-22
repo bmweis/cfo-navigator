@@ -29,6 +29,16 @@ def test_infer_tier_matches_url_keywords():
     assert feature_scan._infer_tier("https://mercury.com/some-random-page", requested_tier=4) == 4
 
 
+def test_normalize_url_treats_trailing_slash_and_case_as_equal():
+    assert (feature_scan._normalize_url("https://mercury.com/changelog/")
+            == feature_scan._normalize_url("https://mercury.com/changelog"))
+    assert (feature_scan._normalize_url("HTTPS://Mercury.com/Changelog")
+            == feature_scan._normalize_url("https://mercury.com/Changelog"))
+    # A genuinely different path must NOT normalize to the same value.
+    assert (feature_scan._normalize_url("https://mercury.com/changelog")
+            != feature_scan._normalize_url("https://mercury.com/help"))
+
+
 def _mock_exa(monkeypatch, results_by_call):
     """results_by_call: list of result-lists, one per Exa call in query order
     (changelog, help center, product, press) — a call beyond the list length
@@ -133,8 +143,65 @@ def test_draft_parses_features_and_tags_source_tier(monkeypatch):
     assert f.ai_enabled is False
     assert f.confident is True
     assert f.source_tier == 1   # resolved from the changelog grounding hit's tier
+    assert f.source_tier_label == "Changelog / release notes"
     assert draft.cost_usd > 0
     assert draft.verified_as_of   # a real date string was stamped
+
+
+# --- Source-tier resolution: the real Mercury/Neobanking finding that "tier
+# 0" appeared in output with no explanation. UNCITED_TIER is a real,
+# intentional sentinel (§8's hierarchy starts at 1) for "the model's cited
+# source_url doesn't match any fetched grounding hit" — not a hierarchy
+# level. Covers both the labeling fix and the URL-normalization fix that
+# recovers a genuine match lost only to formatting (trailing slash). ------
+
+def test_uncited_source_url_resolves_to_uncited_tier_with_label(monkeypatch):
+    _mock_exa(monkeypatch, [
+        [{"url": "https://mercury.com/changelog", "title": "Changelog",
+          "text": "Mercury shipped multi-entity sub-accounts in July."}],
+        [], [], [],
+    ])
+    # The model cites a URL that was never actually fetched as grounding —
+    # a paraphrased/hallucinated citation, not a formatting mismatch.
+    _mock_anthropic(monkeypatch, '{"features": ['
+        '{"name": "Some feature", "source_url": "https://mercury.com/some-other-page"}'
+        ']}')
+    draft = feature_scan.draft_tool_features_for_category(
+        "Mercury", "https://mercury.com", "Neobanking",
+    )
+    f = draft.features[0]
+    assert f.source_tier == feature_scan.UNCITED_TIER == 0
+    assert f.source_tier_label == "Uncited (source URL not in fetched grounding set)"
+
+
+def test_source_url_trailing_slash_mismatch_still_resolves_real_tier(monkeypatch):
+    # A trivial formatting difference (trailing slash) between the fetched
+    # hit's URL and what the model echoes back must NOT fall through to
+    # UNCITED_TIER — that would be a false "uncited" reading on a citation
+    # that's actually correct.
+    _mock_exa(monkeypatch, [
+        [{"url": "https://mercury.com/changelog", "title": "Changelog",
+          "text": "Mercury shipped multi-entity sub-accounts in July."}],
+        [], [], [],
+    ])
+    _mock_anthropic(monkeypatch, '{"features": ['
+        '{"name": "Some feature", "source_url": "https://mercury.com/changelog/"}'
+        ']}')
+    draft = feature_scan.draft_tool_features_for_category(
+        "Mercury", "https://mercury.com", "Neobanking",
+    )
+    f = draft.features[0]
+    assert f.source_tier == 1
+    assert f.source_tier_label == "Changelog / release notes"
+
+
+def test_no_source_url_resolves_to_uncited_tier(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    _mock_anthropic(monkeypatch, '{"features": [{"name": "Some feature"}]}')
+    draft = feature_scan.draft_tool_features_for_category(
+        "Mercury", "https://mercury.com", "Neobanking",
+    )
+    assert draft.features[0].source_tier == feature_scan.UNCITED_TIER
 
 
 def test_draft_is_low_confidence_with_no_grounding(monkeypatch):
