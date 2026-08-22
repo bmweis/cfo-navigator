@@ -68,18 +68,40 @@ _SOURCE_TIER_QUERIES = [
      ("press", "news", "blog")),
 ]
 
+# 0 is NOT a §8 hierarchy tier (§8 starts at 1) — it's this module's own
+# sentinel for "the model's cited source_url doesn't match any URL we
+# actually fetched as grounding," resolved by _match_source_tier below.
+# Surfaced as a real, labeled state (never a bare "tier 0") specifically
+# because a live first test (Mercury/Neobanking) showed it appearing in
+# output with no explanation, reading as an undocumented §8 tier rather
+# than what it actually is — a citation-verification gap worth a human's
+# attention, not a hierarchy level to compare against 1-4.
+UNCITED_TIER = 0
+
 _TIER_LABELS = {
     1: "Changelog / release notes",
     2: "Help center / documentation",
     3: "Product page",
     4: "Press release",
-    0: "Unclassified",
+    UNCITED_TIER: "Uncited (source URL not in fetched grounding set)",
 }
 
 
 def _domain_of(url: str) -> str:
     host = urlsplit(url if "://" in url else f"https://{url}").netloc
     return host[4:] if host.startswith("www.") else host
+
+
+def _normalize_url(url: str) -> str:
+    """Loose equality for matching a model-cited source_url against a
+    fetched grounding hit's URL — case-insensitive scheme/host, no
+    trailing slash, no fragment. NOT used for the Exa/domain-restriction
+    logic above (only for the citation-matching problem below); a
+    genuinely different URL (a different path, a paraphrased/hallucinated
+    one) still correctly falls through to UNCITED_TIER."""
+    parts = urlsplit(url.strip())
+    path = parts.path.rstrip("/")
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}{('?' + parts.query) if parts.query else ''}"
 
 
 def _infer_tier(url: str, requested_tier: int) -> int:
@@ -215,9 +237,12 @@ particular count; a later human review is the actual curation gate, not
 you.
 
 For each candidate feature, decide availability, ai_enabled, and cite the
-SPECIFIC URL from the content below that supports the claim. If the
-content only weakly supports a claim, or you are inferring rather than
-reading it directly, set that feature's "confident" to false.
+SPECIFIC URL from the content below that supports the claim — copy that
+URL EXACTLY as it appears in the "--- Section (URL) ---" header above the
+section you're citing, character for character; never paraphrase, shorten,
+or invent a URL. If the content only weakly supports a claim, or you are
+inferring rather than reading it directly, set that feature's "confident"
+to false.
 
 Vendor: {tool_name} ({tool_url})
 
@@ -302,7 +327,10 @@ class ProposedFeature:
     ai_enabled: bool = False
     confident: bool = False
     source_url: str = ""
-    source_tier: int = 0   # resolved from the grounding hit the model cited, 0 if unresolved
+    source_tier: int = UNCITED_TIER   # resolved from the grounding hit the model cited;
+                                       # UNCITED_TIER (0) if the cited URL matches no fetched hit
+    source_tier_label: str = ""       # human-readable label — always set, so a caller never has
+                                       # to re-derive "what does tier N mean" from a bare int
     note: str = ""
 
 
@@ -468,7 +496,11 @@ def draft_tool_features_for_category(
 
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        url_to_tier = {h.url: h.tier for h in hits}
+        # Keyed on the NORMALIZED hit URL so a model-cited URL that differs
+        # only by trailing slash/case/fragment from the real grounding hit
+        # still resolves to that hit's real tier, rather than incorrectly
+        # falling through to UNCITED_TIER on a trivial formatting mismatch.
+        url_to_tier = {_normalize_url(h.url): h.tier for h in hits}
         features: list[ProposedFeature] = []
         for f in raw_features:
             if not isinstance(f, dict):
@@ -477,6 +509,7 @@ def draft_tool_features_for_category(
             if not name:
                 continue
             source_url = str(f.get("source_url", "")).strip()
+            tier = url_to_tier.get(_normalize_url(source_url), UNCITED_TIER) if source_url else UNCITED_TIER
             features.append(ProposedFeature(
                 name=name,
                 definition=str(f.get("definition", "")).strip(),
@@ -484,7 +517,8 @@ def draft_tool_features_for_category(
                 ai_enabled=bool(f.get("ai_enabled")),
                 confident=bool(f.get("confident")),
                 source_url=source_url,
-                source_tier=url_to_tier.get(source_url, 0),
+                source_tier=tier,
+                source_tier_label=_TIER_LABELS.get(tier, _TIER_LABELS[UNCITED_TIER]),
                 note=str(f.get("note", "")).strip(),
             ))
 

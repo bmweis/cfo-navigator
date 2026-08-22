@@ -75,8 +75,9 @@ def main() -> int:
         print("WARNING: response was truncated mid-generation (even after the automatic retry) — "
               "the feature list below may be missing whatever the model would have proposed after "
               "the cutoff point.")
+    from linklib.feature_scan import _TIER_LABELS
     for h in draft.grounding_sources:
-        print(f"  [tier {h.tier}] {h.title}  ({h.url})")
+        print(f"  [tier {h.tier} — {_TIER_LABELS.get(h.tier, '?')}] {h.title}  ({h.url})")
     print()
 
     print(f"Proposed features: {len(draft.features)}\n")
@@ -85,7 +86,8 @@ def main() -> int:
         print(f"   definition:   {f.definition}")
         print(f"   availability: {f.availability}   ai_enabled: {f.ai_enabled}   "
               f"confident: {f.confident}")
-        print(f"   source:       [tier {f.source_tier}] {f.source_url or '(none cited)'}")
+        print(f"   source:       [tier {f.source_tier} — {f.source_tier_label}] "
+              f"{f.source_url or '(none cited)'}")
         if f.note:
             print(f"   note:         {f.note}")
         print()

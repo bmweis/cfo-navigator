@@ -3190,6 +3190,37 @@ per Brian's explicit ask that both land together, not either/or:
    few features. Covered by 6 new regression tests reproducing the exact
    reported crash shape (`tests/test_feature_scan.py`).
 
+**Phase 2 follow-up 2 (2026-08) — Mercury/Neobanking's first CLEAN run
+surfaced "tier 0" in citations, undefined anywhere in §8's hierarchy
+(which starts at 1).** Confirmed as a real, intentional sentinel — not a
+hierarchy bug — that was simply never labeled anywhere a human could see
+it: `source_tier=url_to_tier.get(source_url, 0)` falls back to `0`
+whenever the model's cited `source_url` doesn't match any URL actually
+fetched as grounding (a hallucinated/paraphrased citation, or a real page
+the model saw referenced but this run never fetched itself) — a
+citation-verification signal worth a human's attention, not a §8 tier to
+compare against 1-4. Two real fixes, not just a label change:
+1. **`UNCITED_TIER = 0`** is now a named constant with its own
+   `_TIER_LABELS` entry ("Uncited (source URL not in fetched grounding
+   set)"), and `ProposedFeature` gained `source_tier_label` so a caller
+   never has to re-derive what a bare tier number means.
+   `scripts/test_feature_scan_origination.py`'s printed output now shows
+   the label, not a bare `[tier 0]`.
+2. **`_normalize_url`** (case/trailing-slash/fragment-insensitive
+   equality) fixes a real bug the labeling alone wouldn't have caught: a
+   model-cited URL that's genuinely the same page as a fetched hit, just
+   differing by trailing slash or case, was falling through to
+   `UNCITED_TIER` on a trivial formatting mismatch rather than resolving
+   to its real tier. Used only for citation matching, not for the Exa
+   domain-restriction logic elsewhere in this module. The prompt was also
+   tightened to tell the model to copy a cited URL exactly as it appears
+   in the content block's own `--- Section (URL) ---` headers, to reduce
+   how often a citation drifts from the literal fetched URL in the first
+   place. A genuinely different/hallucinated URL still correctly resolves
+   to `UNCITED_TIER` after normalization — this only recovers trivial
+   formatting mismatches, not real inconsistencies. 4 new regression
+   tests (`tests/test_feature_scan.py`).
+
 ### Resources — Book recommendations (2026-08)
 
 Splits the flat `/tools/resources` card list into two headed sections:
