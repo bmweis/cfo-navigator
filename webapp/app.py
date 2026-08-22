@@ -16820,6 +16820,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         '<li><strong>Remembers the thread.</strong> Ask a follow-up and it knows what you meant. Come back tomorrow and the conversation&rsquo;s still there.</li>'
         '<li><strong>Finds by meaning, not just keywords.</strong> Semantic search pairs with keyword search (hybrid retrieval), so it surfaces the right article even when your wording doesn&rsquo;t match the source&rsquo;s.</li>'
         '<li><strong>Gets sharper.</strong> Every rating feeds a real eval set that improves retrieval and answer quality over time.</li>'
+        '<li><strong>Human-curated, AI-maintained.</strong> Every source starts with me: reading, vetting, and saving what&rsquo;s actually worth keeping. From there, a pipeline built on Claude (Anthropic), Exa&rsquo;s search API, and the Internet Archive&rsquo;s Wayback Machine keeps the archive structured, current, and recoverable, even when a source moves, goes down, or blocks direct access.</li>'
     )
 
     body = f"""<div class="page page-full">
@@ -16827,7 +16828,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 <p style="margin:0 0 12px;"><a href="/" style="font-size:13px;color:var(--muted);">&larr; Home</a></p>
 <span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
-<p style="color:var(--muted);margin:0 0 28px;">A digital library of finance content, curated over years, searched instantly. Skip the digging, get your answer.</p>
+<p style="color:var(--muted);margin:0 0 28px;">A digital library of finance content I curate by hand, kept structured and current by a content pipeline built on Claude, Exa, and the Internet Archive. Skip the digging, get your answer.</p>
 {usage_html}
 
 <div class="ask-value">
@@ -18936,6 +18937,19 @@ mermaid.initialize({{
 <p style="margin:0;">Exa is the default, toggled at <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings</a>. Turn it off, or leave <code>EXA_API_KEY</code> unset, and Claude's own web-search tool steps in instead&mdash;web search itself is never unavailable, only which engine runs it changes. Exactly one of the two runs per question, never both. A result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</p>
 </div>
 <p style="margin:8px 0 0;font-size:16px;color:var(--ink-soft);line-height:1.65;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
+</section>
+
+<section class="tool-prose">
+<h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Behind the archive</h3>
+<p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The Library isn't a scrape or an auto-import: every article starts with Brian actively reading and saving it, because human judgment about what's actually worth keeping is what makes FP&amp;A Buddy's answers useful rather than merely plausible. What runs on top of that curation is a genuinely automated content pipeline, built from a deliberate mix of tools chosen for what they're each best at:</p>
+<ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
+<li><strong>Claude (Anthropic)</strong> does the reasoning work throughout the pipeline: drafting per-article summaries and tags at save time, judging whether two saved articles are true near-duplicates before merging them, and synthesizing every FP&amp;A Buddy answer itself from the retrieved sources.</li>
+<li><strong>OpenAI's <code>text-embedding-3-small</code></strong> embeds every article&mdash;and every question asked of it&mdash;into the same vector space, so semantic search can surface a relevant article even when its wording doesn't match the question's. That's merged with traditional keyword search (FTS5) by reciprocal rank fusion, rather than picking one search strategy over the other.</li>
+<li><strong>Exa's search API</strong> is the default web-search tier for FP&amp;A Buddy's live citations, restricted to a curated allowlist of trusted finance sites. It's also repurposed inside the archive pipeline itself: when a saved article's original URL goes dead or gets blocked, Exa searches the same publisher for the piece by title, and the retrieved text is checked against the original before it's accepted as a replacement.</li>
+<li><strong>The Internet Archive's Wayback Machine</strong> is the last resort in that same recovery chain: when a source can't be reached directly and no better match turns up, the pipeline pulls a real historical snapshot from archive.org rather than losing the source outright.</li>
+<li><strong>Structured extraction, not flattened text.</strong> Articles are parsed into real HTML&mdash;headings, paragraphs, images, links intact&mdash;so both the human-facing Reader and the retrieval pipeline work from well-formed content, not a wall of run-together text.</li>
+<li><strong>Self-checking at every layer.</strong> Every fetch is graded against a content-quality check that catches a paywall wall or bot-challenge page masquerading as a successful fetch, every database backup runs an integrity check before it's kept, and every background job leaves a durable record of whether it actually finished. That makes archive health something to verify, not assume.</li>
+</ul>
 </section>
 
 <section>
