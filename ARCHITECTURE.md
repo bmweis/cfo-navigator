@@ -3084,6 +3084,75 @@ Brian runs this by hand via `railway ssh` once this PR is deployed and
 verified live — never wired into a boot hook or deploy step, consistent
 with every other destructive one-off script in this codebase.
 
+### Feature Taxonomy scan tool, Phases 1-2 (2026-08) — no schema/route changes yet
+
+A Phase 0 investigation (docs/FEATURE_TAXONOMY.md §10, "origination mode")
+scoped the recurring/one-shot AI scan tool that backfills a curated feature
+list for the 14 (of 17 live) `tool_categories` with no `category_features`
+rows yet. Phases 1-2 are read-only/library-only — no schema change, no new
+route, no `feature_review_queue` writes — so this note exists for
+completeness rather than because the standing ARCHITECTURE.md-update rule
+requires it.
+
+**Phase 1** — `scripts/report_feature_taxonomy_coverage.py`, a read-only
+diagnostic (same shape as `scripts/report_orphaned_categories.py`) that
+reports, per `tool_categories` row: tool count, live/retired
+`category_features` counts, and pending `feature_review_queue` counts by
+source. Confirmed the real numbers the "~22 categories" estimate elsewhere
+in this repo's history was guessing at: 17 categories total, 14 with no
+curated list yet, 0 pending queue items anywhere. Registered in
+`/admin/system/scripts`.
+
+**Phase 2** — `linklib/feature_scan.py`, the per-tool origination-mode
+research + drafting function (no roster-wide accumulation, no §7
+don't-collapse merge, no queue write — those are Phase 3, still to be
+scoped). Two pieces:
+
+- `research_vendor_domain(tool_name, tool_url)` — an Exa `/search` call per
+  §8 sourcing-hierarchy tier (changelog, help center, product page, press
+  release), each restricted to the tool's OWN domain via `includeDomains`
+  — deliberately not `linklib.agent.retrieve_exa`'s OPML-trusted-sites
+  allowlist, since a vendor's changelog/docs live on the vendor's own
+  domain, not Brian's curated third-party site list. Each hit is tagged
+  with an inferred §8 tier from its URL path (`_infer_tier`) since Exa's
+  index doesn't return a tier of its own, and deduped by URL in hierarchy
+  order so a URL matching more than one tier's keywords keeps its
+  strongest (lowest-numbered) classification. §8's tiers 5-6 (independent
+  reviews, vendor-authored comparisons) are inherently mostly off the
+  vendor's own domain and are out of scope for a domain-restricted search
+  by construction — flagged in the module docstring as a known scope limit
+  a future freshness-mode pass could revisit, not silently narrowed.
+- `draft_tool_features_for_category(...)` — one Claude call per tool,
+  grounded on the fetched content, returning a `ToolOriginationDraft`
+  (proposed features, each with availability/ai_enabled/confident/
+  source_url/source_tier, plus real token/cost accounting for both the Exa
+  and Claude legs). Reuses `linklib.enrich`'s Anthropic-call idiom
+  (try/except ImportError, a `DEFAULT_MODEL` constant, a JSON-only prompt,
+  `pricing.compute_cost` accounting) rather than inventing a new one. The
+  prompt embeds §10's two Phase-0/1-approved rules directly: no cap on how
+  many features the scan proposes (Brian's review at the eventual queue is
+  the curation gate, not the scan), and the thin-roster rule (`roster_size
+  < 4` drops the differentiator criterion, keeping only table-stakes/
+  standout candidates) — the caller passes the category's real roster size,
+  not how many tools have been researched so far in a run.
+- `verified_as_of` is stamped with the date the research actually ran — a
+  sensible default for the eventual `tool_feature_links.verified_as_of`
+  once Phase 3 builds the actual queue payload; still editable at
+  edit-then-approve time like any other field.
+
+**Tested with mocked Exa/Anthropic calls** (`tests/test_feature_scan.py`,
+14 cases — dedup/tier-inference, the no-API-key degrade paths, malformed-
+payload defaults, and the thin-roster prompt language). No live run against
+real vendor content happened in this session — no `ANTHROPIC_API_KEY`/
+`EXA_API_KEY` were available, and using the app's own production keys from
+a Code building session is against the standing CLAUDE.md billing-note
+rule. `scripts/test_feature_scan_origination.py` (same "manual QA, makes
+real API calls, writes nothing" shape as `scripts/enrich_compare.py` —
+deliberately not in the scripts registry, matching that precedent) is
+built for Brian to run by hand against 1-2 real Neobanking tools (the
+agreed first test category) to judge output quality before Phase 3 is
+scoped.
+
 ### Resources — Book recommendations (2026-08)
 
 Splits the flat `/tools/resources` card list into two headed sections:
