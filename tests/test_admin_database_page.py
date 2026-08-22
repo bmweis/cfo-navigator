@@ -130,6 +130,6 @@ def test_how_fpa_buddy_works_gets_pan_zoom_but_no_table_search(env):
     should get pan/zoom (generic to any Mermaid SVG) but not the table
     search box, since a flowchart has no erDiagram entity nodes to find."""
     c = _admin_client(env)
-    body = c.get("/admin/system/how-fpa-buddy-works").text
+    body = c.get("/tools/fpa-buddy/how-it-works").text
     assert "svg-pan-zoom" in body
     assert '<input type="text" class="diagram-lightbox-search"' not in body

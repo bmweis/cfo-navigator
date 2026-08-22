@@ -17007,16 +17007,24 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 <p style="margin:0 0 12px;"><a href="/" style="font-size:13px;color:var(--muted);">&larr; Home</a></p>
 <span class="ask-eyebrow">CFO Navigator</span>
 <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
-<p style="color:var(--muted);margin:0 0 28px;">A digital library of finance content I curate by hand, kept structured and current by a content pipeline built on Claude, Exa, and the Internet Archive. Skip the digging, get your answer.</p>
-{usage_html}
+<p style="color:var(--muted);margin:0 0 12px;">A digital library of finance content I curate by hand, kept structured and current by a content pipeline built on Claude, Exa, and the Internet Archive. Skip the digging, get your answer.</p>
+<p class="ask-teaser">Curious how this works? <a href="#fpa-features">Scroll down</a> or <a href="/tools/fpa-buddy/how-it-works">read the full breakdown &rarr;</a></p>
 
-<div class="ask-value">
-  <ul class="ask-value-list ask-value-list-static">{ask_value_bullets}</ul>
-  <details class="ask-value-details">
-    <summary><span class="disclosure-caret">&#9654;</span>What can FP&amp;A Buddy do?</summary>
-    <ul class="ask-value-list">{ask_value_bullets}</ul>
-  </details>
+<div class="ask-example">
+  <div class="ask-example-label">Illustrative example&mdash;not a captured real answer</div>
+  <div class="ask-q-bubble">What FP&amp;A team size do peer SaaS companies run at our stage?</div>
+  <div class="ask-answer">
+    <p>Most peer benchmarks put FP&amp;A headcount around one analyst per 75 to 150 employees, with the ratio tightening as ARR growth accelerates [1]. Companies preparing for a new funding round often add a dedicated FP&amp;A hire ahead of the raise to support board-reporting cadence [2]. Recent hiring trends across sub-$100M-ARR SaaS companies lean toward one generalist analyst before adding a dedicated planning lead [3].</p>
+    <ul class="ask-src-list">
+      <li>&#128218; <span class="ask-src-static">[1] FP&amp;A Team Sizing Benchmarks</span></li>
+      <li>&#128240; <span class="ask-src-static">[2] Board Reporting Cadence at Growth Stage</span></li>
+      <li>&#127760; <span class="ask-src-static">[3] Hiring Trends Across Early-Stage FP&amp;A Teams</span></li>
+    </ul>
+  </div>
+  <p class="ask-example-caption">A mocked example built on the real Library/Feed/Web mechanism described below&mdash;no real question history exists yet to pull a genuine one from.</p>
 </div>
+
+{usage_html}
 
 {past_questions_section}
 
@@ -17052,6 +17060,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 <div id="ask-capped" style="display:none;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:14px;color:var(--muted);">
   You&rsquo;ve reached the limit for this conversation. <a href="#" onclick="resetConvo();return false;" style="color:var(--navy);font-weight:600;">Start a new question</a>.
 </div>
+
+<div class="ask-value" id="fpa-features">
+  <div class="ask-section-label">What FP&amp;A Buddy can do</div>
+  <ul class="ask-value-list">{ask_value_bullets}</ul>
+</div>
 </div>
 </div>
 
@@ -17059,19 +17072,18 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-eyebrow{{display:block;font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}}
 .ask-card{{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:0;}}
 
-.ask-value{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:16px;}}
-.ask-value-list{{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}}
-.ask-value-list li{{font-size:13px;line-height:1.5;color:var(--ink-soft);}}
+.ask-teaser{{font-size:14px;color:var(--ink-soft);margin:0 0 24px;}}
+.ask-teaser a{{color:var(--accent);font-weight:600;}}
+
+.ask-example{{border:1px dashed var(--line-strong);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--surface);}}
+.ask-example-label{{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:3px 10px;margin-bottom:12px;}}
+.ask-example-caption{{margin:12px 0 0;font-size:12px;color:var(--muted);}}
+
+.ask-value{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:36px 0 0;}}
+.ask-value-list{{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;}}
+.ask-value-list li{{font-size:13.5px;line-height:1.55;color:var(--ink-soft);}}
 .ask-value-list strong{{color:var(--ink);}}
-.ask-value-details{{display:none;}}
-.ask-value-details summary{{cursor:pointer;font:600 13px var(--font-body);color:var(--navy);display:flex;align-items:baseline;gap:6px;}}
-.ask-value-details[open] summary{{margin-bottom:10px;}}
-@media (max-width:640px){{
-  .ask-value{{padding:14px 16px;}}
-  .ask-value-list-static{{display:none;}}
-  .ask-value-details{{display:block;}}
-  .ask-value-details .ask-value-list{{grid-template-columns:1fr;gap:8px;}}
-}}
+@media (max-width:640px){{.ask-value{{padding:16px 18px;}}}}
 .ask-section{{margin:20px 0;}}
 .ask-section-label{{font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;}}
 
@@ -17117,7 +17129,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
 .ask-q-bubble{{background:var(--navy);color:#fff;border-radius:14px 14px 2px 14px;padding:12px 18px;font-size:14px;font-weight:500;margin:0 0 8px auto;max-width:80%;width:fit-content;}}
 .ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-wrap:wrap;gap:6px;}}
 .ask-src-list li{{font-size:12px;}}
-.ask-src-list a{{display:inline-flex;align-items:center;gap:5px;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
+.ask-src-list a, .ask-src-list span.ask-src-static{{display:inline-flex;align-items:center;gap:5px;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
 .ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}
 .ask-src-caption{{margin:6px 0 0;font-size:11px;color:var(--muted);}}
 
@@ -17934,7 +17946,7 @@ _TOOLBOX_TOOLS = [
 # only the section grouping changed. Exa web search settings (Phase 7) is
 # the section's 4th card.
 _FPA_BUDDY_TOOLS = [
-    ("/admin/system/how-fpa-buddy-works", "How FP&amp;A Buddy works", "The retrieval tiers, effort levels, citations, and cost model behind the Q&amp;A tool&mdash;for anyone who wants the real mechanism."),
+    ("/tools/fpa-buddy/how-it-works", "How FP&amp;A Buddy works", "The retrieval tiers, effort levels, citations, and cost model behind the Q&amp;A tool&mdash;for anyone who wants the real mechanism. Public page, not admin-only."),
     ("/admin/ask-report",    "FP&A Buddy report",   "Every question asked, across every user—settings, cost, and a CSV export."),
     ("/admin/ask-feedback",  "FP&A Buddy feedback", "Member ratings on answers—triage flagged answers with the sources they cited."),
     ("/admin/exa-settings",  "Exa web search",       "Turn Exa on or off for the web tier, and test the connection."),
@@ -19023,6 +19035,9 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
 # take it as a plain argument the same way `admin_system_database` passes its
 # live-generated `diagram` string.
 _FPA_FLOW_DIAGRAM = """flowchart LR
+    T[Quick / Standard / Deep<br/>sets how much of each tier runs] -.-> L
+    T -.-> F
+    T -.-> W
     Q[Your question] --> L[Library<br/>curated archive]
     Q --> F[Feed<br/>recent RSS]
     Q --> W[Web<br/>Exa search, trusted sites only]
@@ -19030,21 +19045,35 @@ _FPA_FLOW_DIAGRAM = """flowchart LR
     F --> C
     W --> C
     C --> A[Answer<br/>numbered citations]
-    T[Quick / Standard / Deep<br/>sets how much of each tier runs] -.-> C
 
     classDef annotation fill:#F5F4EF,stroke:#6F6A60,stroke-dasharray: 3 3,color:#6F6A60;
     class T annotation;"""
 
 
-@app.get("/admin/system/how-fpa-buddy-works", response_class=HTMLResponse)
-def admin_how_fpa_buddy_works(request: Request):
+@app.get("/tools/fpa-buddy/how-it-works", response_class=HTMLResponse)
+def fpa_buddy_how_it_works(request: Request):
     """A plain-language technical explainer for FP&A Buddy's mechanism (Exa
-    Phase 4) — the same reference-doc role _COMMUNITIES_REFERENCE_HTML plays
-    for the Communities feature, but as its own System-group page rather than
-    a collapsible block on a working admin page, since this page's whole
+    Phase 4; made public and moved off /admin/* in the explainer-page
+    follow-up round) — the same reference-doc role _COMMUNITIES_REFERENCE_HTML
+    plays for the Communities feature, but as its own page rather than a
+    collapsible block on a working admin page, since this page's whole
     purpose IS the explanation (no other primary content to collapse under).
     Written for a technically comfortable reader (PM, engineer, or CFO) who
-    wants the real mechanism, not marketing copy.
+    wants the real mechanism, not marketing copy — public, reachable by
+    anyone with the link (not linked from primary public nav, same
+    discoverability tier as the thought-leadership sub-pages), no login
+    required. The admin dashboard's FP&A Buddy card links here now instead
+    of hosting a separate admin-only copy.
+
+    Public-audience content audit (flagged before this page went public):
+    the "← Admin" breadcrumb is gone (a public visitor has no admin access
+    to return to) in favor of "← FP&A Buddy", matching the back-link
+    convention every other public sub-page already uses; the inline
+    /admin/exa-settings and /admin/users references are de-linked to plain
+    prose ("the site admin") since a public reader would only ever hit a
+    login wall on either; and the ARCHITECTURE.md link is removed outright
+    — the repo is private, so that link 404s for exactly the outside
+    audience this page is now written for.
 
     Per-tier source counts (max_library/max_feed/max_web) and the default
     monthly cap are read live from linklib.agent.EFFORT_SETTINGS and
@@ -19055,9 +19084,6 @@ def admin_how_fpa_buddy_works(request: Request):
     not pinned to a canonical model ID — those rotate independently of this
     page and a literal model name would go stale the moment one retires.
     """
-    if not _is_authed(request):
-        return _login_redirect(request)
-
     from linklib.agent import EFFORT_SETTINGS
     lib = _lib()
     try:
@@ -19081,14 +19107,13 @@ def admin_how_fpa_buddy_works(request: Request):
 
     body = f"""<div class="page page-admin article-atlantic">
 <div class="tool-prose">
-<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>How FP&amp;A Buddy works</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">The real mechanism behind <a href="/tools/fpa-buddy" style="color:var(--accent);">/tools/fpa-buddy</a>, for anyone who wants more than the marketing description&mdash;a PM, an engineer, or a technically comfortable CFO. Retrieval-tier counts and the default cost cap below are read live from the code, so this page can't quietly drift out of date the way a hand-typed number would.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 24px;font-size:15px;line-height:1.6;">The real mechanism behind <a href="/tools/fpa-buddy" style="color:var(--accent);">FP&amp;A Buddy</a>, for anyone who wants more than the marketing description&mdash;a PM, an engineer, or a technically comfortable CFO. Retrieval-tier counts and the default cost cap below are read live from the code, so this page can't quietly drift out of date the way a hand-typed number would.</p>
 </div>
 
+<div style="max-width:680px;margin:0 auto;">
 {_diagram_lightbox_html("fpa-flow-diagram-frame", _FPA_FLOW_DIAGRAM, "the retrieval flow diagram")}
-<div class="tool-prose">
-<p style="color:var(--muted);margin:-14px 0 24px;font-size:12.5px;line-height:1.5;">A concept-level view&mdash;see the &ldquo;FP&amp;A Buddy&rdquo; section of <a href="https://github.com/bmweis/cfo-navigator/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--accent);">ARCHITECTURE.md</a> for the full request/response sequence (API calls, token usage, cost guards, follow-up handling).</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
@@ -19102,6 +19127,11 @@ mermaid.initialize({{
     primaryTextColor: '#002975',
     lineColor: '#6F6A60',
     tertiaryColor: '#F5F4EF'
+  }},
+  flowchart: {{
+    nodeSpacing: 24,
+    rankSpacing: 42,
+    padding: 8
   }}
 }});
 </script>
@@ -19116,12 +19146,20 @@ mermaid.initialize({{
 </ul>
 <div class="article-callout" style="margin:16px 0;">
 <div class="article-callout-title">Which engine handled this answer?</div>
-<p style="margin:0;">Exa is the default, toggled at <a href="/admin/exa-settings" style="color:var(--accent);">/admin/exa-settings</a>. Turn it off, or leave <code>EXA_API_KEY</code> unset, and Claude's own web-search tool steps in instead&mdash;web search itself is never unavailable, only which engine runs it changes. Exactly one of the two runs per question, never both. A result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</p>
+<ul style="margin:0;padding-left:20px;">
+<li><strong>Exa is the default.</strong> Turning it off, or leaving <code>EXA_API_KEY</code> unset, switches to Claude's own web-search tool instead&mdash;web search itself is never unavailable, only which engine runs it changes. This is a setting the site admin controls.</li>
+<li><strong>Exactly one engine runs per question,</strong> never both.</li>
+<li><strong>Exa-sourced results are labeled.</strong> A result Exa found carries a small &ldquo;Web search powered by Exa&rdquo; note under the source list; a result the fallback tool found doesn't&mdash;both render as a normal, citable source either way.</li>
+</ul>
 </div>
 <p style="margin:8px 0 0;font-size:16px;color:var(--ink-soft);line-height:1.65;">Whichever tiers are turned on for a question all get searched every time&mdash;there's no logic that skips Feed or Web because Library already found enough. The model is instructed to lead with the Library and treat Feed and Web as supplementary, but that's guidance in the prompt, not a gate in the code.</p>
 <div class="article-callout" style="margin:16px 0;">
 <div class="article-callout-title">Why the citations can be trusted</div>
-<p style="margin:0;">Every retrieved source&mdash;library, feed, or web&mdash;is handed to Claude as a document block with Anthropic's Citations API turned on, not as plain text pasted into the prompt. That API mechanically ties each cited span of the answer to an actual passage in one of those documents: the model can't produce a citation for something that isn't really in the source text, because the link between claim and passage is checked by the API itself, not self-reported by the model afterward. That's a different, stronger guarantee than an AI saying it read something and believes it's accurate. Every <code>[n]</code> in an answer traces back to a real, verifiable passage, not a plausible-sounding paraphrase.</p>
+<ul style="margin:0;padding-left:20px;">
+<li><strong>Documents, not pasted text.</strong> Every retrieved source&mdash;library, feed, or web&mdash;is handed to Claude as a document block with Anthropic's Citations API turned on, not as plain text pasted into the prompt.</li>
+<li><strong>Mechanically verified, not self-reported.</strong> That API ties each cited span of the answer to an actual passage in one of those documents&mdash;the model can't produce a citation for something that isn't really in the source text, because the link between claim and passage is checked by the API itself.</li>
+<li><strong>A stronger guarantee.</strong> That's different from an AI saying it read something and believes it's accurate. Every <code>[n]</code> in an answer traces back to a real, verifiable passage, not a plausible-sounding paraphrase.</li>
+</ul>
 </div>
 </section>
 
@@ -19172,7 +19210,7 @@ mermaid.initialize({{
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it costs</h3>
 <ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
 <li><strong>Priced from real usage, not a query count.</strong> Every answer, follow-up rewrite, and retrieval step is costed from its actual token usage against the model providers' published rates, so the number reflects what a question actually spent, not an estimate.</li>
-<li><strong>A monthly dollar cap per user,</strong> currently ${default_cap:.2f} by default and adjustable per user in <a href="/admin/users" style="color:var(--accent);">/admin/users</a>. Once a user hits their cap for the month, Buddy tells them so instead of answering, and the cap resets at the start of the next month.</li>
+<li><strong>A monthly dollar cap per user,</strong> currently ${default_cap:.2f} by default and adjustable per user by the site admin. Once a user hits their cap for the month, Buddy tells them so instead of answering, and the cap resets at the start of the next month.</li>
 <li><strong>Visible to the user,</strong> not just to Admin&mdash;a member can see their own spend-to-date against their cap from the Ask page itself.</li>
 </ul>
 </section>
@@ -19184,7 +19222,7 @@ mermaid.initialize({{
 thead .cc-cell{{border-bottom:2px solid var(--line);}}
 </style>
 </div>"""
-    return HTMLResponse(_page("How FP&A Buddy works—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("How FP&A Buddy works—Brian Weisberg", "CFO Toolbox", body, role=_role(request)))
 
 
 @app.get("/admin/exa-settings", response_class=HTMLResponse)
@@ -19216,7 +19254,7 @@ def admin_exa_settings(request: Request):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Exa web search</h1>
-<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Exa is the preferred mechanism for FP&amp;A Buddy's web tier. Turning it off doesn't disable web search&mdash;it switches to Claude's own web-search tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/admin/system/how-fpa-buddy-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</p>
+<p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">Exa is the preferred mechanism for FP&amp;A Buddy's web tier. Turning it off doesn't disable web search&mdash;it switches to Claude's own web-search tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</p>
 {key_banner}
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">

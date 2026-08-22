@@ -2354,6 +2354,56 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   unchanged. See ARCHITECTURE.md's "Admin nav restructure, Library page
   cleanup, and page-width fixes (Phase 6)" section for the full write-up.
 
+- **FP&A Buddy explainer, follow-up round — public layout restructure, and
+  "How FP&A Buddy works" moves off `/admin/*` outright.** On `/tools/fpa-buddy`:
+  the 5-item feature list (previously a top-of-page 2-column grid that split
+  unevenly for an odd item count) moved to the bottom of the page, after the
+  ask interaction, rebuilt as a single always-visible column so item count can
+  never force an uneven split again — the old mobile-only `<details>` collapse
+  is gone with it, since a bottom-of-page recap doesn't need to hide behind a
+  toggle the way a top-of-page block competing for attention did. A teaser
+  line under the intro ("Curious how this works? Scroll down or read the full
+  breakdown →") links to both the relocated section (`#fpa-features`) and the
+  new deep-dive page. A clearly-labeled illustrative example (a realistic
+  sample question + a mocked cited answer, reusing the real `.ask-q-bubble`/
+  `.ask-answer`/`.ask-src-list` components) sits near the top — there's no
+  real usage yet to pull a genuine example from, so it's explicit about being
+  mocked rather than reading as a captured real answer. **The deep-dive page
+  is now public**, moved from `/admin/system/how-fpa-buddy-works` to
+  `/tools/fpa-buddy/how-it-works` — reachable by anyone with the link (no
+  `noindex`, not linked from primary nav, same discoverability tier as a
+  thought-leadership sub-page) rather than admin-gated. A content audit
+  before the move found the page assumed an admin-insider reader in three
+  places, all fixed: the "← Admin" breadcrumb (a public visitor has no admin
+  access to return to) became "← FP&A Buddy", matching every other public
+  sub-page's own back-link convention; the inline `/admin/exa-settings` and
+  `/admin/users` links were de-linked to plain prose ("the site admin"),
+  since a public reader would only ever hit a login wall on either; and the
+  `ARCHITECTURE.md` link was removed outright, since the repo is private and
+  the link 404s for exactly the outside audience the page is now written
+  for. The admin dashboard's FP&A Buddy card now points at this same public
+  URL instead of hosting a separate admin-only copy — no route survives at
+  the old `/admin/system/*` path. The "Which engine handled this answer?"
+  and "Why the citations can be trusted" callouts were reformatted from
+  dense paragraphs into bold-lead-in bullets, matching "Where an answer's
+  sources come from" directly above them. The flow diagram's `Quick /
+  Standard / Deep` annotation node — previously one dotted edge into
+  `Claude` that Mermaid's layout rendered as a box disconnected below the
+  main flow — now fans dotted edges into `Library`/`Feed`/`Web`, the same
+  three tiers its own label describes, landing it as a peer of the question
+  node instead of an orphan; the diagram frame is also wrapped in a
+  `max-width:680px` container so it stops stretching to the full page
+  column regardless of the SVG's actual size. **Known limitation, flagged
+  rather than silently assumed fine:** this session's sandboxed headless
+  Chromium can't reach the `cdnjs.cloudflare.com` CDN that serves
+  `mermaid.min.js` (same class of sandbox-networking gap as the documented
+  Google Fonts one), so the retiled diagram's actual rendered pixel layout
+  was never visually confirmed here — only the container-width fix and the
+  edge-connectivity fix, both verified structurally (HTML/CSS inspection,
+  a live Playwright screenshot showing the narrower frame). Worth a quick
+  look at the live PR preview to confirm the diagram reads well before
+  merging.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
@@ -2376,7 +2426,9 @@ tables, no third-party dependency.
 - **Route protection:**
   - Public (no auth): `/`, `/thought-leadership`, `/thought-leadership/growth-engine-ratio`,
     `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp`, `/contact`,
-    `/privacy`, `/login`, `/logout`, `/static/*`, `/health`. (The old flat `/growth-engine-ratio`,
+    `/privacy`, `/login`, `/logout`, `/static/*`, `/health`, `/tools/fpa-buddy/how-it-works`
+    (moved off `/admin/*` in the FP&A Buddy explainer follow-up round — see the Key
+    architecture decisions bullet above). (The old flat `/growth-engine-ratio`,
     `/finops-ai-hackathon`, `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
   - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
     `/admin/contacts` (member-gated), and

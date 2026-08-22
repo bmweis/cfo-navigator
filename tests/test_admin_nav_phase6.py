@@ -67,7 +67,7 @@ def test_fpa_buddy_tools_list_has_all_expected_pages(env):
     # page itself (tests/test_admin_exa_settings.py).
     hrefs = [href for href, _, _ in env._FPA_BUDDY_TOOLS]
     assert hrefs == [
-        "/admin/system/how-fpa-buddy-works",
+        "/tools/fpa-buddy/how-it-works",
         "/admin/ask-report",
         "/admin/ask-feedback",
         "/admin/exa-settings",
@@ -105,7 +105,7 @@ def test_all_four_moved_routes_still_resolve_at_the_same_urls(env):
     """The reorg only changes section placement — none of the four pages'
     own routes or content should have moved."""
     c = _admin_client(env)
-    for path in ("/admin/system/how-fpa-buddy-works", "/admin/ask-report",
+    for path in ("/tools/fpa-buddy/how-it-works", "/admin/ask-report",
                  "/admin/ask-feedback", "/admin/game-settings"):
         resp = c.get(path)
         assert resp.status_code == 200, path
