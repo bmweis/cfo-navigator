@@ -225,30 +225,56 @@ the standing rule keeping the registry in sync: any PR touching `scripts/`
 updates this page in the same PR, and any PR that finishes a recurring script's
 job archives it and drops its entry, also in the same PR.
 
-**`/admin/system/how-fpa-buddy-works`** (added in the Exa migration's
-Phase 4; moved from the System nav group into its own "FP&A Buddy" section
-in Phase 6, alongside the report/feedback pages and the Phase 7 toggle
-below — the route itself didn't change, only its section) is a
+**`/tools/fpa-buddy/how-it-works`** (added in the Exa migration's Phase 4 as
+`/admin/system/how-fpa-buddy-works`; moved from the System nav group into
+its own "FP&A Buddy" section in Phase 6; made public and moved off
+`/admin/*` entirely in the explainer-page follow-up round) is a
 plain-language technical explainer of FP&A Buddy's mechanism — retrieval
 tiers (library/feed/web), the Quick/Standard/Deep effort tiers, citation
-verification, and the per-user dollar cost cap — written for a technically
-comfortable reader (a PM, an engineer, or a CFO) who wants the real
-mechanism, not marketing copy. It plays the same reference-doc role
-`_COMMUNITIES_REFERENCE_HTML` plays for the Communities feature, but as its
-own page rather than a collapsible block on a working admin page, since
-explaining the mechanism IS this page's whole purpose. Per-tier source
-counts read live from `linklib.agent.EFFORT_SETTINGS` and the default
-monthly cap reads live from `Library.get_default_ask_cap()`, so neither can
-drift out of sync with the code the way a hand-typed number would; model
-names are deliberately described qualitatively (fastest/balanced/most-
-capable) rather than pinned to a canonical model ID, since those rotate
+verification, the archive's own content pipeline, and the per-user dollar
+cost cap — written for a technically comfortable reader (a PM, an
+engineer, or a CFO) who wants the real mechanism, not marketing copy. It
+plays the same reference-doc role `_COMMUNITIES_REFERENCE_HTML` plays for
+the Communities feature, but as its own page rather than a collapsible
+block on a working admin page, since explaining the mechanism IS this
+page's whole purpose. Per-tier source counts read live from
+`linklib.agent.EFFORT_SETTINGS` and the default monthly cap reads live
+from `Library.get_default_ask_cap()`, so neither can drift out of sync
+with the code the way a hand-typed number would; model names are
+deliberately described qualitatively (fastest/balanced/most-capable)
+rather than pinned to a canonical model ID, since those rotate
 independently of this page. Phase 5 added a concept-level Mermaid
 `flowchart` above the prose (question → library/feed/web → synthesis →
 cited answer, no token counts or API names) — deliberately not the
 developer-grade sequence diagram above, which stays the reference for
 anyone debugging the actual request flow. Renders via the same
 CDN-hosted `mermaid.min.js` used by `/admin/system/database`'s ER diagram,
-not a new dependency.
+not a new dependency. **Made public in the explainer-page follow-up
+round**, per Brian's ask that the page be a showcase reachable by anyone
+with the link (not linked from primary public nav, no `noindex`, same
+discoverability tier as a thought-leadership sub-page). A pre-move content
+audit found three admin-insider assumptions baked into the page and fixed
+each: the "← Admin" breadcrumb (a public visitor has no admin access to
+return to) became "← FP&A Buddy", matching every other public sub-page's
+own back-link convention; the inline `/admin/exa-settings` and
+`/admin/users` links were de-linked to plain prose ("the site admin"),
+since a public reader would only ever hit a login wall on either; and the
+`ARCHITECTURE.md` link was removed outright, since this repository is
+private and the link 404s for exactly the outside audience the page is
+now written for. The admin dashboard's FP&A Buddy card (`_FPA_BUDDY_TOOLS`)
+now points at this same public URL instead of hosting a separate
+admin-only copy — no route lives at the old `/admin/system/*` path
+anymore. The "Which engine handled this answer?" and "Why the citations
+can be trusted" callouts were also reformatted from dense paragraphs to
+bold-lead-in bullets, matching the "Where an answer's sources come from"
+list directly above them; and the flowchart's `Quick / Standard / Deep`
+annotation node — previously a single dotted edge into `Claude` that
+Mermaid's layout rendered as a box disconnected below the main flow — now
+fans dotted edges into `Library`/`Feed`/`Web` (the same three tiers its
+label actually describes), landing it as a peer of the question node
+instead of an orphan; the diagram frame is also wrapped in a
+`max-width:680px` container so it no longer stretches to the full page
+column regardless of the SVG's actual rendered size.
 
 **`/admin/exa-settings`** (Phase 7, FP&A Buddy nav group) is the Exa kill
 switch: an `exa_enabled` toggle (`settings` table, `Library.get_exa_enabled`/
