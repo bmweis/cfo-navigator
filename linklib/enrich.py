@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 _logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-5")
+DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-4-8")
 
 # Version of the enrichment "rules" (the prompt below). Stored alongside each
 # article's enrichment so you can tell which ruleset produced a given summary,
@@ -192,9 +192,14 @@ Fields:
      for the directory card and search results — a proper condensed
      rewrite someone could read on its own and understand what the tool is
      and does, not just the description's opening sentences copy-pasted.
+  "confident": true if the page content below gave you a solid, specific
+     basis for both fields; false if you had to draft from thin/ambiguous
+     page content or from your own general knowledge rather than the page
+     itself. Say so honestly rather than defaulting to true — a reader
+     relies on this to know whether the write-up is well-grounded.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly these
-keys: "description", "summary".
+keys: "description", "summary", "confident".
 
 Tool name: {name}
 Tool URL: {url}
@@ -208,6 +213,7 @@ class ToolDescriptionDraft:
     description: str
     summary: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    confident: bool = False   # the model's own self-reported certainty (see prompt above)
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -263,7 +269,8 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL) -
         return ToolDescriptionDraft(
             description=str(data.get("description", "")).strip(),
             summary=str(data.get("summary", "")).strip(),
-            low_confidence=low_confidence, model=model,
+            low_confidence=low_confidence, confident=bool(data.get("confident")),
+            model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:
@@ -290,13 +297,19 @@ Vendor: {name} ({url})
 Description: {description}
 {competitors_block}
 
-Respond with JSON only: {{"competitive_differentiation": "..."}}"""
+Also report "confident": true if the description and competitor context above
+gave you a real basis for a specific, defensible comparison; false if you had
+to draft a generic-sounding callout with little to actually differentiate
+against. Say so honestly rather than defaulting to true.
+
+Respond with JSON only: {{"competitive_differentiation": "...", "confident": true|false}}"""
 
 
 @dataclass
 class ToolDifferentiationDraft:
     competitive_differentiation: str
     low_confidence: bool = False
+    confident: bool = False   # the model's own self-reported certainty (see prompt above)
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -356,7 +369,8 @@ def generate_tool_differentiation(name: str, url: str, description: str,
 
         return ToolDifferentiationDraft(
             competitive_differentiation=str(data.get("competitive_differentiation", "")).strip(),
-            low_confidence=low_confidence, model=model,
+            low_confidence=low_confidence, confident=bool(data.get("confident")),
+            model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:
@@ -1159,3 +1173,42 @@ def voice_rewrite_community_fields(name: str, fields: dict, voice_core: str,
     except Exception as e:
         _logger.warning("voice_rewrite_community_fields() failed: %s: %s", type(e).__name__, e)
         return None
+
+
+def test_model_connection(model_id: str) -> dict:
+    """Fire one minimal, real Claude call against `model_id` to verify it
+    actually works — manual/on-demand only from /admin/system/model's "Test
+    connection" action, same shape and same "manual, never a background job"
+    contract as linklib.agent.test_exa_connection. Returns
+    {"ok", "error", "cost_usd"}: cost_usd is 0.0 on any failure (an
+    auth/rate-limit/invalid-model error means nothing billed), and the real
+    compute_cost() figure on a genuine success."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return {"ok": False, "error": "ANTHROPIC_API_KEY is not set.", "cost_usd": 0.0}
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return {"ok": False, "error": "The anthropic SDK isn't installed.", "cost_usd": 0.0}
+
+    try:
+        client = Anthropic()
+        resp = client.messages.create(
+            model=model_id,
+            max_tokens=64,   # a trivial one-word reply, not a generate_*() JSON call — the
+                             # MIN_GENERATE_MAX_TOKENS floor above doesn't apply here
+            messages=[{"role": "user", "content": "Reply with only the word: ok"}],
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "cost_usd": 0.0}
+
+    from .pricing import compute_cost
+    usage = getattr(resp, "usage", None)
+    in_tok = getattr(usage, "input_tokens", 0) or 0
+    out_tok = getattr(usage, "output_tokens", 0) or 0
+    cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+    try:
+        cost = compute_cost(model_id, in_tok, out_tok, cache_w, cache_r)
+    except Exception:
+        cost = 0.0
+    return {"ok": True, "error": "", "cost_usd": cost}

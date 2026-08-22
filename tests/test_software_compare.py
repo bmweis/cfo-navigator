@@ -145,10 +145,10 @@ def test_compare_gives_agent_involvement_its_own_section(env):
     assert "not have" not in r.text.lower() and "no agent" not in r.text.lower()
 
 
-def test_agent_taxonomy_verification_flag_shown_on_profile(env):
-    """A drafted (unconfirmed) agent_taxonomy_note gets an "unverified"
-    flag on the profile page, consistent with every other verification-
-    flagged narrative field (Description, Differentiation)."""
+def test_agent_taxonomy_unverified_hidden_from_public_profile(env):
+    """A drafted (unconfirmed) agent_taxonomy_note is a publish gate, not
+    just a badge — added after a confirmed fabrication (Abacum) sat
+    unreviewed and publicly visible. A public visitor never sees it."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -156,8 +156,24 @@ def test_agent_taxonomy_verification_flag_shown_on_profile(env):
     lib.close()
 
     r = _client(env).get("/tools/software/runway")
+    assert "Uses an LLM-drafted agent summary." not in r.text
+
+
+def test_agent_taxonomy_unverified_visible_to_admin_labeled_hidden(env):
+    """The same unconfirmed note IS visible to a signed-in admin, clearly
+    labeled as hidden from public visitors — so it can actually be
+    reviewed and verified."""
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(a, "Uses an LLM-drafted agent summary.", 0.5)
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get("/tools/software/runway")
     assert "Uses an LLM-drafted agent summary." in r.text
-    assert '<span class="tp-verify">unverified</span>' in r.text
+    assert "hidden from visitors" in r.text
     assert ".tp-verify{" in r.text   # profile page has its own <style> block
 
 
@@ -171,10 +187,12 @@ def test_agent_taxonomy_no_flag_once_verified(env):
 
     r = _client(env).get("/tools/software/runway")
     assert "Uses an LLM-drafted agent summary." in r.text
-    assert '<span class="tp-verify">unverified</span>' not in r.text
+    assert '<span class="tp-verify">unverified' not in r.text
 
 
-def test_compare_shows_agent_taxonomy_verification_flag(env):
+def test_compare_hides_unverified_agent_taxonomy_from_public(env):
+    """Same publish gate on the compare matrix: an unverified note reads as
+    "Not documented yet" to a public visitor, never the drafted text."""
     from linklib.db import Library
     lib = Library(os.environ["LINKLIB_DB"])
     a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
@@ -184,7 +202,24 @@ def test_compare_shows_agent_taxonomy_verification_flag(env):
     lib.close()
 
     r = _client(env).get(f"/tools/software/compare?ids={a},{b}")
-    assert '<span class="cc-verify">unverified</span>' in r.text
+    assert "Drafted agent note for Runway." not in r.text
+    assert "Confirmed agent note for Datarails." in r.text
+    assert "Not documented yet" in r.text
+
+
+def test_compare_shows_agent_taxonomy_verification_flag_to_admin(env):
+    from linklib.db import Library
+    lib = Library(os.environ["LINKLIB_DB"])
+    a = lib.add_tool("Runway", "FP&A", "https://runway.com", ["FP&A"], approved=1)
+    b = lib.add_tool("Datarails", "FP&A", "https://datarails.com", ["FP&A"], approved=1)
+    lib.set_tool_agent_taxonomy_draft(a, "Drafted agent note for Runway.", 0.5)
+    lib.update_tool_agent_taxonomy(b, "Confirmed agent note for Datarails.")
+    lib.close()
+
+    client = _client(env)
+    _login(client)
+    r = client.get(f"/tools/software/compare?ids={a},{b}")
+    assert '<span class="cc-verify">unverified' in r.text
     assert "Drafted agent note for Runway." in r.text
     assert "Confirmed agent note for Datarails." in r.text
     # The confirmed tool's note must not itself carry the flag.

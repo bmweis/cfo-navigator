@@ -154,7 +154,7 @@ def test_research_refresh_success(env, monkeypatch):
     assert calls
 
     r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
-    assert "AI research refreshed" in r.text
+    assert "Drafted. Review the" in r.text   # shrunk from "AI research refreshed" banner (2026-08 design fix)
 
 
 def test_research_refresh_failure_banner(env, monkeypatch):
@@ -264,7 +264,7 @@ def test_research_refresh_banner_drops_verify_clause_when_confident(env, monkeyp
     client.post(f"/admin/tools/software/{tool_id}/research/refresh", follow_redirects=False)
 
     r = client.get(f"/tools/software/{tool_slug}/edit?research_refreshed=1")
-    assert "AI research refreshed" in r.text
+    assert "Drafted. Review the" in r.text   # shrunk from "AI research refreshed" banner (2026-08 design fix)
     assert "before marking it verified" not in r.text
     # And, matching that: no verify button/badge should be on the page either.
     assert "Mark verified" not in r.text

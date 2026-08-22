@@ -1946,6 +1946,26 @@ class Library:
             # book rows are inserted by a one-off migration script, not by
             # this column-add.
             "ALTER TABLE benchmarks ADD COLUMN section TEXT NOT NULL DEFAULT 'benchmarking'",
+            # AI confidence indicator, tool Description/Short summary and
+            # Competitive differentiation (2026-08) — a genuine model self-
+            # report, matching the pattern agent_taxonomy_needs_verification
+            # already established (generate_tool_agent_taxonomy's own
+            # "confident" JSON key). Deliberately a SEPARATE fact from
+            # description_needs_verification/competitive_differentiation_needs_verification:
+            # verification is about human review status, confidence is the
+            # model's own self-assessed certainty at generation time — the
+            # two combine (an unverified AND low-confidence field is the
+            # highest-risk state a reader can see) rather than one standing
+            # in for the other. NULL means "no signal" (hand-written,
+            # pre-existing row, or a hand-edited save that isn't a fresh AI
+            # draft) — 0/1 only ever gets written alongside a fresh
+            # generation, the same "hand-edited counts as a fresh state"
+            # convention needs_verification already uses. summary shares
+            # description_ai_confident exactly like it shares
+            # description_needs_verification, since both are drafted by the
+            # same generateDescription() call.
+            "ALTER TABLE tools ADD COLUMN description_ai_confident INTEGER",
+            "ALTER TABLE tools ADD COLUMN competitive_differentiation_ai_confident INTEGER",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -4175,7 +4195,8 @@ class Library:
                     promoted: int = 0, vendor_email: str = "",
                     warm_intro_enabled: int = 0, vendor_name: str = "",
                     summary: str = "",
-                    description_needs_verification: Optional[int] = None) -> None:
+                    description_needs_verification: Optional[int] = None,
+                    description_ai_confident: Optional[int] = None) -> None:
         # description_needs_verification defaults to None ("leave the column
         # alone") rather than 0/1, because update_tool is also the bulk-edit
         # panel's write path (every row resaved at once) and
@@ -4201,11 +4222,12 @@ class Library:
                advisor=?, promoted=?, vendor_email=?, warm_intro_enabled=?, vendor_name=?,
                summary=?,
                description_needs_verification=COALESCE(?, description_needs_verification),
+               description_ai_confident=COALESCE(?, description_ai_confident),
                updated_at=? WHERE id=?""",
             (name.strip(), description.strip(), url.strip(),
              json.dumps(categories), advisor, promoted, vendor_email.strip(),
              warm_intro_enabled, vendor_name.strip(), summary.strip(),
-             description_needs_verification, _now(), tool_id),
+             description_needs_verification, description_ai_confident, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -4289,7 +4311,8 @@ class Library:
         return [dict(r) for r in rows]
 
     def update_tool_differentiation(self, tool_id: int, competitive_differentiation: str,
-                                     needs_verification: int = 0) -> None:
+                                     needs_verification: int = 0,
+                                     ai_confident: Optional[int] = None) -> None:
         """Narrow update for the admin full-edit form's "How this differs from
         the competition" field (Phase 3) — same reasoning as
         quick_update_tool: kept separate from update_tool so the Software
@@ -4305,11 +4328,19 @@ class Library:
         just collapsed into this one write path since, unlike Agent
         taxonomy, Differentiation has no separate Refresh route — Generate
         is AJAX-only and this Save is the only place a draft ever gets
-        persisted."""
+        persisted. ai_confident (2026-08, confidence indicator) mirrors
+        needs_verification's own contract exactly — a real value only from
+        the edit-submit route on a fresh draft this session, None everywhere
+        else — but it's read by the UI only while needs_verification=1
+        (see CLAUDE.md): once a human confirms the field, the model's
+        original self-report stops mattering, so there's no need to clear
+        a stale value on every unrelated resave the way needs_verification
+        itself must be."""
         self.conn.execute(
             "UPDATE tools SET competitive_differentiation=?, competitive_differentiation_needs_verification=?, "
+            "competitive_differentiation_ai_confident=COALESCE(?, competitive_differentiation_ai_confident), "
             "updated_at=? WHERE id=?",
-            (competitive_differentiation.strip(), needs_verification, _now(), tool_id),
+            (competitive_differentiation.strip(), needs_verification, ai_confident, _now(), tool_id),
         )
         self.conn.commit()
 
@@ -6177,6 +6208,31 @@ class Library:
 
     def set_exa_enabled(self, enabled: bool) -> None:
         self.set_setting("exa_enabled", "1" if enabled else "0")
+
+    # Deepest/highest-quality curated model, matching linklib.models._REGISTRY's
+    # own "Best quality" entry — the default for the AI model selection toggle
+    # below, quality over cost, same reasoning LINKLIB_ENRICH_MODEL's own
+    # fallback uses (see linklib/enrich.py's DEFAULT_MODEL).
+    _DEFAULT_ENRICH_MODEL = "claude-opus-4-8"
+
+    def get_enrich_model(self) -> str:
+        """The live, DB-stored model id enrichment (Description, Agent
+        taxonomy, Competitive differentiation, Community profile fields, and
+        every other linklib.enrich generation call) actually uses — settable
+        from /admin/system/model without a redeploy, same reasoning
+        get_exa_enabled's Phase 7 kill switch already established: env vars
+        need a deploy to change, a DB-backed setting doesn't. Falls back to
+        LINKLIB_ENRICH_MODEL (or its own hardcoded default) when no selection
+        has ever been saved, so an unconfigured install keeps working exactly
+        as it did before this setting existed."""
+        raw = (self.get_setting("enrich_model") or "").strip()
+        if raw:
+            return raw
+        from .enrich import DEFAULT_MODEL
+        return DEFAULT_MODEL
+
+    def set_enrich_model(self, model_id: str) -> None:
+        self.set_setting("enrich_model", model_id.strip())
 
     def get_effective_ask_cap(self, user_id: int) -> float:
         """The dollar cap that actually applies to this user this month —
