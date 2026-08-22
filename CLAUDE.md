@@ -509,6 +509,51 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   and `generate_tool_differentiation`, which share the no-citation
   architecture and the confidence-flag-not-gate pattern) — remains future,
   separately-scoped work.
+- **Confidence indicator (2026-08) — genuine self-reported "Claude
+  confidence: Yes/No" fields, tool Description/Competitive differentiation
+  first, then extended to 12 of the Community profile draft's 23 fields.**
+  A distinct fact from `*_needs_verification` (human review status) —
+  the two combine (an unverified AND low-confidence field is the
+  highest-risk state a reader can see, Abacum's case exactly). Tool side:
+  `generate_tool_description`/`generate_tool_differentiation` gained a real
+  `"confident": true|false` JSON key (matching `generate_tool_agent_taxonomy`'s
+  existing pattern), stored in new `tools.description_ai_confident`/
+  `competitive_differentiation_ai_confident` columns (NULL = no signal,
+  written only alongside a fresh Generate this save — a new
+  `ai_drafted_confidence` hidden input, parsed by
+  `_ai_drafted_field_confidence`, mirrors `ai_drafted_fields`'s existing
+  "field:1,field2:0" shape). Displayed only while `needs_verification=1` —
+  once a human confirms a field, the model's original self-report stops
+  being the operative fact, so no need to clear it on an unrelated resave.
+  **Community profile draft — Phase 0 inventory + Brian's approval**
+  identified 12 of the 23 fields as genuinely long-form/narrative and
+  fabrication-risky (`linklib.enrich.COMMUNITY_CONFIDENCE_FIELDS`:
+  ideal_member, anti_fit, value_prop, business_model, format_reality,
+  engagement_level, sponsor_relationship_note, application_friction,
+  cost_value_verdict, notable_members, public_criticism, verdict_summary),
+  explicitly excluding `founded_year` and the 7 short factual/categorical
+  fields (not prose) — and, per Brian's explicit call, also excluding
+  `stage_focus`/`jobs_program`/`team_or_individual` despite their being in
+  `VOICE_REWRITE_FIELDS`: matching that pass's existing narrative boundary
+  wasn't the goal, matching actual fabrication risk was, and those three
+  read as categorical. `generate_community_profile`'s single Claude call
+  (all 23 fields drafted together) now also returns one `"confidence"`
+  object with exactly those 12 boolean keys, judged independently per
+  field rather than one blanket verdict. 12 new `community_profiles`
+  columns (`{field}_ai_confident`), same NULL-means-no-signal convention.
+  **One real structural difference from the tool side, driven by
+  `upsert_community_profile` being a full replace on every save (not a
+  narrow COALESCE-based update)**: the submit route itself must decide
+  every tracked field's confidence value on every save — the fresh
+  model-reported value for a field (re)drafted this save, else that
+  field's own previous value read back via `get_community_profile` first
+  and carried forward unchanged, never silently cleared just because a
+  *different* field on the same profile was regenerated. **Display is
+  gated on the shared whole-profile `needs_review` flag**, not a per-field
+  column — the Community profile draft has never had per-field
+  verification (see the `field_reviews`/Phase G reconciliation above), so
+  the confidence line follows the same reduced pattern
+  `_narrative_verify_widget` already uses there.
 - **Phase P — edit-page layout reorg, and why `tool_competitors`/
   `community_competitors` did NOT get renamed alongside `differentiation_note`.**
   Both Software's and Communities' edit pages were reorganized into labeled

@@ -1966,6 +1966,26 @@ class Library:
             # same generateDescription() call.
             "ALTER TABLE tools ADD COLUMN description_ai_confident INTEGER",
             "ALTER TABLE tools ADD COLUMN competitive_differentiation_ai_confident INTEGER",
+            # Confidence indicator, Community profile draft (2026-08) — same
+            # signal as the two tools columns above, extended to the 12
+            # Community profile fields judged to carry real fabrication risk
+            # (linklib.enrich.COMMUNITY_CONFIDENCE_FIELDS; see that constant's
+            # comment for what's excluded and why). One column per field
+            # rather than a JSON blob, matching every other per-field column
+            # on this table. NULL means no signal yet, same convention as the
+            # tools columns.
+            "ALTER TABLE community_profiles ADD COLUMN ideal_member_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN anti_fit_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN value_prop_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN business_model_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN format_reality_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN engagement_level_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN sponsor_relationship_note_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN application_friction_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN cost_value_verdict_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN notable_members_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN public_criticism_ai_confident INTEGER",
+            "ALTER TABLE community_profiles ADD COLUMN verdict_summary_ai_confident INTEGER",
         ]:
             try:
                 self.conn.execute(_col_sql)
@@ -5517,10 +5537,22 @@ class Library:
                                  event_style: str = "", seniority_band: str = "",
                                  resources_included: str = "", needs_review: int = 0,
                                  stage_focus: str = "", jobs_program: str = "",
-                                 team_or_individual: str = "") -> None:
+                                 team_or_individual: str = "",
+                                 confidence: Optional[dict] = None) -> None:
         """Insert or fully replace a community's profile row. There's no partial
         update here (unlike update_community_content's narrow sync) — the admin
         edit form always submits every field, generated or hand-written.
+
+        `confidence` (2026-08 confidence indicator): an optional
+        {field_name: 0|1|None} dict covering
+        `linklib.enrich.COMMUNITY_CONFIDENCE_FIELDS` — since this whole method
+        is a full replace on every save (unlike the tools table's COALESCE-
+        based narrow updates), the caller is responsible for deciding each
+        field's value on every call, not this method: pass the fresh
+        model-reported value for a field that was just (re)drafted this save,
+        or the field's own previous value (read back from `get_community_profile`
+        first) to carry it forward unchanged, or `None` to write NULL (no
+        signal). A missing key defaults to `None`/NULL.
 
         The Recommender's controlled-vocabulary `*_tags` columns (seniority_band_
         tags, cpe_eligible_tags, platform_type_tags, function_tags, looking_for_
@@ -5533,6 +5565,12 @@ class Library:
         retired even earlier than that (primary_purpose_tags,
         resources_included_tags, meeting_format_tags, event_style_tags) went
         the same way in the same migration."""
+        confidence = confidence or {}
+        conf = [confidence.get(f) for f in (
+            "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
+            "engagement_level", "sponsor_relationship_note", "application_friction",
+            "cost_value_verdict", "notable_members", "public_criticism", "verdict_summary",
+        )]
         self.conn.execute(
             """INSERT INTO community_profiles
                (community_id, ideal_member, anti_fit, value_prop, format_reality,
@@ -5541,8 +5579,14 @@ class Library:
                 verdict_summary, low_confidence, updated_at, business_model,
                 primary_purpose, cpe_eligible, platform_type, meeting_format,
                 event_style, seniority_band, resources_included, needs_review,
-                stage_focus, jobs_program, team_or_individual)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                stage_focus, jobs_program, team_or_individual,
+                ideal_member_ai_confident, anti_fit_ai_confident, value_prop_ai_confident,
+                business_model_ai_confident, format_reality_ai_confident,
+                engagement_level_ai_confident, sponsor_relationship_note_ai_confident,
+                application_friction_ai_confident, cost_value_verdict_ai_confident,
+                notable_members_ai_confident, public_criticism_ai_confident,
+                verdict_summary_ai_confident)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(community_id) DO UPDATE SET
                  ideal_member=excluded.ideal_member, anti_fit=excluded.anti_fit,
                  value_prop=excluded.value_prop, format_reality=excluded.format_reality,
@@ -5566,7 +5610,19 @@ class Library:
                  resources_included=excluded.resources_included,
                  needs_review=excluded.needs_review,
                  stage_focus=excluded.stage_focus, jobs_program=excluded.jobs_program,
-                 team_or_individual=excluded.team_or_individual""",
+                 team_or_individual=excluded.team_or_individual,
+                 ideal_member_ai_confident=excluded.ideal_member_ai_confident,
+                 anti_fit_ai_confident=excluded.anti_fit_ai_confident,
+                 value_prop_ai_confident=excluded.value_prop_ai_confident,
+                 business_model_ai_confident=excluded.business_model_ai_confident,
+                 format_reality_ai_confident=excluded.format_reality_ai_confident,
+                 engagement_level_ai_confident=excluded.engagement_level_ai_confident,
+                 sponsor_relationship_note_ai_confident=excluded.sponsor_relationship_note_ai_confident,
+                 application_friction_ai_confident=excluded.application_friction_ai_confident,
+                 cost_value_verdict_ai_confident=excluded.cost_value_verdict_ai_confident,
+                 notable_members_ai_confident=excluded.notable_members_ai_confident,
+                 public_criticism_ai_confident=excluded.public_criticism_ai_confident,
+                 verdict_summary_ai_confident=excluded.verdict_summary_ai_confident""",
             (community_id, ideal_member.strip(), anti_fit.strip(), value_prop.strip(),
              format_reality.strip(), engagement_level.strip(), sponsor_relationship_note.strip(),
              application_friction.strip(), cost_value_verdict.strip(), notable_members.strip(),
@@ -5575,7 +5631,8 @@ class Library:
              primary_purpose.strip(), cpe_eligible.strip(), platform_type.strip(),
              meeting_format.strip(), event_style.strip(), seniority_band.strip(),
              resources_included.strip(), needs_review,
-             stage_focus.strip(), jobs_program.strip(), team_or_individual.strip()),
+             stage_focus.strip(), jobs_program.strip(), team_or_individual.strip(),
+             *conf),
         )
         self.conn.commit()
 

@@ -689,6 +689,21 @@ COMMUNITY_PROFILE_FIELDS = [
     "platform_type", "meeting_format", "event_style", "cpe_eligible",
 ]
 
+# The 12 long-form/narrative Community profile fields judged to carry real
+# fabrication risk (Phase 0 investigation + Brian's approval, 2026-08) —
+# deliberately a SUBSET of COMMUNITY_PROFILE_FIELDS above, not all 23:
+# excludes founded_year (a bare int, not prose) and the eleven short
+# factual/categorical fields (stage_focus/jobs_program/team_or_individual
+# included — judged categorical-not-narrative-risk despite being in
+# VOICE_REWRITE_FIELDS below, since matching that boundary wasn't the goal;
+# matching actual fabrication risk was). Shared with webapp/app.py so the
+# confidence hidden-input wiring and the JSON schema above stay in lockstep.
+COMMUNITY_CONFIDENCE_FIELDS = [
+    "ideal_member", "anti_fit", "value_prop", "business_model", "format_reality",
+    "engagement_level", "sponsor_relationship_note", "application_friction",
+    "cost_value_verdict", "notable_members", "public_criticism", "verdict_summary",
+]
+
 _COMMUNITY_PROFILE_PROMPT = """You are drafting a deep, opinionated profile of a peer community for the
 CFO Toolbox's Communities directory, read by finance leaders deciding whether a
 community is worth their time and money. This is not directory metadata (cost,
@@ -718,6 +733,13 @@ Write about the community named below. Follow these rules exactly:
 9. `cpe_eligible` must be one of "Yes", "No", or "Unclear", optionally with a
    short qualifier in parentheses (e.g. "Yes (NASBA-approved sponsor)") —
    never guess "Yes" without a specific reason to believe it.
+10. For the "confidence" object below: for EACH of its twelve keys, report
+    true only if the page content (or your own knowledge) gave you a real,
+    specific basis for that field's answer; false if you had to draft it
+    thin, generic, or largely inferred. Judge each key independently — a
+    community's `value_prop` can be well-grounded while its `notable_members`
+    is a guess, and the confidence for each should reflect that, not a single
+    blanket judgment repeated twelve times.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
 
@@ -762,6 +784,13 @@ Return STRICT JSON only (no prose, no markdown fences) with exactly these keys:
   "event_style": the feel of its events, e.g. "large-format conferences,"
      "intimate small-group," "forum-only, no events" — or null if unclear.
   "cpe_eligible": "Yes"/"No"/"Unclear", per rule 9 above.
+  "confidence": an object with exactly these twelve boolean keys, one per
+     the long-form/narrative fields above that carry real fabrication risk
+     (the short factual/categorical fields above are not included — see
+     rule 10): "ideal_member", "anti_fit", "value_prop", "business_model",
+     "format_reality", "engagement_level", "sponsor_relationship_note",
+     "application_friction", "cost_value_verdict", "notable_members",
+     "public_criticism", "verdict_summary".
 
 Community name: {name}
 Community URL: {url}
@@ -796,6 +825,7 @@ class CommunityProfileDraft:
     event_style: str = ""
     cpe_eligible: str = ""
     low_confidence: bool = False   # page fetch failed; drafted from name/URL alone
+    confidence: dict = field(default_factory=dict)   # {field_name: bool}, COMMUNITY_CONFIDENCE_FIELDS keys only
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -890,12 +920,23 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
             meeting_format=str(data.get("meeting_format") or "").strip(),
             event_style=str(data.get("event_style") or "").strip(),
             cpe_eligible=str(data.get("cpe_eligible") or "").strip(),
-            low_confidence=low_confidence, model=model,
+            low_confidence=low_confidence,
+            confidence=_parse_community_confidence(data.get("confidence")),
+            model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:
         _logger.warning("generate_community_profile() failed: %s: %s", type(e).__name__, e)
         return None
+
+
+def _parse_community_confidence(raw) -> dict:
+    """Coerce the model's "confidence" object into {field: bool}, defaulting
+    a missing/malformed key to False (needs review) rather than guessing
+    true — same safe-default convention as generate_tool_agent_taxonomy's
+    `not bool(data.get("confident"))`."""
+    raw = raw if isinstance(raw, dict) else {}
+    return {f: bool(raw.get(f)) for f in COMMUNITY_CONFIDENCE_FIELDS}
 
 
 # Sentinel drafted into a listing field the model isn't confident about,

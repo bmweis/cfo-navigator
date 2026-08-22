@@ -53,6 +53,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.enrich import NEEDS_VERIFICATION as _NEEDS_VERIFICATION
+from linklib.enrich import COMMUNITY_CONFIDENCE_FIELDS
 from linklib.overhead_csv import parse_overhead_csv
 from linklib.manual_review_csv import parse_manual_review_corrections_csv
 from linklib.purge_csv import parse_purge_confirmations_csv, MAX_PURGE_PER_RUN
@@ -9376,6 +9377,7 @@ _RETIRED_FIELD_REVIEW_FIELDS = (
 
 _GENERATE_PROFILE_JS = _MARK_AI_DRAFTED_JS + """
 var COMMUNITY_PROFILE_FIELDS = """ + json.dumps(_COMMUNITY_PROFILE_FIELD_IDS) + """;
+var COMMUNITY_CONFIDENCE_FIELDS = """ + json.dumps(COMMUNITY_CONFIDENCE_FIELDS) + """;
 async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
   name = (name || '').trim();
   url = (url || '').trim();
@@ -9401,6 +9403,10 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
       if (!el) return;
       el.value = (d[k] === null || d[k] === undefined) ? '' : d[k];
       if (el.value) markAiDrafted(k);
+    });
+    var conf = d.confidence || {};
+    COMMUNITY_CONFIDENCE_FIELDS.forEach(function(k) {
+      markAiConfidence(k, conf[k]);
     });
     var lowConf = document.getElementById('cp-low_confidence');
     if (lowConf) lowConf.checked = !!d.low_confidence;
@@ -12476,14 +12482,29 @@ def _community_profile_form_fields(p: dict | None, community: dict,
         )
     )
 
-    def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2) -> str:
+    # Confidence indicator (2026-08) — a genuine self-report from the model,
+    # distinct from needs_review (human review status): gated on the same
+    # whole-profile needs_review flag used everywhere else on this page,
+    # since the Community profile draft has no per-field verification
+    # column the way tool Description/Differentiation do (reuses one shared
+    # flag by design — see CLAUDE.md's Phase G note). Covers only the 12
+    # fields in COMMUNITY_CONFIDENCE_FIELDS; every other field on this page
+    # passes no confidence_key and renders exactly as before.
+    _needs_review = bool(p.get("needs_review"))
+
+    def _field(key: str, label: str, placeholder: str = "", required: bool = False, rows: int = 2,
+               confidence_key: str | None = None) -> str:
         req_mark = " *" if required else ""
         req_attr = " required" if required else ""
         ph = f' placeholder="{_esc(placeholder)}"' if placeholder else ""
+        confidence_html = ""
+        if confidence_key:
+            confidence_html = _confidence_indicator_html(_needs_review, p.get(f"{confidence_key}_ai_confident"))
         return f"""  <div>
     <label for="cp-{key}" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(label)}{req_mark}</label>
     <textarea id="cp-{key}" name="{key}" rows="{rows}"{req_attr}{ph}
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;">{_esc(p.get(key, ''))}</textarea>
+{confidence_html}
   </div>"""
 
     def _short_field(key: str, label: str, placeholder: str = "") -> str:
@@ -12510,24 +12531,24 @@ def _community_profile_form_fields(p: dict | None, community: dict,
   </div>
   <p id="cp-gen-err" style="display:none;"></p>
   <div id="gen-host-community-profile" style="display:grid;gap:20px;">
-{_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True)}
-{_field('anti_fit', 'Anti-fit', 'Who should probably skip it')}
-{_field('value_prop', 'Value proposition', 'The primary thing members get out of it')}
-{_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual')}
-{_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards')}
-{_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.")}
-{_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.")}
-{_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label')}
-{_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting')}
-{_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.')}
+{_field('ideal_member', 'Ideal member', 'Who this community is actually for', required=True, confidence_key='ideal_member')}
+{_field('anti_fit', 'Anti-fit', 'Who should probably skip it', confidence_key='anti_fit')}
+{_field('value_prop', 'Value proposition', 'The primary thing members get out of it', confidence_key='value_prop')}
+{_field('format_reality', 'Format, in practice', 'Actual cadence and mix of in-person vs. virtual', confidence_key='format_reality')}
+{_field('engagement_level', 'Engagement level', 'How much active participation membership expects or rewards', confidence_key='engagement_level')}
+{_field('sponsor_relationship_note', 'Sponsor relationship', "Value-add or sales funnel? Distinct from the sponsor name/type recorded on the directory listing.", confidence_key='sponsor_relationship_note')}
+{_field('business_model', 'Business model', "How the community structurally sustains itself, e.g. a gated subscription vs. a wide-funnel free-to-join community monetized via paid tiers/events/sponsorships. Distinct from the sponsor relationship above.", confidence_key='business_model')}
+{_field('application_friction', 'Application friction', 'The real barrier to entry, not just the access-model label', confidence_key='application_friction')}
+{_field('cost_value_verdict', 'Cost vs. value verdict', 'Is the price justified by what members report getting', confidence_key='cost_value_verdict')}
+{_field('notable_members', 'Notable members', 'Publicly known alumni/members, if any. Leave blank otherwise.', confidence_key='notable_members')}
   <div>
     <label for="cp-founded_year" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Founded year</label>
     <input id="cp-founded_year" name="founded_year" type="number" min="1800" max="2100"
       value="{p.get('founded_year') or ''}"
       style="width:160px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
   </div>
-{_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.')}
-{_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True)}
+{_field('public_criticism', 'Public criticism', 'Any visible/reported drawback. Leave blank if none known.', confidence_key='public_criticism')}
+{_field('verdict_summary', 'Verdict', 'e.g. "Best for seed-stage operator CFOs, not for late-stage teams"', required=True, confidence_key='verdict_summary')}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
 {_short_field('primary_purpose', 'Primary purpose', 'e.g. networking, learning, both')}
 {_short_field('cpe_eligible', 'CPE', 'Yes / No / Unclear, with any qualifier')}
@@ -13743,6 +13764,7 @@ def admin_community_profile_edit(request: Request, community_id: int):
 <h1>Profile: {_esc(c['name'])}</h1>
 <form method="post" action="/admin/tools/communities/{community_id}/profile" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
+  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
 {_profile_fields_html}
   <div>
     <button type="submit" class="btn">Save profile</button>
@@ -13763,6 +13785,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
     try:
         if not lib.get_community(community_id):
             raise HTTPException(status_code=404, detail="Community not found")
+        existing_profile = lib.get_community_profile(community_id) or {}
         form = await request.form()
         founded_year_raw = (form.get("founded_year") or "").strip()
         founded_year = int(founded_year_raw) if founded_year_raw.isdigit() else None
@@ -13774,8 +13797,22 @@ async def admin_community_profile_submit(request: Request, community_id: int):
         # manual one Brian set for an unrelated reason (e.g. flagged from a
         # bulk import); the checkbox itself, unchecked and saved, is still
         # the "I reviewed it" action, same as before this phase.
-        profile_ai_drafted = bool(_ai_drafted_field_names(form) & set(_COMMUNITY_PROFILE_FIELD_IDS))
+        ai_drafted = _ai_drafted_field_names(form)
+        profile_ai_drafted = bool(ai_drafted & set(_COMMUNITY_PROFILE_FIELD_IDS))
         needs_review = 1 if (form.get("needs_review") == "1" or profile_ai_drafted) else 0
+        # Confidence indicator (2026-08): upsert_community_profile is a full
+        # replace on every save (see its own docstring), so this route
+        # decides each of the 12 tracked fields' value explicitly — the
+        # fresh model-reported value for a field just (re)drafted this save,
+        # else its own previous stored value carried forward unchanged (not
+        # cleared just because an unrelated field was regenerated).
+        ai_confidence_submitted = _ai_drafted_field_confidence(form)
+        confidence = {}
+        for f in COMMUNITY_CONFIDENCE_FIELDS:
+            if f in ai_drafted and f in ai_confidence_submitted:
+                confidence[f] = int(ai_confidence_submitted[f])
+            else:
+                confidence[f] = existing_profile.get(f"{f}_ai_confident")
         lib.upsert_community_profile(
             community_id,
             ideal_member=(form.get("ideal_member") or "").strip(),
@@ -13803,6 +13840,7 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             stage_focus=(form.get("stage_focus") or "").strip(),
             jobs_program=(form.get("jobs_program") or "").strip(),
             team_or_individual=(form.get("team_or_individual") or "").strip(),
+            confidence=confidence,
         )
         _record_ai_drafted_reviews(lib, request, "community", community_id, form)
     finally:
@@ -13870,6 +13908,7 @@ async def admin_communities_generate_profile(request: Request):
         "meeting_format": draft.meeting_format,
         "event_style": draft.event_style,
         "cpe_eligible": draft.cpe_eligible,
+        "confidence": draft.confidence,
     })
 
 
