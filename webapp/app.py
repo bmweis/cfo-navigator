@@ -16820,7 +16820,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = ""):
         '<li><strong>Remembers the thread.</strong> Ask a follow-up and it knows what you meant. Come back tomorrow and the conversation&rsquo;s still there.</li>'
         '<li><strong>Finds by meaning, not just keywords.</strong> Semantic search pairs with keyword search (hybrid retrieval), so it surfaces the right article even when your wording doesn&rsquo;t match the source&rsquo;s.</li>'
         '<li><strong>Gets sharper.</strong> Every rating feeds a real eval set that improves retrieval and answer quality over time.</li>'
-        '<li><strong>Human-curated, AI-maintained.</strong> Every source starts with me: reading, vetting, and saving what&rsquo;s actually worth keeping. From there, a pipeline built on Claude (Anthropic), Exa&rsquo;s search API, and the Internet Archive&rsquo;s Wayback Machine keeps the archive structured, current, and recoverable, even when a source moves, goes down, or blocks direct access.</li>'
+        '<li><strong>A human/AI partnership.</strong> I decide what goes into the archive: reading, vetting, and saving what&rsquo;s actually worth keeping. From there, AI handles execution and delivery: a pipeline built on Claude (Anthropic), Exa&rsquo;s search API, and the Internet Archive&rsquo;s Wayback Machine keeps it structured and recoverable even when a source moves or gets blocked, and synthesizes every cited answer you get.</li>'
     )
 
     body = f"""<div class="page page-full">
