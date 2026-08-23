@@ -32,6 +32,7 @@ Private routes (require login cookie; API routes also accept a token):
 from __future__ import annotations
 
 import ast
+import difflib
 import hashlib
 import hmac
 import inspect
@@ -11233,7 +11234,57 @@ async def admin_tools_features_retire(request: Request, feature_id: int):
 # is the same approve action with the form fields pre-filled from the
 # proposal but editable — no separate route.
 
-def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], tools_by_id: dict[int, dict]) -> str:
+# Feature Taxonomy scan tool, Phase 3 complement (2026-08) — a source-
+# agnostic near-duplicate nudge on the review queue itself, built alongside
+# Phase 3's own clustering/judgment pass rather than as a separate phase.
+# The scan's own §7 merge test runs at drafting time, biased conservative
+# (split when uncertain — see linklib/feature_scan.py's Phase 3 section);
+# this catches whatever that conservative bias deliberately leaves behind
+# (two near-duplicate names both queued separately), AND anything else that
+# lands two similarly-named pending proposals in the same category — a
+# second scan run, an admin's own manual entry, a public suggestion. Pure
+# Python (difflib), no LLM call, no dependency on the scan having run at
+# all.
+_NEAR_DUPLICATE_NAME_THRESHOLD = 0.6
+
+
+def _find_near_duplicate_queue_items(pending: list[dict]) -> dict[int, list[dict]]:
+    """item_id -> [{"id","name"}, ...] of OTHER pending items in the same
+    category whose feature name looks similar enough to be worth a human
+    double-checking before approving either. Only compares items proposing
+    a NEW feature (is_new_feature) — an existing-feature link proposal has
+    no name of its own to compare. difflib.SequenceMatcher on lowercased
+    names; the threshold is a starting point, not tuned against real data
+    yet — revisit once this has run against a real multi-tool category."""
+    by_category: dict[int, list[dict]] = {}
+    for item in pending:
+        feature = (item.get("payload") or {}).get("feature") or {}
+        name = (feature.get("name") or "").strip()
+        if not name:
+            continue
+        by_category.setdefault(item.get("category_id"), []).append(
+            {"id": item["id"], "name": name}
+        )
+
+    result: dict[int, list[dict]] = {}
+    for items in by_category.values():
+        for i, a in enumerate(items):
+            matches = []
+            for j, b in enumerate(items):
+                if i == j:
+                    continue
+                ratio = difflib.SequenceMatcher(
+                    None, a["name"].lower(), b["name"].lower()
+                ).ratio()
+                if ratio >= _NEAR_DUPLICATE_NAME_THRESHOLD:
+                    matches.append(b)
+            if matches:
+                result[a["id"]] = matches
+    return result
+
+
+def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], tools_by_id: dict[int, dict],
+                                     near_duplicates: list[dict] | None = None) -> str:
     """The approve form IS the edit form — every proposed value is a real
     editable input pre-filled from the payload, so clicking Approve with no
     changes is a verbatim approval and changing a value first is
@@ -11282,6 +11333,16 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
         f'<input type="hidden" name="feature_id" value="{payload.get("feature_id")}"></p>'
     )
 
+    near_dup_html = ""
+    if near_duplicates:
+        names = ", ".join(f'"{_esc(d["name"])}" (#{d["id"]})' for d in near_duplicates)
+        near_dup_html = (
+            f'<p style="font-size:12.5px;color:#92400e;background:#fef3c7;border-radius:8px;'
+            f'padding:6px 10px;margin:0 0 10px;">Possible near-duplicate of {names} — worth '
+            f'checking these describe genuinely different jobs (FEATURE_TAXONOMY.md &sect;7) '
+            f'before approving both.</p>'
+        )
+
     return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:16px;">
   <form method="post" action="/admin/tools/software/feature-review-queue/{item['id']}/approve">
   <input type="hidden" name="n_links" value="{n_links}">
@@ -11289,6 +11350,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
     <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:{source_badge_bg};color:{source_badge_fg};border-radius:5px;padding:2px 9px;">{_esc(item['source'])}</span>
     <span style="font-size:13px;color:var(--muted);">{_esc(item.get('proposal_type', ''))} &middot; {_esc(category_name)}</span>
   </div>
+  {near_dup_html}
   <label style="display:block;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Feature{' (new)' if is_new_feature else ''}</label>
   {feature_field_html}
   {f'<div style="overflow-x:auto;margin:12px 0;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
@@ -11326,13 +11388,18 @@ def admin_feature_review_queue(request: Request, msg: str = ""):
     for item in pending:
         by_source.setdefault(item["source"], []).append(item)
 
+    near_duplicates = _find_near_duplicate_queue_items(pending)
+
     sections = ""
     source_labels = {"admin": "Admin edits", "scan": "AI scan proposals", "public": "Public suggestions"}
     for source in ("public", "scan", "admin"):
         items = by_source.get(source, [])
         if not items:
             continue
-        cards = "".join(_feature_review_queue_item_card(i, categories, tools_by_id) for i in items)
+        cards = "".join(
+            _feature_review_queue_item_card(i, categories, tools_by_id, near_duplicates.get(i["id"]))
+            for i in items
+        )
         sections += f'<h2 style="font-size:16px;margin:24px 0 10px;">{source_labels[source]} ({len(items)})</h2>{cards}'
 
     if not sections:
@@ -18352,6 +18419,17 @@ _SCRIPT_REGISTRY = [
      "to see current coverage and avoid duplicating proposals already in the queue.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.report_feature_taxonomy_coverage --db library.db"]),
+    ("originate_category_features.py", "scripts.originate_category_features", "Recurring & actively useful",
+     "Runs the Feature Taxonomy scan tool's Phase 3 pipeline (docs/FEATURE_TAXONOMY.md §10, "
+     "origination mode) against one category's whole tool roster — research, §7 clustering + "
+     "merge judgment, and (with --apply) the feature_review_queue write. Preview mode (default) "
+     "still makes real Exa/Claude calls — there's no cheap way to preview this pipeline's output.",
+     "Recurring-manual — run once per category as each of the 14 (of 17) categories without a "
+     "curated feature list yet gets originated. Preview first, review the printed proposals, "
+     "then re-run with --apply once satisfied.",
+     ["ANTHROPIC_API_KEY", "EXA_API_KEY (optional — falls back to the model's own knowledge without it)"],
+     ["python -m scripts.originate_category_features --db library.db --category Neobanking",
+      "python -m scripts.originate_category_features --db library.db --category Neobanking --apply"]),
     ("dump_communities.py", "scripts.dump_communities", "Recurring & actively useful",
      "Read-only plain listing of every community's name, URL, and slug — no filtering or "
      "formatting. A quick ad hoc lookup tool.",

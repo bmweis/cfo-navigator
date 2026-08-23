@@ -1,12 +1,19 @@
-"""Feature Taxonomy scan tool, Phase 2 — linklib/feature_scan.py's per-tool
-origination-mode research + drafting function. Mocks both the Exa HTTP call
-and the Anthropic SDK (same idiom as tests/test_tool_summary_description.py)
-so this suite runs with no real API keys or network access — a genuine
-quality check against real vendor content still needs a human running
+"""Feature Taxonomy scan tool — linklib/feature_scan.py.
+
+Phase 2: per-tool origination-mode research + drafting.
+Phase 3: roster-wide accumulation, §7 don't-collapse/unify clustering +
+judgment, and the feature_review_queue write.
+
+Mocks both the Exa HTTP call and the Anthropic SDK (same idiom as
+tests/test_tool_summary_description.py) so this suite runs with no real
+API keys or network access — a genuine quality check against real vendor
+content still needs a human running
 scripts/test_feature_scan_origination.py by hand with real keys, per
 CLAUDE.md's "keep API keys out of Code building sessions" rule.
 """
+import os
 import sys
+import tempfile
 import types
 
 import pytest
@@ -14,6 +21,7 @@ import pytest
 sys.path.insert(0, __file__.rsplit("/tests/", 1)[0])
 
 from linklib import feature_scan
+from linklib.db import Library
 
 
 def test_domain_of_strips_www():
@@ -378,3 +386,317 @@ def test_draft_does_not_retry_when_first_response_parses_cleanly(monkeypatch):
     )
     assert calls["n"] == 1   # no wasted retry call when the first response was fine
     assert draft.truncated is False
+
+
+# ============================================================================
+# Phase 3 — roster-wide accumulation, §7 clustering + judgment, queue write
+# ============================================================================
+
+def test_validate_partition_handles_clean_input():
+    result = feature_scan._validate_partition([[0, 2], [1], [3]], n=4)
+    assert result == [[0, 2], [1], [3]]
+
+
+def test_validate_partition_dedupes_duplicate_index():
+    # Index 2 claimed by both groups -> keeps its FIRST membership only.
+    result = feature_scan._validate_partition([[0, 2], [2, 1]], n=3)
+    assert result == [[0, 2], [1]]
+
+
+def test_validate_partition_recovers_missing_index():
+    # Index 2 dropped entirely by the model -> becomes its own singleton,
+    # appended at the end rather than silently lost.
+    result = feature_scan._validate_partition([[0], [1]], n=3)
+    assert result == [[0], [1], [2]]
+
+
+def test_validate_partition_ignores_out_of_range_and_non_int_values():
+    result = feature_scan._validate_partition([[0, 99, "x"], [1]], n=2)
+    assert result == [[0], [1]]
+
+
+def _candidate(tool_id, tool_name, name, **kw):
+    feature = feature_scan.ProposedFeature(name=name, **kw)
+    return feature_scan.CandidateFeature(tool_id=tool_id, tool_name=tool_name,
+                                          feature=feature, verified_as_of="2026-08-23")
+
+
+def test_cluster_candidate_features_empty_list_no_call(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    clusters, cost = feature_scan.cluster_candidate_features([], "Neobanking")
+    assert clusters == []
+    assert cost == 0.0
+
+
+def test_cluster_candidate_features_no_key_returns_none(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    candidates = [_candidate(1, "Mercury", "Checking accounts")]
+    clusters, cost = feature_scan.cluster_candidate_features(candidates, "Neobanking")
+    assert clusters is None
+    assert cost == 0.0
+
+
+def test_cluster_candidate_features_parses_and_validates(monkeypatch):
+    candidates = [
+        _candidate(1, "Mercury", "Checking accounts"),
+        _candidate(2, "Rho", "Business checking"),
+        _candidate(1, "Mercury", "Virtual cards"),
+    ]
+    _mock_anthropic(monkeypatch, '{"clusters": [[0, 1], [2]]}')
+    clusters, cost = feature_scan.cluster_candidate_features(candidates, "Neobanking")
+    assert clusters == [[0, 1], [2]]
+    assert cost > 0
+
+
+def test_judge_cluster_singleton_short_circuits_no_api_call(monkeypatch):
+    # No Anthropic mock installed at all — if this made a real call it
+    # would raise (ImportError on the real anthropic client with no key),
+    # so a clean pass here proves the short-circuit actually skipped it.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    candidates = [_candidate(1, "Mercury", "Checking accounts")]
+    decisions, cost = feature_scan.judge_cluster("Neobanking", candidates)
+    assert cost == 0.0
+    assert len(decisions) == 1
+    assert decisions[0].merged is False
+    assert decisions[0].indices == [0]
+
+
+def test_judge_cluster_empty_short_circuits():
+    decisions, cost = feature_scan.judge_cluster("Neobanking", [])
+    assert decisions == []
+    assert cost == 0.0
+
+
+def test_judge_cluster_no_key_returns_none(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    candidates = [_candidate(1, "Mercury", "A"), _candidate(2, "Rho", "B")]
+    decisions, cost = feature_scan.judge_cluster("Neobanking", candidates)
+    assert decisions is None
+    assert cost == 0.0
+
+
+def test_judge_cluster_parses_merge_decision(monkeypatch):
+    candidates = [
+        _candidate(1, "Mercury", "On-arrival categorization with review-and-improve"),
+        _candidate(2, "Rho", "Suggests category from history for one-click accept"),
+    ]
+    _mock_anthropic(monkeypatch, '{"groups": [{"indices": [0, 1], "merged": true, '
+        '"canonical_name": "Automated transaction categorization", '
+        '"canonical_definition": "Machine-suggested category per transaction.", '
+        '"reasoning": "Same job (categorize transactions), different mechanism."}]}')
+    decisions, cost = feature_scan.judge_cluster("Neobanking", candidates)
+    assert len(decisions) == 1
+    d = decisions[0]
+    assert d.merged is True
+    assert d.indices == [0, 1]
+    assert d.canonical_name == "Automated transaction categorization"
+    assert "different mechanism" in d.reasoning
+    assert cost > 0
+
+
+def test_judge_cluster_parses_split_decision(monkeypatch):
+    candidates = [_candidate(1, "Mercury", "A"), _candidate(2, "Rho", "B")]
+    _mock_anthropic(monkeypatch, '{"groups": [{"indices": [0], "merged": false}, '
+        '{"indices": [1], "merged": false}]}')
+    decisions, cost = feature_scan.judge_cluster("Neobanking", candidates)
+    assert len(decisions) == 2
+    assert all(d.merged is False for d in decisions)
+
+
+def test_judge_cluster_repairs_bad_partition_and_defaults_to_unmerged(monkeypatch):
+    # The model drops index 1 entirely — _validate_partition recovers it as
+    # its own singleton, which (having no original decision behind it)
+    # correctly defaults to unmerged rather than inheriting group 0's
+    # merged=true.
+    candidates = [_candidate(1, "Mercury", "A"), _candidate(2, "Rho", "B")]
+    _mock_anthropic(monkeypatch, '{"groups": [{"indices": [0], "merged": true, '
+        '"canonical_name": "X", "canonical_definition": "Y"}]}')
+    decisions, cost = feature_scan.judge_cluster("Neobanking", candidates)
+    indices_seen = sorted(i for d in decisions for i in d.indices)
+    assert indices_seen == [0, 1]
+    recovered = [d for d in decisions if d.indices == [1]][0]
+    assert recovered.merged is False
+
+
+@pytest.fixture
+def temp_lib():
+    db_path = tempfile.mktemp(suffix=".db")
+    lib = Library(db_path)
+    yield lib
+    lib.close()
+    if os.path.exists(db_path):
+        os.remove(db_path)
+
+
+def test_originate_category_features_merges_across_tools_and_writes_queue(monkeypatch, temp_lib):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)   # no grounding — keeps this test API-call-count deterministic
+    roster = [
+        {"id": 101, "name": "Mercury", "url": "https://mercury.com"},
+        {"id": 102, "name": "Rho", "url": "https://rho.co"},
+    ]
+    # Call order: draft(Mercury), draft(Rho), cluster, judge(the one 2-member cluster).
+    payloads = [
+        '{"features": [{"name": "Transaction categorization", "definition": "On-arrival, '
+        'review-and-improve.", "availability": "native", "ai_enabled": true, "confident": true, '
+        '"source_url": "", "note": ""}]}',
+        '{"features": [{"name": "Auto-categorize transactions", "definition": "Suggests from '
+        'history, one-click accept.", "availability": "add_on", "ai_enabled": true, '
+        '"confident": true, "source_url": "", "note": ""}]}',
+        '{"clusters": [[0, 1]]}',
+        '{"groups": [{"indices": [0, 1], "merged": true, '
+        '"canonical_name": "Automated transaction categorization", '
+        '"canonical_definition": "Machine-suggested transaction categories.", '
+        '"reasoning": "Same job, different mechanism."}]}',
+    ]
+    calls = _mock_anthropic_sequence(monkeypatch, payloads)
+
+    summary = feature_scan.originate_category_features(temp_lib, category_id=7,
+                                                         category_name="Neobanking", tool_roster=roster)
+
+    assert calls["n"] == 4
+    assert summary is not None
+    assert summary.tools_researched == 2
+    assert summary.tools_failed == 0
+    assert summary.candidates_total == 2
+    assert summary.clusters_found == 1
+    assert summary.features_queued == 1
+    assert summary.features_merged == 1
+    assert summary.features_split == 0
+    assert len(summary.queue_item_ids) == 1
+
+    item = temp_lib.get_feature_review_queue_item(summary.queue_item_ids[0])
+    assert item["source"] == "scan"
+    assert item["status"] == "pending"
+    assert item["category_id"] == 7
+    assert item["proposal_type"] == "new_feature+2 links"
+    assert item["payload"]["feature"]["name"] == "Automated transaction categorization"
+    linked_tool_ids = sorted(link["tool_id"] for link in item["payload"]["links"])
+    assert linked_tool_ids == [101, 102]
+    assert "Merged across 2 tools" in item["articulation"]
+
+
+def test_originate_category_features_split_candidates_queue_separately(monkeypatch, temp_lib):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    roster = [
+        {"id": 201, "name": "Mercury", "url": "https://mercury.com"},
+        {"id": 202, "name": "Rho", "url": "https://rho.co"},
+    ]
+    payloads = [
+        '{"features": [{"name": "Checking accounts", "definition": "FDIC-insured checking."}]}',
+        '{"features": [{"name": "Virtual cards", "definition": "Instant virtual card issuance."}]}',
+        '{"clusters": [[0], [1]]}',   # clustering itself found no overlap — no judge calls needed
+    ]
+    calls = _mock_anthropic_sequence(monkeypatch, payloads)
+
+    summary = feature_scan.originate_category_features(temp_lib, category_id=7,
+                                                         category_name="Neobanking", tool_roster=roster)
+
+    assert calls["n"] == 3   # 2 drafts + 1 cluster call; no judge call for either singleton cluster
+    assert summary.features_queued == 2
+    assert summary.features_merged == 0
+    assert summary.features_split == 2
+    items = [temp_lib.get_feature_review_queue_item(i) for i in summary.queue_item_ids]
+    assert all(it["proposal_type"] == "new_feature+link" for it in items)
+
+
+def test_originate_category_features_partial_tool_failure_still_queues(monkeypatch, temp_lib):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    roster = [
+        {"id": 301, "name": "Mercury", "url": "https://mercury.com"},
+        {"id": 302, "name": "BrokenTool", "url": "https://broken.example"},
+    ]
+    call_count = {"n": 0}
+
+    def _create(**kw):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            class _Block:
+                type = "text"
+                text = '{"features": [{"name": "Checking accounts"}]}'
+            usage = types.SimpleNamespace(input_tokens=10, output_tokens=10,
+                                           cache_creation_input_tokens=0, cache_read_input_tokens=0)
+            return types.SimpleNamespace(content=[_Block()], usage=usage)
+        raise RuntimeError("simulated API failure for the second tool")
+
+    fake = types.SimpleNamespace(Anthropic=lambda *a, **k: types.SimpleNamespace(
+        messages=types.SimpleNamespace(create=lambda **kw: _create(**kw))))
+    monkeypatch.setitem(sys.modules, "anthropic", fake)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+
+    summary = feature_scan.originate_category_features(temp_lib, category_id=1,
+                                                         category_name="Neobanking", tool_roster=roster)
+    assert summary is not None
+    assert summary.tools_researched == 1
+    assert summary.tools_failed == 1
+    assert summary.candidates_total == 1
+
+
+def test_originate_category_features_returns_none_when_every_tool_fails(monkeypatch, temp_lib):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    roster = [{"id": 1, "name": "Mercury", "url": "https://mercury.com"}]
+    summary = feature_scan.originate_category_features(temp_lib, category_id=1,
+                                                         category_name="Neobanking", tool_roster=roster)
+    assert summary is None
+
+
+def test_originate_category_features_clustering_failure_falls_back_to_all_singletons(monkeypatch, temp_lib):
+    # Clustering itself fails outright (no key on that call specifically is
+    # hard to simulate mid-sequence, so simulate via a raising create() on
+    # the 3rd call) — every candidate should still get queued separately
+    # rather than the whole run aborting.
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    roster = [
+        {"id": 401, "name": "Mercury", "url": "https://mercury.com"},
+        {"id": 402, "name": "Rho", "url": "https://rho.co"},
+    ]
+    call_count = {"n": 0}
+
+    def _create(**kw):
+        call_count["n"] += 1
+        if call_count["n"] <= 2:
+            class _Block:
+                type = "text"
+                text = '{"features": [{"name": "Feature ' + str(call_count["n"]) + '"}]}'
+            usage = types.SimpleNamespace(input_tokens=10, output_tokens=10,
+                                           cache_creation_input_tokens=0, cache_read_input_tokens=0)
+            return types.SimpleNamespace(content=[_Block()], usage=usage)
+        raise RuntimeError("simulated clustering-call failure")
+
+    fake = types.SimpleNamespace(Anthropic=lambda *a, **k: types.SimpleNamespace(
+        messages=types.SimpleNamespace(create=lambda **kw: _create(**kw))))
+    monkeypatch.setitem(sys.modules, "anthropic", fake)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+
+    summary = feature_scan.originate_category_features(temp_lib, category_id=1,
+                                                         category_name="Neobanking", tool_roster=roster)
+    assert summary.candidates_total == 2
+    assert summary.features_queued == 2
+    assert summary.features_merged == 0
+    assert summary.features_split == 2
+
+
+def test_originate_category_features_dry_run_writes_nothing(monkeypatch, temp_lib):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    roster = [
+        {"id": 501, "name": "Mercury", "url": "https://mercury.com"},
+        {"id": 502, "name": "Rho", "url": "https://rho.co"},
+    ]
+    payloads = [
+        '{"features": [{"name": "Transaction categorization"}]}',
+        '{"features": [{"name": "Auto-categorize transactions"}]}',
+        '{"clusters": [[0, 1]]}',
+        '{"groups": [{"indices": [0, 1], "merged": true, '
+        '"canonical_name": "Automated transaction categorization", '
+        '"canonical_definition": "def", "reasoning": "same job"}]}',
+    ]
+    _mock_anthropic_sequence(monkeypatch, payloads)
+
+    summary = feature_scan.originate_category_features(
+        temp_lib, category_id=9, category_name="Neobanking", tool_roster=roster, dry_run=True,
+    )
+
+    assert summary.features_queued == 1   # counted from queued_payloads, not the (empty) queue_item_ids
+    assert summary.queue_item_ids == []   # nothing actually written
+    assert len(summary.queued_payloads) == 1
+    assert summary.queued_payloads[0]["feature"]["name"] == "Automated transaction categorization"
+    assert temp_lib.list_feature_review_queue(status=None) == []   # confirms: truly nothing in the DB

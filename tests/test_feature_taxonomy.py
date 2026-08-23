@@ -642,3 +642,103 @@ def test_seed_feature_taxonomy_aborts_on_unresolved_category(lib):
     import scripts.seed_feature_taxonomy as seed_mod
     with pytest.raises(SystemExit):
         seed_mod._resolve_categories(lib, {"ERP", "FP&A", "Close Management"})
+
+
+# -- Feature Taxonomy scan tool, Phase 3 complement: near-duplicate nudge ----
+# (webapp.app._find_near_duplicate_queue_items / the review-queue page's
+# own warning badge) — source-agnostic: catches near-dupes whether they
+# came from the scan's own conservative split, a second scan run, or an
+# admin's manual entry, with no LLM call and no dependency on the scan
+# having run at all.
+
+def test_find_near_duplicate_queue_items_flags_similar_names_same_category(env):
+    import webapp.app as appmod
+    pending = [
+        {"id": 1, "category_id": 7, "payload": {"feature": {"name": "Automated transaction categorization"}}},
+        {"id": 2, "category_id": 7, "payload": {"feature": {"name": "Automatic transaction categorisation"}}},
+    ]
+    result = appmod._find_near_duplicate_queue_items(pending)
+    assert 2 in [d["id"] for d in result.get(1, [])]
+    assert 1 in [d["id"] for d in result.get(2, [])]
+
+
+def test_find_near_duplicate_queue_items_ignores_different_categories(env):
+    import webapp.app as appmod
+    pending = [
+        {"id": 1, "category_id": 7, "payload": {"feature": {"name": "Automated transaction categorization"}}},
+        {"id": 2, "category_id": 8, "payload": {"feature": {"name": "Automated transaction categorization"}}},
+    ]
+    result = appmod._find_near_duplicate_queue_items(pending)
+    assert result == {}
+
+
+def test_find_near_duplicate_queue_items_ignores_dissimilar_names(env):
+    import webapp.app as appmod
+    pending = [
+        {"id": 1, "category_id": 7, "payload": {"feature": {"name": "Checking accounts"}}},
+        {"id": 2, "category_id": 7, "payload": {"feature": {"name": "Virtual card issuance"}}},
+    ]
+    result = appmod._find_near_duplicate_queue_items(pending)
+    assert result == {}
+
+
+def test_find_near_duplicate_queue_items_ignores_existing_feature_links():
+    import webapp.app as appmod
+    # A link-to-an-existing-feature proposal has no "feature" name of its
+    # own to compare — must not crash, must not be treated as a match.
+    pending = [
+        {"id": 1, "category_id": 7, "payload": {"feature_id": 5, "links": []}},
+        {"id": 2, "category_id": 7, "payload": {"feature": {"name": "Checking accounts"}}},
+    ]
+    result = appmod._find_near_duplicate_queue_items(pending)
+    assert result == {}
+
+
+def test_feature_review_queue_page_renders_near_duplicate_warning(env):
+    client = _client(env)
+    _login(client)
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        cat_id = lib.add_tool_category("Neobanking")
+        lib.add_feature_review_queue_item(
+            source="scan", proposal_type="new_feature+link",
+            payload={"category_id": cat_id, "feature": {"name": "Automated transaction categorization"}, "links": []},
+            category_id=cat_id,
+        )
+        lib.add_feature_review_queue_item(
+            source="scan", proposal_type="new_feature+link",
+            payload={"category_id": cat_id, "feature": {"name": "Automatic transaction categorisation"}, "links": []},
+            category_id=cat_id,
+        )
+    finally:
+        lib.close()
+
+    r = client.get("/admin/tools/software/feature-review-queue")
+    assert r.status_code == 200
+    assert "Possible near-duplicate of" in r.text
+
+
+def test_feature_review_queue_page_no_warning_for_distinct_features(env):
+    client = _client(env)
+    _login(client)
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        cat_id = lib.add_tool_category("Neobanking")
+        lib.add_feature_review_queue_item(
+            source="scan", proposal_type="new_feature+link",
+            payload={"category_id": cat_id, "feature": {"name": "Checking accounts"}, "links": []},
+            category_id=cat_id,
+        )
+        lib.add_feature_review_queue_item(
+            source="scan", proposal_type="new_feature+link",
+            payload={"category_id": cat_id, "feature": {"name": "Virtual card issuance"}, "links": []},
+            category_id=cat_id,
+        )
+    finally:
+        lib.close()
+
+    r = client.get("/admin/tools/software/feature-review-queue")
+    assert r.status_code == 200
+    assert "Possible near-duplicate of" not in r.text
