@@ -597,31 +597,39 @@ def draft_tool_features_for_category(
 # don't-collapse/unify merge across the FULL accumulated set, and the
 # feature_review_queue write. Approved shape (2026-08, Brian's sign-off):
 #
-# - Clustering is ONE Claude call over the whole roster's candidate list,
-#   not embeddings-similarity (would judge on surface wording — exactly
-#   what §7 warns against: "never match on shared buzzwords") and not full
-#   pairwise comparison (infeasible at ~400+ candidates for a 10-tool
-#   category). It's a LOOSE grouping pass — cluster_candidate_features
-#   below groups too broadly ON PURPOSE (a candidate is grouped in on any
-#   plausible match), because the real decision happens per-cluster next.
+# - Clustering is INCREMENTAL, folded into the per-tool research loop —
+#   NOT one Claude call over the whole roster's candidate list (that
+#   design shipped first and broke on the first real live run; see the
+#   "Incremental clustering" section below for the full post-mortem and
+#   why a bigger max_tokens ceiling wasn't the right fix). Still not
+#   embeddings-similarity (would judge on surface wording — exactly what
+#   §7 warns against: "never match on shared buzzwords") and still not
+#   full pairwise comparison. Each incremental step is still a LOOSE
+#   grouping pass — a candidate is matched to an existing representative
+#   on any plausible match — because the real decision happens
+#   per-cluster next, same as before.
 # - Per-cluster judgment (judge_cluster) makes the actual merge-or-split
 #   call, few-shot off §7's own worked examples, with an explicit
 #   CONSERVATIVE bias instructed directly in the prompt: split, don't
 #   merge, when genuinely uncertain. A false split is a cheap, visible
 #   queue-review fix; a false merge silently buries a real distinction
 #   inside a link note where it's much easier to miss.
-# - Every failure mode in this pipeline (clustering fails outright, a
-#   judgment call fails outright, a model partition drops/duplicates an
-#   index) degrades toward MORE separate features, never toward losing
-#   research or silently over-merging — the same conservative-bias
-#   philosophy applied structurally, not just in the prompts.
+# - Every failure mode in this pipeline (a clustering match call fails
+#   outright, a judgment call fails outright, a model's output drops/
+#   duplicates an index) degrades toward MORE separate features, never
+#   toward losing research or silently over-merging — the same
+#   conservative-bias philosophy applied structurally, not just in the
+#   prompts. `OriginationSummary.clustering_degraded` makes a structural
+#   clustering failure VISIBLE rather than indistinguishable from "ran
+#   cleanly and genuinely found no overlap" — the exact ambiguity that
+#   let the original whole-batch bug reach the queue silently.
 # - Queue-write wiring reuses Library.add_feature_review_queue_item's
 #   existing payload shape exactly (see approve_feature_review_queue_item's
 #   docstring in linklib/db.py) — zero new surface for the approval UI.
 # ============================================================================
 
-_CLUSTER_MAX_TOKENS = 8000
-_CLUSTER_RETRY_MAX_TOKENS = 16000
+_MATCH_MAX_TOKENS = 8000
+_MATCH_RETRY_MAX_TOKENS = 16000
 _JUDGE_MAX_TOKENS = 8000
 _JUDGE_RETRY_MAX_TOKENS = 16000
 
@@ -666,73 +674,141 @@ class CandidateFeature:
     verified_as_of: str = ""
 
 
-_CLUSTER_PROMPT = """You are grouping candidate features drafted independently for different
-vendors in the SAME CFO Toolbox category, "{category}", before a human
-reviews any of them. §7 of the Feature Taxonomy rules doc is the test for
-whether two candidates describe the same underlying capability:
+# --- Incremental clustering (2026-08 fix, replaces a one-shot whole-roster
+# clustering call) --------------------------------------------------------
+# The first real live run (Neobanking, 364 candidates) produced ZERO
+# merges despite obvious, repeated near-verbatim duplicates across the
+# roster (e.g. "Accounting software sync" appearing 7 times). Root cause,
+# confirmed from the logged call behavior: the original one-shot
+# cluster_candidate_features() asked the model to emit ONE JSON array
+# covering all 364 indices in a single response. Its OUTPUT size scaled
+# with TOTAL roster candidate count — a fundamentally harder single-shot
+# reasoning task than any per-tool drafting call (which only ever reasons
+# about one vendor's own content in isolation). The first attempt's
+# _salvage_json_array recovered ZERO items (not "some, then a cutoff" —
+# the "clusters" key/array was never even reached), meaning Opus 5's
+# on-by-default adaptive thinking consumed the ENTIRE max_tokens budget
+# just reasoning about 364 items, before writing a single output token.
+# Doubling the ceiling on retry is not a scalable fix for a task whose
+# required reasoning length grows with roster size — a bigger category
+# would just hit the same wall again.
+#
+# Fixed by making clustering INCREMENTAL, folded into originate_category_
+# features' existing per-tool loop: as each tool's candidates are drafted,
+# check them against the RUNNING set of distinct-capability representatives
+# found so far (one representative per cluster), not against the whole
+# roster's history. This bounds every call's OUTPUT to this ONE tool's
+# candidate count (~30-50 entries, a trivial null/int array) regardless of
+# how large the representative set (or total roster) grows — representative
+# count only ever appears as INPUT context, which the model's context
+# window holds comfortably without competing against max_tokens the way
+# response generation does. match_candidates_to_representatives() below is
+# the whole mechanism; originate_category_features() drives it tool by tool.
+
+
+_MATCH_PROMPT = """You are checking new candidate features against a list of distinct
+capabilities already found for the SAME CFO Toolbox category, "{category}",
+earlier in this same origination run. §7 of the Feature Taxonomy rules doc
+is the test for whether a new candidate describes the SAME underlying
+capability as an existing one:
 
 {unify_test}
 
-Below is the full list of candidates drafted this run, numbered from 0.
-Group indices that PLAUSIBLY describe the same job into one cluster — a
-candidate with no plausible match to any other is its own cluster of one.
-When in doubt whether two candidates might be the same job, group them
-together here anyway: a later step makes the final merge-or-split call
-with more detail, and grouping too narrowly here means that step never
-gets the chance to compare them at all. This step is a loose net, not the
-final decision.
+Existing distinct capabilities found so far (0-indexed):
+{representative_list}
 
-Candidates:
-{candidate_list}
+New candidates to check against that list (0-indexed, SEPARATELY from the
+list above):
+{new_candidate_list}
+
+For each new candidate, decide: does it plausibly describe the SAME job as
+one of the existing capabilities above? If so, give that existing
+capability's index. If it's genuinely new — no existing capability
+plausibly matches — say so. When genuinely uncertain, prefer "new" over
+guessing a match: a human reviewing the queue can merge two near-duplicate
+proposals easily; a false match could bury a real distinction inside a
+link note where it's much harder to catch.
 
 Return STRICT JSON only (no prose, no markdown fences):
-{{"clusters": [[0, 4, 9], [1], [2, 7]]}}
-— a list of lists of the 0-based indices above. Every index from 0 to
-{max_index} must appear in EXACTLY one cluster."""
+{{"matches": [2, null, null, 0]}}
+— exactly {n_new} entries, one per new candidate above, in the same order.
+Each entry is either an integer index into the existing-capabilities list,
+or null if genuinely new."""
 
 
-def cluster_candidate_features(candidates: list[CandidateFeature], category_name: str,
-                                model: str = DEFAULT_MODEL) -> tuple[list[list[int]] | None, float]:
-    """Groups candidates that plausibly describe the same job (§7) via ONE
-    Claude call over the whole roster's candidate list — see the module's
-    Phase 3 section header for why not embeddings/pairwise. A LOOSE
-    grouping pass, not the final merge decision; judge_cluster makes that
-    call with more detail per cluster.
+def _validate_matches(raw_matches: list, n_new: int, n_reps: int) -> list[int | None]:
+    """Normalizes a match-array response into exactly n_new entries, each
+    either a valid representative index or None ("new"). Short/long/
+    malformed/out-of-range entries all degrade toward None — the same
+    conservative-bias fallback as the rest of this module: never guess a
+    match from bad data, never lose a candidate by dropping it (a missing
+    entry just means "treat as new," not "vanish")."""
+    result: list[int | None] = []
+    for i in range(n_new):
+        v = raw_matches[i] if i < len(raw_matches) else None
+        # bool is a subclass of int in Python — guard so a stray true/false
+        # in the response can't get misread as representative index 1/0.
+        if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < n_reps:
+            result.append(v)
+        else:
+            result.append(None)
+    return result
+
+
+def match_candidates_to_representatives(
+    new_candidates: list[CandidateFeature], representatives: list[CandidateFeature],
+    category_name: str, model: str = DEFAULT_MODEL,
+) -> tuple[list[int | None] | None, float]:
+    """Incremental clustering step — checks ONE tool's newly drafted
+    candidates against the representative set of distinct capabilities
+    found so far in this run, rather than re-clustering the whole roster
+    in one call (see the section header above for why the whole-batch
+    design broke on a real 364-candidate run). This keeps the call's
+    OUTPUT bounded by len(new_candidates), never by the total roster or
+    representative count.
+
+    Returns ([], 0.0) with no call at all when there's nothing to check
+    (no new candidates) or nothing to check against yet (no representatives
+    — the first tool to contribute candidates has nothing to compare to,
+    so every one of its candidates is trivially new).
 
     Returns (None, 0.0) only if the SDK/key is unavailable or the call
-    fails outright (network/auth error) — never on a merely malformed/
-    truncated response, which instead degrades through _validate_partition
-    into a salvaged-but-still-valid partition. Callers that get None
-    should treat every candidate as its own singleton cluster — the
-    safest fallback under the approved conservative-bias philosophy: no
-    clustering happening at all just means nothing merges, not that
-    research is lost."""
-    if not candidates:
+    fails outright (network/auth error) — callers should fall back to
+    treating every one of this tool's candidates as newly distinct (no
+    merge), the same conservative-bias default the rest of this module
+    uses on any clustering-stage failure."""
+    if not new_candidates:
         return [], 0.0
+    if not representatives:
+        return [None] * len(new_candidates), 0.0
     if not _anthropic_available() or not os.environ.get("ANTHROPIC_API_KEY"):
         return None, 0.0
 
-    candidate_list = "\n".join(
-        _format_candidate_line(i, c.tool_name, c.feature) for i, c in enumerate(candidates)
+    representative_list = "\n".join(
+        _format_candidate_line(i, c.tool_name, c.feature) for i, c in enumerate(representatives)
     )
-    prompt = _CLUSTER_PROMPT.format(
+    new_candidate_list = "\n".join(
+        _format_candidate_line(i, c.tool_name, c.feature) for i, c in enumerate(new_candidates)
+    )
+    prompt = _MATCH_PROMPT.format(
         category=category_name, unify_test=_UNIFY_TEST_EXCERPT,
-        candidate_list=candidate_list, max_index=len(candidates) - 1,
+        representative_list=representative_list, new_candidate_list=new_candidate_list,
+        n_new=len(new_candidates),
     )
 
     try:
-        raw_clusters, _truncated, in_tok, out_tok, cache_w, cache_r = _call_and_parse_array(
-            prompt, model, _CLUSTER_MAX_TOKENS, _CLUSTER_RETRY_MAX_TOKENS, "clusters",
-            log_label=f"cluster_candidate_features({category_name})",
+        raw_matches, _truncated, in_tok, out_tok, cache_w, cache_r = _call_and_parse_array(
+            prompt, model, _MATCH_MAX_TOKENS, _MATCH_RETRY_MAX_TOKENS, "matches",
+            log_label=f"match_candidates_to_representatives({category_name})",
         )
     except Exception as e:
-        _logger.warning("cluster_candidate_features() failed for %s: %s: %s",
+        _logger.warning("match_candidates_to_representatives() failed for %s: %s: %s",
                          category_name, type(e).__name__, e)
         return None, 0.0
 
     cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
-    groups = [g for g in raw_clusters if isinstance(g, list)]
-    return _validate_partition(groups, len(candidates)), cost
+    matches = _validate_matches(raw_matches, len(new_candidates), len(representatives))
+    return matches, cost
 
 
 _JUDGE_PROMPT = """Category: "{category}". Below are {n} candidate features drafted
@@ -855,6 +931,13 @@ class OriginationSummary:
     queued_payloads: list[dict] = field(default_factory=list)   # always populated, dry_run or not —
                                                                   # what WAS (or WOULD BE) queued, for
                                                                   # the caller to print/inspect either way
+    clustering_degraded: bool = False   # True if ANY per-tool clustering match call structurally
+                                          # failed and fell back to "treat as all-new" for that
+                                          # tool — makes a real failure visible instead of reading
+                                          # identically to "clustering ran cleanly, found no
+                                          # overlap" (the exact ambiguity the Neobanking bug hid
+                                          # behind). See clustering_degraded_tools for which ones.
+    clustering_degraded_tools: list[str] = field(default_factory=list)
     exa_cost_usd: float = 0.0
     claude_cost_usd: float = 0.0
 
@@ -888,10 +971,16 @@ def originate_category_features(
     counting the rest."""
     roster_size = len(tool_roster)
     candidates: list[CandidateFeature] = []
+    clusters: list[list[int]] = []          # global indices into `candidates`, one list per
+                                             # distinct capability found so far
+    representative_idx: list[int] = []      # each cluster's representative — a global index into
+                                             # `candidates`, parallel to `clusters`
     tools_researched = 0
     tools_failed = 0
     exa_cost = 0.0
     claude_cost = 0.0
+    clustering_degraded = False
+    clustering_degraded_tools: list[str] = []
 
     for tool in tool_roster:
         draft = draft_tool_features_for_category(
@@ -904,21 +993,55 @@ def originate_category_features(
         tools_researched += 1
         exa_cost += draft.exa_cost_usd
         claude_cost += draft.cost_usd
-        for f in draft.features:
-            candidates.append(CandidateFeature(
-                tool_id=tool["id"], tool_name=tool["name"], feature=f,
-                verified_as_of=draft.verified_as_of,
-            ))
+
+        new_candidates = [
+            CandidateFeature(tool_id=tool["id"], tool_name=tool["name"], feature=f,
+                              verified_as_of=draft.verified_as_of)
+            for f in draft.features
+        ]
+        if not new_candidates:
+            continue
+
+        start_idx = len(candidates)
+        candidates.extend(new_candidates)
+        new_global_indices = list(range(start_idx, len(candidates)))
+
+        # Incremental clustering (2026-08 fix — see the module's Phase 3
+        # section header for the full post-mortem): check this tool's new
+        # candidates against the RUNNING representative set, not the whole
+        # roster's history. Bounds every match call's output to this one
+        # tool's candidate count regardless of total roster size.
+        representatives = [candidates[i] for i in representative_idx]
+        matches, match_cost = match_candidates_to_representatives(
+            new_candidates, representatives, category_name, model=model,
+        )
+        claude_cost += match_cost
+
+        if matches is None:
+            # Structural failure (SDK/key unavailable, or the call itself
+            # raised) — conservative-bias fallback: every one of this
+            # tool's candidates becomes its own new cluster, same as a
+            # clean "no matches" result would, but FLAGGED so a real
+            # failure doesn't read as "genuinely found no overlap."
+            clustering_degraded = True
+            clustering_degraded_tools.append(tool["name"])
+            _logger.warning(
+                "originate_category_features(): incremental clustering match failed for "
+                "%s/%s — falling back to treating all %d of its candidates as new (unmerged).",
+                category_name, tool["name"], len(new_candidates),
+            )
+            matches = [None] * len(new_candidates)
+
+        for local_i, gi in enumerate(new_global_indices):
+            match = matches[local_i] if local_i < len(matches) else None
+            if match is not None and 0 <= match < len(clusters):
+                clusters[match].append(gi)
+            else:
+                clusters.append([gi])
+                representative_idx.append(gi)
 
     if not candidates:
         return None
-
-    clusters, cluster_cost = cluster_candidate_features(candidates, category_name, model=model)
-    claude_cost += cluster_cost
-    if clusters is None:
-        # Clustering failed outright — conservative-bias fallback: nothing
-        # merges, rather than losing all this research.
-        clusters = [[i] for i in range(len(candidates))]
 
     queue_item_ids: list[int] = []
     queued_payloads: list[dict] = []
@@ -1008,5 +1131,6 @@ def originate_category_features(
         features_queued=len(queued_payloads), features_merged=features_merged,
         features_split=features_split, queue_item_ids=queue_item_ids,
         queued_payloads=queued_payloads,
+        clustering_degraded=clustering_degraded, clustering_degraded_tools=clustering_degraded_tools,
         exa_cost_usd=exa_cost, claude_cost_usd=claude_cost,
     )

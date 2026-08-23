@@ -11,6 +11,7 @@ content still needs a human running
 scripts/test_feature_scan_origination.py by hand with real keys, per
 CLAUDE.md's "keep API keys out of Code building sessions" rule.
 """
+import json
 import os
 import sys
 import tempfile
@@ -421,31 +422,85 @@ def _candidate(tool_id, tool_name, name, **kw):
                                           feature=feature, verified_as_of="2026-08-23")
 
 
-def test_cluster_candidate_features_empty_list_no_call(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    clusters, cost = feature_scan.cluster_candidate_features([], "Neobanking")
-    assert clusters == []
+# --- Incremental clustering (2026-08 fix — replaces the whole-batch
+# cluster_candidate_features(), which broke on the first real live run:
+# Neobanking, 364 candidates, ZERO merges, because a one-shot call's OUTPUT
+# scaled with total roster size and the model's adaptive thinking consumed
+# the entire max_tokens budget before writing anything at all.
+# match_candidates_to_representatives() bounds output to ONE tool's
+# candidate count regardless of roster size — see the module's Phase 3
+# section header for the full post-mortem. -------------------------------
+
+def test_match_candidates_no_new_candidates_no_call():
+    matches, cost = feature_scan.match_candidates_to_representatives([], [], "Neobanking")
+    assert matches == []
     assert cost == 0.0
 
 
-def test_cluster_candidate_features_no_key_returns_none(monkeypatch):
+def test_match_candidates_no_representatives_all_new_no_call(monkeypatch):
+    # The first tool to contribute candidates has nothing to compare
+    # against yet — every candidate is trivially new, no API call needed.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    candidates = [_candidate(1, "Mercury", "Checking accounts")]
-    clusters, cost = feature_scan.cluster_candidate_features(candidates, "Neobanking")
-    assert clusters is None
+    new = [_candidate(1, "Mercury", "Checking accounts"), _candidate(1, "Mercury", "Virtual cards")]
+    matches, cost = feature_scan.match_candidates_to_representatives(new, [], "Neobanking")
+    assert matches == [None, None]
     assert cost == 0.0
 
 
-def test_cluster_candidate_features_parses_and_validates(monkeypatch):
-    candidates = [
-        _candidate(1, "Mercury", "Checking accounts"),
-        _candidate(2, "Rho", "Business checking"),
-        _candidate(1, "Mercury", "Virtual cards"),
+def test_match_candidates_no_key_returns_none(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    new = [_candidate(2, "Rho", "Business checking")]
+    reps = [_candidate(1, "Mercury", "Checking accounts")]
+    matches, cost = feature_scan.match_candidates_to_representatives(new, reps, "Neobanking")
+    assert matches is None
+    assert cost == 0.0
+
+
+def test_match_candidates_parses_matches_and_new(monkeypatch):
+    new = [
+        _candidate(2, "Rho", "Business checking account"),   # matches rep 0
+        _candidate(2, "Rho", "Wire transfers"),               # genuinely new
     ]
-    _mock_anthropic(monkeypatch, '{"clusters": [[0, 1], [2]]}')
-    clusters, cost = feature_scan.cluster_candidate_features(candidates, "Neobanking")
-    assert clusters == [[0, 1], [2]]
+    reps = [_candidate(1, "Mercury", "Checking accounts")]
+    _mock_anthropic(monkeypatch, '{"matches": [0, null]}')
+    matches, cost = feature_scan.match_candidates_to_representatives(new, reps, "Neobanking")
+    assert matches == [0, None]
     assert cost > 0
+
+
+def test_match_candidates_output_bounded_by_new_count_not_representative_count(monkeypatch):
+    # The whole point of the fix: representative count can be large (a
+    # category with genuinely little overlap) without inflating the
+    # OUTPUT this call asks the model to produce — only len(new) entries,
+    # ever. Confirm the prompt's own stated contract reflects that.
+    captured = {}
+
+    def _create(**kw):
+        captured["prompt"] = kw["messages"][0]["content"]
+        class _Block:
+            type = "text"
+            text = '{"matches": [null, null, null]}'
+        usage = types.SimpleNamespace(input_tokens=50, output_tokens=10,
+                                       cache_creation_input_tokens=0, cache_read_input_tokens=0)
+        return types.SimpleNamespace(content=[_Block()], usage=usage)
+
+    fake = types.SimpleNamespace(Anthropic=lambda *a, **k: types.SimpleNamespace(
+        messages=types.SimpleNamespace(create=lambda **kw: _create(**kw))))
+    monkeypatch.setitem(sys.modules, "anthropic", fake)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+
+    new = [_candidate(2, "Rho", f"New feature {i}") for i in range(3)]
+    reps = [_candidate(1, "Mercury", f"Existing capability {i}") for i in range(300)]
+    matches, cost = feature_scan.match_candidates_to_representatives(new, reps, "Neobanking")
+    assert matches == [None, None, None]
+    assert "exactly 3 entries" in captured["prompt"]   # the stated output contract names len(new), not 303
+
+
+def test_validate_matches_repairs_out_of_range_and_missing():
+    # 5 -> out of range (only 2 reps) -> None; missing 3rd entry -> None;
+    # a stray bool must not be misread as index 0/1 (bool subclasses int).
+    result = feature_scan._validate_matches([5, 1, True], n_new=4, n_reps=2)
+    assert result == [None, 1, None, None]
 
 
 def test_judge_cluster_singleton_short_circuits_no_api_call(monkeypatch):
@@ -534,7 +589,9 @@ def test_originate_category_features_merges_across_tools_and_writes_queue(monkey
         {"id": 101, "name": "Mercury", "url": "https://mercury.com"},
         {"id": 102, "name": "Rho", "url": "https://rho.co"},
     ]
-    # Call order: draft(Mercury), draft(Rho), cluster, judge(the one 2-member cluster).
+    # Call order: draft(Mercury) [no match call — first tool, no representatives
+    # yet], draft(Rho), match(Rho's candidate vs. Mercury's representative),
+    # judge(the one 2-member cluster).
     payloads = [
         '{"features": [{"name": "Transaction categorization", "definition": "On-arrival, '
         'review-and-improve.", "availability": "native", "ai_enabled": true, "confident": true, '
@@ -542,7 +599,7 @@ def test_originate_category_features_merges_across_tools_and_writes_queue(monkey
         '{"features": [{"name": "Auto-categorize transactions", "definition": "Suggests from '
         'history, one-click accept.", "availability": "add_on", "ai_enabled": true, '
         '"confident": true, "source_url": "", "note": ""}]}',
-        '{"clusters": [[0, 1]]}',
+        '{"matches": [0]}',
         '{"groups": [{"indices": [0, 1], "merged": true, '
         '"canonical_name": "Automated transaction categorization", '
         '"canonical_definition": "Machine-suggested transaction categories.", '
@@ -562,6 +619,7 @@ def test_originate_category_features_merges_across_tools_and_writes_queue(monkey
     assert summary.features_queued == 1
     assert summary.features_merged == 1
     assert summary.features_split == 0
+    assert summary.clustering_degraded is False
     assert len(summary.queue_item_ids) == 1
 
     item = temp_lib.get_feature_review_queue_item(summary.queue_item_ids[0])
@@ -584,17 +642,18 @@ def test_originate_category_features_split_candidates_queue_separately(monkeypat
     payloads = [
         '{"features": [{"name": "Checking accounts", "definition": "FDIC-insured checking."}]}',
         '{"features": [{"name": "Virtual cards", "definition": "Instant virtual card issuance."}]}',
-        '{"clusters": [[0], [1]]}',   # clustering itself found no overlap — no judge calls needed
+        '{"matches": [null]}',   # the match call itself found no overlap — no judge call needed
     ]
     calls = _mock_anthropic_sequence(monkeypatch, payloads)
 
     summary = feature_scan.originate_category_features(temp_lib, category_id=7,
                                                          category_name="Neobanking", tool_roster=roster)
 
-    assert calls["n"] == 3   # 2 drafts + 1 cluster call; no judge call for either singleton cluster
+    assert calls["n"] == 3   # 2 drafts + 1 match call; no judge call for either singleton cluster
     assert summary.features_queued == 2
     assert summary.features_merged == 0
     assert summary.features_split == 2
+    assert summary.clustering_degraded is False
     items = [temp_lib.get_feature_review_queue_item(i) for i in summary.queue_item_ids]
     assert all(it["proposal_type"] == "new_feature+link" for it in items)
 
@@ -639,11 +698,13 @@ def test_originate_category_features_returns_none_when_every_tool_fails(monkeypa
     assert summary is None
 
 
-def test_originate_category_features_clustering_failure_falls_back_to_all_singletons(monkeypatch, temp_lib):
-    # Clustering itself fails outright (no key on that call specifically is
-    # hard to simulate mid-sequence, so simulate via a raising create() on
-    # the 3rd call) — every candidate should still get queued separately
-    # rather than the whole run aborting.
+def test_originate_category_features_clustering_failure_falls_back_and_is_flagged(monkeypatch, temp_lib):
+    # The incremental match call for the SECOND tool (comparing it against
+    # the first tool's representative) fails outright — every candidate
+    # should still get queued separately rather than the whole run
+    # aborting, AND the failure must be VISIBLE (clustering_degraded),
+    # never indistinguishable from "genuinely found no overlap" — that
+    # exact ambiguity is what let the original Neobanking bug ship silently.
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     roster = [
         {"id": 401, "name": "Mercury", "url": "https://mercury.com"},
@@ -660,7 +721,7 @@ def test_originate_category_features_clustering_failure_falls_back_to_all_single
             usage = types.SimpleNamespace(input_tokens=10, output_tokens=10,
                                            cache_creation_input_tokens=0, cache_read_input_tokens=0)
             return types.SimpleNamespace(content=[_Block()], usage=usage)
-        raise RuntimeError("simulated clustering-call failure")
+        raise RuntimeError("simulated incremental-match-call failure")
 
     fake = types.SimpleNamespace(Anthropic=lambda *a, **k: types.SimpleNamespace(
         messages=types.SimpleNamespace(create=lambda **kw: _create(**kw))))
@@ -673,6 +734,20 @@ def test_originate_category_features_clustering_failure_falls_back_to_all_single
     assert summary.features_queued == 2
     assert summary.features_merged == 0
     assert summary.features_split == 2
+    assert summary.clustering_degraded is True
+    assert summary.clustering_degraded_tools == ["Rho"]
+
+
+def test_originate_category_features_no_degradation_when_clustering_succeeds(monkeypatch, temp_lib):
+    # Sanity check for the flag itself: a clean run (this one has only one
+    # tool, so no match call ever runs at all) must NOT report degraded.
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    roster = [{"id": 1, "name": "Mercury", "url": "https://mercury.com"}]
+    _mock_anthropic(monkeypatch, '{"features": [{"name": "Checking accounts"}]}')
+    summary = feature_scan.originate_category_features(temp_lib, category_id=1,
+                                                         category_name="Neobanking", tool_roster=roster)
+    assert summary.clustering_degraded is False
+    assert summary.clustering_degraded_tools == []
 
 
 def test_originate_category_features_dry_run_writes_nothing(monkeypatch, temp_lib):
@@ -684,7 +759,7 @@ def test_originate_category_features_dry_run_writes_nothing(monkeypatch, temp_li
     payloads = [
         '{"features": [{"name": "Transaction categorization"}]}',
         '{"features": [{"name": "Auto-categorize transactions"}]}',
-        '{"clusters": [[0, 1]]}',
+        '{"matches": [0]}',
         '{"groups": [{"indices": [0, 1], "merged": true, '
         '"canonical_name": "Automated transaction categorization", '
         '"canonical_definition": "def", "reasoning": "same job"}]}',
@@ -700,3 +775,114 @@ def test_originate_category_features_dry_run_writes_nothing(monkeypatch, temp_li
     assert len(summary.queued_payloads) == 1
     assert summary.queued_payloads[0]["feature"]["name"] == "Automated transaction categorization"
     assert temp_lib.list_feature_review_queue(status=None) == []   # confirms: truly nothing in the DB
+
+
+# --- Synthetic large-N test — exercises the incremental-clustering fix at
+# a scale comparable to the real failure (Neobanking: 10 tools, 364
+# candidates, one duplicate recurring across every tool). This is the test
+# the whole-batch design never had, and its absence is exactly why the
+# original bug shipped: nothing here exercised anything near real scale.
+# Confirms the fix's core property directly — Anthropic call count and
+# each match call's stated output contract stay bounded by TOOL count,
+# never by total candidate count. -----------------------------------------
+
+def test_originate_category_features_large_roster_merges_correctly_and_stays_bounded(monkeypatch, temp_lib):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    n_tools = 8
+    candidates_per_tool = 20   # 1 shared duplicate + 19 tool-unique -> 160 total candidates,
+                               # same order of magnitude as the real 364-candidate failure
+    roster = [
+        {"id": 1000 + i, "name": f"Tool{i}", "url": f"https://tool{i}.example"}
+        for i in range(n_tools)
+    ]
+
+    call_log = []   # (kind, prompt) for every call, to assert output-size bounds directly
+    draft_count = {"n": 0}   # counts ONLY draft-kind calls, for a stable per-tool index —
+                              # calls interleave draft/match/judge, so overall call position
+                              # isn't the same thing as "which tool's draft is this"
+
+    def _create(**kw):
+        prompt = kw["messages"][0]["content"]
+        if '"features"' in prompt or "ORIGINATION MODE" in prompt:
+            kind = "draft"
+        elif '"matches"' in prompt or "checking new candidate features" in prompt.lower():
+            kind = "match"
+        else:
+            kind = "judge"
+        call_log.append((kind, prompt))
+
+        if kind == "draft":
+            tool_i = draft_count["n"]
+            draft_count["n"] += 1
+            features = [{"name": "Accounting software sync", "definition": "Syncs to QuickBooks/Xero."}]
+            features += [{"name": f"Tool{tool_i} unique feature {j}", "definition": "desc"}
+                         for j in range(candidates_per_tool - 1)]
+            text = json.dumps({"features": features})
+        elif kind == "match":
+            # The shared duplicate is always candidate index 0 for every
+            # tool, and (by construction of the incremental algorithm)
+            # always becomes representative index 0 the first time it's
+            # ever seen (tool 0's draft) — every subsequent tool's shared
+            # candidate matches representative 0, every unique candidate
+            # matches nothing.
+            text = json.dumps({"matches": [0] + [None] * (candidates_per_tool - 1)})
+        else:   # judge — called once, for the one real 8-member merged cluster
+            text = json.dumps({"groups": [{
+                "indices": list(range(n_tools)), "merged": True,
+                "canonical_name": "Automated accounting software sync",
+                "canonical_definition": "Two-way sync with accounting software (QuickBooks/Xero).",
+                "reasoning": "Same job across every vendor, phrased differently.",
+            }]})
+
+        class _Block:
+            type = "text"
+            def __init__(self, t):
+                self.text = t
+        usage = types.SimpleNamespace(input_tokens=200, output_tokens=50,
+                                       cache_creation_input_tokens=0, cache_read_input_tokens=0)
+        return types.SimpleNamespace(content=[_Block(text)], usage=usage)
+
+    fake = types.SimpleNamespace(Anthropic=lambda *a, **k: types.SimpleNamespace(
+        messages=types.SimpleNamespace(create=lambda **kw: _create(**kw))))
+    monkeypatch.setitem(sys.modules, "anthropic", fake)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+
+    summary = feature_scan.originate_category_features(
+        temp_lib, category_id=1, category_name="Neobanking", tool_roster=roster,
+    )
+
+    assert summary is not None
+    assert summary.tools_researched == n_tools
+    assert summary.candidates_total == n_tools * candidates_per_tool   # 160
+    assert summary.clustering_degraded is False
+
+    # The core fix property: total calls scale with TOOL count (8 drafts +
+    # 7 match calls [no match call for the first tool] + 1 judge call = 16),
+    # nowhere near what a single-shot whole-batch design over 160 candidates
+    # would have required, and nothing here is proportional to
+    # candidates_per_tool at all.
+    assert len(call_log) == n_tools + (n_tools - 1) + 1
+
+    # Every match call's stated contract asks for exactly candidates_per_tool
+    # entries — NEVER anything close to the running representative count
+    # (which grows toward ~160 over the run) or the total candidate count.
+    match_prompts = [p for kind, p in call_log if kind == "match"]
+    assert len(match_prompts) == n_tools - 1
+    for p in match_prompts:
+        assert f"exactly {candidates_per_tool} entries" in p
+
+    # Real correctness: the duplicate collapsed into ONE merged feature
+    # spanning all 8 tools; everything else stayed separate (152 = 8*19).
+    assert summary.features_merged == 1
+    assert summary.features_split == n_tools * (candidates_per_tool - 1)
+    assert summary.features_queued == 1 + n_tools * (candidates_per_tool - 1)
+
+    merged_items = [
+        temp_lib.get_feature_review_queue_item(i) for i in summary.queue_item_ids
+    ]
+    merged = [it for it in merged_items if len(it["payload"]["links"]) == n_tools]
+    assert len(merged) == 1
+    assert merged[0]["payload"]["feature"]["name"] == "Automated accounting software sync"
+    assert sorted(l["tool_id"] for l in merged[0]["payload"]["links"]) == sorted(
+        t["id"] for t in roster
+    )

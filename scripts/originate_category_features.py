@@ -5,17 +5,19 @@ against one real Toolbox category's whole tool roster, and either previews
 the result or writes it to feature_review_queue for real.
 
 Unlike scripts/backfill_logos.py's preview (which lists already-known rows
-for free before spending any API quota), there is no cheap way to preview
-this pipeline's output — the research/cluster/judge calls ARE the work, so
-even a preview run makes real, billed API calls (Exa + Claude). Default
-(no --apply) runs the full pipeline and prints exactly what WOULD be
-queued, writing nothing; --apply additionally writes it to
-feature_review_queue (source='scan') via the same code path.
+for free before spending any API quota), there is NO cheap way to preview
+this pipeline's output — preview (no --apply) runs the exact same
+research/cluster/judge calls as --apply, just skipping the final queue
+write. Running preview and then --apply as two separate invocations pays
+for the whole pipeline TWICE. Once you trust the pipeline, go straight to
+--apply.
 
-Cost, roughly, per 10-tool category (see the Phase 3 build proposal): 10
-research calls + 1 clustering call + one judgment call per multi-member
-cluster — ballpark $2-5 total for a category this size. Set
-ANTHROPIC_API_KEY and EXA_API_KEY first.
+Cost, roughly, per 10-tool category: ~10 research calls + one incremental
+clustering match call per tool after the first (§7, bounded by that one
+tool's candidate count regardless of roster size — see
+linklib/feature_scan.py's Phase 3 section header) + one judgment call per
+real multi-member cluster found — ballpark $2-5 total for a category this
+size. Set ANTHROPIC_API_KEY and EXA_API_KEY first.
 
 Usage:
     python -m scripts.originate_category_features --db library.db --category Neobanking
@@ -118,6 +120,18 @@ def main() -> int:
     print(f"Cost: Exa ${summary.exa_cost_usd:.4f}  Claude ${summary.claude_cost_usd:.4f}  "
           f"Total ${summary.exa_cost_usd + summary.claude_cost_usd:.4f}")
     print("=" * 80)
+    if summary.clustering_degraded:
+        print()
+        print("!" * 80)
+        print("WARNING: incremental clustering structurally failed for one or more tools and")
+        print("fell back to treating their candidates as all-new (unmerged). The 0 merges (or")
+        print("fewer merges than expected) above may NOT mean 'genuinely no overlap' — it may")
+        print("mean clustering broke. Affected tools:")
+        for name in summary.clustering_degraded_tools:
+            print(f"  - {name}")
+        print("Check logged warnings (linklib.feature_scan) for details before trusting this")
+        print("run's merge results.")
+        print("!" * 80)
     print()
 
     for i, payload in enumerate(summary.queued_payloads, 1):

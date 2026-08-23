@@ -18421,15 +18421,27 @@ _SCRIPT_REGISTRY = [
      ["python -m scripts.report_feature_taxonomy_coverage --db library.db"]),
     ("originate_category_features.py", "scripts.originate_category_features", "Recurring & actively useful",
      "Runs the Feature Taxonomy scan tool's Phase 3 pipeline (docs/FEATURE_TAXONOMY.md §10, "
-     "origination mode) against one category's whole tool roster — research, §7 clustering + "
-     "merge judgment, and (with --apply) the feature_review_queue write. Preview mode (default) "
-     "still makes real Exa/Claude calls — there's no cheap way to preview this pipeline's output.",
+     "origination mode) against one category's whole tool roster — research, incremental §7 "
+     "clustering + merge judgment, and (with --apply) the feature_review_queue write. Preview "
+     "mode (default) runs the SAME full pipeline and makes the SAME real Exa/Claude calls as "
+     "--apply — there's no cheap way to preview this pipeline's output the way a backfill "
+     "script's preview is free, so previewing then applying pays for the whole run twice. "
+     "Go straight to --apply once you trust the pipeline.",
      "Recurring-manual — run once per category as each of the 14 (of 17) categories without a "
-     "curated feature list yet gets originated. Preview first, review the printed proposals, "
-     "then re-run with --apply once satisfied.",
+     "curated feature list yet gets originated. Check /admin/tools/software/feature-review-queue "
+     "for the results afterward.",
      ["ANTHROPIC_API_KEY", "EXA_API_KEY (optional — falls back to the model's own knowledge without it)"],
-     ["python -m scripts.originate_category_features --db library.db --category Neobanking",
-      "python -m scripts.originate_category_features --db library.db --category Neobanking --apply"]),
+     ["python -m scripts.originate_category_features --db library.db --category Neobanking --apply"]),
+    ("deny_pending_scan_proposals.py", "scripts.deny_pending_scan_proposals", "Recurring & actively useful",
+     "Bulk-denies pending feature_review_queue items for one category/source, with a shared "
+     "resolution note — cleanup tool for a botched origination run (built for the real "
+     "Neobanking incident, 364 bad singleton proposals from the pre-fix clustering bug). Denies "
+     "rather than deletes, per the standing no-dead-data/always-leave-a-trace discipline.",
+     "Recurring-manual — run before a corrected re-run of originate_category_features.py "
+     "whenever a prior run's proposals need clearing.",
+     ["LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.deny_pending_scan_proposals --db library.db --category Neobanking "
+      "--reason \"Superseded by corrected clustering re-run\" --apply"]),
     ("dump_communities.py", "scripts.dump_communities", "Recurring & actively useful",
      "Read-only plain listing of every community's name, URL, and slug — no filtering or "
      "formatting. A quick ad hoc lookup tool.",
