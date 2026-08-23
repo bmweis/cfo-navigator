@@ -3336,6 +3336,110 @@ scoping proposal Brian signed off on:
   `EXA_API_KEY` gap as Phase 2 — so a genuine 10-tool Neobanking
   origination run is still Brian's to do by hand via the script above.
 
+### Feature Taxonomy scan tool, Phase 3 follow-up (2026-08) — the first real live run broke clustering, and the fix is a redesign, not a bigger constant
+
+The first real run (Neobanking, 10 tools, 364 candidates) produced **zero
+merges** despite obvious, repeated near-verbatim duplicates across the
+roster (e.g. "Accounting software sync" appearing 7 times, "Business
+checking account" ×4, "Webhook event notifications" ×4). Root cause,
+confirmed from the run's own logged call behavior: the whole-batch
+`cluster_candidate_features()` (shipped in the initial Phase 3 PR) asked
+the model to emit ONE JSON array covering all 364 indices in a single
+response. Its logged `_salvage_json_array` recovery on the first attempt
+was **zero items** — not "some, then a cutoff," but the `"clusters"` key
+never being reached at all — meaning Opus 5's on-by-default adaptive
+thinking consumed the ENTIRE `max_tokens` budget reasoning about 364
+items simultaneously, before writing a single output token. The retry at
+double the ceiling didn't fix it either. `_validate_partition`'s
+conservative-bias repair then did exactly what it's designed to do:
+every unmatched index became its own singleton — silently, with nothing
+distinguishing "clustering ran cleanly and found no overlap" from
+"clustering structurally failed." Because every cluster came back a
+singleton, `judge_cluster`'s `n<=1` short-circuit meant the judgment
+stage never even ran — this was squarely a clustering-stage failure.
+
+**Why a bigger `max_tokens` ceiling was rejected as the fix**: the task's
+required reasoning length scales with total roster candidate count — a
+20-tool category would just hit the same wall again at a higher
+constant. No fixed ceiling is "big enough" for every future category.
+
+**Fix: clustering is now INCREMENTAL, folded into the existing per-tool
+research loop** — not a separate whole-batch step. As each tool's
+candidates are drafted, `match_candidates_to_representatives()` checks
+them against the RUNNING set of distinct-capability representatives
+found so far (one representative per cluster), not the whole roster's
+history:
+- Tool 1 finishes → nothing to compare against yet, every candidate
+  becomes its own new cluster/representative, no API call needed.
+- Tool 2+ finishes → one call: "here are this tool's new candidates,
+  here are the representatives found so far — which new candidates
+  match an existing representative (§7), which are genuinely new?"
+  Output is one integer-or-null entry per NEW candidate only.
+- **The critical property**: every call's OUTPUT is bounded by ONE
+  tool's candidate count (~30-50 entries, a trivial array), regardless
+  of how large the representative set or total roster grows. The
+  representative set only ever appears as INPUT context — the model's
+  context window holds that comfortably without competing against
+  `max_tokens` the way response generation does. A category with
+  genuinely little cross-vendor overlap (representatives approaching
+  total candidate count) still keeps every call's output small; only a
+  category's real duplicate rate affects representative-list *length*,
+  never the *output* size of any single call.
+- Every failure mode still degrades toward MORE separate features,
+  never toward losing research or silently over-merging: a structural
+  match-call failure treats that tool's candidates as all-new (same
+  conservative-bias default as before) but now sets
+  `OriginationSummary.clustering_degraded=True` (plus
+  `clustering_degraded_tools`, naming which tool) — the exact signal
+  the original bug's silence was missing.
+  `scripts/originate_category_features.py` prints a loud warning banner
+  when this flag is set, so a degraded run can never be mistaken for a
+  clean "no overlap found" result again.
+- `judge_cluster` and the queue-write wiring are UNCHANGED — they
+  already operated per-cluster with small cluster sizes; only the
+  upstream clustering step was broken at scale.
+- The old whole-batch `cluster_candidate_features()`/`_CLUSTER_PROMPT`
+  were removed outright (never shipped to a working state, no back-compat
+  concern) rather than left as dead code alongside the new mechanism.
+
+**Test-coverage gap named and closed**: the original Phase 3 test suite
+only ever exercised 2-3 candidate clusters — nothing near real scale,
+which is exactly why this shipped broken. Added
+`test_originate_category_features_large_roster_merges_correctly_and_stays_bounded`
+(`tests/test_feature_scan.py`) — a synthetic 8-tool/160-candidate run
+(same order of magnitude as the real failure) with one duplicate
+recurring across every tool, mocked deterministically, asserting
+directly on the property that matters: total Anthropic call count scales
+with TOOL count (16 calls: 8 drafts + 7 match calls + 1 judgment call),
+never with total candidate count, and every match call's own stated
+output contract names exactly that tool's candidate count — never
+anything approaching the running representative total. 7 further
+regression tests cover the new `match_candidates_to_representatives`/
+`_validate_matches` functions directly (parsing, the no-representatives/
+no-new-candidates no-call shortcuts, out-of-range/bool-guard repair) and
+the `clustering_degraded` flag's both states (net: 43 → 48 tests in
+`tests/test_feature_scan.py` — 3 whole-batch-clustering tests removed
+alongside the code they covered, 8 added).
+
+**Cleanup — `scripts/deny_pending_scan_proposals.py`**: the 364 bad
+singleton proposals from the broken run needed clearing before a
+corrected re-run, but per CLAUDE.md's "no dead data" / always-leave-a-
+trace discipline, the right move is to DENY them (preserving the record
+that the run happened and why it was thrown out) rather than delete the
+rows. A small reusable script — preview-by-default/`--apply` like every
+other admin script here — bulk-denies every pending item matching a
+category and source (`scan` by default) with a shared resolution note.
+Reusable for any future botched run, not a one-off hack. Registered in
+`/admin/system/scripts` alongside `originate_category_features.py`.
+
+**Also fixed in the same pass**: `originate_category_features.py`'s own
+docstring and registry entry previously read as "preview, then
+`--apply`" — misleading, since preview runs the exact same full pipeline
+and real API calls as `--apply` (there's no cheap preview path the way
+`backfill_logos.py`'s is), so running both on the same category pays for
+the whole run twice. Corrected to say plainly: go straight to `--apply`
+once the pipeline is trusted.
+
 ### Resources — Book recommendations (2026-08)
 
 Splits the flat `/tools/resources` card list into two headed sections:
