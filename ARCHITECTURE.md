@@ -3221,6 +3221,121 @@ compare against 1-4. Two real fixes, not just a label change:
    formatting mismatches, not real inconsistencies. 4 new regression
    tests (`tests/test_feature_scan.py`).
 
+### Feature Taxonomy scan tool, Phase 3 (2026-08) — roster-wide accumulation, §7 clustering/judgment, and the queue write
+
+Closes the loop the Phase 2 build brief deferred: everything from "run
+Phase 2's per-tool drafting across a category's whole roster" through the
+actual `feature_review_queue` write. Approved shape, per the Phase 3
+scoping proposal Brian signed off on:
+
+- **Clustering is ONE Claude call over the whole roster's candidate
+  list** (`linklib.feature_scan.cluster_candidate_features`), not
+  embeddings-similarity (would judge on surface wording — exactly what
+  §7 warns against: "never match on shared buzzwords") and not full
+  pairwise comparison (infeasible at the ~400-450 candidates a real
+  10-tool category produces at Mercury/Rho's observed ~44
+  features/tool rate). It's a deliberately LOOSE grouping pass — a
+  candidate gets grouped in on any plausible match, since the real
+  merge-or-split decision happens next, per-cluster, with more detail.
+- **Per-cluster judgment** (`judge_cluster`) makes the actual call,
+  few-shot off §7's own worked examples verbatim
+  (`_UNIFY_TEST_EXCERPT` — Automated Flux Analysis, Real-time
+  Spreadsheet Sync vs. Automated Working Paper Generation), with an
+  explicit **conservative bias instructed directly in the prompt**:
+  split, don't merge, when genuinely uncertain. Reasoning stated to the
+  model itself, not just implied: a false split is a cheap, visible
+  queue-review fix; a false merge silently buries a real distinction
+  inside a link `note` where it's much easier to miss. A judgment call
+  can partition its cluster into more groups than the loose clustering
+  pass produced — clustering groups too broadly on purpose, so a
+  3-candidate cluster might correctly merge 2 and split the 3rd rather
+  than forcing an all-or-nothing call.
+- **Every failure mode degrades toward MORE separate features, never
+  toward losing research or silently over-merging** — the conservative-
+  bias philosophy applied structurally, not just in the prompts:
+  clustering failing outright falls back to every candidate as its own
+  singleton cluster; a judgment call failing outright falls back to
+  every candidate in that cluster staying unmerged; a model's
+  cluster/group output dropping or duplicating an index
+  (`_validate_partition`) recovers a dropped index as its own singleton
+  (never lost) and keeps a duplicated index's FIRST group membership
+  only (never double-counted). A `tool_id` appearing twice within one
+  merge group (that tool proposed two candidates that got merged
+  together) is de-duplicated before the queue write, keeping the first
+  and logging the rest — `upsert_tool_feature_link`'s
+  `UNIQUE(tool_id, feature_id)` would otherwise silently let the second
+  overwrite the first.
+- **Queue-write wiring reuses `Library.add_feature_review_queue_item`'s
+  existing payload shape exactly** — one call per final feature (post-
+  cluster-and-judge), `source='scan'`, one `links` entry per
+  contributing tool (each tool's own availability/ai_enabled/note/
+  source_url/verified_as_of — §7's "the AI flag and link note carry the
+  difference" lands here). Zero new surface for the approval UI
+  (`/admin/tools/software/feature-review-queue`) to handle — a merged
+  proposal's exact-name collision with an existing feature still hits
+  the same Phase 1c merge-confirmation flow as any other proposal.
+  `proposal_type` follows the existing seed-data convention exactly
+  (`new_feature+link` / `new_feature+N links`).
+- **`linklib.feature_scan.originate_category_features(lib, category_id,
+  category_name, tool_roster, ..., dry_run=...)`** is the orchestration
+  entry point — runs Phase 2's drafting across the roster, accumulates
+  `CandidateFeature`s (a `ProposedFeature` tagged with its originating
+  tool + the draft's `verified_as_of`), clusters, judges each
+  multi-member cluster, and either writes to the queue or — when
+  `dry_run=True` — only populates `OriginationSummary.queued_payloads`
+  with what WOULD have been written, so a caller gets the same preview
+  guarantee whether calling the library function directly or through
+  the script below. Returns `None` only if EVERY tool's research
+  failed; a partial-failure run still returns a summary covering what
+  succeeded, with `tools_failed` counting the rest.
+- **`_call_and_parse_array`/`_call_claude`/`_salvage_json_array`** — the
+  Mercury truncation fix's call+parse+one-retry-on-truncation machinery
+  was generalized (from a single inline closure inside
+  `draft_tool_features_for_category`) so clustering and judgment reuse
+  the exact same resilience rather than two more copies of it.
+  `_salvage_feature_objects` survives as origination drafting's own
+  named wrapper (asserted against directly in tests) over the
+  generalized `_salvage_json_array(raw, "features")`.
+- **`scripts/originate_category_features.py`** — the manual-run entry
+  point, registered in `/admin/system/scripts`. Unlike
+  `scripts/backfill_logos.py`'s preview (which lists already-known
+  un-fetched rows for free), there's no cheap way to preview this
+  pipeline — even a preview run makes the full real Exa/Claude research/
+  cluster/judge calls, since that IS the work; the script is explicit
+  about this in its own docstring and `--help` rather than implying a
+  free preview the way the `--apply` convention usually does elsewhere.
+  Default (no `--apply`) prints every payload that WOULD be queued and
+  writes nothing; `--apply` also calls the same code path with
+  `dry_run=False`.
+- **Review-queue near-duplicate nudge, built alongside per Brian's
+  explicit call (not a separate phase)** —
+  `webapp.app._find_near_duplicate_queue_items` (pure Python,
+  `difflib.SequenceMatcher`, no LLM call) groups pending
+  `feature_review_queue` items by `category_id` and flags pairs whose
+  proposed feature names cross a similarity threshold
+  (`_NEAR_DUPLICATE_NAME_THRESHOLD = 0.6`, a starting point not yet
+  tuned against real data). Rendered as an amber warning line on
+  `/admin/tools/software/feature-review-queue`'s existing card
+  (`_feature_review_queue_item_card`'s new `near_duplicates` param),
+  reusing the same amber pair (`#fef3c7`/`#92400e`) that card already
+  uses for the "public" source badge rather than introducing a new
+  color. **Deliberately source-agnostic** — it has no dependency on the
+  scan having run at all, and catches a near-dupe regardless of
+  whether it came from the scan's own conservative split, two separate
+  scan runs over time, or an admin's own manual entry; this is what
+  makes it a genuine complement to Phase 3's clustering rather than
+  scan-specific tooling bolted onto the queue page.
+- **Tested with mocked Exa/Anthropic calls throughout**
+  (`tests/test_feature_scan.py`, 19 new cases covering
+  `_validate_partition`'s repair behavior, clustering/judgment parsing
+  and failure-mode fallbacks, and a full `originate_category_features`
+  integration test against a real temp `Library` confirming the queued
+  payload's exact shape; `tests/test_feature_taxonomy.py`, 6 new cases
+  for the near-duplicate nudge). No live run against real vendor
+  content happened in this session — same `ANTHROPIC_API_KEY`/
+  `EXA_API_KEY` gap as Phase 2 — so a genuine 10-tool Neobanking
+  origination run is still Brian's to do by hand via the script above.
+
 ### Resources — Book recommendations (2026-08)
 
 Splits the flat `/tools/resources` card list into two headed sections:
