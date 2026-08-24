@@ -4863,6 +4863,33 @@ class Library:
         self.conn.commit()
         return cur.lastrowid
 
+    def update_feature_review_queue_payload(self, item_id: int, payload: dict,
+                                             proposal_type: str | None = None,
+                                             articulation: str | None = None) -> None:
+        """Rewrites a PENDING item's payload/proposal_type/articulation in
+        place, keeping it pending — distinct from approve/deny, which both
+        resolve the item. Built for scripts/remap_queue_to_framework.py's
+        consolidation step: several source='scan' proposals that map to the
+        same human-defined framework bucket collapse into ONE updated queue
+        row (canonical name/definition, unioned tool links) rather than a
+        fresh insert, so the queue's created_at/id history for that row
+        still traces back to its original scan proposal. Raises if the item
+        isn't pending — a resolved item's payload is a historical record,
+        not something a later script should silently rewrite."""
+        item = self.get_feature_review_queue_item(item_id)
+        if item is None:
+            raise ValueError("Review queue item not found.")
+        if item["status"] != "pending":
+            raise ValueError(f'This item is already {item["status"]}, not pending — refusing to '
+                              f'rewrite a resolved item\'s payload.')
+        proposal_type = item["proposal_type"] if proposal_type is None else proposal_type.strip()
+        articulation = item["articulation"] if articulation is None else articulation.strip()
+        self.conn.execute(
+            "UPDATE feature_review_queue SET payload=?, proposal_type=?, articulation=? WHERE id=?",
+            (json.dumps(payload), proposal_type, articulation, item_id),
+        )
+        self.conn.commit()
+
     def count_feature_review_queue(self, status: str | None = "pending") -> int:
         """Cheap indexed COUNT (idx_feature_review_queue_status) — powers the
         /admin hub's pending badge, mirroring list_feature_review_queue's own
