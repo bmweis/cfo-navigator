@@ -1991,6 +1991,82 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   and unaffected by, the pre-existing "Show all N" cap/expand mechanism —
   the two toggles coexist on the same entries without conflict.
 
+- **Original Content, Phase 1 — the 3 flagship pieces' card metadata moves
+  off the hardcoded `_TL_FEATURED_CARDS` tuple into a new `original_content`
+  table, and the schema is built to let a brand-new piece be authored
+  entirely from admin later with no code change per article.** A Phase 0
+  investigation (read-only, reported before any code) confirmed: the three
+  bespoke routes (`/thought-leadership/growth-engine-ratio`,
+  `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp`)
+  all share the same shell (`page page-full article-atlantic` +
+  `.tool-inner`/`.tool-prose` + a `&larr; Thought Leadership` back-link) —
+  the article template a future Phase 2 will match; `_TL_FEATURED_CARDS`
+  (a 6-tuple: href/tag/tag_color/title/desc/cta) is the single shared source
+  `_tl_fcard()` renders on both the homepage and `/thought-leadership`, with
+  `test_flagship_cards_content_shared_between_homepage_and_thought_leadership`
+  as the drift guard; `webapp/thought_leadership_data.py`'s Writing column
+  (still unused, kept as a rollback reference — see the Phase 1 Thought
+  Leadership entry above) has 3 entries whose `url` already points at those
+  same three `/thought-leadership/*` paths — genuine overlap with this
+  table's own rows, flagged and left alone per the investigation's scope,
+  Brian's call to make later; and `netsuite_mcp()`'s route function ends
+  right before the unrelated "Sail, Don't Row" game code begins, the correct
+  (and only safe) insertion point for a future `GET /thought-leadership/{slug}`
+  catch-all — it must be registered after all three literal routes so they
+  keep winning by FastAPI's registration order, with no separate
+  custom-route column needed since the three migrated rows' `slug`s are set
+  to match their existing route path segments exactly. No markdown parser
+  was in `requirements.txt` (confirmed, matching Brian's own expectation).
+  **Schema** (`original_content` in `linklib/db.py`): `slug` (unique),
+  `title`, `teaser`, `tag_label`, `link_label`, `body_md` (nullable —
+  `NULL` is load-bearing, meaning "card metadata only, one of the three
+  bespoke routes renders the real piece"; a real markdown string means the
+  future shared article template renders it), `status` (`'draft'`\|`'live'`),
+  `featured_home`, `date_label`/`sort_key`/`display_order` (same convention
+  as `thought_leadership`'s own columns — `sort_key` derived from
+  `date_label` via the same `_sort_key_from_date_label`, reused verbatim —
+  except ordering here is **`display_order` first, `sort_key` only a
+  tiebreak**, the opposite priority from `thought_leadership`'s own
+  `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a
+  chronological feed). `tag_color` (each card's small category-tag accent)
+  was deliberately never promoted to a stored column — `_oc_card_tuple`
+  cycles it from the same 3 established colors
+  (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the
+  3 migrated pieces render with their exact original colors and a 4th+
+  piece still gets a sane one with no admin decision required. **Migration**
+  (`scripts/migrate_original_content.py`, not yet archived since it hasn't
+  run against production — same dry-run/`--apply`/write-then-read-back
+  convention as `scripts/archive/migrate_thought_leadership.py`) reads
+  `_TL_FEATURED_CARDS` directly (`planned_rows()`, shared with its own test
+  file so the test asserts against the same source the script would insert,
+  not a duplicated copy) and seeds all 3 rows with `status='live'`,
+  `featured_home=1`, `body_md=NULL`, `slug` = each href's last path
+  segment, idempotent against a non-empty table. **Rendering**: the
+  homepage's flagship row and `/thought-leadership`'s featured row both
+  call the new `_oc_featured_cards_html(rows)` — same underlying
+  `_tl_fcard()`/`.tl-card`/`_TL_SHARED_CSS` markup as before, now fed by
+  `Library.list_original_content_for_home()` (homepage: `status='live' AND
+  featured_home=1`) and `Library.list_original_content(status="live")`
+  (`/thought-leadership`: every live piece, regardless of `featured_home` —
+  the `.tl-featured` grid already wraps past 3 via
+  `repeat(auto-fit,minmax(220px,1fr))`, no layout change needed as more
+  pieces are added). `_TL_FEATURED_CARDS` itself is **not deleted** — it
+  stays in the repo, unimported by any route, purely as a rollback
+  reference (same precedent as `thought_leadership_data.py`); the drift-guard
+  test now asserts identical rendering from the DB-backed source instead.
+  Fresh-DB tests (a new tempfile per test, same as every other test in this
+  suite) have zero `original_content` rows by default now that seeding is a
+  manual migration, not automatic schema setup — `tests/
+  test_thought_leadership_homepage_teaser.py`'s `env` fixture now seeds the
+  3 flagship rows via the migration script's own `planned_rows()` before
+  yielding, so every existing test in that file still exercises the
+  post-migration state it always assumed. Phase 2 (markdown rendering +
+  the `GET /thought-leadership/{slug}` catch-all route) and Phase 3 (admin
+  CRUD at `/admin/original-content`, plus an "Original Content" box beside
+  the existing Thought Leadership box on the admin index — its tool-count
+  badge is just `len(items)`, no new badge mechanism needed) are separate,
+  sequential PRs.
+
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On
   `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat

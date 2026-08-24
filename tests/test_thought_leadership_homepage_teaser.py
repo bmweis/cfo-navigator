@@ -16,6 +16,26 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 
+def _seed_flagship_original_content(appmod):
+    """Seed the 3 flagship `original_content` rows a real
+    scripts/migrate_original_content.py --apply run would produce (Original
+    Content Phase 1). This test file exercises homepage/thought-leadership
+    rendering as it looks post-migration, not the pre-seed empty-table
+    state — a fresh test DB otherwise has zero flagship cards, since seeding
+    is a manual, run-by-hand migration now, not automatic schema setup."""
+    from scripts.migrate_original_content import planned_rows
+    lib = appmod._lib()
+    try:
+        for r in planned_rows():
+            lib.add_original_content(
+                r["slug"], r["title"], r["teaser"], r["tag_label"], r["link_label"],
+                r["body_md"], r["status"], r["featured_home"], r["date_label"], r["sort_key"],
+                r["display_order"],
+            )
+    finally:
+        lib.close()
+
+
 @pytest.fixture
 def env(monkeypatch):
     db = tempfile.mktemp(suffix=".db")
@@ -24,6 +44,7 @@ def env(monkeypatch):
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
+    _seed_flagship_original_content(appmod)
     yield appmod
     if os.path.exists(db):
         os.remove(db)
@@ -73,18 +94,34 @@ def test_homepage_has_one_consolidated_thought_leadership_section(env):
 
 def test_flagship_cards_content_shared_between_homepage_and_thought_leadership(env):
     """The two pages must render identical flagship-card content (title,
-    description, tag, link label) — a deliberate shared-source guarantee
-    (_TL_FEATURED_CARDS) so the two surfaces can't silently drift apart, even
-    though their card *sizing* differs (each page's own .tl-featured grid
-    track width narrows the cards on the homepage's tighter column)."""
-    from webapp.app import _TL_FEATURED_CARDS, _tl_fcard
+    description, tag, link label) — a deliberate shared-source guarantee,
+    now the `original_content` DB table (Original Content Phase 1) rendered
+    through the shared _oc_card_tuple/_tl_fcard helpers, so the two surfaces
+    still can't silently drift apart, even though their card *sizing* differs
+    (each page's own .tl-featured grid track width narrows the cards on the
+    homepage's tighter column). The homepage shows only featured_home=1
+    pieces while /thought-leadership shows every live piece — for the 3
+    seeded flagship rows that's the same set, so this also confirms both
+    query paths (list_original_content_for_home vs.
+    list_original_content(status='live')) land on identical card content."""
+    from webapp.app import _oc_card_tuple, _tl_fcard
+
+    lib = env._lib()
+    try:
+        home_rows = lib.list_original_content_for_home()
+        live_rows = lib.list_original_content(status="live")
+    finally:
+        lib.close()
+    assert home_rows and live_rows
 
     home_html = _client(env).get("/").text
     tl_html = _client(env).get("/thought-leadership").text
-    for card in _TL_FEATURED_CARDS:
-        card_html = _tl_fcard(*card)
-        assert card_html in home_html, f"missing/diverged on homepage: {card[3]}"
-        assert card_html in tl_html, f"missing/diverged on /thought-leadership: {card[3]}"
+    for i, row in enumerate(home_rows):
+        card_html = _tl_fcard(*_oc_card_tuple(row, i))
+        assert card_html in home_html, f"missing/diverged on homepage: {row['title']}"
+    for i, row in enumerate(live_rows):
+        card_html = _tl_fcard(*_oc_card_tuple(row, i))
+        assert card_html in tl_html, f"missing/diverged on /thought-leadership: {row['title']}"
 
 
 def test_toolbox_panel_present_and_matches_design(env):
