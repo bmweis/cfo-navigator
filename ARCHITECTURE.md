@@ -3520,6 +3520,21 @@ out of scope. A bucket with no matching pending item at all is simply
 skipped — no placeholder feature/link is invented for a capability no real
 tool in the roster actually offers.
 
+**`articulation` is deliberately NOT part of the merge, unlike name/
+definition/links — confirmed with Brian rather than silently assumed.**
+The rewritten row's `articulation` is left exactly as it already was on
+whichever item the script picked as primary (the call passes no
+`articulation` argument, and `update_feature_review_queue_payload` treats
+that as "leave it alone"); every other contributing item's own
+articulation text is neither copied over nor concatenated in — it simply
+stays on that item's now-`denied` row, still fully readable there, with
+the denial reason naming exactly which bucket it was folded into. Nothing
+is lost (the sibling row and its reasoning both still exist), it's just
+not unioned into one place the way links are. Rationale: articulation is
+internal scan-run provenance/reasoning, not public-facing data — the
+denied sibling rows already give full traceability, so concatenating
+wasn't judged worth the added complexity.
+
 **Hard rule, enforced by construction**: this script never calls
 `add_category_feature`/`upsert_tool_feature_link` and never sets a queue
 item's status to `approved` — every affected item ends the run either
