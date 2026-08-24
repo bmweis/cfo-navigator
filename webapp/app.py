@@ -18616,6 +18616,24 @@ _SCRIPT_REGISTRY = [
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.deny_pending_scan_proposals --db library.db --category Neobanking "
       "--reason \"Superseded by corrected clustering re-run\" --apply"]),
+    ("remap_queue_to_framework.py", "scripts.remap_queue_to_framework", "Recurring & actively useful",
+     "Remaps a category's pending source='scan' feature_review_queue proposals against a FIXED, "
+     "human-defined target feature list (a JSON file, not open-ended AI clustering) — matches each "
+     "proposal to a bucket or 'none' via one Claude call per batch, consolidates every proposal "
+     "mapped to the same bucket into ONE rewritten queue row (canonical name from the framework, a "
+     "synthesized definition, tool links unioned and deduped by tool_id), and denies the "
+     "now-redundant/out-of-scope rows — never deletes, per the standing no-dead-data discipline. "
+     "Never writes to category_features/tool_feature_links and never approves anything; every item "
+     "ends up pending (rewritten) or denied, ready for a human's final approve/deny pass. Preview by "
+     "default (runs the real Claude calls — no cheaper way to preview a judgment call — but writes "
+     "nothing); --apply commits the plan. Built for the real Neobanking incident (2026-08, 202 "
+     "pending proposals from the 8/23 corrected origination run, remapped against a 41-bucket list "
+     "Brian defined by hand).",
+     "Recurring-manual — run once per category whenever a human-reviewed target framework "
+     "supersedes that category's raw origination-scan output. Hand it a new --framework JSON file "
+     "for the next category; the script itself doesn't change.",
+     ["ANTHROPIC_API_KEY"],
+     ["python -m scripts.remap_queue_to_framework --db library.db --category Neobanking --apply"]),
     ("dump_communities.py", "scripts.dump_communities", "Recurring & actively useful",
      "Read-only plain listing of every community's name, URL, and slug — no filtering or "
      "formatting. A quick ad hoc lookup tool.",

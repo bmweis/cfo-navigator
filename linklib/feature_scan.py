@@ -1134,3 +1134,220 @@ def originate_category_features(
         clustering_degraded=clustering_degraded, clustering_degraded_tools=clustering_degraded_tools,
         exa_cost_usd=exa_cost, claude_cost_usd=claude_cost,
     )
+
+
+# --- Framework remap (2026-08, scripts/remap_queue_to_framework.py) --------
+# A DIFFERENT job from everything above: origination mode (judge_cluster,
+# match_candidates_to_representatives) invents its own groupings from
+# scratch as it goes. This is matching already-queued feature_review_queue
+# proposals against a FIXED, human-defined bucket list Brian reviewed and
+# approved — the groupings are given, only the per-item assignment (or
+# "belongs to none of them") is a judgment call. Batched (not one call for
+# the whole queue) for the same reason match_candidates_to_representatives
+# bounds its own call to one tool's candidates at a time: a response array
+# scales with item count, and Opus 5's on-by-default adaptive thinking can
+# consume an entire max_tokens budget reasoning about a large batch before
+# writing a single output token (the exact failure the incremental-
+# clustering fix above exists to avoid) — see this module's Phase 3 section
+# header. Unlike that fix, batch size here is a simple fixed chunk (the
+# framework itself is small and fixed, so there's no running-representative-
+# set growth problem to solve), not a structural redesign.
+
+@dataclass
+class FrameworkBucket:
+    """One human-defined target bucket from a framework file (see
+    scripts/seed_data/neobanking_feature_framework.json for the shape). name
+    is the exact canonical feature name to write back to a matched queue
+    item's payload — never paraphrased by the model. hint is prompt-only
+    disambiguation guidance, not stored anywhere."""
+    index: int
+    group: str
+    name: str
+    hint: str = ""
+
+
+@dataclass
+class QueueItemCandidate:
+    """One pending feature_review_queue row, reduced to what the framework-
+    match prompt needs — mirrors CandidateFeature's shape but keyed by queue
+    item id rather than tool_id/feature, since a remap operates on already-
+    queued proposals (each already representing 1+ tool links via its own
+    payload["links"]), not on freshly drafted per-tool candidates."""
+    item_id: int
+    name: str
+    definition: str
+
+
+def _format_bucket_line(b: FrameworkBucket) -> str:
+    hint = f" — {b.hint}" if b.hint else ""
+    return f"{b.index}. [{b.group}] {b.name}{hint}"
+
+
+def _format_queue_item_line(i: int, c: QueueItemCandidate) -> str:
+    definition = (c.definition or "")[:220]
+    return f"{i}. (queue #{c.item_id}) {c.name} — {definition}"
+
+
+_FRAMEWORK_MATCH_PROMPT = """You are mapping existing draft feature proposals for the CFO Toolbox's "{category}"
+category onto a FIXED, human-approved target feature list. A person has
+already reviewed the raw scan output and decided exactly what buckets this
+category's feature list should have — your only job is deciding which
+bucket (if any) each proposal below actually belongs in, using the same
+same-job test §7 of the Feature Taxonomy rules doc uses for merging:
+
+{unify_test}
+
+Match on what the capability actually DOES, not on surface wording — a
+proposal phrased very differently from a bucket's name can still be an
+exact match, and a proposal that echoes a bucket's name in different words
+can still be about a genuinely different job. Some proposals will
+correctly belong to NONE of the buckets below (e.g. a retail/consumer-perk,
+point-of-sale, or BaaS-partner-facing capability that isn't relevant to a
+CFO buyer) — that's an expected, correct outcome, not a failure to find a
+match. When genuinely uncertain between two plausible buckets, or between a
+bucket and "none," prefer the interpretation a human reviewer would find
+easiest to correct: a wrong "none" just needs picking up in review; a wrong
+match can bury a real distinction inside a merged feature where it's much
+harder to catch. So when truly torn, prefer "none" over guessing.
+
+Target buckets (fixed — 0-indexed, do not invent new ones):
+{bucket_list}
+
+Proposals to map (0-indexed, SEPARATELY from the bucket list above):
+{item_list}
+
+Return STRICT JSON only (no prose, no markdown fences):
+{{"matches": [4, null, 12, 4]}}
+— exactly {n_items} entries, one per proposal above, in the same order.
+Each entry is either an integer index into the target-buckets list, or null
+if the proposal genuinely belongs to none of them."""
+
+_FRAMEWORK_MATCH_MAX_TOKENS = 4000
+_FRAMEWORK_MATCH_RETRY_MAX_TOKENS = 8000
+_FRAMEWORK_MATCH_DEFAULT_BATCH_SIZE = 50
+
+
+def _validate_framework_matches(raw_matches: list, n_items: int, n_buckets: int) -> list[int | None]:
+    """Same conservative-bias normalization as _validate_matches: a short/
+    long/malformed/out-of-range response degrades entry-by-entry toward
+    None ("no match — needs a human look"), never toward a guessed match,
+    and a missing entry never silently drops an item."""
+    result: list[int | None] = []
+    for i in range(n_items):
+        v = raw_matches[i] if i < len(raw_matches) else None
+        if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < n_buckets:
+            result.append(v)
+        else:
+            result.append(None)
+    return result
+
+
+def match_items_to_framework(
+    items: list[QueueItemCandidate], buckets: list[FrameworkBucket], category_name: str,
+    model: str = DEFAULT_MODEL, batch_size: int = _FRAMEWORK_MATCH_DEFAULT_BATCH_SIZE,
+) -> tuple[list[int | None] | None, float]:
+    """Matches every item in `items` against the fixed `buckets` list, in
+    chunks of `batch_size` (each batch sees the FULL bucket list every time
+    — only the item side is chunked, since the bucket list is small and
+    fixed and every batch needs the complete target set to match against).
+
+    Returns (matches, total_cost_usd) where matches is a list parallel to
+    `items`, each entry an index into `buckets` or None. Returns (None, 0.0)
+    only if the SDK/key is unavailable OR any batch's call fails outright —
+    a partial result (some batches succeeded, one didn't) is deliberately
+    NOT returned as a mix of real matches and silent Nones, since a caller
+    can't tell "genuinely no match" from "this batch's call errored" in
+    that shape; better to surface the failure and let the caller retry the
+    whole thing than to silently under-map a fraction of the queue."""
+    if not items:
+        return [], 0.0
+    if not _anthropic_available() or not os.environ.get("ANTHROPIC_API_KEY"):
+        return None, 0.0
+
+    bucket_list = "\n".join(_format_bucket_line(b) for b in buckets)
+    total_cost = 0.0
+    all_matches: list[int | None] = []
+
+    for start in range(0, len(items), batch_size):
+        batch = items[start:start + batch_size]
+        item_list = "\n".join(_format_queue_item_line(i, c) for i, c in enumerate(batch))
+        prompt = _FRAMEWORK_MATCH_PROMPT.format(
+            category=category_name, unify_test=_UNIFY_TEST_EXCERPT,
+            bucket_list=bucket_list, item_list=item_list, n_items=len(batch),
+        )
+        try:
+            raw_matches, _truncated, in_tok, out_tok, cache_w, cache_r = _call_and_parse_array(
+                prompt, model, _FRAMEWORK_MATCH_MAX_TOKENS, _FRAMEWORK_MATCH_RETRY_MAX_TOKENS,
+                "matches", log_label=f"match_items_to_framework({category_name}, batch {start})",
+            )
+        except Exception as e:
+            _logger.warning("match_items_to_framework() failed for %s at batch offset %d: %s: %s",
+                             category_name, start, type(e).__name__, e)
+            return None, total_cost
+
+        total_cost += compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+        all_matches.extend(_validate_framework_matches(raw_matches, len(batch), len(buckets)))
+
+    return all_matches, total_cost
+
+
+_DEFINITION_SYNTH_PROMPT = """The CFO Toolbox's "{category}" category has a confirmed target feature named
+"{bucket_name}". The candidate definitions below were independently drafted
+for different vendors and have all been mapped onto this ONE bucket by an
+earlier matching step. Write ONE synthesized definition for "{bucket_name}"
+that reflects what this capability means across the roster, following
+docs/FEATURE_TAXONOMY.md §3: outcome-oriented, plain language, never the
+word "AI" in any form, no vendor branding or product names. Do not just
+copy one vendor's wording verbatim — genuinely synthesize.
+
+Candidate definitions being merged into this one bucket:
+{definition_list}
+
+Return STRICT JSON only (no prose, no markdown fences):
+{{"definition": "..."}}"""
+
+_DEFINITION_SYNTH_MAX_TOKENS = 1200   # MIN_GENERATE_MAX_TOKENS floor (_checked_max_tokens) — a
+                                       # short definition response doesn't need much of this, but
+                                       # Opus 5's on-by-default adaptive thinking shares the same
+                                       # budget, so a thinner ceiling can starve the response text.
+
+
+def synthesize_bucket_definition(
+    bucket_name: str, contributing_definitions: list[str], category_name: str,
+    model: str = DEFAULT_MODEL,
+) -> tuple[str, float]:
+    """Best-effort synthesis of one merged bucket's definition text from
+    every contributing item's own definition — the bucket NAME is always the
+    framework's fixed canonical name (never synthesized), only the
+    definition needs merging across multiple vendors' independently drafted
+    text. Falls back to the single longest non-empty contributing
+    definition (zero cost, no call) whenever the SDK/key is unavailable or
+    the call fails outright — same conservative "never block the run on a
+    synthesis-step failure" degrade as every other best-effort call in this
+    module; a slightly-less-polished definition is a far smaller cost than
+    losing the whole remap to a transient API error."""
+    fallback = max(
+        (d.strip() for d in contributing_definitions if d and d.strip()), key=len, default="",
+    )
+    if not _anthropic_available() or not os.environ.get("ANTHROPIC_API_KEY"):
+        return fallback, 0.0
+    definition_list = "\n".join(f"- {d.strip()}" for d in contributing_definitions if d and d.strip())
+    if not definition_list:
+        return fallback, 0.0
+
+    prompt = _DEFINITION_SYNTH_PROMPT.format(
+        category=category_name, bucket_name=bucket_name, definition_list=definition_list,
+    )
+    try:
+        raw, in_tok, out_tok, cache_w, cache_r = _call_claude(prompt, model, _DEFINITION_SYNTH_MAX_TOKENS)
+    except Exception as e:
+        _logger.warning("synthesize_bucket_definition() failed for %r: %s: %s",
+                         bucket_name, type(e).__name__, e)
+        return fallback, 0.0
+
+    cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+    try:
+        definition = str(json.loads(raw).get("definition", "")).strip()
+    except json.JSONDecodeError:
+        definition = ""
+    return (definition or fallback), cost

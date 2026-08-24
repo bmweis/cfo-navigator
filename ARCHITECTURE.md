@@ -3474,6 +3474,70 @@ and real API calls as `--apply` (there's no cheap preview path the way
 the whole run twice. Corrected to say plainly: go straight to `--apply`
 once the pipeline is trusted.
 
+### Feature Taxonomy scan tool — framework remap (2026-08)
+
+A DIFFERENT job from origination mode's own `judge_cluster`/
+`match_candidates_to_representatives`, which invent their own groupings as
+they go: `scripts/remap_queue_to_framework.py` matches an already-queued
+category's pending `source='scan'` proposals against a FIXED, human-defined
+target feature list — the groupings are given (Brian reviews the raw
+origination output by hand and decides exactly what the category's bucket
+list should be), only the per-item assignment (or "belongs to none of
+them") is a judgment call. Built for the real Neobanking incident (2026-08):
+202 pending proposals from the 8/23 corrected origination run needed
+remapping against a 41-bucket target list.
+
+**Mechanism** (`linklib/feature_scan.py`): `match_items_to_framework`
+batches the pending items (default 50/call — the bucket list is small and
+fixed, so only the item side needs chunking, unlike origination's own
+representative-set-growth problem) and asks Claude to return, per item,
+either an index into the fixed bucket list or `null`. Malformed/out-of-
+range/missing entries degrade to `null` ("needs a human look"), never to a
+guessed match — same conservative-bias convention as
+`match_candidates_to_representatives`' own `_validate_matches`. Where more
+than one pending item maps to the same bucket, `synthesize_bucket_definition`
+makes one more Claude call to write a merged definition from every
+contributing item's own definition (best-effort — falls back to the single
+longest contributing definition, zero cost, on any SDK/key/call failure);
+the bucket's NAME is never synthesized, always the framework's own exact
+string, so it can't drift from what Brian approved.
+
+**The consolidation write** is new: `Library.update_feature_review_queue_payload`
+rewrites a *pending* item's `payload`/`proposal_type`/`articulation` in
+place (raises if the item isn't pending — a resolved item's payload is a
+historical record, not something a later script may silently rewrite),
+distinct from `approve_feature_review_queue_item`/`deny_feature_review_queue_item`,
+neither of which touches payload post-write. The script picks the first
+matched item's row as the "primary" row to rewrite, unions every
+contributing item's `payload.links` deduped by `tool_id` (keeping whichever
+copy has a real `source_url`, then a `verified_as_of` date, then the
+longer note, when the same tool appears more than once), and denies the
+other now-redundant rows with a reason naming what they were folded into
+("Consolidated into '&lt;bucket name&gt;' during framework remap 8/24") —
+never deletes, per CLAUDE.md's no-dead-data/always-leave-a-trace
+discipline. An item matching none of the framework's buckets is denied as
+out of scope. A bucket with no matching pending item at all is simply
+skipped — no placeholder feature/link is invented for a capability no real
+tool in the roster actually offers.
+
+**Hard rule, enforced by construction**: this script never calls
+`add_category_feature`/`upsert_tool_feature_link` and never sets a queue
+item's status to `approved` — every affected item ends the run either
+`pending` (rewritten, ready for a human's final approve/deny pass on
+`/admin/tools/software/feature-review-queue`) or `denied`. It's a
+queue-to-queue remap; final approval into `category_features`/
+`tool_feature_links` stays a human action, per docs/FEATURE_TAXONOMY.md §9.
+
+**The target framework is a JSON file, not hardcoded** — `--framework`
+(default `scripts/seed_data/neobanking_feature_framework.json`) so a
+different category's ~30-40-line bucket list can be handed in without
+touching the script. Preview by default (runs the real Claude matching/
+synthesis calls — no cheaper way to preview a judgment call, same reasoning
+as `originate_category_features.py`'s own preview mode — but writes
+nothing); `--apply` commits the plan, then write-then-read-backs the
+category's post-write pending count against what the plan predicted, per
+CLAUDE.md's one-off-admin-fix discipline.
+
 ### Resources — Book recommendations (2026-08)
 
 Splits the flat `/tools/resources` card list into two headed sections:
