@@ -1,5 +1,5 @@
 {
-  "_comment": "Human-defined target feature framework for the Neobanking category (category_id=36 in production), approved by Brian 2026-08-24 after reviewing the raw 8/23 origination scan output. FINAL — scripts/remap_queue_to_framework.py must not add, remove, or rename any bucket; it only decides which pending feature_review_queue proposals map to which bucket (or to none). Each bucket's 'name' is the exact canonical feature name to write back to the queue item's payload.feature.name — do not let the model paraphrase it. 'hint' is matching guidance only (disambiguation for a human/LLM reviewer), not part of the stored feature name or definition.",
+  "_comment": "Human-defined target feature framework for the Neobanking category (category_id=36 in production), approved by Brian 2026-08-24 after reviewing the raw 8/23 origination scan output. scripts/remap_queue_to_framework.py must not add, remove, or rename any bucket; it only decides which pending feature_review_queue proposals map to which bucket (or to none). Each bucket's 'name' is the exact canonical feature name to write back to the queue item's payload.feature.name — do not let the model paraphrase it. 'hint' is matching guidance only (disambiguation for a human/LLM reviewer), not part of the stored feature name or definition. Revised 2026-08-24 after Brian reviewed the first preview run's plan (nothing had been --apply'd yet): removed 'Mobile banking' (general app access, not CFO-relevant), added 'Mobile check deposit' (the specific useful mobile capability — the preview's denied item #396, already a 2-tool merge from origination, belongs here instead) and 'General ledger / accounting software sync' (a real, well-supported feature the first pass wrongly excluded — the preview's denied item #421, already an 8-tool merge, belongs here; kept distinct from the existing 'Accounting services' bucket, which is bookkeeping/tax-adjacent, a different concept). Confirmed correct as denied, unchanged in this revision: 'Financial statement reporting' (#484, universal table stakes, not differentiating) and 'Multi-currency invoicing' (#453, too niche for this list) — both from the first preview run, neither is a bucket here.",
   "category": "Neobanking",
   "buckets": [
     {"group": "Core banking", "name": "Business bank accounts",
@@ -12,8 +12,8 @@
      "hint": "Managing multiple separate legal entities (subsidiaries, portfolio companies, franchises) under one login/platform."},
     {"group": "Core banking", "name": "Sub-account support",
      "hint": "Creating multiple sub-accounts/buckets WITHIN one entity for budgeting, project tracking, or fund segregation — distinct from multi-entity management, which is about separate legal entities."},
-    {"group": "Core banking", "name": "Mobile banking",
-     "hint": "A dedicated mobile app for account access/management, as distinct from the web platform."},
+    {"group": "Core banking", "name": "Mobile check deposit",
+     "hint": "Depositing a paper check by photographing it via a phone camera — a specific, genuinely useful mobile capability. Distinct from general mobile app account access (not its own bucket in this framework)."},
 
     {"group": "Payment rails", "name": "ACH / wire payments",
      "hint": "Standard domestic ACH and wire transfer send/receive capability."},
@@ -74,7 +74,9 @@
      "hint": "Issuing/managing SAFE (Simple Agreement for Future Equity) instruments — a startup-fundraising-specific capability."},
 
     {"group": "Accounting", "name": "Accounting services",
-     "hint": "Bundled/outsourced bookkeeping or accounting-as-a-service offered alongside the banking product."},
+     "hint": "Bundled/outsourced bookkeeping or accounting-as-a-service offered alongside the banking product — a different concept from the sync bucket below: this is done-FOR-you bookkeeping, not a data connection to a GL tool the customer already runs."},
+    {"group": "Accounting", "name": "General ledger / accounting software sync",
+     "hint": "Syncing transactions/balances with an external accounting/GL platform the customer already uses (e.g. QuickBooks, Xero, NetSuite) — a data-connection capability, distinct from 'Accounting services' (bundled bookkeeping done by the bank itself)."},
     {"group": "Accounting", "name": "Rule-based account transfers",
      "hint": "Automated, rule-driven money movement between accounts/sub-accounts (e.g. auto-sweep by rule) — distinct from accounting categorization/tagging below."},
     {"group": "Accounting", "name": "Employee expense reimbursements",
