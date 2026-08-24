@@ -3687,6 +3687,55 @@ nothing); `--apply` commits the plan, then write-then-read-backs the
 category's post-write pending count against what the plan predicted, per
 CLAUDE.md's one-off-admin-fix discipline.
 
+**Neobanking framework revision (2026-08)** — Brian's review of the first
+real preview run against production corrected the 41-bucket
+`scripts/seed_data/neobanking_feature_framework.json`: dropped "Mobile
+banking" (general app access, not CFO-relevant), added "Mobile check
+deposit" (Core banking — the specific useful mobile capability) and
+"General ledger / accounting software sync" (Accounting — kept distinct
+from the existing "Accounting services" bucket, which is bookkeeping/
+tax-adjacent, a different concept), bringing the framework to 42 buckets.
+Two denied-as-out-of-scope preview items (already multi-tool merges from
+the original origination pass) were confirmed to belong in the two new
+buckets instead, once they existed. No code change — the framework file's
+own `_comment` field records the revision and why.
+
+**Feature Review Queue card follow-up (2026-08) — labeled, narrowed "Feature
+(NEW)" fields, and a new articulation-coverage warning.** Two findings from
+that same review session, both fixed on
+`_feature_review_queue_item_card` (`webapp/app.py`):
+
+1. The card's "Feature (NEW)" section stacked the feature-name and
+   pointer-note text inputs with no visible labels — distinguishable only
+   by position — and both ran full-width, wider than either field's
+   typical content needs. Fixed with a real `<label>` above each ("Name"
+   / "Pointer note (optional)", matching the label style the Manage
+   Features "Add a feature" form already used) and a narrowed `320px`
+   width on both inputs. The Manage Features pivot table's own per-row
+   inputs (`_feature_row`) were checked and are unaffected — that surface
+   already has real `<th>` column headers above every input, so it never
+   had this problem.
+2. Reviewing a denied Neobanking item ("Financing services") surfaced a
+   genuine mismerge that a text-coverage check could have flagged before
+   approval time: the item's merge `articulation` justified only 2 of its
+   5 linked tools (meow, lili), with the other 3 (Mercury, Pipe, Novo)
+   unexplained — those 3 turned out to already be correctly linked to a
+   separately-approved "Credit underwriting" feature, confirming the
+   5-tool merge itself was wrong, not a real distinct feature. New
+   `_articulation_tool_coverage(articulation, tool_names)` splits a queue
+   item's linked-tool names into (mentioned, unmentioned) by a
+   case-insensitive substring check against the articulation text —
+   deliberately a coarse heuristic, not NLP, good enough to prompt a human
+   to look and never used to auto-deny or block anything. The card now
+   shows an amber warning (same style as the existing near-duplicate
+   banner) whenever an item has ≥2 linked tools, a non-empty articulation,
+   and PARTIAL coverage (some tools mentioned, some not) — full coverage
+   and zero coverage both render nothing, since neither is the suspicious
+   pattern; only "explains some, silent on the rest" is. This is a
+   general Feature Review Queue admin-page check, not specific to the
+   framework-remap script — it applies to any pending item regardless of
+   `source` (`admin`/`scan`/`public`) or which pipeline produced it.
+
 ### Resources — Book recommendations (2026-08)
 
 Splits the flat `/tools/resources` card list into two headed sections:
