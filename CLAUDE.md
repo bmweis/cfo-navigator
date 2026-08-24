@@ -2067,6 +2067,55 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   badge is just `len(items)`, no new badge mechanism needed) are separate,
   sequential PRs.
 
+- **Original Content, Phase 2 — markdown rendering + the shared article
+  template at `GET /thought-leadership/{slug}`.** New dependency
+  `python-markdown` (`import markdown`, aliased `_markdown` in
+  `webapp/app.py` to keep it visually distinct from the three pre-existing
+  hand-rolled, zero-dependency JS markdown renderers already in this file —
+  those serve a different purpose, live chat-produced markdown rendered
+  client-side, and are untouched), with only the `fenced_code` and `tables`
+  extensions enabled — no syntax highlighting/Pygments, out of scope per
+  the build brief. `_render_original_content_markdown` also wraps each
+  rendered `<table>` in the same `overflow-x:auto` container every other
+  table on this site already uses, since markdown's `tables` extension
+  emits a bare `<table>` with no wrapper of its own — a small regex
+  post-process, verified live (Playwright, 390px portrait and 844×390
+  landscape) with a genuinely wide table to confirm it scrolls inside its
+  own wrapper without ever forcing the page itself to overflow
+  horizontally. Raw HTML in `body_md` passes through unescaped, per the
+  approved out-of-scope decision — the field is admin-authored only, never
+  public input. `_original_content_article_body` is the shared template,
+  matching the three bespoke pieces' shell exactly (confirmed by reading
+  all three first, not guessed at) — `page page-full article-atlantic`,
+  the same back-link, `.tool-prose`, the same eyebrow/`<h1>`/byline
+  treatment — with only the rendered markdown itself, wrapped in a scoped
+  `.oc-body` div, differing per page. `.oc-body`'s CSS mirrors the
+  Reader's own `.reader-body` treatment for code/pre/table (the one
+  existing precedent in this codebase for "how does this site style
+  rendered long-form content"), except blockquote reuses this shell's own
+  established Quote treatment (`.article-pull`'s border-left/italic style)
+  instead of the Reader's coral box — a coral-boxed quote would clash with
+  BRAND.md's "coral: rare warm accent, one per screen" rule inside the
+  exact shell where Quotes are already border-rule-not-box, not a boxed
+  callout. `GET /thought-leadership/{slug}` is registered immediately
+  after `netsuite_mcp()` ends, before the unrelated `/play` route — the
+  gap the Phase 0 investigation confirmed was the only safe insertion
+  point — so the three literal bespoke routes always win by FastAPI's
+  registration order; proven, not just asserted, by a test that inserts an
+  `original_content` row with a slug colliding with each of the three
+  bespoke pieces and confirms the bespoke page's own content renders, not
+  the DB row's. Serves only `status='live'` rows with a real `body_md`; a
+  `body_md IS NULL` row 404s here too (defense in depth — registration
+  order is what actually protects the three bespoke pieces day to day, not
+  this check) and an unknown slug 404s the same way. A `status='draft'`
+  row 404s for a signed-out visitor and renders normally, at its own
+  canonical URL, for an active admin session — no separate preview URL or
+  token. `requirements.txt` and `webapp/app.py`'s `_OPEN_SOURCE` list both
+  gained the new dependency in this same PR, per the docs discipline.
+  Spot-checked all three bespoke pages still load unaffected before
+  merging, per the process brief. Phase 3 (admin CRUD at
+  `/admin/original-content`) is separate, not-yet-started work.
+
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On
   `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat
@@ -2632,6 +2681,11 @@ tables, no third-party dependency.
     (moved off `/admin/*` in the FP&A Buddy explainer follow-up round — see the Key
     architecture decisions bullet above). (The old flat `/growth-engine-ratio`,
     `/finops-ai-hackathon`, `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
+    `/thought-leadership/{slug}` (Original Content Phase 2 — see Key architecture decisions
+    above) is public **only for a `status='live'` piece with a real `body_md`**; it's not a
+    blanket-public route nor a `/login`-redirecting one — a `status='draft'` row and an
+    unknown slug both 404 for a signed-out visitor, and a draft 200s only for an active admin
+    session, at its own canonical URL, per `_is_authed`.
   - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
     `/admin/contacts` (member-gated), and
     `/read`, `/read/{article_id}` (**admin-only**, Phase 1 access level, merged into

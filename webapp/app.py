@@ -7,6 +7,7 @@ Public routes (no auth):
     GET  /thought-leadership/growth-engine-ratio    GER framework + calculator
     GET  /thought-leadership/ai-hackathon-playbook  AI hackathon playbook
     GET  /thought-leadership/netsuite-mcp           Claude–NetSuite setup guide
+    GET  /thought-leadership/{slug}   Admin-authored Original Content piece (live only, unless admin)
     GET  /contact              Contact form
     POST /contact              Submit contact form
     GET  /login / POST /login  Password sign-in (sets a signed session cookie)
@@ -48,6 +49,8 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import markdown as _markdown
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
@@ -4110,6 +4113,32 @@ def netsuite_mcp(request: Request):
 
 </div>"""
     return HTMLResponse(_page("Connecting Claude to NetSuite—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
+
+
+@app.get("/thought-leadership/{slug}", response_class=HTMLResponse)
+def original_content_article(request: Request, slug: str):
+    """Original Content Phase 2 — the catch-all for admin-authored pieces
+    (a real body_md). Registered here, immediately after all three literal
+    bespoke /thought-leadership/* routes above and before the unrelated
+    /play game code, so FastAPI's registration order always tries those
+    three first — confirmed safe in the Phase 0 investigation. The three
+    migrated rows' slugs match their own path segments exactly (Phase 1),
+    so even if this route were somehow reached for one of them, body_md is
+    NULL for all three and the 404 below still guards it — defense in
+    depth, not the primary mechanism (registration order is).
+    Live pieces are public; a draft renders only for a signed-in admin, at
+    its own canonical URL — everyone else, and every unknown slug, 404s."""
+    lib = _lib()
+    try:
+        row = lib.get_original_content_by_slug(slug)
+    finally:
+        lib.close()
+    if row is None or row["body_md"] is None:
+        raise HTTPException(status_code=404)
+    if row["status"] != "live" and not _is_authed(request):
+        raise HTTPException(status_code=404)
+    body = _original_content_article_body(row)
+    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "Thought Leadership", body, role=_role(request)))
 
 
 # ---------------------------------------------------------------------------
@@ -11878,6 +11907,105 @@ def _oc_featured_cards_html(rows: list[dict]) -> str:
     return _tl_featured_cards_html([_oc_card_tuple(r, i) for i, r in enumerate(rows)])
 
 
+# Original Content Phase 2 — markdown rendering + the shared article template
+# for any original_content row with a real body_md (the three bespoke pieces,
+# whose body_md is NULL, never reach this; their own hand-built routes render
+# them, and always win route-registration order over the GET
+# /thought-leadership/{slug} catch-all below). fenced_code + tables are the
+# only two extensions enabled — no syntax highlighting/Pygments (out of
+# scope per the build brief). Raw HTML passthrough (Markdown's own default
+# behavior — it doesn't escape or strip embedded HTML) is deliberately left
+# on: body_md is admin-authored only, never public input, so there's no
+# injection surface to guard against here the way there would be for a
+# public-submission field.
+_OC_MARKDOWN_EXTENSIONS = ["fenced_code", "tables"]
+
+
+def _render_original_content_markdown(body_md: str) -> str:
+    html = _markdown.markdown(body_md, extensions=_OC_MARKDOWN_EXTENSIONS)
+    # Each rendered <table> gets the same overflow-x:auto wrapper every other
+    # table on this site already uses (.ger-table-wrap, .ns-table's wrapper,
+    # etc.) — a wide admin-authored table (many columns) would otherwise force
+    # the whole page to scroll horizontally on mobile instead of just the
+    # table itself. Markdown's own `tables` extension emits a bare <table>
+    # with no wrapper, so this is a post-process, not an extension option.
+    return re.sub(
+        r"(<table>.*?</table>)",
+        r'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">\1</div>',
+        html, flags=re.DOTALL,
+    )
+
+
+# Scoped to .oc-body (the div wrapping the rendered markdown output only —
+# not the eyebrow/title/byline lines above it, which already render through
+# the sitewide bare h1/p rules the three bespoke pages themselves use).
+# Values mirror the Reader's own .reader-body treatment (webapp/app.py's
+# _READER_CSS) for code/pre/table/blockquote — the one place this codebase
+# already had an answer for "how does this site style rendered long-form
+# content" — with one deliberate difference: blockquote reuses this shell's
+# own established Quote treatment (.article-pull's border-left/italic
+# editorial style, BRAND.md's four-type callout taxonomy) instead of the
+# Reader's coral box, since a coral-boxed blockquote would clash with
+# BRAND.md's "coral: rare warm accent, one per screen" rule on a page that
+# already reserves coral for the Quote-adjacent flagship-card tag color, and
+# because this template nests inside the same .tool-prose/.article-atlantic
+# shell the three bespoke pieces use, where Quotes are already established
+# as border-rule-not-box.
+_OC_ARTICLE_CSS = (
+    '.oc-body{font-size:16px;line-height:1.7;color:var(--ink);}'
+    '.oc-body>*:first-child{margin-top:0;}'
+    '.oc-body h1,.oc-body h2,.oc-body h3,.oc-body h4,.oc-body h5,.oc-body h6{'
+    'font-family:var(--font-head);font-weight:600;letter-spacing:-.01em;color:var(--ink);line-height:1.3;margin:1.8em 0 .6em;}'
+    '.oc-body h1{font-size:1.5em;}'
+    '.oc-body h2{font-size:1.25em;}'
+    '.oc-body h3{font-size:1.1em;}'
+    '.oc-body h4,.oc-body h5,.oc-body h6{font-size:1em;}'
+    '.oc-body p{margin:0 0 1.4em;}'
+    '.oc-body ul,.oc-body ol{padding-left:1.4em;margin:0 0 1.4em;}'
+    '.oc-body li{margin-bottom:.4em;}'
+    '.oc-body a{color:var(--navy);}'
+    '.oc-body blockquote{border-left:3px solid var(--navy);padding:2px 0 2px 26px;margin:1.8em 0;'
+    'font-family:var(--font-head);font-weight:600;font-style:italic;font-size:1.3em;line-height:1.45;'
+    'letter-spacing:-.01em;color:var(--ink);}'
+    '.oc-body blockquote p{margin:0;}'
+    '.oc-body img{max-width:100%;height:auto;border-radius:8px;margin:1.5em 0;display:block;}'
+    '.oc-body table{width:100%;border-collapse:collapse;font-size:.9em;margin:1.5em 0;'
+    'background:#fff;border-radius:12px;overflow:hidden;border:1px solid var(--line);}'
+    '.oc-body th,.oc-body td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;}'
+    '.oc-body th{background:var(--accent-light);font-family:var(--font-body);font-weight:600;}'
+    '.oc-body tr:last-child td{border-bottom:none;}'
+    '.oc-body pre,.oc-body code{font-family:ui-monospace,monospace;font-size:.85em;background:#f0ece4;border-radius:4px;padding:2px 5px;}'
+    '.oc-body pre{padding:16px;overflow-x:auto;border-radius:8px;margin:1.5em 0;}'
+    '.oc-body pre code{background:none;padding:0;}'
+    '.oc-body hr{border:none;border-top:1px solid var(--line);margin:2.5em 0;}'
+)
+
+
+def _original_content_article_body(row: dict) -> str:
+    """The shared article shell for an admin-authored piece — matches the
+    three bespoke pages' own shell exactly (page page-full article-atlantic,
+    the same back-link, .tool-prose, the same eyebrow/h1/byline treatment),
+    per the Phase 0 investigation. The bespoke pages hand-author everything
+    below the byline; here that's the one rendered .oc-body block instead."""
+    date_bits = f'By Brian Weisberg &middot; {_esc(row["date_label"])}' if row["date_label"] else "By Brian Weisberg"
+    tag_html = (
+        f'<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;'
+        f'text-transform:uppercase;letter-spacing:.1em;">{_esc(row["tag_label"])}</p>'
+        if row["tag_label"] else ""
+    )
+    body_html = _render_original_content_markdown(row["body_md"] or "")
+    return f"""<div class="page page-full article-atlantic">
+<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
+<style>{_OC_ARTICLE_CSS}</style>
+<div class="tool-prose">
+{tag_html}
+<h1 style="margin:0 0 8px;">{_esc(row["title"])}</h1>
+<p style="color:var(--muted);font-size:14px;margin:0 0 36px;">{date_bits}</p>
+<div class="oc-body">{body_html}</div>
+</div>
+</div>"""
+
+
 # Flagship-card CSS (.tl-featured/.tl-card*) — shared by /thought-leadership's
 # featured row and the homepage's flagship cards, same as their content
 # (_TL_FEATURED_CARDS above via _tl_fcard()).
@@ -18233,6 +18361,8 @@ _OPEN_SOURCE = [
          "Parses and validates incoming request data behind FastAPI."),
         ("python-multipart", "python-multipart", "Apache-2.0", "https://github.com/Kludex/python-multipart",
          "Reads the form posts—login, contact, and tool submissions."),
+        ("Markdown", "Markdown", "BSD-3-Clause", "https://python-markdown.github.io",
+         "Renders an Original Content piece's markdown body—headings, fenced code blocks, tables—into the shared article template."),
     ]),
     ("Stores & searches", "Where your archive lives and how it's searched.", [
         ("SQLite + FTS5", None, "Public Domain", "https://www.sqlite.org",
