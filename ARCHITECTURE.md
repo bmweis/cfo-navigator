@@ -1164,7 +1164,7 @@ effect.
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (originally "pin into the homepage teaser" — Phase 3 addendum; repurposed by the Homepage Restructure phase to mean "represents this type in the homepage's "Recent highlights" grid", see below; defaults to 0, no retroactive selection) |
-| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` means "card metadata only" — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) renders the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, the literal routes always win over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead, live as of Phase 2 below), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. |
+| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4b, `netsuite-mcp` and `ai-hackathon-playbook` both have real `body_md` and are served by the catch-all, their bespoke routes retired — only `growth-engine-ratio` still has `body_md IS NULL` and a live bespoke route, pending a decision on its JS calculator), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. |
 
 **Original Content Phase 2 (2026-08) — markdown rendering + `GET /thought-leadership/{slug}`.**
 `_render_original_content_markdown` runs `body_md` through `python-markdown` with only
@@ -1273,6 +1273,65 @@ the shared template hardcodes the byline immediately following `<h1>`, and the s
 after that hardcoded byline. Fixing that ordering would mean changing the shared article
 template's shape for every Original Content piece, not just this one — left as a known, minor,
 documented deviation rather than a schema/template change bundled into a content port.
+
+**Original Content Phase 4b (2026-08) — the second bespoke page (`ai-hackathon-playbook`,
+"Sail, Don't Row") ported the same way; its Python route retired.** Same hybrid approach as
+Phase 4a: real prose converted to markdown; the page's designed elements (a 2×2 value/effort
+matrix, an Inspire→Sleep→Build flowchart with a `<640px` vertical-arrow responsive variant, a
+Ship/Iterate/Park verdict tier strip, a resource-link list, a 6-step phase track used twice, and
+a Notion intake-form template box) preserved as raw HTML in `body_md` using their original
+`.fah-*` classes. Confirmed dead and dropped, not carried forward: `.fah-verdicts`/
+`.fah-verdict`/`.fah-v-*`, `.fah-pull`, `.fah-motif` — defined in the retired route's own
+`<style>` block but unused by any element in its actual body. `_OC_HACKATHON_CSS` (`webapp/app.py`)
+holds the rescoped `.oc-body .fah-*` CSS, same `_OC_NETSUITE_MCP_CSS` treatment.
+`scripts/migrate_hackathon_playbook_content.py` follows the same dry-run/`--apply`/
+write-then-read-back convention, setting `body_md`, `date_label` ("June 2026"), and — unlike
+Phase 4a — `title` on the existing Phase-1-seeded row.
+
+**Two real bugs caught by screenshot-diff verification before the route was touched, neither
+visible from reading the code:**
+1. A double-escape bug — the row's `title` was seeded (Phase 1) as the pre-escaped
+   `"Sail, Don&rsquo;t Row"`, meant for `_tl_fcard()`'s raw `<h3>` insertion; the shared article
+   template's own `_esc(row["title"])` call for the real `<h1>` (correct in general, needed for
+   plain-text admin-typed titles) double-escaped it, rendering literal `&rsquo;` text. Fixed with
+   an explicit `TITLE = "Sail, Don't Row"` constant in the migration script (matching the retired
+   route's own `<h1>` text byte-for-byte) rather than reusing `row["title"]`. Since the homepage
+   and `/thought-leadership` flagship cards render straight from this DB row
+   (`_oc_featured_cards_html`/`_tl_fcard()`, not the frozen `_TL_FEATURED_CARDS` tuple), this also
+   changes those cards from the curly entity to a straight apostrophe — `tests/
+   test_thought_leadership_homepage_teaser.py`'s fixture applies this same title fix after its
+   Phase-1 seed so the suite doesn't drift stale against production the moment the migration ships.
+2. Two CSS specificity gaps, found only by comparing real `element.bounding_box()` values (a
+   full-page screenshot glance looked fine even with ~110px of real height difference buried in
+   one repeated component). First: `.fah-body h3`/`.fah-template h3` relied on the original page's
+   sitewide `body{font:16px/1.65 ...}` inheritance for their line-height, never declaring their
+   own — but `_OC_ARTICLE_CSS`'s shared `.oc-body h1,h2,h3...{line-height:1.3}` rule (written for
+   real prose section headings) matches these in-card h3s too, and an explicit declaration always
+   wins over inheritance regardless of specificity, compounding a 6px collapse across every
+   repeated card. Fixed by restating the original's effective `1.65` line-height directly on both
+   selectors. Second, and opposite in direction: `.fah-body p`/`.fah-tier p` are each only one
+   class + a tag on the original page, so they already lose their own line-height/margin-bottom to
+   the sitewide `.article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px}` rule there
+   (two classes always outranks one) — a pre-existing quirk of the live original page. Prefixing
+   every selector with `.oc-body` for scoping gave exactly these two selectors a second class,
+   tying the sitewide rule's specificity; since the article's own `<style>` tag loads after the
+   sitewide one, the tie resolved the *opposite* way, so the port's declared values won where the
+   original's never did. Fixed by dropping line-height/margin-bottom from both ported selectors so
+   they lose to the sitewide rule again, matching the page's actual rendered behavior rather than
+   "fixing" a CSS quirk the live site never showed. (`.fah-template p`, `.fah-r-desc`, and
+   `.fah-flow-caption` were checked too and needed no change — none of them ever declared
+   line-height/margin-bottom, so they already lost to the sitewide rule on both pages.) Phase 4a's
+   near-identical `.ns-body h3`/`.ns-qr h3` selectors carry the same latent line-height gap and
+   were not touched here, since NetSuite MCP is out of scope for this PR.
+
+Post-fix, every `bounding_box()` comparison across the matrix, flowchart (both variants), tier
+strip, resource list, template box, and both phase tracks matched to within 1-2px, and every
+cropped screenshot pair was visually confirmed identical at desktop (1280px), mobile portrait
+(390×844), and mobile landscape (844×390), with zero horizontal overflow at any width. Only then
+was the bespoke `finops_ai_hackathon()` route deleted (the `/finops-ai-hackathon` 301 redirect
+stays, now served by the catch-all) and `"ai-hackathon-playbook"` removed from
+`_OC_RESERVED_SLUGS` — leaving only `"growth-engine-ratio"` reserved. The closing bio blurb's
+`/play` easter-egg link carried over verbatim into `body_md`.
 
 `Library.get_thought_leadership_representative(type)` (Homepage Restructure phase;
 supersedes the Phase 3 addendum's `list_thought_leadership_for_home` pin-then-

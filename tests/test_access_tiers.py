@@ -46,6 +46,23 @@ def env(monkeypatch):
             ns_row["link_label"], _NS_BODY_MD, "live", ns_row["featured_home"],
             _NS_DATE_LABEL, _sort_key(_NS_DATE_LABEL), ns_row["display_order"],
         )
+    # /thought-leadership/ai-hackathon-playbook — same situation, same fix,
+    # as of Original Content Phase 4b (its own bespoke route retired).
+    from scripts.migrate_hackathon_playbook_content import (
+        BODY_MD as _FAH_BODY_MD, DATE_LABEL as _FAH_DATE_LABEL, TITLE as _FAH_TITLE,
+    )
+    fah_row = lib.get_original_content_by_slug("ai-hackathon-playbook")
+    if fah_row is None:
+        lib.add_original_content("ai-hackathon-playbook", _FAH_TITLE,
+                                 tag_label="Playbook", link_label="Read the playbook",
+                                 body_md=_FAH_BODY_MD, status="live", featured_home=True,
+                                 date_label=_FAH_DATE_LABEL, sort_key=_sort_key(_FAH_DATE_LABEL))
+    else:
+        lib.update_original_content(
+            fah_row["id"], fah_row["slug"], _FAH_TITLE, fah_row["teaser"], fah_row["tag_label"],
+            fah_row["link_label"], _FAH_BODY_MD, "live", fah_row["featured_home"],
+            _FAH_DATE_LABEL, _sort_key(_FAH_DATE_LABEL), fah_row["display_order"],
+        )
     lib.close()
     yield appmod
     if os.path.exists(db):
