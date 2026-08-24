@@ -2271,6 +2271,7 @@ def homepage(request: Request):
         # Writing's representative) — that's expected given how the selection
         # logic works, not a bug to guard against.
         tl_reps = [lib.get_thought_leadership_representative(t) for t, _label in _TL_TYPES]
+        original_content_home = lib.list_original_content_for_home()
     finally:
         lib.close()
 
@@ -2401,7 +2402,7 @@ def homepage(request: Request):
       <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
     </ul>
 
-    {_tl_featured_cards_html(_TL_FEATURED_CARDS)}
+    {_oc_featured_cards_html(original_content_home)}
 
     <div class="home-tl-highlights-wrap">
       <div class="home-tl-highlights-label">Recent highlights</div>
@@ -2562,22 +2563,12 @@ def thought_leadership(request: Request):
             f'{rows}{more}</div>'
         )
 
-    # Featured: three flagship pieces, one consistent card treatment — same
-    # shared _TL_FEATURED_CARDS content and _tl_fcard/_TL_SHARED_CSS markup
-    # as the homepage's own flagship cards, so the two surfaces can't drift
-    # apart (see _TL_FEATURED_CARDS' comment). The only per-card variation
+    # Featured: every live original_content piece, one consistent card
+    # treatment — same shared _oc_featured_cards_html/_tl_fcard/_TL_SHARED_CSS
+    # markup as the homepage's own flagship row (Original Content Phase 1),
+    # so the two surfaces can't drift apart. The only per-card variation
     # here is the small category tag colour — no full-colour floods, which
     # is what made the old top read as busy.
-    body = (
-        '<div class="page page-full">'
-        '<style>'
-        + _TL_SHARED_CSS + _TL_COLUMN_CSS +
-        '</style>'
-        '<h1>Thought Leadership</h1>'
-        '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
-        + _tl_featured_cards_html(_TL_FEATURED_CARDS)
-    )
-
     lib = _lib()
     try:
         sections = [
@@ -2586,8 +2577,19 @@ def thought_leadership(request: Request):
             ("Podcasts", "podcast", lib.list_thought_leadership(type="podcast")),
             ("Press", "press", lib.list_thought_leadership(type="press")),
         ]
+        original_content_live = lib.list_original_content(status="live")
     finally:
         lib.close()
+
+    body = (
+        '<div class="page page-full">'
+        '<style>'
+        + _TL_SHARED_CSS + _TL_COLUMN_CSS +
+        '</style>'
+        '<h1>Thought Leadership</h1>'
+        '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
+        + _oc_featured_cards_html(original_content_live)
+    )
 
     columns_html = "".join(
         column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], section_title, items)
@@ -11796,10 +11798,19 @@ def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: s
     )
 
 
-# The 3 flagship pieces — one shared source for both /thought-leadership's
-# featured row and the homepage's consolidated Thought Leadership section, so
-# the two surfaces can't drift apart in content (title/description/link
-# label). This was the deliberate original intent; a brief detour during the
+# NO LONGER THE LIVE SOURCE (Original Content Phase 1) — kept in the repo,
+# unimported by any route, purely as a rollback reference (same precedent as
+# webapp/thought_leadership_data.py). The `original_content` DB table is what
+# both pages actually render from now (via _oc_featured_cards_html); this
+# tuple's own shape (href, tag, tag_color, title, desc, cta) is still what
+# scripts/migrate_original_content.py reads to seed that table, and _tl_fcard/
+# _tl_featured_cards_html/_TL_SHARED_CSS below are still live, reused by the
+# DB-backed renderer — only the content source changed, not the markup.
+#
+# Pre-migration history, kept for context: this was originally the one shared
+# source for both /thought-leadership's featured row and the homepage's
+# consolidated Thought Leadership section, so the two surfaces couldn't drift
+# apart in content (title/description/link label). A brief detour during the
 # Homepage Restructure design-fidelity pass split this into two diverged
 # tuples (the design file showed shorter, homepage-specific copy) before
 # Brian confirmed the shared-content guarantee should hold regardless of what
@@ -11807,7 +11818,7 @@ def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: s
 # Card *sizing* is still free to differ per page (each page's own .tl-featured
 # grid track width naturally narrows the cards on the homepage's tighter
 # column vs. /thought-leadership's full-width featured row) — only the
-# content itself is pinned. The "Sail Don't Row" entry's "Playbook" tag,
+# content itself was pinned. The "Sail Don't Row" entry's "Playbook" tag,
 # description, and "Read the playbook" link/title are the real, correct copy
 # for that piece (not the design file's arcade-game framing — see CLAUDE.md's
 # Homepage Restructure entries for that correction's history).
@@ -11832,6 +11843,39 @@ _TL_FEATURED_CARDS = (
 
 def _tl_featured_cards_html(cards) -> str:
     return '<div class="tl-featured">' + "".join(_tl_fcard(*c) for c in cards) + '</div>'
+
+
+# Original Content (Phase 1) — _TL_FEATURED_CARDS above is no longer the live
+# source for the flagship row; it stays in the repo, unimported, purely as a
+# rollback reference (same precedent as webapp/thought_leadership_data.py).
+# scripts/migrate_original_content.py is the one-time migration that seeded
+# the `original_content` table from it. tag_color was never promoted to a
+# stored column (see that table's schema comment in linklib/db.py) — cycled
+# instead from the same 3 established colors by card position, so the three
+# migrated pieces render with their exact original colors and any piece
+# added later still gets a sane one.
+_OC_TAG_COLORS = ("var(--coral-deep)", "var(--seafoam-deep)", "var(--navy-light)")
+
+
+def _oc_card_tuple(row: dict, idx: int) -> tuple:
+    """Build a _tl_fcard()-shaped tuple from an original_content DB row."""
+    return (
+        f"/thought-leadership/{row['slug']}",
+        row["tag_label"],
+        _OC_TAG_COLORS[idx % len(_OC_TAG_COLORS)],
+        row["title"],
+        row["teaser"],
+        row["link_label"],
+    )
+
+
+def _oc_featured_cards_html(rows: list[dict]) -> str:
+    """Shared renderer for both the homepage's flagship row and
+    /thought-leadership's featured row — same _tl_fcard/.tl-card markup as
+    the pre-DB version, now driven by `original_content` rows instead of the
+    hardcoded _TL_FEATURED_CARDS tuple, so the two surfaces still can't drift
+    apart in content."""
+    return _tl_featured_cards_html([_oc_card_tuple(r, i) for i, r in enumerate(rows)])
 
 
 # Flagship-card CSS (.tl-featured/.tl-card*) — shared by /thought-leadership's
@@ -18931,7 +18975,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Toolbox — Communities", ["communities", "community_audit_log", "community_categories",
                                 "community_competitors", "community_profiles",
                                 "community_gap_submissions", "community_profile_views"]),
-    ("Thought Leadership / Game", ["thought_leadership", "game_rank_settings", "game_runs"]),
+    ("Thought Leadership / Game", ["thought_leadership", "original_content",
+                                    "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
                             "content_refetch_log", "url_correction_log",
