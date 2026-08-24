@@ -245,8 +245,27 @@ def test_play_not_in_site_nav(env):
 def test_play_easter_egg_link_on_hackathon_page(env):
     """The only place Sail, Don't Row is linked from is the bottom of the
     ai-hackathon-playbook article — a quiet easter egg for readers who scroll
-    all the way down, not a promoted CTA."""
-    _, client = env
+    all the way down, not a promoted CTA. As of Original Content Phase 4b
+    the page is served by the GET /thought-leadership/{slug} catch-all
+    (its bespoke Python route was retired), so this fixture's bare DB needs
+    a real original_content row with the easter-egg link in its body_md —
+    this test's own fixture never runs scripts/migrate_hackathon_playbook_content.py,
+    so it seeds just enough of the real body_md's closing blurb directly,
+    matching what that migration actually writes in production."""
+    appmod, client = env
+    lib = appmod._lib()
+    try:
+        lib.add_original_content(
+            slug="ai-hackathon-playbook", title="Sail, Don't Row",
+            body_md=(
+                'Some prose.\n\n'
+                '<p>&#9973; Made it this far? <a href="/play">Sail, Don&rsquo;t Row</a> '
+                'is also a game.</p>'
+            ),
+            status="live",
+        )
+    finally:
+        lib.close()
     body = client.get("/thought-leadership/ai-hackathon-playbook").text
     assert 'href="/play"' in body
     assert "Sail, Don&rsquo;t Row" in body or "Sail, Don't Row" in body
