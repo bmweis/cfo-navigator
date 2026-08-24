@@ -468,6 +468,114 @@ def test_feature_review_queue_page_approve_and_deny(env):
         lib.close()
 
 
+def test_articulation_tool_coverage_splits_mentioned_and_unmentioned():
+    import webapp.app as appmod
+    mentioned, unmentioned = appmod._articulation_tool_coverage(
+        "Merged across 5 tools. meow and lili both offer bookkeeping sync.",
+        ["meow", "lili", "Mercury", "Pipe", "Novo"],
+    )
+    assert mentioned == ["meow", "lili"]
+    assert unmentioned == ["Mercury", "Pipe", "Novo"]
+
+
+def test_articulation_tool_coverage_case_insensitive_and_full_coverage():
+    import webapp.app as appmod
+    mentioned, unmentioned = appmod._articulation_tool_coverage(
+        "MERCURY and rho both support this.", ["Mercury", "Rho"],
+    )
+    assert mentioned == ["Mercury", "Rho"]
+    assert unmentioned == []
+
+
+def test_feature_review_queue_page_flags_articulation_covering_only_some_linked_tools(env):
+    """The real Neobanking case this was built for: a merge articulation
+    named only 2 of 5 linked tools, with the other 3 silently unexplained
+    — which turned out to be a genuine mismerge on manual review. This
+    must now render as a visible warning before an admin approves it."""
+    client = _client(env)
+    _login(client)
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        cat_id = lib.add_tool_category("Neobanking")
+        tool_ids = {
+            name: lib.add_tool(name, "d", f"https://{name.lower()}.example", ["Neobanking"], approved=1, summary="s")
+            for name in ["meow", "lili", "Mercury", "Pipe", "Novo"]
+        }
+        lib.add_feature_review_queue_item(
+            source="scan", proposal_type="new_feature+5 links",
+            payload={"category_id": cat_id, "feature": {"name": "Financing services"},
+                     "links": [{"tool_id": tid, "availability": "native", "ai_enabled": 0,
+                                "verified_as_of": "2026-08-19"} for tid in tool_ids.values()]},
+            category_id=cat_id, articulation="Merged across 5 tools. meow and lili both offer this.",
+        )
+    finally:
+        lib.close()
+
+    r = client.get("/admin/tools/software/feature-review-queue")
+    assert r.status_code == 200
+    assert "Articulation names only 2 of 5 linked tools" in r.text
+    assert "meow, lili" in r.text
+    assert "Mercury, Pipe, Novo" in r.text
+    assert "mismerge" in r.text
+
+
+def test_feature_review_queue_page_no_coverage_warning_when_articulation_covers_all_tools(env):
+    client = _client(env)
+    _login(client)
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        cat_id = lib.add_tool_category("Neobanking")
+        tool_a = lib.add_tool("Mercury", "d", "https://mercury.com", ["Neobanking"], approved=1, summary="s")
+        tool_b = lib.add_tool("Rho", "d", "https://rho.co", ["Neobanking"], approved=1, summary="s")
+        lib.add_feature_review_queue_item(
+            source="scan", proposal_type="new_feature+2 links",
+            payload={"category_id": cat_id, "feature": {"name": "Business bank accounts"},
+                     "links": [{"tool_id": tool_a, "availability": "native", "ai_enabled": 0, "verified_as_of": "2026-08-19"},
+                               {"tool_id": tool_b, "availability": "native", "ai_enabled": 0, "verified_as_of": "2026-08-19"}]},
+            category_id=cat_id, articulation="Merged Mercury and Rho — same job, different mechanism.",
+        )
+    finally:
+        lib.close()
+
+    r = client.get("/admin/tools/software/feature-review-queue")
+    assert r.status_code == 200
+    assert "Articulation names only" not in r.text
+
+
+def test_feature_review_queue_card_labels_new_feature_fields(env):
+    """The card's "Feature (NEW)" section used to stack the feature-name and
+    pointer-note text inputs with no visible labels — distinguishable only
+    by position. Both fields must now carry a real <label>, and neither
+    input should still be full-width (narrowed per the request that
+    prompted this)."""
+    client = _client(env)
+    _login(client)
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        cat_id = lib.add_tool_category("Neobanking")
+        tool_id = lib.add_tool("Mercury", "d", "https://mercury.com", ["Neobanking"], approved=1, summary="s")
+        lib.add_feature_review_queue_item(
+            "scan", "new_feature+link",
+            {"category_id": cat_id, "feature": {"name": "Business bank accounts", "pointer_note": "core"},
+             "links": [{"tool_id": tool_id, "availability": "native", "ai_enabled": 0, "verified_as_of": "2026-08-24"}]},
+            category_id=cat_id, tool_id=tool_id,
+        )
+    finally:
+        lib.close()
+
+    r = client.get("/admin/tools/software/feature-review-queue")
+    assert r.status_code == 200
+    assert ">Name</label>" in r.text
+    assert "Pointer note" in r.text and "(optional)</span></label>" in r.text
+    # Both inputs are narrowed, not full-width, per the request this fixed.
+    assert 'name="feature_name" value="Business bank accounts" maxlength="500" style="width:320px' in r.text
+    assert 'name="pointer_note" value="core" maxlength="500" style="width:320px' in r.text
+    assert 'name="feature_name" value="Business bank accounts" maxlength="500" style="width:100%' not in r.text
+
+
 def test_feature_review_queue_approve_shows_merge_confirmation_before_executing(env):
     """Phase 1c: approving a new_feature+link proposal whose name matches an
     existing feature in the category no longer merges silently — it shows a

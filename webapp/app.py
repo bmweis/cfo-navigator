@@ -11005,6 +11005,25 @@ def _find_near_duplicate_queue_items(pending: list[dict]) -> dict[int, list[dict
     return result
 
 
+def _articulation_tool_coverage(articulation: str, tool_names: list[str]) -> tuple[list[str], list[str]]:
+    """Splits `tool_names` into (mentioned, unmentioned) by a case-insensitive
+    substring check against `articulation`'s text — a coarse heuristic (no
+    NLP), deliberately just good enough to prompt a human reviewer to look,
+    never used to auto-deny or block anything. Built for the pattern a
+    Neobanking review caught by hand (2026-08): a queue item's merge
+    reasoning named only 2 of its 5 linked tools, with no explanation for
+    the other 3 — which turned out to be a genuine mismerge (those 3 were
+    already correctly linked to a separately-approved feature), not a real
+    5-vendor feature. Surfacing "this note doesn't cover all its own
+    links" as a visible flag lets a reviewer catch that before approving,
+    rather than only after noticing by hand."""
+    text = (articulation or "").lower()
+    mentioned, unmentioned = [], []
+    for name in tool_names:
+        (mentioned if name.lower() in text else unmentioned).append(name)
+    return mentioned, unmentioned
+
+
 def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], tools_by_id: dict[int, dict],
                                      near_duplicates: list[dict] | None = None) -> str:
     """The approve form IS the edit form — every proposed value is a real
@@ -11048,8 +11067,15 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
     source_badge_fg = {"admin": "var(--navy)", "scan": "var(--seafoam-deep)", "public": "#92400e"}.get(item["source"], "var(--ink)")
 
     feature_field_html = (
-        f'<div style="margin:0 0 6px;">{_in("feature_name", feature_name, width="100%")}</div>'
-        f'<div>{_in("pointer_note", feature.get("pointer_note", ""), width="100%")}</div>'
+        f'<div style="margin:0 0 10px;">'
+        f'<label style="display:block;font-size:12px;font-weight:500;color:var(--navy);margin-bottom:4px;">Name</label>'
+        f'{_in("feature_name", feature_name, width="320px")}'
+        f'</div>'
+        f'<div>'
+        f'<label style="display:block;font-size:12px;font-weight:500;color:var(--navy);margin-bottom:4px;">Pointer note '
+        f'<span style="font-weight:400;color:var(--muted);">(optional)</span></label>'
+        f'{_in("pointer_note", feature.get("pointer_note", ""), width="320px")}'
+        f'</div>'
         if is_new_feature else
         f'<p style="margin:0 0 6px;font-size:14px;">Existing feature id={payload.get("feature_id")}'
         f'<input type="hidden" name="feature_id" value="{payload.get("feature_id")}"></p>'
@@ -11065,6 +11091,23 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
             f'before approving both.</p>'
         )
 
+    coverage_html = ""
+    if item.get("articulation") and len(payload.get("links", [])) >= 2:
+        link_tool_names = [
+            tools_by_id[l["tool_id"]]["name"] for l in payload.get("links", []) if l.get("tool_id") in tools_by_id
+        ]
+        mentioned, unmentioned = _articulation_tool_coverage(item["articulation"], link_tool_names)
+        if mentioned and unmentioned:
+            coverage_html = (
+                f'<p style="font-size:12.5px;color:#92400e;background:#fef3c7;border-radius:8px;'
+                f'padding:6px 10px;margin:10px 0 0;">Articulation names only {len(mentioned)} of '
+                f'{len(mentioned) + len(unmentioned)} linked tools ({_esc(", ".join(mentioned))}) — '
+                f'{_esc(", ".join(unmentioned))} '
+                f'{"aren&rsquo;t" if len(unmentioned) > 1 else "isn&rsquo;t"} mentioned. Worth checking '
+                f'whether this is a real feature for every linked tool, or a mismerge (a tool that '
+                f'already belongs to a different, separately-approved feature) before approving.</p>'
+            )
+
     return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:16px;">
   <form method="post" action="/admin/tools/software/feature-review-queue/{item['id']}/approve">
   <input type="hidden" name="n_links" value="{n_links}">
@@ -11077,6 +11120,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
   {feature_field_html}
   {f'<div style="overflow-x:auto;margin:12px 0;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
   {f'<p style="font-size:13.5px;line-height:1.6;color:var(--ink);background:var(--bg);border-radius:8px;padding:10px 12px;margin:10px 0 0;">{_esc(item["articulation"])}</p>' if item.get("articulation") else ''}
+  {coverage_html}
   {f'<p style="font-size:13px;color:var(--muted);margin:8px 0 0;">From {_esc(item["submitter_name"])} ({_esc(item["submitter_email"])})</p>' if item.get("submitter_name") else ''}
   <div style="margin-top:14px;">
     <button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Approve</button>
