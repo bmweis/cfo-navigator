@@ -2113,8 +2113,54 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   token. `requirements.txt` and `webapp/app.py`'s `_OPEN_SOURCE` list both
   gained the new dependency in this same PR, per the docs discipline.
   Spot-checked all three bespoke pages still load unaffected before
-  merging, per the process brief. Phase 3 (admin CRUD at
-  `/admin/original-content`) is separate, not-yet-started work.
+  merging, per the process brief.
+
+- **Original Content, Phase 3 — admin CRUD at `/admin/original-content`.**
+  Read `/admin/thought-leadership`'s existing list/add/edit/delete routes
+  first and matched their pattern (list layout, form styling, auth check) —
+  not built from scratch. One real addition beyond that pattern: slug
+  validation. A bad slug here is a genuine failure mode (an unreachable
+  page, or a page that silently loses to a bespoke route) that
+  `thought_leadership`'s free-text title never risked, so `_validate_oc_slug`
+  checks the slug is present, well-formed (`_OC_SLUG_RE` — lowercase
+  letters/digits/single hyphens only, **not auto-lowercased**: an uppercase
+  or malformed slug is rejected outright, not silently normalized, so what
+  an admin sees in the URL is exactly what they typed), doesn't collide
+  with one of the three bespoke pieces' own route path segments
+  (`_OC_RESERVED_SLUGS` — a colliding slug would save fine but be
+  permanently unreachable, since the literal route always wins registration
+  order), and isn't already used by a different row. A rejection re-renders
+  the same form with the submitted values preserved and an inline coral
+  error banner — the richer pattern `_feed_form_page`/
+  `admin_feeds_new_submit` already established for exactly this kind of
+  validation (chosen over `thought_leadership`'s own blunter
+  raise-`HTTPException`-on-bad-input approach, since a slug collision is
+  exactly the kind of mistake an admin needs to see and fix in place, not
+  get bounced to a bare error page for). Slug edits are allowed at any
+  time, including on a live piece — the form's helper text warns this
+  breaks any existing link, since there's no redirect system (out of
+  scope, same call Phase 2 made). `sort_key` is derived from `date_label`
+  on every save via the same `_sort_key_from_date_label`
+  `thought_leadership` already uses — not exposed as a form field.
+  `display_order` left blank on add auto-assigns the next value; left
+  blank on edit is a deliberate clear, treated as `0` — same convention as
+  `thought_leadership`'s own edit route. `body_md` left blank keeps the
+  row as card-metadata-only (`NULL`, not `''` — `_oc_values_from_form`
+  maps an empty textarea to `None`), the same state the three flagship
+  rows have always been in; verified this doesn't regress Phase 1's
+  card-rendering path (a piece created this way still renders as a
+  flagship/`/thought-leadership` card immediately) and correctly 404s at
+  its own `/thought-leadership/{slug}` page (Phase 2's `body_md IS NULL`
+  guard) until a later edit fills in a body — and verified the reverse
+  integration too: a piece with a real `body_md`, set `status='live'`, is
+  immediately reachable at its own page. The admin index's "Thought
+  Leadership" group gained a second item pointing at
+  `/admin/original-content` — `count_label` is `len(items)`, so the badge
+  auto-updated with no additional wiring, confirming the Phase 0
+  investigation's finding. Mobile-verified (Playwright, 390px portrait,
+  real `.tap()` interaction) that the list view and the add/edit form both
+  render with no horizontal overflow and are actually fillable by touch,
+  not just present in the markup.
 
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On

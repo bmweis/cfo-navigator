@@ -12408,6 +12408,410 @@ def admin_thought_leadership_delete(request: Request, item_id: int):
     return RedirectResponse("/admin/thought-leadership", status_code=303)
 
 
+# -- Original Content admin (Phase 3 — see CLAUDE.md) ------------------------
+# Same CRUD pattern as /admin/thought-leadership just above, with one
+# addition: slug validation. A bad slug is a real failure mode here (an
+# unreachable page, or a page that silently loses to a bespoke route) in a
+# way thought_leadership's free-text title never risked, so this follows the
+# richer inline-error/redisplay pattern _feed_form_page/admin_feeds_new_submit
+# already established for exactly that kind of validation, rather than the
+# thought_leadership form's blunter raise-HTTPException-on-bad-input approach.
+
+# The three literal bespoke /thought-leadership/* route path segments — see
+# _TL_FEATURED_CARDS and the Original Content Phase 1/2 CLAUDE.md entries.
+# A new/edited original_content slug matching one of these would be
+# unreachable (the literal route always wins registration order over the
+# GET /thought-leadership/{slug} catch-all), so it's rejected here rather
+# than silently accepted and never actually reachable.
+_OC_RESERVED_SLUGS = {"growth-engine-ratio", "ai-hackathon-playbook", "netsuite-mcp"}
+_OC_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+
+def _validate_oc_slug(slug: str, lib, exclude_id: int | None = None) -> str:
+    """Returns an error message, or "" if the slug is valid. Checked in this
+    order: present, well-formed (lowercase-hyphen only, no leading/trailing/
+    double hyphens), not one of the three bespoke pieces' own paths, and not
+    already used by a different original_content row."""
+    if not slug:
+        return "Slug is required."
+    if not _OC_SLUG_RE.match(slug):
+        return "Slug must be lowercase letters, numbers, and single hyphens only (e.g. \"my-new-piece\")."
+    if slug in _OC_RESERVED_SLUGS:
+        return (f"“{slug}” is one of the three bespoke pieces’ own page paths—"
+                "pick a different slug, or that literal route will always win and this piece "
+                "will never actually be reachable.")
+    existing = lib.get_original_content_by_slug(slug)
+    if existing and existing["id"] != exclude_id:
+        return f"“{slug}” is already used by another piece (“{existing['title']}”)."
+    return ""
+
+
+def _oc_parse_warning(values: dict) -> str:
+    """Inline note when a non-blank date_label didn't parse into a sort_key
+    — same advisory tone as _tl_parse_warning, but different consequence:
+    original_content orders by display_order first and sort_key only as a
+    tiebreak (the opposite priority from thought_leadership), so an
+    unparsed date doesn't float anything to the top — it just means this
+    piece won't get an automatic recency tiebreak against others sharing
+    its Display order."""
+    date_label = (values.get("date_label") or "").strip()
+    sort_key = values.get("sort_key") or ""
+    if date_label and not sort_key:
+        return (
+            '<p style="margin:-8px 0 0;padding:8px 12px;background:#fef3c7;border:1px solid #fde68a;'
+            'border-radius:8px;font-size:12px;color:#92400e;">'
+            "Date didn&rsquo;t parse as Mon YYYY — this piece won&rsquo;t get an automatic recency "
+            "tiebreak against others sharing its Display order.</p>"
+        )
+    return ""
+
+
+def _oc_form_fields(values: dict) -> str:
+    status_opts = "".join(
+        f'<option value="{s}"{" selected" if values.get("status") == s else ""}>{label}</option>'
+        for s, label in (("draft", "Draft"), ("live", "Live"))
+    )
+    return f"""  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Title *</label>
+    <input name="title" required maxlength="300" value="{_esc(values.get('title', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Slug *</label>
+    <input name="slug" required maxlength="200" value="{_esc(values.get('slug', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;font-family:ui-monospace,monospace;"
+      placeholder="my-new-piece">
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+      The URL is /thought-leadership/&lt;slug&gt;. Lowercase letters, numbers, and hyphens only.
+      You can change a slug at any time, including on a live piece&mdash;but there&rsquo;s no
+      redirect system, so changing it breaks any link someone already has to the old one.
+    </p>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Teaser *</label>
+    <input name="teaser" required maxlength="400" value="{_esc(values.get('teaser', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="One line describing the piece, shown on its card">
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tag label *</label>
+      <input name="tag_label" required maxlength="40" value="{_esc(values.get('tag_label', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="e.g. Framework, Playbook, Setup Guide">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Link label *</label>
+      <input name="link_label" required maxlength="60" value="{_esc(values.get('link_label', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="e.g. Read the framework">
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
+      <input name="date_label" maxlength="50" value="{_esc(values.get('date_label', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="Mon YYYY, e.g. Jun 2026 — optional">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (tiebreaker)</label>
+      <input name="display_order" type="number" value="{_esc(str(values.get('display_order')) if values.get('display_order') not in (None, '') else '')}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="Leave blank — auto-assigned">
+    </div>
+  </div>
+  {_oc_parse_warning(values)}
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Body (Markdown)</label>
+    <textarea name="body_md" rows="14"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;font-family:ui-monospace,monospace;background:#fff;resize:vertical;"
+      placeholder="Leave blank to keep this as a card-metadata-only entry (like the 3 flagship pieces) with no page of its own.">{_esc(values.get('body_md', ''))}</textarea>
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+      Headings, fenced code blocks, and tables render through the site&rsquo;s own styling. Raw HTML
+      is passed through as-is&mdash;this field is admin-only, never public input. Images must already
+      exist at a URL (e.g. under /static/thought-leadership/&hellip;)&mdash;there&rsquo;s no upload here.
+    </p>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Status</label>
+    <select name="status" style="width:220px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      {status_opts}
+    </select>
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+      Draft renders only for a signed-in admin, at its own canonical URL. Live is public&mdash;on
+      the site for anyone, and (if Body is filled in) reachable at /thought-leadership/&lt;slug&gt;.
+    </p>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--navy);">
+      <input type="checkbox" name="featured_home" value="1" {"checked" if values.get("featured_home") else ""}>
+      Feature on homepage
+    </label>
+    <p style="margin:4px 0 0 26px;font-size:12px;color:var(--muted);">
+      Shows this piece in the homepage&rsquo;s flagship row. A piece must be Live to show there
+      regardless of this checkbox; /thought-leadership itself shows every Live piece either way.
+    </p>
+  </div>"""
+
+
+def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_label: str) -> str:
+    error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                  f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
+                  if error else '')
+    return f"""<div class="page page-form">
+<p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original Content</a></p>
+<h1>{_esc(heading)}</h1>
+{error_html}
+<form method="post" action="{action}" style="display:grid;gap:20px;">
+{_oc_form_fields(values)}
+  <div>
+    <button type="submit" class="btn">{_esc(submit_label)}</button>
+    <a href="/admin/original-content" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+
+
+def _oc_values_from_form(form) -> dict:
+    display_order_raw = (form.get("display_order") or "").strip()
+    if display_order_raw == "":
+        display_order = None
+    else:
+        try:
+            display_order = int(display_order_raw)
+        except ValueError:
+            display_order = None  # caught by the numeric-string check below, kept as None here
+    date_label = (form.get("date_label") or "").strip()
+    status = (form.get("status") or "draft").strip()
+    if status not in ("draft", "live"):
+        status = "draft"
+    return {
+        "title": (form.get("title") or "").strip(),
+        # Not auto-lowercased — an uppercase or otherwise malformed slug is
+        # rejected outright by _validate_oc_slug's regex, not silently
+        # normalized, so what an admin sees in the URL is exactly what they
+        # typed.
+        "slug": (form.get("slug") or "").strip(),
+        "teaser": (form.get("teaser") or "").strip(),
+        "tag_label": (form.get("tag_label") or "").strip(),
+        "link_label": (form.get("link_label") or "").strip(),
+        "date_label": date_label,
+        "sort_key": _sort_key_from_date_label(date_label),
+        "body_md": (form.get("body_md") or "").strip() or None,
+        "status": status,
+        "featured_home": bool(form.get("featured_home")),
+        "display_order_raw": display_order_raw,
+        "display_order": display_order,
+    }
+
+
+@app.get("/admin/original-content", response_class=HTMLResponse)
+def admin_original_content(request: Request, status: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        items = lib.list_original_content(status=status or None)
+    finally:
+        lib.close()
+
+    def _row(it: dict) -> str:
+        status_badge = (
+            '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;'
+            'background:var(--seafoam-wash);color:var(--seafoam-deep);">Live</span>'
+            if it["status"] == "live" else
+            '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;'
+            'background:var(--accent-light);color:var(--muted);">Draft</span>'
+        )
+        page_link = (f' &middot; <a href="/thought-leadership/{_esc(it["slug"])}" target="_blank" rel="noopener" '
+                     f'style="font-size:12px;">View &rarr;</a>') if it["body_md"] else ""
+        return f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}{page_link}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);font-family:ui-monospace,monospace;">{_esc(it['slug'])}</td>
+  <td style="padding:10px 12px;">{status_badge}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{"Yes" if it["featured_home"] else "—"}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{it['display_order']}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(_relative_age(it['updated_at'])) or '—'}</td>
+  <td style="padding:10px 12px;white-space:nowrap;">
+    <a href="/admin/original-content/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <form method="post" action="/admin/original-content/{it['id']}/delete" style="display:inline;"
+          onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot;?');">
+      <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+
+    rows = "".join(_row(it) for it in items) or \
+        '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No entries yet.</td></tr>'
+
+    def _filter_link(s: str, label: str) -> str:
+        active = s == status
+        href = "/admin/original-content" + (f"?status={s}" if s else "")
+        style = "font-weight:700;color:var(--navy);" if active else "color:var(--muted);"
+        return f'<a href="{href}" style="font-size:13px;margin-right:14px;{style}">{label}</a>'
+
+    filters = _filter_link("", "All") + _filter_link("live", "Live") + _filter_link("draft", "Draft")
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+  <h1>Original Content</h1>
+  <a href="/admin/original-content/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add piece</a>
+</div>
+<p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
+<div style="margin-bottom:16px;">{filters}</div>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Title</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Slug</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Featured home</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Display order</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Updated</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>
+<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
+  The 3 flagship pieces (Growth Engine Ratio, Sail Don&rsquo;t Row, Connecting Claude to NetSuite) have no
+  Body&mdash;their own hand-built pages render them. A piece with a Body renders at its own
+  /thought-leadership/&lt;slug&gt; page once it&rsquo;s Live.
+</p>
+</div>"""
+    return HTMLResponse(_page("Original Content—Admin", "", body, authed=True))
+
+
+@app.get("/admin/original-content/new", response_class=HTMLResponse)
+def admin_original_content_new(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    return HTMLResponse(_page("Add Original Content—Admin", "",
+                              _oc_form_page("Add a piece", "/admin/original-content/new",
+                                           {"status": "draft"}, "", "Add piece"),
+                              authed=True))
+
+
+@app.post("/admin/original-content/new")
+async def admin_original_content_new_submit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    v = _oc_values_from_form(form)
+    lib = _lib()
+    try:
+        def _reject(message: str):
+            return HTMLResponse(_page(
+                "Add Original Content—Admin", "",
+                _oc_form_page("Add a piece", "/admin/original-content/new", v, message, "Add piece"),
+                authed=True), status_code=400)
+
+        if not v["title"]:
+            return _reject("Title is required.")
+        if not v["teaser"]:
+            return _reject("Teaser is required.")
+        if not v["tag_label"]:
+            return _reject("Tag label is required.")
+        if not v["link_label"]:
+            return _reject("Link label is required.")
+        if v["display_order_raw"] and v["display_order"] is None:
+            return _reject("Display order must be a number.")
+        slug_error = _validate_oc_slug(v["slug"], lib)
+        if slug_error:
+            return _reject(slug_error)
+
+        lib.add_original_content(
+            v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
+            v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
+            v["display_order"],
+        )
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/original-content", status_code=303)
+
+
+@app.get("/admin/original-content/{item_id}/edit", response_class=HTMLResponse)
+def admin_original_content_edit(request: Request, item_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        it = lib.get_original_content(item_id)
+    finally:
+        lib.close()
+    if not it:
+        raise HTTPException(status_code=404, detail="Original Content piece not found")
+    values = dict(it)
+    values["body_md"] = values["body_md"] or ""
+    # _page() escapes its own title argument internally — passing an
+    # already-_esc()'d fragment here would double-escape (e.g. "&amp;amp;"),
+    # the same class of bug CLAUDE.md's "Speaking &amp; Events" fix covers.
+    return HTMLResponse(_page(f"Edit {it['title']}—Admin", "",
+                              _oc_form_page(f"Edit {it['title']}", f"/admin/original-content/{item_id}/edit",
+                                           values, "", "Save changes"),
+                              authed=True))
+
+
+@app.post("/admin/original-content/{item_id}/edit")
+async def admin_original_content_edit_submit(request: Request, item_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    v = _oc_values_from_form(form)
+    lib = _lib()
+    try:
+        if not lib.get_original_content(item_id):
+            raise HTTPException(status_code=404, detail="Original Content piece not found")
+
+        def _reject(message: str):
+            return HTMLResponse(_page(
+                f"Edit {v['title']}—Admin", "",
+                _oc_form_page(f"Edit {v['title']}", f"/admin/original-content/{item_id}/edit",
+                             v, message, "Save changes"),
+                authed=True), status_code=400)
+
+        if not v["title"]:
+            return _reject("Title is required.")
+        if not v["teaser"]:
+            return _reject("Teaser is required.")
+        if not v["tag_label"]:
+            return _reject("Tag label is required.")
+        if not v["link_label"]:
+            return _reject("Link label is required.")
+        if v["display_order_raw"] and v["display_order"] is None:
+            return _reject("Display order must be a number.")
+        slug_error = _validate_oc_slug(v["slug"], lib, exclude_id=item_id)
+        if slug_error:
+            return _reject(slug_error)
+
+        # The edit form always prefills display_order with the current
+        # value, so a blank submission here is a deliberate clear — same
+        # convention as thought_leadership's own edit route: treat it as 0
+        # rather than re-triggering the add-only auto-assign.
+        lib.update_original_content(
+            item_id, v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
+            v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
+            v["display_order"] or 0,
+        )
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/original-content", status_code=303)
+
+
+@app.post("/admin/original-content/{item_id}/delete")
+def admin_original_content_delete(request: Request, item_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_original_content(item_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/original-content", status_code=303)
+
+
 _COMMUNITY_COST_BANDS = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
 _COMMUNITY_SPONSORSHIP_TYPES = ["Independent", "Vendor-sponsored", "Investor-sponsored"]
 # Derived from the actual access/format values across the existing 35
@@ -18281,6 +18685,7 @@ _ADMIN_GROUPS = [
     ]),
     ("Thought Leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
         ("/admin/thought-leadership", "Thought Leadership", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
+        ("/admin/original-content", "Original Content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Brand, voice, and content", "How the site looks and sounds.", [
