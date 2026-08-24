@@ -1199,6 +1199,35 @@ check is defense in depth, not the primary mechanism. A `status='draft'` row 404
 signed-out visitor and renders normally, at its own canonical URL, for an active admin session
 (`_is_authed`) — there is no separate preview URL or token.
 
+**Original Content Phase 3 (2026-08) — admin CRUD at `/admin/original-content`.** Same
+list/add/edit/delete pattern as `/admin/thought-leadership` (read first, matched, not built
+from scratch), with one addition specific to this table: slug validation, since a bad slug here
+is a real failure mode (an unreachable page, or a page that silently loses to a bespoke route)
+that `thought_leadership`'s free-text title never risked. `_validate_oc_slug` checks, in order,
+that the slug is present, well-formed (`_OC_SLUG_RE`, lowercase letters/digits/single hyphens
+only — **not auto-lowercased**, an uppercase or malformed slug is rejected outright rather than
+silently normalized, so what an admin sees in the URL is exactly what they typed), not one of
+the three bespoke pieces' own route path segments (`_OC_RESERVED_SLUGS` — a colliding slug would
+save fine but be permanently unreachable, since the literal route always wins registration
+order), and not already used by a different row. A rejection re-renders the same form with the
+submitted values preserved and an inline coral error banner — the richer pattern
+`_feed_form_page`/`admin_feeds_new_submit` already established for exactly this kind of
+validation, not `thought_leadership`'s own blunter raise-`HTTPException`-on-bad-input approach.
+Slug edits are allowed at any time, including on a live piece — the edit form's helper text
+warns that this breaks any existing link, since there's no redirect system (out of scope, same
+as Phase 2's own decision). `sort_key` is derived from `date_label` on every save via the same
+`_sort_key_from_date_label` `thought_leadership` uses — not a form field. `display_order` left
+blank on add auto-assigns the next value (`Library.add_original_content`'s own `COALESCE(MAX...)
++ 1` default); left blank on edit is a deliberate clear, treated as `0` — same convention as
+`thought_leadership`'s own edit route. `body_md` left blank keeps the row as card-metadata-only
+(`NULL`, not `''` — `_oc_values_from_form` maps an empty textarea to `None`), the same state the
+three flagship rows have always been in; a piece created this way still renders as a flagship/
+`/thought-leadership` card immediately (`test_blank_body_md_stays_card_only_and_renders_on_homepage`)
+and correctly 404s at its own `/thought-leadership/{slug}` page (Phase 2's `body_md IS NULL`
+guard) until a later edit fills in a body. The admin index's "Thought Leadership" group gained a
+second item pointing here — `count_label` is `len(items)`, so the badge updated with no
+additional wiring.
+
 `Library.get_thought_leadership_representative(type)` (Homepage Restructure phase;
 supersedes the Phase 3 addendum's `list_thought_leadership_for_home` pin-then-
 recency-backfill panel, which the redesign replaced outright) selects one
