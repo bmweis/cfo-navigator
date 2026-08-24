@@ -25,6 +25,27 @@ def env(monkeypatch):
     from linklib.db import Library
     lib = Library(db)
     lib.create_user("member1", "supersecret", role="user")
+    # /thought-leadership/netsuite-mcp is served by the GET
+    # /thought-leadership/{slug} catch-all now (Original Content Phase 4a —
+    # the bespoke route was retired), which needs a status='live' row with a
+    # real body_md to 200. A fresh test DB has none until this migration
+    # runs, same reason test_thought_leadership_homepage_teaser.py's own
+    # fixture seeds the flagship rows — reusing the migration script's own
+    # content/date_label rather than a duplicated copy.
+    from scripts.migrate_netsuite_mcp_content import BODY_MD as _NS_BODY_MD, DATE_LABEL as _NS_DATE_LABEL
+    from webapp.app import _sort_key_from_date_label as _sort_key
+    ns_row = lib.get_original_content_by_slug("netsuite-mcp")
+    if ns_row is None:
+        lib.add_original_content("netsuite-mcp", "Connecting Claude to NetSuite",
+                                 tag_label="Setup Guide", link_label="Read the guide",
+                                 body_md=_NS_BODY_MD, status="live", featured_home=True,
+                                 date_label=_NS_DATE_LABEL, sort_key=_sort_key(_NS_DATE_LABEL))
+    else:
+        lib.update_original_content(
+            ns_row["id"], ns_row["slug"], ns_row["title"], ns_row["teaser"], ns_row["tag_label"],
+            ns_row["link_label"], _NS_BODY_MD, "live", ns_row["featured_home"],
+            _NS_DATE_LABEL, _sort_key(_NS_DATE_LABEL), ns_row["display_order"],
+        )
     lib.close()
     yield appmod
     if os.path.exists(db):

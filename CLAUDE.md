@@ -2162,6 +2162,79 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   render with no horizontal overflow and are actually fillable by touch,
   not just present in the markup.
 
+- **Original Content, Phase 4 investigation — read-only assessment of
+  porting the three bespoke pages, reported to Brian before any code.**
+  Found all three pages have zero images and zero JS/interactivity except
+  Growth Engine Ratio's live calculator (~380 lines of JS driving two
+  dynamically-generated SVG charts) — a genuine, structural blocker to a
+  clean markdown port for that one page specifically, since it's real
+  computation, not content. Confirmed directly, not assumed: raw HTML, a
+  raw `<style>` block, and even a raw `<script>` block all pass through
+  `_render_original_content_markdown()` completely untouched, so every
+  custom visual device on the other two pages (numbered step-tracks,
+  colored tables, use-case cards, 2×2 matrices, tier strips) is
+  preservable at full fidelity as a raw HTML block in `body_md` — the real
+  choice per page is an authoring-ergonomics trade-off (raw HTML/CSS
+  blocks keep the exact look but aren't prose-editable; simplifying to
+  plain markdown lists/tables is genuinely easy to edit but loses the
+  custom visual), not a hard technical wall, except for GER's calculator.
+  Also surfaced the structural fact that applies to porting any of the
+  three: none can be served at its *current* URL without also retiring its
+  bespoke Python route, since `_OC_RESERVED_SLUGS` (and, underneath that,
+  route-registration order) is what keeps a literal bespoke route from
+  ever losing to the generic catch-all — "port the content" and "free up
+  the slug" are two separate steps, not one.
+
+- **Original Content, Phase 4a — NetSuite MCP ported to `body_md`; its
+  bespoke route retired, the first of the three literal routes to go.**
+  Followed the Phase 4 investigation's hybrid approach: prose became real
+  markdown; the five visually-designed elements (`.ns-case`/`.ns-tip`
+  use-case cards, `.ns-step`/`.ns-num` phase tracks, `.ns-table`/
+  `.ns-trouble` tables, `.ns-note`, `.ns-qr`) were kept as raw HTML blocks
+  in `body_md`, verbatim, using their original CSS classes — copy was
+  extracted exactly as published, no rewriting, no paraphrasing. Those
+  classes' CSS moved out of the retired route's own `<style>` block into a
+  new `_OC_NETSUITE_MCP_CSS` constant, every selector rescoped under
+  `.oc-body` (`.oc-body .ns-table` etc.) so it only ever applies inside a
+  rendered Original Content article, never sitewide — and so `.ns-table`/
+  `.ns-trouble`'s two-class specificity keeps outranking the shared
+  template's own generic `.oc-body table` rule, preserving their original
+  navy-header/zebra-striped look instead of falling back to the generic
+  styling. `scripts/migrate_netsuite_mcp_content.py` (dry-run/`--apply`/
+  write-then-read-back, standard convention) sets `body_md` on the
+  existing Phase-1-seeded row and also sets `date_label` to "June 2026"
+  (blank since Phase 1, since `_TL_FEATURED_CARDS` tuples never carried a
+  date) — restoring the byline the bespoke page always showed, a
+  visual-parity fix bundled into the same script rather than a separate
+  change. **Verified before deleting the route, not assumed**: with the
+  DB row updated but the bespoke route still live, the shared template's
+  real output was rendered to a standalone file (bypassing the still-live
+  bespoke route, which would otherwise win at the real URL) and
+  screenshotted at desktop (1280px) and mobile (390×844) against the live
+  bespoke page. All 23 headings matched, same order, same text. Every
+  ported designed element came back pixel-identical. Two small, expected,
+  documented deltas, not fixed: inline `<code>` spans now render with the
+  shared template's gray-pill background (an inherent side effect of
+  `.oc-body pre,.oc-body code`'s generic styling applying — arguably a
+  consistency win, matching `<code>` everywhere else on the site now), and
+  on mobile, the italic subtitle line now renders just *after* the byline
+  instead of just before it, since the shared template hardcodes the
+  byline immediately after `<h1>` and the subtitle (a field
+  `original_content` has no column for) had to become the first line of
+  `body_md`, which renders after that hardcoded byline — fixing the
+  ordering would mean changing the shared article template's shape for
+  every Original Content piece, not just this one, so it's left as a
+  documented deviation rather than bundled into a content port. Only after
+  that visual-parity check did the bespoke `netsuite_mcp()` Python
+  function get deleted outright — the `/netsuite-mcp` -> `/thought-
+  leadership/netsuite-mcp` 301 redirect stays (its target is still a real,
+  correct URL, just served by the catch-all now); `"netsuite-mcp"` came
+  out of `_OC_RESERVED_SLUGS`, since it's no longer claimed by a bespoke
+  route. Growth Engine Ratio and Sail Don't Row are untouched, still fully
+  bespoke — separate, not-yet-scoped phases (4b/4c), and per the Phase 4
+  investigation, GER's port specifically still needs a decision on what
+  happens to the calculator before it can proceed the same way.
+
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On
   `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat
@@ -2722,16 +2795,21 @@ tables, no third-party dependency.
   log in again — harmless). Set it on the host to keep sessions sticky across deploys.
 - **Route protection:**
   - Public (no auth): `/`, `/thought-leadership`, `/thought-leadership/growth-engine-ratio`,
-    `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp`, `/contact`,
+    `/thought-leadership/ai-hackathon-playbook`, `/contact`,
     `/privacy`, `/login`, `/logout`, `/static/*`, `/health`, `/tools/fpa-buddy/how-it-works`
     (moved off `/admin/*` in the FP&A Buddy explainer follow-up round — see the Key
     architecture decisions bullet above). (The old flat `/growth-engine-ratio`,
-    `/finops-ai-hackathon`, `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
+    `/finops-ai-hackathon`, `/netsuite-mcp` URLs still 301-redirect to the nested paths above —
+    `/netsuite-mcp`'s target is now served by the `{slug}` catch-all below, not a literal route,
+    see Original Content Phase 4a.)
     `/thought-leadership/{slug}` (Original Content Phase 2 — see Key architecture decisions
     above) is public **only for a `status='live'` piece with a real `body_md`**; it's not a
     blanket-public route nor a `/login`-redirecting one — a `status='draft'` row and an
     unknown slug both 404 for a signed-out visitor, and a draft 200s only for an active admin
-    session, at its own canonical URL, per `_is_authed`.
+    session, at its own canonical URL, per `_is_authed`. **`/thought-leadership/netsuite-mcp`
+    is the first real instance of this**, not a fourth literal bespoke route — its own
+    hand-built Python function was retired in Phase 4a; only `growth-engine-ratio` and
+    `ai-hackathon-playbook` remain literal routes (and reserved slugs — `_OC_RESERVED_SLUGS`).
   - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
     `/admin/contacts` (member-gated), and
     `/read`, `/read/{article_id}` (**admin-only**, Phase 1 access level, merged into

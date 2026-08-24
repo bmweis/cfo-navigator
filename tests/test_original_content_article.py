@@ -197,8 +197,11 @@ def test_bespoke_literal_routes_win_over_catch_all_even_on_slug_collision(env):
 
 
 def test_bespoke_pages_unaffected_by_new_catch_all(env):
-    """Spot-check all three bespoke pages still load exactly as before —
-    the new catch-all must not intercept or otherwise change them."""
+    """Spot-check the two remaining bespoke pages still load exactly as
+    before — the new catch-all must not intercept or otherwise change
+    them. netsuite-mcp is no longer bespoke as of Original Content Phase
+    4a (its route was retired, the slug now goes through the catch-all
+    like any other original_content row) — covered separately below."""
     c = _client(env)
     ger = c.get("/thought-leadership/growth-engine-ratio")
     assert ger.status_code == 200
@@ -208,16 +211,23 @@ def test_bespoke_pages_unaffected_by_new_catch_all(env):
     assert hackathon.status_code == 200
     assert "Sail, Don&rsquo;t Row" in hackathon.text or "Sail, Don't Row" in hackathon.text
 
-    netsuite = c.get("/thought-leadership/netsuite-mcp")
-    assert netsuite.status_code == 200
-    assert "Connecting Claude to NetSuite" in netsuite.text
+
+def test_netsuite_mcp_now_served_by_catch_all(env):
+    """Original Content Phase 4a — netsuite-mcp's bespoke route was
+    retired; it's now an ordinary original_content row (still reserved
+    from admin editing as a slug no more — see
+    test_original_content_admin.py's slug-collision tests), reachable
+    through the same catch-all as any brand-new piece."""
+    _add(env, slug="netsuite-mcp", title="Connecting Claude to NetSuite",
+         body_md="Ported content.", status="live")
+    r = _client(env).get("/thought-leadership/netsuite-mcp")
+    assert r.status_code == 200
+    assert "Connecting Claude to NetSuite" in r.text
+    assert "Ported content." in r.text
 
 
 def test_other_bespoke_slug_collisions_also_lose_to_literal_routes(env):
     _add(env, slug="ai-hackathon-playbook", title="Fake Hackathon",
          body_md="fake", status="live")
-    _add(env, slug="netsuite-mcp", title="Fake NetSuite",
-         body_md="fake", status="live")
     c = _client(env)
     assert "Fake Hackathon" not in c.get("/thought-leadership/ai-hackathon-playbook").text
-    assert "Fake NetSuite" not in c.get("/thought-leadership/netsuite-mcp").text

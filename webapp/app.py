@@ -6,8 +6,8 @@ Public routes (no auth):
     GET  /thought-leadership   Podcasts, writing, interviews
     GET  /thought-leadership/growth-engine-ratio    GER framework + calculator
     GET  /thought-leadership/ai-hackathon-playbook  AI hackathon playbook
-    GET  /thought-leadership/netsuite-mcp           Claude–NetSuite setup guide
-    GET  /thought-leadership/{slug}   Admin-authored Original Content piece (live only, unless admin)
+    GET  /thought-leadership/{slug}   Admin-authored Original Content piece (live only, unless admin) —
+                                       includes netsuite-mcp as of Phase 4a; its bespoke route was retired
     GET  /contact              Contact form
     POST /contact              Submit contact form
     GET  /login / POST /login  Password sign-in (sets a signed session cookie)
@@ -3804,315 +3804,6 @@ def netsuite_mcp_redirect(request: Request):
         target += "?" + request.url.query
     return RedirectResponse(target, status_code=301)
 
-
-@app.get("/thought-leadership/netsuite-mcp", response_class=HTMLResponse)
-def netsuite_mcp(request: Request):
-    body = """<div class="page page-full article-atlantic">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
-<style>
-  /* Base pull-quote/callout/warning styling lives in the shared .article-*
-     classes (Phase 6b) — these are just this page's few pre-existing spacing
-     overrides, composed alongside the shared class (class="article-callout
-     ns-callout") so this page's rendering is unchanged from before extraction. */
-  .ns-callout{margin:24px 0;}
-  .ns-callout li{margin-bottom:4px;}
-  .ns-warn{padding:16px 22px;margin:18px 0;}
-  .ns-warn-title{margin-bottom:6px;}
-  /* Width refinement (this phase): CTA/Tip/Warning boxes stay at body-copy
-     width (.tool-prose's 760px column) rather than breaking out — they're
-     mostly multi-line instructional prose, where a wide box reads as an odd
-     second column. Only Quotes widen (see BRAND.md's Callout taxonomy
-     entry); NetSuite MCP currently has no Quote instances, so nothing on
-     this page breaks out. */
-  /* Callout taxonomy (this phase): folded into the Tips color family
-     (seafoam) rather than kept as its own fifth gray "note" style — see
-     BRAND.md's "Callout taxonomy" entry. */
-  .ns-note{background:var(--seafoam-wash);border-left:3px solid var(--seafoam-mid);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}
-  .ns-note p{font-size:14px;color:var(--ink-soft);margin:0;}
-  /* Phase track */
-  .ns-track{display:flex;flex-direction:column;gap:0;margin:24px 0;}
-  .ns-step{display:flex;gap:18px;position:relative;}
-  .ns-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}
-  .ns-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}
-  /* min-width:0 overrides the flex item's default min-width:auto, which
-     otherwise sizes to the content's intrinsic minimum — including the
-     nested .ns-table's min-width:360px — and pushes the whole flex row
-     wider than the viewport on narrow screens instead of letting
-     .ns-table-wrap's overflow-x:auto scroll the table in place. */
-  .ns-body{padding-bottom:24px;flex:1;min-width:0;}
-  .ns-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}
-  .ns-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}
-  /* Use case cards */
-  .ns-cases{display:grid;grid-template-columns:1fr;gap:12px;margin:20px 0;}
-  .ns-case{background:#fff;border:1px solid var(--line-strong);border-radius:10px;padding:20px 22px;}
-  .ns-case-label{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}
-  .ns-case-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin-bottom:8px;}
-  .ns-case p{font-size:14px;color:var(--ink-soft);margin-bottom:10px;line-height:1.55;}
-  .ns-tip{background:var(--seafoam-wash);border-radius:6px;padding:10px 14px;font-size:13px;color:var(--seafoam-deep);margin-top:8px;}
-  .ns-tip strong{font-weight:600;}
-  /* Permission table */
-  .ns-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0;}
-  .ns-table{width:100%;border-collapse:collapse;font-size:14px;}
-  .ns-table th{background:var(--navy);color:#fff;padding:9px 14px;text-align:left;font-weight:600;}
-  .ns-table td{padding:9px 14px;border-top:1px solid var(--line);}
-  .ns-table tr:nth-child(even) td{background:var(--surface-2);}
-  /* Troubleshooting table */
-  .ns-trouble{width:100%;border-collapse:collapse;font-size:14px;margin:16px 0;}
-  .ns-trouble th{background:var(--surface-2);padding:9px 14px;text-align:left;font-weight:600;border-bottom:2px solid var(--line-strong);}
-  .ns-trouble td{padding:10px 14px;border-top:1px solid var(--line);vertical-align:top;line-height:1.5;}
-  .ns-trouble tr:hover td{background:var(--navy-wash);}
-  /* Quick ref */
-  .ns-qr{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:24px 28px;margin:28px 0;}
-  .ns-qr-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;}
-  .ns-qr h3{font-family:var(--font-head);font-size:14px;font-weight:600;color:var(--ink);margin:16px 0 6px;}
-  .ns-qr h3:first-of-type{margin-top:0;}
-  .ns-qr ul{padding-left:18px;margin:0 0 4px;}
-  .ns-qr li{font-size:13px;color:var(--ink-soft);margin-bottom:3px;line-height:1.5;}
-  @media(max-width:640px){
-    .ns-trouble{font-size:13px;}
-    .ns-trouble td,.ns-trouble th{padding:8px 10px;}
-    .ns-table{font-size:13px;}
-    .ns-table td,.ns-table th{padding:8px 10px;}
-  }
-</style>
-
-<div class="tool-prose">
-<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Setup Guide</p>
-<h1 style="margin:0 0 8px;">Connecting Claude to NetSuite</h1>
-<p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">An end-to-end guide to the two-role OAuth setup for finance teams</p>
-<p style="color:var(--muted);font-size:14px;margin:0 0 36px;">By Brian Weisberg &middot; June 2026</p>
-
-<p>This guide walks through connecting Claude to NetSuite so you can ask questions about your financial data and get answers directly—no logging into NetSuite, no writing queries, no manual exports.</p>
-
-<p>Once connected, you can ask things like <em>"how much did we spend with this vendor last year?"</em> or <em>"what's the deferred revenue balance for this customer?"</em> and Claude will query NetSuite and return the answer in plain language, a table, or a formatted report. The connection runs through something called an MCP integration. You don't need to understand the underlying technology to use it—this guide covers everything you need.</p>
-
-<div class="article-callout ns-callout">
-  <div class="article-callout-title">Before you start</div>
-  <p>Check that the NetSuite AI Connector SuiteApp is installed: <strong>Customization → SuiteCloud → Installed SuiteApps</strong>, look for <code>com.netsuite.mcpstandardtools</code>. It should show <strong>Status: COMPLETE</strong>. If it's not installed, go to the SuiteApp Marketplace and search for it by name before continuing.</p>
-</div>
-
-<h2>What you can do with this</h2>
-<p>Three examples to get your wheels turning. The right use cases depend on your business, but the pattern is consistent: ask a question in plain language, Claude queries NetSuite, you get something ready to share or act on.</p>
-
-<div class="ns-cases">
-  <div class="ns-case">
-    <div class="ns-case-label">Use case 01</div>
-    <div class="ns-case-title">Revenue movements reconciliation</div>
-    <p>If you work with deferred revenue—annual contracts, prepaid arrangements, usage-based billing—it's hard to get a clear picture of how money is moving at any point in time. Claude can pull a month-by-month view showing how revenue is loading into deferred, releasing into recognized, and what the ending balance looks like. Run it for the whole business or for a specific customer.</p>
-    <p>A typical output: a waterfall table (deferred loaded, released, ending balance by month), a transaction-level trace from invoice through recognition, and a findings section flagging anything off—like a balance that should have cleared at contract termination but didn't.</p>
-    <div class="ns-tip"><strong>Tip:</strong> Ask Claude to include a math check confirming every ending balance ties back to the underlying arithmetic. Easy to add, catches rounding errors before they make it into something you share.</div>
-  </div>
-  <div class="ns-case">
-    <div class="ns-case-label">Use case 02</div>
-    <div class="ns-case-title">Vendor spend analysis</div>
-    <p>Vendor spend can be deceptively messy in NetSuite. The same vendor might appear under different names across bills. Some vendors route through a spend management platform (Ramp, Navan, Brex), which means they show up as a single vendor with the actual vendor buried in a memo field. Others route through a marketplace, invisible unless you know where to look.</p>
-    <p>Claude can learn these patterns. Once you show it how your vendors are recorded, for example <em>"this vendor always comes through as the platform with the name in the memo,"</em> it applies that logic consistently. The result is a spend picture that reflects reality, not just whatever's in the vendor field.</p>
-    <div class="ns-tip"><strong>Tip:</strong> The first time you run a vendor spend query, ask Claude to show you a sample of raw transaction data before it aggregates anything. Easy way to spot non-obvious mappings before they roll up into a wrong total.</div>
-  </div>
-  <div class="ns-case">
-    <div class="ns-case-label">Use case 03</div>
-    <div class="ns-case-title">Per-employee benefit and stipend tracking</div>
-    <p>If your company offers benefits employees draw on over time—L&amp;D stipends, wellness budgets, home office allowances—and those transactions flow through NetSuite in any form, Claude can extract and organize them by person. A useful output: each employee's YTD usage broken down by category, with transaction-level detail on demand. Useful for answering "who has used their full allocation?" without compiling spreadsheets manually.</p>
-    <div class="ns-tip"><strong>Tip:</strong> Employee names in NetSuite memos are often inconsistent—nicknames, initials, misspellings. Ask Claude to show you the distinct name variations it finds before attributing spend, so you can confirm the mapping is right. It gets even easier if you have a public or internal page that lists your team—Claude picks up on it and learns how you want employee names represented, or how teams are structured.</div>
-  </div>
-</div>
-
-<h2>The security architecture</h2>
-<p>The setup involves creating a dedicated read-only role in NetSuite for Claude to authenticate as. The reason matters.</p>
-
-<p>Claude's NetSuite integration includes tools that can create and update records, not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do. The protection is enforced by NetSuite, not by hoping Claude behaves.</p>
-
-<div class="article-warn ns-warn">
-  <div class="article-warn-title ns-warn-title">One thing that trips people up</div>
-  <p>When you connect Claude, you need to be logged into NetSuite under your <strong>normal working role</strong>—not the new read-only role you're about to create. You'll select the read-only role on a screen that appears during the connection flow. More on this in Part 2.</p>
-</div>
-
-<h2>Part 1—NetSuite setup</h2>
-<p style="color:var(--muted);font-size:14px;margin:-8px 0 20px;">You need Administrator access for these steps, or ask your NetSuite admin to complete them.</p>
-
-<div class="ns-track">
-  <div class="ns-step">
-    <div class="ns-num">1</div>
-    <div class="ns-body">
-      <h3>Confirm the SuiteApp is installed</h3>
-      <p>Go to <strong>Customization → SuiteCloud → Installed SuiteApps</strong>. Look for <strong>NetSuite AI Connector Service</strong> (bundle ID: <code>com.netsuite.mcpstandardtools</code>). Confirm it shows <strong>Status: COMPLETE</strong>. If it's not there, install it from the SuiteApp Marketplace before continuing.</p>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">2</div>
-    <div class="ns-body">
-      <h3>Create the read-only "Netsuite MCP" role</h3>
-      <p>Go to <strong>Setup → Users/Roles → Manage Roles → New</strong>. Name it <strong>Netsuite MCP</strong> (this name appears on the authorization screen when you connect Claude). Check <strong>Web Services Only Role</strong>—this prevents anyone from using this role to log into NetSuite directly and ensures it appears correctly during the connection flow.</p>
-      <p>On the <strong>Permissions tab → Setup subtab</strong>, add these six permissions at Full level:</p>
-      <div class="ns-table-wrap">
-        <table class="ns-table">
-          <thead><tr><th>Permission</th><th>Level</th></tr></thead>
-          <tbody>
-            <tr><td>MCP Server Connection</td><td>Full</td></tr>
-            <tr><td>REST Web Services</td><td>Full</td></tr>
-            <tr><td>Log in using OAuth 2.0 Access Tokens</td><td>Full</td></tr>
-            <tr><td>Log in using Access Tokens</td><td>Full</td></tr>
-            <tr><td>User Access Tokens</td><td>Full</td></tr>
-            <tr><td>SuiteScript</td><td>Full</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p>Save the role. Do not add any permissions related to creating, editing, approving, or posting transactions. This role should stay read-only.</p>
-      <div class="article-warn ns-warn" style="margin-top:12px;">
-        <div class="article-warn-title ns-warn-title">Known issue</div>
-        <p>The Web Services Only Role checkbox is easy to miss but critical. Without it, the role may not show up correctly during the connection flow, and you may see a "does not support OAuth 2.0 login" error.</p>
-      </div>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">3</div>
-    <div class="ns-body">
-      <h3>Assign the role to your user account</h3>
-      <p>Go to <strong>Lists → Employees → Employees</strong>. Find and open your employee record. Click the <strong>Access tab</strong>, find the Roles section, and add <strong>Netsuite MCP</strong>. Save. You'll now see Netsuite MCP in the role selector in the top-right corner of NetSuite—though you won't need to switch into it during normal use.</p>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">4</div>
-    <div class="ns-body">
-      <h3>A note on the integration record (no action needed)</h3>
-      <p>If you look at the integration record Claude uses (<strong>Setup → Integration → Manage Integrations</strong>, look for "NetSuite AI Connector Service"), you'll notice the REST Web Services checkbox is greyed out and can't be checked. That's normal—Anthropic created this integration and its settings are locked. Don't try to edit it. The role you created in Step 2 is what gives Claude the access it needs.</p>
-    </div>
-  </div>
-</div>
-
-<h2>Part 2—Connecting Claude</h2>
-<p style="color:var(--muted);font-size:14px;margin:-8px 0 20px;">NetSuite is set up. This part takes about two minutes per person.</p>
-
-<div class="ns-track">
-  <div class="ns-step">
-    <div class="ns-num">5</div>
-    <div class="ns-body">
-      <h3>Make sure you're in the right NetSuite role first</h3>
-      <p>Before going to Claude, check which role you're currently in on the NetSuite side. You need to be logged in under your <strong>normal working role</strong>—not the Netsuite MCP role you just created. Netsuite MCP is what you'll select during the connection flow, not what you're already in. Check the role indicator in the top-right corner of NetSuite. If it says Netsuite MCP, switch to your normal role first.</p>
-      <div class="article-warn ns-warn" style="margin-top:8px;">
-        <div class="article-warn-title ns-warn-title">Most common mistake when reconnecting</div>
-        <p>Going straight to Claude without checking your NetSuite role first. Always confirm you're in your normal working role in NetSuite before clicking Connect in Claude. This step catches more than half of all connection failures.</p>
-      </div>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">6</div>
-    <div class="ns-body">
-      <h3>Connect NetSuite in Claude</h3>
-      <p>In Claude, go to <strong>Settings → Connectors</strong>. Find NetSuite and click <strong>Connect</strong>. A NetSuite page will open asking you to authorize the connection. On the role selector, choose <strong>Netsuite MCP</strong>. Click <strong>Authorize</strong>. You'll be brought back to Claude automatically.</p>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">7</div>
-    <div class="ns-body">
-      <h3>Test that it works</h3>
-      <p>The NetSuite connector in Claude should now show as connected. Confirm it's actually working with a simple test: <em>"Run a quick NetSuite query to confirm the connection is working—just pull the first 3 rows from the transaction table."</em> If Claude returns a few rows, you're set. If it says the tools are unavailable, see Troubleshooting below.</p>
-    </div>
-  </div>
-</div>
-
-<div class="ns-note">
-  <p><strong>Note:</strong> The connection is per person, not shared. Each person who wants to use Claude with NetSuite needs to go through setup themselves and connect their own Claude account. If a colleague's connection is working, that tells you nothing about whether yours is.</p>
-</div>
-
-<h2>Tips for getting good results</h2>
-
-<h3 style="font-size:16px;margin:24px 0 8px;">Ask for everything, not just bills</h3>
-<p>When you ask Claude to look something up, it may default to querying only vendor bills or invoices. This can miss a lot. Journal entries are a separate transaction type—and many common workflows post through JEs: month-end accruals, prepayment amortizations, corporate card programs. A query limited to vendor bills misses them entirely.</p>
-<div class="article-callout ns-callout">
-  <div class="article-callout-title">Sanity check for any spend query</div>
-  <p>Ask Claude to first pull a grand total with no filters other than the account and date range, then compare against the detailed results. If they don't match, something is being filtered out. The discrepancy tells you what to investigate next.</p>
-</div>
-
-<h3 style="font-size:16px;margin:24px 0 8px;">Filter at the line level, not the header</h3>
-<p>Revenue recognition journal entries are often posted as a single large entry covering many customers at once. The customer is recorded at the line level inside the entry, not on the entry itself. If Claude filters at the wrong level, it can return results for a completely different customer—or nothing at all.</p>
-<p>If results for a customer look wrong—too high, too low, or zero when you know there should be activity—ask Claude: <em>"Are you filtering on the transaction line entity, not the transaction header entity?"</em> That question catches the most common mistake.</p>
-
-<h3 style="font-size:16px;margin:24px 0 8px;">If you get zero results, pull an unfiltered sample first</h3>
-<p>Zero results almost always mean a filter is wrong, not that the data is missing. Ask Claude to run a quick sample: <em>"Can you pull 5–10 raw rows with no filters so we can see what's actually there?"</em> This almost always reveals the issue—a filter too narrow, a date range that doesn't match, or a field with data in a slightly different format than expected.</p>
-
-<h3 style="font-size:16px;margin:24px 0 8px;">Claude can run saved searches, not create them</h3>
-<p>Claude can run existing saved searches and list available ones. It can't create new ones. If you need a new saved search built, ask Claude what criteria and columns to use, then create it yourself: <strong>Reports → Saved Searches → New → Transaction</strong>.</p>
-
-<h2>Troubleshooting</h2>
-<div class="ns-table-wrap">
-  <table class="ns-trouble">
-    <thead><tr><th>Error / symptom</th><th>Cause</th><th>Fix</th></tr></thead>
-    <tbody>
-      <tr>
-        <td>"This connector has no tools available"</td>
-        <td>Usually a stale session, not a permissions problem</td>
-        <td>Open a new Claude conversation first. If that fails, go to Settings → Connectors, disconnect NetSuite, and reconnect—making sure to select Netsuite MCP on the authorization screen.</td>
-      </tr>
-      <tr>
-        <td>"Your role does not support OAuth 2.0 login"</td>
-        <td>You're logged into NetSuite under a role that can't initiate the connection flow—often happens when you're already in the Netsuite MCP role</td>
-        <td>Switch to your normal working role in NetSuite first, then go back to Claude and connect. Select Netsuite MCP on the authorization screen.</td>
-      </tr>
-      <tr>
-        <td>Netsuite MCP doesn't appear as an option on the authorization screen</td>
-        <td>Role hasn't been assigned to your user yet, or Web Services Only Role isn't checked</td>
-        <td>Ask your NetSuite admin to assign Netsuite MCP to your employee record and confirm Web Services Only Role is checked on the role definition.</td>
-      </tr>
-      <tr>
-        <td>Connection keeps dropping</td>
-        <td>Normal—the connection doesn't stay active indefinitely</td>
-        <td>Open a new Claude conversation. Fixes it most of the time. If not, go to Settings → Connectors, disconnect, and reconnect.</td>
-      </tr>
-      <tr>
-        <td>Can't find a Claude token in NetSuite's Access Tokens list</td>
-        <td>Expected—the connection uses a different token type that doesn't appear there</td>
-        <td>Nothing to do. Its absence from that list doesn't mean anything is wrong.</td>
-      </tr>
-      <tr>
-        <td>Totals look wrong or suspiciously large</td>
-        <td>Often filtering at the transaction header instead of the line entity on large journal entries</td>
-        <td>Ask Claude: "Are you filtering on the transaction line entity, not the header?" Then ask it to pull an unfiltered sample to verify.</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-
-<h2>When the connection drops</h2>
-<p>The connection between Claude and NetSuite drops periodically. This is normal and doesn't mean anything is misconfigured. Try this first: <strong>open a new Claude conversation.</strong> The connection re-establishes on a new session most of the time.</p>
-
-<p>If a new conversation doesn't fix it: go to <strong>Customize</strong> (bottom-left of the chat window) or <strong>Settings → Connectors</strong>. Find NetSuite, click Disconnect, then Connect. On the NetSuite authorization screen, confirm you're in your normal working role, then select Netsuite MCP and authorize. Test with a quick query.</p>
-
-<div class="ns-qr">
-  <div class="ns-qr-title">📋 Quick reference</div>
-  <h3>First-time setup (done once, by your NetSuite admin)</h3>
-  <ul>
-    <li>Install the NetSuite AI Connector SuiteApp (<code>com.netsuite.mcpstandardtools</code>)</li>
-    <li>Create the Netsuite MCP role: Web Services Only Role checked, 6 permissions at Full, no write access</li>
-    <li>Assign the role to each user who will connect Claude</li>
-  </ul>
-  <h3>Connecting Claude (done once per person)</h3>
-  <ul>
-    <li>In NetSuite, confirm you're logged in under your normal working role</li>
-    <li>In Claude → Settings → Connectors, click Connect next to NetSuite</li>
-    <li>On the authorization screen, select Netsuite MCP</li>
-    <li>Test with a quick query to confirm it's working</li>
-  </ul>
-  <h3>If the connection drops</h3>
-  <ul>
-    <li>Open a new Claude conversation and try again—fixes it most of the time</li>
-    <li>If that doesn't work: confirm your NetSuite role, then go to Customize or Settings → Connectors in Claude and reconnect</li>
-  </ul>
-  <h3>If results look wrong</h3>
-  <ul>
-    <li>Ask Claude if it's including journal entries, not just bills</li>
-    <li>Ask Claude if it's filtering on the transaction line entity (not the transaction header)</li>
-    <li>Ask Claude to pull a small unfiltered sample to see what's actually in the data</li>
-  </ul>
-</div>
-
-<div style="border-top:1px solid var(--line-strong);margin-top:48px;padding-top:24px;">
-  <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
-</div>
-</div>
-
-</div>"""
-    return HTMLResponse(_page("Connecting Claude to NetSuite—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
 @app.get("/thought-leadership/{slug}", response_class=HTMLResponse)
@@ -11980,6 +11671,60 @@ _OC_ARTICLE_CSS = (
     '.oc-body hr{border:none;border-top:1px solid var(--line);margin:2.5em 0;}'
 )
 
+# Original Content Phase 4a — page-specific CSS ported verbatim from the
+# retired netsuite_mcp() bespoke route's own <style> block, scoped under
+# .oc-body (rather than left bare) so it only ever applies inside a
+# rendered Original Content article body, never sitewide. Class names
+# (.ns-*) are unchanged from the original page — the raw HTML blocks
+# embedded in the netsuite-mcp row's body_md reference these exact classes.
+# .ns-table/.ns-trouble (2 classes) intentionally outrank the generic
+# .oc-body table/th/td rules above (1 class + tag) by CSS specificity, so
+# these two tables keep their original navy-header/zebra-striped treatment
+# instead of falling back to the shared template's generic table styling.
+_OC_NETSUITE_MCP_CSS = (
+    '.oc-body .ns-callout{margin:24px 0;}'
+    '.oc-body .ns-callout li{margin-bottom:4px;}'
+    '.oc-body .ns-warn{padding:16px 22px;margin:18px 0;}'
+    '.oc-body .ns-warn-title{margin-bottom:6px;}'
+    '.oc-body .ns-note{background:var(--seafoam-wash);border-left:3px solid var(--seafoam-mid);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}'
+    '.oc-body .ns-note p{font-size:14px;color:var(--ink-soft);margin:0;}'
+    '.oc-body .ns-track{display:flex;flex-direction:column;gap:0;margin:24px 0;}'
+    '.oc-body .ns-step{display:flex;gap:18px;position:relative;}'
+    '.oc-body .ns-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}'
+    '.oc-body .ns-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}'
+    '.oc-body .ns-body{padding-bottom:24px;flex:1;min-width:0;}'
+    '.oc-body .ns-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}'
+    '.oc-body .ns-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}'
+    '.oc-body .ns-cases{display:grid;grid-template-columns:1fr;gap:12px;margin:20px 0;}'
+    '.oc-body .ns-case{background:#fff;border:1px solid var(--line-strong);border-radius:10px;padding:20px 22px;}'
+    '.oc-body .ns-case-label{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}'
+    '.oc-body .ns-case-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin-bottom:8px;}'
+    '.oc-body .ns-case p{font-size:14px;color:var(--ink-soft);margin-bottom:10px;line-height:1.55;}'
+    '.oc-body .ns-tip{background:var(--seafoam-wash);border-radius:6px;padding:10px 14px;font-size:13px;color:var(--seafoam-deep);margin-top:8px;}'
+    '.oc-body .ns-tip strong{font-weight:600;}'
+    '.oc-body .ns-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0;}'
+    '.oc-body .ns-table{width:100%;border-collapse:collapse;font-size:14px;}'
+    '.oc-body .ns-table th{background:var(--navy);color:#fff;padding:9px 14px;text-align:left;font-weight:600;}'
+    '.oc-body .ns-table td{padding:9px 14px;border-top:1px solid var(--line);}'
+    '.oc-body .ns-table tr:nth-child(even) td{background:var(--surface-2);}'
+    '.oc-body .ns-trouble{width:100%;border-collapse:collapse;font-size:14px;margin:16px 0;}'
+    '.oc-body .ns-trouble th{background:var(--surface-2);padding:9px 14px;text-align:left;font-weight:600;border-bottom:2px solid var(--line-strong);}'
+    '.oc-body .ns-trouble td{padding:10px 14px;border-top:1px solid var(--line);vertical-align:top;line-height:1.5;}'
+    '.oc-body .ns-trouble tr:hover td{background:var(--navy-wash);}'
+    '.oc-body .ns-qr{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:24px 28px;margin:28px 0;}'
+    '.oc-body .ns-qr-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;}'
+    '.oc-body .ns-qr h3{font-family:var(--font-head);font-size:14px;font-weight:600;color:var(--ink);margin:16px 0 6px;}'
+    '.oc-body .ns-qr h3:first-of-type{margin-top:0;}'
+    '.oc-body .ns-qr ul{padding-left:18px;margin:0 0 4px;}'
+    '.oc-body .ns-qr li{font-size:13px;color:var(--ink-soft);margin-bottom:3px;line-height:1.5;}'
+    '@media(max-width:640px){'
+    '.oc-body .ns-trouble{font-size:13px;}'
+    '.oc-body .ns-trouble td,.oc-body .ns-trouble th{padding:8px 10px;}'
+    '.oc-body .ns-table{font-size:13px;}'
+    '.oc-body .ns-table td,.oc-body .ns-table th{padding:8px 10px;}'
+    '}'
+)
+
 
 def _original_content_article_body(row: dict) -> str:
     """The shared article shell for an admin-authored piece — matches the
@@ -11996,7 +11741,7 @@ def _original_content_article_body(row: dict) -> str:
     body_html = _render_original_content_markdown(row["body_md"] or "")
     return f"""<div class="page page-full article-atlantic">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
-<style>{_OC_ARTICLE_CSS}</style>
+<style>{_OC_ARTICLE_CSS}{_OC_NETSUITE_MCP_CSS}</style>
 <div class="tool-prose">
 {tag_html}
 <h1 style="margin:0 0 8px;">{_esc(row["title"])}</h1>
@@ -12417,13 +12162,16 @@ def admin_thought_leadership_delete(request: Request, item_id: int):
 # already established for exactly that kind of validation, rather than the
 # thought_leadership form's blunter raise-HTTPException-on-bad-input approach.
 
-# The three literal bespoke /thought-leadership/* route path segments — see
-# _TL_FEATURED_CARDS and the Original Content Phase 1/2 CLAUDE.md entries.
-# A new/edited original_content slug matching one of these would be
+# The remaining literal bespoke /thought-leadership/* route path segments —
+# see _TL_FEATURED_CARDS and the Original Content Phase 1/2 CLAUDE.md
+# entries. A new/edited original_content slug matching one of these would be
 # unreachable (the literal route always wins registration order over the
 # GET /thought-leadership/{slug} catch-all), so it's rejected here rather
-# than silently accepted and never actually reachable.
-_OC_RESERVED_SLUGS = {"growth-engine-ratio", "ai-hackathon-playbook", "netsuite-mcp"}
+# than silently accepted and never actually reachable. "netsuite-mcp" was
+# removed from this set in Original Content Phase 4a — its bespoke route
+# was retired and the slug is now served by the catch-all like any other
+# original_content row, so it no longer needs reserving.
+_OC_RESERVED_SLUGS = {"growth-engine-ratio", "ai-hackathon-playbook"}
 _OC_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 

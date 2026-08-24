@@ -1228,6 +1228,52 @@ guard) until a later edit fills in a body. The admin index's "Thought Leadership
 second item pointing here — `count_label` is `len(items)`, so the badge updated with no
 additional wiring.
 
+**Original Content Phase 4a (2026-08) — the first bespoke page (`netsuite-mcp`) ported to a real
+`body_md`; its Python route retired.** A read-only Phase 4 investigation (all three bespoke
+pages, reported to Brian before any code) found none of the three has images, JS, or interactivity
+— every custom visual device on all three (numbered step-tracks, use-case cards, colored tables, a
+quick-reference box) is inline-styled HTML/CSS with no page-specific `<style>` selector doing
+anything a raw HTML block in `body_md` can't reproduce exactly (verified directly: a raw HTML
+`<div>`, a raw `<style>` block, and even a raw `<script>` block all pass through
+`_render_original_content_markdown()` completely untouched). The one genuine exception — Growth
+Engine Ratio's live JS calculator — has no equivalent on this page, which is why NetSuite MCP was
+the pilot: closest to a "just structure, no interactivity" port of the three. Approved approach,
+a hybrid: genuine prose became real markdown; the visually-designed elements (`.ns-case`/`.ns-tip`
+use-case cards, `.ns-step`/`.ns-num` phase tracks, `.ns-table`/`.ns-trouble` tables, `.ns-note`,
+`.ns-qr`) were preserved as raw HTML blocks in `body_md`, using their original CSS classes
+unchanged. Those classes' CSS moved from the retired route's own `<style>` block into a new
+`_OC_NETSUITE_MCP_CSS` constant, every selector rescoped under `.oc-body` (e.g. `.oc-body
+.ns-table`) so it only ever applies inside a rendered Original Content article body, never
+sitewide — `.oc-body .ns-table`'s two-class specificity deliberately outranks the shared
+template's own generic `.oc-body table` rule, so this table keeps its original navy-header/
+zebra-striped look instead of falling back to the generic styling. `scripts/
+migrate_netsuite_mcp_content.py` (dry-run/`--apply`/write-then-read-back, same convention as every
+other one-time content migration here) sets `body_md` on the existing Phase-1-seeded row, copying
+the original page's prose verbatim — no rewriting — and also sets `date_label` to "June 2026"
+(blank since the Phase 1 seed, since `_TL_FEATURED_CARDS` tuples never carried a date), restoring
+the byline the bespoke page always showed. The bespoke `netsuite_mcp()` route function itself was
+deleted outright (the `/netsuite-mcp` -> `/thought-leadership/netsuite-mcp` 301 redirect stays —
+its target is still a real, correct URL, just served by the catch-all now instead of a Python
+function); `"netsuite-mcp"` came out of `_OC_RESERVED_SLUGS`, since it's no longer claimed by a
+bespoke route and is now an ordinary admin-editable slug like any other. **Verified before
+deleting the route, not assumed**: with the DB row updated but the bespoke route still live, the
+shared template's actual output was rendered to a standalone file (bypassing the still-live
+bespoke route, which would otherwise win at the real URL) and screenshotted at desktop (1280px)
+and mobile (390×844) against the live bespoke page at the same viewports. Content-structure
+verification found all 23 headings present, in the same order, with identical text. Visual
+verification found every ported designed element (use-case cards, the permission table, the
+troubleshooting table, the quick-reference box) pixel-identical, and two small, deliberate,
+documented deltas: inline `<code>` spans (e.g. `com.netsuite.mcpstandardtools`) now render with
+the shared template's gray-pill background instead of the bespoke page's bare monospace text
+(an inherent, expected side effect of `.oc-body pre,.oc-body code`'s generic styling applying —
+arguably a consistency win, since it now matches `<code>` everywhere else on the site), and on
+mobile, the italic subtitle line now renders just *after* the byline instead of just before it —
+the shared template hardcodes the byline immediately following `<h1>`, and the subtitle (a field
+`original_content` has no column for) had to become the first line of `body_md`, which renders
+after that hardcoded byline. Fixing that ordering would mean changing the shared article
+template's shape for every Original Content piece, not just this one — left as a known, minor,
+documented deviation rather than a schema/template change bundled into a content port.
+
 `Library.get_thought_leadership_representative(type)` (Homepage Restructure phase;
 supersedes the Phase 3 addendum's `list_thought_leadership_for_home` pin-then-
 recency-backfill panel, which the redesign replaced outright) selects one

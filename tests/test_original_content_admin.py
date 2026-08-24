@@ -210,7 +210,7 @@ def test_double_hyphen_slug_rejected(env):
     assert "lowercase letters" in r.text
 
 
-@pytest.mark.parametrize("reserved", ["growth-engine-ratio", "ai-hackathon-playbook", "netsuite-mcp"])
+@pytest.mark.parametrize("reserved", ["growth-engine-ratio", "ai-hackathon-playbook"])
 def test_slug_colliding_with_bespoke_route_rejected(env, reserved):
     c = _admin_client(env)
     form = dict(VALID_FORM)
@@ -221,6 +221,25 @@ def test_slug_colliding_with_bespoke_route_rejected(env, reserved):
     lib = env._lib()
     try:
         assert lib.get_original_content_by_slug(reserved) is None
+    finally:
+        lib.close()
+
+
+def test_netsuite_mcp_slug_no_longer_reserved(env):
+    """Original Content Phase 4a retired the netsuite-mcp bespoke route —
+    its slug is an ordinary, admin-editable slug now, not a collision
+    with anything. (A pre-existing row with this slug, from the Phase 1
+    seed, would still trip the plain duplicate-slug check — this test
+    uses a fresh DB with no such row, to isolate the reserved-slug
+    behavior specifically.)"""
+    c = _admin_client(env)
+    form = dict(VALID_FORM)
+    form["slug"] = "netsuite-mcp"
+    r = c.post("/admin/original-content/new", data=form, follow_redirects=False)
+    assert r.status_code == 303
+    lib = env._lib()
+    try:
+        assert lib.get_original_content_by_slug("netsuite-mcp") is not None
     finally:
         lib.close()
 
