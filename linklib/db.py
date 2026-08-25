@@ -4442,7 +4442,24 @@ class Library:
         step — routes through this one method; logging inside it means a
         future new call site can't forget to record the deletion. `action`
         lets a caller note which of those paths this was ('delete' default,
-        'reject', or 'merge')."""
+        'reject', or 'merge').
+
+        Cascade fix (2026-08, the Pave/Culpepper/Radford removal
+        investigation): this used to leave tool_feature_links and
+        entity_citations rows orphaned — nothing reads them once the tool
+        is gone, so per CLAUDE.md's "no dead data" rule they get deleted
+        here too, and any pending feature_review_queue proposal naming this
+        tool is denied (never silently left pointing at a deleted tool) —
+        same deny-with-a-reason precedent scripts/remap_queue_to_framework.py
+        already uses for a consolidated-away or out-of-scope proposal.
+        tool_leads, tool_competitors, tool_name_dedupe_decisions, and
+        narrative_review_log are deliberately NOT touched by this cascade —
+        tool_competitors/tool_name_dedupe_decisions are cleaned below (their
+        own pre-existing cascade), and tool_leads/narrative_review_log
+        survive on purpose, same precedent as tool_audit_log surviving a
+        deleted tool: they're historical record (an intro-request log, an
+        append-only verification trail), not current state a deleted tool
+        needs to keep correct."""
         row = self.get_tool(tool_id)
         self.conn.execute("DELETE FROM tools WHERE id=?", (tool_id,))
         self.conn.execute("DELETE FROM field_reviews WHERE entity_type='tool' AND entity_id=?", (tool_id,))
@@ -4457,6 +4474,15 @@ class Library:
         self.conn.execute(
             "DELETE FROM tool_name_dedupe_decisions WHERE tool_id_a=? OR tool_id_b=?",
             (tool_id, tool_id),
+        )
+        self.conn.execute("DELETE FROM tool_feature_links WHERE tool_id=?", (tool_id,))
+        self.conn.execute(
+            "DELETE FROM entity_citations WHERE entity_type='tool' AND entity_id=?", (tool_id,)
+        )
+        self.conn.execute(
+            """UPDATE feature_review_queue SET status='denied', resolved_at=?,
+               resolution_note=? WHERE tool_id=? AND status='pending'""",
+            (_now(), "tool deleted", tool_id),
         )
         if row:
             detail = f"{row['name']} | {row['url']} | categories: {', '.join(row['categories'])}"

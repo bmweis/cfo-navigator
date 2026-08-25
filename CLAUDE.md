@@ -3199,6 +3199,30 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   byte-identical between this page and `/thought-leadership/growth-engine-ratio`
   at the same viewport width.
 
+- **`delete_tool()` cascade fix (2026-08) — surfaced by the Pave/Culpepper/Radford
+  comp-benchmarking-vendor removal investigation, fixed as its own PR before any
+  tool was actually deleted.** `Library.delete_tool()` already cascaded
+  `tool_competitors`/`tool_name_dedupe_decisions`/`field_reviews`, but left
+  `tool_feature_links` and `entity_citations` rows orphaned — nothing reads
+  either once the tool is gone, a real "no dead data" violation — and left any
+  `pending` `feature_review_queue` proposal naming the tool stuck pointing at
+  nothing forever. Fixed generally (every future tool deletion benefits, not
+  just tonight's three vendors, same "general fix, not purpose-specific"
+  precedent as the `delete_article()` cascade fix): `delete_tool()` now also
+  deletes the tool's `tool_feature_links`/`entity_citations` rows and denies
+  (never silently drops) any `pending` `feature_review_queue` row naming it,
+  with a `resolution_note`. Deliberately NOT touched: `tool_leads` (an
+  intro-request log, still read via a `tool_name` snapshot with no join back
+  to `tools`) and `narrative_review_log` (append-only verification trail) —
+  both survive a deleted tool on purpose, same precedent as `tool_audit_log`
+  itself surviving. This PR shipped and merged before any of the pending
+  admin-UI deletions (Pave, Culpepper, Radford, the Revenue Operations
+  cleanup, FinQuery, Gong) — the fix is what makes the existing single-row
+  admin Delete button safe to use for all of them, so no separate one-off
+  deletion script was needed for the tools themselves. See ARCHITECTURE.md's
+  `tool_audit_log`/`tool_feature_links`/`entity_citations`/
+  `feature_review_queue` schema-table rows for the cross-referenced write-up.
+
 See the **Authentication & security** section below for the full access-control model —
 it supersedes the old "`/save` is token-gated" note.
 
