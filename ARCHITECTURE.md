@@ -1411,6 +1411,28 @@ viewport (390×844) element-level screenshots of exactly the two flagged element
 captures), `getComputedStyle()` diffs before/after, and a new regression test in
 `tests/test_original_content_article.py` asserting both fixed CSS rules render in the response.
 
+**Phase 4c second follow-up (2026-08) — an unintentional white gap above/below the tier table,
+same root-cause shape as the first follow-up.** `.ger-table-wrap`'s own inline style
+(`background:#fff;border:1px solid var(--line);border-radius:12px`, copied verbatim from the
+retired bespoke page) bounds a white bordered card with zero padding, meant to fit the table
+flush against its edges. But `_OC_ARTICLE_CSS`'s generic `.oc-body table{margin:1.5em 0}` rule
+(written for markdown-generated tables, which have no wrapper of their own to own that spacing)
+still applied to `.ger-table`, since its own CSS never reset `margin`. Measured live before
+fixing: the table sat 21px inset from the wrapper's border on all four sides
+(`getComputedStyle(table).margin` → `21px 0px`; a `bounding_box()` diff between the wrapper and
+the table confirmed a matching 21px gap top and bottom) — an unintentional blank box, not a
+design choice. `.ns-table`'s own wrapper never showed this because it has no background/border
+of its own to reveal the identical inherited margin against — the same 21px gap is present
+there too, just invisible against the page background. Fixed with `.oc-body .ger-table{margin:0;}`,
+so the wrapper (which already carries the correct outer spacing via its own inline
+`margin:0 0 32px`) is the single source of the box's outer edge — the same "give the raw-HTML
+element its own explicit reset instead of letting a generic markdown-table rule reach it"
+pattern the header/CTA fixes both used. Verified with a live `bounding_box()` measurement
+before/after (gap 21px → ~1px, the residual being border-width rounding) and a real desktop
+screenshot showing the header sitting flush against the wrapper's rounded top corners, plus a
+new regression test (`test_growth_engine_ratio_table_wrap_has_no_visible_gap`) asserting the
+fixed CSS rule renders in the response.
+
 `Library.get_thought_leadership_representative(type)` (Homepage Restructure phase;
 supersedes the Phase 3 addendum's `list_thought_leadership_for_home` pin-then-
 recency-backfill panel, which the redesign replaced outright) selects one

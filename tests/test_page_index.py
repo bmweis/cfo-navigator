@@ -60,7 +60,7 @@ def test_page_index_loads_for_admin(env):
     c = _admin_client(env)
     r = c.get("/admin/system/page-index")
     assert r.status_code == 200
-    assert "Page Index" in r.text
+    assert "Page index" in r.text
     assert "app.routes" in r.text
 
 

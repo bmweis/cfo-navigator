@@ -169,14 +169,18 @@ capitalize only the first word (and anything that's always capitalized on its ow
 features," not "Software Features"; "Add software," not "Add Software."
 
 Exceptions:
-- **Named products and features** — FP&A Buddy, CFO Toolbox, Sail Don't Row (the game at `/play`
-  only — see below for its name reused as an article title, which is a different case), Reader,
-  Archive Queue, Feed, Saved, Read Later — keep their own established capitalization wherever they
-  appear. The last five (Reader/Archive Queue/Feed/Saved/Read Later) only ever appear on admin-only
-  surfaces (`/read*`, `/admin/*`) as of the 2026-08 casing audit — none is public-facing today, so
-  the exception's actual footprint is admin-internal only; if any of them ever surfaces on a public
-  page, re-confirm the exception still makes sense there.
+- **Named products and features** — FP&A Buddy, CFO Toolbox, Reader, Archive Queue, Feed, Saved,
+  Read Later — keep their own established capitalization wherever they appear. The last five
+  (Reader/Archive Queue/Feed/Saved/Read Later) only ever appear on admin-only surfaces (`/read*`,
+  `/admin/*`) as of the 2026-08 casing audit — none is public-facing today, so the exception's
+  actual footprint is admin-internal only; if any of them ever surfaces on a public page,
+  re-confirm the exception still makes sense there.
 - **Proper nouns** — a company name, a person's name.
+- **User-typed identifiers** — a literal string a visitor is meant to type or paste verbatim, not
+  read as prose. "Save to CFO Library" (the bookmarklet/Shortcut name suggested on `/bookmarklet`)
+  is the one instance today: it's a suggested Shortcut/bookmark *name*, the same category as a
+  file name or a slug, not page chrome — sentence-casing it would suggest a different literal
+  string than the one that actually works.
 - **Acronyms** — ERP, FP&A, ASC 606, RBAC, AI, and the like — keep their own casing.
 - **A named metric/framework, when it's the title of the article that defines it** — e.g. "The
   Growth Engine Ratio" — the same category as "Magic Number" or "Rule of 40": the proper name of
@@ -191,13 +195,21 @@ Exceptions:
 - **Software Matchmaker / Community Matchmaker** sentence-case to "Software matchmaker" / "Community
   matchmaker" — these are descriptive feature labels, not named products the way FP&A Buddy is;
   revisit if either is ever formally named as a distinct product.
+- **"Sail Don't Row"** — removed from the named-product list (2026-08 update). The game at `/play`
+  never had a punctuation-consistent name to begin with (no
+  comma, no apostrophe curl, Title Case) and reads as ordinary imperative phrasing once you look
+  past the capitalization, not a coined product name the way "FP&A Buddy" is. Canonical form
+  everywhere it appears — the game's own h1, `/play`'s and the leaderboard's tab titles,
+  `/admin/game-settings`' h1 and its admin-dashboard card, and the article-title case below — is
+  now the single sentence-cased form **"Sail, don't row"** (comma, lowercase after it). There is no
+  longer a second, differently-capitalized form for the game itself vs. an article title reusing
+  the phrase; both read the same way.
 - **Article titles, as a general rule** — sentence-case like any other page title, e.g.
   "Connecting Claude to NetSuite" (already compliant: only the first word and the two proper nouns
   are capitalized). The named-metric exception above is narrow, not "article titles are exempt."
   Concretely: **"Sail, Don't Row: AI Hackathon Playbook"** — the article's own title — sentence-cases
-  to "Sail, don't row: AI hackathon playbook" even though "Sail Don't Row" is separately a named
-  product when it refers to the `/play` game itself. Same string, different role: as the game's own
-  name it keeps its capitalization; as an article headline reusing that phrase as a pun, it doesn't.
+  to "Sail, don't row: AI hackathon playbook", the same form the `/play` game itself now uses (see
+  above) — there's no longer a second capitalization to reconcile.
 
 Established as part of the Manage Features pivot-table redesign (Phase 1c, 2026-08); applied there
 to the pages that PR touched (the admin dashboard's Software cards, the feature pivot table, the
@@ -284,7 +296,7 @@ pattern, no graffiti marks on admin tables, forms, or the chat UI.
   every card family sitewide: the Software/Community/Benchmark directory cards, thought-leadership
   landing cards, case-study cards, and the archive/feed cards all converged to this single value in
   the brand audit (previously split across three sizes and three weights with no shared standard).
-  The one confirmed exception is `.sdr-outcome-title` (Sail Don't Row's game-over overlay,
+  The one confirmed exception is `.sdr-outcome-title` (Sail, don't row's game-over overlay,
   800 weight) — deliberately bolder, verified side-by-side against the 600-weight standard and kept
   distinct because it's a single bespoke result overlay, not a family of cards sharing a role.
 - **Disclosure/accordion** — two variants. *Group-level* (top-level Admin sections, e.g. `/admin`
@@ -318,7 +330,7 @@ system landed — the GER calculator was never actually 820px, it used plain 780
 
 | Tier | CSS class | Width | Pages |
 |---|---|---|---|
-| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), Library landing (+ past questions, ask history), article reader (`/read`), CFO Toolbox community profile pages, FP&A Buddy chat, Growth Engine Ratio calculator, Sail Don't Row (+ its leaderboard) |
+| Full-width content | `.page-full` | ~1800–2000px | Homepage/About, Thought Leadership landing (+ its 3 long-form articles), Library landing (+ past questions, ask history), article reader (`/read`), CFO Toolbox community profile pages, FP&A Buddy chat, Growth Engine Ratio calculator, Sail, don't row (+ its leaderboard) |
 | Card grids | `.page-grid` | ~1200–1400px | CFO Toolbox landing + Software directory, Benchmarks directory, Communities directory (+ compare, find-results), `/admin/open-source` |
 | Forms | `.page-form` | ~600–700px | Contact, login/forgot/reset-password, Privacy, all member-submission forms (library/tool/community submit), admin single-record add/edit forms |
 | Admin data tables | `.page-admin` | ~1400–1600px | All remaining `/admin/*` list, dashboard, and report pages |
@@ -332,7 +344,7 @@ internal content widths (960px and 860px respectively) were left alone or adjust
 place rather than forced into a tier that doesn't fit their structure.
 
 The former `.page-tool` tier (960px, "functional tools") was retired in Phase 9b —
-those pages (FP&A Buddy, GER calculator, Sail Don't Row + leaderboard) now sit on
+those pages (FP&A Buddy, GER calculator, Sail, don't row + leaderboard) now sit on
 `.page-full` like every other content page, so they no longer feel visually cramped
 next to it. Each wraps its actual working content (chat, calculator, game canvas) in
 `.tool-inner` (1300px, centered, card-grid scale) so the widget gets real room instead
@@ -544,7 +556,7 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
 - **Colors** — every hex in the codebase must be a brand token (parsed from the `:root` above, so the
   palette is its single source of truth) or one of the explicitly-documented auxiliary colors
   (status/feedback, benchmark badges, chart tints, and three deliberate exceptions: destructive-action
-  buttons, §5/§6; glanceable health indicators' stoplight colors, §6; and "Sail, Don't Row"'s realistic
+  buttons, §5/§6; glanceable health indicators' stoplight colors, §6; and "Sail, don't row"'s realistic
   sky/water/skyline/boat illustration palette,
   which reads as an actual landscape rather than brand-token shading, confined entirely to that one
   game). A brand-new off-palette hex fails the build, forcing a deliberate choice: add it to the

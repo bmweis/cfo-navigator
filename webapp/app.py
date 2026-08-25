@@ -3295,7 +3295,7 @@ function loadTimelineExample() {
 // Build the timeline table up front so its rows exist before the user switches tabs.
 renderTL();
 </script>"""
-    return HTMLResponse(_page("Growth Engine Ratio Calculator—Brian Weisberg", "Thought leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Growth Engine Ratio calculator—Brian Weisberg", "Thought leadership", body, role=_role(request)))
 
 
 @app.get("/finops-ai-hackathon")
@@ -4802,7 +4802,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
 <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;">
-  <h1 style="margin:0;">Sail, Don&rsquo;t Row</h1>
+  <h1 style="margin:0;">Sail, don&rsquo;t row</h1>
   <div style="background:#fff;border:2px solid var(--ink-graffiti);border-radius:6px;padding:4px 12px;transform:rotate(-4deg);font:700 15px var(--font-sticker);color:var(--ink-graffiti);box-shadow:2px 2px 0 var(--ink-graffiti);white-space:nowrap;">arcade</div>
 </div>
 <p class="sdr-sub">Pick your boat. Sail and you might catch a free gust. Row and you&rsquo;ll move fast at first&mdash;but it&rsquo;s harder work, and you&rsquo;ll fade over the long haul.</p>
@@ -4902,7 +4902,7 @@ def play_sail_dont_row(request: Request):
     finally:
         lib.close()
     body = _sdr_build_body(ranks, signed_in=_is_member(request), is_admin=_role(request) == "admin")
-    return HTMLResponse(_page("Sail, Don't Row—Brian Weisberg", "Sail, Don't Row", body, role=_role(request)))
+    return HTMLResponse(_page("Sail, don't row—Brian Weisberg", "Sail, don't row", body, role=_role(request)))
 
 
 @app.post("/play/submit")
@@ -5014,7 +5014,7 @@ def play_leaderboard(request: Request, scope: str = "week"):
   .sdr-lb-badges{display:none;}
 }
 </style>
-<p style="margin:0 0 4px;"><a href="/play" style="font-size:13px;color:var(--muted);">&larr; Sail, Don&rsquo;t Row</a></p>
+<p style="margin:0 0 4px;"><a href="/play" style="font-size:13px;color:var(--muted);">&larr; Sail, don&rsquo;t row</a></p>
 <h1 style="margin:0 0 6px;">Leaderboard</h1>
 <p style="color:var(--muted);margin:0 0 22px;">One board across every rank&mdash;each run is tagged with the
 rank and difficulty it was played on, so a Storm-Warning Skipper run and a Fair-Winds Deckhand run are both
@@ -5023,7 +5023,7 @@ visible at a glance, side by side.</p>
 <div class="sdr-leaderboard">""" + rows_html + """</div>
 </div>
 </div>"""
-    return HTMLResponse(_page("Leaderboard—Sail, Don't Row", "Sail, Don't Row", body, role=_role(request)))
+    return HTMLResponse(_page("Leaderboard—Sail, don't row", "Sail, don't row", body, role=_role(request)))
 
 
 # Query-param values for /contact's `context` param — each maps to a
@@ -9550,7 +9550,7 @@ def admin_software(request: Request):
         {"key": "categories", "label": "Categories", "kind": "multi"},
         {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
         {"key": "promoted", "label": "Featured", "kind": "checkbox"},
-        {"key": "warm_intro_enabled", "label": "Warm Intro enabled", "kind": "checkbox"},
+        {"key": "warm_intro_enabled", "label": "Warm intro enabled", "kind": "checkbox"},
     ]
     # Featured is a boolean/tag, not a sortable column—kept out of this list
     # entirely (see the Cost band/Access/etc. pattern on the Communities
@@ -9956,7 +9956,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox intros{title_suffix}</h1>
-<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm Intro requests from readers&mdash;{len(leads)} total.</p>
+<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm intro requests from readers&mdash;{len(leads)} total.</p>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -11450,6 +11450,27 @@ _OC_HACKATHON_CSS = (
 # viewport is too narrow for one.
 _OC_GER_CSS = (
     '.oc-body .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}'
+    # Post-merge follow-up bug, found live: the wrapper's own inline style
+    # (background:#fff;border:1px solid var(--line);border-radius:12px —
+    # copied verbatim from the retired bespoke page) bounds a white
+    # bordered card with zero padding, meant to fit the table flush against
+    # its edges — but _OC_ARTICLE_CSS's generic `.oc-body table{margin:1.5em
+    # 0}` rule (written for markdown-generated tables, which have no
+    # wrapper of their own to own that spacing) still applies here too,
+    # since `.ger-table`'s own CSS never resets `margin`. The table ends up
+    # sitting 21px inset from the wrapper's border on all four sides,
+    # inside the wrapper's own bounded white box — reading as an
+    # unintentional blank margin, not a design choice, confirmed by
+    # measuring the actual gap (21px, matching the table's computed
+    # margin exactly) rather than guessed at. `.ns-table`'s wrapper never
+    # showed this because it has no background/border of its own to reveal
+    # the same inherited margin against — the gap is identically present
+    # there too, just invisible. Fixed by resetting the table's own margin
+    # to 0, so the wrapper (which already carries the correct outer
+    # spacing via its own `margin:0 0 32px` inline style) is the single
+    # source of the box's outer edge, same as the original bespoke page
+    # before a generic table rule existed to fight it.
+    '.oc-body .ger-table{margin:0;}'
     '.oc-body .ger-table th{background:var(--navy);color:#fff;}'
     '.oc-body .ger-table th:nth-child(1),.oc-body .ger-table td:nth-child(1){white-space:nowrap;width:1%;}'
     '.oc-body .ger-table th:nth-child(2),.oc-body .ger-table td:nth-child(2){white-space:nowrap;}'
@@ -11714,7 +11735,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
   <td style="padding:10px 12px;white-space:nowrap;">
     <a href="/admin/thought-leadership/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
     <form method="post" action="/admin/thought-leadership/{it['id']}/delete" style="display:inline;"
-          onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot; from Thought Leadership?');">
+          onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot; from thought leadership?');">
       <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
     </form>
   </td>
@@ -11734,7 +11755,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Thought Leadership</h1>
+  <h1>Thought leadership</h1>
   <a href="/admin/thought-leadership/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add entry</a>
 </div>
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
@@ -11757,7 +11778,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
   hardcoded on the public page rather than migrated. See CLAUDE.md.
 </p>
 </div>"""
-    return HTMLResponse(_page("Thought Leadership—Admin", "", body, authed=True))
+    return HTMLResponse(_page("Thought leadership—Admin", "", body, authed=True))
 
 
 @app.get("/admin/thought-leadership/new", response_class=HTMLResponse)
@@ -11765,7 +11786,7 @@ def admin_thought_leadership_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     body = f"""<div class="page page-form">
-<h1>Add a Thought Leadership entry</h1>
+<h1>Add a thought leadership entry</h1>
 <form method="post" action="/admin/thought-leadership/new" style="display:grid;gap:20px;">
 {_tl_form_fields()}
   <div>
@@ -11774,7 +11795,7 @@ def admin_thought_leadership_new(request: Request):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Add Thought Leadership entry—Admin", "", body, authed=True))
+    return HTMLResponse(_page("Add thought leadership entry—Admin", "", body, authed=True))
 
 
 def _tl_form_values(form) -> dict:
@@ -11842,9 +11863,9 @@ def admin_thought_leadership_edit(request: Request, item_id: int):
     finally:
         lib.close()
     if not it:
-        raise HTTPException(status_code=404, detail="Thought Leadership entry not found")
+        raise HTTPException(status_code=404, detail="Thought leadership entry not found")
     body = f"""<div class="page page-form">
-<h1>Edit Thought Leadership entry</h1>
+<h1>Edit thought leadership entry</h1>
 <form method="post" action="/admin/thought-leadership/{item_id}/edit" style="display:grid;gap:20px;">
 {_tl_form_fields(it)}
   <div>
@@ -11988,7 +12009,7 @@ def _oc_form_fields(values: dict) -> str:
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
       placeholder="One line describing the piece, shown on its card">
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tag label *</label>
       <input name="tag_label" required maxlength="40" value="{_esc(values.get('tag_label', ''))}"
@@ -12001,8 +12022,6 @@ def _oc_form_fields(values: dict) -> str:
         style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
         placeholder="e.g. Read the framework">
     </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div>
       <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
       <input name="date_label" maxlength="50" value="{_esc(values.get('date_label', ''))}"
@@ -12050,19 +12069,41 @@ def _oc_form_fields(values: dict) -> str:
   </div>"""
 
 
-def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_label: str) -> str:
+def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_label: str,
+                   show_preview: bool = False) -> str:
     error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
-    return f"""<div class="page page-form">
-<p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original Content</a></p>
+    # Preview links to the row's currently-persisted slug (values["slug"] is
+    # sourced straight from the DB row on the normal GET-edit path) — never
+    # an unsaved edit, and never shown on the Add form at all (show_preview
+    # defaults False there), since there's nothing to preview before Save.
+    # Disabled, not hidden, when body_md is blank: a card-metadata-only row
+    # has no /thought-leadership/<slug> page to 404 into, so the link would
+    # be dead — a muted non-link with an explanatory title (same
+    # disabled+title convention as .tool-intro-btn elsewhere) beats either
+    # a broken link or silently vanishing the affordance.
+    if show_preview:
+        if values.get("body_md"):
+            preview_html = (f'<a href="/thought-leadership/{_esc(values.get("slug", ""))}" target="_blank" '
+                             f'rel="noopener" class="btn btn-ghost" style="margin-left:10px;">Preview &rarr;</a>')
+        else:
+            preview_html = ('<span class="btn btn-ghost" style="margin-left:10px;color:var(--muted);'
+                             'border-color:var(--line);cursor:not-allowed;" '
+                             'title="Add body content first — a card-metadata-only piece has no page of its own to preview.">'
+                             'Preview &rarr;</span>')
+    else:
+        preview_html = ""
+    return f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original content</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
-<form method="post" action="{action}" style="display:grid;gap:20px;">
+<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;">
 {_oc_form_fields(values)}
   <div>
     <button type="submit" class="btn">{_esc(submit_label)}</button>
     <a href="/admin/original-content" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+    {preview_html}
   </div>
 </form>
 </div>"""
@@ -12151,7 +12192,7 @@ def admin_original_content(request: Request, status: str = ""):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Original Content</h1>
+  <h1>Original content</h1>
   <a href="/admin/original-content/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add piece</a>
 </div>
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
@@ -12172,18 +12213,18 @@ def admin_original_content(request: Request, status: str = ""):
 </div>
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
   The 3 flagship pieces (Growth Engine Ratio, Sail Don&rsquo;t Row, Connecting Claude to NetSuite) have no
-  Body&mdash;their own hand-built pages render them. A piece with a Body renders at its own
-  /thought-leadership/&lt;slug&gt; page once it&rsquo;s Live.
+  body&mdash;their own hand-built pages render them. A piece with a body renders at its own
+  /thought-leadership/&lt;slug&gt; page once it&rsquo;s live.
 </p>
 </div>"""
-    return HTMLResponse(_page("Original Content—Admin", "", body, authed=True))
+    return HTMLResponse(_page("Original content—Admin", "", body, authed=True))
 
 
 @app.get("/admin/original-content/new", response_class=HTMLResponse)
 def admin_original_content_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-    return HTMLResponse(_page("Add Original Content—Admin", "",
+    return HTMLResponse(_page("Add original content—Admin", "",
                               _oc_form_page("Add a piece", "/admin/original-content/new",
                                            {"status": "draft"}, "", "Add piece"),
                               authed=True))
@@ -12199,7 +12240,7 @@ async def admin_original_content_new_submit(request: Request):
     try:
         def _reject(message: str):
             return HTMLResponse(_page(
-                "Add Original Content—Admin", "",
+                "Add original content—Admin", "",
                 _oc_form_page("Add a piece", "/admin/original-content/new", v, message, "Add piece"),
                 authed=True), status_code=400)
 
@@ -12237,7 +12278,7 @@ def admin_original_content_edit(request: Request, item_id: int):
     finally:
         lib.close()
     if not it:
-        raise HTTPException(status_code=404, detail="Original Content piece not found")
+        raise HTTPException(status_code=404, detail="Original content piece not found")
     values = dict(it)
     values["body_md"] = values["body_md"] or ""
     # _page() escapes its own title argument internally — passing an
@@ -12245,7 +12286,7 @@ def admin_original_content_edit(request: Request, item_id: int):
     # the same class of bug CLAUDE.md's "Speaking &amp; Events" fix covers.
     return HTMLResponse(_page(f"Edit {it['title']}—Admin", "",
                               _oc_form_page(f"Edit {it['title']}", f"/admin/original-content/{item_id}/edit",
-                                           values, "", "Save changes"),
+                                           values, "", "Save changes", show_preview=True),
                               authed=True))
 
 
@@ -12258,13 +12299,17 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
     lib = _lib()
     try:
         if not lib.get_original_content(item_id):
-            raise HTTPException(status_code=404, detail="Original Content piece not found")
+            raise HTTPException(status_code=404, detail="Original content piece not found")
 
         def _reject(message: str):
+            # v["slug"] here is the just-submitted (rejected, unsaved) form
+            # value, not necessarily the persisted one — fine in practice,
+            # since a reject only fires when some other field failed
+            # validation, and the common case leaves slug unchanged anyway.
             return HTMLResponse(_page(
                 f"Edit {v['title']}—Admin", "",
                 _oc_form_page(f"Edit {v['title']}", f"/admin/original-content/{item_id}/edit",
-                             v, message, "Save changes"),
+                             v, message, "Save changes", show_preview=True),
                 authed=True), status_code=400)
 
         if not v["title"]:
@@ -12558,7 +12603,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     # comment on admin_communities_edit below, which this supersedes for
     # layout — Featured/Advisor now get that second column, just unlabeled).
     identity_block_html = f"""  <div>
-    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community Details</h2>
+    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community details</h2>
     <div class="tool-form-cols">
       <div style="display:grid;gap:14px;align-content:start;">
 {identity_html}
@@ -14174,7 +14219,7 @@ def admin_tools_new(request: Request):
 <form method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Company Details</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Company details</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor name *</label>
         <input id="tool-name" name="name" required maxlength="200"
@@ -14196,7 +14241,7 @@ def admin_tools_new(request: Request):
       </label>
     </div>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm Intro</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
         <input name="vendor_name" maxlength="200"
@@ -14248,7 +14293,7 @@ def admin_tools_new(request: Request):
 </form>
 </div>
 <script>{_GENERATE_DESC_JS}</script>"""
-    return HTMLResponse(_page("Add Software—CFO Toolbox", "", body, authed=True))
+    return HTMLResponse(_page("Add software—CFO Toolbox", "", body, authed=True))
 
 
 def _run_tool_research(tool_id: int) -> bool:
@@ -14535,7 +14580,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         _governed_features_html = f"""<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);" open>
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Feature Taxonomy</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Feature taxonomy</h2>
     </span>
     <span class="disclosure-caret">&#9654;</span>
   </summary>
@@ -14544,7 +14589,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   <form method="post" action="/admin/tools/software/{tool_id}/feature-links/save">
     {feature_ids_input}
     {section_blocks}
-    <div style="margin-top:16px;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Save Feature Taxonomy</button></div>
+    <div style="margin-top:16px;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Save feature taxonomy</button></div>
   </form>
 </details>"""
 
@@ -14653,7 +14698,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Company Details</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Company details</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor name *</label>
         <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
@@ -14674,7 +14719,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       </label>
     </div>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm Intro</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
         <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
@@ -18142,7 +18187,7 @@ _SOFTWARE_TOOLS = [
 _TOOLBOX_TOOLS = [
     ("/admin/tools/resources", "Resources", "Add, edit, or remove the sources listed in the Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
-    ("/admin/game-settings",    "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
+    ("/admin/game-settings",    "Sail, don't row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
 ]
 
 # FP&A Buddy's own admin pages, consolidated into one section (Phase 6) —
@@ -18182,13 +18227,13 @@ _FPA_BUDDY_TOOLS = [
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
-        ("/admin/tools/software/leads",  "Toolbox intros",          "Warm Intro requests from readers—name, email, company, and which tool they want an intro to."),
+        ("/admin/tools/software/leads",  "Toolbox intros",          "Warm intro requests from readers—name, email, company, and which tool they want an intro to."),
         ("/admin/community-gaps", "Community gaps",        "Where visitors say finance communities fall short—what they're missing, and which community came closest."),
         ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
-    ("Thought Leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
-        ("/admin/thought-leadership", "Thought Leadership", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
-        ("/admin/original-content", "Original Content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
+    ("Thought leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
+        ("/admin/thought-leadership", "Thought leadership", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
+        ("/admin/original-content", "Original content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Brand, voice, and content", "How the site looks and sounds.", [
@@ -18204,7 +18249,7 @@ _ADMIN_GROUPS = [
         ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
-        ("/admin/system/page-index", "Page Index",        "A live, self-updating map of every route and its width tier."),
+        ("/admin/system/page-index", "Page index",        "A live, self-updating map of every route and its width tier."),
         ("/admin/system/scripts",   "Scripts",             "The recurring CLI scripts still worth running&mdash;purpose, cadence, env vars, and how to invoke each."),
     ]),
 ]
@@ -19033,7 +19078,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Toolbox — Communities", ["communities", "community_audit_log", "community_categories",
                                 "community_competitors", "community_profiles",
                                 "community_gap_submissions", "community_profile_views"]),
-    ("Thought Leadership / Game", ["thought_leadership", "original_content",
+    ("Thought leadership / game", ["thought_leadership", "original_content",
                                     "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
@@ -19262,7 +19307,7 @@ def admin_system_page_index(request: Request):
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Page Index</h1>
+<h1>Page index</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every route and its width tier&mdash;introspected from <code>app.routes</code> on every page load, not a maintained list. Skips non-page endpoints (redirects, JSON/AJAX APIs, file downloads); flags any page route that doesn't carry a recognized width tier, so a newly added page that never got tiered doesn't go unnoticed. See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for the tier system itself.</p>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
@@ -19288,7 +19333,7 @@ def admin_system_page_index(request: Request):
 thead .cc-cell{{border-bottom:2px solid var(--line);}}
 </style>
 </div>"""
-    return HTMLResponse(_page("Page Index—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Page index—Admin", "Admin", body, authed=True))
 
 
 # Static Mermaid source for the page below — pulled out to a module constant
@@ -22121,13 +22166,13 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Sail, Don&rsquo;t Row&mdash;rank settings</h1>
+<h1>Sail, don&rsquo;t row&mdash;rank settings</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Tune pace, wind, obstacle density, and the collision rule per rank. The game reads these live—changes apply to the next run, no redeploy needed.</p>
 <p style="color:var(--muted);margin:0 0 20px;">Course length is a fixed 4300 world-units. Par time is what a full finish at that rank is calibrated against for the pace score.</p>
 {banner}{error_banner}
 {cards}
 </div>"""
-    return HTMLResponse(_page("Sail, Don't Row settings—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Sail, don't row settings—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/game-settings/{rank}/edit")
@@ -26218,7 +26263,7 @@ def admin_voice_page(request: Request):
         "Appended after the voice core for FP&amp;A Buddy specifically&mdash;third-person register, cite-or-name-the-gap, no personal metaphors or LinkedIn-shape devices.",
         custom_fpa_buddy, VOICE_FPA_BUDDY_DEFAULT, 10)
     matchmaker_block = _voice_field(
-        "voice-matchmaker", "Chat Matchmaker voice",
+        "voice-matchmaker", "Chat matchmaker voice",
         "Appended after the voice core for the Communities and Software matchmakers (/tools/communities/find, /tools/software/find)&mdash;first person plural, references what the visitor said, no invented experience with any listed community or vendor.",
         custom_matchmaker, VOICE_MATCHMAKER_DEFAULT, 8)
 
@@ -26240,7 +26285,7 @@ def admin_voice_page(request: Request):
 <select id="vr-rubric" style="margin-left:8px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);">
 <option value="general">General / site copy</option>
 <option value="fpa_buddy">FP&amp;A Buddy answer</option>
-<option value="matchmaker">Chat Matchmaker answer</option>
+<option value="matchmaker">Chat matchmaker answer</option>
 </select></label>
 <textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice—a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
@@ -26571,7 +26616,7 @@ def _email_template_registry() -> list[dict]:
     from linklib import email_utils as eu
     return [
         {
-            "id": "warm-intro", "prefix": "warm_intro", "title": "Warm Intro email",
+            "id": "warm-intro", "prefix": "warm_intro", "title": "Warm intro email",
             "recipient": "Vendor contact (requester cc&rsquo;d)",
             "trigger": "A member requests an intro on /tools",
             "blurb": "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/software/leads). The requester is cc&rsquo;d automatically.",

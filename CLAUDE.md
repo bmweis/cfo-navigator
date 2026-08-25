@@ -2554,6 +2554,72 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   in `tests/test_original_content_article.py`) asserting both fixed CSS
   rules are present in the rendered response.
 
+- **Original Content, Phase 4c second follow-up — an unintentional white
+  gap above/below the tier table, same root-cause shape as the first
+  follow-up (a generic markdown-table CSS rule bleeding into a raw-HTML
+  table it wasn't written for).** Brian caught this live too, after the
+  header/CTA fix landed. `.ger-table-wrap`'s own inline style
+  (`background:#fff;border:1px solid var(--line);border-radius:12px` —
+  copied verbatim from the retired bespoke page) bounds a white bordered
+  card with zero padding, meant to fit the tier table flush against its
+  edges. But `_OC_ARTICLE_CSS`'s generic `.oc-body table{margin:1.5em 0}`
+  rule (written for markdown-generated tables, which have no wrapper of
+  their own to own that spacing) still applied to `.ger-table`, since its
+  own CSS never reset `margin`. Measured live before fixing, not guessed
+  at: the table sat exactly 21px inset from the wrapper's border on all
+  four sides (`getComputedStyle(table).margin` → `21px 0px`,
+  `bounding_box()` diff between the wrapper and the table confirming a
+  21px gap top and bottom) — reading as an unintentional blank box, not a
+  design choice, exactly as Brian described it. `.ns-table`'s own wrapper
+  never showed this same bug because it has no background/border of its
+  own to reveal the identical inherited margin against — the 21px gap is
+  present there too, just invisible against the page background. Fixed
+  with `.oc-body .ger-table{margin:0;}`, so the wrapper (which already
+  carries the correct outer spacing via its own inline `margin:0 0 32px`)
+  is the single source of the box's outer edge — the same "give the
+  raw-HTML element its own explicit reset instead of letting a generic
+  markdown-table rule reach it" pattern the header/CTA fixes both used.
+  Verified with a live `bounding_box()` measurement before/after (gap
+  21px → ~1px, the residual being border-width rounding) and a real
+  desktop screenshot showing the header sitting flush against the
+  wrapper's rounded top corners, plus a new regression test
+  (`test_growth_engine_ratio_table_wrap_has_no_visible_gap`) asserting the
+  fixed CSS rule renders in the response.
+
+- **Original Content admin — width fix + Preview link.** `/admin/original-content/{id}/edit`
+  (and `/admin/original-content/new`) rendered in `.page-form` (640px) — the
+  same tier used for one-column public-facing forms like `/contact` — even
+  though every other admin data-management page (`/admin/tools/software`,
+  `/admin/original-content`'s own list view) uses the wider `.page-admin`
+  (1500px). Investigated first: the list page itself was already correctly on
+  `.page-admin` — only the add/edit form was narrow, contrary to this task's
+  initial premise that both pages needed the fix. Switched the form page to
+  `.page-admin` too, with the `<form>` element itself capped at
+  `max-width:900px` so single-line inputs (Title, Slug, Teaser) don't stretch
+  to the full 1500px container — the width discipline here is "match the
+  page shell" rather than "let text inputs run the full container." With that
+  headroom, the two separate 2-column field grids (Tag label/Link label, then
+  Date label/Display order) merged into a single
+  `repeat(auto-fit,minmax(190px,1fr))` row (not a hardcoded `repeat(4,1fr)`,
+  per the standing CSS-Grid-blowout lesson — Phase P above) — all four fields
+  render on one line at desktop width and collapse gracefully on narrower
+  viewports. A "Preview →" link/button was added next to Save/Cancel on the
+  edit form only (never the Add form — `_oc_form_page`'s new `show_preview`
+  parameter defaults `False`), linking to `/thought-leadership/{slug}` (the
+  row's currently-persisted slug, not an unsaved edit) with `target="_blank"`
+  — no new rendering logic needed, since Phase 2's `GET /thought-leadership/{slug}`
+  route already serves a `status='draft'` row at its canonical URL for an
+  active admin session. When `body_md` is blank (a card-metadata-only row,
+  which 404s at that route per Phase 2's own guard), the link renders instead
+  as a disabled, non-clickable `<span>` with a `title` tooltip explaining why
+  — same `.tool-intro-btn:disabled` muted-color/`cursor:not-allowed`
+  convention used elsewhere, chosen over hiding the affordance entirely so an
+  admin editing a metadata-only row still sees the option exists and why it's
+  off. Verified live: 4-field row confirmed on one line via matching
+  `getBoundingClientRect()` y-coordinates; Preview link's `href`/`target`
+  confirmed correct for a row with body content; the disabled state's `title`
+  text confirmed correct for a row without.
+
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On
   `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat
