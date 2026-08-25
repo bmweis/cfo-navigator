@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 import requests
 
+from .citations import extract_citations, make_document_block
 from .db import Library
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", "claude-sonnet-4-6")
@@ -610,12 +611,7 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
         if not body:
             return
         used += len(body)
-        doc_blocks.append({
-            "type": "document",
-            "source": {"type": "text", "media_type": "text/plain", "data": body},
-            "title": (title or url)[:250],
-            "citations": {"enabled": True},
-        })
+        doc_blocks.append(make_document_block(title or url, body))
         doc = {"title": title or url, "url": url, "type": kind}
         if article_id is not None:
             # Library sources keep their articles.id so a persisted citation
@@ -658,14 +654,6 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
     return doc_blocks, sent_docs
 
 
-def _cit_get(c, name):
-    """Read a field off a citation that may be an SDK object or a raw dict."""
-    v = getattr(c, name, None)
-    if v is None and isinstance(c, dict):
-        v = c.get(name)
-    return v
-
-
 def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
                            ) -> tuple[str, list[dict]]:
     """Reassemble the answer text with verified citation markers.
@@ -687,60 +675,13 @@ def _assemble_cited_answer(content_blocks, sent_docs: list[dict]
     paths use type "web"). Best-effort by design: any surprise in the
     citation metadata degrades to the plain flattened text and an empty list —
     citation handling must never fail an answer.
+
+    Thin wrapper around linklib.citations.extract_citations (Phase 1a
+    extraction refactor — see that module's docstring) — this module's own
+    answer text always wants markers injected inline
+    (inject_markers=True, the default).
     """
-    try:
-        parts: list[str] = []
-        cited: list[dict] = []
-        seen: dict = {}   # dedupe key -> assigned 1-based n
-
-        for block in content_blocks:
-            if getattr(block, "type", None) != "text":
-                continue
-            text = getattr(block, "text", "") or ""
-            nums: list[int] = []
-            for c in getattr(block, "citations", None) or []:
-                doc_idx = _cit_get(c, "document_index")
-                url = _cit_get(c, "url")
-                if isinstance(doc_idx, int) and 0 <= doc_idx < len(sent_docs):
-                    key = ("doc", doc_idx)
-                    info = sent_docs[doc_idx]
-                elif url:
-                    # Automatic citation from the native web_search tool
-                    # (Phase 7 fallback) — always "native", since Exa results
-                    # never arrive this way (they're document blocks).
-                    key = ("web", url)
-                    info = {"title": _cit_get(c, "title") or url,
-                            "url": url, "type": "web", "provider": "native"}
-                else:
-                    continue   # unrecognized citation shape — skip silently
-                n = seen.get(key)
-                if n is None:
-                    n = len(cited) + 1
-                    seen[key] = n
-                    entry = {"n": n, "title": info["title"],
-                             "url": info["url"], "type": info["type"]}
-                    if info.get("article_id") is not None:
-                        entry["article_id"] = info["article_id"]
-                    if info.get("provider") is not None:
-                        entry["provider"] = info["provider"]
-                    cited.append(entry)
-                if n not in nums:
-                    nums.append(n)
-            if nums:
-                # Attach markers to the span itself, before trailing whitespace,
-                # so they hug the sentence they cite.
-                stripped = text.rstrip()
-                trail = text[len(stripped):]
-                text = stripped + "".join(f"[{n}]" for n in sorted(nums)) + trail
-            parts.append(text)
-
-        return "".join(parts).strip(), cited
-    except Exception:
-        text = "".join(
-            getattr(b, "text", "") or "" for b in content_blocks
-            if getattr(b, "type", None) == "text"
-        ).strip()
-        return text, []
+    return extract_citations(content_blocks, sent_docs)
 
 
 def _trim_history(history) -> list[dict]:

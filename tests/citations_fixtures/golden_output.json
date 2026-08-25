@@ -1,0 +1,338 @@
+{
+  "_source": "captured from pre-refactor linklib/agent.py \u2014 see this script's docstring",
+  "assemble_cited_answer": {
+    "exa_web_document_citation_tagged_exa": {
+      "citations": [
+        {
+          "n": 1,
+          "provider": "exa",
+          "title": "SaaS Pricing Trends 2026",
+          "type": "web",
+          "url": "https://web.example/pricing-trends"
+        }
+      ],
+      "text": "Pricing trend claim from a fresh web result.[1]"
+    },
+    "malformed_citations_field_degrades_to_plain_text": {
+      "citations": [],
+      "text": "Text whose citations field is malformed."
+    },
+    "mixed_document_and_native_citations": {
+      "citations": [
+        {
+          "article_id": 101,
+          "n": 1,
+          "title": "GRR vs NRR Benchmarks",
+          "type": "library",
+          "url": "https://library.example/grr-nrr"
+        },
+        {
+          "n": 2,
+          "provider": "native",
+          "title": "Live Story",
+          "type": "web",
+          "url": "https://news.example/live"
+        }
+      ],
+      "text": "Library-grounded claim.[1] Live-web-grounded claim.[2]"
+    },
+    "native_web_search_automatic_url_citation": {
+      "citations": [
+        {
+          "n": 1,
+          "provider": "native",
+          "title": "A Story",
+          "type": "web",
+          "url": "https://news.example/story"
+        }
+      ],
+      "text": "A live web fact with no document block behind it.[1]"
+    },
+    "no_citations_plain_text": {
+      "citations": [],
+      "text": "Just a plain answer with nothing cited."
+    },
+    "non_text_block_ignored": {
+      "citations": [
+        {
+          "article_id": 101,
+          "n": 1,
+          "title": "GRR vs NRR Benchmarks",
+          "type": "library",
+          "url": "https://library.example/grr-nrr"
+        }
+      ],
+      "text": "Some text.[1]"
+    },
+    "out_of_range_document_index_skipped": {
+      "citations": [],
+      "text": "Claim citing a document index that doesn't exist."
+    },
+    "same_document_cited_across_multiple_spans_dedupes": {
+      "citations": [
+        {
+          "article_id": 101,
+          "n": 1,
+          "title": "GRR vs NRR Benchmarks",
+          "type": "library",
+          "url": "https://library.example/grr-nrr"
+        }
+      ],
+      "text": "First claim from the library source.[1] Second claim, same source again.[1]"
+    },
+    "single_document_citation": {
+      "citations": [
+        {
+          "article_id": 101,
+          "n": 1,
+          "title": "GRR vs NRR Benchmarks",
+          "type": "library",
+          "url": "https://library.example/grr-nrr"
+        }
+      ],
+      "text": "Median GRR runs 90-95% for enterprise SaaS.[1]"
+    },
+    "two_documents_first_use_order": {
+      "citations": [
+        {
+          "n": 1,
+          "title": "Board Reporting Cadence",
+          "type": "feed",
+          "url": "https://feed.example/board-cadence"
+        },
+        {
+          "article_id": 101,
+          "n": 2,
+          "title": "GRR vs NRR Benchmarks",
+          "type": "library",
+          "url": "https://library.example/grr-nrr"
+        }
+      ],
+      "text": "Claim grounded in the feed item.[1] Claim grounded in the library item.[2]"
+    },
+    "unrecognized_citation_shape_skipped": {
+      "citations": [],
+      "text": "Claim with a citation carrying neither a document_index nor a url."
+    }
+  },
+  "build_source_documents": {
+    "empty_everything": {
+      "doc_blocks": [],
+      "sent_docs": []
+    },
+    "exa_web_only": {
+      "doc_blocks": [
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "A fresh web result about usage-based pricing adoption.",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "SaaS Pricing Trends 2026",
+          "type": "document"
+        }
+      ],
+      "sent_docs": [
+        {
+          "provider": "exa",
+          "title": "SaaS Pricing Trends 2026",
+          "type": "web",
+          "url": "https://web.example/pricing-trends"
+        }
+      ]
+    },
+    "feed_only": {
+      "doc_blocks": [
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "Recent feed item about how often to report to the board.",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "Board Reporting Cadence",
+          "type": "document"
+        }
+      ],
+      "sent_docs": [
+        {
+          "title": "Board Reporting Cadence",
+          "type": "feed",
+          "url": "https://feed.example/board-cadence"
+        }
+      ]
+    },
+    "global_budget_cuts_off_later_sources": {
+      "doc_blocks": [
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "Long Source A",
+          "type": "document"
+        },
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "xxxxxxxxxxxxxxxxxxxx",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "Long Source B",
+          "type": "document"
+        }
+      ],
+      "sent_docs": [
+        {
+          "article_id": 301,
+          "title": "Long Source A",
+          "type": "library",
+          "url": "https://library.example/long-a"
+        },
+        {
+          "article_id": 302,
+          "title": "Long Source B",
+          "type": "library",
+          "url": "https://library.example/long-b"
+        }
+      ]
+    },
+    "library_only_summary_and_content": {
+      "doc_blocks": [
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "A short distilled summary of the retention piece.\nThe full archived article body goes on at much greater length here, covering churn cohorts, expansion revenue, and net dollar retention math.",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "GRR vs NRR Benchmarks",
+          "type": "document"
+        },
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "Only a body, no summary was ever generated for this one.",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "Burn Multiple 101",
+          "type": "document"
+        }
+      ],
+      "sent_docs": [
+        {
+          "article_id": 101,
+          "title": "GRR vs NRR Benchmarks",
+          "type": "library",
+          "url": "https://library.example/grr-nrr"
+        },
+        {
+          "article_id": 102,
+          "title": "Burn Multiple 101",
+          "type": "library",
+          "url": "https://library.example/burn-multiple"
+        }
+      ]
+    },
+    "mixed_all_three_sources": {
+      "doc_blocks": [
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "Distilled CAC payback summary.\nFull CAC payback article body.",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "CAC Payback Benchmarks",
+          "type": "document"
+        },
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "Feed item revisiting the Rule of 40.",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "Rule of 40 Revisited",
+          "type": "document"
+        },
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "Fresh web result on headcount planning.",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "Headcount Planning at Series B",
+          "type": "document"
+        }
+      ],
+      "sent_docs": [
+        {
+          "article_id": 201,
+          "title": "CAC Payback Benchmarks",
+          "type": "library",
+          "url": "https://library.example/cac-payback"
+        },
+        {
+          "title": "Rule of 40 Revisited",
+          "type": "feed",
+          "url": "https://feed.example/rule-of-40"
+        },
+        {
+          "provider": "exa",
+          "title": "Headcount Planning at Series B",
+          "type": "web",
+          "url": "https://web.example/headcount-series-b"
+        }
+      ]
+    },
+    "source_with_empty_body_is_skipped": {
+      "doc_blocks": [
+        {
+          "citations": {
+            "enabled": true
+          },
+          "source": {
+            "data": "Real summary here.\nReal body here.",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "title": "Has Content",
+          "type": "document"
+        }
+      ],
+      "sent_docs": [
+        {
+          "article_id": 402,
+          "title": "Has Content",
+          "type": "library",
+          "url": "https://library.example/has-content"
+        }
+      ]
+    }
+  }
+}
