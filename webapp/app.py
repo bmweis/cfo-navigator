@@ -14920,7 +14920,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
           {_description_confidence_html}
           {_description_review_line_html}
           <button type="submit" form="tool-edit-form" name="save_action" value="continue"
-            class="tool-admin-btn" style="margin-top:8px;">Save and continue</button>
+            class="btn btn-ghost" style="margin-top:8px;font-size:13px;padding:7px 16px;">Save and continue</button>
         </div>
       </div>
       <div id="gen-host-tool-taxonomy">
