@@ -39,8 +39,8 @@ def _admin_client(appmod):
 
 def test_thought_leadership_in_admin_nav(env):
     group_names = [gname for gname, _, _ in env._ADMIN_GROUPS]
-    assert "Thought Leadership" in group_names
-    tl_groups = [items for gname, _, items in env._ADMIN_GROUPS if gname == "Thought Leadership"]
+    assert "Thought leadership" in group_names
+    tl_groups = [items for gname, _, items in env._ADMIN_GROUPS if gname == "Thought leadership"]
     assert len(tl_groups) == 1
     hrefs = [href for href, _, _ in tl_groups[0]]
     assert "/admin/thought-leadership" in hrefs

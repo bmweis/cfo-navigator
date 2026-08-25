@@ -9491,7 +9491,7 @@ def admin_software(request: Request):
         {"key": "categories", "label": "Categories", "kind": "multi"},
         {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
         {"key": "promoted", "label": "Featured", "kind": "checkbox"},
-        {"key": "warm_intro_enabled", "label": "Warm Intro enabled", "kind": "checkbox"},
+        {"key": "warm_intro_enabled", "label": "Warm intro enabled", "kind": "checkbox"},
     ]
     # Featured is a boolean/tag, not a sortable column—kept out of this list
     # entirely (see the Cost band/Access/etc. pattern on the Communities
@@ -9897,7 +9897,7 @@ def admin_tools_leads(request: Request, tool_id: int | None = None):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Toolbox intros{title_suffix}</h1>
-<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm Intro requests from readers&mdash;{len(leads)} total.</p>
+<p style="color:var(--muted);margin:4px 0 24px;font-size:14px;">Warm intro requests from readers&mdash;{len(leads)} total.</p>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
 <thead><tr style="background:var(--accent-light);">
@@ -11655,7 +11655,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
   <td style="padding:10px 12px;white-space:nowrap;">
     <a href="/admin/thought-leadership/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
     <form method="post" action="/admin/thought-leadership/{it['id']}/delete" style="display:inline;"
-          onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot; from Thought Leadership?');">
+          onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot; from thought leadership?');">
       <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
     </form>
   </td>
@@ -11675,7 +11675,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Thought Leadership</h1>
+  <h1>Thought leadership</h1>
   <a href="/admin/thought-leadership/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add entry</a>
 </div>
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
@@ -11706,7 +11706,7 @@ def admin_thought_leadership_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
     body = f"""<div class="page page-form">
-<h1>Add a Thought Leadership entry</h1>
+<h1>Add a thought leadership entry</h1>
 <form method="post" action="/admin/thought-leadership/new" style="display:grid;gap:20px;">
 {_tl_form_fields()}
   <div>
@@ -11783,9 +11783,9 @@ def admin_thought_leadership_edit(request: Request, item_id: int):
     finally:
         lib.close()
     if not it:
-        raise HTTPException(status_code=404, detail="Thought Leadership entry not found")
+        raise HTTPException(status_code=404, detail="Thought leadership entry not found")
     body = f"""<div class="page page-form">
-<h1>Edit Thought Leadership entry</h1>
+<h1>Edit thought leadership entry</h1>
 <form method="post" action="/admin/thought-leadership/{item_id}/edit" style="display:grid;gap:20px;">
 {_tl_form_fields(it)}
   <div>
@@ -11996,7 +11996,7 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
                   f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
                   if error else '')
     return f"""<div class="page page-form">
-<p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original Content</a></p>
+<p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original content</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
 <form method="post" action="{action}" style="display:grid;gap:20px;">
@@ -12092,7 +12092,7 @@ def admin_original_content(request: Request, status: str = ""):
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-  <h1>Original Content</h1>
+  <h1>Original content</h1>
   <a href="/admin/original-content/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add piece</a>
 </div>
 <p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
@@ -12113,8 +12113,8 @@ def admin_original_content(request: Request, status: str = ""):
 </div>
 <p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
   The 3 flagship pieces (Growth Engine Ratio, Sail Don&rsquo;t Row, Connecting Claude to NetSuite) have no
-  Body&mdash;their own hand-built pages render them. A piece with a Body renders at its own
-  /thought-leadership/&lt;slug&gt; page once it&rsquo;s Live.
+  body&mdash;their own hand-built pages render them. A piece with a body renders at its own
+  /thought-leadership/&lt;slug&gt; page once it&rsquo;s live.
 </p>
 </div>"""
     return HTMLResponse(_page("Original Content—Admin", "", body, authed=True))
@@ -12178,7 +12178,7 @@ def admin_original_content_edit(request: Request, item_id: int):
     finally:
         lib.close()
     if not it:
-        raise HTTPException(status_code=404, detail="Original Content piece not found")
+        raise HTTPException(status_code=404, detail="Original content piece not found")
     values = dict(it)
     values["body_md"] = values["body_md"] or ""
     # _page() escapes its own title argument internally — passing an
@@ -12199,7 +12199,7 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
     lib = _lib()
     try:
         if not lib.get_original_content(item_id):
-            raise HTTPException(status_code=404, detail="Original Content piece not found")
+            raise HTTPException(status_code=404, detail="Original content piece not found")
 
         def _reject(message: str):
             return HTMLResponse(_page(
@@ -12499,7 +12499,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
     # comment on admin_communities_edit below, which this supersedes for
     # layout — Featured/Advisor now get that second column, just unlabeled).
     identity_block_html = f"""  <div>
-    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community Details</h2>
+    <h2 style="font-size:16px;font-weight:600;margin:0 0 16px;">Community details</h2>
     <div class="tool-form-cols">
       <div style="display:grid;gap:14px;align-content:start;">
 {identity_html}
@@ -14115,7 +14115,7 @@ def admin_tools_new(request: Request):
 <form method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Company Details</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Company details</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor name *</label>
         <input id="tool-name" name="name" required maxlength="200"
@@ -14137,7 +14137,7 @@ def admin_tools_new(request: Request):
       </label>
     </div>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm Intro</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
         <input name="vendor_name" maxlength="200"
@@ -14471,7 +14471,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         _governed_features_html = f"""<details class="features-group" style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line);" open>
   <summary style="list-style:none;cursor:pointer;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Feature Taxonomy</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Feature taxonomy</h2>
     </span>
     <span class="disclosure-caret">&#9654;</span>
   </summary>
@@ -14480,7 +14480,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
   <form method="post" action="/admin/tools/software/{tool_id}/feature-links/save">
     {feature_ids_input}
     {section_blocks}
-    <div style="margin-top:16px;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Save Feature Taxonomy</button></div>
+    <div style="margin-top:16px;"><button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Save feature taxonomy</button></div>
   </form>
 </details>"""
 
@@ -14589,7 +14589,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Company Details</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Company details</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor name *</label>
         <input id="tool-name" name="name" required maxlength="200" value="{_esc(tool['name'])}"
@@ -14610,7 +14610,7 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
       </label>
     </div>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px;align-content:start;">
-      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm Intro</h2>
+      <h2 style="font-size:16px;font-weight:600;margin:0;">Warm intro</h2>
       <div>
         <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Vendor contact name</label>
         <input name="vendor_name" maxlength="200" value="{_esc(tool.get('vendor_name') or '')}"
@@ -18115,13 +18115,13 @@ _FPA_BUDDY_TOOLS = [
 _ADMIN_GROUPS = [
     ("Inbox", "New submissions and messages waiting on you.", [
         ("/admin/contacts",     "Contact submissions",     "Messages sent through the public contact form."),
-        ("/admin/tools/software/leads",  "Toolbox intros",          "Warm Intro requests from readers—name, email, company, and which tool they want an intro to."),
+        ("/admin/tools/software/leads",  "Toolbox intros",          "Warm intro requests from readers—name, email, company, and which tool they want an intro to."),
         ("/admin/community-gaps", "Community gaps",        "Where visitors say finance communities fall short—what they're missing, and which community came closest."),
         ("/admin/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
-    ("Thought Leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
-        ("/admin/thought-leadership", "Thought Leadership", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
-        ("/admin/original-content", "Original Content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
+    ("Thought leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
+        ("/admin/thought-leadership", "Thought leadership", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
+        ("/admin/original-content", "Original content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Brand, voice, and content", "How the site looks and sounds.", [
@@ -18137,7 +18137,7 @@ _ADMIN_GROUPS = [
         ("/admin/overhead-spend",  "Overhead spend",      "Total site cost from hand-entered vendor receipts, plus a separate estimate of what's driving AI API usage."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
-        ("/admin/system/page-index", "Page Index",        "A live, self-updating map of every route and its width tier."),
+        ("/admin/system/page-index", "Page index",        "A live, self-updating map of every route and its width tier."),
         ("/admin/system/scripts",   "Scripts",             "The recurring CLI scripts still worth running&mdash;purpose, cadence, env vars, and how to invoke each."),
     ]),
 ]
@@ -18964,7 +18964,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Toolbox — Communities", ["communities", "community_audit_log", "community_categories",
                                 "community_competitors", "community_profiles",
                                 "community_gap_submissions", "community_profile_views"]),
-    ("Thought Leadership / Game", ["thought_leadership", "original_content",
+    ("Thought leadership / game", ["thought_leadership", "original_content",
                                     "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
@@ -19193,7 +19193,7 @@ def admin_system_page_index(request: Request):
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Page Index</h1>
+<h1>Page index</h1>
 <p style="color:var(--ink-soft);margin:-4px 0 20px;font-size:15px;line-height:1.6;">A live, self-updating map of every route and its width tier&mdash;introspected from <code>app.routes</code> on every page load, not a maintained list. Skips non-page endpoints (redirects, JSON/AJAX APIs, file downloads); flags any page route that doesn't carry a recognized width tier, so a newly added page that never got tiered doesn't go unnoticed. See <a href="https://github.com/bmweis/cfo-navigator/blob/main/BRAND.md" target="_blank" rel="noopener" style="color:var(--accent);">BRAND.md &sect;5</a> for the tier system itself.</p>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
@@ -26149,7 +26149,7 @@ def admin_voice_page(request: Request):
         "Appended after the voice core for FP&amp;A Buddy specifically&mdash;third-person register, cite-or-name-the-gap, no personal metaphors or LinkedIn-shape devices.",
         custom_fpa_buddy, VOICE_FPA_BUDDY_DEFAULT, 10)
     matchmaker_block = _voice_field(
-        "voice-matchmaker", "Chat Matchmaker voice",
+        "voice-matchmaker", "Chat matchmaker voice",
         "Appended after the voice core for the Communities and Software matchmakers (/tools/communities/find, /tools/software/find)&mdash;first person plural, references what the visitor said, no invented experience with any listed community or vendor.",
         custom_matchmaker, VOICE_MATCHMAKER_DEFAULT, 8)
 
@@ -26171,7 +26171,7 @@ def admin_voice_page(request: Request):
 <select id="vr-rubric" style="margin-left:8px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);">
 <option value="general">General / site copy</option>
 <option value="fpa_buddy">FP&amp;A Buddy answer</option>
-<option value="matchmaker">Chat Matchmaker answer</option>
+<option value="matchmaker">Chat matchmaker answer</option>
 </select></label>
 <textarea id="vr-input" rows="8" placeholder="Paste content to check against your voice—a draft, page copy, or an FP&amp;A Buddy answer…" style="{mono}"></textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
@@ -26502,7 +26502,7 @@ def _email_template_registry() -> list[dict]:
     from linklib import email_utils as eu
     return [
         {
-            "id": "warm-intro", "prefix": "warm_intro", "title": "Warm Intro email",
+            "id": "warm-intro", "prefix": "warm_intro", "title": "Warm intro email",
             "recipient": "Vendor contact (requester cc&rsquo;d)",
             "trigger": "A member requests an intro on /tools",
             "blurb": "Sent to a vendor contact when a CFO Toolbox member requests an intro (see /admin/tools/software/leads). The requester is cc&rsquo;d automatically.",
