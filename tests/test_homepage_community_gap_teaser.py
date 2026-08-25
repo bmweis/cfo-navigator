@@ -70,7 +70,7 @@ def test_matchmaker_line_inline_in_subtitle_not_a_separate_block(env):
         # The old two-line top-of-page CTA block is gone entirely.
         assert '<div style="margin-top:24px;">' not in r.text
 
-    assert '<a href="/tools/communities/find" style="font-weight:500;">Community Matchmaker' in \
+    assert '<a href="/tools/communities/find" style="font-weight:500;">Community matchmaker' in \
         _member_client(env).get("/tools/communities").text
     assert 'href="/login?next=%2Ftools%2Fcommunities%2Ffind"' in \
         _client(env).get("/tools/communities").text

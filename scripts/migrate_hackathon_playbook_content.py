@@ -39,13 +39,19 @@ for this slug. Same root-cause class as the "Speaking &amp; Events" and
 edit-page-title double-escape bugs documented elsewhere in this repo's
 history — the data was pre-escaped for a raw-insertion call site, and a
 second call site correctly escaping plain text collided with that. Fixed
-here by setting TITLE to the plain, unescaped string, matching the retired
-bespoke page's own actual <h1> text verbatim ("Sail, Don't Row", straight
-apostrophe — confirmed against the source, not the curly &rsquo; used
-elsewhere on the site). This also changes what the homepage/thought-leadership
-flagship card shows for this piece (straight apostrophe instead of curly,
-since _tl_fcard() renders title raw) — a small, deliberate, documented
-side effect of fixing the underlying bad data, not a separate content change.
+by setting TITLE to a plain, unescaped string (straight apostrophe, not the
+curly &rsquo; used elsewhere on the site) — the same pattern this bug fix
+established, since _tl_fcard() still renders title raw for the flagship card
+either way.
+
+TITLE's casing itself was corrected in a later pass (2026-08 sentence-case
+audit): "Sail, Don't Row" is the retired bespoke page's own <h1> text and is
+still the correct, established name for the /play game itself, but as an
+ARTICLE HEADLINE reusing that phrase as a pun, it isn't a named product and
+sentence-cases like any other page title — see BRAND.md §3.2's "Article
+titles" exception entry for the full reasoning (the game keeps its name;
+the article headline referencing it doesn't). TITLE is now "Sail, don't
+row" — same double-escape-bug fix, corrected casing on top of it.
 
 This port's own screenshot-diff verification also caught two CSS specificity
 bugs in _OC_HACKATHON_CSS (webapp/app.py) — an inheritance gap on
@@ -82,10 +88,12 @@ from linklib.db import Library, resolve_db_path
 
 SLUG = "ai-hackathon-playbook"
 DATE_LABEL = "June 2026"
-# Plain, unescaped — matches the retired bespoke page's own <h1> text
-# verbatim. See the module docstring's "double-escape" section for why the
-# Phase-1-seeded title (pre-escaped for a different call site) is wrong here.
-TITLE = "Sail, Don't Row"
+# Plain, unescaped (see the module docstring's "double-escape" section for
+# why the Phase-1-seeded title is wrong regardless of casing), sentence-cased
+# per BRAND.md §3.2 (2026-08 sentence-case audit) — this is the article's
+# headline reusing "Sail, Don't Row" as a pun, not the /play game's own name,
+# so it doesn't keep the game's capitalization. See the docstring above.
+TITLE = "Sail, don't row"
 
 # Verbatim copy from the retired finops_ai_hackathon() route. Prose/headings/
 # plain lists are real markdown; the designed elements (case-study grid,
