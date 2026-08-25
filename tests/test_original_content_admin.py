@@ -69,7 +69,7 @@ def test_post_new_requires_admin_session(env):
 def test_admin_session_can_reach_list(env):
     r = _admin_client(env).get("/admin/original-content")
     assert r.status_code == 200
-    assert "Original Content" in r.text
+    assert "Original content" in r.text
 
 
 # -- CRUD round-trip -------------------------------------------------------
