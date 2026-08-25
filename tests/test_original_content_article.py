@@ -133,13 +133,15 @@ def test_no_date_label_omits_middot(env):
 
 def test_article_uses_shared_shell_matching_bespoke_pages(env):
     """Same shell as the three hand-built pages: page page-full
-    article-atlantic, .tool-prose, and the &larr; Thought Leadership
-    back-link — per the Phase 0 investigation's shell findings."""
+    article-atlantic, .tool-prose, and the &larr; Thought leadership
+    back-link — per the Phase 0 investigation's shell findings. Sentence
+    case per the 2026-08 sentence-case audit (BRAND.md §3.2) — "Thought
+    Leadership" never made the named-product exception list."""
     _add(env, slug="md-shell", title="Shell Check", body_md="Body.", status="live")
     html = _client(env).get("/thought-leadership/md-shell").text
     assert 'class="page page-full article-atlantic"' in html
     assert '<div class="tool-prose">' in html
-    assert '<a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a>' in html
+    assert '<a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a>' in html
 
 
 # -- 404 behavior -------------------------------------------------------------
