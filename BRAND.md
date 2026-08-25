@@ -169,15 +169,43 @@ capitalize only the first word (and anything that's always capitalized on its ow
 features," not "Software Features"; "Add software," not "Add Software."
 
 Exceptions:
-- **Named products and features** — FP&A Buddy, CFO Toolbox, Sail Don't Row — keep their own
-  established capitalization wherever they appear.
+- **Named products and features** — FP&A Buddy, CFO Toolbox, Sail Don't Row (the game at `/play`
+  only — see below for its name reused as an article title, which is a different case), Reader,
+  Archive Queue, Feed, Saved, Read Later — keep their own established capitalization wherever they
+  appear. The last five (Reader/Archive Queue/Feed/Saved/Read Later) only ever appear on admin-only
+  surfaces (`/read*`, `/admin/*`) as of the 2026-08 casing audit — none is public-facing today, so
+  the exception's actual footprint is admin-internal only; if any of them ever surfaces on a public
+  page, re-confirm the exception still makes sense there.
 - **Proper nouns** — a company name, a person's name.
 - **Acronyms** — ERP, FP&A, ASC 606, RBAC, AI, and the like — keep their own casing.
+- **A named metric/framework, when it's the title of the article that defines it** — e.g. "The
+  Growth Engine Ratio" — the same category as "Magic Number" or "Rule of 40": the proper name of
+  the thing itself, not just a headline about it. This is a narrow exception, not a blanket
+  article-title exemption (see below).
+
+**Not exempt, despite reading like a named concept at first glance:**
+- **"Thought Leadership"** sentence-cases to "Thought leadership" (nav link, page headers, admin
+  group/card name) — it never made the named-product list above.
+- **"Warm Intro" and other CTA text** sentence-case the same way ("Warm intro") — a CTA's wording
+  isn't a named feature just because it recurs across pages.
+- **Software Matchmaker / Community Matchmaker** sentence-case to "Software matchmaker" / "Community
+  matchmaker" — these are descriptive feature labels, not named products the way FP&A Buddy is;
+  revisit if either is ever formally named as a distinct product.
+- **Article titles, as a general rule** — sentence-case like any other page title, e.g.
+  "Connecting Claude to NetSuite" (already compliant: only the first word and the two proper nouns
+  are capitalized). The named-metric exception above is narrow, not "article titles are exempt."
+  Concretely: **"Sail, Don't Row: AI Hackathon Playbook"** — the article's own title — sentence-cases
+  to "Sail, don't row: AI hackathon playbook" even though "Sail Don't Row" is separately a named
+  product when it refers to the `/play` game itself. Same string, different role: as the game's own
+  name it keeps its capitalization; as an article headline reusing that phrase as a pun, it doesn't.
 
 Established as part of the Manage Features pivot-table redesign (Phase 1c, 2026-08); applied there
 to the pages that PR touched (the admin dashboard's Software cards, the feature pivot table, the
-review-queue page) rather than swept across the whole site — a dedicated casing pass across every
-existing page is separate, later work.
+review-queue page) rather than swept across the whole site. A dedicated, phased casing pass across
+every existing page (Phase 0 investigation logged 2026-08: ~150–250 instances across ~50–60 routes,
+concentrated in public directory/product chrome, admin chrome, `<title>` tab strings, and in-article
+subheadings, which stay a case-by-case editorial call rather than a mechanical sweep) is in
+progress, phase by phase, as its own multi-PR body of work.
 
 ---
 

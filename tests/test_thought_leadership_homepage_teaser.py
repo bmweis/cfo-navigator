@@ -87,17 +87,20 @@ def test_homepage_has_one_consolidated_thought_leadership_section(env):
     # "What I write about" — the section's own unique heading — is the
     # reliable one-section signal here.)
     assert html.count("What I write about") == 1
-    assert "See all Thought Leadership" in html
+    assert "See all thought leadership" in html
     assert 'href="/thought-leadership"' in html
     # The 3 flagship pieces, using the shared _tl_fcard/.tl-card treatment.
     assert "The Growth Engine Ratio" in html
     # Straight apostrophe, not the curly &rsquo; entity — Phase 4b's
-    # double-escape fix (the row's stored title is now the real,
-    # unescaped "Sail, Don't Row", matching the retired bespoke page's
-    # own <h1> byte-for-byte; _tl_fcard() renders title raw, so the old
-    # pre-escaped value used to render literally as "&rsquo;" text).
-    assert "Sail, Don't Row" in html
+    # double-escape fix (the row's stored title is real, unescaped text;
+    # _tl_fcard() renders title raw, so a pre-escaped value would render
+    # literally as "&rsquo;" text). Sentence-cased per the 2026-08
+    # sentence-case audit — this is the article headline reusing "Sail,
+    # Don't Row" as a pun, not the /play game's own name, so it doesn't
+    # keep the game's capitalization (see BRAND.md §3.2).
+    assert "Sail, don't row" in html
     assert "Sail, Don&rsquo;t Row" not in html
+    assert "Sail, Don't Row" not in html
     assert "Connecting Claude to NetSuite" in html
     assert 'class="tl-card"' in html
     # Sail Don't Row correction: real playbook copy/link, not the design
@@ -309,7 +312,7 @@ def test_homepage_type_breakdown_renders_representative_and_handles_empty_type(e
 def test_homepage_type_breakdown_empty_db_does_not_break_page(env):
     resp = _client(env).get("/")
     assert resp.status_code == 200
-    assert ">Thought Leadership<" in resp.text
+    assert ">Thought leadership<" in resp.text
 
 
 def test_hero_polish_avatar_size(env):
