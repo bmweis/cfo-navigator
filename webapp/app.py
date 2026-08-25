@@ -2776,7 +2776,7 @@ def growth_engine_calculator(request: Request):
 
 <div class="tool-prose">
 <p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Calculator</p>
-<h1 style="margin:0 0 8px;">Growth Engine Ratio Calculator</h1>
+<h1 style="margin:0 0 8px;">Growth Engine Ratio calculator</h1>
 <p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
   Plug in your own quarterly numbers below to see where your ratio lands against the benchmark tiers.
   Haven't read the framework yet? Start with <a href="/thought-leadership/growth-engine-ratio">the full article</a>
@@ -12210,7 +12210,7 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
 <p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original content</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
-<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;">
+<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_oc_form_fields(values)}
   <div>
     <button type="submit" class="btn">{_esc(submit_label)}</button>

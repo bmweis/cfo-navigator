@@ -313,7 +313,7 @@ def test_growth_engine_calculator_page_loads(env):
     UI, the chart-generation functions, and the back-link to the article."""
     r = _client(env).get("/thought-leadership/growth-engine-calculator")
     assert r.status_code == 200
-    assert "Growth Engine Ratio Calculator" in r.text
+    assert "Growth Engine Ratio calculator" in r.text
     assert '<a href="/thought-leadership/growth-engine-ratio"' in r.text
     assert 'id="tab-point"' in r.text
     assert 'id="tab-timeline"' in r.text
