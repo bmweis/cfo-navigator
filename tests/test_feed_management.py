@@ -791,9 +791,15 @@ def test_queue_scan_follows_the_feed_not_the_section_name(seeded, monkeypatch):
     assert queued == ["https://kellblog.com/c"]
 
 
-def test_sitemap_sweep_skips_read_only_feeds(seeded):
+def test_sitemap_sweep_skips_read_only_feeds(seeded, monkeypatch):
     from linklib import queue as qmod
     from linklib.feed import parse_opml as _parse
+
+    # Network mocked per the standing convention in test_backfill_sitemap.py —
+    # this test only cares about which feeds are skipped for being read-only,
+    # not what a real sitemap fetch returns for the rest.
+    monkeypatch.setattr(qmod, "discover_sitemaps", lambda site: [])
+    monkeypatch.setattr(qmod, "fetch_sitemap_entries", lambda sm: [])
 
     feeds = _parse(REPO_OPML)
     report = qmod.scan_sitemaps_into_queue(seeded, feeds, "2020-01-01", dry_run=True)
