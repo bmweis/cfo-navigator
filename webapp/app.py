@@ -3247,7 +3247,7 @@ function loadTimelineExample() {
 // Build the timeline table up front so its rows exist before the user switches tabs.
 renderTL();
 </script>"""
-    return HTMLResponse(_page("Growth Engine Ratio Calculator—Brian Weisberg", "Thought leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Growth Engine Ratio calculator—Brian Weisberg", "Thought leadership", body, role=_role(request)))
 
 
 @app.get("/finops-ai-hackathon")
@@ -4754,7 +4754,7 @@ def _sdr_build_body(ranks, signed_in, is_admin=False):
 <style>""" + _SDR_CSS + """</style>
 <div id="sdrIntro">
 <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;">
-  <h1 style="margin:0;">Sail, Don&rsquo;t Row</h1>
+  <h1 style="margin:0;">Sail, don&rsquo;t row</h1>
   <div style="background:#fff;border:2px solid var(--ink-graffiti);border-radius:6px;padding:4px 12px;transform:rotate(-4deg);font:700 15px var(--font-sticker);color:var(--ink-graffiti);box-shadow:2px 2px 0 var(--ink-graffiti);white-space:nowrap;">arcade</div>
 </div>
 <p class="sdr-sub">Pick your boat. Sail and you might catch a free gust. Row and you&rsquo;ll move fast at first&mdash;but it&rsquo;s harder work, and you&rsquo;ll fade over the long haul.</p>
@@ -4854,7 +4854,7 @@ def play_sail_dont_row(request: Request):
     finally:
         lib.close()
     body = _sdr_build_body(ranks, signed_in=_is_member(request), is_admin=_role(request) == "admin")
-    return HTMLResponse(_page("Sail, Don't Row—Brian Weisberg", "Sail, Don't Row", body, role=_role(request)))
+    return HTMLResponse(_page("Sail, don't row—Brian Weisberg", "Sail, don't row", body, role=_role(request)))
 
 
 @app.post("/play/submit")
@@ -4966,7 +4966,7 @@ def play_leaderboard(request: Request, scope: str = "week"):
   .sdr-lb-badges{display:none;}
 }
 </style>
-<p style="margin:0 0 4px;"><a href="/play" style="font-size:13px;color:var(--muted);">&larr; Sail, Don&rsquo;t Row</a></p>
+<p style="margin:0 0 4px;"><a href="/play" style="font-size:13px;color:var(--muted);">&larr; Sail, don&rsquo;t row</a></p>
 <h1 style="margin:0 0 6px;">Leaderboard</h1>
 <p style="color:var(--muted);margin:0 0 22px;">One board across every rank&mdash;each run is tagged with the
 rank and difficulty it was played on, so a Storm-Warning Skipper run and a Fair-Winds Deckhand run are both
@@ -4975,7 +4975,7 @@ visible at a glance, side by side.</p>
 <div class="sdr-leaderboard">""" + rows_html + """</div>
 </div>
 </div>"""
-    return HTMLResponse(_page("Leaderboard—Sail, Don't Row", "Sail, Don't Row", body, role=_role(request)))
+    return HTMLResponse(_page("Leaderboard—Sail, don't row", "Sail, don't row", body, role=_role(request)))
 
 
 # Query-param values for /contact's `context` param — each maps to a
@@ -11719,7 +11719,7 @@ def admin_thought_leadership(request: Request, type: str = ""):
   hardcoded on the public page rather than migrated. See CLAUDE.md.
 </p>
 </div>"""
-    return HTMLResponse(_page("Thought Leadership—Admin", "", body, authed=True))
+    return HTMLResponse(_page("Thought leadership—Admin", "", body, authed=True))
 
 
 @app.get("/admin/thought-leadership/new", response_class=HTMLResponse)
@@ -11736,7 +11736,7 @@ def admin_thought_leadership_new(request: Request):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page("Add Thought Leadership entry—Admin", "", body, authed=True))
+    return HTMLResponse(_page("Add thought leadership entry—Admin", "", body, authed=True))
 
 
 def _tl_form_values(form) -> dict:
@@ -12158,14 +12158,14 @@ def admin_original_content(request: Request, status: str = ""):
   /thought-leadership/&lt;slug&gt; page once it&rsquo;s live.
 </p>
 </div>"""
-    return HTMLResponse(_page("Original Content—Admin", "", body, authed=True))
+    return HTMLResponse(_page("Original content—Admin", "", body, authed=True))
 
 
 @app.get("/admin/original-content/new", response_class=HTMLResponse)
 def admin_original_content_new(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
-    return HTMLResponse(_page("Add Original Content—Admin", "",
+    return HTMLResponse(_page("Add original content—Admin", "",
                               _oc_form_page("Add a piece", "/admin/original-content/new",
                                            {"status": "draft"}, "", "Add piece"),
                               authed=True))
@@ -12181,7 +12181,7 @@ async def admin_original_content_new_submit(request: Request):
     try:
         def _reject(message: str):
             return HTMLResponse(_page(
-                "Add Original Content—Admin", "",
+                "Add original content—Admin", "",
                 _oc_form_page("Add a piece", "/admin/original-content/new", v, message, "Add piece"),
                 authed=True), status_code=400)
 
@@ -14234,7 +14234,7 @@ def admin_tools_new(request: Request):
 </form>
 </div>
 <script>{_GENERATE_DESC_JS}</script>"""
-    return HTMLResponse(_page("Add Software—CFO Toolbox", "", body, authed=True))
+    return HTMLResponse(_page("Add software—CFO Toolbox", "", body, authed=True))
 
 
 def _run_tool_research(tool_id: int) -> bool:
@@ -18120,7 +18120,7 @@ _SOFTWARE_TOOLS = [
 _TOOLBOX_TOOLS = [
     ("/admin/tools/resources", "Resources", "Add, edit, or remove the sources listed in the Resources section—name, URL, description, coverage, and pricing."),
     ("/admin/tools/communities", "Communities",          "Add, edit, or delete communities in the directory, and manage the category list they're tagged with."),
-    ("/admin/game-settings",    "Sail, Don't Row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
+    ("/admin/game-settings",    "Sail, don't row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
 ]
 
 # FP&A Buddy's own admin pages, consolidated into one section (Phase 6) —
@@ -19264,7 +19264,7 @@ def admin_system_page_index(request: Request):
 thead .cc-cell{{border-bottom:2px solid var(--line);}}
 </style>
 </div>"""
-    return HTMLResponse(_page("Page Index—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Page index—Admin", "Admin", body, authed=True))
 
 
 # Static Mermaid source for the page below — pulled out to a module constant
@@ -22097,13 +22097,13 @@ def admin_game_settings(request: Request, msg: str = "", error: str = ""):
 
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
-<h1>Sail, Don&rsquo;t Row&mdash;rank settings</h1>
+<h1>Sail, don&rsquo;t row&mdash;rank settings</h1>
 <p style="color:var(--muted);margin:-6px 0 6px;">Tune pace, wind, obstacle density, and the collision rule per rank. The game reads these live—changes apply to the next run, no redeploy needed.</p>
 <p style="color:var(--muted);margin:0 0 20px;">Course length is a fixed 4300 world-units. Par time is what a full finish at that rank is calibrated against for the pace score.</p>
 {banner}{error_banner}
 {cards}
 </div>"""
-    return HTMLResponse(_page("Sail, Don't Row settings—Admin", "Admin", body, authed=True))
+    return HTMLResponse(_page("Sail, don't row settings—Admin", "Admin", body, authed=True))
 
 
 @app.post("/admin/game-settings/{rank}/edit")
