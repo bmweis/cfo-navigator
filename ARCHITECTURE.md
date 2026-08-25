@@ -1386,6 +1386,30 @@ NOT added to the set: `"growth-engine-calculator"` itself — that page was neve
 `original_content` system and never will be, so there's no slug an admin could collide with
 through the form.
 
+**Phase 4c follow-up (2026-08) — two post-merge rendering bugs, both invisible text, found
+live on mobile Safari and confirmed present at every viewport width.** (1) The tier table's
+`<thead><tr style="background:var(--navy)">` inline style was silently covered by
+`_OC_ARTICLE_CSS`'s generic `.oc-body th{background:var(--accent-light)}` rule — not a
+specificity contest, a CSS table background PAINTING LAYER fact (CSS 2.1 §17.5.1): a cell's
+own background always paints above its row's, independent of specificity. Fixed the same way
+`.ns-table th` (Phase 4a) already solved this for its own table:
+`.oc-body .ger-table th{background:var(--navy);color:#fff;}`, giving the cell its own explicit
+color rather than relying on the row showing through underneath it. (2) The "Download the full
+guide" `<a class="btn">` CTA lost its white text to `.oc-body a{color:var(--navy)}`, which
+genuinely does have higher specificity than `.btn`'s own `color:#fff` (one class + one tag
+beats one class alone) — a real specificity loss this time, not a layering one. Fixed
+generally in `_OC_ARTICLE_CSS` itself (`.oc-body .btn{color:#fff;}`, two classes beats one
+class + one tag) rather than narrowly in `_OC_GER_CSS`, since this was the first `body_md`
+content anywhere to use the sitewide `.btn` button and any future piece using it would hit the
+same bug. The pre-merge screenshot verification pass had a real gap, not just bad luck: it
+checked the `<thead><tr>`'s own `getComputedStyle().backgroundColor` (genuinely navy, since
+the inline style was never removed) but never checked what actually paints on top of it — same
+"verify what's rendered, not a property read in isolation" lesson CLAUDE.md's testing-standard
+section already documents from an earlier incident. Verified this time with real mobile-Safari-
+viewport (390×844) element-level screenshots of exactly the two flagged elements (not full-page
+captures), `getComputedStyle()` diffs before/after, and a new regression test in
+`tests/test_original_content_article.py` asserting both fixed CSS rules render in the response.
+
 `Library.get_thought_leadership_representative(type)` (Homepage Restructure phase;
 supersedes the Phase 3 addendum's `list_thought_leadership_for_home` pin-then-
 recency-backfill panel, which the redesign replaced outright) selects one
