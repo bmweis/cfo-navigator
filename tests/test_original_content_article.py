@@ -281,6 +281,31 @@ def test_growth_engine_ratio_table_header_and_cta_button_styled_correctly(env):
     assert ".oc-body .btn{color:#fff;}" in r.text
 
 
+def test_growth_engine_ratio_table_wrap_has_no_visible_gap(env):
+    """Second post-merge regression, found live: the tier table's wrapper
+    (.ger-table-wrap, styled with its own white background/border/radius
+    matching the retired bespoke page) has zero padding, meant to fit the
+    table flush against its edges — but _OC_ARTICLE_CSS's generic
+    `.oc-body table{margin:1.5em 0}` rule (written for markdown-generated
+    tables with no wrapper of their own) still applied to `.ger-table`,
+    since its own CSS never reset `margin`. The table sat 21px inset from
+    the wrapper's border on all sides, reading as an unintentional blank
+    box rather than a design choice — confirmed by measuring the actual
+    gap (21px, matching the table's computed margin) live in a browser,
+    not guessed at. `.ns-table`'s wrapper never showed this because it has
+    no background/border of its own to reveal the same inherited margin
+    against — the gap is identically present there too, just invisible.
+    Fixed by resetting `.ger-table`'s own margin to 0, so the wrapper (which
+    already carries the correct outer spacing via its own inline
+    `margin:0 0 32px`) is the single source of the box's outer edge."""
+    from scripts.migrate_growth_engine_ratio_content import BODY_MD
+    _add(env, slug="growth-engine-ratio-table-gap", title="The Growth Engine Ratio",
+         tag_label="Framework", date_label="June 2026", body_md=BODY_MD, status="live")
+    r = _client(env).get("/thought-leadership/growth-engine-ratio-table-gap")
+    assert r.status_code == 200
+    assert ".oc-body .ger-table{margin:0;}" in r.text
+
+
 def test_growth_engine_calculator_page_loads(env):
     """Original Content Phase 4c — the new standalone bespoke route at its
     own URL, independent of any original_content row. Confirms the
