@@ -12039,7 +12039,7 @@ def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_la
 <p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original content</a></p>
 <h1>{_esc(heading)}</h1>
 {error_html}
-<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;">
+<form method="post" action="{action}" style="display:grid;gap:20px;max-width:900px;margin:0 auto;">
 {_oc_form_fields(values)}
   <div>
     <button type="submit" class="btn">{_esc(submit_label)}</button>
