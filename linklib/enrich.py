@@ -20,6 +20,8 @@ import logging
 import os
 from dataclasses import dataclass, field
 
+from .citations import extract_citations, make_document_block
+
 _logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = os.environ.get("LINKLIB_ENRICH_MODEL", "claude-opus-5")
@@ -561,13 +563,14 @@ def _fetch_taxonomy_grounding(url: str) -> tuple[str, list[tuple[str, str, str]]
 
 
 _AGENT_TAXONOMY_PROMPT = """You are researching a vendor listed in the CFO Toolbox's Software
-directory. Budget and depth are not a constraint here — read the full page
-content provided below carefully and be as thorough and specific as the
-material supports.
+directory. Budget and depth are not a constraint here — read the page
+content provided (as separate documents, when available) carefully and be
+as thorough and specific as the material supports.
 
 Write a thorough summary (aim for 3-6 sentences, more if there's real
 material to cover) of whether and how AI agents are involved in this
-product. Ground this strictly in the page content below. If the vendor
+product. Ground this strictly in the documents provided — every specific
+claim should be traceable to something they actually say. If the vendor
 names ANY specific agents anywhere in the content (e.g. "Aura," "Ember," a
 "Contract Review Agent," a "flux agent") — find and name ALL of them, not
 just the first one you notice; a reader comparing tools needs the complete
@@ -577,7 +580,7 @@ agent that runs a workflow end-to-end, an agent-assisted feature where AI
 helps but a human stays in the loop, or no real agent framing at all
 (generic "AI-powered" marketing language without actual agent behavior
 described doesn't count as agentic — say so plainly rather than
-overstating it). If the content gives no genuine signal either way, say
+overstating it). If the documents give no genuine signal either way, say
 that rather than guessing, and set "confident" to false.
 
 Return STRICT JSON only (no prose, no markdown fences) with exactly this
@@ -603,10 +606,55 @@ class AgentTaxonomyResult:
                                # confidence: Yes/No" line matching Description/Differentiation,
                                # independent of needs_verification's own review-status meaning.
     low_confidence: bool = False   # no page content could be fetched at all
+    # API-verified citations (Citations-API grounding fix, Phase 1b,
+    # 2026-08): [{n, title, url, type: "tool_page"}], deduped by url,
+    # first-use order, UNCAPPED — the caller (webapp/app.py) persists this
+    # to the shared entity_citations table (Library.set_entity_citations)
+    # and a public render site applies the 5-source display cap; this
+    # field itself always holds everything. Empty whenever nothing was
+    # fetched at all (low_confidence=True — no documents were sent, so
+    # nothing could be cited) or the model simply didn't cite anything.
+    # Resolved from real document blocks (linklib.citations), not
+    # self-reported — independent of `confident` above.
+    citations: list = field(default_factory=list)
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+
+
+# Total grounding text budget across every fetched page for one agent-
+# taxonomy draft (Citations-API grounding fix, Phase 1b) — same
+# 60,000-char ceiling _fetch_taxonomy_grounding's own joined content_block
+# used to enforce, now applied while building per-page document blocks
+# instead of one flattened string. Each individual page is already capped
+# at 10,000 chars by _fetch_taxonomy_grounding itself.
+_TAXONOMY_DOC_BUDGET_CHARS = 60000
+
+
+def _build_taxonomy_documents(fetched: list[tuple[str, str, str]]
+                              ) -> tuple[list[dict], list[dict]]:
+    """Turn `_fetch_taxonomy_grounding`'s fetched pages into Citations-API
+    `document` blocks, one per page, so the model's summary can be
+    mechanically traced back to a real page rather than self-reported.
+    Returns (doc_blocks, sent_docs) — sent_docs[i] describes doc_blocks[i]
+    as {title, url, type: "tool_page"} for citation resolution (same
+    contract as linklib.agent._build_source_documents's sent_docs). Stops
+    once the combined budget is spent; a page with no content left over is
+    skipped rather than sent as an empty document."""
+    doc_blocks: list[dict] = []
+    sent_docs: list[dict] = []
+    used = 0
+    for label, page_url, content in fetched:
+        if used >= _TAXONOMY_DOC_BUDGET_CHARS:
+            break
+        body = content.strip()[: max(0, _TAXONOMY_DOC_BUDGET_CHARS - used)]
+        if not body:
+            continue
+        used += len(body)
+        doc_blocks.append(make_document_block(label, body))
+        sent_docs.append({"title": label, "url": page_url, "type": "tool_page"})
+    return doc_blocks, sent_docs
 
 
 def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
@@ -624,7 +672,18 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     call, before that table was retired (Feature Taxonomy Phase 1b PR 2 —
     see CLAUDE.md's "no dead data" note); this function keeps the real-crawl
     grounding mechanism, which is still worth it for the agent-taxonomy
-    summary alone."""
+    summary alone.
+
+    Citations-API grounding fix, Phase 1b: each fetched page now rides as a
+    real Citations-API `document` block (linklib.citations) instead of
+    being flattened into the prompt as plain text, so `result.citations`
+    reflects what the model actually cited, mechanically verified by the
+    API — not the model's own self-report (that's what `confident` already
+    was, and still is; citations is a separate, independently-checkable
+    fact). When no page content could be fetched at all
+    (`low_confidence=True`), no documents are sent and the model is told to
+    draft from its own knowledge, same as before — `citations` is empty in
+    that case, since there's nothing to cite."""
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -632,27 +691,38 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
 
-    content_block, fetched = _fetch_taxonomy_grounding(url)
+    _, fetched = _fetch_taxonomy_grounding(url)
     low_confidence = not fetched
-    if not fetched:
-        content_block = (
-            f"(Could not fetch any page content for {url} — draft from your own "
-            f"knowledge of {name} if you have it, keeping to the rules above.)"
-        )
+    doc_blocks, sent_docs = _build_taxonomy_documents(fetched) if fetched else ([], [])
+    content_note = "" if doc_blocks else (
+        f"(Could not fetch any page content for {url} — draft from your own "
+        f"knowledge of {name} if you have it, keeping to the rules above.)"
+    )
 
     prompt = _AGENT_TAXONOMY_PROMPT.format(
         name=name, url=url, description=description.strip() or "(none provided)",
-        content_block=content_block,
+        content_block=content_note,
     )
+    # Documents (when any) ride first, the drafting instructions last — same
+    # ordering as linklib.agent.answer_question's user turn, so citations
+    # resolve against what was actually sent.
+    message_content = (doc_blocks + [{"type": "text", "text": prompt}]) if doc_blocks else prompt
 
     try:
         client = Anthropic()
         resp = client.messages.create(
             model=model,
             max_tokens=_checked_max_tokens(2000),  # headroom for Opus 5's on-by-default adaptive thinking
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": message_content}],
         )
-        raw = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+        # inject_markers=False: this response is strict JSON, and splicing a
+        # [n] marker into the middle of the "summary" string would corrupt
+        # it — see linklib.citations.extract_citations's docstring. `raw` is
+        # therefore a plain concatenation, safe to json.loads(); `citations`
+        # is collected the same way regardless, already deduped by
+        # document_index (== deduped by url in practice, since each fetched
+        # page has its own distinct URL).
+        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=False)
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(raw)
 
@@ -670,7 +740,7 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
             agent_taxonomy_note=str(data.get("summary") or "").strip(),
             agent_taxonomy_needs_verification=not bool(data.get("confident")),
             confident=bool(data.get("confident")),
-            low_confidence=low_confidence, model=model,
+            low_confidence=low_confidence, citations=citations, model=model,
             input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
         )
     except Exception as e:

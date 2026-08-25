@@ -510,6 +510,43 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   and `generate_tool_differentiation`, which share the no-citation
   architecture and the confidence-flag-not-gate pattern) — remains future,
   separately-scoped work.
+- **Citations-API grounding fix — the real structural fix the publish-gate
+  bullet above deferred, built in phases (2026-08).** Phase 1a:
+  `agent.py`'s existing FP&A Buddy citation mechanism
+  (`_build_source_documents`/`_assemble_cited_answer`) was extracted,
+  behavior-unchanged, into a new shared `linklib/citations.py`
+  (`make_document_block`, `extract_citations`) — proven byte-identical
+  against real pre-refactor output captured to a golden fixture file
+  *before* the refactor code existed, not regenerated after (see
+  `tests/test_citations_refactor_parity.py`). Phase 1b: `enrich.py`'s
+  `generate_tool_agent_taxonomy` became the first real caller — each
+  fetched vendor page now rides as a genuine Citations-API `document`
+  block instead of flattened prompt text, so its citations are
+  API-verified, not self-reported (a separate, independent fact from the
+  `confident` self-report the publish gate above already used). Checked
+  against current Anthropic docs before building: citations are
+  explicitly incompatible with structured output (`output_config.format`,
+  400 error) and have no attachment point on `tool_use.input` either
+  (citations only ever attach to `text` blocks) — so the strict-JSON
+  `agent_taxonomy_note` contract stays untouched, with citations extracted
+  via `extract_citations(..., inject_markers=False)` (deterministic
+  parsing, not a second model call) alongside the unmodified JSON text.
+  Stored in a new shared `entity_citations` table (`entity_type`/
+  `entity_id`/`field_name` composite key, full deduped-by-url citation
+  list, uncapped) rather than a per-field column — chosen specifically so
+  Description (Phase 2) and Community profile (Phase 3, one shared
+  citation set per profile draft) don't have to migrate off one later.
+  Public profile page shows a capped-at-5 "Sources" list; the admin edit
+  page shows the full uncapped list in the same `#gen-host-tool-taxonomy`
+  block as the "Mark verified" action, by explicit requirement, so a
+  reviewer sees every source before a note (and its capped citations) goes
+  public — citations never bypass the existing review gate, they only
+  ever render alongside the note in whichever visibility branch it's
+  already in. Competitive differentiation stays deferred (Phase 4) pending
+  a decision on whether it gains real fetched competitor content to
+  ground on, since it currently has none. See ARCHITECTURE.md's citations
+  bullets (under FP&A Buddy) and the `entity_citations` schema-table row
+  for the full write-up.
 - **Confidence indicator (2026-08) — genuine self-reported "Claude
   confidence: Yes/No" fields, tool Description/Competitive differentiation
   first, then extended to 12 of the Community profile draft's 23 fields.**
