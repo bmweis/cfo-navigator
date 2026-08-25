@@ -547,6 +547,46 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   ground on, since it currently has none. See ARCHITECTURE.md's citations
   bullets (under FP&A Buddy) and the `entity_citations` schema-table row
   for the full write-up.
+- **Citations-API grounding fix, Phase 2 (2026-08) — Description joins
+  Agent taxonomy's grounding, with one real structural difference: there's
+  no server-side draft-time persistence point to write to.** Description's
+  Generate button is stateless client-side AJAX (`{name, url}`, no
+  `tool_id` — callable from the brand-new "Add software" form, which has
+  no tool row yet at all), unlike Agent taxonomy's server-side "Refresh AI
+  research" route that persists citations in the same call that drafts the
+  note. So the citations a Generate call returns travel through the
+  browser as a new `ai-drafted-citations` hidden input (JSON, mirroring
+  the existing `ai-drafted-fields`/`ai-drafted-confidence` convention) and
+  get validated server-side before persisting, in both submit routes
+  (`/tools/software/{slug}/edit` and `/admin/tools/software/new`) —
+  `webapp.app._validate_citations_payload` never trusts the hidden field's
+  contents as-is: must be a JSON list of objects, `url` must be http(s)
+  (rejecting `javascript:`/`data:`/etc.), `title` length-capped, a
+  malformed entry dropped rather than failing the save, `n` renumbered
+  over what survives. Citations persist only when `"description"` is in
+  that submit's `ai_drafted_fields`; any other save clears them, same
+  "editing/saving is a confirmation" convention `update_tool_agent_taxonomy`
+  already applies. A new client-side guard closes the gap a purely
+  server-side check couldn't: a one-time `input` listener on the
+  description textarea clears both the AI-drafted flag and the citations
+  the moment the admin types over a fresh draft, so a save right after
+  hand-editing doesn't ship citations grounding text that no longer
+  exists. **Also fixes a real pre-existing gap, as its own commit, per
+  explicit direction rather than silently bundled in**: the "Add software"
+  form never carried the `ai-drafted-fields`/`ai-drafted-confidence`
+  hidden inputs at all, so a brand-new tool created straight from a
+  Generate-description draft never recorded
+  `description_needs_verification`/`description_ai_confident` — `Library.
+  add_tool` gained both as optional parameters (default 0/None, every
+  other caller unaffected). **Deliberately does not add a publish gate**:
+  unlike Agent taxonomy's Abacum-fix gate, Description has never hidden an
+  unverified/low-confidence draft from public visitors, and this phase
+  keeps it that way — only a Sources list is added. Flagged here as a
+  known follow-up, not an oversight: a future phase could extend the same
+  `agent_taxonomy_needs_verification`-style publish gate to Description if
+  that's ever decided worth doing. See ARCHITECTURE.md's Description
+  grounding fix bullet and the `entity_citations` schema-table row for the
+  full write-up.
 - **Confidence indicator (2026-08) — genuine self-reported "Claude
   confidence: Yes/No" fields, tool Description/Competitive differentiation
   first, then extended to 12 of the Community profile draft's 23 fields.**
