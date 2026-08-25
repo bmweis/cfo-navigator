@@ -11160,6 +11160,17 @@ _OC_ARTICLE_CSS = (
     '.oc-body ul,.oc-body ol{padding-left:1.4em;margin:0 0 1.4em;}'
     '.oc-body li{margin-bottom:.4em;}'
     '.oc-body a{color:var(--navy);}'
+    # A body_md-authored CTA button (<a class="btn">, the sitewide button
+    # component — first used by the growth-engine-ratio port's "Download the
+    # full guide" CTA) needs its own white text preserved. .btn's own
+    # `color:#fff` rule (0,1,0 specificity) loses to the generic
+    # `.oc-body a{color:var(--navy)}` rule directly above (0,1,1 — one class
+    # AND one tag beats one class alone) regardless of source order, so a
+    # navy-background button rendered navy text on navy — invisible. Fixed
+    # with `.oc-body .btn` (0,2,0 — two classes beats one class + one tag by
+    # CSS's class-count-first comparison), a permanent fix for any future
+    # body_md piece that uses this same button, not just this one.
+    '.oc-body .btn{color:#fff;}'
     '.oc-body blockquote{border-left:3px solid var(--navy);padding:2px 0 2px 26px;margin:1.8em 0;'
     'font-family:var(--font-head);font-weight:600;font-style:italic;font-size:1.3em;line-height:1.45;'
     'letter-spacing:-.01em;color:var(--ink);}'
@@ -11350,8 +11361,28 @@ _OC_HACKATHON_CSS = (
 #
 # .oc-body .ger-table (2 classes) intentionally outranks the generic
 # .oc-body table (1 class + tag) rule by specificity — same reasoning as
-# .ns-table/.fah-* above — so the tier table keeps its original navy-header
-# treatment and its Tier/Ratio columns keep their no-wrap behavior.
+# .ns-table/.fah-* above — so the tier table's Tier/Ratio columns keep their
+# no-wrap behavior. **Real post-merge bug, found on live mobile Safari and
+# fixed here**: the header row's navy background/white text did NOT survive
+# the port, despite the original raw HTML keeping its
+# `<thead><tr style="background:var(--navy);">` inline style verbatim. The
+# cause isn't a specificity contest at all — it's CSS's table BACKGROUND
+# PAINTING LAYER ORDER (CSS 2.1 §17.5.1), which is independent of selector
+# specificity: a `<th>`'s own background always paints on top of its parent
+# `<tr>`'s background, at the CELL layer, layered above the ROW layer. Once
+# `_OC_ARTICLE_CSS` gave every `.oc-body th` its own `background:
+# var(--accent-light)` (for markdown-generated tables, which have no
+# per-row inline styling to preserve), that light background sat on top of
+# the tr's navy — the tr's own background was never actually removed, it
+# was just permanently hidden underneath every cell. White header text on a
+# near-white cell background read as "near-invisible, with an unexplained
+# gap of white space" — one bug, not two, exactly as it looked. The
+# original bespoke page never hit this because it had no competing
+# `.oc-body th` rule to paint over it. Fixed the same way `.ns-table th`
+# (Phase 4a) already solved this for its own table: give `.ger-table th`
+# its own explicit background/color directly, so the cell itself carries
+# the right color instead of relying on the row showing through underneath
+# it.
 #
 # .ger-pull's 1040px breakout math is unchanged from the original page:
 # .tool-prose/.tool-inner/.page share a center axis, so
@@ -11360,6 +11391,7 @@ _OC_HACKATHON_CSS = (
 # viewport is too narrow for one.
 _OC_GER_CSS = (
     '.oc-body .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}'
+    '.oc-body .ger-table th{background:var(--navy);color:#fff;}'
     '.oc-body .ger-table th:nth-child(1),.oc-body .ger-table td:nth-child(1){white-space:nowrap;width:1%;}'
     '.oc-body .ger-table th:nth-child(2),.oc-body .ger-table td:nth-child(2){white-space:nowrap;}'
     '.oc-body .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}'

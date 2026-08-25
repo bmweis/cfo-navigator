@@ -247,6 +247,38 @@ def test_growth_engine_ratio_now_served_by_catch_all(env):
     assert 'id="rev_n"' not in r.text
 
 
+def test_growth_engine_ratio_table_header_and_cta_button_styled_correctly(env):
+    """Post-merge regression, found live on mobile Safari (and, it turned
+    out, present at every viewport width — see the CSS comments this fix
+    added): two real rendering bugs, both invisible text, both fixed here.
+
+    (1) The tier table's <thead><tr style="background:var(--navy)"> inline
+    style was silently covered by _OC_ARTICLE_CSS's generic
+    `.oc-body th{background:var(--accent-light)}` rule — not a specificity
+    loss, a CSS table background PAINTING LAYER order fact (a cell's own
+    background always paints above its row's, regardless of specificity).
+    White header text on a near-white cell background read as
+    "near-invisible, with an unexplained gap of white space above it" — one
+    bug, not two. Fixed by giving `.ger-table th` its own explicit
+    background/color, the same pattern already used for `.ns-table th`.
+
+    (2) `.article-cta`'s "Download the full guide" <a class="btn"> lost its
+    white text to `.oc-body a{color:var(--navy)}`, which has *higher*
+    specificity (one class + one tag) than `.btn`'s own `color:#fff` rule
+    (one class alone) — navy text on a navy background. Fixed with
+    `.oc-body .btn{color:#fff}` (two classes beats one class + one tag by
+    CSS's class-count-first specificity comparison), a permanent fix for
+    any future body_md piece using this same sitewide button, not just this
+    one — this was the first body_md content anywhere to use it."""
+    from scripts.migrate_growth_engine_ratio_content import BODY_MD
+    _add(env, slug="growth-engine-ratio-styling", title="The Growth Engine Ratio",
+         tag_label="Framework", date_label="June 2026", body_md=BODY_MD, status="live")
+    r = _client(env).get("/thought-leadership/growth-engine-ratio-styling")
+    assert r.status_code == 200
+    assert ".oc-body .ger-table th{background:var(--navy);color:#fff;}" in r.text
+    assert ".oc-body .btn{color:#fff;}" in r.text
+
+
 def test_growth_engine_calculator_page_loads(env):
     """Original Content Phase 4c — the new standalone bespoke route at its
     own URL, independent of any original_content row. Confirms the

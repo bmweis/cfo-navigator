@@ -2464,6 +2464,59 @@ library.db            # NOT in git (personal data, large). Lives beside the code
     `/admin/thought-leadership` himself — no code change needed for this
     item.**
 
+- **Original Content, Phase 4c follow-up — two real rendering bugs found
+  live post-merge, both invisible text, neither caught by pre-merge
+  review.** Brian caught both on mobile Safari; investigation found they
+  reproduced at every viewport width, not just mobile — the pre-merge
+  screenshot pass that should have caught this had a real gap, not just
+  bad luck: it checked the `<thead><tr>`'s own computed `background-color`
+  (which genuinely was navy, since the inline style was never removed) but
+  never checked what actually paints on top of it, the same "verify what's
+  rendered, not a property in isolation" lesson this file's own testing-
+  standard section already documents elsewhere.
+  1. **Tier table header, near-invisible.** The retired page's
+     `<thead><tr style="background:var(--navy);">` inline style survived
+     the port verbatim, but `_OC_ARTICLE_CSS`'s generic
+     `.oc-body th{background:var(--accent-light)}` rule (written for
+     markdown-generated tables, which have no per-row inline style to
+     preserve) painted over it — not a specificity loss, a CSS table
+     BACKGROUND PAINTING LAYER fact (CSS 2.1 §17.5.1): a `<th>`'s own
+     background always paints above its parent `<tr>`'s, regardless of
+     which rule has higher specificity. White header text landed on a
+     near-white cell background — read as "near-invisible, with an
+     unexplained gap of white space above it," which turned out to be one
+     bug, not two, exactly as Brian's report guessed it might be. The
+     original bespoke page never hit this, since it had no competing
+     `.oc-body th` rule to paint over it — this could only surface once
+     the table moved under the shared template. Fixed the same way
+     `.ns-table th` (Phase 4a) already solved this for its own table:
+     `.oc-body .ger-table th{background:var(--navy);color:#fff;}`, giving
+     the cell itself the right color directly instead of relying on the
+     row showing through underneath it.
+  2. **"Download the full guide" CTA button, invisible text.** `.btn`'s own
+     `color:#fff` (one class, 0-1-0 specificity) lost to
+     `.oc-body a{color:var(--navy)}` (one class + one tag, 0-1-1 —
+     genuinely higher specificity, this one **is** a real specificity
+     loss) — navy text on a navy background. This was the first `body_md`
+     content anywhere to use the sitewide `.btn` button inside an
+     admin-authored piece, so the interaction had never been exercised
+     before. Fixed generally, in `_OC_ARTICLE_CSS` itself rather than
+     narrowly in `_OC_GER_CSS`, since any future piece using this same
+     button would hit the identical bug:
+     `.oc-body .btn{color:#fff;}` — two classes beats one class + one tag
+     by CSS's class-count-first specificity comparison.
+
+  Both fixed, then verified with real mobile-Safari-viewport (390×844)
+  element-level screenshots of exactly the two elements Brian flagged —
+  not full-page captures, not just described — confirmed via
+  `getComputedStyle()` before AND after (before: `th` background
+  `rgb(238,241,247)`/color white; button background navy/color navy;
+  after: `th` background/color navy/white; button background navy/color
+  white) alongside the visual screenshots, plus a new regression test
+  (`test_growth_engine_ratio_table_header_and_cta_button_styled_correctly`
+  in `tests/test_original_content_article.py`) asserting both fixed CSS
+  rules are present in the rendered response.
+
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On
   `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat
