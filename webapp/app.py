@@ -4,9 +4,11 @@
 Public routes (no auth):
     GET  /                     Bio homepage
     GET  /thought-leadership   Podcasts, writing, interviews
-    GET  /thought-leadership/growth-engine-ratio    GER framework + calculator
-    GET  /thought-leadership/ai-hackathon-playbook  AI hackathon playbook
-    GET  /thought-leadership/netsuite-mcp           Claude–NetSuite setup guide
+    GET  /thought-leadership/growth-engine-calculator  GER interactive calculator (standalone, Phase 4c)
+    GET  /thought-leadership/{slug}   Admin-authored Original Content piece (live only, unless admin) —
+                                       includes netsuite-mcp (Phase 4a), ai-hackathon-playbook (Phase 4b),
+                                       and growth-engine-ratio (Phase 4c); all three bespoke routes were
+                                       retired once their content was ported
     GET  /contact              Contact form
     POST /contact              Submit contact form
     GET  /login / POST /login  Password sign-in (sets a signed session cookie)
@@ -32,6 +34,7 @@ Private routes (require login cookie; API routes also accept a token):
 from __future__ import annotations
 
 import ast
+import difflib
 import hashlib
 import hmac
 import inspect
@@ -47,6 +50,8 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import markdown as _markdown
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
@@ -2270,6 +2275,7 @@ def homepage(request: Request):
         # Writing's representative) — that's expected given how the selection
         # logic works, not a bug to guard against.
         tl_reps = [lib.get_thought_leadership_representative(t) for t, _label in _TL_TYPES]
+        original_content_home = lib.list_original_content_for_home()
     finally:
         lib.close()
 
@@ -2400,7 +2406,7 @@ def homepage(request: Request):
       <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>Showing up for the finance community&mdash;hosting my own podcast, speaking on panels, co-chairing demo days and events.</li>
     </ul>
 
-    {_tl_featured_cards_html(_TL_FEATURED_CARDS)}
+    {_oc_featured_cards_html(original_content_home)}
 
     <div class="home-tl-highlights-wrap">
       <div class="home-tl-highlights-label">Recent highlights</div>
@@ -2561,22 +2567,12 @@ def thought_leadership(request: Request):
             f'{rows}{more}</div>'
         )
 
-    # Featured: three flagship pieces, one consistent card treatment — same
-    # shared _TL_FEATURED_CARDS content and _tl_fcard/_TL_SHARED_CSS markup
-    # as the homepage's own flagship cards, so the two surfaces can't drift
-    # apart (see _TL_FEATURED_CARDS' comment). The only per-card variation
+    # Featured: every live original_content piece, one consistent card
+    # treatment — same shared _oc_featured_cards_html/_tl_fcard/_TL_SHARED_CSS
+    # markup as the homepage's own flagship row (Original Content Phase 1),
+    # so the two surfaces can't drift apart. The only per-card variation
     # here is the small category tag colour — no full-colour floods, which
     # is what made the old top read as busy.
-    body = (
-        '<div class="page page-full">'
-        '<style>'
-        + _TL_SHARED_CSS + _TL_COLUMN_CSS +
-        '</style>'
-        '<h1>Thought leadership</h1>'
-        '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
-        + _tl_featured_cards_html(_TL_FEATURED_CARDS)
-    )
-
     lib = _lib()
     try:
         sections = [
@@ -2585,8 +2581,19 @@ def thought_leadership(request: Request):
             ("Podcasts", "podcast", lib.list_thought_leadership(type="podcast")),
             ("Press", "press", lib.list_thought_leadership(type="press")),
         ]
+        original_content_live = lib.list_original_content(status="live")
     finally:
         lib.close()
+
+    body = (
+        '<div class="page page-full">'
+        '<style>'
+        + _TL_SHARED_CSS + _TL_COLUMN_CSS +
+        '</style>'
+        '<h1>Thought leadership</h1>'
+        '<p style="max-width:680px;color:var(--muted);margin:4px 0 24px;">Writing, talks, podcasts, and press&mdash;from a tech CFO working in the thick of the business.</p>'
+        + _oc_featured_cards_html(original_content_live)
+    )
 
     columns_html = "".join(
         column(i, _TL_COLUMN_ICONS[i % len(_TL_COLUMN_ICONS)], section_title, items)
@@ -2625,21 +2632,31 @@ def growth_engine_ratio_redirect(request: Request):
     return RedirectResponse(target, status_code=301)
 
 
-@app.get("/thought-leadership/growth-engine-ratio", response_class=HTMLResponse)
-def growth_engine_ratio(request: Request):
+# Original Content Phase 4c — the standalone Growth Engine Ratio
+# calculator. Split off from the retired growth_engine_ratio() bespoke
+# route: the article itself is now an ordinary original_content row served
+# through GET /thought-leadership/{slug} (see
+# scripts/migrate_growth_engine_ratio_content.py), but the calculator is
+# genuinely interactive (live inputs, on-demand JS computation, two
+# dynamically-generated SVG charts) — not markdown-representable content —
+# so it stays a hand-built Python route, same as before, just at its own
+# URL and with the article's prose/table/CTA content removed.
+#
+# Extraction discipline: the calculator's own markup, CSS, and ~380 lines
+# of JS below are copied byte-for-byte from the retired route — no logic,
+# input, or chart-generation change. Only new content on this page is the
+# back-link, the eyebrow/H1, and the intro blurb immediately below —
+# flagged for Brian's review per the process note in this PR (new copy, not
+# ported copy).
+@app.get("/thought-leadership/growth-engine-calculator", response_class=HTMLResponse)
+def growth_engine_calculator(request: Request):
     body = """<div class="page page-full article-atlantic">
 <div class="tool-inner">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
+<p style="margin:0 0 12px;"><a href="/thought-leadership/growth-engine-ratio" style="font-size:13px;color:var(--muted);">&larr; The Growth Engine Ratio</a></p>
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
   .ger-grid-3{display:grid;grid-template-columns:88px 1fr 1fr 1fr;gap:10px;align-items:center;}
-  .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  /* Tier and Ratio columns are short, fixed-format values ("Below target",
-     "$0.50–$0.70") that should never wrap; What It Means is prose and keeps
-     wrapping normally. */
-  .ger-table th:nth-child(1),.ger-table td:nth-child(1){white-space:nowrap;width:1%;}
-  .ger-table th:nth-child(2),.ger-table td:nth-child(2){white-space:nowrap;}
   .ger-modes{display:flex;flex-wrap:wrap;gap:8px;}
   .ger-mode{font:inherit;font-size:14px;font-weight:500;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer;}
   .ger-mode:hover{background:var(--accent-light);color:var(--ink);}
@@ -2656,152 +2673,32 @@ def growth_engine_ratio(request: Request):
   .tl-ctrl button{font:inherit;font-size:18px;line-height:1;width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--accent);cursor:pointer;}
   .tl-ctrl button:hover{background:var(--accent-light);}
   .tl-ctrl span{font-size:16px;font-weight:700;min-width:16px;text-align:center;color:var(--ink);}
-  /* Quote breakout (width refinement, this phase): only Quotes widen beyond
-     .tool-prose's 760px reading column — CTA/Tip/Warning boxes stay at
-     body-copy width since they're mostly multi-line instructional prose,
-     where a wide box just reads as an odd second column. A quote is short,
-     so it earns the wider, deliberate moment. 1040px is a middle ground
-     between the 760px reading column and .tool-inner's full 1300px — wide
-     enough to read as intentional, not so wide it matches the calculator
-     card below it. Centering math: left:50% shifts the box right by half of
-     its normal containing block's width (.tool-prose, the column it sits
-     in); translateX(-50%) then shifts it left by half of its own (wider)
-     width. Since .tool-prose, .tool-inner, and .page are all centered on the
-     same axis, the net result re-centers the wider box under .tool-inner
-     regardless of viewport size, collapsing to no visible breakout once the
-     viewport is too narrow for one. */
-  .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}
   @media (max-width:640px){
     .ger-grid-4{grid-template-columns:repeat(2,1fr);}
     .ger-grid-2{grid-template-columns:1fr;}
     .ger-grid-3{grid-template-columns:58px 1fr 1fr 1fr;gap:6px;}
     .ger-card{padding:22px 18px !important;}
-    .ger-table th,.ger-table td{padding:8px 10px !important;font-size:13px !important;}
     .ger-value-big{font-size:38px !important;}
     .ger-in{font-size:14px;padding:8px 9px;}
   }
 </style>
 
 <div class="tool-prose">
-<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Framework</p>
-<h1 style="margin:0 0 8px;">The Growth Engine Ratio</h1>
-<p style="color:var(--muted);font-size:15px;margin:0 0 8px;">
-  By Brian Weisberg &middot; Published with <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a> &middot; June 2026
+<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Calculator</p>
+<h1 style="margin:0 0 8px;">Growth Engine Ratio Calculator</h1>
+<p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
+  Plug in your own quarterly numbers below to see where your ratio lands against the benchmark tiers.
+  Haven't read the framework yet? Start with <a href="/thought-leadership/growth-engine-ratio">the full article</a>
+  for the methodology behind these calculations.
 </p>
-<p style="color:var(--muted);font-size:14px;margin:0 0 32px;">
-  Contributor: Katherine Zhang, CEO of OPEXEngine by Bain &amp; Company, whose benchmark database makes the company-level numbers in this piece possible.
-</p>
 
-<div class="article-cta">
-  <p>
-    The full guide—including benchmark data from 200+ public and private SaaS companies via OPEXEngine—
-    is available as a downloadable whitepaper on The F Suite.
-    <strong><a href="https://www.fsuite.co" target="_blank" rel="noopener">Read the full article and download the guide &rarr;</a></strong>
-    <em style="display:block;margin-top:6px;font-size:13px;color:var(--muted);">(Link will be live when The F Suite publishes—coming soon.)</em>
-  </p>
-</div>
-
-<h2 style="margin-top:0;">Why I Built This</h2>
-<p>Most SaaS efficiency metrics measure one engine at a time. CAC payback tells you how quickly GTM
-investment pays back on new logos. Magic Number tells you how much ARR you're getting per dollar of
-sales and marketing spend. Both are useful—I use them all the time—but they share a blind spot:
-they leave R&D entirely out of the efficiency equation.</p>
-
-<p>That bothers me. At most companies, R&D is 20–30% of revenue. It's a meaningful investment, and
-it directly influences how easy or hard it is for GTM to do its job. A great product shortens
-sales cycles, reduces churn, and drives expansion. A product that's hard to understand or hasn't
-kept pace with customer needs makes every dollar of GTM spend work harder just to stay in place.</p>
-
-<div class="article-pull ger-pull"><p>Spending like a 50%+ growth company while delivering 25% = efficiency disaster.</p></div>
-
-<p>When product and GTM are evaluated in separate silos, it's almost impossible to answer the
-question that actually matters: are these two engines working together efficiently?
-I came up with the Growth Engine Ratio to answer that question.</p>
-
-<h2>The Core Idea</h2>
-<p>The framework is built on a simple observation: revenue recognized today is the result of
-investments made over the past several quarters, not just last quarter. Features ship before
-they're sold. Pipeline built in Q1 converts in Q3. A single period's P&amp;L doesn't capture that.</p>
-
-<p>So instead of comparing today's revenue growth to today's spending, the Growth Engine Ratio
-distributes investment across the quarters that actually contributed to a given period's growth.
-I call this the <strong>time-distributed contribution model</strong>.</p>
-
-<p>The formula:</p>
-<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:0 0 24px;font-family:ui-monospace,monospace;font-size:14px;line-height:1.8;">
-  <strong>Growth Engine Ratio = Annualized Revenue Growth &divide; (GTM Investment + R&amp;D Investment)</strong><br><br>
-  Annualized Growth = (Revenue Q<sub>n</sub> &minus; Revenue Q<sub>n-1</sub>) &times; 4<br>
-  GTM Investment = 0.25 &times; (GTM<sub>n-4</sub> + GTM<sub>n-3</sub> + GTM<sub>n-2</sub> + GTM<sub>n-1</sub>)<br>
-  R&amp;D Investment = 0.25 &times; (R&amp;D<sub>n-5</sub> + R&amp;D<sub>n-4</sub>)
-</div>
-
-<p>GTM uses a 4-quarter lookback because enterprise sales cycles run 6–9 months—pipeline built
-in Q<sub>n-4</sub> converts across subsequent quarters until it lands in Q<sub>n</sub>.
-R&amp;D uses a 2-quarter lookback starting one quarter earlier (n-5, n-4) because features are
-built before they're sold. The build-then-sell sequence matters. Each contributing quarter is
-weighted at 25%, so GTM enters at a full quarterly run-rate (four quarters &times; 25%) while the
-shorter R&amp;D build window enters at half (two quarters &times; 25%).</p>
-
-<h2>What the Number Tells You</h2>
-<p>A ratio of <strong>$1.00</strong> means you're generating exactly $1 of annualized revenue growth for
-every $1 of combined R&amp;D + GTM investment. That's the threshold that separates companies
-that are profitable on acquisition from those that aren't.</p>
-
-<p>In my analysis of 11 public SaaS companies across 188 company-quarters, only 2 exceeded $1.00
-in steady state. The guide names them: Reddit at $2.94, Palantir at $2.04. It benchmarks both
-against 200+ private SaaS companies via OPEXEngine's database.</p>
-
-<div class="article-pull ger-pull"><p>Don't benchmark against these outliers unless you have similar network effects.</p></div>
-
-<p>The other 9 need to retain customers for 1.2 to 2.8 years just to break even
-on acquisition costs. That changes how you think about churn—permanently.</p>
-
-<div class="article-pull ger-pull"><p>Every churned customer represents permanent capital loss.</p></div>
-
-<div class="ger-table-wrap" style="background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 32px;">
-  <table class="ger-table" style="width:100%;border-collapse:collapse;font-size:14px;min-width:520px;">
-    <thead><tr style="background:var(--navy);">
-      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">Tier</th>
-      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">Ratio</th>
-      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">Years to Break Even</th>
-      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">What It Means</th>
-    </tr></thead>
-    <tbody>
-      <tr style="border-top:1px solid var(--line);">
-        <td style="padding:10px 14px;">&#127942; Elite</td>
-        <td style="padding:10px 14px;">&gt; $1.20</td>
-        <td style="padding:10px 14px;">&lt; 0.8 years</td>
-        <td style="padding:10px 14px;">Profitable on acquisition—invest aggressively</td>
-      </tr>
-      <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
-        <td style="padding:10px 14px;">&#11088; Strong</td>
-        <td style="padding:10px 14px;">$0.70&ndash;$1.20</td>
-        <td style="padding:10px 14px;">0.8&ndash;1.4 years</td>
-        <td style="padding:10px 14px;">Above median—maintain efficiency as you scale</td>
-      </tr>
-      <tr style="border-top:1px solid var(--line);">
-        <td style="padding:10px 14px;">&#10003; Typical</td>
-        <td style="padding:10px 14px;">$0.50&ndash;$0.70</td>
-        <td style="padding:10px 14px;">1.4&ndash;2.0 years</td>
-        <td style="padding:10px 14px;">In the pack—retention must be a top priority</td>
-      </tr>
-      <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
-        <td style="padding:10px 14px;">&#9888;&#65039; Below target</td>
-        <td style="padding:10px 14px;">&lt; $0.50</td>
-        <td style="padding:10px 14px;">&gt; 2.0 years</td>
-        <td style="padding:10px 14px;">Urgent review—fix retention before scaling acquisition</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-</div><!-- /tool-prose -->
-
-<h2>Calculate Your Ratio</h2>
+<h2 style="margin-top:0;">Calculate Your Ratio</h2>
 <p style="color:var(--muted);font-size:15px;margin:-6px 0 18px;">
   Pick how much data you have. A single quarter returns your score against the benchmark; a run of
   quarters shows your trend; projected quarters show where you're headed—with an upper/lower band
   if your numbers land 10% better or worse than plan. All figures in the same currency, consistently.
 </p>
+</div><!-- /tool-prose -->
 
 <div class="ger-modes" role="tablist" style="margin:0 0 18px;">
   <button class="ger-mode ger-mode-on" id="tab-point" onclick="setMode('point')">Point in time</button>
@@ -2931,37 +2828,8 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
   n-5 R&amp;D lookback, so the timeline carries five quarters of lookback before its first measured
   point and adds one measured quarter for each period you look back or forward.
 </p>
-
-<h2>A Note on Retention</h2>
-<p>One of the more useful outputs of this framework is a simple break-even calculation:
-<strong>Years to Break Even = 1 ÷ Efficiency Ratio</strong>. If your ratio is $0.60, you
-need to retain each customer for 1.7 years just to recover acquisition costs—and that
-assumes flat renewal with no expansion. Strong NRR (above 110%) compresses that timeline;
-contraction can make it indefinitely long.</p>
-
-<p>Companies below $1.00, which is most of them, need both high gross retention and strong
-net expansion for the economics to work. One without the other isn't sufficient. The ratio
-makes that constraint explicit in a way that's hard to argue with in a board room.</p>
-
-<h2>Get the Full Guide</h2>
-<p>The whitepaper includes the complete methodology, a worked example using Datadog's public
-financials, benchmark data across 200+ companies via OPEXEngine, and a performance tier guide
-with specific actions to take based on where your ratio lands. It's published in partnership
-with The F Suite.</p>
-
-<a href="https://www.fsuite.co" target="_blank" rel="noopener" class="btn" style="font-size:15px;padding:12px 24px;">
-  Download the full guide &rarr;
-</a>
-<p style="font-size:13px;color:var(--muted);margin-top:8px;">(Full link coming soon—check back or <a href="/contact">reach out</a> and I'll send it directly.)</p>
-
-<h2>Bonus: The Growth Engine Ratio, the Song</h2>
-<p style="color:var(--muted);font-size:14px;margin:0 0 14px;">I couldn't resist. AI-generated, obviously.</p>
-<iframe src="https://suno.com/embed/608201fd-d2b9-4774-af56-b65d477f3528" width="100%" height="240" style="border:none;border-radius:12px;max-width:760px;display:block;"
-  allow="autoplay; encrypted-media; fullscreen" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"
-  title="The Growth Engine Ratio (song)"></iframe>
-<p style="font-size:13px;color:var(--muted);margin-top:8px;">Player not loading? <a href="/static/growth-engine-ratio.mp3" download>Download the MP3</a> or <a href="https://suno.com/song/608201fd-d2b9-4774-af56-b65d477f3528" target="_blank" rel="noopener">listen on Suno</a>.</p>
-
 </div><!-- /tool-prose -->
+
 </div><!-- /tool-inner -->
 </div><!-- /page -->
 
@@ -3379,7 +3247,7 @@ function loadTimelineExample() {
 // Build the timeline table up front so its rows exist before the user switches tabs.
 renderTL();
 </script>"""
-    return HTMLResponse(_page("The Growth Engine Ratio—Brian Weisberg", "Thought leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Growth Engine Ratio Calculator—Brian Weisberg", "Thought leadership", body, role=_role(request)))
 
 
 @app.get("/finops-ai-hackathon")
@@ -3390,407 +3258,6 @@ def finops_ai_hackathon_redirect(request: Request):
     return RedirectResponse(target, status_code=301)
 
 
-@app.get("/thought-leadership/ai-hackathon-playbook", response_class=HTMLResponse)
-def finops_ai_hackathon(request: Request):
-    body = """<div class="page page-full article-atlantic">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
-<style>
-  /* Base pull-quote/callout/warning styling lives in the shared .article-*
-     classes (Phase 6b) — these are just this page's few pre-existing spacing
-     overrides, composed alongside the shared class (class="article-pull
-     fah-pull") so this page's rendering is unchanged from before extraction. */
-  .fah-callout{margin:28px 0;}
-  .fah-callout li{margin-bottom:5px;}
-  .fah-warn{padding:18px 22px;margin:24px 0;}
-  .fah-warn-title{margin-bottom:8px;}
-  /* Quote breakout (width refinement, this phase): only Quotes widen beyond
-     the body-copy column — CTA/Tip/Warning boxes stay at body-copy width
-     (mostly multi-line instructional prose, where a wide box reads as an
-     odd second column). 1040px is a middle ground between the 760px
-     .tool-prose column and the page's full working width. See BRAND.md's
-     Callout taxonomy entry for the centering math and the box-vs-quote
-     width reasoning. */
-  .fah-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}
-  /* Phase track */
-  .fah-track{display:flex;flex-direction:column;gap:0;margin:28px 0;}
-  .fah-step{display:flex;gap:18px;position:relative;}
-  .fah-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}
-  .fah-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}
-  .fah-body{padding-bottom:26px;flex:1;}
-  .fah-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}
-  .fah-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}
-  .fah-tag{display:inline-block;font:600 11px var(--font-body);letter-spacing:.05em;color:var(--muted);border:1px solid var(--line-strong);border-radius:5px;padding:2px 8px;margin-top:4px;}
-  /* 2x2 Matrix */
-  .fah-matrix{margin:28px 0;}
-  .fah-matrix-label{text-align:center;font:700 11px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
-  .fah-matrix-grid{display:grid;grid-template-columns:28px 1fr 1fr;grid-template-rows:1fr 1fr 28px;gap:0;height:280px;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}
-  .fah-m-y{writing-mode:vertical-rl;transform:rotate(180deg);font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:1/3;grid-column:1;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}
-  .fah-m-x{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:3;grid-column:2/4;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}
-  .fah-q{padding:16px 18px;font-size:13px;line-height:1.45;display:flex;flex-direction:column;border:1px solid var(--line);}
-  .fah-q-label{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;}
-  .fah-q-star{background:var(--navy);color:#fff;}.fah-q-star .fah-q-label{color:rgba(255,255,255,.75);}
-  .fah-q-b{background:var(--navy-wash);color:var(--ink-soft);}.fah-q-b .fah-q-label{color:var(--muted);}
-  .fah-q-c{background:#fff;color:var(--muted);}.fah-q-c .fah-q-label{color:var(--line-strong);}
-  /* Verdict chips */
-  .fah-verdicts{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0;}
-  .fah-verdict{padding:10px 18px;border-radius:8px;font-size:14px;}
-  .fah-v-ship{background:var(--navy);color:#fff;}
-  .fah-v-iterate{background:var(--coral-wash);color:var(--coral-deep);border:1px solid var(--coral-light);}
-  .fah-v-park{background:var(--surface-2);color:var(--muted);border:1px solid var(--line-strong);}
-  .fah-v-label{font:700 11px var(--font-body);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
-  /* Resource links */
-  .fah-resources{display:flex;flex-direction:column;gap:0;margin:20px 0;border-top:1px solid var(--line-strong);}
-  .fah-resource{display:flex;align-items:flex-start;gap:14px;padding:14px 4px;text-decoration:none;color:inherit;border-bottom:1px solid var(--line);}
-  .fah-resource:hover{background:var(--navy-wash);}
-  .fah-r-icon{font-size:18px;flex-shrink:0;margin-top:1px;}
-  .fah-r-title{font:600 15px var(--font-head);color:var(--navy);margin-bottom:2px;}
-  .fah-r-desc{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}
-  .fah-r-src{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-top:3px;}
-  /* Notion template box */
-  .fah-template{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:26px 30px;margin:28px 0;}
-  .fah-template-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;display:flex;align-items:center;gap:8px;}
-  .fah-template h3{font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin:18px 0 6px;}
-  .fah-template h3:first-of-type{margin-top:0;}
-  .fah-template p,.fah-template li{font-size:14px;color:var(--ink-soft);}
-  .fah-template ul{padding-left:18px;margin:0 0 8px;}
-  .fah-template li{margin-bottom:4px;}
-  /* Tier strip */
-  .fah-tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:22px 0;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}
-  .fah-tier{padding:18px 16px;}
-  .fah-tier:not(:last-child){border-right:1px solid var(--line);}
-  .fah-tier-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px;}
-  .fah-tier p{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}
-  .fah-t-ship{background:var(--navy);}.fah-t-ship .fah-tier-title{color:#fff;}.fah-t-ship p{color:rgba(255,255,255,.8);}
-  .fah-t-iter{background:var(--coral-wash);}.fah-t-iter .fah-tier-title{color:var(--coral-deep);}
-  .fah-t-park{background:var(--surface-2);}.fah-t-park .fah-tier-title{color:var(--muted);}
-  /* Inspire -> Sleep -> Build flowchart: a process sequence, not a quotable
-     idea, so it gets a lightweight CSS-only boxes-and-arrows visual instead
-     of pull-quote styling. No charting dependency needed for three linear
-     steps — see BRAND.md's Callout taxonomy entry. */
-  .fah-flow{display:flex;align-items:center;gap:10px;margin:24px 0 10px;}
-  .fah-flow-step{flex:1;background:var(--navy-wash);border:1px solid var(--line);border-radius:10px;padding:16px 14px;text-align:center;font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);}
-  .fah-flow-arrow{flex:0 0 auto;font-size:20px;color:var(--muted);}
-  .fah-flow-arrow-v{display:none;}
-  .fah-flow-caption{font-size:14px;color:var(--ink-soft);text-align:center;margin:0 0 24px;}
-  @media(max-width:640px){
-    .fah-flow{flex-direction:column;}
-    .fah-flow-arrow-h{display:none;}
-    .fah-flow-arrow-v{display:inline;}
-  }
-  /* Sailboat SVG motif */
-  .fah-motif{text-align:center;margin:32px 0 24px;}
-  @media(max-width:640px){
-    .fah-matrix-grid{height:220px;}
-    .fah-tiers{grid-template-columns:1fr;}
-    .fah-tier:not(:last-child){border-right:none;border-bottom:1px solid var(--line);}
-    .fah-verdicts{flex-direction:column;}
-  }
-</style>
-
-<div class="tool-prose">
-<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Playbook</p>
-<h1 style="margin:0 0 8px;">Sail, don't row</h1>
-<p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">A playbook for running an AI hackathon with your finance team</p>
-<p style="color:var(--muted);font-size:14px;margin:0 0 36px;">By Brian Weisberg &middot; June 2026</p>
-
-<p>There are two ways to approach the AI moment in finance. The first is to row harder: one-off solutions, manual handoffs, each person finding their own tool at their own pace. Exhausting. Doesn't scale. The second is to sail: build the infrastructure deliberately, rig it carefully, and let the conditions do the work. The difference isn't capability. It's intention.</p>
-
-<p>A hackathon is how a finance team learns to sail. It creates protected time and a low-stakes space to learn something hard together—as a team, where nobody has to already know the answer. The builds you ship at the end are real, but they're a byproduct. The point is the skill that stays when everyone goes home.</p>
-
-<p>I've run one of these with my own finance and ops team, and this is the format distilled—what worked, why it worked, and how to run it yourself.</p>
-
-<div class="article-callout fah-callout">
-  <div class="article-callout-title">Before any piece of work, two questions</div>
-  <ol>
-    <li>Is this worth doing?</li>
-    <li>And am I sailing or rowing?</li>
-  </ol>
-  <p style="margin-top:10px;">Rowing isn't inherently bad. The point is being intentional about when you go manual and when you build something repeatable. Ad-hoc has a way of becoming permanent ad-hoc.</p>
-</div>
-
-<h2>Why a hackathon—and why now</h2>
-<p>AI adoption in finance doesn't happen on its own. It gets crowded out by the close, the board deck, the forecast update. There's always something more urgent. Left to find the time on their own, most teams never do.</p>
-
-<p>A hackathon fixes that by force. It carves out protected time and makes <em>exploring together</em> the actual assignment. The format works for three reasons:</p>
-<ul style="padding-left:22px;margin:0 0 20px;">
-  <li style="margin-bottom:10px;"><strong>Psychological safety.</strong> When everyone is learning at the same time, in the same room, there's no expert to defer to and no reason to hide. Half-formed ideas get air.</li>
-  <li style="margin-bottom:10px;"><strong>Time-boxing as a feature.</strong> The constraint—ninety minutes to build something shippable—focuses effort better than a two-week sprint with no end in sight. Done is better than perfect.</li>
-  <li style="margin-bottom:10px;"><strong>Compounding returns.</strong> A team that has learned something together learns faster next time. The first hackathon is the hardest. Run it annually and it becomes a flywheel.</li>
-</ul>
-
-<p>The goal isn't to automate the whole finance function. It's to close the gap between your team's potential and its current velocity—on purpose, together, in a way that compounds.</p>
-
-<h2>The method behind it: design thinking</h2>
-<p>Before the mechanics, the philosophy. The prioritization format I use: post-its, dot stickers, a 2×2. It isn't a team-building exercise. It's the application of a specific method: design thinking.</p>
-
-<p>Design thinking is a problem-solving approach that starts with the people experiencing the problem, not with the solution. It works in two modes:</p>
-
-<ul style="padding-left:22px;margin:0 0 20px;">
-  <li style="margin-bottom:10px;">Diverge first. Everyone generates ideas independently, without talking.</li>
-  <li style="margin-bottom:10px;">Then converge.</li>
-</ul>
-
-<p>The separation matters—if you skip the silent step and just go around the room, the first voice anchors every other answer.</p>
-
-<p>The other half is the ground rule going in: <strong>no bad ideas.</strong> No judgment, no evaluating while generating. The only requirement is a clear persona and use case: a real person with a real problem, not a vague wish. That's what makes people comfortable putting the half-formed thing on the wall—which is exactly where the good ones tend to start.</p>
-
-<p>This method started in product design but works anywhere you need a group to surface and prioritize ideas without the usual political drag. A few examples of what it looks like at scale:</p>
-
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--line-strong);border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;margin:20px 0;">
-  <div style="background:#fff;padding:18px 16px;">
-    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Airbnb</div>
-    <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">Early growth</div>
-    <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Bookings were flat. They visited hosts, looked at listings, and realized photos were terrible. One non-technical intervention. The insight came from observing the problem directly.</p>
-  </div>
-  <div style="background:#fff;padding:18px 16px;">
-    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">IBM</div>
-    <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">Enterprise shift</div>
-    <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Flipped the order: start with what the customer needs, then figure out the technology. Built internal design studios. Retrained thousands. Outputs improved. So did relationships.</p>
-  </div>
-  <div style="background:#fff;padding:18px 16px;">
-    <div style="font:600 11.5px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Google</div>
-    <div style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:8px;">20% rule</div>
-    <p style="font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;">Structured diverge time with real stakes attached. Gmail, Google News, and AdSense all started there. The roadmap never would have produced them.</p>
-  </div>
-</div>
-
-<p style="font-size:14px;color:var(--muted);margin:0 0 8px;">Three resources worth sending as pre-reading before you run this:</p>
-<div class="fah-resources">
-  <a href="https://www.nngroup.com/articles/design-thinking/" target="_blank" rel="noopener" class="fah-resource">
-    <span class="fah-r-icon">📖</span>
-    <div><div class="fah-r-title">Design Thinking 101</div><p class="fah-r-desc">Covers the six phases and why this isn't just a brainstorming session with a fancier name.</p><div class="fah-r-src">Nielsen Norman Group</div></div>
-  </a>
-  <a href="https://www.nngroup.com/articles/diverge-converge/" target="_blank" rel="noopener" class="fah-resource">
-    <span class="fah-r-icon">🔀</span>
-    <div><div class="fah-r-title">The Diverge-and-Converge Technique</div><p class="fah-r-desc">Why you split ideation from prioritization, and what goes wrong when you don't.</p><div class="fah-r-src">Nielsen Norman Group</div></div>
-  </a>
-  <a href="https://www.nngroup.com/articles/dot-voting/" target="_blank" rel="noopener" class="fah-resource">
-    <span class="fah-r-icon">🟢</span>
-    <div><div class="fah-r-title">Dot Voting</div><p class="fah-r-desc">How many dots to give, when to rerun a vote, and the failure modes to watch for—especially the person who campaigns out loud before the stickers go up.</p><div class="fah-r-src">Nielsen Norman Group</div></div>
-  </a>
-  <a href="https://designthinking.ideo.com/" target="_blank" rel="noopener" class="fah-resource">
-    <span class="fah-r-icon">💡</span>
-    <div><div class="fah-r-title">IDEO Design Thinking</div><p class="fah-r-desc">The original source—where the method came from, with toolkits and examples across industries.</p><div class="fah-r-src">IDEO</div></div>
-  </a>
-</div>
-
-<h2>Before you arrive: the setup</h2>
-<p>The single biggest mistake in running a hackathon is walking into the room cold. If the first thing you do is ask "so what should we build?"—you'll spend half your time generating half-baked ideas and the other half convincing people to try something. Do the intake work before you're in a room together.</p>
-
-<div class="article-callout fah-callout">
-  <div class="article-callout-title">Async intake—1–2 weeks before the event</div>
-  <ul>
-    <li>Set up a simple intake form (Notion works well) with these fields: <strong>problem statement</strong> (one sentence), <strong>who it hurts</strong>, <strong>type</strong> (automation / visibility / missing skill / analysis), <strong>impact and feasibility</strong> (a first guess), and <strong>definition of done</strong>.</li>
-    <li>Ask specific questions. <em>"What do you do every week that feels like copy-paste?"</em> gets better answers than <em>"What problems do you have?"</em></li>
-    <li>Make it frictionless. Let people dump free text if that's easier—you or an AI agent can structure it afterward. The goal is honest input, not a polished pitch.</li>
-    <li>Optional: use AI to auto-fill the structured fields from each submission, then have people review and correct. That task itself is a small AI adoption moment.</li>
-  </ul>
-</div>
-
-<p>Also before the event: get your integrations connected. If you're building with Claude or another AI assistant, make sure it's linked to the systems you actually use—NetSuite, Notion, Google Drive, Slack. Spending build time on setup is demoralizing. Arrive ready to build.</p>
-
-<p>Consider sending the design thinking pre-reads (linked above) a few days out. Not required, but teams that arrive with the method in their heads move faster once they're in the room.</p>
-
-<h2>Day zero: from problems to priorities</h2>
-<p>This is the framing session—the day (or half-day) before the build. Its job is to turn a backlog of submitted problems into a ranked shortlist of sprint candidates. Here's the full sequence:</p>
-
-<div class="fah-track">
-  <div class="fah-step">
-    <div class="fah-num">1</div>
-    <div class="fah-body">
-      <h3>Transcribe to post-its</h3>
-      <p>During a break, the facilitator writes each submitted problem onto a physical sticky note—one problem per note. This forces a human edit pass. You spot duplicates, catch problems that are really the same thing framed twice, and produce something the whole room can see simultaneously. Keep laptops closed for the rest of this session.</p>
-      <span class="fah-tag">⏱ 15–20 min · facilitator only · done during a break</span>
-    </div>
-  </div>
-  <div class="fah-step">
-    <div class="fah-num">2</div>
-    <div class="fah-body">
-      <h3>Live additions + clustering</h3>
-      <p>Give the room a few minutes to add anything not submitted async. Then cluster: pull duplicate or overlapping stickies together before voting. Facilitator-led, fast—group what's obviously similar and move on. Don't debate the clusters. Debate costs time and anchors thinking before the vote.</p>
-      <span class="fah-tag">⏱ 10–15 min · whole team</span>
-    </div>
-  </div>
-  <div class="fah-step">
-    <div class="fah-num">3</div>
-    <div class="fah-body">
-      <h3>Silent dot voting</h3>
-      <p>Everyone gets five dot stickers. You can stack all five on one idea or spread them across five. <strong>No talking while voting.</strong> Silence prevents the loudest voice from anchoring the group—the most common failure mode in group prioritization. Once votes are tallied, log totals back into your intake database so the prioritization is permanent.</p>
-      <span class="fah-tag">⏱ 5–10 min · whole team · silence required</span>
-    </div>
-  </div>
-  <div class="fah-step">
-    <div class="fah-num">4</div>
-    <div class="fah-body">
-      <h3>The 2×2: value vs. effort</h3>
-      <p>With vote tallies as a guide, place stickies on a 2×2 grid together as a team. <strong>Value</strong> on the vertical axis. <strong>Effort</strong> on the horizontal—and effort means all-in effort: time, skill required, data access, dependencies. Facilitator guides, team places. The conversation happens around placement, not around lobbying for ideas.</p>
-    </div>
-  </div>
-</div>
-
-<div class="fah-matrix">
-  <div class="fah-matrix-label">Value vs. Effort—how to sort your ideas</div>
-  <div class="fah-matrix-grid">
-    <div class="fah-m-y">Value &uarr;</div>
-    <div class="fah-q fah-q-star">
-      <div class="fah-q-label">&#10022; Sprint targets</div>
-      <div style="font-size:13px;line-height:1.45;">High value, achievable in 90 min. These are your hackathon finalists. Pick 3–4, pair up, build.</div>
-    </div>
-    <div class="fah-q fah-q-b">
-      <div class="fah-q-label">Scope &amp; own</div>
-      <div style="font-size:13px;line-height:1.45;color:var(--ink-soft);">High value, high effort. Real initiatives—not hackathon material. Each gets a named owner and goes on the roadmap.</div>
-    </div>
-    <div class="fah-q fah-q-c">
-      <div class="fah-q-label" style="color:var(--line-strong);">Intentionally skip</div>
-      <div style="font-size:13px;line-height:1.45;color:var(--line-strong);">Low value, low effort. Name it explicitly. Agree to leave it alone.</div>
-    </div>
-    <div class="fah-q fah-q-c">
-      <div class="fah-q-label" style="color:var(--line-strong);">Intentionally skip</div>
-      <div style="font-size:13px;line-height:1.45;color:var(--line-strong);">Low value, high effort. Clear no.</div>
-    </div>
-    <div class="fah-m-x">Effort &rarr;</div>
-  </div>
-</div>
-
-<div class="article-warn fah-warn">
-  <div class="article-warn-title fah-warn-title">Name what you're skipping</div>
-  <p>Things that "fall off the list" have a way of coming back. Things you've explicitly decided to skip don't. For every idea below the line: name it, say it out loud, agree to leave it alone. <em>"Intentionally skipping"</em> and <em>"fell off the list"</em> are not the same thing.</p>
-</div>
-
-<div class="fah-track" style="margin-top:24px;">
-  <div class="fah-step">
-    <div class="fah-num">5</div>
-    <div class="fah-body">
-      <h3>Two final cuts: when, and whether it's ready</h3>
-      <p>Sort the upper-right survivors two ways. First, <strong>timing:</strong> Build (do it at the hackathon), Later (worth doing, not this week), Even Later (needs scoping first). Second, <strong>readiness:</strong> can you touch this right now, or does it have a dependency, a data question, an unknown to resolve? A high-value idea that isn't ready to build isn't a sprint candidate—it's a scoping task. Naming that distinction keeps you honest.</p>
-      <span class="fah-tag">⏱ 10–15 min · whole team</span>
-    </div>
-  </div>
-  <div class="fah-step">
-    <div class="fah-num">6</div>
-    <div class="fah-body">
-      <h3>Assign pairs</h3>
-      <p>Match people to Build-ready ideas. Pairs, not solo work—two people per build keeps momentum up when one gets stuck. Assign 1–2 floaters (ideally including yourself if you're the leader) who stay unattached and circulate to unblock teams during the sprint.</p>
-      <span class="fah-tag">⏱ 5 min · facilitator-led</span>
-    </div>
-  </div>
-</div>
-
-<h2>Protect the gap: inspire, sleep, build</h2>
-<p>Here's the sequencing decision that separates a good hackathon from a great one: <strong>don't build on the framing day.</strong></p>
-
-<p>The framing session is dense with new thinking—a full backlog processed, clustered, voted on, and prioritized. Ending there, inspired rather than rushed, gives that thinking time to settle. People go home with a problem in their head. They think about it in the shower. They wake up with the approach half-formed. That overnight processing is doing real work.</p>
-
-<div class="fah-flow">
-  <div class="fah-flow-step">Inspire</div>
-  <div class="fah-flow-arrow"><span class="fah-flow-arrow-h">&rarr;</span><span class="fah-flow-arrow-v">&darr;</span></div>
-  <div class="fah-flow-step">Sleep</div>
-  <div class="fah-flow-arrow"><span class="fah-flow-arrow-h">&rarr;</span><span class="fah-flow-arrow-v">&darr;</span></div>
-  <div class="fah-flow-step">Build</div>
-</div>
-<p class="fah-flow-caption">That's the sequence. The gap between the framing day and the build day isn't scheduling slack. It's part of the method.</p>
-
-<p>Add one more step on the morning of the build day before anyone opens a laptop: <strong>15–20 minutes of inspiration.</strong> Show examples of what other finance teams have actually built with AI. Real demos, not slides. Actual workflows someone is using. Then, and this is the move worth stealing, clear the votes and run a second idea-generation round from scratch. The second round is almost always better than the first. People arrive with new angles, sharper problem statements, and sometimes a completely different sense of what they want to build.</p>
-
-<h2>The build day</h2>
-<p>The build sprint is simple by design. Complexity is the enemy of shipping.</p>
-
-<div class="article-callout fah-callout">
-  <div class="article-callout-title">Build day structure</div>
-  <ul>
-    <li><strong>Morning reboot (15–20 min):</strong> Inspiration videos, second idea-generation round, confirm pairs and targets.</li>
-    <li><strong>Sprint #1 (90 min):</strong> Pairs build. Floaters circulate. No whole-group check-ins until time's called—mid-sprint interruptions break flow.</li>
-    <li><strong>Optional midpoint (45 min in):</strong> 5-minute pulse check per team. Not a demo—just calibration. Are you stuck? Do you need to scope down?</li>
-    <li><strong>Demos + verdicts:</strong> Regroup as a full team. Each pair demos what they built or learned. 10 minutes per team, 2 minutes for the verdict decision. Every demo gets a verdict and a named owner before the next team starts.</li>
-  </ul>
-</div>
-
-<p>The constraint (90 minutes) is the point. It forces scope decisions early. A team that's trying to build the perfect reconciliation engine will fail. A team that's trying to build a working prototype of one slice of that engine will ship something. "Done enough to demo" is the bar.</p>
-
-<p>What floaters actually do: when a pair is stuck on a tool behavior, a data question, or scope creep, the floater doesn't solve the problem for them. They ask one question: <em>"What's the smallest thing you could build that would prove this works?"</em> That's usually enough to unblock.</p>
-
-<h2>Closing with verdicts and owners</h2>
-<p>The close is where most hackathons fail. Teams demo, everyone claps, and then... nothing. The builds sit in a Notion database for three months and quietly become shelf-ware. What prevents that is a discipline: <strong>every demo gets a verdict and a named owner before the room empties.</strong></p>
-
-<div class="fah-tiers">
-  <div class="fah-tier fah-t-ship">
-    <div class="fah-tier-title">Ship</div>
-    <p>Push it to production now. It's working, it's useful, it's ready. Assign an owner whose job is to not let it die.</p>
-  </div>
-  <div class="fah-tier fah-t-iter">
-    <div class="fah-tier-title">Iterate</div>
-    <p>Another pass before it's ready. Assign an owner and a target date. <em>Iterate without a date is just Park with extra steps.</em></p>
-  </div>
-  <div class="fah-tier fah-t-park">
-    <div class="fah-tier-title">Park</div>
-    <p>Not the right moment—but documented for later. This is a legitimate verdict. Honor it by writing down why.</p>
-  </div>
-</div>
-
-<p>The Park verdict deserves more credit than it gets. It's not failure—it's intellectual honesty. Naming why something isn't ready (wrong timing, missing data, dependency on something else) is more useful than letting it die quietly. A well-documented Park can become a Ship six months later when the conditions change.</p>
-
-<p>The goal is at least one thing in production before anyone gets on a plane. Aim for that. It changes the energy of the room and sets the bar for everything that follows.</p>
-
-<h2>The operating system: a Notion setup that compounds</h2>
-<p>The post-its get the attention. They're not what makes this work. What makes it work is the underlying system—one intake database, one page per idea, a structured record that outlives the event.</p>
-
-<div class="fah-template">
-  <div class="fah-template-title">📋 Hackathon intake form—fields that matter</div>
-  <h3>Submission name</h3>
-  <p>A 3–6 word label. Forces clarity before anyone has read the full submission.</p>
-  <h3>Problem statement</h3>
-  <p>One sentence. The constraint is the discipline—a problem that needs "and" is really two problems. Split it.</p>
-  <h3>Who it hurts</h3>
-  <p>A specific person or role. "The team" is not a persona. "The controller on every close" is.</p>
-  <h3>Type</h3>
-  <p>Automation / visibility / missing skill / analysis / ops plumbing. Useful for spotting patterns—if half the submissions are "I can't see X," that's a signal.</p>
-  <h3>Impact + feasibility</h3>
-  <p>A first guess, not a commitment. You'll refine it during the 2×2.</p>
-  <h3>Definition of done</h3>
-  <p>Describe the two-minute demo. What does success look like when someone watches it work? This field does more work than any other.</p>
-</div>
-
-<p>The move worth stealing: <strong>one page per idea.</strong> Not just a row in a table—an actual page that becomes the full record. What the team submitted, live notes from the build, what they learned, what broke, what to do next. The page carries the idea through the event and becomes searchable institutional knowledge.</p>
-
-<p>Without this, the hackathon produces prototypes. With it, it produces compounding assets. The next person who picks up a similar problem starts from the answer, not from scratch.</p>
-
-<p>Two database views worth setting up: an <strong>effort × value matrix</strong> (the digital twin of your sticky-note 2×2, auto-sorted by vote count) and a <strong>groups board</strong> by theme. The groups view is useful for spotting when one area—say, month-end close—quietly dominates the shortlist, which is usually a signal worth paying attention to.</p>
-
-<h2>After: building the AI Lab</h2>
-<p>The hackathon is a beginning, not a destination. What makes it compound over time is institutionalizing what you learned: a shared space—call it the AI Lab, call it whatever fits your culture—where builds live and can be forked.</p>
-
-<p>The operating model is simple:</p>
-<ul style="padding-left:22px;margin:0 0 20px;">
-  <li style="margin-bottom:8px;">Build something useful → document it → drop it in the Lab.</li>
-  <li style="margin-bottom:8px;">Find something someone else built → fork it → adapt it to your context.</li>
-  <li style="margin-bottom:8px;">Review the Lab quarterly. What's still in use? What needs updating? What opened up new possibilities?</li>
-</ul>
-
-<p>Run the hackathon again next year. The format gets easier the second time—the setup is faster, people know what to expect, and the ideas are sharper because everyone has spent a year noticing problems worth solving. The first one is the hardest. The flywheel needs one good push.</p>
-
-<div class="article-callout fah-callout">
-  <div class="article-callout-title">What good looks like when you leave</div>
-  <ul>
-    <li>3–4 working prototypes, each with a verdict and a named owner</li>
-    <li>A prioritized backlog in Notion for everything that didn't get built—with owners on anything that moves forward</li>
-    <li>At least one thing in production before anyone leaves</li>
-    <li>A shared Lab space where builds live and can be forked</li>
-    <li>A date on the calendar for the next one</li>
-  </ul>
-</div>
-
-<p>The teams that get the most out of AI aren't the ones with the best tools. They're the ones that got good at using them—together, on purpose, through deliberate practice. A hackathon is how you start that. Sail, don't row.</p>
-
-<div style="border-top:1px solid var(--line-strong);margin-top:48px;padding-top:24px;">
-  <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
-  <p style="font-size:12px;color:var(--muted);margin:14px 0 0;">&#9973; Made it this far? <a href="/play">Sail, Don&rsquo;t Row</a> is also a game.</p>
-</div>
-</div>
-
-</div>"""
-    return HTMLResponse(_page("Sail, don't row: AI hackathon playbook—Brian Weisberg", "Thought leadership", body, role=_role(request)))
-
-
 @app.get("/netsuite-mcp")
 def netsuite_mcp_redirect(request: Request):
     target = "/thought-leadership/netsuite-mcp"
@@ -3799,314 +3266,31 @@ def netsuite_mcp_redirect(request: Request):
     return RedirectResponse(target, status_code=301)
 
 
-@app.get("/thought-leadership/netsuite-mcp", response_class=HTMLResponse)
-def netsuite_mcp(request: Request):
-    body = """<div class="page page-full article-atlantic">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
-<style>
-  /* Base pull-quote/callout/warning styling lives in the shared .article-*
-     classes (Phase 6b) — these are just this page's few pre-existing spacing
-     overrides, composed alongside the shared class (class="article-callout
-     ns-callout") so this page's rendering is unchanged from before extraction. */
-  .ns-callout{margin:24px 0;}
-  .ns-callout li{margin-bottom:4px;}
-  .ns-warn{padding:16px 22px;margin:18px 0;}
-  .ns-warn-title{margin-bottom:6px;}
-  /* Width refinement (this phase): CTA/Tip/Warning boxes stay at body-copy
-     width (.tool-prose's 760px column) rather than breaking out — they're
-     mostly multi-line instructional prose, where a wide box reads as an odd
-     second column. Only Quotes widen (see BRAND.md's Callout taxonomy
-     entry); NetSuite MCP currently has no Quote instances, so nothing on
-     this page breaks out. */
-  /* Callout taxonomy (this phase): folded into the Tips color family
-     (seafoam) rather than kept as its own fifth gray "note" style — see
-     BRAND.md's "Callout taxonomy" entry. */
-  .ns-note{background:var(--seafoam-wash);border-left:3px solid var(--seafoam-mid);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}
-  .ns-note p{font-size:14px;color:var(--ink-soft);margin:0;}
-  /* Phase track */
-  .ns-track{display:flex;flex-direction:column;gap:0;margin:24px 0;}
-  .ns-step{display:flex;gap:18px;position:relative;}
-  .ns-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}
-  .ns-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}
-  /* min-width:0 overrides the flex item's default min-width:auto, which
-     otherwise sizes to the content's intrinsic minimum — including the
-     nested .ns-table's min-width:360px — and pushes the whole flex row
-     wider than the viewport on narrow screens instead of letting
-     .ns-table-wrap's overflow-x:auto scroll the table in place. */
-  .ns-body{padding-bottom:24px;flex:1;min-width:0;}
-  .ns-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}
-  .ns-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}
-  /* Use case cards */
-  .ns-cases{display:grid;grid-template-columns:1fr;gap:12px;margin:20px 0;}
-  .ns-case{background:#fff;border:1px solid var(--line-strong);border-radius:10px;padding:20px 22px;}
-  .ns-case-label{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}
-  .ns-case-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin-bottom:8px;}
-  .ns-case p{font-size:14px;color:var(--ink-soft);margin-bottom:10px;line-height:1.55;}
-  .ns-tip{background:var(--seafoam-wash);border-radius:6px;padding:10px 14px;font-size:13px;color:var(--seafoam-deep);margin-top:8px;}
-  .ns-tip strong{font-weight:600;}
-  /* Permission table */
-  .ns-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0;}
-  .ns-table{width:100%;border-collapse:collapse;font-size:14px;}
-  .ns-table th{background:var(--navy);color:#fff;padding:9px 14px;text-align:left;font-weight:600;}
-  .ns-table td{padding:9px 14px;border-top:1px solid var(--line);}
-  .ns-table tr:nth-child(even) td{background:var(--surface-2);}
-  /* Troubleshooting table */
-  .ns-trouble{width:100%;border-collapse:collapse;font-size:14px;margin:16px 0;}
-  .ns-trouble th{background:var(--surface-2);padding:9px 14px;text-align:left;font-weight:600;border-bottom:2px solid var(--line-strong);}
-  .ns-trouble td{padding:10px 14px;border-top:1px solid var(--line);vertical-align:top;line-height:1.5;}
-  .ns-trouble tr:hover td{background:var(--navy-wash);}
-  /* Quick ref */
-  .ns-qr{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:24px 28px;margin:28px 0;}
-  .ns-qr-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;}
-  .ns-qr h3{font-family:var(--font-head);font-size:14px;font-weight:600;color:var(--ink);margin:16px 0 6px;}
-  .ns-qr h3:first-of-type{margin-top:0;}
-  .ns-qr ul{padding-left:18px;margin:0 0 4px;}
-  .ns-qr li{font-size:13px;color:var(--ink-soft);margin-bottom:3px;line-height:1.5;}
-  @media(max-width:640px){
-    .ns-trouble{font-size:13px;}
-    .ns-trouble td,.ns-trouble th{padding:8px 10px;}
-    .ns-table{font-size:13px;}
-    .ns-table td,.ns-table th{padding:8px 10px;}
-  }
-</style>
 
-<div class="tool-prose">
-<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Setup Guide</p>
-<h1 style="margin:0 0 8px;">Connecting Claude to NetSuite</h1>
-<p style="font-size:17px;font-style:italic;color:var(--ink-soft);margin:0 0 6px;line-height:1.5;">An end-to-end guide to the two-role OAuth setup for finance teams</p>
-<p style="color:var(--muted);font-size:14px;margin:0 0 36px;">By Brian Weisberg &middot; June 2026</p>
-
-<p>This guide walks through connecting Claude to NetSuite so you can ask questions about your financial data and get answers directly—no logging into NetSuite, no writing queries, no manual exports.</p>
-
-<p>Once connected, you can ask things like <em>"how much did we spend with this vendor last year?"</em> or <em>"what's the deferred revenue balance for this customer?"</em> and Claude will query NetSuite and return the answer in plain language, a table, or a formatted report. The connection runs through something called an MCP integration. You don't need to understand the underlying technology to use it—this guide covers everything you need.</p>
-
-<div class="article-callout ns-callout">
-  <div class="article-callout-title">Before you start</div>
-  <p>Check that the NetSuite AI Connector SuiteApp is installed: <strong>Customization → SuiteCloud → Installed SuiteApps</strong>, look for <code>com.netsuite.mcpstandardtools</code>. It should show <strong>Status: COMPLETE</strong>. If it's not installed, go to the SuiteApp Marketplace and search for it by name before continuing.</p>
-</div>
-
-<h2>What you can do with this</h2>
-<p>Three examples to get your wheels turning. The right use cases depend on your business, but the pattern is consistent: ask a question in plain language, Claude queries NetSuite, you get something ready to share or act on.</p>
-
-<div class="ns-cases">
-  <div class="ns-case">
-    <div class="ns-case-label">Use case 01</div>
-    <div class="ns-case-title">Revenue movements reconciliation</div>
-    <p>If you work with deferred revenue—annual contracts, prepaid arrangements, usage-based billing—it's hard to get a clear picture of how money is moving at any point in time. Claude can pull a month-by-month view showing how revenue is loading into deferred, releasing into recognized, and what the ending balance looks like. Run it for the whole business or for a specific customer.</p>
-    <p>A typical output: a waterfall table (deferred loaded, released, ending balance by month), a transaction-level trace from invoice through recognition, and a findings section flagging anything off—like a balance that should have cleared at contract termination but didn't.</p>
-    <div class="ns-tip"><strong>Tip:</strong> Ask Claude to include a math check confirming every ending balance ties back to the underlying arithmetic. Easy to add, catches rounding errors before they make it into something you share.</div>
-  </div>
-  <div class="ns-case">
-    <div class="ns-case-label">Use case 02</div>
-    <div class="ns-case-title">Vendor spend analysis</div>
-    <p>Vendor spend can be deceptively messy in NetSuite. The same vendor might appear under different names across bills. Some vendors route through a spend management platform (Ramp, Navan, Brex), which means they show up as a single vendor with the actual vendor buried in a memo field. Others route through a marketplace, invisible unless you know where to look.</p>
-    <p>Claude can learn these patterns. Once you show it how your vendors are recorded, for example <em>"this vendor always comes through as the platform with the name in the memo,"</em> it applies that logic consistently. The result is a spend picture that reflects reality, not just whatever's in the vendor field.</p>
-    <div class="ns-tip"><strong>Tip:</strong> The first time you run a vendor spend query, ask Claude to show you a sample of raw transaction data before it aggregates anything. Easy way to spot non-obvious mappings before they roll up into a wrong total.</div>
-  </div>
-  <div class="ns-case">
-    <div class="ns-case-label">Use case 03</div>
-    <div class="ns-case-title">Per-employee benefit and stipend tracking</div>
-    <p>If your company offers benefits employees draw on over time—L&amp;D stipends, wellness budgets, home office allowances—and those transactions flow through NetSuite in any form, Claude can extract and organize them by person. A useful output: each employee's YTD usage broken down by category, with transaction-level detail on demand. Useful for answering "who has used their full allocation?" without compiling spreadsheets manually.</p>
-    <div class="ns-tip"><strong>Tip:</strong> Employee names in NetSuite memos are often inconsistent—nicknames, initials, misspellings. Ask Claude to show you the distinct name variations it finds before attributing spend, so you can confirm the mapping is right. It gets even easier if you have a public or internal page that lists your team—Claude picks up on it and learns how you want employee names represented, or how teams are structured.</div>
-  </div>
-</div>
-
-<h2>The security architecture</h2>
-<p>The setup involves creating a dedicated read-only role in NetSuite for Claude to authenticate as. The reason matters.</p>
-
-<p>Claude's NetSuite integration includes tools that can create and update records, not just read them. If Claude is authenticated with a role that has write permissions, it could theoretically create transactions, edit customer records, or modify other data in your ledger. To prevent that, we create a read-only role and configure Claude to use it. No write permissions on the role means NetSuite blocks any write attempt at the permission level—regardless of what Claude tries to do. The protection is enforced by NetSuite, not by hoping Claude behaves.</p>
-
-<div class="article-warn ns-warn">
-  <div class="article-warn-title ns-warn-title">One thing that trips people up</div>
-  <p>When you connect Claude, you need to be logged into NetSuite under your <strong>normal working role</strong>—not the new read-only role you're about to create. You'll select the read-only role on a screen that appears during the connection flow. More on this in Part 2.</p>
-</div>
-
-<h2>Part 1—NetSuite setup</h2>
-<p style="color:var(--muted);font-size:14px;margin:-8px 0 20px;">You need Administrator access for these steps, or ask your NetSuite admin to complete them.</p>
-
-<div class="ns-track">
-  <div class="ns-step">
-    <div class="ns-num">1</div>
-    <div class="ns-body">
-      <h3>Confirm the SuiteApp is installed</h3>
-      <p>Go to <strong>Customization → SuiteCloud → Installed SuiteApps</strong>. Look for <strong>NetSuite AI Connector Service</strong> (bundle ID: <code>com.netsuite.mcpstandardtools</code>). Confirm it shows <strong>Status: COMPLETE</strong>. If it's not there, install it from the SuiteApp Marketplace before continuing.</p>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">2</div>
-    <div class="ns-body">
-      <h3>Create the read-only "Netsuite MCP" role</h3>
-      <p>Go to <strong>Setup → Users/Roles → Manage Roles → New</strong>. Name it <strong>Netsuite MCP</strong> (this name appears on the authorization screen when you connect Claude). Check <strong>Web Services Only Role</strong>—this prevents anyone from using this role to log into NetSuite directly and ensures it appears correctly during the connection flow.</p>
-      <p>On the <strong>Permissions tab → Setup subtab</strong>, add these six permissions at Full level:</p>
-      <div class="ns-table-wrap">
-        <table class="ns-table">
-          <thead><tr><th>Permission</th><th>Level</th></tr></thead>
-          <tbody>
-            <tr><td>MCP Server Connection</td><td>Full</td></tr>
-            <tr><td>REST Web Services</td><td>Full</td></tr>
-            <tr><td>Log in using OAuth 2.0 Access Tokens</td><td>Full</td></tr>
-            <tr><td>Log in using Access Tokens</td><td>Full</td></tr>
-            <tr><td>User Access Tokens</td><td>Full</td></tr>
-            <tr><td>SuiteScript</td><td>Full</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p>Save the role. Do not add any permissions related to creating, editing, approving, or posting transactions. This role should stay read-only.</p>
-      <div class="article-warn ns-warn" style="margin-top:12px;">
-        <div class="article-warn-title ns-warn-title">Known issue</div>
-        <p>The Web Services Only Role checkbox is easy to miss but critical. Without it, the role may not show up correctly during the connection flow, and you may see a "does not support OAuth 2.0 login" error.</p>
-      </div>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">3</div>
-    <div class="ns-body">
-      <h3>Assign the role to your user account</h3>
-      <p>Go to <strong>Lists → Employees → Employees</strong>. Find and open your employee record. Click the <strong>Access tab</strong>, find the Roles section, and add <strong>Netsuite MCP</strong>. Save. You'll now see Netsuite MCP in the role selector in the top-right corner of NetSuite—though you won't need to switch into it during normal use.</p>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">4</div>
-    <div class="ns-body">
-      <h3>A note on the integration record (no action needed)</h3>
-      <p>If you look at the integration record Claude uses (<strong>Setup → Integration → Manage Integrations</strong>, look for "NetSuite AI Connector Service"), you'll notice the REST Web Services checkbox is greyed out and can't be checked. That's normal—Anthropic created this integration and its settings are locked. Don't try to edit it. The role you created in Step 2 is what gives Claude the access it needs.</p>
-    </div>
-  </div>
-</div>
-
-<h2>Part 2—Connecting Claude</h2>
-<p style="color:var(--muted);font-size:14px;margin:-8px 0 20px;">NetSuite is set up. This part takes about two minutes per person.</p>
-
-<div class="ns-track">
-  <div class="ns-step">
-    <div class="ns-num">5</div>
-    <div class="ns-body">
-      <h3>Make sure you're in the right NetSuite role first</h3>
-      <p>Before going to Claude, check which role you're currently in on the NetSuite side. You need to be logged in under your <strong>normal working role</strong>—not the Netsuite MCP role you just created. Netsuite MCP is what you'll select during the connection flow, not what you're already in. Check the role indicator in the top-right corner of NetSuite. If it says Netsuite MCP, switch to your normal role first.</p>
-      <div class="article-warn ns-warn" style="margin-top:8px;">
-        <div class="article-warn-title ns-warn-title">Most common mistake when reconnecting</div>
-        <p>Going straight to Claude without checking your NetSuite role first. Always confirm you're in your normal working role in NetSuite before clicking Connect in Claude. This step catches more than half of all connection failures.</p>
-      </div>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">6</div>
-    <div class="ns-body">
-      <h3>Connect NetSuite in Claude</h3>
-      <p>In Claude, go to <strong>Settings → Connectors</strong>. Find NetSuite and click <strong>Connect</strong>. A NetSuite page will open asking you to authorize the connection. On the role selector, choose <strong>Netsuite MCP</strong>. Click <strong>Authorize</strong>. You'll be brought back to Claude automatically.</p>
-    </div>
-  </div>
-  <div class="ns-step">
-    <div class="ns-num">7</div>
-    <div class="ns-body">
-      <h3>Test that it works</h3>
-      <p>The NetSuite connector in Claude should now show as connected. Confirm it's actually working with a simple test: <em>"Run a quick NetSuite query to confirm the connection is working—just pull the first 3 rows from the transaction table."</em> If Claude returns a few rows, you're set. If it says the tools are unavailable, see Troubleshooting below.</p>
-    </div>
-  </div>
-</div>
-
-<div class="ns-note">
-  <p><strong>Note:</strong> The connection is per person, not shared. Each person who wants to use Claude with NetSuite needs to go through setup themselves and connect their own Claude account. If a colleague's connection is working, that tells you nothing about whether yours is.</p>
-</div>
-
-<h2>Tips for getting good results</h2>
-
-<h3 style="font-size:16px;margin:24px 0 8px;">Ask for everything, not just bills</h3>
-<p>When you ask Claude to look something up, it may default to querying only vendor bills or invoices. This can miss a lot. Journal entries are a separate transaction type—and many common workflows post through JEs: month-end accruals, prepayment amortizations, corporate card programs. A query limited to vendor bills misses them entirely.</p>
-<div class="article-callout ns-callout">
-  <div class="article-callout-title">Sanity check for any spend query</div>
-  <p>Ask Claude to first pull a grand total with no filters other than the account and date range, then compare against the detailed results. If they don't match, something is being filtered out. The discrepancy tells you what to investigate next.</p>
-</div>
-
-<h3 style="font-size:16px;margin:24px 0 8px;">Filter at the line level, not the header</h3>
-<p>Revenue recognition journal entries are often posted as a single large entry covering many customers at once. The customer is recorded at the line level inside the entry, not on the entry itself. If Claude filters at the wrong level, it can return results for a completely different customer—or nothing at all.</p>
-<p>If results for a customer look wrong—too high, too low, or zero when you know there should be activity—ask Claude: <em>"Are you filtering on the transaction line entity, not the transaction header entity?"</em> That question catches the most common mistake.</p>
-
-<h3 style="font-size:16px;margin:24px 0 8px;">If you get zero results, pull an unfiltered sample first</h3>
-<p>Zero results almost always mean a filter is wrong, not that the data is missing. Ask Claude to run a quick sample: <em>"Can you pull 5–10 raw rows with no filters so we can see what's actually there?"</em> This almost always reveals the issue—a filter too narrow, a date range that doesn't match, or a field with data in a slightly different format than expected.</p>
-
-<h3 style="font-size:16px;margin:24px 0 8px;">Claude can run saved searches, not create them</h3>
-<p>Claude can run existing saved searches and list available ones. It can't create new ones. If you need a new saved search built, ask Claude what criteria and columns to use, then create it yourself: <strong>Reports → Saved Searches → New → Transaction</strong>.</p>
-
-<h2>Troubleshooting</h2>
-<div class="ns-table-wrap">
-  <table class="ns-trouble">
-    <thead><tr><th>Error / symptom</th><th>Cause</th><th>Fix</th></tr></thead>
-    <tbody>
-      <tr>
-        <td>"This connector has no tools available"</td>
-        <td>Usually a stale session, not a permissions problem</td>
-        <td>Open a new Claude conversation first. If that fails, go to Settings → Connectors, disconnect NetSuite, and reconnect—making sure to select Netsuite MCP on the authorization screen.</td>
-      </tr>
-      <tr>
-        <td>"Your role does not support OAuth 2.0 login"</td>
-        <td>You're logged into NetSuite under a role that can't initiate the connection flow—often happens when you're already in the Netsuite MCP role</td>
-        <td>Switch to your normal working role in NetSuite first, then go back to Claude and connect. Select Netsuite MCP on the authorization screen.</td>
-      </tr>
-      <tr>
-        <td>Netsuite MCP doesn't appear as an option on the authorization screen</td>
-        <td>Role hasn't been assigned to your user yet, or Web Services Only Role isn't checked</td>
-        <td>Ask your NetSuite admin to assign Netsuite MCP to your employee record and confirm Web Services Only Role is checked on the role definition.</td>
-      </tr>
-      <tr>
-        <td>Connection keeps dropping</td>
-        <td>Normal—the connection doesn't stay active indefinitely</td>
-        <td>Open a new Claude conversation. Fixes it most of the time. If not, go to Settings → Connectors, disconnect, and reconnect.</td>
-      </tr>
-      <tr>
-        <td>Can't find a Claude token in NetSuite's Access Tokens list</td>
-        <td>Expected—the connection uses a different token type that doesn't appear there</td>
-        <td>Nothing to do. Its absence from that list doesn't mean anything is wrong.</td>
-      </tr>
-      <tr>
-        <td>Totals look wrong or suspiciously large</td>
-        <td>Often filtering at the transaction header instead of the line entity on large journal entries</td>
-        <td>Ask Claude: "Are you filtering on the transaction line entity, not the header?" Then ask it to pull an unfiltered sample to verify.</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-
-<h2>When the connection drops</h2>
-<p>The connection between Claude and NetSuite drops periodically. This is normal and doesn't mean anything is misconfigured. Try this first: <strong>open a new Claude conversation.</strong> The connection re-establishes on a new session most of the time.</p>
-
-<p>If a new conversation doesn't fix it: go to <strong>Customize</strong> (bottom-left of the chat window) or <strong>Settings → Connectors</strong>. Find NetSuite, click Disconnect, then Connect. On the NetSuite authorization screen, confirm you're in your normal working role, then select Netsuite MCP and authorize. Test with a quick query.</p>
-
-<div class="ns-qr">
-  <div class="ns-qr-title">📋 Quick reference</div>
-  <h3>First-time setup (done once, by your NetSuite admin)</h3>
-  <ul>
-    <li>Install the NetSuite AI Connector SuiteApp (<code>com.netsuite.mcpstandardtools</code>)</li>
-    <li>Create the Netsuite MCP role: Web Services Only Role checked, 6 permissions at Full, no write access</li>
-    <li>Assign the role to each user who will connect Claude</li>
-  </ul>
-  <h3>Connecting Claude (done once per person)</h3>
-  <ul>
-    <li>In NetSuite, confirm you're logged in under your normal working role</li>
-    <li>In Claude → Settings → Connectors, click Connect next to NetSuite</li>
-    <li>On the authorization screen, select Netsuite MCP</li>
-    <li>Test with a quick query to confirm it's working</li>
-  </ul>
-  <h3>If the connection drops</h3>
-  <ul>
-    <li>Open a new Claude conversation and try again—fixes it most of the time</li>
-    <li>If that doesn't work: confirm your NetSuite role, then go to Customize or Settings → Connectors in Claude and reconnect</li>
-  </ul>
-  <h3>If results look wrong</h3>
-  <ul>
-    <li>Ask Claude if it's including journal entries, not just bills</li>
-    <li>Ask Claude if it's filtering on the transaction line entity (not the transaction header)</li>
-    <li>Ask Claude to pull a small unfiltered sample to see what's actually in the data</li>
-  </ul>
-</div>
-
-<div style="border-top:1px solid var(--line-strong);margin-top:48px;padding-top:24px;">
-  <p style="font-size:13px;color:var(--muted);margin:0;">Brian Weisberg is a tech CFO writing about finance leadership, AI adoption, and building finance teams that compound. <a href="/thought-leadership">More writing &rarr;</a></p>
-</div>
-</div>
-
-</div>"""
-    return HTMLResponse(_page("Connecting Claude to NetSuite—Brian Weisberg", "Thought leadership", body, role=_role(request)))
+@app.get("/thought-leadership/{slug}", response_class=HTMLResponse)
+def original_content_article(request: Request, slug: str):
+    """Original Content Phase 2 — the catch-all for admin-authored pieces
+    (a real body_md). Registered here, immediately after all three literal
+    bespoke /thought-leadership/* routes above and before the unrelated
+    /play game code, so FastAPI's registration order always tries those
+    three first — confirmed safe in the Phase 0 investigation. The three
+    migrated rows' slugs match their own path segments exactly (Phase 1),
+    so even if this route were somehow reached for one of them, body_md is
+    NULL for all three and the 404 below still guards it — defense in
+    depth, not the primary mechanism (registration order is).
+    Live pieces are public; a draft renders only for a signed-in admin, at
+    its own canonical URL — everyone else, and every unknown slug, 404s."""
+    lib = _lib()
+    try:
+        row = lib.get_original_content_by_slug(slug)
+    finally:
+        lib.close()
+    if row is None or row["body_md"] is None:
+        raise HTTPException(status_code=404)
+    if row["status"] != "live" and not _is_authed(request):
+        raise HTTPException(status_code=404)
+    body = _original_content_article_body(row)
+    return HTMLResponse(_page(f'{row["title"]}—Brian Weisberg', "Thought leadership", body, role=_role(request)))
 
 
 # ---------------------------------------------------------------------------
@@ -11233,7 +10417,76 @@ async def admin_tools_features_retire(request: Request, feature_id: int):
 # is the same approve action with the form fields pre-filled from the
 # proposal but editable — no separate route.
 
-def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], tools_by_id: dict[int, dict]) -> str:
+# Feature Taxonomy scan tool, Phase 3 complement (2026-08) — a source-
+# agnostic near-duplicate nudge on the review queue itself, built alongside
+# Phase 3's own clustering/judgment pass rather than as a separate phase.
+# The scan's own §7 merge test runs at drafting time, biased conservative
+# (split when uncertain — see linklib/feature_scan.py's Phase 3 section);
+# this catches whatever that conservative bias deliberately leaves behind
+# (two near-duplicate names both queued separately), AND anything else that
+# lands two similarly-named pending proposals in the same category — a
+# second scan run, an admin's own manual entry, a public suggestion. Pure
+# Python (difflib), no LLM call, no dependency on the scan having run at
+# all.
+_NEAR_DUPLICATE_NAME_THRESHOLD = 0.6
+
+
+def _find_near_duplicate_queue_items(pending: list[dict]) -> dict[int, list[dict]]:
+    """item_id -> [{"id","name"}, ...] of OTHER pending items in the same
+    category whose feature name looks similar enough to be worth a human
+    double-checking before approving either. Only compares items proposing
+    a NEW feature (is_new_feature) — an existing-feature link proposal has
+    no name of its own to compare. difflib.SequenceMatcher on lowercased
+    names; the threshold is a starting point, not tuned against real data
+    yet — revisit once this has run against a real multi-tool category."""
+    by_category: dict[int, list[dict]] = {}
+    for item in pending:
+        feature = (item.get("payload") or {}).get("feature") or {}
+        name = (feature.get("name") or "").strip()
+        if not name:
+            continue
+        by_category.setdefault(item.get("category_id"), []).append(
+            {"id": item["id"], "name": name}
+        )
+
+    result: dict[int, list[dict]] = {}
+    for items in by_category.values():
+        for i, a in enumerate(items):
+            matches = []
+            for j, b in enumerate(items):
+                if i == j:
+                    continue
+                ratio = difflib.SequenceMatcher(
+                    None, a["name"].lower(), b["name"].lower()
+                ).ratio()
+                if ratio >= _NEAR_DUPLICATE_NAME_THRESHOLD:
+                    matches.append(b)
+            if matches:
+                result[a["id"]] = matches
+    return result
+
+
+def _articulation_tool_coverage(articulation: str, tool_names: list[str]) -> tuple[list[str], list[str]]:
+    """Splits `tool_names` into (mentioned, unmentioned) by a case-insensitive
+    substring check against `articulation`'s text — a coarse heuristic (no
+    NLP), deliberately just good enough to prompt a human reviewer to look,
+    never used to auto-deny or block anything. Built for the pattern a
+    Neobanking review caught by hand (2026-08): a queue item's merge
+    reasoning named only 2 of its 5 linked tools, with no explanation for
+    the other 3 — which turned out to be a genuine mismerge (those 3 were
+    already correctly linked to a separately-approved feature), not a real
+    5-vendor feature. Surfacing "this note doesn't cover all its own
+    links" as a visible flag lets a reviewer catch that before approving,
+    rather than only after noticing by hand."""
+    text = (articulation or "").lower()
+    mentioned, unmentioned = [], []
+    for name in tool_names:
+        (mentioned if name.lower() in text else unmentioned).append(name)
+    return mentioned, unmentioned
+
+
+def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], tools_by_id: dict[int, dict],
+                                     near_duplicates: list[dict] | None = None) -> str:
     """The approve form IS the edit form — every proposed value is a real
     editable input pre-filled from the payload, so clicking Approve with no
     changes is a verbatim approval and changing a value first is
@@ -11275,12 +10528,46 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
     source_badge_fg = {"admin": "var(--navy)", "scan": "var(--seafoam-deep)", "public": "#92400e"}.get(item["source"], "var(--ink)")
 
     feature_field_html = (
-        f'<div style="margin:0 0 6px;">{_in("feature_name", feature_name, width="100%")}</div>'
-        f'<div>{_in("pointer_note", feature.get("pointer_note", ""), width="100%")}</div>'
+        f'<div style="margin:0 0 10px;">'
+        f'<label style="display:block;font-size:12px;font-weight:500;color:var(--navy);margin-bottom:4px;">Name</label>'
+        f'{_in("feature_name", feature_name, width="320px")}'
+        f'</div>'
+        f'<div>'
+        f'<label style="display:block;font-size:12px;font-weight:500;color:var(--navy);margin-bottom:4px;">Pointer note '
+        f'<span style="font-weight:400;color:var(--muted);">(optional)</span></label>'
+        f'{_in("pointer_note", feature.get("pointer_note", ""), width="320px")}'
+        f'</div>'
         if is_new_feature else
         f'<p style="margin:0 0 6px;font-size:14px;">Existing feature id={payload.get("feature_id")}'
         f'<input type="hidden" name="feature_id" value="{payload.get("feature_id")}"></p>'
     )
+
+    near_dup_html = ""
+    if near_duplicates:
+        names = ", ".join(f'"{_esc(d["name"])}" (#{d["id"]})' for d in near_duplicates)
+        near_dup_html = (
+            f'<p style="font-size:12.5px;color:#92400e;background:#fef3c7;border-radius:8px;'
+            f'padding:6px 10px;margin:0 0 10px;">Possible near-duplicate of {names} — worth '
+            f'checking these describe genuinely different jobs (FEATURE_TAXONOMY.md &sect;7) '
+            f'before approving both.</p>'
+        )
+
+    coverage_html = ""
+    if item.get("articulation") and len(payload.get("links", [])) >= 2:
+        link_tool_names = [
+            tools_by_id[l["tool_id"]]["name"] for l in payload.get("links", []) if l.get("tool_id") in tools_by_id
+        ]
+        mentioned, unmentioned = _articulation_tool_coverage(item["articulation"], link_tool_names)
+        if mentioned and unmentioned:
+            coverage_html = (
+                f'<p style="font-size:12.5px;color:#92400e;background:#fef3c7;border-radius:8px;'
+                f'padding:6px 10px;margin:10px 0 0;">Articulation names only {len(mentioned)} of '
+                f'{len(mentioned) + len(unmentioned)} linked tools ({_esc(", ".join(mentioned))}) — '
+                f'{_esc(", ".join(unmentioned))} '
+                f'{"aren&rsquo;t" if len(unmentioned) > 1 else "isn&rsquo;t"} mentioned. Worth checking '
+                f'whether this is a real feature for every linked tool, or a mismerge (a tool that '
+                f'already belongs to a different, separately-approved feature) before approving.</p>'
+            )
 
     return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:16px;">
   <form method="post" action="/admin/tools/software/feature-review-queue/{item['id']}/approve">
@@ -11289,10 +10576,12 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
     <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:{source_badge_bg};color:{source_badge_fg};border-radius:5px;padding:2px 9px;">{_esc(item['source'])}</span>
     <span style="font-size:13px;color:var(--muted);">{_esc(item.get('proposal_type', ''))} &middot; {_esc(category_name)}</span>
   </div>
+  {near_dup_html}
   <label style="display:block;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Feature{' (new)' if is_new_feature else ''}</label>
   {feature_field_html}
   {f'<div style="overflow-x:auto;margin:12px 0;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="background:var(--bg);"><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Tool</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Availability</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">AI</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;">Verified as of</th></tr></thead><tbody>{link_rows}</tbody></table></div>' if link_rows else ''}
   {f'<p style="font-size:13.5px;line-height:1.6;color:var(--ink);background:var(--bg);border-radius:8px;padding:10px 12px;margin:10px 0 0;">{_esc(item["articulation"])}</p>' if item.get("articulation") else ''}
+  {coverage_html}
   {f'<p style="font-size:13px;color:var(--muted);margin:8px 0 0;">From {_esc(item["submitter_name"])} ({_esc(item["submitter_email"])})</p>' if item.get("submitter_name") else ''}
   <div style="margin-top:14px;">
     <button type="submit" class="btn" style="font-size:13px;padding:7px 16px;">Approve</button>
@@ -11326,13 +10615,18 @@ def admin_feature_review_queue(request: Request, msg: str = ""):
     for item in pending:
         by_source.setdefault(item["source"], []).append(item)
 
+    near_duplicates = _find_near_duplicate_queue_items(pending)
+
     sections = ""
     source_labels = {"admin": "Admin edits", "scan": "AI scan proposals", "public": "Public suggestions"}
     for source in ("public", "scan", "admin"):
         items = by_source.get(source, [])
         if not items:
             continue
-        cards = "".join(_feature_review_queue_item_card(i, categories, tools_by_id) for i in items)
+        cards = "".join(
+            _feature_review_queue_item_card(i, categories, tools_by_id, near_duplicates.get(i["id"]))
+            for i in items
+        )
         sections += f'<h2 style="font-size:16px;margin:24px 0 10px;">{source_labels[source]} ({len(items)})</h2>{cards}'
 
     if not sections:
@@ -11729,10 +11023,19 @@ def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: s
     )
 
 
-# The 3 flagship pieces — one shared source for both /thought-leadership's
-# featured row and the homepage's consolidated Thought Leadership section, so
-# the two surfaces can't drift apart in content (title/description/link
-# label). This was the deliberate original intent; a brief detour during the
+# NO LONGER THE LIVE SOURCE (Original Content Phase 1) — kept in the repo,
+# unimported by any route, purely as a rollback reference (same precedent as
+# webapp/thought_leadership_data.py). The `original_content` DB table is what
+# both pages actually render from now (via _oc_featured_cards_html); this
+# tuple's own shape (href, tag, tag_color, title, desc, cta) is still what
+# scripts/migrate_original_content.py reads to seed that table, and _tl_fcard/
+# _tl_featured_cards_html/_TL_SHARED_CSS below are still live, reused by the
+# DB-backed renderer — only the content source changed, not the markup.
+#
+# Pre-migration history, kept for context: this was originally the one shared
+# source for both /thought-leadership's featured row and the homepage's
+# consolidated Thought Leadership section, so the two surfaces couldn't drift
+# apart in content (title/description/link label). A brief detour during the
 # Homepage Restructure design-fidelity pass split this into two diverged
 # tuples (the design file showed shorter, homepage-specific copy) before
 # Brian confirmed the shared-content guarantee should hold regardless of what
@@ -11740,7 +11043,7 @@ def _tl_fcard(href: str, tag: str, tag_color: str, title: str, desc: str, cta: s
 # Card *sizing* is still free to differ per page (each page's own .tl-featured
 # grid track width naturally narrows the cards on the homepage's tighter
 # column vs. /thought-leadership's full-width featured row) — only the
-# content itself is pinned. The "Sail Don't Row" entry's "Playbook" tag,
+# content itself was pinned. The "Sail Don't Row" entry's "Playbook" tag,
 # description, and "Read the playbook" link/title are the real, correct copy
 # for that piece (not the design file's arcade-game framing — see CLAUDE.md's
 # Homepage Restructure entries for that correction's history).
@@ -11765,6 +11068,362 @@ _TL_FEATURED_CARDS = (
 
 def _tl_featured_cards_html(cards) -> str:
     return '<div class="tl-featured">' + "".join(_tl_fcard(*c) for c in cards) + '</div>'
+
+
+# Original Content (Phase 1) — _TL_FEATURED_CARDS above is no longer the live
+# source for the flagship row; it stays in the repo, unimported, purely as a
+# rollback reference (same precedent as webapp/thought_leadership_data.py).
+# scripts/migrate_original_content.py is the one-time migration that seeded
+# the `original_content` table from it. tag_color was never promoted to a
+# stored column (see that table's schema comment in linklib/db.py) — cycled
+# instead from the same 3 established colors by card position, so the three
+# migrated pieces render with their exact original colors and any piece
+# added later still gets a sane one.
+_OC_TAG_COLORS = ("var(--coral-deep)", "var(--seafoam-deep)", "var(--navy-light)")
+
+
+def _oc_card_tuple(row: dict, idx: int) -> tuple:
+    """Build a _tl_fcard()-shaped tuple from an original_content DB row."""
+    return (
+        f"/thought-leadership/{row['slug']}",
+        row["tag_label"],
+        _OC_TAG_COLORS[idx % len(_OC_TAG_COLORS)],
+        row["title"],
+        row["teaser"],
+        row["link_label"],
+    )
+
+
+def _oc_featured_cards_html(rows: list[dict]) -> str:
+    """Shared renderer for both the homepage's flagship row and
+    /thought-leadership's featured row — same _tl_fcard/.tl-card markup as
+    the pre-DB version, now driven by `original_content` rows instead of the
+    hardcoded _TL_FEATURED_CARDS tuple, so the two surfaces still can't drift
+    apart in content."""
+    return _tl_featured_cards_html([_oc_card_tuple(r, i) for i, r in enumerate(rows)])
+
+
+# Original Content Phase 2 — markdown rendering + the shared article template
+# for any original_content row with a real body_md (the three bespoke pieces,
+# whose body_md is NULL, never reach this; their own hand-built routes render
+# them, and always win route-registration order over the GET
+# /thought-leadership/{slug} catch-all below). fenced_code + tables are the
+# only two extensions enabled — no syntax highlighting/Pygments (out of
+# scope per the build brief). Raw HTML passthrough (Markdown's own default
+# behavior — it doesn't escape or strip embedded HTML) is deliberately left
+# on: body_md is admin-authored only, never public input, so there's no
+# injection surface to guard against here the way there would be for a
+# public-submission field.
+_OC_MARKDOWN_EXTENSIONS = ["fenced_code", "tables"]
+
+
+def _render_original_content_markdown(body_md: str) -> str:
+    html = _markdown.markdown(body_md, extensions=_OC_MARKDOWN_EXTENSIONS)
+    # Each rendered <table> gets the same overflow-x:auto wrapper every other
+    # table on this site already uses (.ger-table-wrap, .ns-table's wrapper,
+    # etc.) — a wide admin-authored table (many columns) would otherwise force
+    # the whole page to scroll horizontally on mobile instead of just the
+    # table itself. Markdown's own `tables` extension emits a bare <table>
+    # with no wrapper, so this is a post-process, not an extension option.
+    return re.sub(
+        r"(<table>.*?</table>)",
+        r'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">\1</div>',
+        html, flags=re.DOTALL,
+    )
+
+
+# Scoped to .oc-body (the div wrapping the rendered markdown output only —
+# not the eyebrow/title/byline lines above it, which already render through
+# the sitewide bare h1/p rules the three bespoke pages themselves use).
+# Values mirror the Reader's own .reader-body treatment (webapp/app.py's
+# _READER_CSS) for code/pre/table/blockquote — the one place this codebase
+# already had an answer for "how does this site style rendered long-form
+# content" — with one deliberate difference: blockquote reuses this shell's
+# own established Quote treatment (.article-pull's border-left/italic
+# editorial style, BRAND.md's four-type callout taxonomy) instead of the
+# Reader's coral box, since a coral-boxed blockquote would clash with
+# BRAND.md's "coral: rare warm accent, one per screen" rule on a page that
+# already reserves coral for the Quote-adjacent flagship-card tag color, and
+# because this template nests inside the same .tool-prose/.article-atlantic
+# shell the three bespoke pieces use, where Quotes are already established
+# as border-rule-not-box.
+_OC_ARTICLE_CSS = (
+    '.oc-body{font-size:16px;line-height:1.7;color:var(--ink);}'
+    '.oc-body>*:first-child{margin-top:0;}'
+    '.oc-body h1,.oc-body h2,.oc-body h3,.oc-body h4,.oc-body h5,.oc-body h6{'
+    'font-family:var(--font-head);font-weight:600;letter-spacing:-.01em;color:var(--ink);line-height:1.3;margin:1.8em 0 .6em;}'
+    '.oc-body h1{font-size:1.5em;}'
+    '.oc-body h2{font-size:1.25em;}'
+    '.oc-body h3{font-size:1.1em;}'
+    '.oc-body h4,.oc-body h5,.oc-body h6{font-size:1em;}'
+    '.oc-body p{margin:0 0 1.4em;}'
+    '.oc-body ul,.oc-body ol{padding-left:1.4em;margin:0 0 1.4em;}'
+    '.oc-body li{margin-bottom:.4em;}'
+    '.oc-body a{color:var(--navy);}'
+    # A body_md-authored CTA button (<a class="btn">, the sitewide button
+    # component — first used by the growth-engine-ratio port's "Download the
+    # full guide" CTA) needs its own white text preserved. .btn's own
+    # `color:#fff` rule (0,1,0 specificity) loses to the generic
+    # `.oc-body a{color:var(--navy)}` rule directly above (0,1,1 — one class
+    # AND one tag beats one class alone) regardless of source order, so a
+    # navy-background button rendered navy text on navy — invisible. Fixed
+    # with `.oc-body .btn` (0,2,0 — two classes beats one class + one tag by
+    # CSS's class-count-first comparison), a permanent fix for any future
+    # body_md piece that uses this same button, not just this one.
+    '.oc-body .btn{color:#fff;}'
+    '.oc-body blockquote{border-left:3px solid var(--navy);padding:2px 0 2px 26px;margin:1.8em 0;'
+    'font-family:var(--font-head);font-weight:600;font-style:italic;font-size:1.3em;line-height:1.45;'
+    'letter-spacing:-.01em;color:var(--ink);}'
+    '.oc-body blockquote p{margin:0;}'
+    '.oc-body img{max-width:100%;height:auto;border-radius:8px;margin:1.5em 0;display:block;}'
+    '.oc-body table{width:100%;border-collapse:collapse;font-size:.9em;margin:1.5em 0;'
+    'background:#fff;border-radius:12px;overflow:hidden;border:1px solid var(--line);}'
+    '.oc-body th,.oc-body td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;}'
+    '.oc-body th{background:var(--accent-light);font-family:var(--font-body);font-weight:600;}'
+    '.oc-body tr:last-child td{border-bottom:none;}'
+    '.oc-body pre,.oc-body code{font-family:ui-monospace,monospace;font-size:.85em;background:#f0ece4;border-radius:4px;padding:2px 5px;}'
+    '.oc-body pre{padding:16px;overflow-x:auto;border-radius:8px;margin:1.5em 0;}'
+    '.oc-body pre code{background:none;padding:0;}'
+    '.oc-body hr{border:none;border-top:1px solid var(--line);margin:2.5em 0;}'
+)
+
+# Original Content Phase 4a — page-specific CSS ported verbatim from the
+# retired netsuite_mcp() bespoke route's own <style> block, scoped under
+# .oc-body (rather than left bare) so it only ever applies inside a
+# rendered Original Content article body, never sitewide. Class names
+# (.ns-*) are unchanged from the original page — the raw HTML blocks
+# embedded in the netsuite-mcp row's body_md reference these exact classes.
+# .ns-table/.ns-trouble (2 classes) intentionally outrank the generic
+# .oc-body table/th/td rules above (1 class + tag) by CSS specificity, so
+# these two tables keep their original navy-header/zebra-striped treatment
+# instead of falling back to the shared template's generic table styling.
+_OC_NETSUITE_MCP_CSS = (
+    '.oc-body .ns-callout{margin:24px 0;}'
+    '.oc-body .ns-callout li{margin-bottom:4px;}'
+    '.oc-body .ns-warn{padding:16px 22px;margin:18px 0;}'
+    '.oc-body .ns-warn-title{margin-bottom:6px;}'
+    '.oc-body .ns-note{background:var(--seafoam-wash);border-left:3px solid var(--seafoam-mid);padding:14px 18px;margin:16px 0;border-radius:0 8px 8px 0;}'
+    '.oc-body .ns-note p{font-size:14px;color:var(--ink-soft);margin:0;}'
+    '.oc-body .ns-track{display:flex;flex-direction:column;gap:0;margin:24px 0;}'
+    '.oc-body .ns-step{display:flex;gap:18px;position:relative;}'
+    '.oc-body .ns-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}'
+    '.oc-body .ns-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}'
+    '.oc-body .ns-body{padding-bottom:24px;flex:1;min-width:0;}'
+    '.oc-body .ns-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;}'
+    '.oc-body .ns-body p{font-size:15px;color:var(--ink-soft);margin-bottom:8px;line-height:1.6;}'
+    '.oc-body .ns-cases{display:grid;grid-template-columns:1fr;gap:12px;margin:20px 0;}'
+    '.oc-body .ns-case{background:#fff;border:1px solid var(--line-strong);border-radius:10px;padding:20px 22px;}'
+    '.oc-body .ns-case-label{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}'
+    '.oc-body .ns-case-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin-bottom:8px;}'
+    '.oc-body .ns-case p{font-size:14px;color:var(--ink-soft);margin-bottom:10px;line-height:1.55;}'
+    '.oc-body .ns-tip{background:var(--seafoam-wash);border-radius:6px;padding:10px 14px;font-size:13px;color:var(--seafoam-deep);margin-top:8px;}'
+    '.oc-body .ns-tip strong{font-weight:600;}'
+    '.oc-body .ns-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0;}'
+    '.oc-body .ns-table{width:100%;border-collapse:collapse;font-size:14px;}'
+    '.oc-body .ns-table th{background:var(--navy);color:#fff;padding:9px 14px;text-align:left;font-weight:600;}'
+    '.oc-body .ns-table td{padding:9px 14px;border-top:1px solid var(--line);}'
+    '.oc-body .ns-table tr:nth-child(even) td{background:var(--surface-2);}'
+    '.oc-body .ns-trouble{width:100%;border-collapse:collapse;font-size:14px;margin:16px 0;}'
+    '.oc-body .ns-trouble th{background:var(--surface-2);padding:9px 14px;text-align:left;font-weight:600;border-bottom:2px solid var(--line-strong);}'
+    '.oc-body .ns-trouble td{padding:10px 14px;border-top:1px solid var(--line);vertical-align:top;line-height:1.5;}'
+    '.oc-body .ns-trouble tr:hover td{background:var(--navy-wash);}'
+    '.oc-body .ns-qr{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:24px 28px;margin:28px 0;}'
+    '.oc-body .ns-qr-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;}'
+    '.oc-body .ns-qr h3{font-family:var(--font-head);font-size:14px;font-weight:600;color:var(--ink);margin:16px 0 6px;}'
+    '.oc-body .ns-qr h3:first-of-type{margin-top:0;}'
+    '.oc-body .ns-qr ul{padding-left:18px;margin:0 0 4px;}'
+    '.oc-body .ns-qr li{font-size:13px;color:var(--ink-soft);margin-bottom:3px;line-height:1.5;}'
+    '@media(max-width:640px){'
+    '.oc-body .ns-trouble{font-size:13px;}'
+    '.oc-body .ns-trouble td,.oc-body .ns-trouble th{padding:8px 10px;}'
+    '.oc-body .ns-table{font-size:13px;}'
+    '.oc-body .ns-table td,.oc-body .ns-table th{padding:8px 10px;}'
+    '}'
+)
+
+# Original Content Phase 4b — the ported ai-hackathon-playbook page's own
+# .fah-* CSS, same treatment as _OC_NETSUITE_MCP_CSS above: moved out of the
+# retired route's <style> block, every selector rescoped under .oc-body.
+# Deliberately NOT carried forward: .fah-verdicts/.fah-verdict/.fah-v-*,
+# .fah-pull, and .fah-motif — confirmed dead in the source page (defined in
+# its <style> block, never actually used by any element in its body), so
+# porting them would just be dead CSS living in a second place.
+#
+# .fah-body h3 and .fah-template h3 carry an explicit line-height:1.65 that
+# the original bespoke route never needed to state (verified via a live
+# screenshot-diff catch during this port): the retired page's own
+# body{font:16px/1.65 ...} rule was the only line-height these small
+# in-card h3s ever inherited. _OC_ARTICLE_CSS's shared
+# ".oc-body h1,h2,h3...{line-height:1.3}" rule (written for real prose
+# section headings) matches these same h3 tags too and, being an explicit
+# declaration, wins over the inherited 1.65 regardless of specificity —
+# collapsing each step/field card's title down 6px and letting the whole
+# .fah-track/.fah-template stack drift ~30-110px shorter than the original
+# over enough repeated cards. Fixed by restating the original 1.65 directly
+# on these two selectors, which is real Original Content Phase 4b
+# discovery — Phase 4a's near-identical .ns-body h3/.ns-qr h3 selectors
+# have the same latent gap and were not audited or touched here, since
+# NetSuite MCP is explicitly out of scope for this PR; worth a follow-up
+# check there.
+#
+# A second, related specificity gap surfaced by the same diff pass:
+# .fah-body p and .fah-tier p are each only one class + a tag on the
+# original bespoke page (e.g. ".fah-body p"), so on the LIVE original page
+# they already lose their own line-height/margin-bottom to the sitewide
+# ".article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px}"
+# rule (two classes + a tag always outranks one, regardless of source
+# order) — a pre-existing quirk of the original page's own CSS, not
+# something this port introduced. Prefixing every selector with .oc-body
+# for scoping (this file's whole convention) incidentally added a second
+# class to exactly these two selectors, tying the sitewide rule's
+# specificity — and since this article's own <style> tag loads after the
+# sitewide one, the tie then resolved the OPPOSITE way here, so the port's
+# line-height/margin-bottom actually applied where the original's never
+# did. Fixed by dropping line-height and margin-bottom from both ported
+# selectors (margin-top/left/right on .fah-tier p are kept — those never
+# collided) so both naturally lose to the sitewide rule again, reproducing
+# the original's actual rendered spacing rather than fighting the cascade
+# for a "more correct" result the live page never showed. (.fah-template p,
+# .fah-r-desc, and .fah-flow-caption were checked too and already lose to
+# the same sitewide rule on both pages — they never declared
+# line-height/margin-bottom in the first place, so no fix was needed
+# there.)
+_OC_HACKATHON_CSS = (
+    '.oc-body .fah-callout{margin:28px 0;}'
+    '.oc-body .fah-callout li{margin-bottom:5px;}'
+    '.oc-body .fah-warn{padding:18px 22px;margin:24px 0;}'
+    '.oc-body .fah-warn-title{margin-bottom:8px;}'
+    '.oc-body .fah-track{display:flex;flex-direction:column;gap:0;margin:28px 0;}'
+    '.oc-body .fah-step{display:flex;gap:18px;position:relative;}'
+    '.oc-body .fah-step:not(:last-child)::after{content:"";position:absolute;left:17px;top:40px;width:2px;bottom:-2px;background:var(--line-strong);}'
+    '.oc-body .fah-num{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-family:var(--font-head);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;z-index:1;}'
+    '.oc-body .fah-body{padding-bottom:26px;flex:1;}'
+    '.oc-body .fah-body h3{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--ink);margin:4px 0 6px;line-height:1.65;}'
+    '.oc-body .fah-body p{font-size:15px;color:var(--ink-soft);}'
+    '.oc-body .fah-tag{display:inline-block;font:600 11px var(--font-body);letter-spacing:.05em;color:var(--muted);border:1px solid var(--line-strong);border-radius:5px;padding:2px 8px;margin-top:4px;}'
+    '.oc-body .fah-matrix{margin:28px 0;}'
+    '.oc-body .fah-matrix-label{text-align:center;font:700 11px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}'
+    '.oc-body .fah-matrix-grid{display:grid;grid-template-columns:28px 1fr 1fr;grid-template-rows:1fr 1fr 28px;gap:0;height:280px;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}'
+    '.oc-body .fah-m-y{writing-mode:vertical-rl;transform:rotate(180deg);font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:1/3;grid-column:1;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}'
+    '.oc-body .fah-m-x{font:700 10px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:center;grid-row:3;grid-column:2/4;display:flex;align-items:center;justify-content:center;background:var(--surface-2);}'
+    '.oc-body .fah-q{padding:16px 18px;font-size:13px;line-height:1.45;display:flex;flex-direction:column;border:1px solid var(--line);}'
+    '.oc-body .fah-q-label{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;}'
+    '.oc-body .fah-q-star{background:var(--navy);color:#fff;}.oc-body .fah-q-star .fah-q-label{color:rgba(255,255,255,.75);}'
+    '.oc-body .fah-q-b{background:var(--navy-wash);color:var(--ink-soft);}.oc-body .fah-q-b .fah-q-label{color:var(--muted);}'
+    '.oc-body .fah-q-c{background:#fff;color:var(--muted);}.oc-body .fah-q-c .fah-q-label{color:var(--line-strong);}'
+    '.oc-body .fah-resources{display:flex;flex-direction:column;gap:0;margin:20px 0;border-top:1px solid var(--line-strong);}'
+    '.oc-body .fah-resource{display:flex;align-items:flex-start;gap:14px;padding:14px 4px;text-decoration:none;color:inherit;border-bottom:1px solid var(--line);}'
+    '.oc-body .fah-resource:hover{background:var(--navy-wash);}'
+    '.oc-body .fah-r-icon{font-size:18px;flex-shrink:0;margin-top:1px;}'
+    '.oc-body .fah-r-title{font:600 15px var(--font-head);color:var(--navy);margin-bottom:2px;}'
+    '.oc-body .fah-r-desc{font-size:13px;color:var(--ink-soft);margin:0;line-height:1.5;}'
+    '.oc-body .fah-r-src{font:700 10px var(--font-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-top:3px;}'
+    '.oc-body .fah-template{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:26px 30px;margin:28px 0;}'
+    '.oc-body .fah-template-title{font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--navy);margin-bottom:16px;display:flex;align-items:center;gap:8px;}'
+    '.oc-body .fah-template h3{font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--ink);margin:18px 0 6px;line-height:1.65;}'
+    '.oc-body .fah-template h3:first-of-type{margin-top:0;}'
+    '.oc-body .fah-template p,.oc-body .fah-template li{font-size:14px;color:var(--ink-soft);}'
+    '.oc-body .fah-template ul{padding-left:18px;margin:0 0 8px;}'
+    '.oc-body .fah-template li{margin-bottom:4px;}'
+    '.oc-body .fah-tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:22px 0;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;}'
+    '.oc-body .fah-tier{padding:18px 16px;}'
+    '.oc-body .fah-tier:not(:last-child){border-right:1px solid var(--line);}'
+    '.oc-body .fah-tier-title{font-family:var(--font-head);font-size:17px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px;}'
+    '.oc-body .fah-tier p{font-size:13px;color:var(--ink-soft);margin-top:0;margin-left:0;margin-right:0;}'
+    '.oc-body .fah-t-ship{background:var(--navy);}.oc-body .fah-t-ship .fah-tier-title{color:#fff;}.oc-body .fah-t-ship p{color:rgba(255,255,255,.8);}'
+    '.oc-body .fah-t-iter{background:var(--coral-wash);}.oc-body .fah-t-iter .fah-tier-title{color:var(--coral-deep);}'
+    '.oc-body .fah-t-park{background:var(--surface-2);}.oc-body .fah-t-park .fah-tier-title{color:var(--muted);}'
+    '.oc-body .fah-flow{display:flex;align-items:center;gap:10px;margin:24px 0 10px;}'
+    '.oc-body .fah-flow-step{flex:1;background:var(--navy-wash);border:1px solid var(--line);border-radius:10px;padding:16px 14px;text-align:center;font-family:var(--font-head);font-weight:600;font-size:17px;color:var(--navy);}'
+    '.oc-body .fah-flow-arrow{flex:0 0 auto;font-size:20px;color:var(--muted);}'
+    '.oc-body .fah-flow-arrow-v{display:none;}'
+    '.oc-body .fah-flow-caption{font-size:14px;color:var(--ink-soft);text-align:center;margin:0 0 24px;}'
+    '@media(max-width:640px){'
+    '.oc-body .fah-flow{flex-direction:column;}'
+    '.oc-body .fah-flow-arrow-h{display:none;}'
+    '.oc-body .fah-flow-arrow-v{display:inline;}'
+    '.oc-body .fah-matrix-grid{height:220px;}'
+    '.oc-body .fah-tiers{grid-template-columns:1fr;}'
+    '.oc-body .fah-tier:not(:last-child){border-right:none;border-bottom:1px solid var(--line);}'
+    '}'
+)
+
+# Original Content Phase 4c — the ported growth-engine-ratio page's own
+# .ger-pull/.ger-table CSS, same treatment as _OC_NETSUITE_MCP_CSS/
+# _OC_HACKATHON_CSS above: moved out of the retired route's <style> block,
+# rescoped under .oc-body. Only the article-side rules move here — the
+# calculator's own CSS (.ger-grid-*, .ger-mode*, .ger-in, .qlabel, .qhead,
+# .qrow-proj, .ger-chart, .ger-contrib*, .tl-step, .tl-ctrl*, .ger-card,
+# .ger-value-big) stays on the new standalone
+# /thought-leadership/growth-engine-calculator route's own <style> tag,
+# since that page is still a bespoke Python route, not part of this
+# markdown-rendered template.
+#
+# .oc-body .ger-table (2 classes) intentionally outranks the generic
+# .oc-body table (1 class + tag) rule by specificity — same reasoning as
+# .ns-table/.fah-* above — so the tier table's Tier/Ratio columns keep their
+# no-wrap behavior. **Real post-merge bug, found on live mobile Safari and
+# fixed here**: the header row's navy background/white text did NOT survive
+# the port, despite the original raw HTML keeping its
+# `<thead><tr style="background:var(--navy);">` inline style verbatim. The
+# cause isn't a specificity contest at all — it's CSS's table BACKGROUND
+# PAINTING LAYER ORDER (CSS 2.1 §17.5.1), which is independent of selector
+# specificity: a `<th>`'s own background always paints on top of its parent
+# `<tr>`'s background, at the CELL layer, layered above the ROW layer. Once
+# `_OC_ARTICLE_CSS` gave every `.oc-body th` its own `background:
+# var(--accent-light)` (for markdown-generated tables, which have no
+# per-row inline styling to preserve), that light background sat on top of
+# the tr's navy — the tr's own background was never actually removed, it
+# was just permanently hidden underneath every cell. White header text on a
+# near-white cell background read as "near-invisible, with an unexplained
+# gap of white space" — one bug, not two, exactly as it looked. The
+# original bespoke page never hit this because it had no competing
+# `.oc-body th` rule to paint over it. Fixed the same way `.ns-table th`
+# (Phase 4a) already solved this for its own table: give `.ger-table th`
+# its own explicit background/color directly, so the cell itself carries
+# the right color instead of relying on the row showing through underneath
+# it.
+#
+# .ger-pull's 1040px breakout math is unchanged from the original page:
+# .tool-prose/.tool-inner/.page share a center axis, so
+# left:50%+translateX(-50%) re-centers the wider quote box under
+# .tool-inner regardless of viewport, collapsing to no breakout once the
+# viewport is too narrow for one.
+_OC_GER_CSS = (
+    '.oc-body .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}'
+    '.oc-body .ger-table th{background:var(--navy);color:#fff;}'
+    '.oc-body .ger-table th:nth-child(1),.oc-body .ger-table td:nth-child(1){white-space:nowrap;width:1%;}'
+    '.oc-body .ger-table th:nth-child(2),.oc-body .ger-table td:nth-child(2){white-space:nowrap;}'
+    '.oc-body .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}'
+    '@media(max-width:640px){'
+    '.oc-body .ger-table th,.oc-body .ger-table td{padding:8px 10px !important;font-size:13px !important;}'
+    '}'
+)
+
+
+def _original_content_article_body(row: dict) -> str:
+    """The shared article shell for an admin-authored piece — matches the
+    three bespoke pages' own shell exactly (page page-full article-atlantic,
+    the same back-link, .tool-prose, the same eyebrow/h1/byline treatment),
+    per the Phase 0 investigation. The bespoke pages hand-author everything
+    below the byline; here that's the one rendered .oc-body block instead."""
+    date_bits = f'By Brian Weisberg &middot; {_esc(row["date_label"])}' if row["date_label"] else "By Brian Weisberg"
+    tag_html = (
+        f'<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;'
+        f'text-transform:uppercase;letter-spacing:.1em;">{_esc(row["tag_label"])}</p>'
+        if row["tag_label"] else ""
+    )
+    body_html = _render_original_content_markdown(row["body_md"] or "")
+    return f"""<div class="page page-full article-atlantic">
+<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought leadership</a></p>
+<style>{_OC_ARTICLE_CSS}{_OC_NETSUITE_MCP_CSS}{_OC_HACKATHON_CSS}{_OC_GER_CSS}</style>
+<div class="tool-prose">
+{tag_html}
+<h1 style="margin:0 0 8px;">{_esc(row["title"])}</h1>
+<p style="color:var(--muted);font-size:14px;margin:0 0 36px;">{date_bits}</p>
+<div class="oc-body">{body_html}</div>
+</div>
+</div>"""
 
 
 # Flagship-card CSS (.tl-featured/.tl-card*) — shared by /thought-leadership's
@@ -12135,7 +11794,11 @@ def admin_thought_leadership_edit(request: Request, item_id: int):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page(f"Edit {_esc(it['title'])}—Admin", "", body, authed=True))
+    # _page() escapes its own title argument internally — passing an
+    # already-_esc()'d fragment here would double-escape (e.g. "&amp;amp;"),
+    # the same bug Original Content Phase 3 found and fixed in
+    # admin_original_content_edit (see CLAUDE.md).
+    return HTMLResponse(_page(f"Edit {it['title']}—Admin", "", body, authed=True))
 
 
 @app.post("/admin/thought-leadership/{item_id}/edit")
@@ -12167,6 +11830,422 @@ def admin_thought_leadership_delete(request: Request, item_id: int):
     finally:
         lib.close()
     return RedirectResponse("/admin/thought-leadership", status_code=303)
+
+
+# -- Original Content admin (Phase 3 — see CLAUDE.md) ------------------------
+# Same CRUD pattern as /admin/thought-leadership just above, with one
+# addition: slug validation. A bad slug is a real failure mode here (an
+# unreachable page, or a page that silently loses to a bespoke route) in a
+# way thought_leadership's free-text title never risked, so this follows the
+# richer inline-error/redisplay pattern _feed_form_page/admin_feeds_new_submit
+# already established for exactly that kind of validation, rather than the
+# thought_leadership form's blunter raise-HTTPException-on-bad-input approach.
+
+# The literal bespoke /thought-leadership/* route path segments this set
+# used to guard against — see _TL_FEATURED_CARDS and the Original Content
+# Phase 1/2 CLAUDE.md entries. A new/edited original_content slug matching
+# one of these would be unreachable (the literal route always wins
+# registration order over the GET /thought-leadership/{slug} catch-all), so
+# it's rejected here rather than silently accepted and never actually
+# reachable. "netsuite-mcp" was removed from this set in Original Content
+# Phase 4a, "ai-hackathon-playbook" in Phase 4b, and "growth-engine-ratio"
+# in Phase 4c — all three bespoke /thought-leadership/{slug} routes have now
+# been retired and their slugs are served by the catch-all like any other
+# original_content row, so the set is empty. Deliberately NOT reserving
+# "growth-engine-calculator" (Phase 4c's new standalone calculator route):
+# that page was never part of the original_content system and never will
+# be — it's not a slug an admin could ever collide with through this form,
+# so there's nothing here to guard against. Kept as a real (empty) set
+# rather than removed outright, since _validate_oc_slug still checks
+# against it — a future bespoke /thought-leadership/* page would go back to
+# reserving its own slug here the same way.
+_OC_RESERVED_SLUGS = set()
+_OC_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+
+def _validate_oc_slug(slug: str, lib, exclude_id: int | None = None) -> str:
+    """Returns an error message, or "" if the slug is valid. Checked in this
+    order: present, well-formed (lowercase-hyphen only, no leading/trailing/
+    double hyphens), not one of the three bespoke pieces' own paths, and not
+    already used by a different original_content row."""
+    if not slug:
+        return "Slug is required."
+    if not _OC_SLUG_RE.match(slug):
+        return "Slug must be lowercase letters, numbers, and single hyphens only (e.g. \"my-new-piece\")."
+    if slug in _OC_RESERVED_SLUGS:
+        return (f"“{slug}” is one of the three bespoke pieces’ own page paths—"
+                "pick a different slug, or that literal route will always win and this piece "
+                "will never actually be reachable.")
+    existing = lib.get_original_content_by_slug(slug)
+    if existing and existing["id"] != exclude_id:
+        return f"“{slug}” is already used by another piece (“{existing['title']}”)."
+    return ""
+
+
+def _oc_parse_warning(values: dict) -> str:
+    """Inline note when a non-blank date_label didn't parse into a sort_key
+    — same advisory tone as _tl_parse_warning, but different consequence:
+    original_content orders by display_order first and sort_key only as a
+    tiebreak (the opposite priority from thought_leadership), so an
+    unparsed date doesn't float anything to the top — it just means this
+    piece won't get an automatic recency tiebreak against others sharing
+    its Display order."""
+    date_label = (values.get("date_label") or "").strip()
+    sort_key = values.get("sort_key") or ""
+    if date_label and not sort_key:
+        return (
+            '<p style="margin:-8px 0 0;padding:8px 12px;background:#fef3c7;border:1px solid #fde68a;'
+            'border-radius:8px;font-size:12px;color:#92400e;">'
+            "Date didn&rsquo;t parse as Mon YYYY — this piece won&rsquo;t get an automatic recency "
+            "tiebreak against others sharing its Display order.</p>"
+        )
+    return ""
+
+
+def _oc_form_fields(values: dict) -> str:
+    status_opts = "".join(
+        f'<option value="{s}"{" selected" if values.get("status") == s else ""}>{label}</option>'
+        for s, label in (("draft", "Draft"), ("live", "Live"))
+    )
+    return f"""  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Title *</label>
+    <input name="title" required maxlength="300" value="{_esc(values.get('title', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Slug *</label>
+    <input name="slug" required maxlength="200" value="{_esc(values.get('slug', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;font-family:ui-monospace,monospace;"
+      placeholder="my-new-piece">
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+      The URL is /thought-leadership/&lt;slug&gt;. Lowercase letters, numbers, and hyphens only.
+      You can change a slug at any time, including on a live piece&mdash;but there&rsquo;s no
+      redirect system, so changing it breaks any link someone already has to the old one.
+    </p>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Teaser *</label>
+    <input name="teaser" required maxlength="400" value="{_esc(values.get('teaser', ''))}"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+      placeholder="One line describing the piece, shown on its card">
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Tag label *</label>
+      <input name="tag_label" required maxlength="40" value="{_esc(values.get('tag_label', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="e.g. Framework, Playbook, Setup Guide">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Link label *</label>
+      <input name="link_label" required maxlength="60" value="{_esc(values.get('link_label', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="e.g. Read the framework">
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Date label</label>
+      <input name="date_label" maxlength="50" value="{_esc(values.get('date_label', ''))}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="Mon YYYY, e.g. Jun 2026 — optional">
+    </div>
+    <div>
+      <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Display order (tiebreaker)</label>
+      <input name="display_order" type="number" value="{_esc(str(values.get('display_order')) if values.get('display_order') not in (None, '') else '')}"
+        style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;"
+        placeholder="Leave blank — auto-assigned">
+    </div>
+  </div>
+  {_oc_parse_warning(values)}
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Body (Markdown)</label>
+    <textarea name="body_md" rows="14"
+      style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;font-family:ui-monospace,monospace;background:#fff;resize:vertical;"
+      placeholder="Leave blank to keep this as a card-metadata-only entry (like the 3 flagship pieces) with no page of its own.">{_esc(values.get('body_md', ''))}</textarea>
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+      Headings, fenced code blocks, and tables render through the site&rsquo;s own styling. Raw HTML
+      is passed through as-is&mdash;this field is admin-only, never public input. Images must already
+      exist at a URL (e.g. under /static/thought-leadership/&hellip;)&mdash;there&rsquo;s no upload here.
+    </p>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">Status</label>
+    <select name="status" style="width:220px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+      {status_opts}
+    </select>
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted);">
+      Draft renders only for a signed-in admin, at its own canonical URL. Live is public&mdash;on
+      the site for anyone, and (if Body is filled in) reachable at /thought-leadership/&lt;slug&gt;.
+    </p>
+  </div>
+  <div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--navy);">
+      <input type="checkbox" name="featured_home" value="1" {"checked" if values.get("featured_home") else ""}>
+      Feature on homepage
+    </label>
+    <p style="margin:4px 0 0 26px;font-size:12px;color:var(--muted);">
+      Shows this piece in the homepage&rsquo;s flagship row. A piece must be Live to show there
+      regardless of this checkbox; /thought-leadership itself shows every Live piece either way.
+    </p>
+  </div>"""
+
+
+def _oc_form_page(heading: str, action: str, values: dict, error: str, submit_label: str) -> str:
+    error_html = (f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+                  f'padding:12px 16px;font-size:14px;margin:0 0 18px;line-height:1.55;">{_esc(error)}</p>'
+                  if error else '')
+    return f"""<div class="page page-form">
+<p style="margin:0 0 4px;"><a href="/admin/original-content" style="font-size:13px;color:var(--muted);">&larr; Original Content</a></p>
+<h1>{_esc(heading)}</h1>
+{error_html}
+<form method="post" action="{action}" style="display:grid;gap:20px;">
+{_oc_form_fields(values)}
+  <div>
+    <button type="submit" class="btn">{_esc(submit_label)}</button>
+    <a href="/admin/original-content" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
+  </div>
+</form>
+</div>"""
+
+
+def _oc_values_from_form(form) -> dict:
+    display_order_raw = (form.get("display_order") or "").strip()
+    if display_order_raw == "":
+        display_order = None
+    else:
+        try:
+            display_order = int(display_order_raw)
+        except ValueError:
+            display_order = None  # caught by the numeric-string check below, kept as None here
+    date_label = (form.get("date_label") or "").strip()
+    status = (form.get("status") or "draft").strip()
+    if status not in ("draft", "live"):
+        status = "draft"
+    return {
+        "title": (form.get("title") or "").strip(),
+        # Not auto-lowercased — an uppercase or otherwise malformed slug is
+        # rejected outright by _validate_oc_slug's regex, not silently
+        # normalized, so what an admin sees in the URL is exactly what they
+        # typed.
+        "slug": (form.get("slug") or "").strip(),
+        "teaser": (form.get("teaser") or "").strip(),
+        "tag_label": (form.get("tag_label") or "").strip(),
+        "link_label": (form.get("link_label") or "").strip(),
+        "date_label": date_label,
+        "sort_key": _sort_key_from_date_label(date_label),
+        "body_md": (form.get("body_md") or "").strip() or None,
+        "status": status,
+        "featured_home": bool(form.get("featured_home")),
+        "display_order_raw": display_order_raw,
+        "display_order": display_order,
+    }
+
+
+@app.get("/admin/original-content", response_class=HTMLResponse)
+def admin_original_content(request: Request, status: str = ""):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        items = lib.list_original_content(status=status or None)
+    finally:
+        lib.close()
+
+    def _row(it: dict) -> str:
+        status_badge = (
+            '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;'
+            'background:var(--seafoam-wash);color:var(--seafoam-deep);">Live</span>'
+            if it["status"] == "live" else
+            '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;'
+            'background:var(--accent-light);color:var(--muted);">Draft</span>'
+        )
+        page_link = (f' &middot; <a href="/thought-leadership/{_esc(it["slug"])}" target="_blank" rel="noopener" '
+                     f'style="font-size:12px;">View &rarr;</a>') if it["body_md"] else ""
+        return f"""<tr style="border-top:1px solid var(--line);">
+  <td style="padding:10px 12px;font-weight:600;">{_esc(it['title'])}{page_link}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);font-family:ui-monospace,monospace;">{_esc(it['slug'])}</td>
+  <td style="padding:10px 12px;">{status_badge}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{"Yes" if it["featured_home"] else "—"}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);">{it['display_order']}</td>
+  <td style="padding:10px 12px;font-size:13px;color:var(--muted);white-space:nowrap;">{_esc(_relative_age(it['updated_at'])) or '—'}</td>
+  <td style="padding:10px 12px;white-space:nowrap;">
+    <a href="/admin/original-content/{it['id']}/edit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;">Edit</a>
+    <form method="post" action="/admin/original-content/{it['id']}/delete" style="display:inline;"
+          onsubmit="return confirm('Delete &quot;{_esc(it['title'])}&quot;?');">
+      <button type="submit" class="btn btn-ghost" style="padding:5px 12px;font-size:13px;color:#b91c1c;border-color:#fca5a5;margin-left:4px;">Delete</button>
+    </form>
+  </td>
+</tr>"""
+
+    rows = "".join(_row(it) for it in items) or \
+        '<tr><td colspan="7" style="padding:20px;color:var(--muted);">No entries yet.</td></tr>'
+
+    def _filter_link(s: str, label: str) -> str:
+        active = s == status
+        href = "/admin/original-content" + (f"?status={s}" if s else "")
+        style = "font-weight:700;color:var(--navy);" if active else "color:var(--muted);"
+        return f'<a href="{href}" style="font-size:13px;margin-right:14px;{style}">{label}</a>'
+
+    filters = _filter_link("", "All") + _filter_link("live", "Live") + _filter_link("draft", "Draft")
+
+    body = f"""<div class="page page-admin">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+  <h1>Original Content</h1>
+  <a href="/admin/original-content/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add piece</a>
+</div>
+<p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
+<div style="margin-bottom:16px;">{filters}</div>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:12px;border:1px solid var(--line);overflow:hidden;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Title</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Slug</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Status</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Featured home</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Display order</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Updated</th>
+  <th style="padding:10px 12px;text-align:left;font-size:13px;">Actions</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div>
+<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">
+  The 3 flagship pieces (Growth Engine Ratio, Sail Don&rsquo;t Row, Connecting Claude to NetSuite) have no
+  Body&mdash;their own hand-built pages render them. A piece with a Body renders at its own
+  /thought-leadership/&lt;slug&gt; page once it&rsquo;s Live.
+</p>
+</div>"""
+    return HTMLResponse(_page("Original Content—Admin", "", body, authed=True))
+
+
+@app.get("/admin/original-content/new", response_class=HTMLResponse)
+def admin_original_content_new(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    return HTMLResponse(_page("Add Original Content—Admin", "",
+                              _oc_form_page("Add a piece", "/admin/original-content/new",
+                                           {"status": "draft"}, "", "Add piece"),
+                              authed=True))
+
+
+@app.post("/admin/original-content/new")
+async def admin_original_content_new_submit(request: Request):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    v = _oc_values_from_form(form)
+    lib = _lib()
+    try:
+        def _reject(message: str):
+            return HTMLResponse(_page(
+                "Add Original Content—Admin", "",
+                _oc_form_page("Add a piece", "/admin/original-content/new", v, message, "Add piece"),
+                authed=True), status_code=400)
+
+        if not v["title"]:
+            return _reject("Title is required.")
+        if not v["teaser"]:
+            return _reject("Teaser is required.")
+        if not v["tag_label"]:
+            return _reject("Tag label is required.")
+        if not v["link_label"]:
+            return _reject("Link label is required.")
+        if v["display_order_raw"] and v["display_order"] is None:
+            return _reject("Display order must be a number.")
+        slug_error = _validate_oc_slug(v["slug"], lib)
+        if slug_error:
+            return _reject(slug_error)
+
+        lib.add_original_content(
+            v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
+            v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
+            v["display_order"],
+        )
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/original-content", status_code=303)
+
+
+@app.get("/admin/original-content/{item_id}/edit", response_class=HTMLResponse)
+def admin_original_content_edit(request: Request, item_id: int):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        it = lib.get_original_content(item_id)
+    finally:
+        lib.close()
+    if not it:
+        raise HTTPException(status_code=404, detail="Original Content piece not found")
+    values = dict(it)
+    values["body_md"] = values["body_md"] or ""
+    # _page() escapes its own title argument internally — passing an
+    # already-_esc()'d fragment here would double-escape (e.g. "&amp;amp;"),
+    # the same class of bug CLAUDE.md's "Speaking &amp; Events" fix covers.
+    return HTMLResponse(_page(f"Edit {it['title']}—Admin", "",
+                              _oc_form_page(f"Edit {it['title']}", f"/admin/original-content/{item_id}/edit",
+                                           values, "", "Save changes"),
+                              authed=True))
+
+
+@app.post("/admin/original-content/{item_id}/edit")
+async def admin_original_content_edit_submit(request: Request, item_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    form = await request.form()
+    v = _oc_values_from_form(form)
+    lib = _lib()
+    try:
+        if not lib.get_original_content(item_id):
+            raise HTTPException(status_code=404, detail="Original Content piece not found")
+
+        def _reject(message: str):
+            return HTMLResponse(_page(
+                f"Edit {v['title']}—Admin", "",
+                _oc_form_page(f"Edit {v['title']}", f"/admin/original-content/{item_id}/edit",
+                             v, message, "Save changes"),
+                authed=True), status_code=400)
+
+        if not v["title"]:
+            return _reject("Title is required.")
+        if not v["teaser"]:
+            return _reject("Teaser is required.")
+        if not v["tag_label"]:
+            return _reject("Tag label is required.")
+        if not v["link_label"]:
+            return _reject("Link label is required.")
+        if v["display_order_raw"] and v["display_order"] is None:
+            return _reject("Display order must be a number.")
+        slug_error = _validate_oc_slug(v["slug"], lib, exclude_id=item_id)
+        if slug_error:
+            return _reject(slug_error)
+
+        # The edit form always prefills display_order with the current
+        # value, so a blank submission here is a deliberate clear — same
+        # convention as thought_leadership's own edit route: treat it as 0
+        # rather than re-triggering the add-only auto-assign.
+        lib.update_original_content(
+            item_id, v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
+            v["body_md"], v["status"], v["featured_home"], v["date_label"], v["sort_key"],
+            v["display_order"] or 0,
+        )
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/original-content", status_code=303)
+
+
+@app.post("/admin/original-content/{item_id}/delete")
+def admin_original_content_delete(request: Request, item_id: int):
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.delete_original_content(item_id)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/original-content", status_code=303)
 
 
 _COMMUNITY_COST_BANDS = ["Free", "Undisclosed dues", "<$1k/yr", "<$2,500/yr", "$2,500+/yr"]
@@ -18042,6 +18121,7 @@ _ADMIN_GROUPS = [
     ]),
     ("Thought Leadership", "Writing, Speaking &amp; Events, Podcasts, and Press for the public /thought-leadership page.", [
         ("/admin/thought-leadership", "Thought Leadership", "Add, edit, or delete entries in any of the four columns—Writing, Speaking &amp; Events, Podcasts, Press."),
+        ("/admin/original-content", "Original Content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
     ("Brand, voice, and content", "How the site looks and sounds.", [
@@ -18122,6 +18202,8 @@ _OPEN_SOURCE = [
          "Parses and validates incoming request data behind FastAPI."),
         ("python-multipart", "python-multipart", "Apache-2.0", "https://github.com/Kludex/python-multipart",
          "Reads the form posts—login, contact, and tool submissions."),
+        ("Markdown", "Markdown", "BSD-3-Clause", "https://python-markdown.github.io",
+         "Renders an Original Content piece's markdown body—headings, fenced code blocks, tables—into the shared article template."),
     ]),
     ("Stores & searches", "Where your archive lives and how it's searched.", [
         ("SQLite + FTS5", None, "Public Domain", "https://www.sqlite.org",
@@ -18343,6 +18425,56 @@ _SCRIPT_REGISTRY = [
      "Recurring-manual — run as needed if orphaned-category drift is suspected.",
      ["LINKLIB_DB (or pass --db)"],
      ["python -m scripts.report_orphaned_categories --db library.db"]),
+    ("report_feature_taxonomy_coverage.py", "scripts.report_feature_taxonomy_coverage", "Recurring & actively useful",
+     "Read-only: per tool_categories row, reports tool count, live/retired category_features "
+     "counts, and pending feature_review_queue counts by source. Built for the Feature Taxonomy "
+     "scan tool's Phase 0/1 (docs/FEATURE_TAXONOMY.md §10) to confirm which categories are "
+     "origination-mode candidates against real numbers instead of an estimate.",
+     "Recurring-manual — run before scoping/running an origination scan against a new category, "
+     "to see current coverage and avoid duplicating proposals already in the queue.",
+     ["LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.report_feature_taxonomy_coverage --db library.db"]),
+    ("originate_category_features.py", "scripts.originate_category_features", "Recurring & actively useful",
+     "Runs the Feature Taxonomy scan tool's Phase 3 pipeline (docs/FEATURE_TAXONOMY.md §10, "
+     "origination mode) against one category's whole tool roster — research, incremental §7 "
+     "clustering + merge judgment, and (with --apply) the feature_review_queue write. Preview "
+     "mode (default) runs the SAME full pipeline and makes the SAME real Exa/Claude calls as "
+     "--apply — there's no cheap way to preview this pipeline's output the way a backfill "
+     "script's preview is free, so previewing then applying pays for the whole run twice. "
+     "Go straight to --apply once you trust the pipeline.",
+     "Recurring-manual — run once per category as each of the 14 (of 17) categories without a "
+     "curated feature list yet gets originated. Check /admin/tools/software/feature-review-queue "
+     "for the results afterward.",
+     ["ANTHROPIC_API_KEY", "EXA_API_KEY (optional — falls back to the model's own knowledge without it)"],
+     ["python -m scripts.originate_category_features --db library.db --category Neobanking --apply"]),
+    ("deny_pending_scan_proposals.py", "scripts.deny_pending_scan_proposals", "Recurring & actively useful",
+     "Bulk-denies pending feature_review_queue items for one category/source, with a shared "
+     "resolution note — cleanup tool for a botched origination run (built for the real "
+     "Neobanking incident, 364 bad singleton proposals from the pre-fix clustering bug). Denies "
+     "rather than deletes, per the standing no-dead-data/always-leave-a-trace discipline.",
+     "Recurring-manual — run before a corrected re-run of originate_category_features.py "
+     "whenever a prior run's proposals need clearing.",
+     ["LINKLIB_DB (or pass --db)"],
+     ["python -m scripts.deny_pending_scan_proposals --db library.db --category Neobanking "
+      "--reason \"Superseded by corrected clustering re-run\" --apply"]),
+    ("remap_queue_to_framework.py", "scripts.remap_queue_to_framework", "Recurring & actively useful",
+     "Remaps a category's pending source='scan' feature_review_queue proposals against a FIXED, "
+     "human-defined target feature list (a JSON file, not open-ended AI clustering) — matches each "
+     "proposal to a bucket or 'none' via one Claude call per batch, consolidates every proposal "
+     "mapped to the same bucket into ONE rewritten queue row (canonical name from the framework, a "
+     "synthesized definition, tool links unioned and deduped by tool_id), and denies the "
+     "now-redundant/out-of-scope rows — never deletes, per the standing no-dead-data discipline. "
+     "Never writes to category_features/tool_feature_links and never approves anything; every item "
+     "ends up pending (rewritten) or denied, ready for a human's final approve/deny pass. Preview by "
+     "default (runs the real Claude calls — no cheaper way to preview a judgment call — but writes "
+     "nothing); --apply commits the plan. Built for the real Neobanking incident (2026-08, 202 "
+     "pending proposals from the 8/23 corrected origination run, remapped against a 41-bucket list "
+     "Brian defined by hand).",
+     "Recurring-manual — run once per category whenever a human-reviewed target framework "
+     "supersedes that category's raw origination-scan output. Hand it a new --framework JSON file "
+     "for the next category; the script itself doesn't change.",
+     ["ANTHROPIC_API_KEY"],
+     ["python -m scripts.remap_queue_to_framework --db library.db --category Neobanking --apply"]),
     ("dump_communities.py", "scripts.dump_communities", "Recurring & actively useful",
      "Read-only plain listing of every community's name, URL, and slug — no filtering or "
      "formatting. A quick ad hoc lookup tool.",
@@ -18832,7 +18964,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Toolbox — Communities", ["communities", "community_audit_log", "community_categories",
                                 "community_competitors", "community_profiles",
                                 "community_gap_submissions", "community_profile_views"]),
-    ("Thought Leadership / Game", ["thought_leadership", "game_rank_settings", "game_runs"]),
+    ("Thought Leadership / Game", ["thought_leadership", "original_content",
+                                    "game_rank_settings", "game_runs"]),
     ("Library / Archive", ["articles", "articles_fts", "articles_vec", "library_queue",
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
                             "content_refetch_log", "url_correction_log",

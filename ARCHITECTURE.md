@@ -130,7 +130,7 @@ Every table in the file, grouped by feature area:
 | Chat Matchmaker | `matchmaker_questions` |
 | Accounts | `users`, `password_reset_requests` |
 | CFO Toolbox | `tools`, `tool_categories`, `tool_audit_log`, `benchmarks`, `tool_leads`, `communities`, `community_categories`, `community_audit_log`, `community_profiles`, `community_gap_submissions`, `community_profile_views`, `field_reviews`, `narrative_review_log` |
-| Thought Leadership | `thought_leadership` |
+| Thought Leadership | `thought_leadership`, `original_content` |
 | Site operations | `settings`, `contacts`, `email_failures`, `archive_audit_log`, `contact_audit_log`, `backup_log`, `integrity_check_log`, `job_run_log` |
 | "Sail, Don't Row" (`/play`) | `game_rank_settings`, `game_runs` |
 
@@ -1164,6 +1164,251 @@ effect.
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (originally "pin into the homepage teaser" — Phase 3 addendum; repurposed by the Homepage Restructure phase to mean "represents this type in the homepage's "Recent highlights" grid", see below; defaults to 0, no retroactive selection) |
+| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4c, all three flagship pieces — `netsuite-mcp` (4a), `ai-hackathon-playbook` (4b), and `growth-engine-ratio` (4c) — have real `body_md` and are served by the catch-all, their bespoke routes all retired; `growth-engine-ratio`'s own JS calculator moved to a brand-new standalone bespoke route, `/thought-leadership/growth-engine-calculator`, which is not part of this table at all), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. |
+
+**Original Content Phase 2 (2026-08) — markdown rendering + `GET /thought-leadership/{slug}`.**
+`_render_original_content_markdown` runs `body_md` through `python-markdown` with only
+`fenced_code` and `tables` enabled (no syntax highlighting/Pygments), then wraps each rendered
+`<table>` in the same `overflow-x:auto` container every other table on this site already uses
+(`.ger-table-wrap`, the `.ns-table`/`.ns-trouble` wrappers) — markdown's `tables` extension emits
+a bare `<table>` with no wrapper of its own, so this is a small regex post-process, not an
+extension option; verified live at 390px portrait and 844×390 landscape that a genuinely wide
+table scrolls inside its own wrapper without ever forcing the page itself to overflow
+horizontally. Raw HTML embedded in `body_md` passes through unescaped — deliberate, since the
+field is admin-authored only, never public input, so there's no injection surface to guard
+against here. `_original_content_article_body` is the shared article template, matching the
+three bespoke pieces' own shell exactly (`page page-full article-atlantic`, the same
+`&larr; Thought Leadership` back-link, `.tool-prose`, the same eyebrow/`<h1>`/byline treatment) —
+only the rendered markdown itself (wrapped in a scoped `.oc-body` div) differs from page to page.
+`.oc-body`'s CSS mirrors the Reader's own `.reader-body` treatment for code/pre/table (the one
+place this codebase already had an answer for "how does this site style rendered long-form
+content"), with one deliberate difference: `blockquote` reuses this shell's own established Quote
+treatment (`.article-pull`'s border-left/italic style, BRAND.md's four-type callout taxonomy)
+instead of the Reader's coral box, since a coral-boxed quote would clash with BRAND.md's
+"coral: rare warm accent, one per screen" rule inside the exact shell where Quotes are already
+established as border-rule-not-box. `GET /thought-leadership/{slug}` is registered immediately
+after `netsuite_mcp()` ends and before the unrelated `/play` route — confirmed in the Phase 0
+investigation as the only gap where nothing else registers a conflicting route — so the three
+literal bespoke routes above it always win by FastAPI's registration order; a row with a slug
+colliding with one of the three bespoke pieces (deliberately possible, since nothing in the
+schema prevents it) still loses to the bespoke page, proven by
+`test_bespoke_literal_routes_win_over_catch_all_even_on_slug_collision`. Serves only a row with
+`status='live'` AND a non-null `body_md`; a `body_md IS NULL` row 404s here too even though
+route-registration order is what actually protects the three bespoke pieces in practice — that
+check is defense in depth, not the primary mechanism. A `status='draft'` row 404s for a
+signed-out visitor and renders normally, at its own canonical URL, for an active admin session
+(`_is_authed`) — there is no separate preview URL or token.
+
+**Original Content Phase 3 (2026-08) — admin CRUD at `/admin/original-content`.** Same
+list/add/edit/delete pattern as `/admin/thought-leadership` (read first, matched, not built
+from scratch), with one addition specific to this table: slug validation, since a bad slug here
+is a real failure mode (an unreachable page, or a page that silently loses to a bespoke route)
+that `thought_leadership`'s free-text title never risked. `_validate_oc_slug` checks, in order,
+that the slug is present, well-formed (`_OC_SLUG_RE`, lowercase letters/digits/single hyphens
+only — **not auto-lowercased**, an uppercase or malformed slug is rejected outright rather than
+silently normalized, so what an admin sees in the URL is exactly what they typed), not one of
+the three bespoke pieces' own route path segments (`_OC_RESERVED_SLUGS` — a colliding slug would
+save fine but be permanently unreachable, since the literal route always wins registration
+order), and not already used by a different row. A rejection re-renders the same form with the
+submitted values preserved and an inline coral error banner — the richer pattern
+`_feed_form_page`/`admin_feeds_new_submit` already established for exactly this kind of
+validation, not `thought_leadership`'s own blunter raise-`HTTPException`-on-bad-input approach.
+Slug edits are allowed at any time, including on a live piece — the edit form's helper text
+warns that this breaks any existing link, since there's no redirect system (out of scope, same
+as Phase 2's own decision). `sort_key` is derived from `date_label` on every save via the same
+`_sort_key_from_date_label` `thought_leadership` uses — not a form field. `display_order` left
+blank on add auto-assigns the next value (`Library.add_original_content`'s own `COALESCE(MAX...)
++ 1` default); left blank on edit is a deliberate clear, treated as `0` — same convention as
+`thought_leadership`'s own edit route. `body_md` left blank keeps the row as card-metadata-only
+(`NULL`, not `''` — `_oc_values_from_form` maps an empty textarea to `None`), the same state the
+three flagship rows have always been in; a piece created this way still renders as a flagship/
+`/thought-leadership` card immediately (`test_blank_body_md_stays_card_only_and_renders_on_homepage`)
+and correctly 404s at its own `/thought-leadership/{slug}` page (Phase 2's `body_md IS NULL`
+guard) until a later edit fills in a body. The admin index's "Thought Leadership" group gained a
+second item pointing here — `count_label` is `len(items)`, so the badge updated with no
+additional wiring.
+
+**Original Content Phase 4a (2026-08) — the first bespoke page (`netsuite-mcp`) ported to a real
+`body_md`; its Python route retired.** A read-only Phase 4 investigation (all three bespoke
+pages, reported to Brian before any code) found none of the three has images, JS, or interactivity
+— every custom visual device on all three (numbered step-tracks, use-case cards, colored tables, a
+quick-reference box) is inline-styled HTML/CSS with no page-specific `<style>` selector doing
+anything a raw HTML block in `body_md` can't reproduce exactly (verified directly: a raw HTML
+`<div>`, a raw `<style>` block, and even a raw `<script>` block all pass through
+`_render_original_content_markdown()` completely untouched). The one genuine exception — Growth
+Engine Ratio's live JS calculator — has no equivalent on this page, which is why NetSuite MCP was
+the pilot: closest to a "just structure, no interactivity" port of the three. Approved approach,
+a hybrid: genuine prose became real markdown; the visually-designed elements (`.ns-case`/`.ns-tip`
+use-case cards, `.ns-step`/`.ns-num` phase tracks, `.ns-table`/`.ns-trouble` tables, `.ns-note`,
+`.ns-qr`) were preserved as raw HTML blocks in `body_md`, using their original CSS classes
+unchanged. Those classes' CSS moved from the retired route's own `<style>` block into a new
+`_OC_NETSUITE_MCP_CSS` constant, every selector rescoped under `.oc-body` (e.g. `.oc-body
+.ns-table`) so it only ever applies inside a rendered Original Content article body, never
+sitewide — `.oc-body .ns-table`'s two-class specificity deliberately outranks the shared
+template's own generic `.oc-body table` rule, so this table keeps its original navy-header/
+zebra-striped look instead of falling back to the generic styling. `scripts/
+migrate_netsuite_mcp_content.py` (dry-run/`--apply`/write-then-read-back, same convention as every
+other one-time content migration here) sets `body_md` on the existing Phase-1-seeded row, copying
+the original page's prose verbatim — no rewriting — and also sets `date_label` to "June 2026"
+(blank since the Phase 1 seed, since `_TL_FEATURED_CARDS` tuples never carried a date), restoring
+the byline the bespoke page always showed. The bespoke `netsuite_mcp()` route function itself was
+deleted outright (the `/netsuite-mcp` -> `/thought-leadership/netsuite-mcp` 301 redirect stays —
+its target is still a real, correct URL, just served by the catch-all now instead of a Python
+function); `"netsuite-mcp"` came out of `_OC_RESERVED_SLUGS`, since it's no longer claimed by a
+bespoke route and is now an ordinary admin-editable slug like any other. **Verified before
+deleting the route, not assumed**: with the DB row updated but the bespoke route still live, the
+shared template's actual output was rendered to a standalone file (bypassing the still-live
+bespoke route, which would otherwise win at the real URL) and screenshotted at desktop (1280px)
+and mobile (390×844) against the live bespoke page at the same viewports. Content-structure
+verification found all 23 headings present, in the same order, with identical text. Visual
+verification found every ported designed element (use-case cards, the permission table, the
+troubleshooting table, the quick-reference box) pixel-identical, and two small, deliberate,
+documented deltas: inline `<code>` spans (e.g. `com.netsuite.mcpstandardtools`) now render with
+the shared template's gray-pill background instead of the bespoke page's bare monospace text
+(an inherent, expected side effect of `.oc-body pre,.oc-body code`'s generic styling applying —
+arguably a consistency win, since it now matches `<code>` everywhere else on the site), and on
+mobile, the italic subtitle line now renders just *after* the byline instead of just before it —
+the shared template hardcodes the byline immediately following `<h1>`, and the subtitle (a field
+`original_content` has no column for) had to become the first line of `body_md`, which renders
+after that hardcoded byline. Fixing that ordering would mean changing the shared article
+template's shape for every Original Content piece, not just this one — left as a known, minor,
+documented deviation rather than a schema/template change bundled into a content port.
+
+**Original Content Phase 4b (2026-08) — the second bespoke page (`ai-hackathon-playbook`,
+"Sail, Don't Row") ported the same way; its Python route retired.** Same hybrid approach as
+Phase 4a: real prose converted to markdown; the page's designed elements (a 2×2 value/effort
+matrix, an Inspire→Sleep→Build flowchart with a `<640px` vertical-arrow responsive variant, a
+Ship/Iterate/Park verdict tier strip, a resource-link list, a 6-step phase track used twice, and
+a Notion intake-form template box) preserved as raw HTML in `body_md` using their original
+`.fah-*` classes. Confirmed dead and dropped, not carried forward: `.fah-verdicts`/
+`.fah-verdict`/`.fah-v-*`, `.fah-pull`, `.fah-motif` — defined in the retired route's own
+`<style>` block but unused by any element in its actual body. `_OC_HACKATHON_CSS` (`webapp/app.py`)
+holds the rescoped `.oc-body .fah-*` CSS, same `_OC_NETSUITE_MCP_CSS` treatment.
+`scripts/migrate_hackathon_playbook_content.py` follows the same dry-run/`--apply`/
+write-then-read-back convention, setting `body_md`, `date_label` ("June 2026"), and — unlike
+Phase 4a — `title` on the existing Phase-1-seeded row.
+
+**Two real bugs caught by screenshot-diff verification before the route was touched, neither
+visible from reading the code:**
+1. A double-escape bug — the row's `title` was seeded (Phase 1) as the pre-escaped
+   `"Sail, Don&rsquo;t Row"`, meant for `_tl_fcard()`'s raw `<h3>` insertion; the shared article
+   template's own `_esc(row["title"])` call for the real `<h1>` (correct in general, needed for
+   plain-text admin-typed titles) double-escaped it, rendering literal `&rsquo;` text. Fixed with
+   an explicit `TITLE = "Sail, Don't Row"` constant in the migration script (matching the retired
+   route's own `<h1>` text byte-for-byte) rather than reusing `row["title"]`. Since the homepage
+   and `/thought-leadership` flagship cards render straight from this DB row
+   (`_oc_featured_cards_html`/`_tl_fcard()`, not the frozen `_TL_FEATURED_CARDS` tuple), this also
+   changes those cards from the curly entity to a straight apostrophe — `tests/
+   test_thought_leadership_homepage_teaser.py`'s fixture applies this same title fix after its
+   Phase-1 seed so the suite doesn't drift stale against production the moment the migration ships.
+2. Two CSS specificity gaps, found only by comparing real `element.bounding_box()` values (a
+   full-page screenshot glance looked fine even with ~110px of real height difference buried in
+   one repeated component). First: `.fah-body h3`/`.fah-template h3` relied on the original page's
+   sitewide `body{font:16px/1.65 ...}` inheritance for their line-height, never declaring their
+   own — but `_OC_ARTICLE_CSS`'s shared `.oc-body h1,h2,h3...{line-height:1.3}` rule (written for
+   real prose section headings) matches these in-card h3s too, and an explicit declaration always
+   wins over inheritance regardless of specificity, compounding a 6px collapse across every
+   repeated card. Fixed by restating the original's effective `1.65` line-height directly on both
+   selectors. Second, and opposite in direction: `.fah-body p`/`.fah-tier p` are each only one
+   class + a tag on the original page, so they already lose their own line-height/margin-bottom to
+   the sitewide `.article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px}` rule there
+   (two classes always outranks one) — a pre-existing quirk of the live original page. Prefixing
+   every selector with `.oc-body` for scoping gave exactly these two selectors a second class,
+   tying the sitewide rule's specificity; since the article's own `<style>` tag loads after the
+   sitewide one, the tie resolved the *opposite* way, so the port's declared values won where the
+   original's never did. Fixed by dropping line-height/margin-bottom from both ported selectors so
+   they lose to the sitewide rule again, matching the page's actual rendered behavior rather than
+   "fixing" a CSS quirk the live site never showed. (`.fah-template p`, `.fah-r-desc`, and
+   `.fah-flow-caption` were checked too and needed no change — none of them ever declared
+   line-height/margin-bottom, so they already lost to the sitewide rule on both pages.) Phase 4a's
+   near-identical `.ns-body h3`/`.ns-qr h3` selectors carry the same latent line-height gap and
+   were not touched here, since NetSuite MCP is out of scope for this PR.
+
+Post-fix, every `bounding_box()` comparison across the matrix, flowchart (both variants), tier
+strip, resource list, template box, and both phase tracks matched to within 1-2px, and every
+cropped screenshot pair was visually confirmed identical at desktop (1280px), mobile portrait
+(390×844), and mobile landscape (844×390), with zero horizontal overflow at any width. Only then
+was the bespoke `finops_ai_hackathon()` route deleted (the `/finops-ai-hackathon` 301 redirect
+stays, now served by the catch-all) and `"ai-hackathon-playbook"` removed from
+`_OC_RESERVED_SLUGS` — leaving only `"growth-engine-ratio"` reserved. The closing bio blurb's
+`/play` easter-egg link carried over verbatim into `body_md`.
+
+**Original Content Phase 4c (2026-08) — `growth-engine-ratio`, the last of the three
+flagship pieces, ported with a genuine SPLIT rather than a whole-page port.** Unlike Phase
+4a/4b, this page couldn't be ported as-is: alongside the prose/formula/table/quotes content,
+it embeds a ~380-line live JS calculator (two modes — point-in-time and a bounded -2..+2
+timeline — driving two dynamically-generated SVG charts, `contributionSVG()`/`buildChart()`)
+that's genuinely interactive, not markdown-representable content. Resolution: the article
+half ported the same way netsuite-mcp/ai-hackathon-playbook did (real prose to markdown; the
+formula box, 3 pull-quotes, and the tier table preserved as raw HTML in `body_md` using their
+original `.ger-pull`/`.ger-table` classes — `.article-cta`/`.article-pull` needed no porting,
+since those are sitewide shared classes, not page-specific, already available everywhere).
+The calculator moved to a brand-new standalone bespoke route,
+`GET /thought-leadership/growth-engine-calculator` (`growth_engine_calculator()` in
+`webapp/app.py`) — its markup, CSS, and JS extracted byte-for-byte from the retired route,
+zero logic/input/chart change. `_OC_GER_CSS` (`webapp/app.py`) holds the rescoped
+`.oc-body .ger-pull`/`.oc-body .ger-table` CSS, same `_OC_NETSUITE_MCP_CSS`/`_OC_HACKATHON_CSS`
+treatment — only the article-side rules; the calculator's own CSS
+(`.ger-grid-*`/`.ger-mode*`/`.ger-in`/`.qlabel`/`.qhead`/`.qrow-proj`/`.ger-chart`/
+`.ger-contrib*`/`.tl-step`/`.tl-ctrl*`/`.ger-card`/`.ger-value-big`) stays on the new
+calculator route's own `<style>` tag, since that page is still hand-built Python, never
+routed through the markdown template. The retired page's "Methodology note" paragraph
+(GTM/R&D GAAP definitions plus a timeline-lookback explanation) stayed on the calculator
+page unmodified, in its original position directly below the calculator card, rather than
+being split across both pages — it's calculator-specific (references the timeline's
+lookback mechanics directly) and moving it verbatim was lower-risk than trying to split its
+sentences between the two pages. `scripts/migrate_growth_engine_ratio_content.py` follows
+the same dry-run/`--apply`/write-then-read-back convention as Phase 4a/4b's migration
+scripts, setting `body_md` and `date_label` ("June 2026", same visual-parity fix) — `title`
+needed no fix this time, unlike Phase 4b's hackathon row (`"The Growth Engine Ratio"` has no
+HTML entities in it to double-escape).
+
+The retired page's byline carried two lines beyond what the shared template's single
+`date_label` field can represent — "Published with [The F Suite]" (a live link) and a
+Contributor credit line for Katherine Zhang — both preserved verbatim as the first two lines
+of `body_md` itself, the same "extra byline content becomes body_md's leading content"
+precedent Phase 4b used for the hackathon piece's italic subtitle line. One genuinely new
+piece of content: where the original page's "## Calculate Your Ratio" section held the live
+calculator inline, the ported article now shows a CTA box (reusing the sitewide
+`.article-cta` class, same visual treatment as the existing F Suite whitepaper CTA already on
+the page) linking out to the new standalone calculator page — new copy, surfaced to Brian for
+review before merge per the standing em-dash/new-copy process (see the PR description), same
+as the calculator page's own new intro blurb.
+
+Verified before either route changed: with the row updated and the new calculator page live
+at its new URL but the old bespoke `growth_engine_ratio()` route still in place, screenshot
+comparison confirmed visual parity of the article portion (desktop and 390×844 mobile), and
+the new calculator page's both modes and both SVG charts were confirmed functioning
+identically to how they worked embedded in the old page, at desktop and mobile widths. Only
+then was the old bespoke route deleted and `"growth-engine-ratio"` removed from
+`_OC_RESERVED_SLUGS` — leaving the set empty for the first time since Phase 1. Deliberately
+NOT added to the set: `"growth-engine-calculator"` itself — that page was never part of the
+`original_content` system and never will be, so there's no slug an admin could collide with
+through the form.
+
+**Phase 4c follow-up (2026-08) — two post-merge rendering bugs, both invisible text, found
+live on mobile Safari and confirmed present at every viewport width.** (1) The tier table's
+`<thead><tr style="background:var(--navy)">` inline style was silently covered by
+`_OC_ARTICLE_CSS`'s generic `.oc-body th{background:var(--accent-light)}` rule — not a
+specificity contest, a CSS table background PAINTING LAYER fact (CSS 2.1 §17.5.1): a cell's
+own background always paints above its row's, independent of specificity. Fixed the same way
+`.ns-table th` (Phase 4a) already solved this for its own table:
+`.oc-body .ger-table th{background:var(--navy);color:#fff;}`, giving the cell its own explicit
+color rather than relying on the row showing through underneath it. (2) The "Download the full
+guide" `<a class="btn">` CTA lost its white text to `.oc-body a{color:var(--navy)}`, which
+genuinely does have higher specificity than `.btn`'s own `color:#fff` (one class + one tag
+beats one class alone) — a real specificity loss this time, not a layering one. Fixed
+generally in `_OC_ARTICLE_CSS` itself (`.oc-body .btn{color:#fff;}`, two classes beats one
+class + one tag) rather than narrowly in `_OC_GER_CSS`, since this was the first `body_md`
+content anywhere to use the sitewide `.btn` button and any future piece using it would hit the
+same bug. The pre-merge screenshot verification pass had a real gap, not just bad luck: it
+checked the `<thead><tr>`'s own `getComputedStyle().backgroundColor` (genuinely navy, since
+the inline style was never removed) but never checked what actually paints on top of it — same
+"verify what's rendered, not a property read in isolation" lesson CLAUDE.md's testing-standard
+section already documents from an earlier incident. Verified this time with real mobile-Safari-
+viewport (390×844) element-level screenshots of exactly the two flagged elements (not full-page
+captures), `getComputedStyle()` diffs before/after, and a new regression test in
+`tests/test_original_content_article.py` asserting both fixed CSS rules render in the response.
 
 `Library.get_thought_leadership_representative(type)` (Homepage Restructure phase;
 supersedes the Phase 3 addendum's `list_thought_leadership_for_home` pin-then-
@@ -3084,6 +3329,490 @@ Brian runs this by hand via `railway ssh` once this PR is deployed and
 verified live — never wired into a boot hook or deploy step, consistent
 with every other destructive one-off script in this codebase.
 
+### Feature Taxonomy scan tool, Phases 1-2 (2026-08) — no schema/route changes yet
+
+A Phase 0 investigation (docs/FEATURE_TAXONOMY.md §10, "origination mode")
+scoped the recurring/one-shot AI scan tool that backfills a curated feature
+list for the 14 (of 17 live) `tool_categories` with no `category_features`
+rows yet. Phases 1-2 are read-only/library-only — no schema change, no new
+route, no `feature_review_queue` writes — so this note exists for
+completeness rather than because the standing ARCHITECTURE.md-update rule
+requires it.
+
+**Phase 1** — `scripts/report_feature_taxonomy_coverage.py`, a read-only
+diagnostic (same shape as `scripts/report_orphaned_categories.py`) that
+reports, per `tool_categories` row: tool count, live/retired
+`category_features` counts, and pending `feature_review_queue` counts by
+source. Confirmed the real numbers the "~22 categories" estimate elsewhere
+in this repo's history was guessing at: 17 categories total, 14 with no
+curated list yet, 0 pending queue items anywhere. Registered in
+`/admin/system/scripts`.
+
+**Phase 2** — `linklib/feature_scan.py`, the per-tool origination-mode
+research + drafting function (no roster-wide accumulation, no §7
+don't-collapse merge, no queue write — those are Phase 3, still to be
+scoped). Two pieces:
+
+- `research_vendor_domain(tool_name, tool_url)` — an Exa `/search` call per
+  §8 sourcing-hierarchy tier (changelog, help center, product page, press
+  release), each restricted to the tool's OWN domain via `includeDomains`
+  — deliberately not `linklib.agent.retrieve_exa`'s OPML-trusted-sites
+  allowlist, since a vendor's changelog/docs live on the vendor's own
+  domain, not Brian's curated third-party site list. Each hit is tagged
+  with an inferred §8 tier from its URL path (`_infer_tier`) since Exa's
+  index doesn't return a tier of its own, and deduped by URL in hierarchy
+  order so a URL matching more than one tier's keywords keeps its
+  strongest (lowest-numbered) classification. §8's tiers 5-6 (independent
+  reviews, vendor-authored comparisons) are inherently mostly off the
+  vendor's own domain and are out of scope for a domain-restricted search
+  by construction — flagged in the module docstring as a known scope limit
+  a future freshness-mode pass could revisit, not silently narrowed.
+- `draft_tool_features_for_category(...)` — one Claude call per tool,
+  grounded on the fetched content, returning a `ToolOriginationDraft`
+  (proposed features, each with availability/ai_enabled/confident/
+  source_url/source_tier, plus real token/cost accounting for both the Exa
+  and Claude legs). Reuses `linklib.enrich`'s Anthropic-call idiom
+  (try/except ImportError, a `DEFAULT_MODEL` constant, a JSON-only prompt,
+  `pricing.compute_cost` accounting) rather than inventing a new one. The
+  prompt embeds §10's two Phase-0/1-approved rules directly: no cap on how
+  many features the scan proposes (Brian's review at the eventual queue is
+  the curation gate, not the scan), and the thin-roster rule (`roster_size
+  < 4` drops the differentiator criterion, keeping only table-stakes/
+  standout candidates) — the caller passes the category's real roster size,
+  not how many tools have been researched so far in a run.
+- `verified_as_of` is stamped with the date the research actually ran — a
+  sensible default for the eventual `tool_feature_links.verified_as_of`
+  once Phase 3 builds the actual queue payload; still editable at
+  edit-then-approve time like any other field.
+
+**Tested with mocked Exa/Anthropic calls** (`tests/test_feature_scan.py`).
+No live run against real vendor content happened in this session — no
+`ANTHROPIC_API_KEY`/`EXA_API_KEY` were available, and using the app's own
+production keys from a Code building session is against the standing
+CLAUDE.md billing-note rule. `scripts/test_feature_scan_origination.py`
+(same "manual QA, makes real API calls, writes nothing" shape as
+`scripts/enrich_compare.py` — deliberately not in the scripts registry,
+matching that precedent) is built for Brian to run by hand against 1-2
+real Neobanking tools (the agreed first test category) to judge output
+quality before Phase 3 is scoped.
+
+**Phase 2 follow-up (2026-08) — the first real run (Mercury/Neobanking)
+crashed on a truncated response, and the fix is structural, not a
+one-off patch.** `draft_tool_features_for_category` hard-crashed with a
+`JSONDecodeError` ("unterminated string") that fell into the generic
+`except Exception` handler and silently returned `None`, losing the
+tool's research entirely. Root cause: the response got cut off
+mid-generation before finishing the JSON — Opus 5's on-by-default
+adaptive thinking shares the same `max_tokens` budget as the response
+text (the same failure class `MIN_GENERATE_MAX_TOKENS` exists to guard
+the *floor* of in `linklib/enrich.py`), and Phase 0's own approved rule —
+no cap on how many features the scan may propose — put an uncapped-length
+response and a finite token ceiling on a collision course by
+construction. A feature-rich vendor like Mercury is exactly the case most
+likely to hit it, so this will recur on other vendors even after any
+single token-budget bump, not just this one call. Fixed two ways,
+per Brian's explicit ask that both land together, not either/or:
+1. `max_tokens` raised from 4000 to `_ORIGINATION_MAX_TOKENS = 8000` —
+   sized above `generate_community_profile`'s existing 6000 (23 fields in
+   one call), since an uncapped-length array is the whole point of this
+   call.
+2. `_salvage_feature_objects` recovers as many COMPLETE JSON objects as
+   `json.JSONDecoder.raw_decode`'s incremental parsing can pull from the
+   `"features"` array before the first truncated/malformed element,
+   rather than losing every earlier feature the model had already fully
+   described. `draft_tool_features_for_category` tries a full `json.loads`
+   first and only falls back to salvage on a parse failure — a clean
+   response never touches the salvage path at all (`ToolOriginationDraft.
+   truncated` stays `False`). When the first attempt DOES truncate, one
+   automatic retry runs at `_RETRY_MAX_TOKENS = 16000`; token/cost
+   accounting sums both calls, and the retry's result (parsed cleanly or
+   salvaged again) always wins over the first attempt's — no infinite
+   retry loop, no silently doubling cost on every call, only on the
+   failure path. `truncated=True` on the returned draft is a visible
+   signal to whatever consumes this (Phase 3, and the manual QA script's
+   own printed warning) that the feature list may be incomplete, rather
+   than that being indistinguishable from a vendor that genuinely has
+   few features. Covered by 6 new regression tests reproducing the exact
+   reported crash shape (`tests/test_feature_scan.py`).
+
+**Phase 2 follow-up 2 (2026-08) — Mercury/Neobanking's first CLEAN run
+surfaced "tier 0" in citations, undefined anywhere in §8's hierarchy
+(which starts at 1).** Confirmed as a real, intentional sentinel — not a
+hierarchy bug — that was simply never labeled anywhere a human could see
+it: `source_tier=url_to_tier.get(source_url, 0)` falls back to `0`
+whenever the model's cited `source_url` doesn't match any URL actually
+fetched as grounding (a hallucinated/paraphrased citation, or a real page
+the model saw referenced but this run never fetched itself) — a
+citation-verification signal worth a human's attention, not a §8 tier to
+compare against 1-4. Two real fixes, not just a label change:
+1. **`UNCITED_TIER = 0`** is now a named constant with its own
+   `_TIER_LABELS` entry ("Uncited (source URL not in fetched grounding
+   set)"), and `ProposedFeature` gained `source_tier_label` so a caller
+   never has to re-derive what a bare tier number means.
+   `scripts/test_feature_scan_origination.py`'s printed output now shows
+   the label, not a bare `[tier 0]`.
+2. **`_normalize_url`** (case/trailing-slash/fragment-insensitive
+   equality) fixes a real bug the labeling alone wouldn't have caught: a
+   model-cited URL that's genuinely the same page as a fetched hit, just
+   differing by trailing slash or case, was falling through to
+   `UNCITED_TIER` on a trivial formatting mismatch rather than resolving
+   to its real tier. Used only for citation matching, not for the Exa
+   domain-restriction logic elsewhere in this module. The prompt was also
+   tightened to tell the model to copy a cited URL exactly as it appears
+   in the content block's own `--- Section (URL) ---` headers, to reduce
+   how often a citation drifts from the literal fetched URL in the first
+   place. A genuinely different/hallucinated URL still correctly resolves
+   to `UNCITED_TIER` after normalization — this only recovers trivial
+   formatting mismatches, not real inconsistencies. 4 new regression
+   tests (`tests/test_feature_scan.py`).
+
+### Feature Taxonomy scan tool, Phase 3 (2026-08) — roster-wide accumulation, §7 clustering/judgment, and the queue write
+
+Closes the loop the Phase 2 build brief deferred: everything from "run
+Phase 2's per-tool drafting across a category's whole roster" through the
+actual `feature_review_queue` write. Approved shape, per the Phase 3
+scoping proposal Brian signed off on:
+
+- **Clustering is ONE Claude call over the whole roster's candidate
+  list** (`linklib.feature_scan.cluster_candidate_features`), not
+  embeddings-similarity (would judge on surface wording — exactly what
+  §7 warns against: "never match on shared buzzwords") and not full
+  pairwise comparison (infeasible at the ~400-450 candidates a real
+  10-tool category produces at Mercury/Rho's observed ~44
+  features/tool rate). It's a deliberately LOOSE grouping pass — a
+  candidate gets grouped in on any plausible match, since the real
+  merge-or-split decision happens next, per-cluster, with more detail.
+- **Per-cluster judgment** (`judge_cluster`) makes the actual call,
+  few-shot off §7's own worked examples verbatim
+  (`_UNIFY_TEST_EXCERPT` — Automated Flux Analysis, Real-time
+  Spreadsheet Sync vs. Automated Working Paper Generation), with an
+  explicit **conservative bias instructed directly in the prompt**:
+  split, don't merge, when genuinely uncertain. Reasoning stated to the
+  model itself, not just implied: a false split is a cheap, visible
+  queue-review fix; a false merge silently buries a real distinction
+  inside a link `note` where it's much easier to miss. A judgment call
+  can partition its cluster into more groups than the loose clustering
+  pass produced — clustering groups too broadly on purpose, so a
+  3-candidate cluster might correctly merge 2 and split the 3rd rather
+  than forcing an all-or-nothing call.
+- **Every failure mode degrades toward MORE separate features, never
+  toward losing research or silently over-merging** — the conservative-
+  bias philosophy applied structurally, not just in the prompts:
+  clustering failing outright falls back to every candidate as its own
+  singleton cluster; a judgment call failing outright falls back to
+  every candidate in that cluster staying unmerged; a model's
+  cluster/group output dropping or duplicating an index
+  (`_validate_partition`) recovers a dropped index as its own singleton
+  (never lost) and keeps a duplicated index's FIRST group membership
+  only (never double-counted). A `tool_id` appearing twice within one
+  merge group (that tool proposed two candidates that got merged
+  together) is de-duplicated before the queue write, keeping the first
+  and logging the rest — `upsert_tool_feature_link`'s
+  `UNIQUE(tool_id, feature_id)` would otherwise silently let the second
+  overwrite the first.
+- **Queue-write wiring reuses `Library.add_feature_review_queue_item`'s
+  existing payload shape exactly** — one call per final feature (post-
+  cluster-and-judge), `source='scan'`, one `links` entry per
+  contributing tool (each tool's own availability/ai_enabled/note/
+  source_url/verified_as_of — §7's "the AI flag and link note carry the
+  difference" lands here). Zero new surface for the approval UI
+  (`/admin/tools/software/feature-review-queue`) to handle — a merged
+  proposal's exact-name collision with an existing feature still hits
+  the same Phase 1c merge-confirmation flow as any other proposal.
+  `proposal_type` follows the existing seed-data convention exactly
+  (`new_feature+link` / `new_feature+N links`).
+- **`linklib.feature_scan.originate_category_features(lib, category_id,
+  category_name, tool_roster, ..., dry_run=...)`** is the orchestration
+  entry point — runs Phase 2's drafting across the roster, accumulates
+  `CandidateFeature`s (a `ProposedFeature` tagged with its originating
+  tool + the draft's `verified_as_of`), clusters, judges each
+  multi-member cluster, and either writes to the queue or — when
+  `dry_run=True` — only populates `OriginationSummary.queued_payloads`
+  with what WOULD have been written, so a caller gets the same preview
+  guarantee whether calling the library function directly or through
+  the script below. Returns `None` only if EVERY tool's research
+  failed; a partial-failure run still returns a summary covering what
+  succeeded, with `tools_failed` counting the rest.
+- **`_call_and_parse_array`/`_call_claude`/`_salvage_json_array`** — the
+  Mercury truncation fix's call+parse+one-retry-on-truncation machinery
+  was generalized (from a single inline closure inside
+  `draft_tool_features_for_category`) so clustering and judgment reuse
+  the exact same resilience rather than two more copies of it.
+  `_salvage_feature_objects` survives as origination drafting's own
+  named wrapper (asserted against directly in tests) over the
+  generalized `_salvage_json_array(raw, "features")`.
+- **`scripts/originate_category_features.py`** — the manual-run entry
+  point, registered in `/admin/system/scripts`. Unlike
+  `scripts/backfill_logos.py`'s preview (which lists already-known
+  un-fetched rows for free), there's no cheap way to preview this
+  pipeline — even a preview run makes the full real Exa/Claude research/
+  cluster/judge calls, since that IS the work; the script is explicit
+  about this in its own docstring and `--help` rather than implying a
+  free preview the way the `--apply` convention usually does elsewhere.
+  Default (no `--apply`) prints every payload that WOULD be queued and
+  writes nothing; `--apply` also calls the same code path with
+  `dry_run=False`.
+- **Review-queue near-duplicate nudge, built alongside per Brian's
+  explicit call (not a separate phase)** —
+  `webapp.app._find_near_duplicate_queue_items` (pure Python,
+  `difflib.SequenceMatcher`, no LLM call) groups pending
+  `feature_review_queue` items by `category_id` and flags pairs whose
+  proposed feature names cross a similarity threshold
+  (`_NEAR_DUPLICATE_NAME_THRESHOLD = 0.6`, a starting point not yet
+  tuned against real data). Rendered as an amber warning line on
+  `/admin/tools/software/feature-review-queue`'s existing card
+  (`_feature_review_queue_item_card`'s new `near_duplicates` param),
+  reusing the same amber pair (`#fef3c7`/`#92400e`) that card already
+  uses for the "public" source badge rather than introducing a new
+  color. **Deliberately source-agnostic** — it has no dependency on the
+  scan having run at all, and catches a near-dupe regardless of
+  whether it came from the scan's own conservative split, two separate
+  scan runs over time, or an admin's own manual entry; this is what
+  makes it a genuine complement to Phase 3's clustering rather than
+  scan-specific tooling bolted onto the queue page.
+- **Tested with mocked Exa/Anthropic calls throughout**
+  (`tests/test_feature_scan.py`, 19 new cases covering
+  `_validate_partition`'s repair behavior, clustering/judgment parsing
+  and failure-mode fallbacks, and a full `originate_category_features`
+  integration test against a real temp `Library` confirming the queued
+  payload's exact shape; `tests/test_feature_taxonomy.py`, 6 new cases
+  for the near-duplicate nudge). No live run against real vendor
+  content happened in this session — same `ANTHROPIC_API_KEY`/
+  `EXA_API_KEY` gap as Phase 2 — so a genuine 10-tool Neobanking
+  origination run is still Brian's to do by hand via the script above.
+
+### Feature Taxonomy scan tool, Phase 3 follow-up (2026-08) — the first real live run broke clustering, and the fix is a redesign, not a bigger constant
+
+The first real run (Neobanking, 10 tools, 364 candidates) produced **zero
+merges** despite obvious, repeated near-verbatim duplicates across the
+roster (e.g. "Accounting software sync" appearing 7 times, "Business
+checking account" ×4, "Webhook event notifications" ×4). Root cause,
+confirmed from the run's own logged call behavior: the whole-batch
+`cluster_candidate_features()` (shipped in the initial Phase 3 PR) asked
+the model to emit ONE JSON array covering all 364 indices in a single
+response. Its logged `_salvage_json_array` recovery on the first attempt
+was **zero items** — not "some, then a cutoff," but the `"clusters"` key
+never being reached at all — meaning Opus 5's on-by-default adaptive
+thinking consumed the ENTIRE `max_tokens` budget reasoning about 364
+items simultaneously, before writing a single output token. The retry at
+double the ceiling didn't fix it either. `_validate_partition`'s
+conservative-bias repair then did exactly what it's designed to do:
+every unmatched index became its own singleton — silently, with nothing
+distinguishing "clustering ran cleanly and found no overlap" from
+"clustering structurally failed." Because every cluster came back a
+singleton, `judge_cluster`'s `n<=1` short-circuit meant the judgment
+stage never even ran — this was squarely a clustering-stage failure.
+
+**Why a bigger `max_tokens` ceiling was rejected as the fix**: the task's
+required reasoning length scales with total roster candidate count — a
+20-tool category would just hit the same wall again at a higher
+constant. No fixed ceiling is "big enough" for every future category.
+
+**Fix: clustering is now INCREMENTAL, folded into the existing per-tool
+research loop** — not a separate whole-batch step. As each tool's
+candidates are drafted, `match_candidates_to_representatives()` checks
+them against the RUNNING set of distinct-capability representatives
+found so far (one representative per cluster), not the whole roster's
+history:
+- Tool 1 finishes → nothing to compare against yet, every candidate
+  becomes its own new cluster/representative, no API call needed.
+- Tool 2+ finishes → one call: "here are this tool's new candidates,
+  here are the representatives found so far — which new candidates
+  match an existing representative (§7), which are genuinely new?"
+  Output is one integer-or-null entry per NEW candidate only.
+- **The critical property**: every call's OUTPUT is bounded by ONE
+  tool's candidate count (~30-50 entries, a trivial array), regardless
+  of how large the representative set or total roster grows. The
+  representative set only ever appears as INPUT context — the model's
+  context window holds that comfortably without competing against
+  `max_tokens` the way response generation does. A category with
+  genuinely little cross-vendor overlap (representatives approaching
+  total candidate count) still keeps every call's output small; only a
+  category's real duplicate rate affects representative-list *length*,
+  never the *output* size of any single call.
+- Every failure mode still degrades toward MORE separate features,
+  never toward losing research or silently over-merging: a structural
+  match-call failure treats that tool's candidates as all-new (same
+  conservative-bias default as before) but now sets
+  `OriginationSummary.clustering_degraded=True` (plus
+  `clustering_degraded_tools`, naming which tool) — the exact signal
+  the original bug's silence was missing.
+  `scripts/originate_category_features.py` prints a loud warning banner
+  when this flag is set, so a degraded run can never be mistaken for a
+  clean "no overlap found" result again.
+- `judge_cluster` and the queue-write wiring are UNCHANGED — they
+  already operated per-cluster with small cluster sizes; only the
+  upstream clustering step was broken at scale.
+- The old whole-batch `cluster_candidate_features()`/`_CLUSTER_PROMPT`
+  were removed outright (never shipped to a working state, no back-compat
+  concern) rather than left as dead code alongside the new mechanism.
+
+**Test-coverage gap named and closed**: the original Phase 3 test suite
+only ever exercised 2-3 candidate clusters — nothing near real scale,
+which is exactly why this shipped broken. Added
+`test_originate_category_features_large_roster_merges_correctly_and_stays_bounded`
+(`tests/test_feature_scan.py`) — a synthetic 8-tool/160-candidate run
+(same order of magnitude as the real failure) with one duplicate
+recurring across every tool, mocked deterministically, asserting
+directly on the property that matters: total Anthropic call count scales
+with TOOL count (16 calls: 8 drafts + 7 match calls + 1 judgment call),
+never with total candidate count, and every match call's own stated
+output contract names exactly that tool's candidate count — never
+anything approaching the running representative total. 7 further
+regression tests cover the new `match_candidates_to_representatives`/
+`_validate_matches` functions directly (parsing, the no-representatives/
+no-new-candidates no-call shortcuts, out-of-range/bool-guard repair) and
+the `clustering_degraded` flag's both states (net: 43 → 48 tests in
+`tests/test_feature_scan.py` — 3 whole-batch-clustering tests removed
+alongside the code they covered, 8 added).
+
+**Cleanup — `scripts/deny_pending_scan_proposals.py`**: the 364 bad
+singleton proposals from the broken run needed clearing before a
+corrected re-run, but per CLAUDE.md's "no dead data" / always-leave-a-
+trace discipline, the right move is to DENY them (preserving the record
+that the run happened and why it was thrown out) rather than delete the
+rows. A small reusable script — preview-by-default/`--apply` like every
+other admin script here — bulk-denies every pending item matching a
+category and source (`scan` by default) with a shared resolution note.
+Reusable for any future botched run, not a one-off hack. Registered in
+`/admin/system/scripts` alongside `originate_category_features.py`.
+
+**Also fixed in the same pass**: `originate_category_features.py`'s own
+docstring and registry entry previously read as "preview, then
+`--apply`" — misleading, since preview runs the exact same full pipeline
+and real API calls as `--apply` (there's no cheap preview path the way
+`backfill_logos.py`'s is), so running both on the same category pays for
+the whole run twice. Corrected to say plainly: go straight to `--apply`
+once the pipeline is trusted.
+
+### Feature Taxonomy scan tool — framework remap (2026-08)
+
+A DIFFERENT job from origination mode's own `judge_cluster`/
+`match_candidates_to_representatives`, which invent their own groupings as
+they go: `scripts/remap_queue_to_framework.py` matches an already-queued
+category's pending `source='scan'` proposals against a FIXED, human-defined
+target feature list — the groupings are given (Brian reviews the raw
+origination output by hand and decides exactly what the category's bucket
+list should be), only the per-item assignment (or "belongs to none of
+them") is a judgment call. Built for the real Neobanking incident (2026-08):
+202 pending proposals from the 8/23 corrected origination run needed
+remapping against a 41-bucket target list.
+
+**Mechanism** (`linklib/feature_scan.py`): `match_items_to_framework`
+batches the pending items (default 50/call — the bucket list is small and
+fixed, so only the item side needs chunking, unlike origination's own
+representative-set-growth problem) and asks Claude to return, per item,
+either an index into the fixed bucket list or `null`. Malformed/out-of-
+range/missing entries degrade to `null` ("needs a human look"), never to a
+guessed match — same conservative-bias convention as
+`match_candidates_to_representatives`' own `_validate_matches`. Where more
+than one pending item maps to the same bucket, `synthesize_bucket_definition`
+makes one more Claude call to write a merged definition from every
+contributing item's own definition (best-effort — falls back to the single
+longest contributing definition, zero cost, on any SDK/key/call failure);
+the bucket's NAME is never synthesized, always the framework's own exact
+string, so it can't drift from what Brian approved.
+
+**The consolidation write** is new: `Library.update_feature_review_queue_payload`
+rewrites a *pending* item's `payload`/`proposal_type`/`articulation` in
+place (raises if the item isn't pending — a resolved item's payload is a
+historical record, not something a later script may silently rewrite),
+distinct from `approve_feature_review_queue_item`/`deny_feature_review_queue_item`,
+neither of which touches payload post-write. The script picks the first
+matched item's row as the "primary" row to rewrite, unions every
+contributing item's `payload.links` deduped by `tool_id` (keeping whichever
+copy has a real `source_url`, then a `verified_as_of` date, then the
+longer note, when the same tool appears more than once), and denies the
+other now-redundant rows with a reason naming what they were folded into
+("Consolidated into '&lt;bucket name&gt;' during framework remap 8/24") —
+never deletes, per CLAUDE.md's no-dead-data/always-leave-a-trace
+discipline. An item matching none of the framework's buckets is denied as
+out of scope. A bucket with no matching pending item at all is simply
+skipped — no placeholder feature/link is invented for a capability no real
+tool in the roster actually offers.
+
+**`articulation` is deliberately NOT part of the merge, unlike name/
+definition/links — confirmed with Brian rather than silently assumed.**
+The rewritten row's `articulation` is left exactly as it already was on
+whichever item the script picked as primary (the call passes no
+`articulation` argument, and `update_feature_review_queue_payload` treats
+that as "leave it alone"); every other contributing item's own
+articulation text is neither copied over nor concatenated in — it simply
+stays on that item's now-`denied` row, still fully readable there, with
+the denial reason naming exactly which bucket it was folded into. Nothing
+is lost (the sibling row and its reasoning both still exist), it's just
+not unioned into one place the way links are. Rationale: articulation is
+internal scan-run provenance/reasoning, not public-facing data — the
+denied sibling rows already give full traceability, so concatenating
+wasn't judged worth the added complexity.
+
+**Hard rule, enforced by construction**: this script never calls
+`add_category_feature`/`upsert_tool_feature_link` and never sets a queue
+item's status to `approved` — every affected item ends the run either
+`pending` (rewritten, ready for a human's final approve/deny pass on
+`/admin/tools/software/feature-review-queue`) or `denied`. It's a
+queue-to-queue remap; final approval into `category_features`/
+`tool_feature_links` stays a human action, per docs/FEATURE_TAXONOMY.md §9.
+
+**The target framework is a JSON file, not hardcoded** — `--framework`
+(default `scripts/seed_data/neobanking_feature_framework.json`) so a
+different category's ~30-40-line bucket list can be handed in without
+touching the script. Preview by default (runs the real Claude matching/
+synthesis calls — no cheaper way to preview a judgment call, same reasoning
+as `originate_category_features.py`'s own preview mode — but writes
+nothing); `--apply` commits the plan, then write-then-read-backs the
+category's post-write pending count against what the plan predicted, per
+CLAUDE.md's one-off-admin-fix discipline.
+
+**Neobanking framework revision (2026-08)** — Brian's review of the first
+real preview run against production corrected the 41-bucket
+`scripts/seed_data/neobanking_feature_framework.json`: dropped "Mobile
+banking" (general app access, not CFO-relevant), added "Mobile check
+deposit" (Core banking — the specific useful mobile capability) and
+"General ledger / accounting software sync" (Accounting — kept distinct
+from the existing "Accounting services" bucket, which is bookkeeping/
+tax-adjacent, a different concept), bringing the framework to 42 buckets.
+Two denied-as-out-of-scope preview items (already multi-tool merges from
+the original origination pass) were confirmed to belong in the two new
+buckets instead, once they existed. No code change — the framework file's
+own `_comment` field records the revision and why.
+
+**Feature Review Queue card follow-up (2026-08) — labeled, narrowed "Feature
+(NEW)" fields, and a new articulation-coverage warning.** Two findings from
+that same review session, both fixed on
+`_feature_review_queue_item_card` (`webapp/app.py`):
+
+1. The card's "Feature (NEW)" section stacked the feature-name and
+   pointer-note text inputs with no visible labels — distinguishable only
+   by position — and both ran full-width, wider than either field's
+   typical content needs. Fixed with a real `<label>` above each ("Name"
+   / "Pointer note (optional)", matching the label style the Manage
+   Features "Add a feature" form already used) and a narrowed `320px`
+   width on both inputs. The Manage Features pivot table's own per-row
+   inputs (`_feature_row`) were checked and are unaffected — that surface
+   already has real `<th>` column headers above every input, so it never
+   had this problem.
+2. Reviewing a denied Neobanking item ("Financing services") surfaced a
+   genuine mismerge that a text-coverage check could have flagged before
+   approval time: the item's merge `articulation` justified only 2 of its
+   5 linked tools (meow, lili), with the other 3 (Mercury, Pipe, Novo)
+   unexplained — those 3 turned out to already be correctly linked to a
+   separately-approved "Credit underwriting" feature, confirming the
+   5-tool merge itself was wrong, not a real distinct feature. New
+   `_articulation_tool_coverage(articulation, tool_names)` splits a queue
+   item's linked-tool names into (mentioned, unmentioned) by a
+   case-insensitive substring check against the articulation text —
+   deliberately a coarse heuristic, not NLP, good enough to prompt a human
+   to look and never used to auto-deny or block anything. The card now
+   shows an amber warning (same style as the existing near-duplicate
+   banner) whenever an item has ≥2 linked tools, a non-empty articulation,
+   and PARTIAL coverage (some tools mentioned, some not) — full coverage
+   and zero coverage both render nothing, since neither is the suspicious
+   pattern; only "explains some, silent on the rest" is. This is a
+   general Feature Review Queue admin-page check, not specific to the
+   framework-remap script — it applies to any pending item regardless of
+   `source` (`admin`/`scan`/`public`) or which pipeline produced it.
+
 ### Resources — Book recommendations (2026-08)
 
 Splits the flat `/tools/resources` card list into two headed sections:
@@ -3277,7 +4006,11 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   toward signing in, not a hard gate on the chat itself.
 - **Three surfaces**:
   - *Public* — no auth: `/`, `/thought-leadership`,
-    `/thought-leadership/growth-engine-ratio`, `/thought-leadership/ai-hackathon-playbook`,
+    `/thought-leadership/growth-engine-ratio`, `/thought-leadership/growth-engine-calculator`
+    (Original Content Phase 4c — the standalone interactive calculator, still a hand-built
+    Python route since it's genuinely interactive, not markdown-representable content; the
+    article half moved to the catch-all like netsuite-mcp/ai-hackathon-playbook below),
+    `/thought-leadership/ai-hackathon-playbook`,
     `/thought-leadership/netsuite-mcp`, `/tools`, `/tools/software`,
     `/tools/software/{slug}` (the profile page, Software search overhaul Phase 2;
     opened in a new tab via each card's "Full profile →" link — 404s for an

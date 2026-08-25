@@ -77,8 +77,9 @@ scripts/           # CLI entry points
 
 webapp/
   app.py           # FastAPI, ~110 routes, all HTML/CSS/JS inline: public site
-                   #   (/, /thought-leadership [+ /thought-leadership/growth-engine-ratio,
-                   #   /thought-leadership/ai-hackathon-playbook, /thought-leadership/netsuite-mcp],
+                   #   (/, /thought-leadership [+ /thought-leadership/growth-engine-calculator,
+                   #   the one remaining literal bespoke /thought-leadership/* route — see
+                   #   Original Content Phase 4c],
                    #   /tools, /contact, /play) + private tools
                    #   (/tools/fpa-buddy, /save, /api/search, /bookmarklet — plus
                    #   the merged Reader, /read and /read/{article_id}, admin-only)
@@ -1991,6 +1992,531 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   and unaffected by, the pre-existing "Show all N" cap/expand mechanism —
   the two toggles coexist on the same entries without conflict.
 
+- **Original Content, Phase 1 — the 3 flagship pieces' card metadata moves
+  off the hardcoded `_TL_FEATURED_CARDS` tuple into a new `original_content`
+  table, and the schema is built to let a brand-new piece be authored
+  entirely from admin later with no code change per article.** A Phase 0
+  investigation (read-only, reported before any code) confirmed: the three
+  bespoke routes (`/thought-leadership/growth-engine-ratio`,
+  `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp`)
+  all share the same shell (`page page-full article-atlantic` +
+  `.tool-inner`/`.tool-prose` + a `&larr; Thought Leadership` back-link) —
+  the article template a future Phase 2 will match; `_TL_FEATURED_CARDS`
+  (a 6-tuple: href/tag/tag_color/title/desc/cta) is the single shared source
+  `_tl_fcard()` renders on both the homepage and `/thought-leadership`, with
+  `test_flagship_cards_content_shared_between_homepage_and_thought_leadership`
+  as the drift guard; `webapp/thought_leadership_data.py`'s Writing column
+  (still unused, kept as a rollback reference — see the Phase 1 Thought
+  Leadership entry above) has 3 entries whose `url` already points at those
+  same three `/thought-leadership/*` paths — genuine overlap with this
+  table's own rows, flagged and left alone per the investigation's scope,
+  Brian's call to make later; and `netsuite_mcp()`'s route function ends
+  right before the unrelated "Sail, Don't Row" game code begins, the correct
+  (and only safe) insertion point for a future `GET /thought-leadership/{slug}`
+  catch-all — it must be registered after all three literal routes so they
+  keep winning by FastAPI's registration order, with no separate
+  custom-route column needed since the three migrated rows' `slug`s are set
+  to match their existing route path segments exactly. No markdown parser
+  was in `requirements.txt` (confirmed, matching Brian's own expectation).
+  **Schema** (`original_content` in `linklib/db.py`): `slug` (unique),
+  `title`, `teaser`, `tag_label`, `link_label`, `body_md` (nullable —
+  `NULL` is load-bearing, meaning "card metadata only, one of the three
+  bespoke routes renders the real piece"; a real markdown string means the
+  future shared article template renders it), `status` (`'draft'`\|`'live'`),
+  `featured_home`, `date_label`/`sort_key`/`display_order` (same convention
+  as `thought_leadership`'s own columns — `sort_key` derived from
+  `date_label` via the same `_sort_key_from_date_label`, reused verbatim —
+  except ordering here is **`display_order` first, `sort_key` only a
+  tiebreak**, the opposite priority from `thought_leadership`'s own
+  `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a
+  chronological feed). `tag_color` (each card's small category-tag accent)
+  was deliberately never promoted to a stored column — `_oc_card_tuple`
+  cycles it from the same 3 established colors
+  (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the
+  3 migrated pieces render with their exact original colors and a 4th+
+  piece still gets a sane one with no admin decision required. **Migration**
+  (`scripts/migrate_original_content.py`, not yet archived since it hasn't
+  run against production — same dry-run/`--apply`/write-then-read-back
+  convention as `scripts/archive/migrate_thought_leadership.py`) reads
+  `_TL_FEATURED_CARDS` directly (`planned_rows()`, shared with its own test
+  file so the test asserts against the same source the script would insert,
+  not a duplicated copy) and seeds all 3 rows with `status='live'`,
+  `featured_home=1`, `body_md=NULL`, `slug` = each href's last path
+  segment, idempotent against a non-empty table. **Rendering**: the
+  homepage's flagship row and `/thought-leadership`'s featured row both
+  call the new `_oc_featured_cards_html(rows)` — same underlying
+  `_tl_fcard()`/`.tl-card`/`_TL_SHARED_CSS` markup as before, now fed by
+  `Library.list_original_content_for_home()` (homepage: `status='live' AND
+  featured_home=1`) and `Library.list_original_content(status="live")`
+  (`/thought-leadership`: every live piece, regardless of `featured_home` —
+  the `.tl-featured` grid already wraps past 3 via
+  `repeat(auto-fit,minmax(220px,1fr))`, no layout change needed as more
+  pieces are added). `_TL_FEATURED_CARDS` itself is **not deleted** — it
+  stays in the repo, unimported by any route, purely as a rollback
+  reference (same precedent as `thought_leadership_data.py`); the drift-guard
+  test now asserts identical rendering from the DB-backed source instead.
+  Fresh-DB tests (a new tempfile per test, same as every other test in this
+  suite) have zero `original_content` rows by default now that seeding is a
+  manual migration, not automatic schema setup — `tests/
+  test_thought_leadership_homepage_teaser.py`'s `env` fixture now seeds the
+  3 flagship rows via the migration script's own `planned_rows()` before
+  yielding, so every existing test in that file still exercises the
+  post-migration state it always assumed. Phase 2 (markdown rendering +
+  the `GET /thought-leadership/{slug}` catch-all route) and Phase 3 (admin
+  CRUD at `/admin/original-content`, plus an "Original Content" box beside
+  the existing Thought Leadership box on the admin index — its tool-count
+  badge is just `len(items)`, no new badge mechanism needed) are separate,
+  sequential PRs.
+
+- **Original Content, Phase 2 — markdown rendering + the shared article
+  template at `GET /thought-leadership/{slug}`.** New dependency
+  `python-markdown` (`import markdown`, aliased `_markdown` in
+  `webapp/app.py` to keep it visually distinct from the three pre-existing
+  hand-rolled, zero-dependency JS markdown renderers already in this file —
+  those serve a different purpose, live chat-produced markdown rendered
+  client-side, and are untouched), with only the `fenced_code` and `tables`
+  extensions enabled — no syntax highlighting/Pygments, out of scope per
+  the build brief. `_render_original_content_markdown` also wraps each
+  rendered `<table>` in the same `overflow-x:auto` container every other
+  table on this site already uses, since markdown's `tables` extension
+  emits a bare `<table>` with no wrapper of its own — a small regex
+  post-process, verified live (Playwright, 390px portrait and 844×390
+  landscape) with a genuinely wide table to confirm it scrolls inside its
+  own wrapper without ever forcing the page itself to overflow
+  horizontally. Raw HTML in `body_md` passes through unescaped, per the
+  approved out-of-scope decision — the field is admin-authored only, never
+  public input. `_original_content_article_body` is the shared template,
+  matching the three bespoke pieces' shell exactly (confirmed by reading
+  all three first, not guessed at) — `page page-full article-atlantic`,
+  the same back-link, `.tool-prose`, the same eyebrow/`<h1>`/byline
+  treatment — with only the rendered markdown itself, wrapped in a scoped
+  `.oc-body` div, differing per page. `.oc-body`'s CSS mirrors the
+  Reader's own `.reader-body` treatment for code/pre/table (the one
+  existing precedent in this codebase for "how does this site style
+  rendered long-form content"), except blockquote reuses this shell's own
+  established Quote treatment (`.article-pull`'s border-left/italic style)
+  instead of the Reader's coral box — a coral-boxed quote would clash with
+  BRAND.md's "coral: rare warm accent, one per screen" rule inside the
+  exact shell where Quotes are already border-rule-not-box, not a boxed
+  callout. `GET /thought-leadership/{slug}` is registered immediately
+  after `netsuite_mcp()` ends, before the unrelated `/play` route — the
+  gap the Phase 0 investigation confirmed was the only safe insertion
+  point — so the three literal bespoke routes always win by FastAPI's
+  registration order; proven, not just asserted, by a test that inserts an
+  `original_content` row with a slug colliding with each of the three
+  bespoke pieces and confirms the bespoke page's own content renders, not
+  the DB row's. Serves only `status='live'` rows with a real `body_md`; a
+  `body_md IS NULL` row 404s here too (defense in depth — registration
+  order is what actually protects the three bespoke pieces day to day, not
+  this check) and an unknown slug 404s the same way. A `status='draft'`
+  row 404s for a signed-out visitor and renders normally, at its own
+  canonical URL, for an active admin session — no separate preview URL or
+  token. `requirements.txt` and `webapp/app.py`'s `_OPEN_SOURCE` list both
+  gained the new dependency in this same PR, per the docs discipline.
+  Spot-checked all three bespoke pages still load unaffected before
+  merging, per the process brief.
+
+- **Original Content, Phase 3 — admin CRUD at `/admin/original-content`.**
+  Read `/admin/thought-leadership`'s existing list/add/edit/delete routes
+  first and matched their pattern (list layout, form styling, auth check) —
+  not built from scratch. One real addition beyond that pattern: slug
+  validation. A bad slug here is a genuine failure mode (an unreachable
+  page, or a page that silently loses to a bespoke route) that
+  `thought_leadership`'s free-text title never risked, so `_validate_oc_slug`
+  checks the slug is present, well-formed (`_OC_SLUG_RE` — lowercase
+  letters/digits/single hyphens only, **not auto-lowercased**: an uppercase
+  or malformed slug is rejected outright, not silently normalized, so what
+  an admin sees in the URL is exactly what they typed), doesn't collide
+  with one of the three bespoke pieces' own route path segments
+  (`_OC_RESERVED_SLUGS` — a colliding slug would save fine but be
+  permanently unreachable, since the literal route always wins registration
+  order), and isn't already used by a different row. A rejection re-renders
+  the same form with the submitted values preserved and an inline coral
+  error banner — the richer pattern `_feed_form_page`/
+  `admin_feeds_new_submit` already established for exactly this kind of
+  validation (chosen over `thought_leadership`'s own blunter
+  raise-`HTTPException`-on-bad-input approach, since a slug collision is
+  exactly the kind of mistake an admin needs to see and fix in place, not
+  get bounced to a bare error page for). Slug edits are allowed at any
+  time, including on a live piece — the form's helper text warns this
+  breaks any existing link, since there's no redirect system (out of
+  scope, same call Phase 2 made). `sort_key` is derived from `date_label`
+  on every save via the same `_sort_key_from_date_label`
+  `thought_leadership` already uses — not exposed as a form field.
+  `display_order` left blank on add auto-assigns the next value; left
+  blank on edit is a deliberate clear, treated as `0` — same convention as
+  `thought_leadership`'s own edit route. `body_md` left blank keeps the
+  row as card-metadata-only (`NULL`, not `''` — `_oc_values_from_form`
+  maps an empty textarea to `None`), the same state the three flagship
+  rows have always been in; verified this doesn't regress Phase 1's
+  card-rendering path (a piece created this way still renders as a
+  flagship/`/thought-leadership` card immediately) and correctly 404s at
+  its own `/thought-leadership/{slug}` page (Phase 2's `body_md IS NULL`
+  guard) until a later edit fills in a body — and verified the reverse
+  integration too: a piece with a real `body_md`, set `status='live'`, is
+  immediately reachable at its own page. The admin index's "Thought
+  Leadership" group gained a second item pointing at
+  `/admin/original-content` — `count_label` is `len(items)`, so the badge
+  auto-updated with no additional wiring, confirming the Phase 0
+  investigation's finding. Mobile-verified (Playwright, 390px portrait,
+  real `.tap()` interaction) that the list view and the add/edit form both
+  render with no horizontal overflow and are actually fillable by touch,
+  not just present in the markup.
+
+- **Original Content, Phase 4 investigation — read-only assessment of
+  porting the three bespoke pages, reported to Brian before any code.**
+  Found all three pages have zero images and zero JS/interactivity except
+  Growth Engine Ratio's live calculator (~380 lines of JS driving two
+  dynamically-generated SVG charts) — a genuine, structural blocker to a
+  clean markdown port for that one page specifically, since it's real
+  computation, not content. Confirmed directly, not assumed: raw HTML, a
+  raw `<style>` block, and even a raw `<script>` block all pass through
+  `_render_original_content_markdown()` completely untouched, so every
+  custom visual device on the other two pages (numbered step-tracks,
+  colored tables, use-case cards, 2×2 matrices, tier strips) is
+  preservable at full fidelity as a raw HTML block in `body_md` — the real
+  choice per page is an authoring-ergonomics trade-off (raw HTML/CSS
+  blocks keep the exact look but aren't prose-editable; simplifying to
+  plain markdown lists/tables is genuinely easy to edit but loses the
+  custom visual), not a hard technical wall, except for GER's calculator.
+  Also surfaced the structural fact that applies to porting any of the
+  three: none can be served at its *current* URL without also retiring its
+  bespoke Python route, since `_OC_RESERVED_SLUGS` (and, underneath that,
+  route-registration order) is what keeps a literal bespoke route from
+  ever losing to the generic catch-all — "port the content" and "free up
+  the slug" are two separate steps, not one.
+
+- **Original Content, Phase 4a — NetSuite MCP ported to `body_md`; its
+  bespoke route retired, the first of the three literal routes to go.**
+  Followed the Phase 4 investigation's hybrid approach: prose became real
+  markdown; the five visually-designed elements (`.ns-case`/`.ns-tip`
+  use-case cards, `.ns-step`/`.ns-num` phase tracks, `.ns-table`/
+  `.ns-trouble` tables, `.ns-note`, `.ns-qr`) were kept as raw HTML blocks
+  in `body_md`, verbatim, using their original CSS classes — copy was
+  extracted exactly as published, no rewriting, no paraphrasing. Those
+  classes' CSS moved out of the retired route's own `<style>` block into a
+  new `_OC_NETSUITE_MCP_CSS` constant, every selector rescoped under
+  `.oc-body` (`.oc-body .ns-table` etc.) so it only ever applies inside a
+  rendered Original Content article, never sitewide — and so `.ns-table`/
+  `.ns-trouble`'s two-class specificity keeps outranking the shared
+  template's own generic `.oc-body table` rule, preserving their original
+  navy-header/zebra-striped look instead of falling back to the generic
+  styling. `scripts/migrate_netsuite_mcp_content.py` (dry-run/`--apply`/
+  write-then-read-back, standard convention) sets `body_md` on the
+  existing Phase-1-seeded row and also sets `date_label` to "June 2026"
+  (blank since Phase 1, since `_TL_FEATURED_CARDS` tuples never carried a
+  date) — restoring the byline the bespoke page always showed, a
+  visual-parity fix bundled into the same script rather than a separate
+  change. **Verified before deleting the route, not assumed**: with the
+  DB row updated but the bespoke route still live, the shared template's
+  real output was rendered to a standalone file (bypassing the still-live
+  bespoke route, which would otherwise win at the real URL) and
+  screenshotted at desktop (1280px) and mobile (390×844) against the live
+  bespoke page. All 23 headings matched, same order, same text. Every
+  ported designed element came back pixel-identical. Two small, expected,
+  documented deltas, not fixed: inline `<code>` spans now render with the
+  shared template's gray-pill background (an inherent side effect of
+  `.oc-body pre,.oc-body code`'s generic styling applying — arguably a
+  consistency win, matching `<code>` everywhere else on the site now), and
+  on mobile, the italic subtitle line now renders just *after* the byline
+  instead of just before it, since the shared template hardcodes the
+  byline immediately after `<h1>` and the subtitle (a field
+  `original_content` has no column for) had to become the first line of
+  `body_md`, which renders after that hardcoded byline — fixing the
+  ordering would mean changing the shared article template's shape for
+  every Original Content piece, not just this one, so it's left as a
+  documented deviation rather than bundled into a content port. Only after
+  that visual-parity check did the bespoke `netsuite_mcp()` Python
+  function get deleted outright — the `/netsuite-mcp` -> `/thought-
+  leadership/netsuite-mcp` 301 redirect stays (its target is still a real,
+  correct URL, just served by the catch-all now); `"netsuite-mcp"` came
+  out of `_OC_RESERVED_SLUGS`, since it's no longer claimed by a bespoke
+  route. Growth Engine Ratio and Sail Don't Row are untouched, still fully
+  bespoke — separate, not-yet-scoped phases (4b/4c), and per the Phase 4
+  investigation, GER's port specifically still needs a decision on what
+  happens to the calculator before it can proceed the same way.
+- **Original Content, Phase 4b — "Sail, Don't Row" (the AI hackathon
+  playbook) ported the same way, plus two real specificity bugs the
+  process caught before shipping.** Same hybrid approach as Phase 4a:
+  prose became real markdown (12 H2 sections); the page's designed
+  elements — the 2×2 value/effort matrix, the Inspire→Sleep→Build
+  flowchart (including its `<640px` vertical-arrow variant), the
+  Ship/Iterate/Park verdict tier strip, the resource-link list, the
+  6-step phase track (used twice), and the Notion intake-form template
+  box — were kept as raw HTML in `body_md` using their original `.fah-*`
+  classes verbatim, moved into a new `_OC_HACKATHON_CSS` constant scoped
+  under `.oc-body` exactly like `_OC_NETSUITE_MCP_CSS`. Confirmed dead and
+  deliberately NOT carried forward: `.fah-verdicts`/`.fah-verdict`/
+  `.fah-v-*`, `.fah-pull`, and `.fah-motif` — defined in the retired
+  route's own `<style>` block but never referenced by any element in its
+  body. `scripts/migrate_hackathon_playbook_content.py` follows Phase 4a's
+  exact script shape (dry-run default, `--apply`, write-then-read-back).
+  **Two real bugs surfaced by the screenshot-diff verification step,
+  neither visible from reading the code — both fixed before the route was
+  touched:**
+  1. **A double-escape bug, the third known instance of this pattern**
+     (see "Speaking &amp; Events" and the Phase 3 admin-edit-page `<title>`
+     tag elsewhere in this doc): the row's `title` was seeded (Phase 1)
+     as `"Sail, Don&rsquo;t Row"` — pre-escaped for `_tl_fcard()`'s raw
+     `<h3>` insertion, the call site Phase 1 was built for. Phase 2's
+     `_original_content_article_body()` correctly calls `_esc()` on
+     `title` for the real `<h1>` (needed for genuinely plain-text
+     admin-typed titles), which double-escaped this one, rendering the
+     literal text `Sail, Don&rsquo;t Row` in the browser. Fixed by adding
+     `TITLE = "Sail, Don't Row"` (plain, matching the retired route's own
+     `<h1>` text byte-for-byte) to the migration script rather than
+     reusing `row["title"]` — a deliberate, documented side effect: since
+     the homepage/`/thought-leadership` flagship cards render straight
+     from this same DB row via `_oc_featured_cards_html`/`_tl_fcard()`
+     (not the frozen, unimported `_TL_FEATURED_CARDS` tuple), fixing the
+     stored title also changes those cards from the curly entity to a
+     straight apostrophe — `tests/test_thought_leadership_homepage_teaser.py`'s
+     fixture was updated to apply this same title fix after its Phase-1
+     seed, so the suite models actual post-migration production state
+     rather than silently drifting stale the moment the migration ships.
+     Phase 4a's netsuite-mcp migration never touched `title`, so it never
+     needed an equivalent fixture update.
+  2. **Two CSS specificity gaps, found only by comparing real bounding
+     boxes (`element.bounding_box()`), not screenshots** — a full-page
+     screenshot glance looked fine even with a ~110px real height
+     difference buried in one repeated component. First: `.fah-body h3`/
+     `.fah-template h3` never declared their own `line-height` on the
+     original bespoke page, relying on `body{font:16px/1.65 ...}`'s
+     sitewide inheritance — but `_OC_ARTICLE_CSS`'s shared
+     `.oc-body h1,h2,h3...{line-height:1.3}` rule (written for real prose
+     section headings) matches these same in-card h3 tags too, and an
+     explicit declaration always wins over inheritance regardless of
+     specificity, collapsing each step/field-card title by 6px and
+     compounding across every repeated card in the phase track and intake
+     form. Fixed by restating the original's effective `1.65` directly on
+     both selectors. Second, smaller and easy to miss precisely because it
+     runs the opposite direction: `.fah-body p`/`.fah-tier p` are each only
+     one class + a tag on the original page, so they already lose their
+     own `line-height`/`margin-bottom` to the sitewide
+     `.article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px}`
+     rule there (two classes always outranks one) — a pre-existing quirk
+     of the original page's own CSS. Prefixing every selector with
+     `.oc-body` for scoping (this whole file's convention) incidentally
+     gave exactly these two selectors a second class, tying the sitewide
+     rule's specificity; since the article's own `<style>` tag loads after
+     the sitewide one, the tie then resolved the *opposite* way, so the
+     port's declared values won where the original's never did. Fixed by
+     dropping `line-height`/`margin-bottom` from both ported selectors so
+     they lose to the sitewide rule again, same as the live original —
+     matching the page's actual rendered behavior rather than "fixing" a
+     CSS quirk the live site never showed. (`.fah-template p`, `.fah-r-desc`,
+     `.fah-flow-caption` were checked too and already lose to the same
+     sitewide rule on both pages without any change, since none of them
+     ever declared `line-height`/`margin-bottom` in the first place.)
+     Phase 4a's near-identical `.ns-body h3`/`.ns-qr h3` selectors have the
+     same latent line-height gap and were not audited or touched here,
+     since NetSuite MCP is out of scope for this PR — worth a follow-up
+     check there. Post-fix, every `.bounding_box()` comparison across the
+     matrix, flowchart (both the desktop and `<640px` vertical-arrow
+     variants), tier strip, resource list, template box, and both phase
+     tracks matched to within 1-2px (subpixel/rounding), and every cropped
+     screenshot pair was visually confirmed identical at desktop
+     (1280px), mobile portrait (390×844), and mobile landscape (844×390),
+     with zero horizontal overflow at any width. Only after that
+     confirmed parity did the bespoke `finops_ai_hackathon()` route get
+     deleted — the `/finops-ai-hackathon` 301 redirect stays (its target
+     is still real, just served by the catch-all now);
+     `"ai-hackathon-playbook"` came out of `_OC_RESERVED_SLUGS`, leaving
+     only `"growth-engine-ratio"` reserved. The closing bio blurb's
+     `/play` easter-egg link ("Sail, Don't Row is also a game") carried
+     over verbatim into `body_md`.
+
+- **Original Content, Phase 4c — Growth Engine Ratio, the last of the three
+  flagship pages, SPLIT rather than ported whole — resolving Phase 4's
+  open question about its live JS calculator.** Unlike Phase 4a/4b, this
+  page couldn't be ported as one piece: alongside prose/formula/table/quote
+  content it embeds a ~380-line live JS calculator (point-in-time and a
+  bounded -2..+2 timeline mode, each driving a dynamically-generated SVG
+  chart) — genuinely interactive, not markdown-representable. Brian's
+  approved resolution: split the page. The article half ported the same
+  way netsuite-mcp/ai-hackathon-playbook did — prose to markdown; the
+  formula box, 3 pull-quotes, and the tier table preserved as raw HTML in
+  `body_md` using their original `.ger-pull`/`.ger-table` classes, rescoped
+  under `.oc-body` into a new `_OC_GER_CSS` constant, same
+  `_OC_NETSUITE_MCP_CSS`/`_OC_HACKATHON_CSS` treatment (`.article-cta`/
+  `.article-pull` themselves needed no porting — sitewide shared classes,
+  not page-specific, already available on every page). The calculator
+  moved to a brand-new standalone bespoke route,
+  `GET /thought-leadership/growth-engine-calculator`
+  (`growth_engine_calculator()` in `webapp/app.py`) — markup, CSS, and JS
+  extracted byte-for-byte from the retired route, zero logic/input/chart
+  change; only new content on that page is the back-link, eyebrow/H1, and
+  a short intro blurb. The retired page's "Methodology note" paragraph
+  (GTM/R&D GAAP definitions plus a timeline-lookback explanation) stayed
+  whole on the calculator page, unmodified, in its original position
+  directly below the calculator card — it's calculator-specific (the
+  lookback sentence directly references the timeline mechanic) and porting
+  it whole was lower-risk than splitting its sentences across both pages.
+  `scripts/migrate_growth_engine_ratio_content.py` follows the same
+  dry-run/`--apply`/write-then-read-back convention as Phase 4a/4b's
+  scripts, setting `body_md` and `date_label` ("June 2026", same
+  visual-parity fix Phase 4b used) — `title` needed no fix this time,
+  unlike Phase 4b's hackathon row: `"The Growth Engine Ratio"` has no HTML
+  entities in it, so there was no double-escape bug to work around.
+
+  The retired page's byline carried two lines beyond what the shared
+  template's single `date_label` field can represent — "Published with
+  [The F Suite]" (a live link) and a Contributor credit line for Katherine
+  Zhang — both preserved verbatim as the first two lines of `body_md`
+  itself, the same "extra byline content becomes body_md's leading
+  content" precedent Phase 4b used for the hackathon piece's italic
+  subtitle line. **One genuinely new piece of content**: where the
+  original page's "## Calculate Your Ratio" section held the live
+  calculator inline, the ported article now shows a CTA box (reusing the
+  sitewide `.article-cta` class — same visual treatment as the page's
+  existing F Suite whitepaper CTA) linking out to the new standalone
+  calculator page. This CTA copy, and the calculator page's own intro
+  blurb, are both new copy — not ported — and were surfaced to Brian for
+  review before merge per the standing new-copy/em-dash process; neither
+  uses an em dash.
+
+  Verified before either route changed, per this phase's own explicit
+  process requirement: with the row updated and the new calculator page
+  live at its new URL but the old bespoke `growth_engine_ratio()` route
+  still in place, screenshot comparison confirmed visual parity of the
+  article portion (desktop and 390×844 mobile), and the new calculator
+  page's both modes and both SVG charts were confirmed functioning
+  identically to how they worked embedded in the old page, at desktop and
+  mobile widths. Only then was the old bespoke route deleted and
+  `"growth-engine-ratio"` removed from `_OC_RESERVED_SLUGS` — leaving the
+  set empty for the first time since Phase 1: all three original flagship
+  pieces (netsuite-mcp, ai-hackathon-playbook, growth-engine-ratio) are now
+  served by the catch-all, their bespoke routes retired. Deliberately NOT
+  reserved: `"growth-engine-calculator"` itself — that page was never part
+  of the `original_content` system and never will be, so there's no slug
+  an admin could ever collide with through the form; confirmed explicitly
+  rather than assumed, per this phase's own instruction.
+
+- **Original Content, Phase 5 — cleanup: a double-escape fix landed, two
+  proposed rollback-file deletions turned out NOT to be safe and were left
+  in place, and a Writing-column duplication was investigated (not
+  deleted) pending Brian's own action.**
+  - **Fixed:** `admin_thought_leadership_edit` had the identical
+    double-escape bug Original Content Phase 3 found and fixed in
+    `admin_original_content_edit` — an already-`_esc()`'d title passed into
+    `_page()`, which escapes its own title argument internally, producing
+    `&amp;amp;` for any title containing `&`. Same fix, same pattern: pass
+    the raw title straight through. `test_edit_page_title_is_not_double_escaped`
+    added to `tests/test_thought_leadership_admin.py`, mirroring Phase 3's
+    own test of the same name.
+  - **NOT removed, contrary to the initial plan — `_TL_FEATURED_CARDS` and
+    `webapp/thought_leadership_data.py` are both still live dependencies,
+    not dead rollback references.** The premise that both are "unimported"
+    only holds for the *render* path (`_oc_featured_cards_html()`/the
+    `original_content` table did replace them there, per Phase 1) — a
+    direct search found `_TL_FEATURED_CARDS` is still imported by
+    `scripts/migrate_original_content.py` (the seed source for
+    `planned_rows()`) and by `tests/test_migrate_original_content.py`, and
+    `webapp/thought_leadership_data.py` is still imported by
+    `scripts/archive/migrate_thought_leadership.py` (`from
+    webapp.thought_leadership_data import SECTIONS`), which
+    `tests/test_thought_leadership_admin.py::test_migration_script_moves_32_of_33_entries`
+    still runs live against a fresh temp DB. Deleting either file today
+    would break real, currently-passing tests, not just an unused rollback
+    copy. The blocker is really `scripts/migrate_original_content.py`
+    itself: unlike `scripts/archive/migrate_thought_leadership.py` (already
+    `git mv`'d once its run was confirmed, the precedent this repo's own
+    "archive a one-time script as soon as its run is confirmed" rule sets),
+    `scripts/migrate_original_content.py` is still sitting in `scripts/`,
+    not `scripts/archive/` — CLAUDE.md's own Original Content Phase 1 entry
+    still reads "not yet archived since it hasn't run against production"
+    as of this writing. Whether it has in fact already run in production
+    (the live site's flagship cards visibly render from `original_content`,
+    which only has data if it has) is Brian's call to confirm, not this
+    session's to assume — this session has no access to `library.db`
+    itself (Railway-volume-only, same limitation noted in earlier Original
+    Content phases). **Recommended follow-up, not done here:** once Brian
+    confirms the migration ran, archive `scripts/migrate_original_content.py`
+    (`git mv` into `scripts/archive/`, matching `migrate_thought_leadership.py`'s
+    own precedent) and update/retire `tests/test_migrate_original_content.py`
+    accordingly — only then does `_TL_FEATURED_CARDS` (and, separately,
+    `webapp/thought_leadership_data.py` once nothing archived needs it
+    either) actually become dead code safe to delete under this repo's own
+    "no dead data"/no-dead-code discipline.
+  - **Investigated, not deleted — the 3 Writing-column `thought_leadership`
+    rows duplicating the flagship pieces.** This session has no access to
+    the live `library.db` (same Railway-volume-only limitation as above),
+    so the exact row `id` values weren't confirmed directly — Brian can
+    find them at `/admin/thought-leadership?type=writing` by matching the
+    three titles/URLs in the task description. A full codebase search found
+    no sitemap generator, RSS/Atom feed, or other producer for the site
+    itself (the only "sitemap" code in this repo is the unrelated Archive
+    Queue's historical-backfill sitemap *crawler*, over an entirely
+    different table). No test asserts a specific count or title against the
+    *production* `thought_leadership` table tied to these 3 rows —
+    `test_migration_script_moves_32_of_33_entries`'s `writing: 6` count
+    (mentioned above) is a fresh-temp-DB migration test, unrelated to
+    production row counts. The only two live readers beyond
+    `/admin/thought-leadership`'s list/edit views are `/thought-leadership`'s
+    own Writing column (`list_thought_leadership(type="writing")`) and the
+    homepage's "Recent highlights" grid
+    (`get_thought_leadership_representative("writing")`) — deleting the 3
+    rows is safe for both: the Writing column just shows one fewer
+    (duplicate) entry, and if one of the 3 happens to currently be the
+    `writing` representative, deletion falls back to the most-recent
+    remaining entry per that function's existing fallback rule (not a bug,
+    just a different pick). **Confirmed safe for Brian to delete via
+    `/admin/thought-leadership` himself — no code change needed for this
+    item.**
+
+- **Original Content, Phase 4c follow-up — two real rendering bugs found
+  live post-merge, both invisible text, neither caught by pre-merge
+  review.** Brian caught both on mobile Safari; investigation found they
+  reproduced at every viewport width, not just mobile — the pre-merge
+  screenshot pass that should have caught this had a real gap, not just
+  bad luck: it checked the `<thead><tr>`'s own computed `background-color`
+  (which genuinely was navy, since the inline style was never removed) but
+  never checked what actually paints on top of it, the same "verify what's
+  rendered, not a property in isolation" lesson this file's own testing-
+  standard section already documents elsewhere.
+  1. **Tier table header, near-invisible.** The retired page's
+     `<thead><tr style="background:var(--navy);">` inline style survived
+     the port verbatim, but `_OC_ARTICLE_CSS`'s generic
+     `.oc-body th{background:var(--accent-light)}` rule (written for
+     markdown-generated tables, which have no per-row inline style to
+     preserve) painted over it — not a specificity loss, a CSS table
+     BACKGROUND PAINTING LAYER fact (CSS 2.1 §17.5.1): a `<th>`'s own
+     background always paints above its parent `<tr>`'s, regardless of
+     which rule has higher specificity. White header text landed on a
+     near-white cell background — read as "near-invisible, with an
+     unexplained gap of white space above it," which turned out to be one
+     bug, not two, exactly as Brian's report guessed it might be. The
+     original bespoke page never hit this, since it had no competing
+     `.oc-body th` rule to paint over it — this could only surface once
+     the table moved under the shared template. Fixed the same way
+     `.ns-table th` (Phase 4a) already solved this for its own table:
+     `.oc-body .ger-table th{background:var(--navy);color:#fff;}`, giving
+     the cell itself the right color directly instead of relying on the
+     row showing through underneath it.
+  2. **"Download the full guide" CTA button, invisible text.** `.btn`'s own
+     `color:#fff` (one class, 0-1-0 specificity) lost to
+     `.oc-body a{color:var(--navy)}` (one class + one tag, 0-1-1 —
+     genuinely higher specificity, this one **is** a real specificity
+     loss) — navy text on a navy background. This was the first `body_md`
+     content anywhere to use the sitewide `.btn` button inside an
+     admin-authored piece, so the interaction had never been exercised
+     before. Fixed generally, in `_OC_ARTICLE_CSS` itself rather than
+     narrowly in `_OC_GER_CSS`, since any future piece using this same
+     button would hit the identical bug:
+     `.oc-body .btn{color:#fff;}` — two classes beats one class + one tag
+     by CSS's class-count-first specificity comparison.
+
+  Both fixed, then verified with real mobile-Safari-viewport (390×844)
+  element-level screenshots of exactly the two elements Brian flagged —
+  not full-page captures, not just described — confirmed via
+  `getComputedStyle()` before AND after (before: `th` background
+  `rgb(238,241,247)`/color white; button background navy/color navy;
+  after: `th` background/color navy/white; button background navy/color
+  white) alongside the visual screenshots, plus a new regression test
+  (`test_growth_engine_ratio_table_header_and_cta_button_styled_correctly`
+  in `tests/test_original_content_article.py`) asserting both fixed CSS
+  rules are present in the rendered response.
+
 - **Library/Toolbox restructure, Phase 4 — FP&A Buddy's Sources/Depth controls
   compact into two columns, and Depth stops being a card stack.** On
   `/tools/fpa-buddy`, Sources (a multi-select row of `.ask-tag` buttons) sat
@@ -2550,12 +3076,26 @@ tables, no third-party dependency.
   **If `LINKLIB_SECRET_KEY` is unset, an app restart invalidates all sessions** (you just
   log in again — harmless). Set it on the host to keep sessions sticky across deploys.
 - **Route protection:**
-  - Public (no auth): `/`, `/thought-leadership`, `/thought-leadership/growth-engine-ratio`,
-    `/thought-leadership/ai-hackathon-playbook`, `/thought-leadership/netsuite-mcp`, `/contact`,
+  - Public (no auth): `/`, `/thought-leadership`, `/thought-leadership/growth-engine-calculator`
+    (Original Content Phase 4c — the standalone interactive calculator; still a real, literal
+    bespoke route, not part of the `original_content` system), `/contact`,
     `/privacy`, `/login`, `/logout`, `/static/*`, `/health`, `/tools/fpa-buddy/how-it-works`
     (moved off `/admin/*` in the FP&A Buddy explainer follow-up round — see the Key
     architecture decisions bullet above). (The old flat `/growth-engine-ratio`,
-    `/finops-ai-hackathon`, `/netsuite-mcp` URLs 301-redirect to the nested paths above.)
+    `/finops-ai-hackathon`, `/netsuite-mcp` URLs still 301-redirect to the nested paths below —
+    all three now served by the `{slug}` catch-all, none a literal route any more, see Original
+    Content Phase 4a/4b/4c.)
+    `/thought-leadership/{slug}` (Original Content Phase 2 — see Key architecture decisions
+    above) is public **only for a `status='live'` piece with a real `body_md`**; it's not a
+    blanket-public route nor a `/login`-redirecting one — a `status='draft'` row and an
+    unknown slug both 404 for a signed-out visitor, and a draft 200s only for an active admin
+    session, at its own canonical URL, per `_is_authed`. `/thought-leadership/netsuite-mcp`,
+    `/thought-leadership/ai-hackathon-playbook`, and `/thought-leadership/growth-engine-ratio`
+    are all now served this way — their hand-built Python route functions were retired in
+    Phases 4a, 4b, and 4c respectively, so `_OC_RESERVED_SLUGS` is now empty (the standalone
+    `/thought-leadership/growth-engine-calculator` route above is deliberately NOT added to
+    it — it was never part of the `original_content` system, so there's no slug collision to
+    guard against).
   - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
     `/admin/contacts` (member-gated), and
     `/read`, `/read/{article_id}` (**admin-only**, Phase 1 access level, merged into
@@ -2781,7 +3321,9 @@ instead, off that page — kept for git history, not meant to run again.
   existing corpus
 - Bookmarklet
 - Public site: bio homepage (`/`), thought leadership (`/thought-leadership`),
-  Growth Engine Ratio page + calculator (`/thought-leadership/growth-engine-ratio`), contact (`/contact`)
+  Growth Engine Ratio article (`/thought-leadership/growth-engine-ratio`) and its standalone
+  calculator (`/thought-leadership/growth-engine-calculator`, Original Content Phase 4c),
+  contact (`/contact`)
 - Password login for the private section (`/login` + signed session cookie)
 - Merged Reader (`/read`, Phase 5): a three-pane Feed/Saved/Read Later view with category
   and per-source filtering, an AJAX-loaded article pane, save-to-library, and a

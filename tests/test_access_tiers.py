@@ -25,6 +25,63 @@ def env(monkeypatch):
     from linklib.db import Library
     lib = Library(db)
     lib.create_user("member1", "supersecret", role="user")
+    # /thought-leadership/netsuite-mcp is served by the GET
+    # /thought-leadership/{slug} catch-all now (Original Content Phase 4a —
+    # the bespoke route was retired), which needs a status='live' row with a
+    # real body_md to 200. A fresh test DB has none until this migration
+    # runs, same reason test_thought_leadership_homepage_teaser.py's own
+    # fixture seeds the flagship rows — reusing the migration script's own
+    # content/date_label rather than a duplicated copy.
+    from scripts.migrate_netsuite_mcp_content import BODY_MD as _NS_BODY_MD, DATE_LABEL as _NS_DATE_LABEL
+    from webapp.app import _sort_key_from_date_label as _sort_key
+    ns_row = lib.get_original_content_by_slug("netsuite-mcp")
+    if ns_row is None:
+        lib.add_original_content("netsuite-mcp", "Connecting Claude to NetSuite",
+                                 tag_label="Setup Guide", link_label="Read the guide",
+                                 body_md=_NS_BODY_MD, status="live", featured_home=True,
+                                 date_label=_NS_DATE_LABEL, sort_key=_sort_key(_NS_DATE_LABEL))
+    else:
+        lib.update_original_content(
+            ns_row["id"], ns_row["slug"], ns_row["title"], ns_row["teaser"], ns_row["tag_label"],
+            ns_row["link_label"], _NS_BODY_MD, "live", ns_row["featured_home"],
+            _NS_DATE_LABEL, _sort_key(_NS_DATE_LABEL), ns_row["display_order"],
+        )
+    # /thought-leadership/ai-hackathon-playbook — same situation, same fix,
+    # as of Original Content Phase 4b (its own bespoke route retired).
+    from scripts.migrate_hackathon_playbook_content import (
+        BODY_MD as _FAH_BODY_MD, DATE_LABEL as _FAH_DATE_LABEL, TITLE as _FAH_TITLE,
+    )
+    fah_row = lib.get_original_content_by_slug("ai-hackathon-playbook")
+    if fah_row is None:
+        lib.add_original_content("ai-hackathon-playbook", _FAH_TITLE,
+                                 tag_label="Playbook", link_label="Read the playbook",
+                                 body_md=_FAH_BODY_MD, status="live", featured_home=True,
+                                 date_label=_FAH_DATE_LABEL, sort_key=_sort_key(_FAH_DATE_LABEL))
+    else:
+        lib.update_original_content(
+            fah_row["id"], fah_row["slug"], _FAH_TITLE, fah_row["teaser"], fah_row["tag_label"],
+            fah_row["link_label"], _FAH_BODY_MD, "live", fah_row["featured_home"],
+            _FAH_DATE_LABEL, _sort_key(_FAH_DATE_LABEL), fah_row["display_order"],
+        )
+    # /thought-leadership/growth-engine-ratio — same situation, same fix, as
+    # of Original Content Phase 4c (its own bespoke route retired; the live
+    # calculator moved to the new standalone
+    # /thought-leadership/growth-engine-calculator route, which needs no DB
+    # row at all — it stays a bespoke Python route, so it's already 200
+    # with no seeding, same as any other hand-built page).
+    from scripts.migrate_growth_engine_ratio_content import BODY_MD as _GER_BODY_MD, DATE_LABEL as _GER_DATE_LABEL
+    ger_row = lib.get_original_content_by_slug("growth-engine-ratio")
+    if ger_row is None:
+        lib.add_original_content("growth-engine-ratio", "The Growth Engine Ratio",
+                                 tag_label="Framework", link_label="Read the framework",
+                                 body_md=_GER_BODY_MD, status="live", featured_home=True,
+                                 date_label=_GER_DATE_LABEL, sort_key=_sort_key(_GER_DATE_LABEL))
+    else:
+        lib.update_original_content(
+            ger_row["id"], ger_row["slug"], ger_row["title"], ger_row["teaser"], ger_row["tag_label"],
+            ger_row["link_label"], _GER_BODY_MD, "live", ger_row["featured_home"],
+            _GER_DATE_LABEL, _sort_key(_GER_DATE_LABEL), ger_row["display_order"],
+        )
     lib.close()
     yield appmod
     if os.path.exists(db):
@@ -58,6 +115,7 @@ PUBLIC = ["/", "/about", "/thought-leadership", "/contact",
           # this static 200-only list — covered separately in
           # tests/test_community_profiles.py.
           "/thought-leadership/growth-engine-ratio",
+          "/thought-leadership/growth-engine-calculator",
           "/thought-leadership/netsuite-mcp",
           "/thought-leadership/ai-hackathon-playbook",
           # Sail, Don't Row is fully playable signed-out, and the per-rank

@@ -220,6 +220,54 @@ CREATE TABLE IF NOT EXISTS thought_leadership (
     updated_at     TEXT
 );
 
+-- Original Content (Original Content Phase 1, 2026-08) — card metadata for
+-- the "flagship pieces" row shown on the homepage and /thought-leadership,
+-- replacing the hardcoded _TL_FEATURED_CARDS tuple in webapp/app.py, plus
+-- the model for any brand-new piece authored going forward with no code
+-- change per article. slug is the URL segment under /thought-leadership/
+-- (lowercase-hyphen, unique) — collision with the three literal bespoke
+-- routes (growth-engine-ratio, ai-hackathon-playbook, netsuite-mcp) is
+-- checked in the admin form (Phase 3), not enforced here. body_md is
+-- nullable and that nullability is load-bearing: NULL means "card metadata
+-- only" — one of the three hand-built bespoke pages renders the actual
+-- piece, and since those three rows' slugs are set to match their existing
+-- route path segments exactly, the literal routes always win over the
+-- generic GET /thought-leadership/{slug} catch-all by registration order,
+-- with no separate custom-route column needed. A real markdown string means
+-- the shared article template at that catch-all route renders it instead
+-- (Phase 2). status is 'draft'|'live' — a draft never appears on the
+-- homepage, on /thought-leadership, or at its own canonical URL for a
+-- signed-out visitor; a signed-in admin can still preview it there.
+-- featured_home selects which live pieces appear in the homepage's flagship
+-- row (all live pieces show on /thought-leadership regardless). date_label/
+-- sort_key/display_order follow the same convention as thought_leadership
+-- above — date_label is the admin-typed display string, sort_key ("YYYY-MM")
+-- is derived from it on every save via webapp/app.py's
+-- _sort_key_from_date_label (reused verbatim, not reimplemented), blank or
+-- unparseable input yields "". Unlike thought_leadership, ordering here is
+-- display_order first (a curated card order, not a strict chronological
+-- feed) with sort_key only as a tiebreak — see Library.list_original_content.
+-- _TL_FEATURED_CARDS itself stays in the repo, unimported, as a rollback
+-- reference (same precedent as webapp/thought_leadership_data.py) — see
+-- scripts/migrate_original_content.py for the one-time migration that seeds
+-- this table from it, and CLAUDE.md's Original Content Phase 1 entry.
+CREATE TABLE IF NOT EXISTS original_content (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug          TEXT NOT NULL UNIQUE,
+    title         TEXT NOT NULL DEFAULT '',
+    teaser        TEXT NOT NULL DEFAULT '',
+    tag_label     TEXT NOT NULL DEFAULT '',
+    link_label    TEXT NOT NULL DEFAULT '',
+    body_md       TEXT,
+    status        TEXT NOT NULL DEFAULT 'draft',
+    featured_home INTEGER NOT NULL DEFAULT 0,
+    date_label    TEXT NOT NULL DEFAULT '',
+    sort_key      TEXT NOT NULL DEFAULT '',
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT,
+    updated_at    TEXT
+);
+
 -- Personal bookmark list — private per user, never shared with other users
 -- or with the admin-curated Archive. user_id has no NOT NULL/UNIQUE
 -- constraint here on purpose: on a fresh DB every row gets a real user_id at
@@ -4815,6 +4863,33 @@ class Library:
         self.conn.commit()
         return cur.lastrowid
 
+    def update_feature_review_queue_payload(self, item_id: int, payload: dict,
+                                             proposal_type: str | None = None,
+                                             articulation: str | None = None) -> None:
+        """Rewrites a PENDING item's payload/proposal_type/articulation in
+        place, keeping it pending — distinct from approve/deny, which both
+        resolve the item. Built for scripts/remap_queue_to_framework.py's
+        consolidation step: several source='scan' proposals that map to the
+        same human-defined framework bucket collapse into ONE updated queue
+        row (canonical name/definition, unioned tool links) rather than a
+        fresh insert, so the queue's created_at/id history for that row
+        still traces back to its original scan proposal. Raises if the item
+        isn't pending — a resolved item's payload is a historical record,
+        not something a later script should silently rewrite."""
+        item = self.get_feature_review_queue_item(item_id)
+        if item is None:
+            raise ValueError("Review queue item not found.")
+        if item["status"] != "pending":
+            raise ValueError(f'This item is already {item["status"]}, not pending — refusing to '
+                              f'rewrite a resolved item\'s payload.')
+        proposal_type = item["proposal_type"] if proposal_type is None else proposal_type.strip()
+        articulation = item["articulation"] if articulation is None else articulation.strip()
+        self.conn.execute(
+            "UPDATE feature_review_queue SET payload=?, proposal_type=?, articulation=? WHERE id=?",
+            (json.dumps(payload), proposal_type, articulation, item_id),
+        )
+        self.conn.commit()
+
     def count_feature_review_queue(self, status: str | None = "pending") -> int:
         """Cheap indexed COUNT (idx_feature_review_queue_status) — powers the
         /admin hub's pending badge, mirroring list_feature_review_queue's own
@@ -5243,6 +5318,82 @@ class Library:
 
     def delete_thought_leadership(self, item_id: int) -> None:
         self.conn.execute("DELETE FROM thought_leadership WHERE id = ?", (item_id,))
+        self.conn.commit()
+
+    # -- original content (flagship-piece cards + admin-authored articles) --
+    # Ordering is display_order first (a curated card order — the admin picks
+    # what leads), sort_key only as a tiebreak for entries that share a
+    # display_order — the opposite priority from _TL_ORDER_SQL above, since
+    # this list is a handful of hand-curated flagship pieces, not a
+    # chronological feed.
+    _OC_ORDER_SQL = "display_order ASC, sort_key DESC"
+
+    def list_original_content(self, status: str | None = None) -> list[dict]:
+        if status:
+            rows = self.conn.execute(
+                f"SELECT * FROM original_content WHERE status = ? ORDER BY {self._OC_ORDER_SQL}",
+                (status,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                f"SELECT * FROM original_content ORDER BY {self._OC_ORDER_SQL}"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_original_content_for_home(self) -> list[dict]:
+        """The homepage's flagship row: live pieces flagged featured_home=1
+        only. (/thought-leadership itself shows every live piece regardless
+        of this flag — see list_original_content(status='live').)"""
+        rows = self.conn.execute(
+            f"SELECT * FROM original_content WHERE status = 'live' AND featured_home = 1 "
+            f"ORDER BY {self._OC_ORDER_SQL}"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_original_content(self, item_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM original_content WHERE id = ?", (item_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_original_content_by_slug(self, slug: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM original_content WHERE slug = ?", (slug,)).fetchone()
+        return dict(row) if row else None
+
+    def add_original_content(self, slug: str, title: str, teaser: str = "", tag_label: str = "",
+                             link_label: str = "", body_md: str | None = None, status: str = "draft",
+                             featured_home: bool = False, date_label: str = "", sort_key: str = "",
+                             display_order: int | None = None) -> int:
+        if display_order is None:
+            display_order = self.conn.execute(
+                "SELECT COALESCE(MAX(display_order), -1) + 1 FROM original_content"
+            ).fetchone()[0]
+        now = _now()
+        cur = self.conn.execute(
+            "INSERT INTO original_content "
+            "(slug, title, teaser, tag_label, link_label, body_md, status, featured_home, "
+            "date_label, sort_key, display_order, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (slug.strip(), title.strip(), teaser.strip(), tag_label.strip(), link_label.strip(),
+             body_md, status, int(bool(featured_home)), date_label.strip(), sort_key.strip(),
+             display_order, now, now),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_original_content(self, item_id: int, slug: str, title: str, teaser: str, tag_label: str,
+                                link_label: str, body_md: str | None, status: str, featured_home: bool,
+                                date_label: str, sort_key: str, display_order: int) -> None:
+        self.conn.execute(
+            "UPDATE original_content SET slug=?, title=?, teaser=?, tag_label=?, link_label=?, "
+            "body_md=?, status=?, featured_home=?, date_label=?, sort_key=?, display_order=?, "
+            "updated_at=? WHERE id=?",
+            (slug.strip(), title.strip(), teaser.strip(), tag_label.strip(), link_label.strip(),
+             body_md, status, int(bool(featured_home)), date_label.strip(), sort_key.strip(),
+             display_order, _now(), item_id),
+        )
+        self.conn.commit()
+
+    def delete_original_content(self, item_id: int) -> None:
+        self.conn.execute("DELETE FROM original_content WHERE id = ?", (item_id,))
         self.conn.commit()
 
     # -- communities (the /tools/communities directory) ---------------------

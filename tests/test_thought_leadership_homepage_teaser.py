@@ -16,6 +16,45 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 
+def _seed_flagship_original_content(appmod):
+    """Seed the 3 flagship `original_content` rows a real
+    scripts/migrate_original_content.py --apply run would produce (Original
+    Content Phase 1). This test file exercises homepage/thought-leadership
+    rendering as it looks post-migration, not the pre-seed empty-table
+    state — a fresh test DB otherwise has zero flagship cards, since seeding
+    is a manual, run-by-hand migration now, not automatic schema setup.
+
+    Also applies the one later-phase change this file's assertions actually
+    depend on: Original Content Phase 4b's ai-hackathon-playbook title fix
+    (scripts/migrate_hackathon_playbook_content.py). That migration only
+    touches the ai-hackathon-playbook row (title/body_md/date_label), and
+    the flagship homepage/thought-leadership cards render straight from
+    the DB row's own title (_oc_featured_cards_html/_tl_fcard, not the
+    frozen _TL_FEATURED_CARDS tuple) — so leaving this fixture pinned to
+    the pre-4b title would silently drift from what production actually
+    shows once that migration is applied there. Phase 4a's netsuite-mcp
+    migration needed no equivalent here since it never touched that row's
+    title, only its body_md."""
+    from scripts.migrate_original_content import planned_rows
+    from scripts.migrate_hackathon_playbook_content import TITLE as HACKATHON_TITLE
+    lib = appmod._lib()
+    try:
+        for r in planned_rows():
+            lib.add_original_content(
+                r["slug"], r["title"], r["teaser"], r["tag_label"], r["link_label"],
+                r["body_md"], r["status"], r["featured_home"], r["date_label"], r["sort_key"],
+                r["display_order"],
+            )
+        row = lib.get_original_content_by_slug("ai-hackathon-playbook")
+        lib.update_original_content(
+            row["id"], row["slug"], HACKATHON_TITLE, row["teaser"], row["tag_label"],
+            row["link_label"], row["body_md"], row["status"], row["featured_home"],
+            row["date_label"], row["sort_key"], row["display_order"],
+        )
+    finally:
+        lib.close()
+
+
 @pytest.fixture
 def env(monkeypatch):
     db = tempfile.mktemp(suffix=".db")
@@ -24,6 +63,7 @@ def env(monkeypatch):
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
+    _seed_flagship_original_content(appmod)
     yield appmod
     if os.path.exists(db):
         os.remove(db)
@@ -51,7 +91,16 @@ def test_homepage_has_one_consolidated_thought_leadership_section(env):
     assert 'href="/thought-leadership"' in html
     # The 3 flagship pieces, using the shared _tl_fcard/.tl-card treatment.
     assert "The Growth Engine Ratio" in html
-    assert "Sail, don&rsquo;t row" in html
+    # Straight apostrophe, not the curly &rsquo; entity — Phase 4b's
+    # double-escape fix (the row's stored title is real, unescaped text;
+    # _tl_fcard() renders title raw, so a pre-escaped value would render
+    # literally as "&rsquo;" text). Sentence-cased per the 2026-08
+    # sentence-case audit — this is the article headline reusing "Sail,
+    # Don't Row" as a pun, not the /play game's own name, so it doesn't
+    # keep the game's capitalization (see BRAND.md §3.2).
+    assert "Sail, don't row" in html
+    assert "Sail, Don&rsquo;t Row" not in html
+    assert "Sail, Don't Row" not in html
     assert "Connecting Claude to NetSuite" in html
     assert 'class="tl-card"' in html
     # Sail Don't Row correction: real playbook copy/link, not the design
@@ -73,18 +122,34 @@ def test_homepage_has_one_consolidated_thought_leadership_section(env):
 
 def test_flagship_cards_content_shared_between_homepage_and_thought_leadership(env):
     """The two pages must render identical flagship-card content (title,
-    description, tag, link label) — a deliberate shared-source guarantee
-    (_TL_FEATURED_CARDS) so the two surfaces can't silently drift apart, even
-    though their card *sizing* differs (each page's own .tl-featured grid
-    track width narrows the cards on the homepage's tighter column)."""
-    from webapp.app import _TL_FEATURED_CARDS, _tl_fcard
+    description, tag, link label) — a deliberate shared-source guarantee,
+    now the `original_content` DB table (Original Content Phase 1) rendered
+    through the shared _oc_card_tuple/_tl_fcard helpers, so the two surfaces
+    still can't silently drift apart, even though their card *sizing* differs
+    (each page's own .tl-featured grid track width narrows the cards on the
+    homepage's tighter column). The homepage shows only featured_home=1
+    pieces while /thought-leadership shows every live piece — for the 3
+    seeded flagship rows that's the same set, so this also confirms both
+    query paths (list_original_content_for_home vs.
+    list_original_content(status='live')) land on identical card content."""
+    from webapp.app import _oc_card_tuple, _tl_fcard
+
+    lib = env._lib()
+    try:
+        home_rows = lib.list_original_content_for_home()
+        live_rows = lib.list_original_content(status="live")
+    finally:
+        lib.close()
+    assert home_rows and live_rows
 
     home_html = _client(env).get("/").text
     tl_html = _client(env).get("/thought-leadership").text
-    for card in _TL_FEATURED_CARDS:
-        card_html = _tl_fcard(*card)
-        assert card_html in home_html, f"missing/diverged on homepage: {card[3]}"
-        assert card_html in tl_html, f"missing/diverged on /thought-leadership: {card[3]}"
+    for i, row in enumerate(home_rows):
+        card_html = _tl_fcard(*_oc_card_tuple(row, i))
+        assert card_html in home_html, f"missing/diverged on homepage: {row['title']}"
+    for i, row in enumerate(live_rows):
+        card_html = _tl_fcard(*_oc_card_tuple(row, i))
+        assert card_html in tl_html, f"missing/diverged on /thought-leadership: {row['title']}"
 
 
 def test_toolbox_panel_present_and_matches_design(env):

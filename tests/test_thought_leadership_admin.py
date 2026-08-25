@@ -307,3 +307,30 @@ def test_migration_script_moves_32_of_33_entries(env, tmp_path):
         assert len(lib.list_thought_leadership()) == 32
     finally:
         lib.close()
+
+
+def test_edit_page_title_is_not_double_escaped(env):
+    """_page() escapes its own title argument internally — the edit route
+    must pass the raw title, not a pre-_esc()'d one, or an "&" in the title
+    renders as "&amp;amp;" instead of "&amp;". Same bug, same fix, as
+    Original Content Phase 3's admin_original_content_edit (see CLAUDE.md's
+    Original Content Phase 5 cleanup entry)."""
+    c = _admin_client(env)
+    resp = c.post("/admin/thought-leadership/new", data={
+        "type": "writing", "title": "AI & Finance", "url": "https://example.com/ai-finance",
+        "venue": "Example Pub", "date_label": "Jan 2027", "sort_key": "2027-01",
+        "description": "A synopsis.", "display_order": "0",
+    }, follow_redirects=False)
+    assert resp.status_code == 303
+
+    from linklib.db import Library
+    lib = Library(env.DB_PATH)
+    try:
+        item_id = next(r["id"] for r in lib.list_thought_leadership(type="writing")
+                        if r["title"] == "AI & Finance")
+    finally:
+        lib.close()
+
+    html = c.get(f"/admin/thought-leadership/{item_id}/edit").text
+    assert "&amp;amp;" not in html
+    assert "<title>BMW CFO · Edit AI &amp; Finance</title>" in html

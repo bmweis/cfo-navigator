@@ -182,10 +182,35 @@ The scan operates in two modes, both under these rules:
 
 **Origination mode** (backfilling a category with no feature table yet): given the category, its
 tool roster, and this rules document, research each tool against the §8 sourcing hierarchy and
-propose the full curated feature table — ~10-15 features per §4, named per §3, with proposed
+propose the full curated feature table — features per §4, named per §3, with proposed
 tool-feature links carrying designations per §6. The entire proposal lands in the review queue;
 nothing is created until approved. This is how every category beyond the three pilot categories
 gets built.
+
+The scan proposes everything that clears §4's bar (differentiator, table-stakes-worth-confirming,
+or standout) — it does not stop at ~10-15 and does not otherwise self-limit the count. §4's
+"~10-15 features per category" is the target shape of the *curated, live* list once reviewed, not
+a cap on how much the scan may propose. Brian's review at the queue is the actual curation gate,
+the same as every other AI-drafts/human-decides mechanism in this build (Description, Agent
+taxonomy, Competitive differentiation, competitor-match suggestions) — the scan is not expected to
+pre-curate down to that count on its own.
+
+**Thin roster.** Below 4 tools in a category's roster, "differentiators — vendors in the category
+split on it" (§4) isn't a meaningful test with too few vendors to compare. Origination mode still
+runs against a thin roster, but drops the differentiator criterion and proposes only table-stakes-
+worth-confirming and standout features (§4's other two keep bullets) until the roster grows.
+
+**Origination mode's merge/de-dup step.** A roster has multiple tools, each researched
+independently — so before anything reaches the review queue, apply the §7 don't-collapse/unify
+test across the FULL accumulated set of features proposed for the whole roster, not per tool as
+each tool is researched. Concretely: research every tool in the roster first; only once the whole
+roster's raw candidate features are collected, merge same-job proposals into one feature row per
+§7 (carrying every tool's link separately) and split different-job proposals that used similar
+language, before queuing. Queuing per-tool as each is researched would let the same capability
+reach the queue under two different names from two different tools, reintroducing exactly the
+vocabulary drift §2 and §7 exist to prevent — origination mode has no existing feature list to
+de-dup a single tool's proposal against the way freshness mode does (step 3 below), so the
+roster-wide accumulation is what does that job instead.
 
 **Freshness mode** (recurring scan of an existing category):
 
