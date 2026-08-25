@@ -906,6 +906,49 @@ def _citations_list_html(citations: list, cap: int | None = None, empty_note: st
             f'{items}</ul></div>')
 
 
+_MAX_CITATION_TITLE_LEN = 250
+
+
+def _validate_citations_payload(raw: str) -> list[dict]:
+    """Parses and validates the `ai_drafted_citations` hidden-input value a
+    submit route receives (Citations-API grounding fix, Phase 2) — the
+    citations a stateless `generate-description` AJAX call handed back to
+    the browser, carried into the form as JSON and submitted back with it.
+    Never trusted as-is: this is client-controlled input riding through a
+    hidden field, not a server-computed value the way Agent taxonomy's
+    citations are (persisted directly from `result.citations` inside
+    `_run_tool_research`, never round-tripped through a browser).
+
+    Drops anything malformed rather than raising — a bad or missing payload
+    just means no citations get recorded, same as an ungrounded draft:
+    not a list at the top level, a non-dict entry, a non-string/empty
+    `url`, or a `url` that isn't http(s) (blocks `javascript:`/`data:`/etc.)
+    are all silently skipped. `title` is coerced to the source URL when
+    missing and length-capped. `n` is renumbered sequentially over what
+    survives, so a dropped entry never leaves a gapped citation number in
+    the rendered Sources list."""
+    try:
+        data = json.loads(raw) if raw else []
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    out: list[dict] = []
+    for c in data:
+        if not isinstance(c, dict):
+            continue
+        url = c.get("url")
+        if not isinstance(url, str) or not url.strip().startswith(("http://", "https://")):
+            continue
+        url = url.strip()
+        title = c.get("title")
+        title = title.strip() if isinstance(title, str) and title.strip() else url
+        title = title[:_MAX_CITATION_TITLE_LEN]
+        c_type = c.get("type") if isinstance(c.get("type"), str) and c.get("type").strip() else "tool_page"
+        out.append({"n": len(out) + 1, "title": title, "url": url, "type": c_type})
+    return out
+
+
 def _ai_drafted_field_names(form) -> set[str]:
     """The submitted ai_drafted_fields hidden input (see markAiDrafted in the
     edit-form JS), parsed into a set of field names — shared by
@@ -6447,6 +6490,9 @@ def tools_software_profile(request: Request, slug: str):
         agent_taxonomy_citations = (
             lib.get_entity_citations("tool", tool["id"], "agent_taxonomy") if tool else []
         )
+        description_citations = (
+            lib.get_entity_citations("tool", tool["id"], "description") if tool else []
+        )
     finally:
         lib.close()
     if not tool:
@@ -6722,6 +6768,7 @@ function submitIntroForm() {{
     description_card = f"""<div class="tp-card">
   <h2 class="tp-card-h">Description</h2>
   <p style="margin:0;">{_esc(tool['description'])}</p>
+  {_citations_list_html(description_citations, cap=5)}
 </div>"""
 
     # Competitors sits right under Bottom Line now (Phase F6), not at the
@@ -8486,7 +8533,13 @@ def _tool_category_checkboxes(categories: list[dict], selected: list[str] | None
 # stamp a field_reviews row for on save (standing principle: AI drafts into
 # the form, a human review-and-save is what makes it live — see
 # Library.record_field_review). A no-op where that hidden input doesn't
-# exist (the stateless Add Tool form has no entity_id yet to review against).
+# exist. (The stateless Add Tool form used to have no #ai-drafted-fields
+# input at all — "no entity_id yet to review against" — which meant a
+# brand-new tool created straight from a Generate-description draft never
+# got description_needs_verification/description_ai_confident recorded.
+# Citations-API grounding fix, Phase 2 closed that gap: the Add Tool form
+# now carries the same hidden inputs as the edit form, and its submit route
+# reads them the same way — see admin_tools_new_submit.)
 _MARK_AI_DRAFTED_JS = """
 function markAiDrafted(fieldName) {
   var el = document.getElementById('ai-drafted-fields');
@@ -8494,6 +8547,48 @@ function markAiDrafted(fieldName) {
   var fields = el.value ? el.value.split(',') : [];
   if (fields.indexOf(fieldName) === -1) fields.push(fieldName);
   el.value = fields.join(',');
+}
+// Reverses markAiDrafted for one field — used when a field's textarea is
+// hand-edited after a Generate click, so a save right after typing over an
+// AI draft is treated as the human confirmation it actually is (same
+// "editing/saving is itself a confirmation" convention
+// update_tool_agent_taxonomy already applies server-side), rather than
+// still reading as an untouched, freshly-generated draft. A no-op where the
+// hidden input doesn't exist.
+function unmarkAiDrafted(fieldName) {
+  var el = document.getElementById('ai-drafted-fields');
+  if (el) {
+    var fields = (el.value ? el.value.split(',') : []).filter(function(f) { return f && f !== fieldName; });
+    el.value = fields.join(',');
+  }
+  var confEl = document.getElementById('ai-drafted-confidence');
+  if (confEl) {
+    var prefix = fieldName + ':';
+    var pairs = (confEl.value ? confEl.value.split(',') : []).filter(function(p) {
+      return p && p.indexOf(prefix) !== 0;
+    });
+    confEl.value = pairs.join(',');
+  }
+}
+// Citations-API grounding fix, Phase 2 — the citations a stateless
+// generate-description call handed back, carried to the submit route as
+// JSON in a hidden field (server-side validated again on arrival — see
+// _validate_citations_payload — never trusted as-is just because it came
+// from this hidden input). markAiCitations also records which model
+// produced them, in a separate hidden field paralleling
+// ai-drafted-confidence's own "one field, one parallel input" convention.
+// No-ops where the hidden inputs don't exist.
+function markAiCitations(citations, model) {
+  var el = document.getElementById('ai-drafted-citations');
+  if (el) el.value = JSON.stringify(citations || []);
+  var modelEl = document.getElementById('ai-drafted-citations-model');
+  if (modelEl) modelEl.value = model || '';
+}
+function clearAiCitations() {
+  var el = document.getElementById('ai-drafted-citations');
+  if (el) el.value = '';
+  var modelEl = document.getElementById('ai-drafted-citations-model');
+  if (modelEl) modelEl.value = '';
 }
 // Confidence indicator (2026-08) — the model's own self-reported "confident"
 // flag from a generation call (Description/Competitive differentiation so
@@ -8581,10 +8676,27 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
     document.getElementById(descId).value = d.description;
     markAiDrafted('description');
     markAiConfidence('description', d.confident);
+    markAiCitations(d.citations || [], d.model || '');
     if (summaryId) {
       var summaryEl = document.getElementById(summaryId);
       if (summaryEl) { summaryEl.value = d.summary || ''; markAiDrafted('summary'); markAiConfidence('summary', d.confident); }
     }
+    // A hand-edit to the description after this Generate call means its
+    // text no longer matches what the citations above actually ground —
+    // clear the AI-drafted-this-session flag and the citations together the
+    // moment the admin types, so a save right after doesn't ship stale
+    // citations against edited text. One-time listener: re-attached on the
+    // next successful Generate, since a fresh draft needs the same guard.
+    (function() {
+      var descEl = document.getElementById(descId);
+      if (!descEl) return;
+      function onEdit() {
+        unmarkAiDrafted('description');
+        clearAiCitations();
+        descEl.removeEventListener('input', onEdit);
+      }
+      descEl.addEventListener('input', onEdit);
+    })();
     status.textContent = d.low_confidence
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
       : 'Drafted. Review before saving.';
@@ -14217,6 +14329,10 @@ def admin_tools_new(request: Request):
 <h1>Add software</h1>
 <p style="color:var(--muted);margin:4px 0 32px;">Manually add a tool directly to the public directory.</p>
 <form method="post" action="/admin/tools/software/new" style="display:grid;gap:20px;">
+  <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
+  <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
+  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
       <h2 style="font-size:16px;font-weight:600;margin:0;">Company details</h2>
@@ -14360,13 +14476,36 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     vendor_name = (form.get("vendor_name") or "").strip()
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
+    # Citations-API grounding fix, Phase 2 — closes a real gap: this form's
+    # Generate-description button used to have nowhere to record
+    # needs_verification/confidence/citations at all, since add_tool() never
+    # accepted them and the form carried none of the ai-drafted-* hidden
+    # inputs. Same "fresh draft this submit" convention as the edit-submit
+    # route below (_ai_drafted_field_names/_ai_drafted_field_confidence),
+    # just evaluated once at creation instead of on every resave.
+    ai_drafted = _ai_drafted_field_names(form)
+    ai_confidence = _ai_drafted_field_confidence(form)
+    description_needs_verification = 1 if ({"description", "summary"} & ai_drafted) else 0
+    description_confident = (
+        int(ai_confidence["description"]) if "description" in ai_drafted and "description" in ai_confidence
+        else None
+    )
+    description_citations = (
+        _validate_citations_payload(form.get("ai_drafted_citations") or "")
+        if "description" in ai_drafted else []
+    )
+    citations_model = (form.get("ai_drafted_citations_model") or "").strip()
     lib = _lib()
     try:
         name_dup = lib.find_tool_name_duplicate(name)
         tool_id = lib.add_tool(name, description, url, categories, approved=1, advisor=advisor,
                                 promoted=promoted, vendor_email=vendor_email,
                                 warm_intro_enabled=warm_intro_enabled, vendor_name=vendor_name,
-                                summary=summary)
+                                summary=summary,
+                                description_needs_verification=description_needs_verification,
+                                description_ai_confident=description_confident)
+        if description_citations:
+            lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     finally:
@@ -14449,6 +14588,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
         )
         agent_taxonomy_citations = (
             lib.get_entity_citations("tool", tool_id, "agent_taxonomy") if tool else []
+        )
+        description_citations = (
+            lib.get_entity_citations("tool", tool_id, "description") if tool else []
         )
     finally:
         lib.close()
@@ -14695,6 +14837,8 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
 <form id="tool-edit-form" method="post" action="/tools/software/{slug}/edit" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
+  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
 
   <div class="tool-form-cols">
     <div style="display:grid;gap:14px;align-content:start;">
@@ -14770,6 +14914,9 @@ def admin_tools_edit(request: Request, slug: str, screenshot_captured: str = "",
             style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
             placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
           {_description_verify_action}
+          {_citations_list_html(description_citations,
+                                empty_note="No citations recorded for this draft (hand-written, "
+                                           "or drafted with no page content to ground on).")}
           {_description_confidence_html}
           {_description_review_line_html}
           <button type="submit" form="tool-edit-form" name="save_action" value="continue"
@@ -15024,6 +15171,19 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         if "competitive_differentiation" in ai_drafted and "competitive_differentiation" in ai_confidence
         else None
     )
+    # Citations-API grounding fix, Phase 2 — same "fresh draft this submit"
+    # gate as description_needs_verification/description_confident above:
+    # citations persist only when this exact save follows a Generate click
+    # for description (the browser-carried, server-validated payload — see
+    # _validate_citations_payload — is trusted only in that case); any other
+    # save (a hand-edit, or a resave that never touched Generate) clears
+    # them, same "editing/saving is itself a confirmation" convention
+    # update_tool_agent_taxonomy already applies to its own citations.
+    description_citations = (
+        _validate_citations_payload(form.get("ai_drafted_citations") or "")
+        if "description" in ai_drafted else []
+    )
+    citations_model = (form.get("ai_drafted_citations_model") or "").strip()
     lib = _lib()
     try:
         name_dup = lib.find_tool_name_duplicate(name, exclude_id=tool_id)
@@ -15033,6 +15193,10 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         summary=summary,
                         description_needs_verification=description_needs_verification,
                         description_ai_confident=description_confident)
+        if "description" in ai_drafted and description_citations:
+            lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
+        else:
+            lib.clear_entity_citations("tool", tool_id, "description")
         lib.update_tool_differentiation(tool_id, competitive_differentiation,
                                         needs_verification=competitive_differentiation_needs_verification,
                                         ai_confident=differentiation_confident)
@@ -15394,7 +15558,8 @@ async def admin_tools_generate_description(request: Request):
         lib.close()
 
     return JSONResponse({"ok": True, "description": draft.description, "summary": draft.summary,
-                         "low_confidence": draft.low_confidence, "confident": draft.confident})
+                         "low_confidence": draft.low_confidence, "confident": draft.confident,
+                         "citations": draft.citations, "model": draft.model})
 
 
 @app.post("/admin/tools/software/{tool_id}/generate-differentiation")
