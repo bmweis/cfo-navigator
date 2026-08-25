@@ -1798,6 +1798,26 @@ Details worth knowing:
   Exa" caption (Phase 3) on the real mechanism. Any surprise in citation
   metadata degrades to plain text — citation handling can never fail an
   answer.
+- **Citation-assembly logic lives in a shared module, not agent.py-private
+  (Phase 1a of the enrich.py grounding fix, 2026-08).** `linklib/citations.py`
+  (`make_document_block`, `extract_citations`) is a pure extraction of what
+  used to be `_build_source_documents`'s per-source document-block builder
+  and `_assemble_cited_answer` — this module's own `_assemble_cited_answer`
+  is now a one-line wrapper around `extract_citations`. No behavior change:
+  proven via `tests/test_citations_refactor_parity.py`, which replays a
+  battery of scenarios (`tests/citations_fixtures/scenarios.py`) against
+  the post-refactor functions and diffs the result against
+  `tests/citations_fixtures/golden_output.json` — output captured from the
+  real, unmodified pre-refactor code by
+  `scripts/archive/capture_citations_golden_fixtures.py` (run once, before
+  any refactor code existed, then archived) — rather than merely "the
+  existing tests still pass." `extract_citations`'s `inject_markers` flag
+  (True here, the only mode this module uses) exists for a future caller
+  that can't accept inline `[n]` markers in its output: `enrich.py`'s
+  Agent taxonomy grounding fix (Phase 1b, not yet built) drafts strict
+  JSON, where splicing a marker into a field value would corrupt the
+  parse — see that module's docstring. Nothing in `enrich.py` imports this
+  module yet.
 - **Cost guards are layered**: per-turn grounding-character caps, a max-tokens
   budget per tier, a follow-up cap (6 extra turns, counted from the
   conversation's recorded `ask_questions` rows — never from anything
