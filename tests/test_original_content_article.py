@@ -180,33 +180,17 @@ def test_draft_not_visible_to_signed_out_visitor_even_with_correct_slug(env):
 
 
 # -- Route precedence ----------------------------------------------------------
-
-def test_bespoke_literal_routes_win_over_catch_all_even_on_slug_collision(env):
-    """The three literal /thought-leadership/* routes are registered before
-    this catch-all, so they always win by FastAPI's registration order —
-    proven here by inserting an original_content row with a colliding slug
-    and a real body_md, and confirming the bespoke page's own content wins,
-    not the DB row's."""
-    _add(env, slug="growth-engine-ratio", title="Fake GER Impostor",
-         body_md="# This should never render", status="live")
-    r = _client(env).get("/thought-leadership/growth-engine-ratio")
-    assert r.status_code == 200
-    assert "The Growth Engine Ratio" in r.text
-    assert "Fake GER Impostor" not in r.text
-    assert "This should never render" not in r.text
-
-
-def test_bespoke_pages_unaffected_by_new_catch_all(env):
-    """Spot-check the one remaining bespoke page still loads exactly as
-    before — the new catch-all must not intercept or otherwise change
-    it. netsuite-mcp (Phase 4a) and ai-hackathon-playbook (Phase 4b) are
-    no longer bespoke — both routes were retired, and their slugs now go
-    through the catch-all like any other original_content row — covered
-    separately below."""
-    c = _client(env)
-    ger = c.get("/thought-leadership/growth-engine-ratio")
-    assert ger.status_code == 200
-    assert "The Growth Engine Ratio" in ger.text
+#
+# All three of the original bespoke /thought-leadership/* pieces
+# (netsuite-mcp, ai-hackathon-playbook, growth-engine-ratio) have now been
+# retired — see test_netsuite_mcp_now_served_by_catch_all,
+# test_ai_hackathon_playbook_now_served_by_catch_all, and
+# test_growth_engine_ratio_now_served_by_catch_all below. There is no
+# longer a literal-route-wins-over-catch-all scenario to prove for any
+# /thought-leadership/* piece — the "bespoke literal routes win by
+# registration order" test that used to live here (against
+# growth-engine-ratio, the last one still bespoke) has no subject left and
+# was removed rather than retargeted at a nonexistent bespoke page.
 
 
 def test_netsuite_mcp_now_served_by_catch_all(env):
@@ -233,3 +217,48 @@ def test_ai_hackathon_playbook_now_served_by_catch_all(env):
     assert r.status_code == 200
     assert "Sail, Don't Row" in r.text
     assert "Ported hackathon content." in r.text
+
+
+def test_growth_engine_ratio_now_served_by_catch_all(env):
+    """Original Content Phase 4c — growth-engine-ratio's bespoke route was
+    retired the same way netsuite-mcp's (4a) and ai-hackathon-playbook's
+    (4b) were; it's now an ordinary original_content row, reachable through
+    the catch-all. Unlike those two synthetic-content tests, this one runs
+    the real migrate_growth_engine_ratio_content.py BODY_MD through the
+    template — a light integration check that the actual ported content
+    (not just a placeholder string) renders without error and carries the
+    split-page pieces this phase specifically produced: the CTA linking out
+    to the new standalone calculator page, and the tier table's page-
+    specific CSS classes."""
+    from scripts.migrate_growth_engine_ratio_content import BODY_MD
+    _add(env, slug="growth-engine-ratio", title="The Growth Engine Ratio",
+         tag_label="Framework", date_label="June 2026", body_md=BODY_MD, status="live")
+    r = _client(env).get("/thought-leadership/growth-engine-ratio")
+    assert r.status_code == 200
+    assert "The Growth Engine Ratio" in r.text
+    assert "By Brian Weisberg &middot; June 2026" in r.text
+    assert 'href="/thought-leadership/growth-engine-calculator"' in r.text
+    assert "Try the Growth Engine Ratio calculator" in r.text
+    assert "ger-table" in r.text
+    assert "ger-pull" in r.text
+    # The calculator's own JS/inputs must NOT be on the article page — that
+    # content moved entirely to the new standalone calculator route.
+    assert "function calcGER" not in r.text
+    assert 'id="rev_n"' not in r.text
+
+
+def test_growth_engine_calculator_page_loads(env):
+    """Original Content Phase 4c — the new standalone bespoke route at its
+    own URL, independent of any original_content row. Confirms the
+    extracted calculator markup/JS is present and functioning — both modes'
+    UI, the chart-generation functions, and the back-link to the article."""
+    r = _client(env).get("/thought-leadership/growth-engine-calculator")
+    assert r.status_code == 200
+    assert "Growth Engine Ratio Calculator" in r.text
+    assert '<a href="/thought-leadership/growth-engine-ratio"' in r.text
+    assert 'id="tab-point"' in r.text
+    assert 'id="tab-timeline"' in r.text
+    assert "function calcGER" in r.text
+    assert "function calcTimeline" in r.text
+    assert "function contributionSVG" in r.text
+    assert "function buildChart" in r.text

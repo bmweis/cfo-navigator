@@ -77,8 +77,9 @@ scripts/           # CLI entry points
 
 webapp/
   app.py           # FastAPI, ~110 routes, all HTML/CSS/JS inline: public site
-                   #   (/, /thought-leadership [+ /thought-leadership/growth-engine-ratio,
-                   #   /thought-leadership/ai-hackathon-playbook, /thought-leadership/netsuite-mcp],
+                   #   (/, /thought-leadership [+ /thought-leadership/growth-engine-calculator,
+                   #   the one remaining literal bespoke /thought-leadership/* route — see
+                   #   Original Content Phase 4c],
                    #   /tools, /contact, /play) + private tools
                    #   (/tools/fpa-buddy, /save, /api/search, /bookmarklet — plus
                    #   the merged Reader, /read and /read/{article_id}, admin-only)
@@ -2323,9 +2324,73 @@ library.db            # NOT in git (personal data, large). Lives beside the code
      `"ai-hackathon-playbook"` came out of `_OC_RESERVED_SLUGS`, leaving
      only `"growth-engine-ratio"` reserved. The closing bio blurb's
      `/play` easter-egg link ("Sail, Don't Row is also a game") carried
-     over verbatim into `body_md`. Growth Engine Ratio remains the one
-     fully bespoke page left — still blocked on Brian's decision about
-     its live JS calculator, per the Phase 4 investigation.
+     over verbatim into `body_md`.
+
+- **Original Content, Phase 4c — Growth Engine Ratio, the last of the three
+  flagship pages, SPLIT rather than ported whole — resolving Phase 4's
+  open question about its live JS calculator.** Unlike Phase 4a/4b, this
+  page couldn't be ported as one piece: alongside prose/formula/table/quote
+  content it embeds a ~380-line live JS calculator (point-in-time and a
+  bounded -2..+2 timeline mode, each driving a dynamically-generated SVG
+  chart) — genuinely interactive, not markdown-representable. Brian's
+  approved resolution: split the page. The article half ported the same
+  way netsuite-mcp/ai-hackathon-playbook did — prose to markdown; the
+  formula box, 3 pull-quotes, and the tier table preserved as raw HTML in
+  `body_md` using their original `.ger-pull`/`.ger-table` classes, rescoped
+  under `.oc-body` into a new `_OC_GER_CSS` constant, same
+  `_OC_NETSUITE_MCP_CSS`/`_OC_HACKATHON_CSS` treatment (`.article-cta`/
+  `.article-pull` themselves needed no porting — sitewide shared classes,
+  not page-specific, already available on every page). The calculator
+  moved to a brand-new standalone bespoke route,
+  `GET /thought-leadership/growth-engine-calculator`
+  (`growth_engine_calculator()` in `webapp/app.py`) — markup, CSS, and JS
+  extracted byte-for-byte from the retired route, zero logic/input/chart
+  change; only new content on that page is the back-link, eyebrow/H1, and
+  a short intro blurb. The retired page's "Methodology note" paragraph
+  (GTM/R&D GAAP definitions plus a timeline-lookback explanation) stayed
+  whole on the calculator page, unmodified, in its original position
+  directly below the calculator card — it's calculator-specific (the
+  lookback sentence directly references the timeline mechanic) and porting
+  it whole was lower-risk than splitting its sentences across both pages.
+  `scripts/migrate_growth_engine_ratio_content.py` follows the same
+  dry-run/`--apply`/write-then-read-back convention as Phase 4a/4b's
+  scripts, setting `body_md` and `date_label` ("June 2026", same
+  visual-parity fix Phase 4b used) — `title` needed no fix this time,
+  unlike Phase 4b's hackathon row: `"The Growth Engine Ratio"` has no HTML
+  entities in it, so there was no double-escape bug to work around.
+
+  The retired page's byline carried two lines beyond what the shared
+  template's single `date_label` field can represent — "Published with
+  [The F Suite]" (a live link) and a Contributor credit line for Katherine
+  Zhang — both preserved verbatim as the first two lines of `body_md`
+  itself, the same "extra byline content becomes body_md's leading
+  content" precedent Phase 4b used for the hackathon piece's italic
+  subtitle line. **One genuinely new piece of content**: where the
+  original page's "## Calculate Your Ratio" section held the live
+  calculator inline, the ported article now shows a CTA box (reusing the
+  sitewide `.article-cta` class — same visual treatment as the page's
+  existing F Suite whitepaper CTA) linking out to the new standalone
+  calculator page. This CTA copy, and the calculator page's own intro
+  blurb, are both new copy — not ported — and were surfaced to Brian for
+  review before merge per the standing new-copy/em-dash process; neither
+  uses an em dash.
+
+  Verified before either route changed, per this phase's own explicit
+  process requirement: with the row updated and the new calculator page
+  live at its new URL but the old bespoke `growth_engine_ratio()` route
+  still in place, screenshot comparison confirmed visual parity of the
+  article portion (desktop and 390×844 mobile), and the new calculator
+  page's both modes and both SVG charts were confirmed functioning
+  identically to how they worked embedded in the old page, at desktop and
+  mobile widths. Only then was the old bespoke route deleted and
+  `"growth-engine-ratio"` removed from `_OC_RESERVED_SLUGS` — leaving the
+  set empty for the first time since Phase 1: all three original flagship
+  pieces (netsuite-mcp, ai-hackathon-playbook, growth-engine-ratio) are now
+  served by the catch-all, their bespoke routes retired. Deliberately NOT
+  reserved: `"growth-engine-calculator"` itself — that page was never part
+  of the `original_content` system and never will be, so there's no slug
+  an admin could ever collide with through the form; confirmed explicitly
+  rather than assumed, per this phase's own instruction.
 
 - **Original Content, Phase 5 — cleanup: a double-escape fix landed, two
   proposed rollback-file deletions turned out NOT to be safe and were left
@@ -2958,22 +3023,26 @@ tables, no third-party dependency.
   **If `LINKLIB_SECRET_KEY` is unset, an app restart invalidates all sessions** (you just
   log in again — harmless). Set it on the host to keep sessions sticky across deploys.
 - **Route protection:**
-  - Public (no auth): `/`, `/thought-leadership`, `/thought-leadership/growth-engine-ratio`,
-    `/thought-leadership/ai-hackathon-playbook`, `/contact`,
+  - Public (no auth): `/`, `/thought-leadership`, `/thought-leadership/growth-engine-calculator`
+    (Original Content Phase 4c — the standalone interactive calculator; still a real, literal
+    bespoke route, not part of the `original_content` system), `/contact`,
     `/privacy`, `/login`, `/logout`, `/static/*`, `/health`, `/tools/fpa-buddy/how-it-works`
     (moved off `/admin/*` in the FP&A Buddy explainer follow-up round — see the Key
     architecture decisions bullet above). (The old flat `/growth-engine-ratio`,
-    `/finops-ai-hackathon`, `/netsuite-mcp` URLs still 301-redirect to the nested paths above —
-    `/netsuite-mcp`'s target is now served by the `{slug}` catch-all below, not a literal route,
-    see Original Content Phase 4a.)
+    `/finops-ai-hackathon`, `/netsuite-mcp` URLs still 301-redirect to the nested paths below —
+    all three now served by the `{slug}` catch-all, none a literal route any more, see Original
+    Content Phase 4a/4b/4c.)
     `/thought-leadership/{slug}` (Original Content Phase 2 — see Key architecture decisions
     above) is public **only for a `status='live'` piece with a real `body_md`**; it's not a
     blanket-public route nor a `/login`-redirecting one — a `status='draft'` row and an
     unknown slug both 404 for a signed-out visitor, and a draft 200s only for an active admin
-    session, at its own canonical URL, per `_is_authed`. **`/thought-leadership/netsuite-mcp`
-    is the first real instance of this**, not a fourth literal bespoke route — its own
-    hand-built Python function was retired in Phase 4a; only `growth-engine-ratio` and
-    `ai-hackathon-playbook` remain literal routes (and reserved slugs — `_OC_RESERVED_SLUGS`).
+    session, at its own canonical URL, per `_is_authed`. `/thought-leadership/netsuite-mcp`,
+    `/thought-leadership/ai-hackathon-playbook`, and `/thought-leadership/growth-engine-ratio`
+    are all now served this way — their hand-built Python route functions were retired in
+    Phases 4a, 4b, and 4c respectively, so `_OC_RESERVED_SLUGS` is now empty (the standalone
+    `/thought-leadership/growth-engine-calculator` route above is deliberately NOT added to
+    it — it was never part of the `original_content` system, so there's no slug collision to
+    guard against).
   - Private HTML pages → **redirect to `/login`** when signed out: `/tools/fpa-buddy`,
     `/admin/contacts` (member-gated), and
     `/read`, `/read/{article_id}` (**admin-only**, Phase 1 access level, merged into
@@ -3199,7 +3268,9 @@ instead, off that page — kept for git history, not meant to run again.
   existing corpus
 - Bookmarklet
 - Public site: bio homepage (`/`), thought leadership (`/thought-leadership`),
-  Growth Engine Ratio page + calculator (`/thought-leadership/growth-engine-ratio`), contact (`/contact`)
+  Growth Engine Ratio article (`/thought-leadership/growth-engine-ratio`) and its standalone
+  calculator (`/thought-leadership/growth-engine-calculator`, Original Content Phase 4c),
+  contact (`/contact`)
 - Password login for the private section (`/login` + signed session cookie)
 - Merged Reader (`/read`, Phase 5): a three-pane Feed/Saved/Read Later view with category
   and per-source filtering, an AJAX-loaded article pane, save-to-library, and a

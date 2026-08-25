@@ -4,10 +4,11 @@
 Public routes (no auth):
     GET  /                     Bio homepage
     GET  /thought-leadership   Podcasts, writing, interviews
-    GET  /thought-leadership/growth-engine-ratio    GER framework + calculator
-    GET  /thought-leadership/ai-hackathon-playbook  AI hackathon playbook
+    GET  /thought-leadership/growth-engine-calculator  GER interactive calculator (standalone, Phase 4c)
     GET  /thought-leadership/{slug}   Admin-authored Original Content piece (live only, unless admin) —
-                                       includes netsuite-mcp as of Phase 4a; its bespoke route was retired
+                                       includes netsuite-mcp (Phase 4a), ai-hackathon-playbook (Phase 4b),
+                                       and growth-engine-ratio (Phase 4c); all three bespoke routes were
+                                       retired once their content was ported
     GET  /contact              Contact form
     POST /contact              Submit contact form
     GET  /login / POST /login  Password sign-in (sets a signed session cookie)
@@ -2631,21 +2632,31 @@ def growth_engine_ratio_redirect(request: Request):
     return RedirectResponse(target, status_code=301)
 
 
-@app.get("/thought-leadership/growth-engine-ratio", response_class=HTMLResponse)
-def growth_engine_ratio(request: Request):
+# Original Content Phase 4c — the standalone Growth Engine Ratio
+# calculator. Split off from the retired growth_engine_ratio() bespoke
+# route: the article itself is now an ordinary original_content row served
+# through GET /thought-leadership/{slug} (see
+# scripts/migrate_growth_engine_ratio_content.py), but the calculator is
+# genuinely interactive (live inputs, on-demand JS computation, two
+# dynamically-generated SVG charts) — not markdown-representable content —
+# so it stays a hand-built Python route, same as before, just at its own
+# URL and with the article's prose/table/CTA content removed.
+#
+# Extraction discipline: the calculator's own markup, CSS, and ~380 lines
+# of JS below are copied byte-for-byte from the retired route — no logic,
+# input, or chart-generation change. Only new content on this page is the
+# back-link, the eyebrow/H1, and the intro blurb immediately below —
+# flagged for Brian's review per the process note in this PR (new copy, not
+# ported copy).
+@app.get("/thought-leadership/growth-engine-calculator", response_class=HTMLResponse)
+def growth_engine_calculator(request: Request):
     body = """<div class="page page-full article-atlantic">
 <div class="tool-inner">
-<p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
+<p style="margin:0 0 12px;"><a href="/thought-leadership/growth-engine-ratio" style="font-size:13px;color:var(--muted);">&larr; The Growth Engine Ratio</a></p>
 <style>
   .ger-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
   .ger-grid-3{display:grid;grid-template-columns:88px 1fr 1fr 1fr;gap:10px;align-items:center;}
-  .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  /* Tier and Ratio columns are short, fixed-format values ("Below target",
-     "$0.50–$0.70") that should never wrap; What It Means is prose and keeps
-     wrapping normally. */
-  .ger-table th:nth-child(1),.ger-table td:nth-child(1){white-space:nowrap;width:1%;}
-  .ger-table th:nth-child(2),.ger-table td:nth-child(2){white-space:nowrap;}
   .ger-modes{display:flex;flex-wrap:wrap;gap:8px;}
   .ger-mode{font:inherit;font-size:14px;font-weight:500;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer;}
   .ger-mode:hover{background:var(--accent-light);color:var(--ink);}
@@ -2662,152 +2673,32 @@ def growth_engine_ratio(request: Request):
   .tl-ctrl button{font:inherit;font-size:18px;line-height:1;width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--accent);cursor:pointer;}
   .tl-ctrl button:hover{background:var(--accent-light);}
   .tl-ctrl span{font-size:16px;font-weight:700;min-width:16px;text-align:center;color:var(--ink);}
-  /* Quote breakout (width refinement, this phase): only Quotes widen beyond
-     .tool-prose's 760px reading column — CTA/Tip/Warning boxes stay at
-     body-copy width since they're mostly multi-line instructional prose,
-     where a wide box just reads as an odd second column. A quote is short,
-     so it earns the wider, deliberate moment. 1040px is a middle ground
-     between the 760px reading column and .tool-inner's full 1300px — wide
-     enough to read as intentional, not so wide it matches the calculator
-     card below it. Centering math: left:50% shifts the box right by half of
-     its normal containing block's width (.tool-prose, the column it sits
-     in); translateX(-50%) then shifts it left by half of its own (wider)
-     width. Since .tool-prose, .tool-inner, and .page are all centered on the
-     same axis, the net result re-centers the wider box under .tool-inner
-     regardless of viewport size, collapsing to no visible breakout once the
-     viewport is too narrow for one. */
-  .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}
   @media (max-width:640px){
     .ger-grid-4{grid-template-columns:repeat(2,1fr);}
     .ger-grid-2{grid-template-columns:1fr;}
     .ger-grid-3{grid-template-columns:58px 1fr 1fr 1fr;gap:6px;}
     .ger-card{padding:22px 18px !important;}
-    .ger-table th,.ger-table td{padding:8px 10px !important;font-size:13px !important;}
     .ger-value-big{font-size:38px !important;}
     .ger-in{font-size:14px;padding:8px 9px;}
   }
 </style>
 
 <div class="tool-prose">
-<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Framework</p>
-<h1 style="margin:0 0 8px;">The Growth Engine Ratio</h1>
-<p style="color:var(--muted);font-size:15px;margin:0 0 8px;">
-  By Brian Weisberg &middot; Published with <a href="https://www.fsuite.co" target="_blank" rel="noopener">The F Suite</a> &middot; June 2026
+<p style="font:600 11.5px var(--font-body);color:var(--muted);margin:0 0 6px;text-transform:uppercase;letter-spacing:.1em;">Calculator</p>
+<h1 style="margin:0 0 8px;">Growth Engine Ratio Calculator</h1>
+<p style="color:var(--muted);font-size:15px;margin:0 0 32px;">
+  Plug in your own quarterly numbers below to see where your ratio lands against the benchmark tiers.
+  Haven't read the framework yet? Start with <a href="/thought-leadership/growth-engine-ratio">the full article</a>
+  for the methodology behind these calculations.
 </p>
-<p style="color:var(--muted);font-size:14px;margin:0 0 32px;">
-  Contributor: Katherine Zhang, CEO of OPEXEngine by Bain &amp; Company, whose benchmark database makes the company-level numbers in this piece possible.
-</p>
 
-<div class="article-cta">
-  <p>
-    The full guide—including benchmark data from 200+ public and private SaaS companies via OPEXEngine—
-    is available as a downloadable whitepaper on The F Suite.
-    <strong><a href="https://www.fsuite.co" target="_blank" rel="noopener">Read the full article and download the guide &rarr;</a></strong>
-    <em style="display:block;margin-top:6px;font-size:13px;color:var(--muted);">(Link will be live when The F Suite publishes—coming soon.)</em>
-  </p>
-</div>
-
-<h2 style="margin-top:0;">Why I Built This</h2>
-<p>Most SaaS efficiency metrics measure one engine at a time. CAC payback tells you how quickly GTM
-investment pays back on new logos. Magic Number tells you how much ARR you're getting per dollar of
-sales and marketing spend. Both are useful—I use them all the time—but they share a blind spot:
-they leave R&D entirely out of the efficiency equation.</p>
-
-<p>That bothers me. At most companies, R&D is 20–30% of revenue. It's a meaningful investment, and
-it directly influences how easy or hard it is for GTM to do its job. A great product shortens
-sales cycles, reduces churn, and drives expansion. A product that's hard to understand or hasn't
-kept pace with customer needs makes every dollar of GTM spend work harder just to stay in place.</p>
-
-<div class="article-pull ger-pull"><p>Spending like a 50%+ growth company while delivering 25% = efficiency disaster.</p></div>
-
-<p>When product and GTM are evaluated in separate silos, it's almost impossible to answer the
-question that actually matters: are these two engines working together efficiently?
-I came up with the Growth Engine Ratio to answer that question.</p>
-
-<h2>The Core Idea</h2>
-<p>The framework is built on a simple observation: revenue recognized today is the result of
-investments made over the past several quarters, not just last quarter. Features ship before
-they're sold. Pipeline built in Q1 converts in Q3. A single period's P&amp;L doesn't capture that.</p>
-
-<p>So instead of comparing today's revenue growth to today's spending, the Growth Engine Ratio
-distributes investment across the quarters that actually contributed to a given period's growth.
-I call this the <strong>time-distributed contribution model</strong>.</p>
-
-<p>The formula:</p>
-<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:0 0 24px;font-family:ui-monospace,monospace;font-size:14px;line-height:1.8;">
-  <strong>Growth Engine Ratio = Annualized Revenue Growth &divide; (GTM Investment + R&amp;D Investment)</strong><br><br>
-  Annualized Growth = (Revenue Q<sub>n</sub> &minus; Revenue Q<sub>n-1</sub>) &times; 4<br>
-  GTM Investment = 0.25 &times; (GTM<sub>n-4</sub> + GTM<sub>n-3</sub> + GTM<sub>n-2</sub> + GTM<sub>n-1</sub>)<br>
-  R&amp;D Investment = 0.25 &times; (R&amp;D<sub>n-5</sub> + R&amp;D<sub>n-4</sub>)
-</div>
-
-<p>GTM uses a 4-quarter lookback because enterprise sales cycles run 6–9 months—pipeline built
-in Q<sub>n-4</sub> converts across subsequent quarters until it lands in Q<sub>n</sub>.
-R&amp;D uses a 2-quarter lookback starting one quarter earlier (n-5, n-4) because features are
-built before they're sold. The build-then-sell sequence matters. Each contributing quarter is
-weighted at 25%, so GTM enters at a full quarterly run-rate (four quarters &times; 25%) while the
-shorter R&amp;D build window enters at half (two quarters &times; 25%).</p>
-
-<h2>What the Number Tells You</h2>
-<p>A ratio of <strong>$1.00</strong> means you're generating exactly $1 of annualized revenue growth for
-every $1 of combined R&amp;D + GTM investment. That's the threshold that separates companies
-that are profitable on acquisition from those that aren't.</p>
-
-<p>In my analysis of 11 public SaaS companies across 188 company-quarters, only 2 exceeded $1.00
-in steady state. The guide names them: Reddit at $2.94, Palantir at $2.04. It benchmarks both
-against 200+ private SaaS companies via OPEXEngine's database.</p>
-
-<div class="article-pull ger-pull"><p>Don't benchmark against these outliers unless you have similar network effects.</p></div>
-
-<p>The other 9 need to retain customers for 1.2 to 2.8 years just to break even
-on acquisition costs. That changes how you think about churn—permanently.</p>
-
-<div class="article-pull ger-pull"><p>Every churned customer represents permanent capital loss.</p></div>
-
-<div class="ger-table-wrap" style="background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 32px;">
-  <table class="ger-table" style="width:100%;border-collapse:collapse;font-size:14px;min-width:520px;">
-    <thead><tr style="background:var(--navy);">
-      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">Tier</th>
-      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">Ratio</th>
-      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">Years to Break Even</th>
-      <th style="padding:10px 14px;text-align:left;font-weight:600;color:#fff;">What It Means</th>
-    </tr></thead>
-    <tbody>
-      <tr style="border-top:1px solid var(--line);">
-        <td style="padding:10px 14px;">&#127942; Elite</td>
-        <td style="padding:10px 14px;">&gt; $1.20</td>
-        <td style="padding:10px 14px;">&lt; 0.8 years</td>
-        <td style="padding:10px 14px;">Profitable on acquisition—invest aggressively</td>
-      </tr>
-      <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
-        <td style="padding:10px 14px;">&#11088; Strong</td>
-        <td style="padding:10px 14px;">$0.70&ndash;$1.20</td>
-        <td style="padding:10px 14px;">0.8&ndash;1.4 years</td>
-        <td style="padding:10px 14px;">Above median—maintain efficiency as you scale</td>
-      </tr>
-      <tr style="border-top:1px solid var(--line);">
-        <td style="padding:10px 14px;">&#10003; Typical</td>
-        <td style="padding:10px 14px;">$0.50&ndash;$0.70</td>
-        <td style="padding:10px 14px;">1.4&ndash;2.0 years</td>
-        <td style="padding:10px 14px;">In the pack—retention must be a top priority</td>
-      </tr>
-      <tr style="border-top:1px solid var(--line);background:#fdfcfa;">
-        <td style="padding:10px 14px;">&#9888;&#65039; Below target</td>
-        <td style="padding:10px 14px;">&lt; $0.50</td>
-        <td style="padding:10px 14px;">&gt; 2.0 years</td>
-        <td style="padding:10px 14px;">Urgent review—fix retention before scaling acquisition</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-</div><!-- /tool-prose -->
-
-<h2>Calculate Your Ratio</h2>
+<h2 style="margin-top:0;">Calculate Your Ratio</h2>
 <p style="color:var(--muted);font-size:15px;margin:-6px 0 18px;">
   Pick how much data you have. A single quarter returns your score against the benchmark; a run of
   quarters shows your trend; projected quarters show where you're headed—with an upper/lower band
   if your numbers land 10% better or worse than plan. All figures in the same currency, consistently.
 </p>
+</div><!-- /tool-prose -->
 
 <div class="ger-modes" role="tablist" style="margin:0 0 18px;">
   <button class="ger-mode ger-mode-on" id="tab-point" onclick="setMode('point')">Point in time</button>
@@ -2937,37 +2828,8 @@ on acquisition costs. That changes how you think about churn—permanently.</p>
   n-5 R&amp;D lookback, so the timeline carries five quarters of lookback before its first measured
   point and adds one measured quarter for each period you look back or forward.
 </p>
-
-<h2>A Note on Retention</h2>
-<p>One of the more useful outputs of this framework is a simple break-even calculation:
-<strong>Years to Break Even = 1 ÷ Efficiency Ratio</strong>. If your ratio is $0.60, you
-need to retain each customer for 1.7 years just to recover acquisition costs—and that
-assumes flat renewal with no expansion. Strong NRR (above 110%) compresses that timeline;
-contraction can make it indefinitely long.</p>
-
-<p>Companies below $1.00, which is most of them, need both high gross retention and strong
-net expansion for the economics to work. One without the other isn't sufficient. The ratio
-makes that constraint explicit in a way that's hard to argue with in a board room.</p>
-
-<h2>Get the Full Guide</h2>
-<p>The whitepaper includes the complete methodology, a worked example using Datadog's public
-financials, benchmark data across 200+ companies via OPEXEngine, and a performance tier guide
-with specific actions to take based on where your ratio lands. It's published in partnership
-with The F Suite.</p>
-
-<a href="https://www.fsuite.co" target="_blank" rel="noopener" class="btn" style="font-size:15px;padding:12px 24px;">
-  Download the full guide &rarr;
-</a>
-<p style="font-size:13px;color:var(--muted);margin-top:8px;">(Full link coming soon—check back or <a href="/contact">reach out</a> and I'll send it directly.)</p>
-
-<h2>Bonus: The Growth Engine Ratio, the Song</h2>
-<p style="color:var(--muted);font-size:14px;margin:0 0 14px;">I couldn't resist. AI-generated, obviously.</p>
-<iframe src="https://suno.com/embed/608201fd-d2b9-4774-af56-b65d477f3528" width="100%" height="240" style="border:none;border-radius:12px;max-width:760px;display:block;"
-  allow="autoplay; encrypted-media; fullscreen" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"
-  title="The Growth Engine Ratio (song)"></iframe>
-<p style="font-size:13px;color:var(--muted);margin-top:8px;">Player not loading? <a href="/static/growth-engine-ratio.mp3" download>Download the MP3</a> or <a href="https://suno.com/song/608201fd-d2b9-4774-af56-b65d477f3528" target="_blank" rel="noopener">listen on Suno</a>.</p>
-
 </div><!-- /tool-prose -->
+
 </div><!-- /tool-inner -->
 </div><!-- /page -->
 
@@ -3385,7 +3247,7 @@ function loadTimelineExample() {
 // Build the timeline table up front so its rows exist before the user switches tabs.
 renderTL();
 </script>"""
-    return HTMLResponse(_page("The Growth Engine Ratio—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
+    return HTMLResponse(_page("Growth Engine Ratio Calculator—Brian Weisberg", "Thought Leadership", body, role=_role(request)))
 
 
 @app.get("/finops-ai-hackathon")
@@ -11475,6 +11337,37 @@ _OC_HACKATHON_CSS = (
     '}'
 )
 
+# Original Content Phase 4c — the ported growth-engine-ratio page's own
+# .ger-pull/.ger-table CSS, same treatment as _OC_NETSUITE_MCP_CSS/
+# _OC_HACKATHON_CSS above: moved out of the retired route's <style> block,
+# rescoped under .oc-body. Only the article-side rules move here — the
+# calculator's own CSS (.ger-grid-*, .ger-mode*, .ger-in, .qlabel, .qhead,
+# .qrow-proj, .ger-chart, .ger-contrib*, .tl-step, .tl-ctrl*, .ger-card,
+# .ger-value-big) stays on the new standalone
+# /thought-leadership/growth-engine-calculator route's own <style> tag,
+# since that page is still a bespoke Python route, not part of this
+# markdown-rendered template.
+#
+# .oc-body .ger-table (2 classes) intentionally outranks the generic
+# .oc-body table (1 class + tag) rule by specificity — same reasoning as
+# .ns-table/.fah-* above — so the tier table keeps its original navy-header
+# treatment and its Tier/Ratio columns keep their no-wrap behavior.
+#
+# .ger-pull's 1040px breakout math is unchanged from the original page:
+# .tool-prose/.tool-inner/.page share a center axis, so
+# left:50%+translateX(-50%) re-centers the wider quote box under
+# .tool-inner regardless of viewport, collapsing to no breakout once the
+# viewport is too narrow for one.
+_OC_GER_CSS = (
+    '.oc-body .ger-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}'
+    '.oc-body .ger-table th:nth-child(1),.oc-body .ger-table td:nth-child(1){white-space:nowrap;width:1%;}'
+    '.oc-body .ger-table th:nth-child(2),.oc-body .ger-table td:nth-child(2){white-space:nowrap;}'
+    '.oc-body .ger-pull{position:relative;left:50%;transform:translateX(-50%);width:calc(100vw - 48px);max-width:1040px;}'
+    '@media(max-width:640px){'
+    '.oc-body .ger-table th,.oc-body .ger-table td{padding:8px 10px !important;font-size:13px !important;}'
+    '}'
+)
+
 
 def _original_content_article_body(row: dict) -> str:
     """The shared article shell for an admin-authored piece — matches the
@@ -11491,7 +11384,7 @@ def _original_content_article_body(row: dict) -> str:
     body_html = _render_original_content_markdown(row["body_md"] or "")
     return f"""<div class="page page-full article-atlantic">
 <p style="margin:0 0 12px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">&larr; Thought Leadership</a></p>
-<style>{_OC_ARTICLE_CSS}{_OC_NETSUITE_MCP_CSS}{_OC_HACKATHON_CSS}</style>
+<style>{_OC_ARTICLE_CSS}{_OC_NETSUITE_MCP_CSS}{_OC_HACKATHON_CSS}{_OC_GER_CSS}</style>
 <div class="tool-prose">
 {tag_html}
 <h1 style="margin:0 0 8px;">{_esc(row["title"])}</h1>
@@ -11916,19 +11809,25 @@ def admin_thought_leadership_delete(request: Request, item_id: int):
 # already established for exactly that kind of validation, rather than the
 # thought_leadership form's blunter raise-HTTPException-on-bad-input approach.
 
-# The remaining literal bespoke /thought-leadership/* route path segments —
-# see _TL_FEATURED_CARDS and the Original Content Phase 1/2 CLAUDE.md
-# entries. A new/edited original_content slug matching one of these would be
-# unreachable (the literal route always wins registration order over the
-# GET /thought-leadership/{slug} catch-all), so it's rejected here rather
-# than silently accepted and never actually reachable. "netsuite-mcp" was
-# removed from this set in Original Content Phase 4a, and
-# "ai-hackathon-playbook" in Phase 4b — both bespoke routes were retired
-# and their slugs are now served by the catch-all like any other
-# original_content row, so neither needs reserving any more. Only
-# "growth-engine-ratio" remains bespoke (its live JS calculator is a
-# separate, not-yet-scoped phase).
-_OC_RESERVED_SLUGS = {"growth-engine-ratio"}
+# The literal bespoke /thought-leadership/* route path segments this set
+# used to guard against — see _TL_FEATURED_CARDS and the Original Content
+# Phase 1/2 CLAUDE.md entries. A new/edited original_content slug matching
+# one of these would be unreachable (the literal route always wins
+# registration order over the GET /thought-leadership/{slug} catch-all), so
+# it's rejected here rather than silently accepted and never actually
+# reachable. "netsuite-mcp" was removed from this set in Original Content
+# Phase 4a, "ai-hackathon-playbook" in Phase 4b, and "growth-engine-ratio"
+# in Phase 4c — all three bespoke /thought-leadership/{slug} routes have now
+# been retired and their slugs are served by the catch-all like any other
+# original_content row, so the set is empty. Deliberately NOT reserving
+# "growth-engine-calculator" (Phase 4c's new standalone calculator route):
+# that page was never part of the original_content system and never will
+# be — it's not a slug an admin could ever collide with through this form,
+# so there's nothing here to guard against. Kept as a real (empty) set
+# rather than removed outright, since _validate_oc_slug still checks
+# against it — a future bespoke /thought-leadership/* page would go back to
+# reserving its own slug here the same way.
+_OC_RESERVED_SLUGS = set()
 _OC_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 

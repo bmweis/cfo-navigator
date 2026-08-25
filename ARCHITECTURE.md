@@ -1164,7 +1164,7 @@ effect.
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
 | `thought_leadership` | Backs all four columns on `/thought-leadership` (Writing, Speaking & Events, Podcasts, Press) and their admin CRUD at `/admin/thought-leadership` (Phase 1 — see CLAUDE.md). Replaces the pre-Phase-1 mechanism, `webapp/thought_leadership_data.py` (33 hardcoded `TLItem`s), which stays in the repo unused as a rollback reference — see `scripts/archive/migrate_thought_leadership.py` for the one-time migration. | `type` (`'writing'`\|`'speaking'`\|`'podcast'`\|`'press'`), `sort_key` (`'YYYY-MM'`; `''` floats an item to the top of its section — **derived automatically from `date_label` on every save**, not a form field, since a follow-up fix; see CLAUDE.md), `display_order` (tiebreaker for items sharing a `sort_key`, or both undated — preserves add/migration order rather than leaving ties to SQLite's row order; blank on the admin add form auto-assigns the next value per type), `needs_synopsis` (a blank `description` is deliberate, pending research, not skipped by accident), `featured_home` (originally "pin into the homepage teaser" — Phase 3 addendum; repurposed by the Homepage Restructure phase to mean "represents this type in the homepage's "Recent highlights" grid", see below; defaults to 0, no retroactive selection) |
-| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4b, `netsuite-mcp` and `ai-hackathon-playbook` both have real `body_md` and are served by the catch-all, their bespoke routes retired — only `growth-engine-ratio` still has `body_md IS NULL` and a live bespoke route, pending a decision on its JS calculator), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. |
+| `original_content` | Original Content Phase 1 (2026-08) — card metadata (title/teaser/tag/link label) for the homepage's flagship row and `/thought-leadership`'s featured row, migrated off the hardcoded `_TL_FEATURED_CARDS` tuple in `webapp/app.py` (which stays in the repo, unimported, as a rollback reference — same precedent as `thought_leadership_data.py`) via the one-time `scripts/migrate_original_content.py`. Also the model for any brand-new piece authored entirely from admin going forward (Phase 2/3), with no code change per article. | `slug` (unique, URL segment under `/thought-leadership/`), `body_md` (**nullable, load-bearing**: `NULL` meant "card metadata only" for all three flagship rows at Phase 1 seeding — one of the three hand-built bespoke routes (`growth-engine-ratio`, `ai-hackathon-playbook`, `netsuite-mcp`) rendered the actual piece, and since those three rows' slugs are set to match their existing route path segments exactly, a literal route always wins over the generic `GET /thought-leadership/{slug}` catch-all by FastAPI's registration order, with no separate custom-route column needed; a real markdown string means the shared article template at that catch-all renders it instead. As of Phase 4c, all three flagship pieces — `netsuite-mcp` (4a), `ai-hackathon-playbook` (4b), and `growth-engine-ratio` (4c) — have real `body_md` and are served by the catch-all, their bespoke routes all retired; `growth-engine-ratio`'s own JS calculator moved to a brand-new standalone bespoke route, `/thought-leadership/growth-engine-calculator`, which is not part of this table at all), `status` (`'draft'`\|`'live'` — a draft is never public), `featured_home` (selects which live pieces the homepage's flagship row shows; `/thought-leadership` shows every live piece regardless), `date_label`/`sort_key`/`display_order` (same convention as `thought_leadership` above — `sort_key` is derived from `date_label` via the same `_sort_key_from_date_label`, reused verbatim). Ordering (`Library.list_original_content`) is **`display_order` first, `sort_key` only as a tiebreak** — the opposite priority from `thought_leadership`'s own `_TL_ORDER_SQL`, since this is a handful of curated flagship cards, not a chronological feed. `tag_color` (the small category-tag accent color on each card) was deliberately never promoted to a stored column — `webapp/app.py`'s `_oc_card_tuple` cycles it from the same 3 established colors (`--coral-deep`/`--seafoam-deep`/`--navy-light`) by card position, so the 3 migrated pieces render with their exact original colors and a 4th+ piece still gets a sane one. |
 
 **Original Content Phase 2 (2026-08) — markdown rendering + `GET /thought-leadership/{slug}`.**
 `_render_original_content_markdown` runs `body_md` through `python-markdown` with only
@@ -1332,6 +1332,59 @@ was the bespoke `finops_ai_hackathon()` route deleted (the `/finops-ai-hackathon
 stays, now served by the catch-all) and `"ai-hackathon-playbook"` removed from
 `_OC_RESERVED_SLUGS` — leaving only `"growth-engine-ratio"` reserved. The closing bio blurb's
 `/play` easter-egg link carried over verbatim into `body_md`.
+
+**Original Content Phase 4c (2026-08) — `growth-engine-ratio`, the last of the three
+flagship pieces, ported with a genuine SPLIT rather than a whole-page port.** Unlike Phase
+4a/4b, this page couldn't be ported as-is: alongside the prose/formula/table/quotes content,
+it embeds a ~380-line live JS calculator (two modes — point-in-time and a bounded -2..+2
+timeline — driving two dynamically-generated SVG charts, `contributionSVG()`/`buildChart()`)
+that's genuinely interactive, not markdown-representable content. Resolution: the article
+half ported the same way netsuite-mcp/ai-hackathon-playbook did (real prose to markdown; the
+formula box, 3 pull-quotes, and the tier table preserved as raw HTML in `body_md` using their
+original `.ger-pull`/`.ger-table` classes — `.article-cta`/`.article-pull` needed no porting,
+since those are sitewide shared classes, not page-specific, already available everywhere).
+The calculator moved to a brand-new standalone bespoke route,
+`GET /thought-leadership/growth-engine-calculator` (`growth_engine_calculator()` in
+`webapp/app.py`) — its markup, CSS, and JS extracted byte-for-byte from the retired route,
+zero logic/input/chart change. `_OC_GER_CSS` (`webapp/app.py`) holds the rescoped
+`.oc-body .ger-pull`/`.oc-body .ger-table` CSS, same `_OC_NETSUITE_MCP_CSS`/`_OC_HACKATHON_CSS`
+treatment — only the article-side rules; the calculator's own CSS
+(`.ger-grid-*`/`.ger-mode*`/`.ger-in`/`.qlabel`/`.qhead`/`.qrow-proj`/`.ger-chart`/
+`.ger-contrib*`/`.tl-step`/`.tl-ctrl*`/`.ger-card`/`.ger-value-big`) stays on the new
+calculator route's own `<style>` tag, since that page is still hand-built Python, never
+routed through the markdown template. The retired page's "Methodology note" paragraph
+(GTM/R&D GAAP definitions plus a timeline-lookback explanation) stayed on the calculator
+page unmodified, in its original position directly below the calculator card, rather than
+being split across both pages — it's calculator-specific (references the timeline's
+lookback mechanics directly) and moving it verbatim was lower-risk than trying to split its
+sentences between the two pages. `scripts/migrate_growth_engine_ratio_content.py` follows
+the same dry-run/`--apply`/write-then-read-back convention as Phase 4a/4b's migration
+scripts, setting `body_md` and `date_label` ("June 2026", same visual-parity fix) — `title`
+needed no fix this time, unlike Phase 4b's hackathon row (`"The Growth Engine Ratio"` has no
+HTML entities in it to double-escape).
+
+The retired page's byline carried two lines beyond what the shared template's single
+`date_label` field can represent — "Published with [The F Suite]" (a live link) and a
+Contributor credit line for Katherine Zhang — both preserved verbatim as the first two lines
+of `body_md` itself, the same "extra byline content becomes body_md's leading content"
+precedent Phase 4b used for the hackathon piece's italic subtitle line. One genuinely new
+piece of content: where the original page's "## Calculate Your Ratio" section held the live
+calculator inline, the ported article now shows a CTA box (reusing the sitewide
+`.article-cta` class, same visual treatment as the existing F Suite whitepaper CTA already on
+the page) linking out to the new standalone calculator page — new copy, surfaced to Brian for
+review before merge per the standing em-dash/new-copy process (see the PR description), same
+as the calculator page's own new intro blurb.
+
+Verified before either route changed: with the row updated and the new calculator page live
+at its new URL but the old bespoke `growth_engine_ratio()` route still in place, screenshot
+comparison confirmed visual parity of the article portion (desktop and 390×844 mobile), and
+the new calculator page's both modes and both SVG charts were confirmed functioning
+identically to how they worked embedded in the old page, at desktop and mobile widths. Only
+then was the old bespoke route deleted and `"growth-engine-ratio"` removed from
+`_OC_RESERVED_SLUGS` — leaving the set empty for the first time since Phase 1. Deliberately
+NOT added to the set: `"growth-engine-calculator"` itself — that page was never part of the
+`original_content` system and never will be, so there's no slug an admin could collide with
+through the form.
 
 `Library.get_thought_leadership_representative(type)` (Homepage Restructure phase;
 supersedes the Phase 3 addendum's `list_thought_leadership_for_home` pin-then-
@@ -3929,7 +3982,11 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
   toward signing in, not a hard gate on the chat itself.
 - **Three surfaces**:
   - *Public* — no auth: `/`, `/thought-leadership`,
-    `/thought-leadership/growth-engine-ratio`, `/thought-leadership/ai-hackathon-playbook`,
+    `/thought-leadership/growth-engine-ratio`, `/thought-leadership/growth-engine-calculator`
+    (Original Content Phase 4c — the standalone interactive calculator, still a hand-built
+    Python route since it's genuinely interactive, not markdown-representable content; the
+    article half moved to the catch-all like netsuite-mcp/ai-hackathon-playbook below),
+    `/thought-leadership/ai-hackathon-playbook`,
     `/thought-leadership/netsuite-mcp`, `/tools`, `/tools/software`,
     `/tools/software/{slug}` (the profile page, Software search overhaul Phase 2;
     opened in a new tab via each card's "Full profile →" link — 404s for an
