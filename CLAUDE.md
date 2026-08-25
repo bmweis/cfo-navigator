@@ -2392,6 +2392,78 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   an admin could ever collide with through the form; confirmed explicitly
   rather than assumed, per this phase's own instruction.
 
+- **Original Content, Phase 5 — cleanup: a double-escape fix landed, two
+  proposed rollback-file deletions turned out NOT to be safe and were left
+  in place, and a Writing-column duplication was investigated (not
+  deleted) pending Brian's own action.**
+  - **Fixed:** `admin_thought_leadership_edit` had the identical
+    double-escape bug Original Content Phase 3 found and fixed in
+    `admin_original_content_edit` — an already-`_esc()`'d title passed into
+    `_page()`, which escapes its own title argument internally, producing
+    `&amp;amp;` for any title containing `&`. Same fix, same pattern: pass
+    the raw title straight through. `test_edit_page_title_is_not_double_escaped`
+    added to `tests/test_thought_leadership_admin.py`, mirroring Phase 3's
+    own test of the same name.
+  - **NOT removed, contrary to the initial plan — `_TL_FEATURED_CARDS` and
+    `webapp/thought_leadership_data.py` are both still live dependencies,
+    not dead rollback references.** The premise that both are "unimported"
+    only holds for the *render* path (`_oc_featured_cards_html()`/the
+    `original_content` table did replace them there, per Phase 1) — a
+    direct search found `_TL_FEATURED_CARDS` is still imported by
+    `scripts/migrate_original_content.py` (the seed source for
+    `planned_rows()`) and by `tests/test_migrate_original_content.py`, and
+    `webapp/thought_leadership_data.py` is still imported by
+    `scripts/archive/migrate_thought_leadership.py` (`from
+    webapp.thought_leadership_data import SECTIONS`), which
+    `tests/test_thought_leadership_admin.py::test_migration_script_moves_32_of_33_entries`
+    still runs live against a fresh temp DB. Deleting either file today
+    would break real, currently-passing tests, not just an unused rollback
+    copy. The blocker is really `scripts/migrate_original_content.py`
+    itself: unlike `scripts/archive/migrate_thought_leadership.py` (already
+    `git mv`'d once its run was confirmed, the precedent this repo's own
+    "archive a one-time script as soon as its run is confirmed" rule sets),
+    `scripts/migrate_original_content.py` is still sitting in `scripts/`,
+    not `scripts/archive/` — CLAUDE.md's own Original Content Phase 1 entry
+    still reads "not yet archived since it hasn't run against production"
+    as of this writing. Whether it has in fact already run in production
+    (the live site's flagship cards visibly render from `original_content`,
+    which only has data if it has) is Brian's call to confirm, not this
+    session's to assume — this session has no access to `library.db`
+    itself (Railway-volume-only, same limitation noted in earlier Original
+    Content phases). **Recommended follow-up, not done here:** once Brian
+    confirms the migration ran, archive `scripts/migrate_original_content.py`
+    (`git mv` into `scripts/archive/`, matching `migrate_thought_leadership.py`'s
+    own precedent) and update/retire `tests/test_migrate_original_content.py`
+    accordingly — only then does `_TL_FEATURED_CARDS` (and, separately,
+    `webapp/thought_leadership_data.py` once nothing archived needs it
+    either) actually become dead code safe to delete under this repo's own
+    "no dead data"/no-dead-code discipline.
+  - **Investigated, not deleted — the 3 Writing-column `thought_leadership`
+    rows duplicating the flagship pieces.** This session has no access to
+    the live `library.db` (same Railway-volume-only limitation as above),
+    so the exact row `id` values weren't confirmed directly — Brian can
+    find them at `/admin/thought-leadership?type=writing` by matching the
+    three titles/URLs in the task description. A full codebase search found
+    no sitemap generator, RSS/Atom feed, or other producer for the site
+    itself (the only "sitemap" code in this repo is the unrelated Archive
+    Queue's historical-backfill sitemap *crawler*, over an entirely
+    different table). No test asserts a specific count or title against the
+    *production* `thought_leadership` table tied to these 3 rows —
+    `test_migration_script_moves_32_of_33_entries`'s `writing: 6` count
+    (mentioned above) is a fresh-temp-DB migration test, unrelated to
+    production row counts. The only two live readers beyond
+    `/admin/thought-leadership`'s list/edit views are `/thought-leadership`'s
+    own Writing column (`list_thought_leadership(type="writing")`) and the
+    homepage's "Recent highlights" grid
+    (`get_thought_leadership_representative("writing")`) — deleting the 3
+    rows is safe for both: the Writing column just shows one fewer
+    (duplicate) entry, and if one of the 3 happens to currently be the
+    `writing` representative, deletion falls back to the most-recent
+    remaining entry per that function's existing fallback rule (not a bug,
+    just a different pick). **Confirmed safe for Brian to delete via
+    `/admin/thought-leadership` himself — no code change needed for this
+    item.**
+
 - **Original Content, Phase 4c follow-up — two real rendering bugs found
   live post-merge, both invisible text, neither caught by pre-merge
   review.** Brian caught both on mobile Safari; investigation found they

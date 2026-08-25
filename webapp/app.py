@@ -11794,7 +11794,11 @@ def admin_thought_leadership_edit(request: Request, item_id: int):
   </div>
 </form>
 </div>"""
-    return HTMLResponse(_page(f"Edit {_esc(it['title'])}—Admin", "", body, authed=True))
+    # _page() escapes its own title argument internally — passing an
+    # already-_esc()'d fragment here would double-escape (e.g. "&amp;amp;"),
+    # the same bug Original Content Phase 3 found and fixed in
+    # admin_original_content_edit (see CLAUDE.md).
+    return HTMLResponse(_page(f"Edit {it['title']}—Admin", "", body, authed=True))
 
 
 @app.post("/admin/thought-leadership/{item_id}/edit")
