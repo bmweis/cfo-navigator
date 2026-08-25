@@ -8266,6 +8266,7 @@ def tools_community_profile(request: Request, slug: str):
         community = _public_community(community)
         profile = lib.get_community_profile(community["id"]) or {}
         similar_communities = lib.list_community_competitors(community["id"])
+        profile_citations = lib.get_entity_citations("community", community["id"], "community_profile")
         lib.record_community_view(session_id, community["id"])
     finally:
         lib.close()
@@ -8336,6 +8337,16 @@ def tools_community_profile(request: Request, slug: str):
     elif authed:
         verdict_block = (f'<div style="margin-bottom:22px;">'
                           f'{_profile_admin_nudge("Bottom line not yet generated.")}</div>')
+    # Citations-API grounding fix, Phase 3 — ONE shared "Sources" list for
+    # the whole profile draft (decision 5), not one per card, rendered once
+    # right after the Bottom line callout, public-capped at 5. Empty when
+    # the profile was never grounded (hand-written, or predates this
+    # feature) — same "render nothing, not even the label" default as every
+    # other _citations_list_html public call site.
+    profile_citations_block = ""
+    _pc_html = _citations_list_html(profile_citations, cap=5)
+    if _pc_html:
+        profile_citations_block = f'<div>{_pc_html}</div>'
 
     cards = []
     for group_title, fields in _COMMUNITY_PROFILE_GROUPS:
@@ -8440,6 +8451,7 @@ def tools_community_profile(request: Request, slug: str):
     lower_band = f"""<div class="tp-band">
   <div class="tp-col-stack">
     {verdict_block}
+    {profile_citations_block}
     {description_card}
     {profile_cards}
   </div>
@@ -8774,6 +8786,22 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
     });
     var lowConf = document.getElementById('cp-low_confidence');
     if (lowConf) lowConf.checked = !!d.low_confidence;
+    markAiCitations(d.citations || [], d.model || '');
+    // One shared citation set grounds all 23 fields (decision 5, Phase 0) —
+    // a hand-edit to ANY of them after this Generate call means the set may
+    // no longer describe what's on the form, so every field gets the same
+    // one-time clear-on-edit guard generateDescription() uses for its single
+    // field. Re-attached on every successful Generate, same convention.
+    COMMUNITY_PROFILE_FIELDS.forEach(function(k) {
+      var el = document.getElementById('cp-' + k);
+      if (!el) return;
+      function onEdit() {
+        unmarkAiDrafted(k);
+        clearAiCitations();
+        el.removeEventListener('input', onEdit);
+      }
+      el.addEventListener('input', onEdit);
+    });
     status.textContent = d.low_confidence
       ? 'Drafted. Could not fetch the page, so verify facts before saving.'
       : 'Drafted. Review before saving.';
@@ -12748,7 +12776,8 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
 
 
 def _community_profile_form_fields(p: dict | None, community: dict,
-                                    latest_review: dict | None = None) -> tuple[str, str]:
+                                    latest_review: dict | None = None,
+                                    citations: list | None = None) -> tuple[str, str]:
     """The Community Profile edit form (deep qualitative fields, distinct from
     the directory metadata in _community_form_fields_parts above). Field ids are
     'cp-<column name>' — generateCommunityProfile (_GENERATE_PROFILE_JS)
@@ -12765,12 +12794,24 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     taxonomy — reusing needs_review rather than a new column deliberately
     avoids repeating that gap for a second flag.
 
+    citations (Citations-API grounding fix, Phase 3): the FULL, uncapped
+    list from Library.get_entity_citations("community", id,
+    "community_profile") — ONE shared set covering the whole 23-field draft
+    (decision 5, Phase 0), not one per field. Rendered once, uncapped, in
+    this same block as the "Mark reviewed" widget — an admin reviewing the
+    draft sees every source before deciding to sign off, same placement
+    logic as Agent taxonomy/Description's own uncapped admin lists.
+
     Returns (fields_html, hidden_verify_form_html) rather than one string —
     fields_html renders inside the page's main <form>, but the "Mark
     reviewed" button's target <form> must NOT be nested inside it (see
     _narrative_verify_widget's docstring for why), so the caller renders
     hidden_verify_form_html after the main form's closing tag instead."""
     p = p or {}
+    citations = citations or []
+    _admin_citations_html = _citations_list_html(
+        citations, empty_note="No citations recorded for this draft (hand-written, "
+                               "regenerated without a successful page fetch, or predates this feature).")
     _, _community_profile_mark_reviewed_action, _community_profile_mark_reviewed_form_html, _community_profile_review_line_html = (
         _narrative_verify_widget(
             bool(p.get("needs_review")),
@@ -12924,6 +12965,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     </label>
     {_community_profile_mark_reviewed_action if p.get('needs_review') else ''}
     {_community_profile_review_line_html}
+    {_admin_citations_html}
   </div>
   </div>""", _community_profile_mark_reviewed_form_html
 
@@ -14102,17 +14144,21 @@ def admin_community_profile_edit(request: Request, community_id: int):
         c = lib.get_community(community_id)
         p = lib.get_community_profile(community_id)
         latest_review = lib.get_latest_narrative_review("community", "community_profile", community_id)
+        profile_citations = lib.get_entity_citations("community", community_id, "community_profile")
     finally:
         lib.close()
     if not c:
         raise HTTPException(status_code=404, detail="Community not found")
-    _profile_fields_html, _profile_mark_reviewed_form_html = _community_profile_form_fields(p, c, latest_review)
+    _profile_fields_html, _profile_mark_reviewed_form_html = _community_profile_form_fields(
+        p, c, latest_review, citations=profile_citations)
     body = f"""<div class="page page-admin">
 <p style="margin:0 0 4px;"><a href="/admin/tools/communities" style="font-size:13px;color:var(--muted);">&larr; Communities</a></p>
 <h1>Profile: {_esc(c['name'])}</h1>
 <form method="post" action="/admin/tools/communities/{community_id}/profile" style="display:grid;gap:20px;">
   <input type="hidden" id="ai-drafted-fields" name="ai_drafted_fields" value="">
   <input type="hidden" id="ai-drafted-confidence" name="ai_drafted_confidence" value="">
+  <input type="hidden" id="ai-drafted-citations" name="ai_drafted_citations" value="">
+  <input type="hidden" id="ai-drafted-citations-model" name="ai_drafted_citations_model" value="">
 {_profile_fields_html}
   <div>
     <button type="submit" class="btn">Save profile</button>
@@ -14148,6 +14194,19 @@ async def admin_community_profile_submit(request: Request, community_id: int):
         ai_drafted = _ai_drafted_field_names(form)
         profile_ai_drafted = bool(ai_drafted & set(_COMMUNITY_PROFILE_FIELD_IDS))
         needs_review = 1 if (form.get("needs_review") == "1" or profile_ai_drafted) else 0
+        # Citations-API grounding fix, Phase 3: one shared citation set for
+        # the whole 23-field draft (decision 5) — persisted only when this
+        # exact save follows a fresh Generate click on at least one profile
+        # field (profile_ai_drafted, computed above — _validate_citations_payload
+        # is trusted only in that case); any other save (hand-edit, or a
+        # resave with no fresh draft this session) clears it, same
+        # hand-edit-invalidates-citations convention update_tool_agent_taxonomy/
+        # the Description submit routes already apply.
+        profile_citations = (
+            _validate_citations_payload(form.get("ai_drafted_citations") or "")
+            if profile_ai_drafted else []
+        )
+        citations_model = (form.get("ai_drafted_citations_model") or "").strip()
         # Confidence indicator (2026-08): upsert_community_profile is a full
         # replace on every save (see its own docstring), so this route
         # decides each of the 12 tracked fields' value explicitly — the
@@ -14190,6 +14249,11 @@ async def admin_community_profile_submit(request: Request, community_id: int):
             team_or_individual=(form.get("team_or_individual") or "").strip(),
             confidence=confidence,
         )
+        if profile_citations:
+            lib.set_entity_citations("community", community_id, "community_profile",
+                                     profile_citations, model=citations_model)
+        else:
+            lib.clear_entity_citations("community", community_id, "community_profile")
         _record_ai_drafted_reviews(lib, request, "community", community_id, form)
     finally:
         lib.close()
@@ -14257,6 +14321,8 @@ async def admin_communities_generate_profile(request: Request):
         "event_style": draft.event_style,
         "cpe_eligible": draft.cpe_eligible,
         "confidence": draft.confidence,
+        "citations": draft.citations,
+        "model": draft.model,
     })
 
 
