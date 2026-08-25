@@ -377,34 +377,21 @@ def test_admin_edit_page_shows_empty_note_when_no_citations(app_module):
     assert "No citations recorded for this draft" in r.text
 
 
-def test_community_profile_renders_publicly_regardless_of_needs_review():
+def test_community_profile_renders_publicly_regardless_of_needs_review(app_module):
     """Confirms the missing publish gate noted in Phase 0: unlike tools'
     Agent taxonomy Abacum-fix gate, the Community profile has no such gate
     — an unreviewed (needs_review=1) draft still renders to a public
     visitor. Pinned as intentional current behavior (a known follow-up,
     same as Description's own equivalent test), not something this phase
     changes."""
-    db = tempfile.mktemp(suffix=".db")
-    os.environ["LINKLIB_DB"] = db
-    os.environ["LINKLIB_PASSWORD"] = "adminpass"
-    os.environ["LINKLIB_SECRET_KEY"] = "k"
-    import importlib, webapp.app as appmod
-    importlib.reload(appmod)
-    try:
-        lib = Library(db)
-        community_id = lib.add_community(name="Chief", url="https://chief.com",
-                                         demographic="Senior executive women",
-                                         cost_band="Paid", categories=[], approved=1)
-        lib.upsert_community_profile(community_id, ideal_member="An unreviewed AI-drafted ideal member.",
-                                     verdict_summary="Unreviewed verdict.", needs_review=1)
-        slug = lib.get_community(community_id)["slug"]
-        lib.close()
+    lib = Library(os.environ["LINKLIB_DB"])
+    community_id = _add_community(lib)
+    lib.upsert_community_profile(community_id, ideal_member="An unreviewed AI-drafted ideal member.",
+                                 verdict_summary="Unreviewed verdict.", needs_review=1)
+    slug = lib.get_community(community_id)["slug"]
+    lib.close()
 
-        from fastapi.testclient import TestClient
-        client = TestClient(appmod.app, raise_server_exceptions=True)   # no login — a signed-out public visitor
-        r = client.get(f"/tools/communities/{slug}")
-        assert r.status_code == 200
-        assert "An unreviewed AI-drafted ideal member." in r.text
-    finally:
-        if os.path.exists(db):
-            os.remove(db)
+    client = _client(app_module)   # no login — a signed-out public visitor
+    r = client.get(f"/tools/communities/{slug}")
+    assert r.status_code == 200
+    assert "An unreviewed AI-drafted ideal member." in r.text
